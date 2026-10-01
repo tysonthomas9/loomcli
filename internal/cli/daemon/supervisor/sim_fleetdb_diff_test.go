@@ -89,7 +89,7 @@ func (t *recTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	e.n++
 	n := e.n
 	e.mu.Unlock()
-	rid := fmt.Sprintf("fd659d-%s-%03d", e.scen, n)
+	rid := fmt.Sprintf("%s-%s-%03d", diffRunTag(), e.scen, n)
 	clone := req.Clone(req.Context())
 	clone.Body = io.NopCloser(bytes.NewReader(body))
 	clone.ContentLength = int64(len(body))
@@ -166,7 +166,7 @@ func (e *diffEnv) records() []diffRec {
 func (e *diffEnv) getJSON(path string, v any) (int, string, error) {
 	req, _ := http.NewRequest("GET", e.url+"/api/v1/"+e.ws+path, nil)
 	req.Header.Set("X-Actor", simDaemonActor)
-	req.Header.Set("X-Request-ID", fmt.Sprintf("fd659d-%s-observe", e.scen))
+	req.Header.Set("X-Request-ID", fmt.Sprintf("%s-%s-observe", diffRunTag(), e.scen))
 	resp, err := e.plain.Do(req)
 	if err != nil {
 		return 0, "", err
@@ -249,6 +249,79 @@ func createRealIssue(t *testing.T, loomAPI, ws, title string) string {
 		t.Fatalf("create issue: no id in %s", b)
 	}
 	return id
+}
+
+// diffRunTag prefixes X-Request-IDs and issue titles so a run's requests can be
+// found in the FleetDB server log (FLEETDB_DIFF_RUN, default fd659d).
+func diffRunTag() string {
+	if v := os.Getenv("FLEETDB_DIFF_RUN"); v != "" {
+		return v
+	}
+	return "fd659d"
+}
+
+// readyInnerKeys are the issue fields both sides must carry in every
+// /issues/ready item; their values are then compared by walkCompare.
+var readyInnerKeys = []string{"id", "title", "status", "priority", "type", "design", "created_at", "updated_at"}
+
+func isReadyPath(p string) bool { return p == "/issues/ready" || p == "/ready" }
+
+// compareReady asserts the FleetDB 40e8431d readyListResponse envelope
+// {issues, count} on both sides, count == len(issues), the same issue IDs in
+// the same order, and readyInnerKeys present on every item. Field values are
+// compared by compareBody's walk of the envelope. It returns the number of
+// inner items checked so a run can prove ready items were actually compared.
+func compareReady(fake, real string) (diffs []string, items int) {
+	type env struct {
+		Issues []map[string]any `json:"issues"`
+		Count  *int             `json:"count"`
+	}
+	parse := func(side, body string) (*env, bool) {
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(body), &raw); err != nil {
+			diffs = append(diffs, fmt.Sprintf(" ready %s: not an {issues,count} object", side))
+			return nil, false
+		}
+		var e env
+		if _, ok := raw["issues"]; !ok {
+			diffs = append(diffs, fmt.Sprintf(" ready %s: missing issues", side))
+			return nil, false
+		}
+		if err := json.Unmarshal([]byte(body), &e); err != nil || e.Issues == nil || e.Count == nil {
+			diffs = append(diffs, fmt.Sprintf(" ready %s: bad envelope (issues array + count required)", side))
+			return nil, false
+		}
+		if *e.Count != len(e.Issues) {
+			diffs = append(diffs, fmt.Sprintf(" ready %s: count %d != len(issues) %d", side, *e.Count, len(e.Issues)))
+		}
+		for i, it := range e.Issues {
+			for _, k := range readyInnerKeys {
+				if _, ok := it[k]; !ok {
+					diffs = append(diffs, fmt.Sprintf(" ready %s: issues[%d] missing %s", side, i, k))
+				}
+			}
+			if _, ok := it["has_design"]; ok && side == "fake" {
+				diffs = append(diffs, fmt.Sprintf(" ready fake: issues[%d] has has_design", i))
+			}
+		}
+		return &e, true
+	}
+	fe, fok := parse("fake", fake)
+	re, rok := parse("real", real)
+	if !fok || !rok {
+		return diffs, 0
+	}
+	ids := func(e *env) []any {
+		out := make([]any, len(e.Issues))
+		for i, it := range e.Issues {
+			out[i] = it["id"]
+		}
+		return out
+	}
+	if !reflect.DeepEqual(ids(fe), ids(re)) {
+		diffs = append(diffs, fmt.Sprintf(" ready ids: fake %v real %v", ids(fe), ids(re)))
+	}
+	return diffs, len(re.Issues)
 }
 
 var volatileKeys = map[string]bool{"created_at": true, "updated_at": true, "closed_at": true}
@@ -423,6 +496,10 @@ type scenarioResult struct {
 	Real     sideResult `json:"real"`
 	Diffs    []string   `json:"diffs"`
 	Extra    []string   `json:"real_extra_fields"`
+	// ReadyResponses / ReadyItems count the ready pairs and inner items
+	// asserted by compareReady.
+	ReadyResponses int `json:"ready_responses"`
+	ReadyItems     int `json:"ready_items"`
 }
 
 func TestFleetDBDiff(t *testing.T) {
@@ -436,7 +513,7 @@ func TestFleetDBDiff(t *testing.T) {
 			continue
 		}
 		t.Run(sc.name, func(t *testing.T) {
-			id := createRealIssue(t, api, ws, "fd659d "+sc.name)
+			id := createRealIssue(t, api, ws, diffRunTag()+" "+sc.name)
 			real := &diffEnv{real: true, ws: ws, url: url, scen: sc.name, plain: &http.Client{Timeout: 10 * time.Second}}
 			var m map[string]any
 			_, _, _ = real.getJSON("/issues/"+id, &m)
@@ -475,6 +552,12 @@ func TestFleetDBDiff(t *testing.T) {
 					res.Diffs = append(res.Diffs, fmt.Sprintf("#%d %s %s status: fake %d real %d (rid %s)", i+1, f.Method, f.Path, f.Status, r.Status, r.RequestID))
 				}
 				d, x := compareBody(f.RespBody, r.RespBody)
+				if isReadyPath(f.Path) && f.Status == 200 && r.Status == 200 {
+					rd, n := compareReady(f.RespBody, r.RespBody)
+					d = append(d, rd...)
+					res.ReadyResponses++
+					res.ReadyItems += n
+				}
 				for _, s := range d {
 					res.Diffs = append(res.Diffs, fmt.Sprintf("#%d %s %s body%s (rid %s)", i+1, f.Method, f.Path, s, r.RequestID))
 				}
@@ -489,6 +572,7 @@ func TestFleetDBDiff(t *testing.T) {
 				t.Logf("real #%d %s %s %s?%s actor=%s -> %d rid=%s", i+1, r.Attempt, r.Method, r.Path, r.Query, r.Actor, r.Status, r.RequestID)
 			}
 			t.Logf("final fake=%+v real=%+v", res.Fake.Final, res.Real.Final)
+			t.Logf("ready responses compared=%d inner items=%d", res.ReadyResponses, res.ReadyItems)
 			if len(res.Diffs) != 0 {
 				t.Errorf("DIVERGENCE %s (%s):\n%s", sc.name, id, strings.Join(res.Diffs, "\n"))
 			}

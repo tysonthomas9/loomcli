@@ -317,7 +317,8 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []map[string]any{}
 	}
-	writeJSON(w, http.StatusOK, out)
+	// FleetDB 40e8431d getReady wraps the list: readyListResponse{issues, count}.
+	writeJSON(w, http.StatusOK, map[string]any{"issues": out, "count": len(out)})
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -572,7 +573,6 @@ func issueJSON(is *Issue) map[string]any {
 		"status":     is.Status,
 		"priority":   is.Priority,
 		"type":       is.Type,
-		"has_design": strings.TrimSpace(is.Design) != "",
 		"created_at": is.CreatedAt.UTC(),
 		"updated_at": is.UpdatedAt.UTC(),
 	}
