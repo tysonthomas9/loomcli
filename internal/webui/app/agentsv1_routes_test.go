@@ -75,9 +75,11 @@ func TestAgentAPIPatchAndCorsThroughServer(t *testing.T) {
 		t.Fatalf("preflight = %d %v", pre.StatusCode, pre.Header)
 	}
 
-	resp := do(http.MethodPatch, "/api/workspaces/ws/v1/agents/a1", `{"Name":"renamed"}`, map[string]string{
+	resp := do(http.MethodPatch, "/api/workspaces/ws/v1/agents/a1", `{"name":"renamed"}`, map[string]string{
 		"Origin": origin, "Content-Type": "application/json", "Idempotency-Key": "u1"})
-	var got loomagent.AgentInfo
+	var got struct {
+		Name string `json:"name"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || resp.StatusCode != http.StatusOK ||
 		got.Name != "renamed" || resp.Header.Get("Access-Control-Allow-Origin") != origin {
 		t.Fatalf("patch = %d %+v %v", resp.StatusCode, got, err)

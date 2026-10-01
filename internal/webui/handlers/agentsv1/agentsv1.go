@@ -74,7 +74,7 @@ func (h *Handler) serve(fn route) http.Handler {
 	})
 }
 
-// actor is the caller from the authenticated request, never from the body:
+// actor is the caller from the authenticated request; no body field names it:
 // the verified signed-in user, else the local user.
 func actor(r *http.Request) loomagent.ActorRef {
 	if _, id, ok := middleware.VerifiedUserActorFromContext(r.Context()); ok {
@@ -95,14 +95,15 @@ func envelope(w http.ResponseWriter, r *http.Request, dst any) (string, error) {
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
-	var req loomagent.CreateRequest
-	id, err := envelope(w, r, &req)
+	var body createBody
+	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
 	}
+	req := body.request()
 	req.RequestID, req.Actor = id, actor(r)
 	a, err := s.Create(r.Context(), req)
-	return http.StatusCreated, a, err
+	return http.StatusCreated, agentOut(a), err
 }
 
 func list(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
@@ -119,26 +120,29 @@ func list(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, an
 		SubjectID: q.Get("subject_id"), ExternalKeyPrefix: q.Get("external_key_prefix"), Name: q.Get("name"),
 		IncludeArchived: q.Get("include_archived") == "true", After: q.Get("after"), Limit: int(limit),
 	})
-	if agents == nil {
-		agents = []loomagent.AgentInfo{}
+	out := []agentJSON{}
+	for _, a := range agents {
+		out = append(out, agentOut(a))
 	}
-	return http.StatusOK, map[string]any{"agents": agents, "next": next}, err
+	return http.StatusOK, map[string]any{"agents": out, "next": next}, err
 }
 
 func get(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
 	a, err := s.Get(r.Context(), r.PathValue("id"))
-	return http.StatusOK, a, err
+	return http.StatusOK, agentOut(a), err
 }
 
 func update(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
-	var req loomagent.UpdateRequest
-	id, err := envelope(w, r, &req)
+	var body updateBody
+	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
 	}
-	req.RequestID, req.AgentID = id, r.PathValue("id")
-	a, err := s.Update(r.Context(), req)
-	return http.StatusOK, a, err
+	a, err := s.Update(r.Context(), loomagent.UpdateRequest{
+		Envelope: loomagent.Envelope{RequestID: id, Expect: body.Expect.expect()},
+		AgentID:  r.PathValue("id"), Name: body.Name, Model: body.Model, Harness: body.Harness,
+	})
+	return http.StatusOK, agentOut(a), err
 }
 
 func del(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
@@ -158,24 +162,24 @@ func unarchive(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (in
 }
 
 func archiving(w http.ResponseWriter, r *http.Request, op func(context.Context, loomagent.ArchiveRequest) error) (int, any, error) {
-	var req loomagent.ArchiveRequest
-	id, err := envelope(w, r, &req)
+	var body archiveBody
+	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
 	}
-	req.RequestID, req.AgentID = id, r.PathValue("id")
-	return http.StatusNoContent, nil, op(r.Context(), req)
+	return http.StatusNoContent, nil, op(r.Context(), loomagent.ArchiveRequest{
+		Envelope: loomagent.Envelope{RequestID: id}, AgentID: r.PathValue("id"), Reason: body.Reason})
 }
 
 func send(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
-	var req loomagent.SendRequest
-	id, err := envelope(w, r, &req)
+	var body sendBody
+	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
 	}
-	req.RequestID, req.AgentID, req.Actor, req.Source = id, r.PathValue("id"), actor(r), "user_chat"
-	res, err := s.Send(r.Context(), req)
-	return http.StatusAccepted, res, err
+	res, err := s.Send(r.Context(), loomagent.SendRequest{Envelope: loomagent.Envelope{RequestID: id},
+		AgentID: r.PathValue("id"), Text: body.Text, Source: "user_chat", Actor: actor(r)})
+	return http.StatusAccepted, sendJSON{res.MessageID, res.State, res.Replaced, res.TurnID}, err
 }
 
 func withdraw(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
@@ -183,17 +187,18 @@ func withdraw(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int
 		Envelope: loomagent.Envelope{RequestID: r.Header.Get("Idempotency-Key")},
 		AgentID:  r.PathValue("id"), Actor: actor(r),
 	})
-	return http.StatusOK, res, err
+	return http.StatusOK, withdrawJSON{res.Result}, err
 }
 
 func respond(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
-	var req loomagent.RespondRequest
-	id, err := envelope(w, r, &req)
+	var body respondBody
+	id, err := envelope(w, r, &body)
 	if err != nil {
 		return 0, nil, err
 	}
-	req.RequestID, req.AgentID, req.AskID = id, r.PathValue("id"), r.PathValue("askId")
-	return http.StatusNoContent, nil, s.Respond(r.Context(), req)
+	return http.StatusNoContent, nil, s.Respond(r.Context(), loomagent.RespondRequest{
+		Envelope: loomagent.Envelope{RequestID: id}, AgentID: r.PathValue("id"), AskID: r.PathValue("askId"),
+		Decision: body.Decision, Answer: body.Answer})
 }
 
 func listEvents(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
@@ -208,17 +213,21 @@ func listEvents(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (i
 	}
 	page, err := s.ListEvents(r.Context(), loomstore.EventQuery{AgentID: r.PathValue("id"),
 		After: n[0], Snapshot: n[1], Limit: int(n[2]), Kinds: handler.ParseArrayParam(q, "kind")})
-	return http.StatusOK, page, err
+	return http.StatusOK, eventPageOut(page), err
 }
 
 func (h *Handler) listPresets(_ http.ResponseWriter, r *http.Request, _ *loomagent.Service) (int, any, error) {
 	ps, err := h.presets.List(r.Context())
-	return http.StatusOK, map[string]any{"presets": ps}, err
+	out := []presetJSON{}
+	for _, p := range ps {
+		out = append(out, presetOut(p))
+	}
+	return http.StatusOK, map[string]any{"presets": out}, err
 }
 
 func (h *Handler) getPreset(_ http.ResponseWriter, r *http.Request, _ *loomagent.Service) (int, any, error) {
 	p, err := h.presets.Get(r.Context(), r.PathValue("name"))
-	return http.StatusOK, p, err
+	return http.StatusOK, presetOut(p), err
 }
 
 func intParam(v string) (int64, error) {
