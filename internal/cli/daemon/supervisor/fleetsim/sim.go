@@ -2,6 +2,8 @@ package fleetsim
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +31,13 @@ var ErrResponseLost = errors.New("fleetsim: response lost after apply")
 // ErrRequestDropped is returned to a client whose request never reached the
 // server.
 var ErrRequestDropped = errors.New("fleetsim: request dropped before apply")
+
+// ErrClientGaveUp is returned to a client whose request Abandon released
+// before the server applied it: the caller's context deadline fired while the
+// request was still in flight. It wraps context.DeadlineExceeded, which is
+// what net/http reports in that case. The request stays pending and may still
+// apply later.
+var ErrClientGaveUp = fmt.Errorf("fleetsim: client gave up before apply: %w", context.DeadlineExceeded)
 
 // Delivery selects what the interposer does with a pending request.
 type Delivery int
@@ -68,6 +77,9 @@ type Pending struct {
 	Actor      string // X-Actor header as Loom sent it
 	Body       string
 	SentAt     time.Time
+	// Abandoned is set once Abandon released the caller; the request is
+	// still in flight and applies whenever it is delivered.
+	Abandoned bool
 
 	req   *http.Request
 	reply chan reply
@@ -104,6 +116,44 @@ type Record struct {
 	// apply time: the attempt whose claim most recently succeeded, while its
 	// claim actor still holds the live lock. "" means nobody holds authority.
 	AuthorityBefore string
+	// Abandoned: the caller had already given up (Abandon) when this applied.
+	Abandoned bool
+
+	// Control-plane stamps (zero for issue routes).
+	// Agent is the agent ID the control-plane request concerns.
+	Agent string
+	// OwnerAuthorityBefore is the attempt holding ownership authority for
+	// Agent at apply time: the attempt whose ownership acquire most recently
+	// succeeded, while that acquire's fence is still the server's active,
+	// unexpired lease. "" means nobody holds ownership.
+	OwnerAuthorityBefore string
+	// SessionID / SessionStatusBefore / SessionAttempt describe the session a
+	// session or session-lease request touches; SessionAttempt is the attempt
+	// whose create of that session succeeded.
+	SessionID           string
+	SessionStatusBefore string
+	SessionAttempt      string
+	// LeaseAttempt is the attempt whose create of the session lease succeeded.
+	LeaseAttempt string
+	// ReqStatus is the "status" a session PATCH asked for.
+	ReqStatus string
+}
+
+// Observation is a local fact about an attempt that never crosses the wire:
+// its supervisor still believes it owns the agent, or its agent process is
+// still running. The oracle judges it against server-side ownership at the
+// observation instant.
+type Observation struct {
+	At             time.Time
+	Attempt        string
+	Agent          string
+	What           string
+	OwnerAuthority string
+}
+
+type ownGrant struct {
+	attempt string
+	fence   int64
 }
 
 // Sim couples a fake clock, the FleetDB model and the interposer, and
@@ -126,6 +176,12 @@ type Sim struct {
 	records []Record
 	claimOf map[string]string // attempt → claim actor
 	auth    map[string]string // issue → attempt of the last successful claim
+
+	own       map[string]ownGrant // agent → last successful ownership acquire
+	sessionOf map[string]string   // session ID → creating attempt
+	leaseOf   map[string]string   // session lease ID → creating attempt
+	ended     map[string]bool     // attempts whose process is gone
+	obs       []Observation
 }
 
 // New builds a Sim at start for workspace.
@@ -140,6 +196,10 @@ func New(start time.Time, workspace string, guards Guards) *Sim {
 		claimOf:   map[string]string{},
 		attSeq:    map[string]int{},
 		auth:      map[string]string{},
+		own:       map[string]ownGrant{},
+		sessionOf: map[string]string{},
+		leaseOf:   map[string]string{},
+		ended:     map[string]bool{},
 	}
 	s.cond = sync.NewCond(&s.mu)
 	return s
@@ -277,6 +337,7 @@ func (s *Sim) Records() []Record {
 // meets at apply time.
 func (s *Sim) stampBefore(rec *Record) {
 	if rec.IssueID == "" {
+		s.stampControlPlane(rec)
 		return
 	}
 	if is, holder, ok := s.Server.Snapshot(rec.IssueID); ok {
@@ -308,7 +369,9 @@ func (s *Sim) Deliver(seq int, d Delivery, at time.Time) Record {
 	}
 	p := s.pending[idx]
 	s.pending = append(s.pending[:idx], s.pending[idx+1:]...)
-	s.running++ // the parked caller resumes once we reply
+	if !p.Abandoned {
+		s.running++ // the parked caller resumes once we reply
+	}
 	s.mu.Unlock()
 
 	if !at.IsZero() {
@@ -316,34 +379,192 @@ func (s *Sim) Deliver(seq int, d Delivery, at time.Time) Record {
 	}
 	rec := Record{Seq: p.Seq, AttemptSeq: p.AttemptSeq, Attempt: p.Attempt, Method: p.Method, Path: p.Path, Query: p.Query,
 		Actor: p.Actor, Body: p.Body, SentAt: p.SentAt, AppliedAt: s.Clock.Now(), Delivery: d,
-		IssueID: issueIDFromPath(p.Path)}
+		IssueID: issueIDFromPath(p.Path), Abandoned: p.Abandoned}
 	s.stampBefore(&rec)
-	var rp reply
-	if d == Drop {
-		rp.err = ErrRequestDropped
-	} else {
-		rr := httptest.NewRecorder()
-		p.req.Body = io.NopCloser(strings.NewReader(p.Body))
-		s.Server.ServeHTTP(rr, p.req)
-		rec.Status = rr.Code
-		rec.RespBody = rr.Body.String()
-		if d == ApplyLoseResponse {
-			rp.err = ErrResponseLost
-		} else {
-			res := rr.Result()
-			res.Request = p.req
-			rp.resp = res
-		}
-	}
+	rp := s.serve(p, d, &rec)
+	s.noteControlPlane(rec)
 	s.mu.Lock()
 	if rec.IssueID != "" && rec.Method == "POST" && strings.HasSuffix(rec.Path, "/claim") && rec.Status/100 == 2 && d != Drop {
 		s.auth[rec.IssueID] = rec.Attempt
 	}
 	s.records = append(s.records, rec)
 	s.mu.Unlock()
-	p.reply <- rp
+	if !p.Abandoned {
+		p.reply <- rp
+	}
 	s.Quiesce()
 	return rec
+}
+
+// serve applies p per d, filling rec's status and body, and returns the reply
+// its caller gets.
+func (s *Sim) serve(p *Pending, d Delivery, rec *Record) reply {
+	if d == Drop {
+		return reply{err: ErrRequestDropped}
+	}
+	rr := httptest.NewRecorder()
+	p.req.Body = io.NopCloser(strings.NewReader(p.Body))
+	s.Server.ServeHTTP(rr, p.req)
+	rec.Status = rr.Code
+	rec.RespBody = rr.Body.String()
+	if d == ApplyLoseResponse {
+		return reply{err: ErrResponseLost}
+	}
+	res := rr.Result()
+	res.Request = p.req
+	return reply{resp: res}
+}
+
+// Abandon answers the caller of pending request seq with ErrClientGaveUp
+// without applying it — the caller's own deadline expired while the request
+// was still on the network — and leaves the request pending, so a later
+// Deliver applies it late. Waits for quiescence afterwards.
+func (s *Sim) Abandon(seq int) {
+	s.Quiesce()
+	s.mu.Lock()
+	var p *Pending
+	for _, q := range s.pending {
+		if q.Seq == seq {
+			p = q
+			break
+		}
+	}
+	if p == nil || p.Abandoned {
+		s.mu.Unlock()
+		panic(fmt.Sprintf("fleetsim: cannot abandon seq=%d", seq))
+	}
+	p.Abandoned = true
+	s.running++
+	s.mu.Unlock()
+	p.reply <- reply{err: ErrClientGaveUp}
+	s.Quiesce()
+}
+
+// EndAttempt records that attempt's agent process is gone. Sessions it
+// created that are still non-terminal when Check runs are reported as
+// SessionTerminates violations.
+func (s *Sim) EndAttempt(attempt string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ended[attempt] = true
+}
+
+// Observe records a local fact about attempt (see Observation) at the current
+// fake time, stamped with the server-side ownership authority for agent.
+func (s *Sim) Observe(attempt, agent, what string) Observation {
+	auth := s.ownerAuthority(agent)
+	o := Observation{At: s.Clock.Now(), Attempt: attempt, Agent: agent, What: what, OwnerAuthority: auth}
+	s.mu.Lock()
+	s.obs = append(s.obs, o)
+	s.mu.Unlock()
+	return o
+}
+
+// OwnerAuthority reports which attempt holds ownership authority for agent
+// right now ("" if none).
+func (s *Sim) OwnerAuthority(agent string) string { return s.ownerAuthority(agent) }
+
+func (s *Sim) ownerAuthority(agent string) string {
+	l, ok := s.Server.OwnershipSnapshot(agent)
+	if !ok || !l.Live(s.Clock.Now()) {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g := s.own[agent]
+	if g.attempt != "" && g.fence == l.FencingToken {
+		return g.attempt
+	}
+	return ""
+}
+
+// stampControlPlane fills the control-plane fields of rec from server state
+// at apply time (called before the request is served).
+func (s *Sim) stampControlPlane(rec *Record) {
+	kind, id, _ := controlPlanePath(rec.Path)
+	switch kind {
+	case "ownership":
+		rec.Agent = id
+	case "sessions":
+		var body struct {
+			SessionID string `json:"session_id"`
+			AgentID   string `json:"agent_id"`
+			Status    string `json:"status"`
+		}
+		_ = json.Unmarshal([]byte(rec.Body), &body)
+		rec.ReqStatus = body.Status
+		if id == "" {
+			rec.SessionID, rec.Agent = body.SessionID, body.AgentID
+			break
+		}
+		rec.SessionID = id
+		if sess, ok := s.Server.SessionSnapshot(id); ok {
+			rec.Agent, rec.SessionStatusBefore = sess.AgentID, sess.Status
+		}
+	case "leases":
+		if l, ok := s.Server.LeaseSnapshot(id); ok {
+			rec.Agent, rec.SessionID = l.AgentID, l.SessionID
+			if sess, ok := s.Server.SessionSnapshot(l.SessionID); ok {
+				rec.SessionStatusBefore = sess.Status
+			}
+		}
+	default:
+		return
+	}
+	if rec.Agent != "" {
+		rec.OwnerAuthorityBefore = s.ownerAuthority(rec.Agent)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec.SessionAttempt = s.sessionOf[rec.SessionID]
+	if kind == "leases" {
+		rec.LeaseAttempt = s.leaseOf[id]
+	}
+}
+
+// noteControlPlane updates attempt bookkeeping after a control-plane
+// request applied.
+func (s *Sim) noteControlPlane(rec Record) {
+	if rec.Delivery == Drop || rec.Status/100 != 2 {
+		return
+	}
+	kind, id, sub := controlPlanePath(rec.Path)
+	var resp struct {
+		LeaseID      string `json:"lease_id"`
+		SessionID    string `json:"session_id"`
+		FencingToken int64  `json:"fencing_token"`
+	}
+	_ = json.Unmarshal([]byte(rec.RespBody), &resp)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case kind == "ownership" && sub == "acquire":
+		s.own[id] = ownGrant{attempt: rec.Attempt, fence: resp.FencingToken}
+	case kind == "sessions" && id == "" && rec.Method == "POST":
+		s.sessionOf[resp.SessionID] = rec.Attempt
+	case kind == "sessions" && sub == "leases":
+		s.leaseOf[resp.LeaseID] = rec.Attempt
+	}
+}
+
+// controlPlanePath splits a workspace-relative control-plane path into its
+// resource kind ("ownership", "sessions", "leases"), the resource ID and the
+// sub-resource.
+func controlPlanePath(path string) (kind, id, sub string) {
+	for prefix, k := range map[string]string{
+		"/agent-ownership-leases": "ownership",
+		"/agent-sessions":         "sessions",
+		"/agent-leases":           "leases",
+	} {
+		rest, ok := strings.CutPrefix(path, prefix)
+		if !ok {
+			continue
+		}
+		rest = strings.TrimPrefix(rest, "/")
+		id, sub, _ = strings.Cut(rest, "/")
+		return k, id, sub
+	}
+	return "", "", ""
 }
 
 // Match selects a pending request.

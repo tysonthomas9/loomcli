@@ -13,9 +13,12 @@
 // the real stale-worker trace verified in task e034de04 (see calibration.go).
 // Response BODIES were not captured by that trace; the bodies produced here
 // follow the pinned handler source shapes and are labeled source-derived, not
-// observed. Control-plane liveness (sessions, leases, nodes) is not modeled,
-// so the reaper sees no live session vouching for a claim. Guard switches are
-// design exploration only: they are not evidence of any server guard.
+// observed. The control-plane subset (ownership leases, sessions, session
+// leases, worker deregistration, lease reaper) lives in controlplane.go and is
+// source-derived only: no control-plane traffic was ever captured. Nodes are
+// not modeled, so FleetDB's live-work derivation finds no live session and the
+// claim reaper never sees a claim vouched for. Guard switches are design
+// exploration only: they are not evidence of any server guard.
 package fleetsim
 
 import (
@@ -97,6 +100,7 @@ type Server struct {
 	locks     map[string]lock
 	events    []Event
 	workers   map[string]string // worker ID → current task ("" when idle)
+	cp        controlPlane
 	unmodeled []string
 	mux       *http.ServeMux
 }
@@ -110,6 +114,7 @@ func NewServer(clk clock.Clock, workspace string, guards Guards) *Server {
 		issues:    map[string]*Issue{},
 		locks:     map[string]lock{},
 		workers:   map[string]string{},
+		cp:        newControlPlane(),
 	}
 	mux := http.NewServeMux()
 	p := "/api/v1/{workspace}"
@@ -119,7 +124,7 @@ func NewServer(clk clock.Clock, workspace string, guards Guards) *Server {
 	mux.HandleFunc("GET "+p+"/issues/{id}/deps", s.handleEmptyList("dependencies"))
 	mux.HandleFunc("GET "+p+"/issues/{id}/comments", s.handleEmptyList("comments"))
 	mux.HandleFunc("POST "+p+"/workers/{id}/heartbeat", s.handleWorkerHeartbeat)
-	mux.HandleFunc(p+"/agent-ownership-leases/", s.handleOwnershipLeases)
+	s.registerControlPlane(mux, p)
 	mux.HandleFunc("GET "+p+"/issues", s.handleList)
 	mux.HandleFunc("POST "+p+"/issues/{id}/claim", s.handleClaim)
 	mux.HandleFunc("POST "+p+"/issues/{id}/assign", s.handleAssign)
@@ -271,14 +276,6 @@ func (s *Server) handleWorkerHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
-}
-
-func (s *Server) handleOwnershipLeases(w http.ResponseWriter, r *http.Request) {
-	if s.guards.OwnershipLeasesUnsupported {
-		writeError(w, http.StatusNotFound, "not_found", "not found", nil)
-		return
-	}
-	s.handleUnmodeled(w, r)
 }
 
 func (s *Server) liveHolderLocked(id string) string {

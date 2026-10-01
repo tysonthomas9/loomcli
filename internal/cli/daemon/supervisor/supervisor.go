@@ -588,7 +588,7 @@ func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	if sessionID == "" {
 		return
 	}
-	now := time.Now().UTC()
+	now := s.clk().Now().UTC()
 	status := domain.AgentSessionRunning
 	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
 	defer cancel()
@@ -663,7 +663,7 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	if input.exitCode != 0 {
 		status = domain.AgentSessionFailed
 	}
-	finishedAt := time.Now().UTC()
+	finishedAt := s.clk().Now().UTC()
 	finishedAtPtr := &finishedAt
 	exitCodePtr := &input.exitCode
 	var taskIDPtr *string

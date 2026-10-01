@@ -14,6 +14,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/clock"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -444,14 +445,16 @@ func (d *Daemon) validateIPCLease(ctx context.Context, req AgentIPCRequest) (Age
 			if getErr != nil {
 				return ipcErrorResponse(getErr), false
 			}
-			return validateLeaseRecord(verified, req)
+			return validateLeaseRecord(verified, req, clock.Or(d.sup.Clock).Now())
 		}
 		return ipcErrorResponse(err), false
 	}
-	return validateLeaseRecord(lease, req)
+	return validateLeaseRecord(lease, req, clock.Or(d.sup.Clock).Now())
 }
 
-func validateLeaseRecord(lease *domain.AgentLease, req AgentIPCRequest) (AgentIPCResponse, bool) {
+// validateLeaseRecord judges lease expiry against now, the supervisor's clock
+// (real unless a simulation injects one).
+func validateLeaseRecord(lease *domain.AgentLease, req AgentIPCRequest, now time.Time) (AgentIPCResponse, bool) {
 	if lease == nil {
 		return AgentIPCResponse{
 			Error: "lease not found",
@@ -476,7 +479,7 @@ func validateLeaseRecord(lease *domain.AgentLease, req AgentIPCRequest) (AgentIP
 			Kind:  string(backend.KindConflict),
 		}, false
 	}
-	if time.Now().After(lease.ExpiresAt) {
+	if now.After(lease.ExpiresAt) {
 		return AgentIPCResponse{
 			Error: "lease expired",
 			Kind:  string(backend.KindConflict),
