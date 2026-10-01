@@ -101,13 +101,13 @@ func entryGitRepo(t *testing.T) string {
 	root := t.TempDir()
 	repo, remote := filepath.Join(root, "repo"), filepath.Join(root, "remote.git")
 	for _, command := range [][]string{{"init", "-b", "main", repo}, {"init", "--bare", remote}} {
-		if output, err := exec.Command("git", command...).CombinedOutput(); err != nil {
+		if output, err := exec.Command("git", command...).CombinedOutput(); err != nil { //nolint:norawexec // Temporary real-Git merge fixture, local bare remote.
 			t.Fatalf("git %v: %s: %v", command, output, err)
 		}
 	}
 	for _, command := range [][]string{{"config", "user.name", "Fixture"}, {"config", "user.email", "fixture@example.com"},
 		{"commit", "--allow-empty", "-m", "base"}, {"remote", "add", "origin", remote}, {"push", "origin", "main"}} {
-		process := exec.Command("git", command...)
+		process := exec.Command("git", command...) //nolint:norawexec // Temporary real-Git merge fixture, local bare remote.
 		process.Dir = repo
 		if output, err := process.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %s: %v", command, output, err)
