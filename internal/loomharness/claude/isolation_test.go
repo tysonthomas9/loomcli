@@ -53,9 +53,27 @@ func within(p, root string) bool {
 	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
+// noSymlink refuses absolute path p if it or any existing directory above it
+// is a symlink, checked with Lstat and never followed (as realDir does), so a
+// dangling alias is refused even when its target does not exist.
+func noSymlink(p string) error {
+	for cur := filepath.Clean(p); ; cur = filepath.Dir(cur) {
+		info, err := os.Lstat(cur)
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink; refusing", cur)
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if cur == filepath.Dir(cur) {
+			return nil
+		}
+	}
+}
+
 // isolated fails closed unless every path the launch resolves (HOME, the
-// effective Claude config dir, the transcript root and the working dir)
-// resolves, through any symlinks, inside the owned test root.
+// effective Claude config dir, the transcript root and the working dir) is
+// reached without any symlink and lies inside the owned test root.
 func isolated(cfg Config, spec ProcessSpec) error {
 	if ownedRoot == "" {
 		return errors.New("isolation: no owned test root")
@@ -73,6 +91,9 @@ func isolated(cfg Config, spec ProcessSpec) error {
 	for name, p := range map[string]string{"HOME": home, "CLAUDE_CONFIG_DIR": config, "root": root, "dir": spec.Dir} {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("isolation: %s %q is not an absolute path", name, p)
+		}
+		if err := noSymlink(p); err != nil {
+			return fmt.Errorf("isolation: %s %q: %w", name, p, err)
 		}
 		r, err := canonical(p)
 		if err != nil {
@@ -137,7 +158,11 @@ func TestClaudeTestIsolationGuard(t *testing.T) {
 			t.Errorf("%s: not refused", name)
 		}
 	}
-	if h, _ := canonical(os.Getenv("HOME")); !within(h, ownedRoot) || !strings.HasPrefix(ownedRoot, "/private/tmp/") {
+	tmp, err := filepath.EvalSymlinks("/tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, _ := canonical(os.Getenv("HOME")); !within(h, ownedRoot) || filepath.Dir(ownedRoot) != tmp {
 		t.Fatalf("the test binary's HOME %q is not in an owned /tmp root (%q)", h, ownedRoot)
 	}
 }
