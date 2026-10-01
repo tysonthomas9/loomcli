@@ -143,7 +143,7 @@ func (s *state) goCheck(name string) error {
 	case "mirror_refs":
 		return s.packageTests("./internal/loomgit/mirror", "Test.*")
 	case "leased_publish":
-		return s.packageTests("./internal/loomgit/publish", "TestPublish.*")
+		return s.packageTests("./internal/loomgit/publish", "TestPublish(CreatesAndLeasedReplacesLayer|PassesOneExactLeaseToMirrorPusher)")
 	case "landing_detection":
 		return s.packageTests("./internal/loomgit/landing", "Test(MergeRecordLandsWithoutTrailerAndOffersDependent|MergedWaitsForFetchedTrunk|RestackOfferSurvivesCallbackFailure|OpenOwnedPRNeverLandsFromCopiedTrailer|SecondaryNeedsOwnedPRAssociation|FetchFailureChangesNoStatus)")
 	case "fault_tools":
