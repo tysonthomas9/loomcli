@@ -45,6 +45,7 @@ type tweaked struct {
 	page2             func() (loomharness.MessagePage, error)
 	block             chan struct{} // a history read waits until it closes
 	replyErr          error         // every Reply fails with it
+	onReply           func()        // runs as a Reply starts
 	replies           *[]loomharness.Reply
 }
 
@@ -84,6 +85,9 @@ func (p tweakedSession) Messages(ctx context.Context, after string, limit int) (
 func (p tweakedSession) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
 	if p.w.replies != nil {
 		*p.w.replies = append(*p.w.replies, r)
+	}
+	if p.w.onReply != nil {
+		p.w.onReply()
 	}
 	if p.w.replyErr != nil {
 		return p.w.replyErr
@@ -747,37 +751,51 @@ func failInsert(t *testing.T, e *createEnv, suffix string) func() {
 
 // TestRespondQuarantinedLosesAsk: a Reply the session refuses as
 // quarantined fails Respond, saves ask.lost for that ask once, closes it and
-// shows Attention harness_unavailable; a repeat finds no ask and saves no
-// second ask.lost.
+// shows Attention harness_unavailable, even when the Reply used up the
+// caller's context; a repeat finds no ask, and a later replay neither
+// reopens it nor saves a second ask.lost.
 func TestRespondQuarantinedLosesAsk(t *testing.T) {
-	ctx := context.Background()
-	e := newCreateEnv(t)
-	fh := e.h.Harness.(*fake.Harness)
-	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
-	a, _ := newLead(t, e, s, "alpha")
-	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
-	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool {
-		return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
-	})
-	stop()
-	s.harnesses["opencode"] = tweaked{Harness: e.h, replyErr: fmt.Errorf("opencode: %w", loomharness.ErrQuarantined)}
-	err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"})
-	if !strings.Contains(fmt.Sprint(err), "quarantined") {
-		t.Fatalf("Respond = %v; want the quarantine", err)
-	}
-	wantCode(t, err, CodeHarnessError)
-	lostRows := func() []loomstore.Event { return kinds(rows(t, s, a.AgentID, 0), KindAskLost) }
-	if lost := lostRows(); len(lost) != 1 || !strings.Contains(string(lost[0].Payload), `"askId":"a1"`) {
-		t.Fatalf("ask.lost rows = %+v; want one for a1", lost)
-	}
-	ag := s.get(t, a.AgentID)
-	if deref(ag.AttentionReason) != AttentionHarnessUnavailable || ag.State == StateWaiting || len(askIDs(t, s, a.AgentID)) != 0 {
-		t.Fatalf("after quarantine: Attention %q, state %s, asks %v", deref(ag.AttentionReason), ag.State, askIDs(t, s, a.AgentID))
-	}
-	wantCode(t, s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"}), CodeAskNotFound)
-	if lost := lostRows(); len(lost) != 1 {
-		t.Fatalf("ask.lost rows after a repeat = %d", len(lost))
+	for _, canceled := range []bool{false, true} {
+		e := newCreateEnv(t)
+		fh := e.h.Harness.(*fake.Harness)
+		s := e.service(ServiceConfig{})
+		stop := startFeed(s, e)
+		a, _ := newLead(t, e, s, "alpha")
+		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
+		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+		eventually(t, "a1 opens", func() bool {
+			return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
+		})
+		stop()
+		ctx, cancel := context.WithCancel(context.Background())
+		w := tweaked{Harness: e.h, replyErr: fmt.Errorf("opencode: %w", loomharness.ErrQuarantined)}
+		if canceled {
+			w.onReply = cancel // the Reply ran out the caller's time
+		}
+		s.harnesses["opencode"] = w
+		err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"})
+		cancel()
+		if !strings.Contains(fmt.Sprint(err), "quarantined") {
+			t.Fatalf("canceled %v: Respond = %v; want the quarantine", canceled, err)
+		}
+		wantCode(t, err, CodeHarnessError)
+		bg := context.Background()
+		check := func(when string) {
+			t.Helper()
+			lost := kinds(rows(t, s, a.AgentID, 0), KindAskLost)
+			if len(lost) != 1 || !strings.Contains(string(lost[0].Payload), `"askId":"a1"`) {
+				t.Fatalf("canceled %v, %s: ask.lost rows = %+v; want one for a1", canceled, when, lost)
+			}
+			ag := s.get(t, a.AgentID)
+			if deref(ag.AttentionReason) != AttentionHarnessUnavailable || ag.State == StateWaiting || len(askIDs(t, s, a.AgentID)) != 0 {
+				t.Fatalf("canceled %v, %s: Attention %q, state %s, asks %v", canceled, when, deref(ag.AttentionReason), ag.State, askIDs(t, s, a.AgentID))
+			}
+		}
+		check("after Respond")
+		wantCode(t, s.Respond(bg, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"}), CodeAskNotFound)
+		if err := s.replay(bg, "opencode", s.get(t, a.AgentID)); err != nil {
+			t.Fatal(err)
+		}
+		check("after a replay")
 	}
 }

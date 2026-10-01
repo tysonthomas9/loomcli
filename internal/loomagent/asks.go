@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -78,13 +79,19 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 		return &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"}
 	}
 	if err := sess.Reply(ctx, req.AskID, r); errors.Is(err, loomharness.ErrQuarantined) {
-		return errors.Join(harnessErr(err), s.quarantined(ctx, a, ask))
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), quarantineCleanup)
+		defer cancel() // the Reply may have used up ctx; the loss must still be saved
+		return errors.Join(harnessErr(err), s.quarantined(cleanup, a, ask))
 	} else if err != nil {
 		return harnessErr(err)
 	}
 	s.setAsk(a.AgentID, Ask{ID: req.AskID}, false)
 	return s.syncWaiting(ctx, a)
 }
+
+// quarantineCleanup bounds saving a quarantined ask's loss, which runs even
+// if the caller's context ended during the Reply.
+const quarantineCleanup = 10 * time.Second
 
 // quarantined handles a Reply its session refused as quarantined: the ask
 // can no longer be answered, so it is saved as ask.lost (once) and closed,
