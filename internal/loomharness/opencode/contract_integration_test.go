@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -61,8 +63,8 @@ func TestContract(t *testing.T) {
 		}
 		pid := serverPID(a)
 		a.Stop()
-		if alive(pid) {
-			t.Errorf("server %d still running after Stop", pid)
+		if alive(pid) || len(a.owned()) != 0 {
+			t.Errorf("owned tree still running after Stop: server %v, owned %v", alive(pid), a.owned())
 		}
 	})
 
@@ -253,6 +255,33 @@ func TestContract(t *testing.T) {
 		events.wait(t, "turn after restart", func(e loomharness.Event) bool {
 			return e.Session.NativeID == ref.NativeID && e.Type == loomharness.EventTurnCompleted && e.StopReason == "completed" && model.requests("after restart") == 1
 		})
+	})
+
+	t.Run("OwnedTree", func(t *testing.T) {
+		// OpenCode runs shell commands detached from the server's group, so a
+		// crashed server leaves them behind; the restart must reap them.
+		shellCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+		defer stop()
+		go func() { _ = a.call(shellCtx, "POST", sp("/shell"), map[string]string{"command": "sleep 300"}, nil) }()
+		pid := serverPID(a)
+		var orphans []int
+		waitFor(t, "detached shell command", func() bool {
+			orphans = slices.DeleteFunc(a.owned(), func(p int) bool { return p == pid })
+			return len(orphans) > 0
+		})
+		for _, o := range orphans {
+			if g, err := syscall.Getpgid(o); err == nil && g == pid {
+				t.Fatalf("shell command %d is in the server's group; the test no longer exercises a detached tree", o)
+			}
+		}
+		time.Sleep(2 * trackEvery) // let track record the command
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
+		if n := liveCount(orphans); n != 0 {
+			t.Fatalf("%d processes of the crashed tree survived the restart: %v", n, orphans)
+		}
 	})
 
 	t.Run("PurgeOwnedOnly", func(t *testing.T) {

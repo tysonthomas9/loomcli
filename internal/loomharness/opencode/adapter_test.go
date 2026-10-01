@@ -21,12 +21,14 @@ import (
 
 // TestMain lets the test binary play `opencode` for the supervisor tests:
 // LOOM_FAKE_OPENCODE=serve answers --version and serves /api/info and
-// /api/model like a service-mode server; =exit fails every serve.
+// /api/model like a service-mode server; =exit fails every serve. serve,
+// exit-child and hang first start a detached grandchild (=sleep), as
+// OpenCode does for shell commands, and record its pid in children.
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("LOOM_FAKE_OPENCODE"); mode != "" {
 		os.Exit(fakeOpenCode(mode))
 	}
-	restartBackoff, maxBackoff = 10*time.Millisecond, 50*time.Millisecond
+	restartBackoff, maxBackoff, trackEvery = 10*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond
 	os.Exit(m.Run())
 }
 
@@ -36,10 +38,22 @@ func fakeOpenCode(mode string) int {
 		fmt.Println(os.Getenv("LOOM_FAKE_OPENCODE_VERSION"))
 		return 0
 	}
+	if mode == "sleep" {
+		time.Sleep(time.Hour)
+		return 0
+	}
 	if mode == "exit" || !slices.Contains(args, "--service") {
 		return 1
 	}
 	state := os.Getenv("XDG_STATE_HOME")
+	spawnDetached(state)
+	switch mode {
+	case "exit-child":
+		time.Sleep(300 * time.Millisecond) // a child born just before a crash can escape tracking
+		return 1
+	case "hang":
+		time.Sleep(time.Hour)
+	}
 	_ = os.WriteFile(filepath.Join(state, "config-content"), []byte(os.Getenv("OPENCODE_CONFIG_CONTENT")), 0o600)
 	var tokens []string
 	for _, k := range githubTokens {
@@ -72,6 +86,44 @@ func fakeOpenCode(mode string) int {
 	signal.Notify(sig, syscall.SIGTERM)
 	<-sig
 	return 0
+}
+
+// spawnDetached starts a grandchild in its own session, so it leaves the
+// server's process group.
+func spawnDetached(state string) {
+	env := append(slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "LOOM_FAKE_OPENCODE=") }), "LOOM_FAKE_OPENCODE=sleep")
+	p, err := os.StartProcess(os.Args[0], os.Args[:1], &os.ProcAttr{Env: env, Sys: &syscall.SysProcAttr{Setsid: true}})
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(state, "children"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err == nil {
+		_, _ = fmt.Fprintln(f, p.Pid)
+		_ = f.Close()
+	}
+}
+
+// children reads the grandchild pids a fake server recorded.
+func children(t *testing.T, state string) []int {
+	t.Helper()
+	b, _ := os.ReadFile(filepath.Join(state, "children"))
+	var pids []int
+	for _, f := range strings.Fields(string(b)) {
+		var pid int
+		_, _ = fmt.Sscan(f, &pid)
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+func liveCount(pids []int) int {
+	n := 0
+	for _, p := range pids {
+		if alive(p) {
+			n++
+		}
+	}
+	return n
 }
 
 func fakeAdapter(t *testing.T, mode, version string, presets ...loomharness.PresetConfig) (*Adapter, string) {
@@ -224,5 +276,68 @@ func TestOpenCodeServeStripsGitHubTokens(t *testing.T) {
 		if err != nil || !slices.Contains(env, "LOOM_KEEP=1") {
 			t.Fatalf("other env dropped: %v", err)
 		}
+	}
+}
+
+func TestAdapterOwnedProcessTree(t *testing.T) {
+	ctx := context.Background()
+	a, state := fakeAdapter(t, "serve", "opencode v2.0.19")
+	other, otherState := fakeAdapter(t, "serve", "opencode v2.0.19")
+	for _, x := range []*Adapter{a, other} {
+		if _, err := x.Models(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := children(t, state)
+	if len(first) != 1 || !alive(first[0]) {
+		t.Fatalf("grandchild %v not running", first)
+	}
+
+	// A crashed server leaves its detached grandchild behind; the restart
+	// reaps it before starting a new tree.
+	pid := serverPID(a)
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
+	waitFor(t, "crashed tree reaped", func() bool { return !alive(first[0]) })
+	if got := children(t, state); len(got) != 2 || liveCount(got) != 1 {
+		t.Fatalf("after crash restart: children %v, %d alive; want exactly one", got, liveCount(got))
+	}
+
+	if err := a.Restart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := children(t, state); len(got) != 3 || liveCount(got) != 1 || !alive(got[2]) {
+		t.Fatalf("after Restart: children %v, %d alive; want only the newest", got, liveCount(got))
+	}
+
+	pid = serverPID(a)
+	a.Stop()
+	if alive(pid) || liveCount(children(t, state)) != 0 || len(a.owned()) != 0 {
+		t.Fatalf("Stop left the owned tree running: server %v, %d children, owned %v", alive(pid), liveCount(children(t, state)), a.owned())
+	}
+	if !alive(serverPID(other)) || liveCount(children(t, otherState)) != 1 {
+		t.Fatal("Stop touched another adapter's tree")
+	}
+}
+
+func TestAdapterReapsFailedAndCancelledStarts(t *testing.T) {
+	a, state := fakeAdapter(t, "exit-child", "opencode v2.0.19")
+	if _, err := a.Models(context.Background()); !errors.Is(err, loomharness.ErrUnavailable) {
+		t.Fatalf("Models = %v; want ErrUnavailable", err)
+	}
+	if got := children(t, state); len(got) != 1 || liveCount(got) != 0 {
+		t.Fatalf("failed start left children %v running", got)
+	}
+
+	b, state := fakeAdapter(t, "hang", "opencode v2.0.19")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := b.Models(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Models = %v; want the cancelled start", err)
+	}
+	if got := children(t, state); len(got) != 1 || liveCount(got) != 0 || len(b.owned()) != 0 {
+		t.Fatalf("cancelled start left children %v (owned %v)", got, b.owned())
 	}
 }

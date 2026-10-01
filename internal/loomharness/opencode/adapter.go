@@ -31,6 +31,7 @@ var (
 	restartBackoff = time.Second      // doubled per consecutive failure
 	maxBackoff     = 30 * time.Second // backoff cap
 	stableAfter    = time.Minute      // an exit after this long is a fresh failure
+	trackEvery     = time.Second      // how often the server's descendants are recorded
 	startTimeout   = time.Minute
 	stopGrace      = 10 * time.Second
 )
@@ -42,10 +43,21 @@ const maxFailures = 3
 // Adapter is the OpenCode harness: it supervises one `opencode serve
 // --service` on a free loopback port and serves the port through Client. The
 // server starts on first use, restarts with backoff when it exits, and is
-// stopped only by Stop or Restart, which signal the owned process only.
+// stopped only by Loom's own Stop or Restart calls.
+//
+// Loom owns the process tree it starts. The server runs in its own process
+// group, but OpenCode starts shell commands and its PTY daemon detached, so
+// they leave that group and outlive a crashed server. While the server runs,
+// track records its descendants (by parent PID) with their start times; reap
+// signals exactly the recorded processes that still have the same start
+// time, plus their current descendants. It never pattern-kills and never
+// touches a process outside that tree, such as the user's own OpenCode.
 type Adapter struct {
 	*Client
 	cfg Config
+
+	treeMu sync.Mutex
+	tree   map[int]string // recorded descendant PID -> start time
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd // the owned server; nil when none runs
@@ -59,7 +71,7 @@ var _ loomharness.Harness = (*Adapter)(nil)
 
 // New returns an adapter; nothing starts until the first call.
 func New(cfg Config) *Adapter {
-	a := &Adapter{Client: NewClient("", ""), cfg: cfg}
+	a := &Adapter{Client: NewClient("", ""), cfg: cfg, tree: map[int]string{}}
 	a.ready = a.ensure
 	return a
 }
@@ -123,6 +135,7 @@ func (a *Adapter) Stop() {
 	defer a.mu.Unlock()
 	a.stopped = true
 	a.stopLocked()
+	a.reap() // also after a crash, when no server runs
 }
 
 func (a *Adapter) version(ctx context.Context) (loomharness.VersionCheck, error) {
@@ -179,21 +192,27 @@ func (a *Adapter) spawn(ctx context.Context) error {
 	_ = l.Close()
 	cmd := exec.Command(a.cfg.Bin, "serve", "--service", "--hostname", "127.0.0.1", "--port", port) //nolint:gosec // G204: the configured OpenCode binary.
 	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	a.reap() // leftovers of a crashed server: no duplicate survivor
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("opencode serve: %w: %w", loomharness.ErrUnavailable, err)
 	}
 	exited := make(chan struct{})
 	started := time.Now()
 	go a.watch(cmd, exited, started)
+	go a.track(cmd.Process.Pid, exited)
 	kill := func(err error) error {
-		_ = cmd.Process.Kill()
+		a.record(cmd.Process.Pid)
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-exited
+		a.reap()
 		return err
 	}
 	file := filepath.Join(stateDir(env), "opencode", "service.json")
 	for deadline := started.Add(startTimeout); ; {
 		select {
 		case <-exited:
+			a.reap()
 			return fmt.Errorf("opencode serve exited during start (another OpenCode service may own %s): %w", file, loomharness.ErrUnavailable)
 		case <-ctx.Done():
 			return kill(ctx.Err())
@@ -202,6 +221,7 @@ func (a *Adapter) spawn(ctx context.Context) error {
 		if pw, ok := servicePassword(file, cmd.Process.Pid); ok && answers(ctx, base, pw, cmd.Process.Pid) {
 			a.setEndpoint(base, pw)
 			a.cmd, a.exited = cmd, exited
+			a.record(cmd.Process.Pid)
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -228,20 +248,130 @@ func (a *Adapter) watch(cmd *exec.Cmd, exited chan struct{}, started time.Time) 
 	time.AfterFunc(time.Until(a.retryAt), func() { _ = a.ensure(context.Background()) })
 }
 
-// stopLocked sends SIGTERM to the owned server, waits, then SIGKILLs it.
+// stopLocked sends SIGTERM to the owned server's process group, waits, then
+// SIGKILLs it, and reaps the detached rest of the tree.
 func (a *Adapter) stopLocked() {
 	cmd, exited := a.cmd, a.exited
 	if cmd == nil {
 		return
 	}
 	a.cmd = nil
-	_ = cmd.Process.Signal(syscall.SIGTERM)
+	a.record(cmd.Process.Pid)
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 	select {
 	case <-exited:
 	case <-time.After(stopGrace):
-		_ = cmd.Process.Kill()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-exited
 	}
+	a.reap()
+}
+
+// track records the server's descendants until it exits.
+func (a *Adapter) track(server int, exited <-chan struct{}) {
+	for {
+		a.record(server)
+		select {
+		case <-exited:
+			return
+		case <-time.After(trackEvery):
+		}
+	}
+}
+
+// record adds the current descendants of server to the recorded tree.
+func (a *Adapter) record(server int) {
+	procs := processes()
+	a.treeMu.Lock()
+	defer a.treeMu.Unlock()
+	for _, pid := range descendants(procs, []int{server}) {
+		a.tree[pid] = procs[pid].start
+	}
+}
+
+// owned lists the recorded processes that still run with the same start
+// time, plus their current descendants, and forgets the rest.
+func (a *Adapter) owned() []int {
+	procs := processes()
+	a.treeMu.Lock()
+	defer a.treeMu.Unlock()
+	var roots []int
+	for pid, start := range a.tree {
+		if p, ok := procs[pid]; ok && p.start == start {
+			roots = append(roots, pid)
+		} else {
+			delete(a.tree, pid)
+		}
+	}
+	return append(roots, descendants(procs, roots)...)
+}
+
+// reap stops the owned processes: SIGTERM, then SIGKILL after stopGrace. It
+// lists them again before each signal, so an exited, reused PID is never hit.
+func (a *Adapter) reap() {
+	sig := syscall.SIGTERM
+	for deadline := time.Now().Add(stopGrace); ; time.Sleep(50 * time.Millisecond) {
+		pids := a.owned()
+		if len(pids) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			sig = syscall.SIGKILL
+		}
+		for _, pid := range pids {
+			_ = syscall.Kill(pid, sig)
+		}
+		if sig == syscall.SIGKILL {
+			return
+		}
+	}
+}
+
+type process struct {
+	ppid  int
+	start string
+}
+
+// processes is the ps table: PID -> parent and start time. Zombies are left
+// out; they are already dead.
+func processes() map[int]process {
+	out, err := exec.Command("ps", "-axo", "pid=,ppid=,stat=,lstart=").Output()
+	if err != nil {
+		return nil
+	}
+	procs := map[int]process{}
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 4 || strings.HasPrefix(f[2], "Z") {
+			continue
+		}
+		pid, err1 := strconv.Atoi(f[0])
+		ppid, err2 := strconv.Atoi(f[1])
+		if err1 == nil && err2 == nil {
+			procs[pid] = process{ppid: ppid, start: strings.Join(f[3:], " ")}
+		}
+	}
+	return procs
+}
+
+// descendants lists every process below roots in procs.
+func descendants(procs map[int]process, roots []int) []int {
+	kids := map[int][]int{}
+	for pid, p := range procs {
+		kids[p.ppid] = append(kids[p.ppid], pid)
+	}
+	var out []int
+	for queue := slices.Clone(roots); len(queue) > 0; {
+		pid := queue[0]
+		queue = queue[1:]
+		for _, k := range kids[pid] {
+			if k != os.Getpid() {
+				out = append(out, k)
+				queue = append(queue, k)
+			}
+		}
+	}
+	return out
 }
 
 // githubTokens never reach the server: agents publish through Loom (R32).
