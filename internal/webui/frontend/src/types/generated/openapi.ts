@@ -1420,6 +1420,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/agents/{name}/git/merge-up-to": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Preview a recorded stack merge and its per-layer progress */
+    get: operations["gitMergePreview"];
+    put?: never;
+    /** Create a human-confirmed merge request for exact stack heads */
+    post: operations["gitMergeUpTo"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/reset-preview": {
     parameters: {
       query?: never;
@@ -2431,6 +2449,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    MergeStackView: {
+      stack_id: string;
+      target: string;
+      backend: string;
+      phase: string;
+      reason?: string;
+      layers: {
+        change: string;
+        head: string;
+        pr_url: string;
+        state: string;
+      }[];
+    };
     ErrorResponse: {
       /** @constant */
       success: false;
@@ -6735,6 +6766,67 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  gitMergePreview: {
+    parameters: {
+      query: {
+        stack_id: string;
+        target: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stack merge state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeStackView"];
+        };
+      };
+    };
+  };
+  gitMergeUpTo: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          stack_id: string;
+          target: string;
+          heads: string[];
+        };
+      };
+    };
+    responses: {
+      /** @description Merge request recorded */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeStackView"];
         };
       };
     };

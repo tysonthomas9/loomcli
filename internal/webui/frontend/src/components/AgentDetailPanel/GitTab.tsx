@@ -19,6 +19,7 @@ import { getAvatarColor } from "@/utils/colorUtils";
 
 import panelStyles from "./AgentDetailPanel.module.css";
 import { useCreatePRAction } from "./CreatePRAction";
+import { MergeUpToAction } from "./MergeUpToAction";
 import { TargetBranchSelector } from "./TargetBranchSelector";
 import styles from "./GitTab.module.css";
 
@@ -248,6 +249,7 @@ export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
         </header>
 
         {createPR.form}
+        <MergeUpToAction workspaceId={workspaceId} agentName={agent.name} />
 
         <div className={styles.historyBody}>
           {commits.length > 0 ? (

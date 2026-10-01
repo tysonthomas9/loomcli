@@ -16,6 +16,8 @@ import {
   gitPull,
   gitSync,
   gitCreatePR,
+  gitMergePreview,
+  gitMergeUpTo,
   gitReset,
   gitResetPreview,
   gitUpdateTarget,
@@ -201,6 +203,38 @@ describe("git API functions", () => {
         "/api/workspaces/test-ws-id/agents/nova/git/pr",
         { change_id: "C-2" },
         { timeout: 60000 },
+      );
+    });
+  });
+
+  describe("gitMergeUpTo", () => {
+    it("previews and submits the exact four confirmed heads", async () => {
+      const preview = {
+        stack_id: "feature",
+        target: "C",
+        backend: "loom",
+        phase: "",
+        layers: [
+          { change: "A", head: "a", pr_url: "", state: "pending" },
+          { change: "B", head: "b", pr_url: "", state: "pending" },
+          { change: "C", head: "c", pr_url: "", state: "pending" },
+          { change: "D", head: "d", pr_url: "", state: "pending" },
+        ],
+      };
+      mockGet.mockResolvedValue(preview);
+      mockPost.mockResolvedValue({ ...preview, phase: "ready" });
+      await gitMergePreview("W", "L", "feature", "C");
+      await gitMergeUpTo("W", "L", preview);
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/W/agents/L/git/merge-up-to?stack_id=feature&target=C",
+      );
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/W/agents/L/git/merge-up-to",
+        {
+          stack_id: "feature",
+          target: "C",
+          heads: ["a", "b", "c", "d"],
+        },
       );
     });
   });

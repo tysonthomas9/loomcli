@@ -45,6 +45,47 @@ export interface GitPRResult {
   no_commits: boolean;
 }
 
+export interface MergeStackView {
+  stack_id: string;
+  target: string;
+  backend: string;
+  phase: string;
+  reason?: string;
+  layers: Array<{
+    change: string;
+    head: string;
+    pr_url: string;
+    state: string;
+  }>;
+}
+
+export async function gitMergePreview(
+  workspaceId: string,
+  agentName: string,
+  stackId: string,
+  target: string,
+): Promise<MergeStackView> {
+  const query = new URLSearchParams({ stack_id: stackId, target });
+  return get<MergeStackView>(
+    `${agentGitUrl(workspaceId, agentName, "merge-up-to")}?${query}`,
+  );
+}
+
+export async function gitMergeUpTo(
+  workspaceId: string,
+  agentName: string,
+  preview: MergeStackView,
+): Promise<MergeStackView> {
+  return post<MergeStackView>(
+    agentGitUrl(workspaceId, agentName, "merge-up-to"),
+    {
+      stack_id: preview.stack_id,
+      target: preview.target,
+      heads: preview.layers.map((layer) => layer.head),
+    },
+  );
+}
+
 export interface GitResetResult {
   success: boolean;
   message: string;

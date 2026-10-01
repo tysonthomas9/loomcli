@@ -85,6 +85,21 @@ func (s *SQLite) OpenNativeMerges(ctx context.Context) ([]NativeMerge, error) {
 	return merges, rows.Err()
 }
 
+func (s *SQLite) NativeMerge(ctx context.Context, workspace, stackID string) (NativeMerge, error) {
+	var merge NativeMerge
+	var changes string
+	err := s.db.QueryRowContext(ctx, `SELECT workspace,stack_id,target,changes,phase,head_sha,request_uuid,reason
+		FROM native_stack_merges WHERE workspace=? AND stack_id=?`, workspace, stackID).Scan(
+		&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Phase, &merge.Head, &merge.UUID, &merge.Reason)
+	if err != nil {
+		return NativeMerge{}, err
+	}
+	if err := json.Unmarshal([]byte(changes), &merge.Changes); err != nil {
+		return NativeMerge{}, err
+	}
+	return merge, nil
+}
+
 func (s *SQLite) RecordNativeMergeRequest(ctx context.Context, merge NativeMerge, uuid string) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE native_stack_merges SET phase='sent',request_uuid=?
 		WHERE workspace=? AND stack_id=? AND phase='dispatching' AND head_sha=?`,
@@ -352,6 +367,26 @@ func (s *SQLite) Publication(ctx context.Context, workspace, change string) (Pub
 		return Publication{}, false, nil
 	}
 	return p, err == nil, err
+}
+
+func (s *SQLite) StackPublications(ctx context.Context, workspace, stackID string) ([]Publication, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,feature_flag,phase,pr_number,pr_url,stack_id,prior_sha,drift_sha
+		FROM change_publications WHERE workspace=? AND stack_id=? ORDER BY pr_number`, workspace, stackID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var publications []Publication
+	for rows.Next() {
+		var publication Publication
+		if err := rows.Scan(&publication.Workspace, &publication.Change, &publication.Repo, &publication.Branch,
+			&publication.Trunk, &publication.Slug, &publication.Head, &publication.FeatureFlag, &publication.Phase,
+			&publication.PRNumber, &publication.PRURL, &publication.StackID, &publication.Prior, &publication.DriftSHA); err != nil {
+			return nil, err
+		}
+		publications = append(publications, publication)
+	}
+	return publications, rows.Err()
 }
 
 func (s *SQLite) BeginPublication(ctx context.Context, p Publication) error {

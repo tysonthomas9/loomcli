@@ -2367,6 +2367,21 @@ type JourneySpan struct {
 	UnknownStart  bool       `json:"unknown_start"`
 }
 
+// MergeStackView defines model for MergeStackView.
+type MergeStackView struct {
+	Backend string `json:"backend"`
+	Layers  []struct {
+		Change string `json:"change"`
+		Head   string `json:"head"`
+		PrUrl  string `json:"pr_url"`
+		State  string `json:"state"`
+	} `json:"layers"`
+	Phase   string  `json:"phase"`
+	Reason  *string `json:"reason,omitempty"`
+	StackId string  `json:"stack_id"`
+	Target  string  `json:"target"`
+}
+
 // MessageResponse defines model for MessageResponse.
 type MessageResponse struct {
 	Message string                 `json:"message"`
@@ -3353,6 +3368,19 @@ type GetDiffFileParams struct {
 	Path string `form:"path" json:"path"`
 }
 
+// GitMergePreviewParams defines parameters for GitMergePreview.
+type GitMergePreviewParams struct {
+	StackId string `form:"stack_id" json:"stack_id"`
+	Target  string `form:"target" json:"target"`
+}
+
+// GitMergeUpToJSONBody defines parameters for GitMergeUpTo.
+type GitMergeUpToJSONBody struct {
+	Heads   []string `json:"heads"`
+	StackId string   `json:"stack_id"`
+	Target  string   `json:"target"`
+}
+
 // GitCreatePRJSONBody defines parameters for GitCreatePR.
 type GitCreatePRJSONBody struct {
 	ChangeId string `json:"change_id"`
@@ -3811,6 +3839,9 @@ type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody CreateAgentJSONBody
+
+// GitMergeUpToJSONRequestBody defines body for GitMergeUpTo for application/json ContentType.
+type GitMergeUpToJSONRequestBody GitMergeUpToJSONBody
 
 // GitCreatePRJSONRequestBody defines body for GitCreatePR for application/json ContentType.
 type GitCreatePRJSONRequestBody GitCreatePRJSONBody
