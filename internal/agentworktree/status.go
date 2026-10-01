@@ -46,6 +46,11 @@ func (w *Worktrees) Status(ctx context.Context, s Spec) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	return w.status(ctx, path, wt)
+}
+
+// status reads the uncommitted paths and fingerprint of the owned worktree wt.
+func (w *Worktrees) status(ctx context.Context, path string, wt Worktree) (Status, error) {
 	// v2 entries start with a letter or digit, so the runner's trim keeps them whole.
 	out, err := w.git.Run(ctx, path, "status", "--porcelain=v2", "-z", "--no-renames", "--untracked-files=all")
 	if err != nil {
@@ -121,8 +126,9 @@ func hashFile(h io.Writer, path string) error {
 }
 
 // Remove deletes the worktree s owns and keeps its branch. It refuses a
-// worktree that is not owned by s (ErrNotOwned) or has uncommitted or
-// untracked changes (ErrDirty). A missing worktree is already removed.
+// worktree that is not owned by s (ErrNotOwned), or one with uncommitted or
+// untracked changes (ErrDirty) unless s.Confirm equals its current Status
+// fingerprint: the user confirmed deleting exactly that work. A missing worktree is already removed.
 // Deciding which worktrees are due for removal is the caller's job.
 func (w *Worktrees) Remove(ctx context.Context, s Spec) error {
 	if err := checkSpec(s); err != nil {
@@ -138,17 +144,22 @@ func (w *Worktrees) Remove(ctx context.Context, s Spec) error {
 	} else if err != nil {
 		return fmt.Errorf("agentworktree: stat %s: %w", path, err)
 	}
-	if _, err := w.owned(ctx, s, path); err != nil {
-		return err
-	}
-	dirty, err := w.git.Run(ctx, path, "status", "--porcelain", "--untracked-files=all")
+	wt, err := w.owned(ctx, s, path)
 	if err != nil {
 		return err
 	}
-	if dirty != "" {
-		return fmt.Errorf("%w: %s", ErrDirty, path)
+	st, err := w.status(ctx, path, wt)
+	if err != nil {
+		return err
 	}
-	if _, err := w.git.Run(ctx, s.Repo, "worktree", "remove", path); err != nil {
+	args := []string{"worktree", "remove", path}
+	if len(st.Uncommitted) > 0 {
+		if s.Confirm == "" || s.Confirm != st.Fingerprint {
+			return fmt.Errorf("%w: %s", ErrDirty, path)
+		}
+		args = []string{"worktree", "remove", "--force", path}
+	}
+	if _, err := w.git.Run(ctx, s.Repo, args...); err != nil {
 		return fmt.Errorf("agentworktree: remove worktree %s: %w", path, err)
 	}
 	return nil

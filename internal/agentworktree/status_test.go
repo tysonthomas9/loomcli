@@ -262,3 +262,51 @@ func TestWorkspaceRemoveOwned(t *testing.T) {
 		}
 	})
 }
+
+func TestWorkspaceRemoveConfirmedFingerprint(t *testing.T) {
+	ctx := context.Background()
+	ws, _, repo := portSetup(t)
+	s := loomagent.WorkspaceSpec{Key: "agt_c", Repo: repo, BaseRef: "main", Branch: "loom/agent/agt_c"}
+	wc, err := ws.Ensure(ctx, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(wc.Path, "base.txt"), "edit")
+	write(t, filepath.Join(wc.Path, "new.txt"), "untracked")
+	seen, err := ws.Status(ctx, s)
+	if err != nil || len(seen.Uncommitted) != 2 {
+		t.Fatalf("Status = %+v, %v", seen, err)
+	}
+
+	if err := ws.Remove(ctx, s); !errors.Is(err, ErrDirty) {
+		t.Fatalf("unconfirmed Remove = %v, want ErrDirty", err)
+	}
+	write(t, filepath.Join(wc.Path, "new.txt"), "edited after the user confirmed")
+	stale := s
+	stale.Confirm = seen.Fingerprint
+	if err := ws.Remove(ctx, stale); !errors.Is(err, ErrDirty) {
+		t.Fatalf("stale Remove = %v, want ErrDirty", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(wc.Path, "new.txt")); err != nil || string(b) != "edited after the user confirmed" {
+		t.Fatalf("stale Remove touched work: %q, %v", b, err)
+	}
+
+	now, err := ws.Status(ctx, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed := s
+	confirmed.Confirm = now.Fingerprint
+	if err := ws.Remove(ctx, confirmed); err != nil {
+		t.Fatalf("confirmed Remove = %v", err)
+	}
+	if _, err := os.Stat(wc.Path); !os.IsNotExist(err) {
+		t.Fatalf("worktree still exists: %v", err)
+	}
+	if got := run(t, repo, "rev-parse", "refs/heads/"+s.Branch); got != wc.HEAD {
+		t.Fatalf("branch at %s, want kept %s", got, wc.HEAD)
+	}
+	if st, err := ws.Status(ctx, s); err != nil || len(st.Uncommitted) != 0 {
+		t.Fatalf("Status after delete = %+v, %v; want absent", st, err)
+	}
+}

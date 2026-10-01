@@ -153,6 +153,7 @@ func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
 		}
 	}
 	if spec != nil {
+		spec.Confirm = req.Fingerprint
 		if err := s.workspace.Remove(ctx, *spec); err != nil {
 			return err
 		}

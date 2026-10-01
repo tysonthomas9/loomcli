@@ -10,7 +10,8 @@ type Workspace interface {
 	Ensure(ctx context.Context, s WorkspaceSpec) (WorkingCopy, error)
 	// Status reports uncommitted paths and the branch and head for task results.
 	Status(ctx context.Context, s WorkspaceSpec) (WorkspaceStatus, error)
-	// Remove deletes the working copy for s and keeps its branch.
+	// Remove deletes the working copy for s and keeps its branch. It refuses
+	// uncommitted work unless s.Confirm equals the current Status fingerprint.
 	Remove(ctx context.Context, s WorkspaceSpec) error
 	// Publish pushes the agent's branch and opens or updates its one PR.
 	Publish(ctx context.Context, req PublishRequest) (PublishResult, error)
@@ -23,6 +24,7 @@ type WorkspaceSpec struct {
 	BaseRef  string // branch or SHA to start from; local or remote-tracking
 	Branch   string // "loom/agent/<id>", or empty for detached
 	Detached bool   // reviewers: detached at BaseRef (a head SHA)
+	Confirm  string // Remove only: the Status fingerprint the user confirmed deleting
 }
 
 // WorkingCopy is an ensured working copy.
