@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/changeset"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/pool"
@@ -29,7 +30,7 @@ func newFixture(t *testing.T) *fixture { return fixtureWithSource(t, nil) }
 func fixtureWithSource(t *testing.T, extend func(*testing.T, *fixture)) *fixture {
 	t.Helper()
 	dir := t.TempDir()
-	if out, err := exec.Command("git", "init", "-q", dir).CombinedOutput(); err != nil { //nolint:norawexec // Temporary real-Git fixture, no network.
+	if out, err := exec.Command("git", "init", "-q", "-b", "main", dir).CombinedOutput(); err != nil { //nolint:norawexec // Temporary real-Git fixture, no network.
 		t.Fatalf("git init: %s: %v", out, err)
 	}
 	options := gitexec.Options{GlobalConfig: os.DevNull, SystemConfig: os.DevNull,
@@ -208,6 +209,34 @@ func TestApplyReplayRecordsDerivedAndCarriesApproval(t *testing.T) {
 	}
 	if err := review.RequireVerdict(context.Background(), f.store, "W", "C1", 2, got.HeadSHA, "apply", "L"); err != nil {
 		t.Fatalf("derived approval: %v", err)
+	}
+}
+
+func TestApplyDerivedRequestIDTracksReplayBase(t *testing.T) {
+	fixture := newFixture(t)
+	firstBase := fixture.commit(t, "first", "first\n", "first")
+	first, err := changeset.RecordDerived(context.Background(), fixture.store, fixture.runner, changeset.DerivedInput{
+		Workspace: "W", Change: "C1", RequestID: "approval:1:derived", FromNumber: 1,
+		Operation: "apply", BaseSHA: firstBase, HeadSHA: firstBase, Outcome: "completed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBase := fixture.commit(t, "second", "second\n", "second")
+	second, err := fixture.service.Apply(context.Background(), Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: "approval:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Derived.Number == first.Number || second.Derived.BaseSHA != secondBase ||
+		second.Derived.RequestID == first.RequestID {
+		t.Fatalf("base move reused derived revision: first=%+v second=%+v", first, second.Derived)
+	}
+	again, err := changeset.RecordDerived(context.Background(), fixture.store, fixture.runner, changeset.DerivedInput{
+		Workspace: "W", Change: "C1", RequestID: second.Derived.RequestID, FromNumber: 1,
+		Operation: "apply", BaseSHA: secondBase, HeadSHA: second.Derived.SourceHeadSHA, Outcome: "completed",
+	})
+	if err != nil || again.Number != second.Derived.Number {
+		t.Fatalf("same-base retry created a revision: %+v, %v", again, err)
 	}
 }
 
