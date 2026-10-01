@@ -117,12 +117,23 @@ type NativeMergeResult struct {
 }
 
 func (g *GitHubForge) MergeNativePull(ctx context.Context, owner, repo string, number int, head string) (NativeMergeResult, error) {
+	return g.requestNativeMerge(ctx, owner, repo, number, head, false)
+}
+
+func (g *GitHubForge) RecoverNativePull(ctx context.Context, owner, repo string, number int, head string) (NativeMergeResult, error) {
+	return g.requestNativeMerge(ctx, owner, repo, number, head, true)
+}
+
+func (g *GitHubForge) requestNativeMerge(ctx context.Context, owner, repo string, number int, head string, existingOnly bool) (NativeMergeResult, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
 	status, data, _, err := g.do(ctx, http.MethodPut, path, map[string]any{
 		"merge_action": "default", "sha": head, "bypass_rules": false,
 	})
 	if err != nil {
 		return NativeMergeResult{}, err
+	}
+	if existingOnly && status != http.StatusConflict {
+		return NativeMergeResult{}, fmt.Errorf("github did not confirm an existing async merge: %w", g.apiErr("PUT", path, status, data))
 	}
 	if status != http.StatusAccepted && status != http.StatusOK && status != http.StatusConflict {
 		message := strings.ToLower(string(data))
@@ -137,7 +148,7 @@ func (g *GitHubForge) MergeNativePull(ctx context.Context, owner, repo string, n
 	if err != nil {
 		return NativeMergeResult{}, err
 	}
-	if status == http.StatusConflict && (result.Details.ExpectedHeadSHA != head || result.Details.MergeAction != "default" || result.Details.BypassRules) {
+	if status == http.StatusConflict && (result.Details.UUID == "" || result.Details.ExpectedHeadSHA != head || result.Details.MergeAction != "default" || result.Details.BypassRules) {
 		return NativeMergeResult{}, fmt.Errorf("github existing async merge differs from requested head or action")
 	}
 	return result, nil

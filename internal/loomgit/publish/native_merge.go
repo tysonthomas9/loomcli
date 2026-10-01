@@ -30,6 +30,7 @@ type nativeMergeStore interface {
 type nativeMergeForge interface {
 	PullByNumber(context.Context, string, string, int) (stackpublish.PR, error)
 	MergeNativePull(context.Context, string, string, int, string) (stackpublish.NativeMergeResult, error)
+	RecoverNativePull(context.Context, string, string, int, string) (stackpublish.NativeMergeResult, error)
 	NativeMergeStatus(context.Context, string, string, int, string) (stackpublish.NativeMergeResult, error)
 }
 
@@ -221,7 +222,11 @@ func recoverNativeDispatch(ctx context.Context, store nativeMergeStore, forge na
 		return err
 	}
 	if !pr.Merged {
-		return loomgit.NewError(loomgit.AttentionRequired, "native merge submission outcome is unknown", nil)
+		result, err := forge.RecoverNativePull(ctx, parts[0], parts[1], publication.PRNumber, merge.Head)
+		if err != nil {
+			return loomgit.NewError(loomgit.AttentionRequired, "native merge submission outcome is unknown", err)
+		}
+		return store.RecordNativeMergeRequest(ctx, merge, result.Details.UUID)
 	}
 	if pr.HeadSHA != merge.Head {
 		return loomgit.NewError(loomgit.Stale, "native merge target head changed", nil)

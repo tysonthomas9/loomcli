@@ -18,6 +18,9 @@ type fakeMergeForge struct {
 	prs          []stackpublish.PR
 	submitted    []int
 	mergeErr     error
+	recoverErr   error
+	recoverCalls int
+	recoverUUID  string
 	resultStatus string
 	statusCalls  int
 }
@@ -42,6 +45,19 @@ func (forge *fakeMergeForge) MergeNativePull(_ context.Context, _, _ string, num
 	forge.submitted = append(forge.submitted, number)
 	result := stackpublish.NativeMergeResult{Status: "pending"}
 	result.Details.UUID = "request-uuid"
+	return result, nil
+}
+
+func (forge *fakeMergeForge) RecoverNativePull(_ context.Context, _, _ string, _ int, _ string) (stackpublish.NativeMergeResult, error) {
+	forge.recoverCalls++
+	if forge.recoverErr != nil {
+		return stackpublish.NativeMergeResult{}, forge.recoverErr
+	}
+	if forge.recoverUUID == "" {
+		return stackpublish.NativeMergeResult{}, journal.ErrNotFound
+	}
+	result := stackpublish.NativeMergeResult{Status: "pending"}
+	result.Details.UUID = forge.recoverUUID
 	return result, nil
 }
 
@@ -205,8 +221,43 @@ func TestNativeMergeUnknownSubmissionRequiresAttention(t *testing.T) {
 		t.Fatal(err)
 	}
 	codeIs(t, ReconcileNativeMerges(ctx, caseFixture.store, forge), loomgit.AttentionRequired)
-	if len(forge.submitted) != 0 {
-		t.Fatalf("submitted = %v", forge.submitted)
+	if len(forge.submitted) != 0 || forge.recoverCalls != 1 {
+		t.Fatalf("submitted = %v, recovery probes = %d", forge.submitted, forge.recoverCalls)
+	}
+}
+
+func TestNativeMergeRecoversAcceptedRequestAfterCrash(t *testing.T) {
+	for _, outcome := range []string{"merged", "failed"} {
+		t.Run(outcome, func(t *testing.T) {
+			caseFixture, forge, request := nativeMergeFixture(t)
+			ctx := context.Background()
+			if err := beginNativeMerge(ctx, caseFixture.store, request, "A"); err != nil {
+				t.Fatal(err)
+			}
+			merges, err := caseFixture.store.OpenNativeMerges(ctx)
+			if err != nil || len(merges) != 1 {
+				t.Fatalf("merges = %v, %v", merges, err)
+			}
+			if err := caseFixture.store.AdvanceNativeMerge(ctx, merges[0], "dispatching", forge.prs[0].HeadSHA, 0); err != nil {
+				t.Fatal(err)
+			}
+			forge.recoverUUID = "request-uuid"
+			if err := ReconcileNativeMerges(ctx, caseFixture.store, forge); err != nil {
+				t.Fatal(err)
+			}
+			forge.resultStatus = outcome
+			if outcome == "merged" {
+				forge.prs[0].Merged, forge.prs[0].State = true, "closed"
+			}
+			if err := ReconcileNativeMerges(ctx, caseFixture.store, forge); outcome == "failed" {
+				codeIs(t, err, loomgit.MergeBlocked)
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if len(forge.submitted) != 0 || forge.recoverCalls != 1 || forge.statusCalls != 1 {
+				t.Fatalf("submits=%v probes=%d polls=%d", forge.submitted, forge.recoverCalls, forge.statusCalls)
+			}
+		})
 	}
 }
 
