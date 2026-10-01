@@ -2,6 +2,8 @@ package opencode
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,7 +73,7 @@ func fakeOpenCode(mode string) int {
 		return 1
 	}
 	pw := os.Getenv("OPENCODE_SERVER_PASSWORD")
-	_ = os.WriteFile(filepath.Join(state, "passwords"), []byte(pw+"\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(state, "password-sha256"), []byte(sha(pw)), 0o600) // never the value
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
 		if _, got, _ := r.BasicAuth(); got != pw {
@@ -140,6 +142,8 @@ func liveCount(pids []int) int {
 	return n
 }
 
+func sha(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+
 func fakeAdapter(t *testing.T, mode, version string, presets ...loomharness.PresetConfig) (*Adapter, string) {
 	t.Helper()
 	return fakeAdapterEnv(t, mode, version, nil, presets...)
@@ -148,7 +152,7 @@ func fakeAdapter(t *testing.T, mode, version string, presets ...loomharness.Pres
 func fakeAdapterEnv(t *testing.T, mode, version string, extra []string, presets ...loomharness.PresetConfig) (*Adapter, string) {
 	t.Helper()
 	state := t.TempDir()
-	a := New(Config{Bin: os.Args[0], Presets: presets, Env: append(append(os.Environ(), extra...),
+	a := New(Config{Bin: os.Args[0], Presets: presets, Env: append(append(hostEnv(), extra...),
 		"LOOM_FAKE_OPENCODE="+mode,
 		"LOOM_FAKE_OPENCODE_VERSION="+version,
 		"XDG_STATE_HOME="+state,
@@ -207,9 +211,9 @@ func TestAdapterLifecycle(t *testing.T) {
 	}
 	pid := serverPID(a)
 	base, pw := a.endpoint()
-	served, _ := os.ReadFile(filepath.Join(state, "passwords"))
-	if !strings.HasPrefix(base, "http://127.0.0.1:") || len(pw) < 40 || string(served) != pw+"\n" {
-		t.Fatalf("endpoint = %s; per-boot password set through OPENCODE_SERVER_PASSWORD: %v", base, string(served) == pw+"\n")
+	served, _ := os.ReadFile(filepath.Join(state, "password-sha256"))
+	if !strings.HasPrefix(base, "http://127.0.0.1:") || len(pw) < 40 || string(served) != sha(pw) {
+		t.Fatalf("endpoint = %s; per-boot password set through OPENCODE_SERVER_PASSWORD: %v", base, string(served) == sha(pw))
 	}
 
 	b, err := os.ReadFile(filepath.Join(state, "config-content"))

@@ -557,25 +557,37 @@ func loomServes(t *testing.T, bin string) []int {
 	return pids
 }
 
-// contractEnv is the sandbox environment: OpenCode's HOME, TMPDIR and XDG
-// roots under sbx, no provider keys, and no models.dev fetch.
-func contractEnv(sbx string) []string {
+// contractEnv is the sandbox environment a real test server starts from:
+// sandboxEnv, no models.dev fetch, and extra (synthetic test secrets only).
+func contractEnv(sbx string, extra ...string) []string {
+	return append(append(sandboxEnv(sbx), "OPENCODE_DISABLE_MODELS_FETCH=1"), extra...)
+}
+
+// hostNames is all a test server takes from the host environment: what a
+// shell needs to run, never a credential, token or provider key.
+var hostNames = []string{"PATH", "SHELL", "LANG", "USER", "LOGNAME"}
+
+// hostEnv selects hostNames from the host environment.
+func hostEnv() []string {
 	var env []string
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		if strings.HasPrefix(k, "OPENCODE_") || strings.HasPrefix(k, "XDG_") || strings.HasSuffix(k, "_API_KEY") || k == "HOME" || k == "TMPDIR" {
-			continue
+	for _, k := range hostNames {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
 		}
-		env = append(env, kv)
 	}
-	return append(env,
+	return env
+}
+
+// sandboxEnv is an explicitly selected environment: hostEnv, plus
+// OpenCode's HOME, TMPDIR and XDG roots under sbx.
+func sandboxEnv(sbx string) []string {
+	return append(hostEnv(),
 		"HOME="+filepath.Join(sbx, "home"),
 		"TMPDIR="+filepath.Join(sbx, "tmp")+"/",
 		"XDG_DATA_HOME="+filepath.Join(sbx, "data"),
 		"XDG_CONFIG_HOME="+filepath.Join(sbx, "config"),
 		"XDG_STATE_HOME="+filepath.Join(sbx, "state"),
 		"XDG_CACHE_HOME="+filepath.Join(sbx, "cache"),
-		"OPENCODE_DISABLE_MODELS_FETCH=1",
 	)
 }
 

@@ -57,23 +57,21 @@ func TestContractSubagentEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sbx, "config/opencode/opencode.json"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Synthetic fixture credentials in the parent (loom serve) environment.
-	for _, k := range secretNames {
-		t.Setenv(k, "fixture-"+strings.ToLower(k))
-	}
-	t.Setenv("LOOM_NESTED_MARKER", "kept")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	// contractEnv drops OPENCODE_*; put the synthetic server passwords back.
-	parentEnv := append(contractEnv(sbx), "OPENCODE_SERVER_PASSWORD=fixture-opencode_server_password",
-		"OPENCODE_PASSWORD=fixture-opencode_password")
+	// The parent (loom serve) environment: scrubbed, plus every synthetic
+	// fixture credential and the marker.
+	parentEnv := contractEnv(sbx, "LOOM_NESTED_MARKER=kept")
+	for _, k := range secretNames {
+		parentEnv = append(parentEnv, k+"=fixture-"+strings.ToLower(k))
+	}
 	spec := loomharness.OpenSpec{Launch: loomharness.Launch{Root: sbx}, Dir: repo, Model: "aft/m",
 		Rules: []loomharness.PermissionRule{{Action: "*", Resource: "*", Effect: "allow"}}}
-	check := func(t *testing.T, envs map[string]string, leaked func(name string) bool) {
+	check := func(t *testing.T, envs map[string]map[string]bool, leaked func(name string) bool) {
 		t.Helper()
 		for role, env := range envs {
 			for _, k := range secretNames {
-				if saw := strings.Contains(env, "\n"+k+"=") || strings.HasPrefix(env, k+"="); saw != leaked(k) {
+				if saw := env[k]; saw != leaked(k) {
 					t.Errorf("%s shell saw %s = %v; want %v", role, k, saw, leaked(k))
 				}
 			}
@@ -134,15 +132,16 @@ func TestContractSubagentEnv(t *testing.T) {
 	})
 }
 
-// subagentShells scripts a session whose first tool dumps its environment,
-// then spawns a subagent that dumps and spawns another that dumps. It returns
-// each dump by role, after checking that two nested subagent sessions ran.
-func subagentShells(t *testing.T, ctx context.Context, c *Client, ref loomharness.NativeRef, fixture, dir string) map[string]string {
+// subagentShells scripts a session whose first tool records which secret
+// names its environment has, then spawns a subagent that records and spawns
+// another that records. It returns
+// the names set in each by role, after checking that two nested subagent sessions ran.
+func subagentShells(t *testing.T, ctx context.Context, c *Client, ref loomharness.NativeRef, fixture, dir string) map[string]map[string]bool {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dump := func(role string) map[string]any { return map[string]any{"bash": "env > " + filepath.Join(dir, role)} }
+	dump := func(role string) map[string]any { return presenceStep(filepath.Join(dir, role)) }
 	spawn := map[string]any{"tool_calls": []map[string]any{{"name": "subagent",
 		"arguments": map[string]string{"agent": "general", "description": "env check", "prompt": "check env"}}}}
 	// One FIFO queue serves every session in turn.
@@ -157,13 +156,9 @@ func subagentShells(t *testing.T, ctx context.Context, c *Client, ref loomharnes
 	if err := c.Session(ref).Prompt(ctx, loomharness.Input{Key: PromptID(ref.NativeID, dir), Text: "spawn"}); err != nil {
 		t.Fatal(err)
 	}
-	envs := map[string]string{}
+	envs := map[string]map[string]bool{}
 	for _, role := range []string{"parent", "child", "grandchild"} {
-		waitFor(t, role+" env dump", func() bool {
-			out, err := os.ReadFile(filepath.Join(dir, role))
-			envs[role] = string(out)
-			return err == nil && strings.Contains(envs[role], "LOOM_NESTED_MARKER=kept")
-		})
+		envs[role] = readPresence(t, filepath.Join(dir, role))
 	}
 	kids := childSessions(t, ctx, c, ref.NativeID)
 	if len(kids) != before+1 || len(childSessions(t, ctx, c, kids[len(kids)-1])) != 1 {
@@ -192,4 +187,36 @@ func childSessions(t *testing.T, ctx context.Context, c *Client, id string) []st
 	}
 	slices.Sort(ids)
 	return ids
+}
+
+// presenceStep is a scripted shell step that writes NAME=present or
+// NAME=absent for each of secretNames and LOOM_NESTED_MARKER. It checks only
+// those names and never writes a value or the environment. The file is
+// written aside, then renamed.
+func presenceStep(file string) map[string]any {
+	names := strings.Join(append(slices.Clone(secretNames), "LOOM_NESTED_MARKER"), " ")
+	return map[string]any{"bash": fmt.Sprintf(
+		`for k in %s; do if printenv "$k" >/dev/null; then echo "$k=present"; else echo "$k=absent"; fi; done > %s.part; mv %s.part %s`,
+		names, file, file, file)}
+}
+
+// readPresence waits for a presenceStep file whose shell had the marker and
+// returns the names it recorded as present.
+func readPresence(t *testing.T, file string) map[string]bool {
+	t.Helper()
+	set := map[string]bool{}
+	waitFor(t, filepath.Base(file)+" presence record", func() bool {
+		out, err := os.ReadFile(file)
+		if err != nil {
+			return false
+		}
+		clear(set)
+		for _, line := range strings.Fields(string(out)) {
+			if k, ok := strings.CutSuffix(line, "=present"); ok {
+				set[k] = true
+			}
+		}
+		return set["LOOM_NESTED_MARKER"]
+	})
+	return set
 }

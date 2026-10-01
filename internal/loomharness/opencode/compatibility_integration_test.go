@@ -106,26 +106,6 @@ func envOr(key, def string) string {
 	return def
 }
 
-// sandboxEnv points OpenCode's home, data, config, state and cache at sbx.
-func sandboxEnv(sbx string) []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		if strings.HasPrefix(k, "OPENCODE_") || strings.HasPrefix(k, "XDG_") || k == "HOME" || k == "TMPDIR" {
-			continue
-		}
-		env = append(env, kv)
-	}
-	return append(env,
-		"HOME="+filepath.Join(sbx, "home"),
-		"TMPDIR="+filepath.Join(sbx, "tmp")+"/",
-		"XDG_DATA_HOME="+filepath.Join(sbx, "data"),
-		"XDG_CONFIG_HOME="+filepath.Join(sbx, "config"),
-		"XDG_STATE_HOME="+filepath.Join(sbx, "state"),
-		"XDG_CACHE_HOME="+filepath.Join(sbx, "cache"),
-	)
-}
-
 // snapshot copies src to dst through a read-only connection.
 func snapshot(t *testing.T, src, dst string) {
 	t.Helper()
