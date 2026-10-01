@@ -28,6 +28,7 @@ fi
 AFT_LIVE=""
 AFT_WITH_DAEMON=""
 AFT_MAX_REAL_CASES=""
+AFT_SUITE_GLOB=""
 AFT_PASSTHRU=()
 LIVE_LOCK_WRITTEN=""
 LIVE_ACCOUNT_LOCK=""
@@ -46,10 +47,28 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { echo "[aft] --max-real-cases needs a value" >&2; exit 1; }
             AFT_MAX_REAL_CASES="$2"; shift 2 ;;
         --max-real-cases=*) AFT_MAX_REAL_CASES="${1#*=}"; shift ;;
+        --suite)
+            [[ $# -ge 2 ]] || { echo "[aft] --suite needs a suite-name glob" >&2; exit 1; }
+            AFT_SUITE_GLOB="$2"; shift 2 ;;
+        --suite=*) AFT_SUITE_GLOB="${1#*=}"; shift ;;
         *)                 AFT_PASSTHRU+=("$1"); shift ;;
     esac
 done
 set -- "${AFT_PASSTHRU[@]+"${AFT_PASSTHRU[@]}"}"
+
+if [[ -n "$AFT_SUITE_GLOB" ]]; then
+    if [[ -n "${AFT_SUITES+x}" || -n "$AFT_LIVE" || ! "$AFT_SUITE_GLOB" =~ ^[a-zA-Z0-9_*-]+$ ]]; then
+        echo "[aft] --suite needs a simple name glob and cannot combine with AFT_SUITES or --live" >&2
+        exit 1
+    fi
+    shopt -s nullglob
+    AFT_SUITE_PATHS=("$SCRIPT_DIR"/suites/${AFT_SUITE_GLOB}.test.yaml)
+    shopt -u nullglob
+    if [[ ${#AFT_SUITE_PATHS[@]} -eq 0 || ! -f "${AFT_SUITE_PATHS[0]}" ]]; then
+        echo "[aft] --suite matched no files: $AFT_SUITE_GLOB" >&2
+        exit 1
+    fi
+fi
 
 if [[ -n "$AFT_MAX_REAL_CASES" && ! "$AFT_MAX_REAL_CASES" =~ ^[1-9][0-9]*$ ]]; then
     echo "[aft] --max-real-cases needs a positive integer (got '$AFT_MAX_REAL_CASES')" >&2
@@ -844,9 +863,9 @@ command -v caffeinate >/dev/null 2>&1 && CAFFEINATE="caffeinate -dimsu"
 # The deterministic default is one aft invocation over both tiers so reporting and
 # census joins stay combined. Real-* tiers set AFT_SUITES above and therefore keep
 # their exact single-directory override.
-if [[ -n "${AFT_SUITES+x}" ]]; then
+if [[ -z "$AFT_SUITE_GLOB" && -n "${AFT_SUITES+x}" ]]; then
     AFT_SUITE_PATHS=("$AFT_SUITES")
-else
+elif [[ -z "$AFT_SUITE_GLOB" ]]; then
     AFT_SUITE_PATHS=("$SCRIPT_DIR/suites" "$SCRIPT_DIR/surface-suites")
 fi
 

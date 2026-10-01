@@ -69,6 +69,12 @@ tests:
         intent: "Open the recorded task through the same browser session using its runtime ID"
       - wait: { text: Revisions }
       - expect: { visible: { testid: revisions-section } }
+      - click: { role: button, name: Apply, exact: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=revisions-section] [role=alert]')?.textContent.includes('review_required')
+        intent: "Wait until an unapproved revision is refused by the review gate"
+      - expect: { text: review_required }
       - click: { role: button, name: Approve, exact: true }
       - api:
           method: "GET"
@@ -77,3 +83,48 @@ tests:
             - path: "data.0.verdict"
               equals: "approve"
         intent: "An operator confirms that the UI action persisted approval for the recorded revision"
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/reviewTaskId")";
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/issues/$task/revisions" > "$AFT_WORK_DIR/review-revisions.json";
+          python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; assert item["verdict"] == "approve"; assert len(item["head_sha"]) == 40; assert item["change_id"]; assert item["number"] > 0' "$AFT_WORK_DIR/review-revisions.json";
+          git -C "$AFT_WORK_DIR/review-repo" cat-file -e "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["head_sha"])' "$AFT_WORK_DIR/review-revisions.json")^{commit}"
+        intent: "An operator verifies the approved revision names a real commit in the workspace repository"
+      - run: >-
+          read change revision < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"], item["number"])' "$AFT_WORK_DIR/review-revisions.json");
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/changes/$change/revisions/$revision/diff?repo=review-repo" > "$AFT_WORK_DIR/review-diff.json";
+          grep -q 'review-output.txt' "$AFT_WORK_DIR/review-diff.json"
+        intent: "The revision diff API names the file produced by the task runner"
+
+  - name: legacy branch Push is rejected without moving the workspace branch
+    intent: An API client tries the removed branch Push route and checks that the workspace branch remains unchanged
+    steps:
+      - run: >-
+          before="$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)";
+          status="$(curl -s -o "$AFT_WORK_DIR/review-legacy-push.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/agents/lead/git/push" -H 'Content-Type: application/json' -d '{}')";
+          test "$status" = 400;
+          grep -q 'branch Push is unavailable' "$AFT_WORK_DIR/review-legacy-push.json";
+          after="$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)";
+          test "$before" = "$after"
+        intent: "The client sees the P2.8 validation error and confirms the local Git ref did not advance"
+
+  - name: P2.14 approved Apply advances only the lead working area
+    skip: true
+    intent: "Expected failure until P2.14 lands: an operator applies an approved revision in the UI and sees the working area advance without a provider push"
+    steps:
+      - run: >-
+          test -s "$AFT_WORK_DIR/review-revisions.json";
+          git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main > "$AFT_WORK_DIR/apply-trunk-before"
+        intent: "Record the trunk ref before the operator applies the approved revision"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-REVIEW/issues/$(cat "$AFT_WORK_DIR/reviewTaskId")"
+        intent: "Open the approved revision in the task detail panel"
+      - wait: { text: Revisions }
+      - click: { role: button, name: Apply, exact: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=revisions-section] [role=status]')?.textContent.includes('Applied revision')
+        intent: "Wait for the UI to confirm that the approved revision joined the local working area"
+      - run: >-
+          test "$(cat "$AFT_WORK_DIR/apply-trunk-before")" = "$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)"
+        intent: "Confirm that applying the layer did not advance trunk"

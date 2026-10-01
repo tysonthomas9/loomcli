@@ -1,0 +1,63 @@
+suite: loomgit-sync
+classification: { area: agents, feature: git-sync, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  repo="$AFT_WORK_DIR/sync-repo"
+  remote="$AFT_WORK_DIR/sync-origin.git"
+  git init -q --bare "$remote"
+  git init -q -b main "$repo"
+  printf '%s\n' "sync base ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  git -C "$repo" remote add origin "$remote"
+  git -C "$repo" push -q -u origin main
+  python3 -c 'import json,sys; print(json.dumps({"name":"e2e-ws-sync","type":"empty","repos":[sys.argv[1]]}))' "$repo" > "$AFT_WORK_DIR/sync-workspace.json"
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json' -d @"$AFT_WORK_DIR/sync-workspace.json" >/dev/null
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-SYNC/agents" -H 'Content-Type: application/json' -d '{"name":"sync-lead","role_name":"lead","auto":false,"cross_repo":true,"repos":[],"backend":"codex"}' >/dev/null
+teardown: >-
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-SYNC/agents/sync-lead" >/dev/null || true;
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-SYNC" >/dev/null || true
+
+tests:
+  - name: Sync pulls trunk without pushing the provider
+    intent: An operator syncs the lead working area after trunk advances and verifies that the remote main ref does not move again
+    steps:
+      - run: >-
+          printf '%s\n' "trunk advance ${RUN_ID:-local}" >> "$AFT_WORK_DIR/sync-repo/README.md";
+          git -C "$AFT_WORK_DIR/sync-repo" add README.md;
+          git -C "$AFT_WORK_DIR/sync-repo" -c user.email=e2e@x -c user.name=e2e commit -q -m advance;
+          git -C "$AFT_WORK_DIR/sync-repo" push -q origin main;
+          git --git-dir="$AFT_WORK_DIR/sync-origin.git" rev-parse refs/heads/main > "$AFT_WORK_DIR/sync-remote-before"
+        intent: "A separate contributor advances the local bare remote's trunk and records its new ref"
+      - open: /ws/E2E-WS-SYNC/agents/sync-lead
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agents-page]')
+        intent: "Wait for the lead agent detail page to mount"
+      - click: { role: button, name: Git, exact: true }
+      - wait:
+          fn: >-
+            document.body.textContent.includes('-1 behind')
+        intent: "Wait until the Git panel shows the lead working area behind trunk"
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-WS-SYNC/agents/sync-lead/git/sync
+        intent: "An orchestration client asks Loom to sync the lead area with its recorded trunk"
+      - api:
+          method: GET
+          path: /api/workspaces/E2E-WS-SYNC/agents/sync-lead/git/status
+          assert:
+            - path: behind
+              equals: 0
+        intent: "A client readback confirms the lead working area caught up with trunk"
+      - reload: true
+      - click: { role: button, name: Git, exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agent-editor-groups]') &&
+            !document.body.textContent.includes('-1 behind')
+        intent: "Wait until the Git panel no longer shows the lead behind trunk"
+      - run: >-
+          test "$(cat "$AFT_WORK_DIR/sync-remote-before")" = "$(git --git-dir="$AFT_WORK_DIR/sync-origin.git" rev-parse refs/heads/main)"
+        intent: "Read back the bare remote ref to prove Sync made no remote write"
