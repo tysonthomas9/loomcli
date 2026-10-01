@@ -330,6 +330,42 @@ func TestContract(t *testing.T) {
 		}
 	})
 
+	t.Run("CrashResume", func(t *testing.T) {
+		key := PromptID("agent-1", "req-crash")
+		if err := s.Prompt(ctx, loomharness.Input{Key: key, Text: "SLOW crash"}); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "running turn", func() bool {
+			st, err := s.Status(ctx)
+			return err == nil && st.Running && model.requests("SLOW crash") > 0
+		})
+		pid := serverPID(a)
+		if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
+		if got, err := s.Resume(ctx, spec.Launch); err != nil || got != ref {
+			t.Fatalf("Resume after crash = %v, %v", got, err)
+		}
+		// R-D evidence: plain serve keeps the session but does not resume the
+		// interrupted turn (OpenCode's crash recovery runs only in --service
+		// mode). Pinned so a behavior change is noticed; Loom must not
+		// auto-continue (Decision Agent).
+		time.Sleep(8 * time.Second)
+		if st, err := s.Status(ctx); err != nil || st.Running {
+			t.Fatalf("Status after crash = %+v, %v; want not running", st, err)
+		}
+		if n := model.requests("SLOW crash"); n != 1 {
+			t.Fatalf("model saw %d SLOW crash turns; plain serve now resumes, revisit R-D", n)
+		}
+		for _, e := range allEvents(t, s, 200) {
+			if e.Type == loomharness.EventTurnResumed {
+				t.Fatalf("plain serve emitted %s; revisit R-D", e.Type)
+			}
+		}
+		_, _ = s.Interrupt(ctx)
+	})
+
 	t.Run("PolicyMeaning", func(t *testing.T) {
 		// Loom-vocabulary rules as 1.5a compiles them (loomharness cannot
 		// import loomagent), judged by the pinned OpenCode permission matcher
