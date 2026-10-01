@@ -15,6 +15,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomharness/codex/protocol"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/proctree"
 )
 
 // Config configures the supervised app-servers.
@@ -33,6 +34,7 @@ var (
 	stableAfter    = time.Minute      // an exit after this long is a fresh failure
 	startTimeout   = time.Minute
 	stopGrace      = 10 * time.Second
+	trackEvery     = time.Second // how often a server's descendants are recorded
 )
 
 // maxFailures consecutive failed starts or early exits of one root's server
@@ -48,6 +50,9 @@ var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "
 // gets its own. Each runs on the user's own login and config; only a profile
 // root sets CODEX_HOME. A server starts on first use, and again after an exit
 // (with backoff) on the next use; its exit is a gap only for its own threads.
+// Each server's process tree is recorded while it runs and reaped when it
+// stops or crashes, including tool processes that left its process group
+// (proctree); another root's tree is never touched.
 type Supervisor struct {
 	cfg     Config
 	mu      sync.Mutex
@@ -59,7 +64,8 @@ type server struct {
 	mu       sync.Mutex // held while starting or stopping
 	conn     *Conn
 	cmd      *exec.Cmd
-	exited   chan struct{}
+	exited   chan struct{} // closed once the server exited and its tree was reaped
+	tree     *proctree.Tree
 	failures int
 	retryAt  time.Time
 }
@@ -83,10 +89,18 @@ func (s *Supervisor) Root(root string) string {
 	if abs, err := filepath.Abs(root); err == nil {
 		root = abs
 	}
-	if real, err := filepath.EvalSymlinks(root); err == nil {
-		return real
+	// Resolve symlinks in the longest existing prefix, so a root names the
+	// same server before and after its directory is created.
+	for dir, rest := filepath.Clean(root), ""; ; {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(real, rest)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return filepath.Clean(root)
+		}
+		dir, rest = parent, filepath.Join(filepath.Base(dir), rest)
 	}
-	return filepath.Clean(root)
 }
 
 // Conn returns the connection to root's app-server, starting it if none runs.
@@ -99,7 +113,7 @@ func (s *Supervisor) Conn(ctx context.Context, root string) (*Conn, error) {
 	}
 	srv := s.servers[root]
 	if srv == nil {
-		srv = &server{}
+		srv = &server{tree: proctree.New()}
 		s.servers[root] = srv
 	}
 	s.mu.Unlock()
@@ -107,8 +121,10 @@ func (s *Supervisor) Conn(ctx context.Context, root string) (*Conn, error) {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 	switch {
-	case srv.conn != nil:
+	case srv.conn != nil && srv.conn.Err() == nil:
 		return srv.conn, nil
+	case srv.conn != nil: // exited; watch is reaping it
+		return nil, fmt.Errorf("codex app-server for %s exited: %w", root, loomharness.ErrUnavailable)
 	case time.Now().Before(srv.retryAt):
 		return nil, fmt.Errorf("codex app-server for %s: restart backoff after %d failures: %w", root, srv.failures, loomharness.ErrUnavailable)
 	}
@@ -206,6 +222,7 @@ func (s *Supervisor) start(ctx context.Context, root string, srv *server) error 
 		fallback = func(m Message) { s.cfg.Unrouted(root, m) }
 	}
 	conn, exited, started := NewConn(outR, inW, fallback), make(chan struct{}), time.Now()
+	go srv.tree.Track(cmd.Process.Pid, conn.Done(), trackEvery)
 	go srv.watch(cmd, conn, outR, exited, started)
 
 	ictx, cancel := context.WithTimeout(ctx, startTimeout)
@@ -222,6 +239,7 @@ func (s *Supervisor) start(ctx context.Context, root string, srv *server) error 
 		err = conn.Notify("initialized", nil)
 	}
 	if err != nil {
+		srv.tree.Record(cmd.Process.Pid)
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-exited
 		return fmt.Errorf("codex app-server start for %s: %w", root, err)
@@ -230,13 +248,15 @@ func (s *Supervisor) start(ctx context.Context, root string, srv *server) error 
 	return nil
 }
 
-// watch reaps the server; its connection then ends with a gap for its own
+// watch waits for the server to exit, then reaps the rest of its process
+// group and its recorded tree; its connection ends with a gap for its own
 // threads only, and the next Conn starts a new one after the backoff.
 func (srv *server) watch(cmd *exec.Cmd, conn *Conn, stdout *os.File, exited chan struct{}, started time.Time) {
 	_ = cmd.Wait()
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // what is left of its process group
 	_, _ = conn.Close(), stdout.Close()
 	<-conn.Done()
+	srv.tree.Reap(stopGrace)
 	close(exited)
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
@@ -250,13 +270,15 @@ func (srv *server) watch(cmd *exec.Cmd, conn *Conn, stdout *os.File, exited chan
 	srv.fail()
 }
 
-// stop closes the server's stdin, which stops an app-server, then SIGKILLs
-// its process group after stopGrace.
+// stop records the server's tree, closes its stdin, which stops an
+// app-server, SIGKILLs its process group after stopGrace, and waits until
+// watch has reaped the tree.
 func (srv *server) stop() {
 	cmd, exited := srv.cmd, srv.exited
 	if cmd == nil {
 		return
 	}
+	srv.tree.Record(cmd.Process.Pid)
 	_ = srv.conn.Close()
 	srv.conn, srv.cmd = nil, nil
 	select {

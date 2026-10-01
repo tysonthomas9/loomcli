@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -22,12 +23,18 @@ import (
 // until stdin closes. Methods: initialize (codexHome is its CODEX_HOME or
 // ~/.codex), env (token names present, CODEX_HOME, LOOM_MARK), pid, exit
 // (dies), and ask, which sends a server request for params.threadId and
-// returns the answer it got back.
+// returns the answer it got back. Each app-server first starts a detached
+// grandchild (its own session, as codex's exec sessions are) and appends its
+// pid to $CODEX_HOME/children; LOOM_FAKE_CODEX=sleep is that grandchild.
 func TestMain(m *testing.M) {
-	if os.Getenv("LOOM_FAKE_CODEX") == "1" {
+	switch os.Getenv("LOOM_FAKE_CODEX") {
+	case "1":
 		os.Exit(fakeCodex())
+	case "sleep":
+		time.Sleep(time.Hour)
+		os.Exit(0)
 	}
-	restartBackoff, maxBackoff = 10*time.Millisecond, 50*time.Millisecond
+	restartBackoff, maxBackoff, trackEvery = 10*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond
 	os.Exit(m.Run())
 }
 
@@ -44,6 +51,7 @@ func fakeCodex() int {
 	if home == "" {
 		home = filepath.Join(os.Getenv("HOME"), ".codex")
 	}
+	spawnDetached(home)
 	in, out := bufio.NewScanner(os.Stdin), json.NewEncoder(os.Stdout)
 	for in.Scan() {
 		var req struct {
@@ -72,6 +80,19 @@ func fakeCodex() int {
 		_ = out.Encode(map[string]any{"id": req.ID, "result": result})
 	}
 	return 0
+}
+
+func spawnDetached(home string) {
+	env := append(slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "LOOM_FAKE_CODEX=") }), "LOOM_FAKE_CODEX=sleep")
+	p, err := os.StartProcess(os.Args[0], os.Args[:1], &os.ProcAttr{Env: env, Sys: &syscall.SysProcAttr{Setsid: true}})
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(home, 0o700)
+	if f, err := os.OpenFile(filepath.Join(home, "children"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+		_, _ = fmt.Fprintln(f, p.Pid)
+		_ = f.Close()
+	}
 }
 
 // presentTokens lists names only: test output never carries values.
@@ -262,5 +283,98 @@ func TestCodexRestartGapOnlyThatRoot(t *testing.T) {
 	var newPID int
 	if err := c.Call(ctx, "pid", nil, &newPID); err != nil || newPID == oldPID {
 		t.Fatalf("restarted pid %d (old %d): %v", newPID, oldPID, err)
+	}
+}
+
+// children reads the grandchild pids the app-servers of a codex home started.
+func children(t *testing.T, home string) []int {
+	t.Helper()
+	b, _ := os.ReadFile(filepath.Join(home, "children"))
+	var pids []int
+	for _, f := range strings.Fields(string(b)) {
+		var pid int
+		_, _ = fmt.Sscan(f, &pid)
+		pids = append(pids, pid)
+	}
+	t.Cleanup(func() {
+		for _, pid := range pids {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	return pids
+}
+
+func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
+// waitOwned waits until root's recorded tree holds pid.
+func waitOwned(t *testing.T, s *Supervisor, root string, pid int) {
+	t.Helper()
+	srv := s.servers[s.Root(root)]
+	for deadline := time.Now().Add(5 * time.Second); !slices.Contains(srv.tree.Owned(), pid); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("grandchild %d never recorded", pid)
+		}
+	}
+}
+
+func waitGone(t *testing.T, what string, pid int) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); alive(pid); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: detached grandchild %d still runs", what, pid)
+		}
+	}
+}
+
+// TestCodexReapsDetachedDescendants: a tool process that left the
+// app-server's process group is reaped when its server crashes and when it
+// is stopped (Restart), while the other root's server and tree keep running.
+func TestCodexReapsDetachedDescendants(t *testing.T) {
+	f := newFixture(t, "codex-cli 0.157.1")
+	s := newSupervisor(t, f, nil)
+	ctx := context.Background()
+	a, errA := s.Conn(ctx, "")
+	_, errB := s.Conn(ctx, f.profile)
+	if errA != nil || errB != nil {
+		t.Fatal(errA, errB)
+	}
+	other := children(t, s.Root(f.profile))[0]
+	crashed := children(t, f.inherited)[0]
+	waitOwned(t, s, "", crashed)
+
+	_ = a.Call(ctx, "exit", nil, nil) // the app-server crashes
+	waitGone(t, "after a crash", crashed)
+
+	var c *Conn
+	for deadline := time.Now().Add(5 * time.Second); c == nil; time.Sleep(20 * time.Millisecond) {
+		c, _ = s.Conn(ctx, "")
+		if time.Now().After(deadline) {
+			t.Fatal("no restart")
+		}
+	}
+	stopped := children(t, f.inherited)[1]
+	waitOwned(t, s, "", stopped)
+	if err := s.Restart(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	waitGone(t, "after a stop", stopped)
+	if !alive(other) {
+		t.Fatal("reaping one root killed the other root's tool process")
+	}
+	s.Stop()
+	waitGone(t, "after Stop", other)
+}
+
+// TestCodexRootStableWhenCreated: a root names the same server before and
+// after its directory exists (macOS /var is a symlink to /private/var).
+func TestCodexRootStableWhenCreated(t *testing.T) {
+	s := New(Config{Env: []string{}})
+	dir := filepath.Join(t.TempDir(), "later", "codex")
+	before := s.Root(dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if after := s.Root(dir); after != before {
+		t.Fatalf("Root changed when the directory appeared: %s, then %s", before, after)
 	}
 }
