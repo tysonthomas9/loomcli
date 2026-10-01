@@ -53,6 +53,9 @@ func newCreateEnv(t *testing.T) *createEnv {
 func (e *createEnv) service(cfg ServiceConfig) *Service {
 	cfg.Store, cfg.Events, cfg.Workspace, cfg.WorkspaceID = e.st, NewEventLog(e.st), e.ws, "ws"
 	cfg.Harnesses = map[string]loomharness.Harness{"opencode": e.h}
+	if cfg.Bridge == nil { // a host bridge that registers no capabilities
+		cfg.Bridge = func(context.Context, Preset) (BridgeCaps, error) { return BridgeCaps{}, nil }
+	}
 	if cfg.Launch == nil {
 		cfg.Launch = func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
 			return loomharness.Launch{Root: "/root/opencode"}, nil

@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -127,7 +128,7 @@ func New(cfg ServiceConfig) *Service {
 		s.backend = func(context.Context) (Backend, error) { return Backend{}, nil }
 	}
 	if s.bridge == nil {
-		s.bridge = func(context.Context, Preset) (BridgeCaps, error) { return BridgeCaps{}, nil }
+		s.bridge = noBridge
 	}
 	if s.inputKey == nil {
 		s.inputKey = defaultInputKey
@@ -256,4 +257,13 @@ func deref(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// noBridge is the Bridge when none is wired: a preset with bridge tools fails
+// closed (R-G); one without needs no registration.
+func noBridge(_ context.Context, p Preset) (BridgeCaps, error) {
+	if len(p.Tools) > 0 {
+		return BridgeCaps{}, errors.New("no bridge is wired for its tools")
+	}
+	return BridgeCaps{}, nil
 }

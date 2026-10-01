@@ -121,10 +121,9 @@ func crashDispatchAt(t *testing.T, point string) func(func()) bool {
 
 // TestHarnessSwitchIdleDispatchUnderAgentLock drives the 1.5→1.6 hand-off: a
 // harness switch stops a running turn and publishes agent.idle while it holds
-// the agent lock, with one message waiting. The real dispatcher consumes that
-// event from the Bus (asynchronously) while another caller asks for dispatch
-// at the same time. The switch returns, and the message is handed over once,
-// on the new session, and never again.
+// the agent lock, with one message waiting. Nothing else dispatches: only the
+// real dispatcher's Bus wake on agent.idle can hand the message over. The
+// switch returns, and the message is handed over once, on the new session.
 func TestHarnessSwitchIdleDispatchUnderAgentLock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -135,35 +134,26 @@ func TestHarnessSwitchIdleDispatchUnderAgentLock(t *testing.T) {
 	if err := e.s.store.CompareAndSetState(ctx, "a1", e.s.get(t, "a1").StateOf(), to); err != nil {
 		t.Fatal(err)
 	}
+	stopped := make(chan struct{})
+	go func() { defer close(stopped); e.s.RunDispatcher(ctx) }()
+	eventually(t, "the dispatcher subscribed", func() bool {
+		e.s.Bus.mu.Lock()
+		defer e.s.Bus.mu.Unlock()
+		return len(e.s.Bus.subs) == 1
+	})
 	mustSendMsg(t, e.s, sendReq("a1", "r-next", "next", user)) // waits: a turn runs
 	if got := slotState(t, e.s, "a1", "r-next"); got != loomstore.SlotWaiting {
 		t.Fatalf("slot = %s; want waiting", got)
 	}
-	idle := e.s.Bus.Subscribe("a1")
-	defer e.s.Bus.Unsubscribe(idle)
-	stopped := make(chan struct{})
-	go func() { defer close(stopped); e.s.RunDispatcher(ctx) }()
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	var switchErr error
-	go func() { defer wg.Done(); _, switchErr = e.s.Update(ctx, switchReq("r1", 1, "fb")) }()
-	go func() { // a concurrent dispatch request, contending for the lock
-		defer wg.Done()
-		eventually(t, "agent.idle published", func() bool {
-			return slices.ContainsFunc(drain(idle), func(ev Event) bool { return ev.Type == EventIdle })
-		})
-		_ = e.s.Dispatch(ctx, "a1")
-	}()
-	finished := make(chan struct{})
-	go func() { wg.Wait(); close(finished) }()
+	switched := make(chan error, 1)
+	go func() { _, err := e.s.Update(ctx, switchReq("r1", 1, "fb")); switched <- err }()
 	select {
-	case <-finished:
+	case err := <-switched:
+		if err != nil {
+			t.Fatal(err)
+		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("deadlock: the switch or the dispatch never returned")
-	}
-	if switchErr != nil {
-		t.Fatal(switchErr)
+		t.Fatal("deadlock: the switch never returned")
 	}
 	a := e.s.get(t, "a1")
 	newRef := loomharness.NativeRef{Root: "/root/fb", NativeID: *a.HarnessSessionID}
@@ -328,17 +318,11 @@ func TestDispatchOldestFirstOneTurnAtATime(t *testing.T) {
 		if err := fh.Session(ref).Reply(ctx, ask, loomharness.Reply{Allow: true}); err != nil {
 			t.Fatal(err)
 		}
+		// Oldest first, one per turn: c1 and x1 waited before u2 was sent.
 		eventually(t, "the next hand-over", func() bool { return len(handedReqs(t, s, a.AgentID, reqs...)) == i+2 })
-	}
-	// Oldest first: c1 and x1 waited before u2 was sent.
-	order := []string{"u1"}
-	for _, req := range []string{"c1", "x1", "u2"} {
-		if slices.Contains(handedReqs(t, s, a.AgentID, req), req) {
-			order = append(order, req)
+		if got := handedReqs(t, s, a.AgentID, reqs...); !slices.Equal(got, reqs[:i+2]) {
+			t.Fatalf("after turn %d handed = %v; want %v", i+1, got, reqs[:i+2])
 		}
-	}
-	if !slices.Equal(order, reqs) {
-		t.Fatalf("hand-over order = %v", order)
 	}
 	_, turns := fh.Rules(ref)
 	if hasPublishDenies(turns[0]) || !hasPublishDenies(turns[len(turns)-1]) {
@@ -407,8 +391,8 @@ func TestDispatchArchiveDoneAndSingleTaskOutcome(t *testing.T) {
 }
 
 // TestDispatchHandedIgnoresOtherSessionEvents: a turn.completed from a session
-// that is not the agent's current one, or for a turn that is not running,
-// changes nothing.
+// that is not the agent's current one (another NativeID, or the same NativeID
+// under another root), or for a turn that is not running, changes nothing.
 func TestDispatchHandedIgnoresOtherSessionEvents(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -417,9 +401,14 @@ func TestDispatchHandedIgnoresOtherSessionEvents(t *testing.T) {
 	a, ref := newLead(t, e, s, "alpha")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "t1"}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
+	run := deref(s.get(t, a.AgentID).RunningTurnID)
+	done := func(ref loomharness.NativeRef, turn string) loomharness.Event {
+		return loomharness.Event{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: turn, StopReason: "completed"}
+	}
 	for _, ev := range []loomharness.Event{
-		{Type: loomharness.EventTurnCompleted, Session: loomharness.NativeRef{Root: ref.Root, NativeID: "other"}, StopReason: "completed"},
-		{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: "an-old-turn", StopReason: "cancelled"},
+		done(loomharness.NativeRef{Root: ref.Root, NativeID: "other"}, run),
+		done(loomharness.NativeRef{Root: "/root/other", NativeID: ref.NativeID}, run),
+		done(ref, "an-old-turn"),
 	} {
 		if err := s.HarnessEvent(ctx, a.AgentID, ev); err != nil {
 			t.Fatal(err)
@@ -427,5 +416,63 @@ func TestDispatchHandedIgnoresOtherSessionEvents(t *testing.T) {
 	}
 	if got := s.get(t, a.AgentID); got.State != StateActive || got.RunningTurnID == nil {
 		t.Fatalf("a stray turn.completed ended the turn: %s %v", got.State, got.RunningTurnID)
+	}
+	if err := s.HarnessEvent(ctx, a.AgentID, done(ref, run)); err != nil || s.get(t, a.AgentID).State != StateIdle {
+		t.Fatalf("the running turn's own completion did not end it: %v", err)
+	}
+}
+
+// TestDispatchStaleCompletionKeepsNextTurn: an older turn's late
+// turn.completed (or turn.started) that arrives after the next message was
+// handed over and delivered changes nothing; only the new turn's own events
+// name and end it.
+func TestDispatchStaleCompletionKeepsNextTurn(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	a, ref := newLead(t, e, s, "alpha")
+	ev := func(typ loomharness.EventType, turn, key string) {
+		t.Helper()
+		if err := s.HarnessEvent(ctx, a.AgentID, loomharness.Event{Type: typ, Session: ref, TurnID: turn,
+			InputKey: key, StopReason: "completed"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	k1, k2 := defaultInputKey("", a.AgentID, "u1"), defaultInputKey("", a.AgentID, "c1")
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
+	ev(loomharness.EventMessageDelivered, "", k1)
+	ev(loomharness.EventTurnStarted, "T1", "")
+	mustSendMsg(t, s, sendReq(a.AgentID, "c1", "child done", child))
+	ev(loomharness.EventTurnCompleted, "T1", "") // hands c1 over
+	ev(loomharness.EventMessageDelivered, "", k2)
+	if got := s.get(t, a.AgentID); deref(got.RunningTurnID) != k2 || slotState(t, s, a.AgentID, "c1") != loomstore.SlotDelivered {
+		t.Fatalf("c1 not running: turn %v slot %s", got.RunningTurnID, slotState(t, s, a.AgentID, "c1"))
+	}
+	ev(loomharness.EventTurnCompleted, "T1", "") // the old turn's late completion
+	if got := s.get(t, a.AgentID); got.State != StateActive || deref(got.RunningTurnID) != k2 {
+		t.Fatalf("a stale completion ended the next turn: %s %v", got.State, got.RunningTurnID)
+	}
+	ev(loomharness.EventTurnStarted, "T2", "")
+	ev(loomharness.EventTurnStarted, "T1", "") // a stale start never renames a named turn
+	if got := s.get(t, a.AgentID); deref(got.RunningTurnID) != "T2" {
+		t.Fatalf("running turn = %v; want T2", got.RunningTurnID)
+	}
+	ev(loomharness.EventTurnCompleted, "T2", "")
+	if got := s.get(t, a.AgentID); got.State != StateIdle || got.RunningTurnID != nil {
+		t.Fatalf("T2's completion: %s %v", got.State, got.RunningTurnID)
+	}
+}
+
+// TestNoBridgeFailsClosed: with no host bridge wired, a preset with bridge
+// tools (lead) gets no policy, so it never launches; one without tools does.
+func TestNoBridgeFailsClosed(t *testing.T) {
+	s := New(ServiceConfig{})
+	lead, _ := BuiltinPresets{}.Get(context.Background(), "lead")
+	task, _ := BuiltinPresets{}.Get(context.Background(), "task")
+	if _, err := s.policy(context.Background(), Config{Preset: lead}); err == nil {
+		t.Fatal("lead got a policy with no bridge wired")
+	}
+	if _, err := s.policy(context.Background(), Config{Preset: task}); err != nil {
+		t.Fatalf("task: %v", err)
 	}
 }

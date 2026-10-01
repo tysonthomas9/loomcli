@@ -132,7 +132,10 @@ func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl looms
 			return a, true, nil // its turn ran while Loom was down
 		}
 		to := a.StateOf()
-		to.RunningTurn = sl.NativeKey
+		to.RunningTurn = sl.NativeKey // until turn.started names it
+		if st.TurnID != "" {
+			to.RunningTurn = &st.TurnID
+		}
 		if a.State == StateIdle {
 			to.State = StateActive
 		}
@@ -193,24 +196,34 @@ func (s *Service) handOff(ctx context.Context, a loomstore.Agent) (loomstore.Age
 func (s *Service) HarnessEvent(ctx context.Context, agentID string, e loomharness.Event) error {
 	defer s.lock(agentID)()
 	a, err := s.live(ctx, agentID)
-	if err != nil || a.HarnessSessionID == nil || *a.HarnessSessionID != e.Session.NativeID {
+	if err != nil || e.Session != (loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}) {
 		return err
 	}
 	switch e.Type {
 	case loomharness.EventMessageDelivered:
 		return s.delivered(ctx, a, e.InputKey)
 	case loomharness.EventTurnStarted:
-		if a.RunningTurnID == nil || e.TurnID == "" {
-			return nil
-		}
-		to := a.StateOf()
-		to.RunningTurn = &e.TurnID
-		_, err = s.setState(ctx, a, to)
-		return err
+		return s.turnStarted(ctx, a, e.TurnID)
 	case loomharness.EventTurnCompleted:
 		return s.turnCompleted(ctx, a, e)
 	}
 	return nil
+}
+
+// turnStarted names a's running turn turnID, only while the turn is still
+// known by its input key: a named turn is never renamed.
+func (s *Service) turnStarted(ctx context.Context, a loomstore.Agent, turnID string) error {
+	if a.RunningTurnID == nil || turnID == "" {
+		return nil
+	}
+	slots, err := s.store.Slots(ctx, a.AgentID)
+	if err != nil || !slices.ContainsFunc(slots, func(sl loomstore.Slot) bool { return deref(sl.NativeKey) == *a.RunningTurnID }) {
+		return err
+	}
+	to := a.StateOf()
+	to.RunningTurn = &turnID
+	_, err = s.setState(ctx, a, to)
+	return err
 }
 
 // delivered marks a's handed message with native key key delivered.
@@ -227,24 +240,19 @@ func (s *Service) delivered(ctx context.Context, a loomstore.Agent, key string) 
 	return nil // already delivered
 }
 
-// turnCompleted ends a's running turn e. Until turn.started names the turn,
-// the running turn is known by its input key; then only a completion after
-// that input was delivered is its own (one session's feed is ordered, so an
-// older turn's late completion arrives before it).
+// turnCompleted ends a's running turn e. Only the running turn's own
+// completion counts: one for any other turn ID, such as an older turn's late
+// completion, or one before turn.started named the turn, changes nothing.
 func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomharness.Event) error {
-	run := deref(a.RunningTurnID)
+	if a.RunningTurnID == nil || *a.RunningTurnID != e.TurnID {
+		return nil // not the running turn
+	}
 	slots, err := s.store.Slots(ctx, a.AgentID)
 	if err != nil {
 		return err
 	}
-	byKey := slices.ContainsFunc(slots, func(sl loomstore.Slot) bool {
-		return deref(sl.NativeKey) == run && sl.State == loomstore.SlotDelivered
-	})
-	if run == "" || (run != e.TurnID && !byKey) {
-		return nil // not the running turn
-	}
 	for _, sl := range slots { // a turn that ran had its input delivered
-		if sl.State == loomstore.SlotHanded && (deref(sl.NativeKey) == run || run == e.TurnID) {
+		if sl.State == loomstore.SlotHanded {
 			if err := s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID); err != nil {
 				return err
 			}
