@@ -6,26 +6,12 @@
  * Unit tests for IssueDetailPanel component.
  */
 
-import {
-  act,
-  render,
-  screen,
-  fireEvent,
-  within,
-  waitFor,
-} from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type {
-  Event,
-  Issue,
-  IssueDetails,
-  IssueWithDependencyMetadata,
-} from "@/types";
-import type { SessionRecord } from "@/types/agent";
+import type { Event, IssueDetails } from "@/types";
 import {
-  updateIssue,
   startWorkflowRun,
   createWorkspaceAgent,
   deleteWorkspaceAgent,
@@ -195,20 +181,6 @@ vi.mock("@/hooks", async (importOriginal) => {
 });
 
 /**
- * Create a minimal test issue with required fields.
- */
-function createTestIssue(overrides: Partial<Issue> = {}): Issue {
-  return {
-    id: "test-123",
-    title: "Test Issue",
-    priority: 2,
-    created_at: "2026-01-23T00:00:00Z",
-    updated_at: "2026-01-23T00:00:00Z",
-    ...overrides,
-  };
-}
-
-/**
  * Create a test issue with full details (IssueDetails type).
  */
 function createTestIssueDetails(
@@ -234,65 +206,6 @@ function createTestEvent(overrides: Partial<Event> = {}): Event {
     event_type: "issue.create",
     actor: "alice",
     created_at: "2026-01-23T00:00:00Z",
-    ...overrides,
-  };
-}
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-} {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
-}
-
-/**
- * Create a test dependency issue.
- */
-function createTestDependency(
-  overrides: Partial<IssueWithDependencyMetadata> = {},
-): IssueWithDependencyMetadata {
-  return {
-    id: "dep-456",
-    title: "Dependency Issue",
-    priority: 2,
-    created_at: "2026-01-23T00:00:00Z",
-    updated_at: "2026-01-23T00:00:00Z",
-    status: "open",
-    dependency_type: "blocks",
-    ...overrides,
-  };
-}
-
-function createTestSession(
-  overrides: Partial<SessionRecord> = {},
-): SessionRecord {
-  return {
-    session_id: "sess-1",
-    task_id: "test-123",
-    agent_name: "planner",
-    backend: "codex",
-    status: "failed",
-    started_at: "2026-01-23T00:00:00Z",
-    ended_at: "2026-01-23T00:00:15Z",
-    duration_s: 15,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    estimated_cost_usd: 0,
-    exit_code: 1,
-    files_changed: 0,
-    lines_added: 0,
-    lines_removed: 0,
-    attempt_num: 1,
-    has_transcript: true,
-    has_diff: false,
-    is_active: false,
-    error_class: "AuthFailure",
     ...overrides,
   };
 }

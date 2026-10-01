@@ -9,7 +9,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -531,41 +530,8 @@ function entry(name: string, isDir = false): FileEntry {
   };
 }
 
-async function expandWorkspaceFiles(): Promise<void> {
-  fireEvent.click(
-    await screen.findByRole("button", { name: /^Workspace files$/ }),
-  );
-  await screen.findByLabelText("main.ts");
-}
-
-async function expandRepoRoot(): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name: /^loomcli$/ }));
-  await screen.findByLabelText("main.ts");
-}
-
 function storeWorkingCompareMode(): void {
   localStorage.setItem("loom:ws-1:file-explorer-compare-mode", "working");
-}
-
-function reviewerSkillGroups(): SkillCatalogGroup[] {
-  return [
-    {
-      scope: "role",
-      role: "reviewer",
-      skills: [
-        {
-          name: "audit",
-          scope: "role",
-          role: "reviewer",
-          description: "Audit the implementation",
-          content_revision: "skill-v1",
-          files: [],
-          created_at: "2026-08-14T00:00:00Z",
-          updated_at: "2026-08-14T00:00:00Z",
-        },
-      ],
-    },
-  ];
 }
 
 describe("WorkspaceFileBrowser SSE bug replay", () => {
