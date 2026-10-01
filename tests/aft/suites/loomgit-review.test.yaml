@@ -10,6 +10,10 @@ setup: >-
   curl -sf -X POST "$AFT_BASE_URL/api/workspaces"
   -H "Content-Type: application/json"
   -d "{\"name\":\"e2e-ws-review\",\"type\":\"empty\",\"repos\":[\"$d\"]}"
+  >/dev/null;
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/agents"
+  -H "Content-Type: application/json"
+  -d '{"name":"lead","role_name":"lead","auto":false,"cross_repo":true,"repos":[],"backend":"codex"}'
   >/dev/null
 teardown: >-
   AFT_WS=E2E-WS-REVIEW "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
@@ -89,7 +93,12 @@ tests:
           test "$status" = 409;
           grep -q 'review_required' "$AFT_WORK_DIR/review-unapproved-apply.json"
         intent: "An unapproved revision is refused by the HTTP Apply gate before any working-area swap"
+      - run: >-
+          python3 -c 'import sqlite3,sys; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); assert db.execute("select count(*) from working_areas where workspace=? and lead=?",("E2E-WS-REVIEW","lead")).fetchone()[0] == 0' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db"
+        intent: "The workspace has a lead agent but no working area before approval"
       - click: { role: button, name: Approve, exact: true }
+      - wait: { text: "Approved: Apply to create the lead working area" }
+      - expect: { visible: { role: button, name: Apply } }
       - api:
           method: "GET"
           path: "/api/workspaces/E2E-WS-REVIEW/issues/${var:reviewTaskId}/revisions"
@@ -121,21 +130,19 @@ tests:
           test "$before" = "$after"
         intent: "The client sees the P2.8 validation error and confirms the local Git ref did not advance"
 
-  - name: P2.14 approved Apply advances only the lead working area
-    intent: An operator applies an approved revision over HTTP and sees the working area advance without a provider push
+  - name: P2.16 Apply prompt creates the missing lead working area
+    intent: The review UI offers Apply after approval without an area; the operator creates it without pushing to the provider
     steps:
       - run: >-
           test -s "$AFT_WORK_DIR/review-revisions.json";
           git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main > "$AFT_WORK_DIR/apply-trunk-before"
         intent: "Record the trunk ref before the operator applies the approved revision"
+      - click: { role: button, name: Apply, exact: true }
+        intent: "Use the UI prompt to create the lead working area"
+      - wait: { text: Applied }
       - run: >-
-          read change revision < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"], item["number"])' "$AFT_WORK_DIR/review-revisions.json");
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/git/apply"
-          -H 'Content-Type: application/json'
-          -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}"
-          > "$AFT_WORK_DIR/review-applied.json";
-          grep -q '"success":true' "$AFT_WORK_DIR/review-applied.json"
-        intent: "The approved revision joins the local working area through the product Apply route"
+          python3 -c 'import json,sqlite3,sys; item=json.load(open(sys.argv[2]))["data"][0]; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); assert db.execute("select count(*) from working_areas where workspace=? and lead=?",("E2E-WS-REVIEW","lead")).fetchone()[0] == 1; assert db.execute("select count(*) from applied_layers where workspace=? and lead=? and change_id=? and phase=?",("E2E-WS-REVIEW","lead",item["change_id"],"done")).fetchone()[0] == 1' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$AFT_WORK_DIR/review-revisions.json"
+        intent: "The new lead area and applied layer are durable product state"
       - run: >-
           test "$(cat "$AFT_WORK_DIR/apply-trunk-before")" = "$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)"
         intent: "Confirm that applying the layer did not advance trunk"
