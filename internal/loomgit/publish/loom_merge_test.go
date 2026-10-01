@@ -13,9 +13,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
 
-type allowedMerge struct{}
+type allowedLoomMerge struct{}
 
-func (allowedMerge) AuthorizeMerge(context.Context, StackRequest, string) error { return nil }
+func (allowedLoomMerge) AuthorizeMerge(context.Context, StackRequest, string) error { return nil }
 
 type mergeForgeFake struct {
 	*fakeForge
@@ -129,7 +129,7 @@ func loomMergeFixture(t *testing.T) (fixture, *mergeForgeFake, StackRequest) {
 	forge := &mergeForgeFake{fakeForge: &fakeForge{}, checks: "passing"}
 	request := item.request()
 	request.forge = forge
-	stack := StackRequest{Request: request, StackID: "feature", Changes: []string{"A"}, MergeAuthority: allowedMerge{}}
+	stack := StackRequest{Request: request, StackID: "feature", Changes: []string{"A"}, MergeAuthority: allowedLoomMerge{}}
 	if _, err := (LoomStackBackend{Store: item.store}).Publish(context.Background(), stack); err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +581,7 @@ func threeLayerMergeFixture(t *testing.T) (fixture, *mergeForgeFake, StackReques
 	forge := &mergeForgeFake{fakeForge: &fakeForge{}, checks: "passing"}
 	request := item.request()
 	request.forge = forge
-	stack := StackRequest{Request: request, StackID: "feature", Changes: []string{"A", "B", "C"}, MergeAuthority: allowedMerge{}}
+	stack := StackRequest{Request: request, StackID: "feature", Changes: []string{"A", "B", "C"}, MergeAuthority: allowedLoomMerge{}}
 	if _, err := (LoomStackBackend{Store: item.store}).Publish(ctx, stack); err != nil {
 		t.Fatal(err)
 	}
