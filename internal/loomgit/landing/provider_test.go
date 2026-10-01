@@ -325,3 +325,138 @@ func TestProviderPRWithoutHeadSkipsObservationAndStillLands(t *testing.T) {
 		t.Fatalf("landing status = %+v, %v", status, err)
 	}
 }
+
+// stackedLineage publishes A-C with distinct commits, each PR based on the
+// branch below it, and squash-merges A onto main as a new commit.
+func stackedLineage(t *testing.T, native bool) (*fixture, map[string]string) {
+	t.Helper()
+	fixture, ctx := newFixture(t), context.Background()
+	heads, trunk, prior := map[string]string{}, "main", ""
+	for index, change := range []string{"A", "B", "C"} {
+		branch := "loom/ws/W/change/" + change
+		git(t, fixture.source, "switch", "-q", "-c", branch)
+		heads[change] = fixture.commit(t, change+" patch")
+		git(t, fixture.source, "push", "-q", "origin", "HEAD:refs/heads/"+branch)
+		publication := journal.Publication{Workspace: "W", Change: change, Repo: fixture.source, Branch: branch,
+			Trunk: trunk, Slug: "owner/repo", Head: heads[change], StackID: "feature", Prior: prior}
+		if err := fixture.store.BeginPublication(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		publication.Phase, publication.PRNumber = "done", 41+index
+		if err := fixture.store.AdvancePublication(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		sourceRevision(t, fixture, change, heads[change])
+		trunk, prior = branch, heads[change]
+	}
+	if native {
+		if err := fixture.store.RecordStackBackend(ctx, "W", "feature", "native"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	heads["squash A"] = squashOntoMain(t, fixture, heads["A"])
+	return fixture, heads
+}
+
+func squashOntoMain(t *testing.T, fixture *fixture, layer string) string {
+	t.Helper()
+	git(t, fixture.source, "switch", "-q", "main")
+	git(t, fixture.source, "cherry-pick", "--no-commit", layer)
+	git(t, fixture.source, "commit", "-qm", "squash "+layer)
+	git(t, fixture.source, "push", "-q", "origin", "main")
+	return git(t, fixture.source, "rev-parse", "HEAD")
+}
+
+// githubRestack has GitHub restack B onto the squashed A and C onto the new B.
+func githubRestack(t *testing.T, fixture *fixture, heads map[string]string) {
+	t.Helper()
+	git(t, fixture.source, "switch", "-q", "-c", "github-restack", heads["squash A"])
+	git(t, fixture.source, "cherry-pick", heads["B"])
+	heads["restacked B"] = git(t, fixture.source, "rev-parse", "HEAD")
+	git(t, fixture.source, "cherry-pick", heads["C"])
+	heads["restacked C"] = git(t, fixture.source, "rev-parse", "HEAD")
+	git(t, fixture.source, "push", "-q", "--force", "origin", heads["restacked B"]+":refs/heads/loom/ws/W/change/B",
+		heads["restacked C"]+":refs/heads/loom/ws/W/change/C")
+}
+
+// adoptNativeRestack records Loom's adoption of GitHub's restacked B and C heads.
+func adoptNativeRestack(t *testing.T, fixture *fixture, heads map[string]string) {
+	t.Helper()
+	ctx := context.Background()
+	githubRestack(t, fixture, heads)
+	b, _, errB := fixture.store.Publication(ctx, "W", "B")
+	c, _, errC := fixture.store.Publication(ctx, "W", "C")
+	if errB != nil || errC != nil {
+		t.Fatal(errB, errC)
+	}
+	b.Trunk = "main"
+	if err := fixture.store.AdoptStackPublications(ctx, []journal.Publication{b, c},
+		map[string]string{"B": heads["restacked B"], "C": heads["restacked C"]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.MarkLanded(ctx, "W", "A", "merge_commit"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func lineagePulls(heads map[string]string, c stackpublish.PR) map[int]stackpublish.PR {
+	c.Number, c.Head, c.State = 43, "loom/ws/W/change/C", "open"
+	return map[int]stackpublish.PR{
+		41: {Number: 41, Head: "loom/ws/W/change/A", HeadSHA: heads["A"], Base: "main", State: "closed",
+			Merged: true, MergeCommitSHA: heads["squash A"]},
+		42: {Number: 42, Head: "loom/ws/W/change/B", HeadSHA: heads["restacked B"], Base: "main", State: "open"},
+		43: c,
+	}
+}
+
+func assertObservation(t *testing.T, fixture *fixture, change, want string) {
+	t.Helper()
+	if err := Reconcile(context.Background(), fixture.store, fixture.forge); err != nil {
+		t.Fatal(err)
+	}
+	observation, found, err := fixture.store.ProviderObservation(context.Background(), "W", change)
+	if err != nil || !found || observation.State != want {
+		t.Fatalf("%s observation = %+v, found=%v, %v; want %s", change, observation, found, err, want)
+	}
+}
+
+func TestNativeForeignRetargetAfterAdoptionIsDrift(t *testing.T) {
+	fixture, heads := stackedLineage(t, true)
+	adoptNativeRestack(t, fixture, heads)
+	fixture.forge.pulls = lineagePulls(heads, stackpublish.PR{HeadSHA: heads["restacked C"], Base: "main"})
+	assertObservation(t, fixture, "C", "diverged")
+	assertObservation(t, fixture, "B", "open")
+}
+
+func TestNativeForeignPushAfterAdoptionIsDrift(t *testing.T) {
+	fixture, heads := stackedLineage(t, true)
+	adoptNativeRestack(t, fixture, heads)
+	pushed := fixture.commit(t, "foreign edit")
+	git(t, fixture.source, "push", "-q", "--force", "origin", "HEAD:refs/heads/loom/ws/W/change/C")
+	fixture.forge.pulls = lineagePulls(heads, stackpublish.PR{HeadSHA: pushed, Base: "loom/ws/W/change/B"})
+	assertObservation(t, fixture, "C", "diverged")
+}
+
+func TestRetargetToTrunkAfterTwoLandedLayersIsExpected(t *testing.T) {
+	fixture, heads := stackedLineage(t, false)
+	squashB := squashOntoMain(t, fixture, heads["B"])
+	fixture.forge.pulls = lineagePulls(heads, stackpublish.PR{HeadSHA: heads["C"], Base: "main"})
+	fixture.forge.pulls[42] = stackpublish.PR{Number: 42, Head: "loom/ws/W/change/B", HeadSHA: heads["B"],
+		Base: "loom/ws/W/change/A", State: "closed", Merged: true, MergeCommitSHA: squashB}
+	assertObservation(t, fixture, "C", "open")
+	for _, change := range []string{"A", "B"} {
+		if status, err := fixture.store.LandingStatus(context.Background(), "W", change); err != nil || status.State != "landed" {
+			t.Fatalf("%s landing = %+v, %v", change, status, err)
+		}
+	}
+}
+
+func TestNativeForeignPushDuringPendingRestackIsDrift(t *testing.T) {
+	fixture, heads := stackedLineage(t, true)
+	githubRestack(t, fixture, heads)
+	pushed := fixture.commit(t, "foreign edit")
+	git(t, fixture.source, "push", "-q", "--force", "origin", "HEAD:refs/heads/loom/ws/W/change/C")
+	fixture.forge.pulls = lineagePulls(heads, stackpublish.PR{HeadSHA: pushed, Base: "loom/ws/W/change/B"})
+	assertObservation(t, fixture, "C", "diverged")
+	assertObservation(t, fixture, "B", "native_restack")
+}

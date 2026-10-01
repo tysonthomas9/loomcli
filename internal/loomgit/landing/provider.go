@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/changeset"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -16,23 +18,18 @@ import (
 )
 
 func expectedBase(ctx context.Context, store Store, publication journal.Publication, all []journal.Publication) (string, error) {
-	if publication.StackID == "" {
+	predecessor, found := stackPredecessor(publication, all)
+	if publication.StackID == "" || !found {
 		return publication.Trunk, nil
 	}
-	for _, predecessor := range all {
-		if predecessor.Workspace != publication.Workspace || predecessor.StackID != publication.StackID ||
-			predecessor.Change == publication.Change || predecessor.Head != publication.Prior || publication.Prior == "" {
-			continue
-		}
-		status, err := store.LandingStatus(ctx, predecessor.Workspace, predecessor.Change)
-		if err != nil {
-			return "", err
-		}
-		if status.State != "landed" {
-			return predecessor.Branch, nil
-		}
+	status, err := store.LandingStatus(ctx, predecessor.Workspace, predecessor.Change)
+	if err != nil {
+		return "", err
 	}
-	return publication.Trunk, nil
+	if status.State != "landed" {
+		return predecessor.Branch, nil
+	}
+	return targetTrunk(publication, all), nil
 }
 
 func observeProvider(ctx context.Context, store Store, forge Forge, item fetchedPublication, pull stackpublish.PR, all []journal.Publication) error {
@@ -77,7 +74,14 @@ func providerMove(ctx context.Context, store Store, forge Forge, item fetchedPub
 		return "", err
 	}
 	if native {
-		return "native_restack", nil
+		shaped, err := nativeShaped(ctx, store, forge, item, pull, base, all)
+		if err != nil {
+			return "", err
+		}
+		if shaped {
+			return "native_restack", nil
+		}
+		return "diverged", nil
 	}
 	if pull.Base != base {
 		return "diverged", nil
@@ -107,36 +111,100 @@ func nativeRestackPending(ctx context.Context, store Store, forge Forge, publica
 		if !found {
 			return false, nil
 		}
-		status, err := store.LandingStatus(ctx, predecessor.Workspace, predecessor.Change)
-		if err != nil {
-			return false, err
-		}
-		if status.State == "landed" || status.State == "merged" {
-			return true, nil
-		}
-		pull, err := ownedPull(ctx, forge, predecessor)
-		if err != nil {
-			return false, err
-		}
-		if pull.Merged {
-			return true, nil
+		merged, err := layerMerged(ctx, store, forge, predecessor)
+		if err != nil || merged {
+			return merged, err
 		}
 		current = predecessor
 	}
 	return false, nil
 }
 
+// stackPredecessor finds the layer below by its recorded branch first: native
+// adoption rewrites heads but not prior_sha, so Prior can name a stale head.
 func stackPredecessor(publication journal.Publication, all []journal.Publication) (journal.Publication, bool) {
-	for _, candidate := range all {
-		if candidate.Workspace != publication.Workspace || candidate.StackID != publication.StackID ||
-			candidate.Change == publication.Change {
-			continue
-		}
-		if candidate.Branch == publication.Trunk || publication.Prior != "" && candidate.Head == publication.Prior {
-			return candidate, true
+	for _, byBranch := range []bool{true, false} {
+		for _, candidate := range all {
+			if candidate.Workspace != publication.Workspace || candidate.StackID != publication.StackID ||
+				candidate.Change == publication.Change {
+				continue
+			}
+			if byBranch && candidate.Branch == publication.Trunk ||
+				!byBranch && publication.Prior != "" && candidate.Head == publication.Prior {
+				return candidate, true
+			}
 		}
 	}
 	return journal.Publication{}, false
+}
+
+func layerMerged(ctx context.Context, store Store, forge Forge, publication journal.Publication) (bool, error) {
+	status, err := store.LandingStatus(ctx, publication.Workspace, publication.Change)
+	if err != nil {
+		return false, err
+	}
+	if status.State == "landed" || status.State == "merged" {
+		return true, nil
+	}
+	pull, err := ownedPull(ctx, forge, publication)
+	return err == nil && pull.Merged, err
+}
+
+// nativeShaped reports whether a provider move is GitHub restacking a native
+// stack rather than a foreign retarget or push. The PR keeps its expected base,
+// or moves to trunk once the layer directly below merged. A moved head must be
+// rebuilt on a base tip the recorded head did not already contain, and carry
+// exactly the recorded layer's patches.
+func nativeShaped(ctx context.Context, store Store, forge Forge, item fetchedPublication,
+	pull stackpublish.PR, base string, all []journal.Publication) (bool, error) {
+	publication := item.publication
+	predecessor, found := stackPredecessor(publication, all)
+	if !found {
+		return false, nil
+	}
+	if pull.Base != base {
+		if pull.Base != targetTrunk(publication, all) {
+			return false, nil
+		}
+		if merged, err := layerMerged(ctx, store, forge, predecessor); err != nil || !merged {
+			return false, err
+		}
+	}
+	if pull.HeadSHA == publication.Head {
+		return true, nil
+	}
+	tip, err := fetchTip(ctx, item.runner, pull.Base)
+	if err != nil {
+		return false, err
+	}
+	if head, err := fetchTip(ctx, item.runner, pull.Head); err != nil || head != pull.HeadSHA {
+		return false, fmt.Errorf("provider head changed during fetch: %w", err)
+	}
+	if onTip, err := isAncestor(ctx, item.runner, tip, pull.HeadSHA); err != nil || !onTip {
+		return false, err
+	}
+	if stale, err := isAncestor(ctx, item.runner, tip, publication.Head); err != nil || stale {
+		return false, err
+	}
+	return review.PatchesMatch(ctx, item.runner, loomgit.Revision{BaseSHA: predecessor.Head, HeadSHA: publication.Head},
+		loomgit.Revision{BaseSHA: tip, HeadSHA: pull.HeadSHA})
+}
+
+func fetchTip(ctx context.Context, runner *gitexec.Runner, branch string) (string, error) {
+	if _, err := runner.Run(ctx, "fetch", "origin", branch); err != nil {
+		return "", err
+	}
+	tip, err := runner.Run(ctx, "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+	return strings.TrimSpace(string(tip)), err
+}
+
+func isAncestor(ctx context.Context, runner *gitexec.Runner, ancestor, head string) (bool, error) {
+	_, err := runner.Run(ctx, "merge-base", "--is-ancestor", ancestor, head)
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && (exit.ExitCode() == 1 || exit.ExitCode() == 128) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func reconcileHead(ctx context.Context, store Store, item fetchedPublication, pull stackpublish.PR) (string, error) {

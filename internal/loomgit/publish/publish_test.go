@@ -80,8 +80,12 @@ type fixture struct {
 	store              *journal.SQLite
 }
 
-func newFixture(t *testing.T) fixture {
+func newFixture(t *testing.T, trunk ...string) fixture {
 	t.Helper()
+	recorded := "develop"
+	if len(trunk) > 0 {
+		recorded = trunk[0]
+	}
 	root := t.TempDir()
 	repo, remote := filepath.Join(root, "repo"), filepath.Join(root, "remote.git")
 	if err := os.Mkdir(repo, 0700); err != nil {
@@ -115,7 +119,7 @@ func newFixture(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitWorkspace(context.Background(), entry, []loomgit.WorkspaceRepo{{Workspace: "W", Repo: "repo", Trunk: "develop"}}); err != nil {
+	if err := store.CommitWorkspace(context.Background(), entry, []loomgit.WorkspaceRepo{{Workspace: "W", Repo: "repo", Trunk: recorded}}); err != nil {
 		t.Fatal(err)
 	}
 	return fixture{repo: repo, remote: remote, base: base, storePath: storePath, store: store}

@@ -161,7 +161,8 @@ func fetchPublications(ctx context.Context, store Store, publications []journal.
 		if status.State == "landed" && !includeLanded {
 			continue
 		}
-		key := publication.Repo + "\x00" + publication.Trunk
+		trunk := targetTrunk(publication, publications)
+		key := publication.Repo + "\x00" + trunk
 		if existing, ok := byTrunk[key]; ok {
 			existing.publication = publication
 			fetched = append(fetched, existing)
@@ -173,10 +174,10 @@ func fetchPublications(ctx context.Context, store Store, publications []journal.
 		if err != nil {
 			return nil, err
 		}
-		if _, err := runner.Run(ctx, "fetch", "origin", publication.Trunk); err != nil {
+		if _, err := runner.Run(ctx, "fetch", "origin", trunk); err != nil {
 			return nil, fmt.Errorf("fetch trunk for %s: %w", publication.Change, err)
 		}
-		trunkRef := "origin/" + publication.Trunk
+		trunkRef := "origin/" + trunk
 		out, err := runner.Run(ctx, "rev-parse", "--verify", trunkRef+"^{commit}")
 		if err != nil {
 			return nil, fmt.Errorf("resolve fetched trunk for %s: %w", publication.Change, err)
@@ -187,6 +188,19 @@ func fetchPublications(ctx context.Context, store Store, publications []journal.
 		fetched = append(fetched, item)
 	}
 	return fetched, nil
+}
+
+// targetTrunk follows a stacked PR's predecessors to the bottom layer's trunk,
+// where provider merges actually land.
+func targetTrunk(publication journal.Publication, all []journal.Publication) string {
+	for range all {
+		predecessor, found := stackPredecessor(publication, all)
+		if !found {
+			break
+		}
+		publication = predecessor
+	}
+	return publication.Trunk
 }
 
 func detect(ctx context.Context, store Store, forge Forge, item fetchedPublication, publications []journal.Publication) error {
