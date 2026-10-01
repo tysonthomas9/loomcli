@@ -104,6 +104,20 @@ func localLoginToken(t *testing.T) string {
 	return c.ClaudeAiOauth.AccessToken
 }
 
+// authAccepted runs `claude auth status`, which takes no model turn, with the
+// launch's own environment and working dir, and fails unless Claude reports
+// itself logged in (exit 0). Its output is never printed. It shows only that
+// Claude accepts the environment token locally; the first turn is what proves
+// the API accepts it.
+func authAccepted(t *testing.T, p *Process) {
+	t.Helper()
+	cmd := exec.Command(p.cfg.Bin, "auth", "status")
+	cmd.Dir, cmd.Env = p.spec.Dir, p.env()
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("real Claude: `claude auth status` with the environment token did not report a login: %v", err)
+	}
+}
+
 func startReal(t *testing.T, args ...string) *realRun {
 	t.Helper()
 	bin := realBin(t)
@@ -120,6 +134,7 @@ func startReal(t *testing.T, args ...string) *realRun {
 		t.Fatal(err)
 	}
 	r.p = NewProcess(cfg, spec)
+	authAccepted(t, r.p)
 	t.Cleanup(func() { _ = r.p.Close(context.Background()) })
 	return r
 }
@@ -258,7 +273,7 @@ func TestClaudeNestedLaunchStripsGitHubTokens(t *testing.T) {
 		}
 		// The tool records only whether each variable is set, never a value:
 		// the child's environment holds the login token.
-		cmd := `for k in ` + strings.Join(strippedTokens, " ") + `; do if printenv "$k" >/dev/null; then echo "$k=present"; else echo "$k=absent"; fi; done > ` + name
+		cmd := `for k in ` + strings.Join(append(slices.Clone(strippedTokens), "CLAUDE_CODE_OAUTH_TOKEN"), " ") + `; do if printenv "$k" >/dev/null; then echo "$k=present"; else echo "$k=absent"; fi; done > ` + name
 		res, _ := r.prompt(t, "Use the Bash tool to run exactly this command: "+cmd+"\nThen reply DONE.")
 		if res.Subtype != "success" {
 			t.Fatalf("launch %d: %+v", i, res)
@@ -283,6 +298,11 @@ func TestClaudeNestedLaunchStripsGitHubTokens(t *testing.T) {
 			} else if got != "absent" {
 				t.Errorf("launch %d: %s reached the nested tool", i, k)
 			}
+		}
+		if got, ok := lookup(nested, "CLAUDE_CODE_OAUTH_TOKEN"); ok {
+			t.Logf("launch %d: CLAUDE_CODE_OAUTH_TOKEN=%s in the nested tool", i, got) // present or absent, never a value
+		} else {
+			t.Errorf("launch %d: the tool did not report CLAUDE_CODE_OAUTH_TOKEN", i)
 		}
 		if got, _ := lookup(spawned, "CLAUDE_CODE_OAUTH_TOKEN"); got == "" || got != r.p.spec.Launch.Env["CLAUDE_CODE_OAUTH_TOKEN"] {
 			t.Errorf("launch %d: Claude's own auth token was dropped", i)

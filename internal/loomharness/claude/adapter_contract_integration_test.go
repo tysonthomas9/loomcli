@@ -34,6 +34,7 @@ func TestAdapterContract(t *testing.T) {
 	if err := isolated(a.cfg, ProcessSpec{Launch: l, Dir: dir}); err != nil {
 		t.Fatal(err)
 	}
+	authAccepted(t, NewProcess(a.cfg, ProcessSpec{Launch: l, Dir: dir}))
 	ref, err := a.Open(ctx, loomharness.OpenSpec{Key: uuid.NewString(), Launch: l, Dir: dir, Model: "haiku"})
 	if err != nil {
 		t.Fatal(err)
