@@ -105,33 +105,71 @@ func (g *GitHubForge) createNativeStack(ctx context.Context, owner, repo string,
 	return nil
 }
 
-func (g *GitHubForge) MergeNativePull(ctx context.Context, owner, repo string, number int, head string) error {
+type NativeMergeResult struct {
+	Status  string `json:"status"`
+	Details struct {
+		UUID            string `json:"uuid"`
+		Message         string `json:"message"`
+		ExpectedHeadSHA string `json:"expected_head_sha"`
+		MergeAction     string `json:"merge_action"`
+		BypassRules     bool   `json:"bypass_rules"`
+	} `json:"details"`
+}
+
+func (g *GitHubForge) MergeNativePull(ctx context.Context, owner, repo string, number int, head string) (NativeMergeResult, error) {
 	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async", owner, repo, number)
 	status, data, _, err := g.do(ctx, http.MethodPut, path, map[string]any{
-		"merge_method": "squash", "merge_action": "direct_merge", "sha": head, "bypass_rules": false,
+		"merge_action": "default", "sha": head, "bypass_rules": false,
 	})
 	if err != nil {
-		return err
+		return NativeMergeResult{}, err
 	}
-	if status != http.StatusAccepted && status != http.StatusOK {
+	if status != http.StatusAccepted && status != http.StatusOK && status != http.StatusConflict {
 		message := strings.ToLower(string(data))
-		if (status == http.StatusUnprocessableEntity || status == http.StatusConflict) &&
+		if status == http.StatusUnprocessableEntity &&
 			strings.Contains(message, "merge queue") &&
 			(strings.Contains(message, "required") || strings.Contains(message, "must")) {
-			return fmt.Errorf("github native merge: %w", ErrMergeQueueRequired)
+			return NativeMergeResult{}, fmt.Errorf("github native merge: %w", ErrMergeQueueRequired)
 		}
-		return g.apiErr("PUT", path, status, data)
+		return NativeMergeResult{}, g.apiErr("PUT", path, status, data)
 	}
-	var result struct {
-		Status string `json:"status"`
+	result, err := decodeNativeMergeResult(data)
+	if err != nil {
+		return NativeMergeResult{}, err
 	}
+	if status == http.StatusConflict && (result.Details.ExpectedHeadSHA != head || result.Details.MergeAction != "default" || result.Details.BypassRules) {
+		return NativeMergeResult{}, fmt.Errorf("github existing async merge differs from requested head or action")
+	}
+	return result, nil
+}
+
+func (g *GitHubForge) NativeMergeStatus(ctx context.Context, owner, repo string, number int, uuid string) (NativeMergeResult, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge-async/%s", owner, repo, number, uuid)
+	status, data, _, err := g.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return NativeMergeResult{}, err
+	}
+	if status != http.StatusOK {
+		return NativeMergeResult{}, g.apiErr("GET", path, status, data)
+	}
+	return decodeNativeMergeResult(data)
+}
+
+func decodeNativeMergeResult(data []byte) (NativeMergeResult, error) {
+	var result NativeMergeResult
 	if err := json.Unmarshal(data, &result); err != nil {
-		return fmt.Errorf("github native merge decode: %w", err)
+		return result, fmt.Errorf("github native merge decode: %w", err)
 	}
-	if result.Status != "pending" && result.Status != "merged" {
-		return fmt.Errorf("github native merge returned %q", result.Status)
+	switch result.Status {
+	case "pending":
+		if result.Details.UUID == "" {
+			return result, errors.New("github async merge pending without UUID")
+		}
+	case "merged", "enqueued", "failed":
+	default:
+		return result, fmt.Errorf("github native merge returned %q", result.Status)
 	}
-	return nil
+	return result, nil
 }
 
 var _ Forge = (*GitHubForge)(nil)
@@ -235,7 +273,7 @@ func (g *GitHubForge) do(ctx context.Context, method, path string, body any) (in
 	req.Header.Set("Authorization", "Bearer "+g.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if strings.Contains(path, "/stacks") || strings.HasSuffix(path, "/merge-async") {
+	if strings.Contains(path, "/stacks") || strings.Contains(path, "/merge-async") {
 		req.Header.Set("X-GitHub-Api-Version", "2026-03-10")
 	}
 	req.Header.Set("User-Agent", "loom-stack-publisher")

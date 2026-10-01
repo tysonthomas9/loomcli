@@ -21,6 +21,7 @@ type nativeMergeStore interface {
 	BeginNativeMerge(context.Context, journal.NativeMerge) error
 	OpenNativeMerges(context.Context) ([]journal.NativeMerge, error)
 	AdvanceNativeMerge(context.Context, journal.NativeMerge, string, string, int) error
+	RecordNativeMergeRequest(context.Context, journal.NativeMerge, string) error
 	BlockNativeMerge(context.Context, journal.NativeMerge, string) error
 	LandingStatus(context.Context, string, string) (journal.LandingStatus, error)
 	StackBackend(context.Context, string, string) (string, error)
@@ -28,7 +29,8 @@ type nativeMergeStore interface {
 
 type nativeMergeForge interface {
 	PullByNumber(context.Context, string, string, int) (stackpublish.PR, error)
-	MergeNativePull(context.Context, string, string, int, string) error
+	MergeNativePull(context.Context, string, string, int, string) (stackpublish.NativeMergeResult, error)
+	NativeMergeStatus(context.Context, string, string, int, string) (stackpublish.NativeMergeResult, error)
 }
 
 func beginNativeMerge(ctx context.Context, store Store, request StackRequest, target string) error {
@@ -97,7 +99,7 @@ func ReconcileNativeMerges(ctx context.Context, store nativeMergeStore, forge na
 	for _, merge := range merges {
 		if err := reconcileNativeMerge(ctx, store, forge, merge); err != nil {
 			var coded *loomgit.Error
-			if errors.As(err, &coded) && (coded.Kind == loomgit.Stale || coded.Kind == loomgit.MergeBlocked || coded.Kind == loomgit.ReviewRequired) {
+			if errors.As(err, &coded) && (coded.Kind == loomgit.Stale || coded.Kind == loomgit.MergeBlocked || coded.Kind == loomgit.ReviewRequired || coded.Kind == loomgit.Protected) {
 				if blockErr := store.BlockNativeMerge(ctx, merge, err.Error()); blockErr != nil {
 					return blockErr
 				}
@@ -132,57 +134,41 @@ func ReconcileNativeAt(ctx context.Context) error {
 }
 
 func reconcileNativeMerge(ctx context.Context, store nativeMergeStore, forge nativeMergeForge, merge journal.NativeMerge) error {
-	if merge.Index < 0 || merge.Index >= len(merge.Changes) {
-		return errors.New("native merge cursor is invalid")
-	}
-	change := merge.Changes[merge.Index]
-	publication, found, err := store.Publication(ctx, merge.Workspace, change)
+	publication, found, err := store.Publication(ctx, merge.Workspace, merge.Target)
 	if err != nil {
 		return err
 	}
 	if !found || publication.StackID != merge.StackID || publication.PRNumber == 0 {
-		return loomgit.NewError(loomgit.MergeBlocked, "native layer publication is missing", nil)
+		return loomgit.NewError(loomgit.MergeBlocked, "native target publication is missing", nil)
 	}
 	parts := strings.Split(publication.Slug, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return errors.New("native repository slug is invalid")
 	}
-	pr, err := forge.PullByNumber(ctx, parts[0], parts[1], publication.PRNumber)
-	if err != nil {
-		return err
-	}
-	if merge.Phase == "dispatching" {
-		if !pr.Merged {
-			return loomgit.NewError(loomgit.AttentionRequired, "native merge submission outcome is unknown", nil)
-		}
-		if err := store.AdvanceNativeMerge(ctx, merge, "sent", merge.Head, merge.Index); err != nil {
-			return err
-		}
-		merge.Phase = "sent"
-	}
-	if merge.Phase == "sent" {
-		return reconcileNativeSent(ctx, store, merge, publication, pr)
-	}
-	if merge.Phase != "ready" {
+	switch merge.Phase {
+	case "ready":
+		return submitNativeMerge(ctx, store, forge, merge, publication, parts)
+	case "dispatching":
+		return recoverNativeDispatch(ctx, store, forge, merge, publication, parts)
+	case "sent":
+		return pollNativeMerge(ctx, store, forge, merge, publication, parts)
+	default:
 		return fmt.Errorf("native merge phase %q is invalid", merge.Phase)
 	}
-	return submitNativeMerge(ctx, store, forge, merge, publication, pr, parts)
 }
 
 func submitNativeMerge(ctx context.Context, store nativeMergeStore, forge nativeMergeForge,
-	merge journal.NativeMerge, publication journal.Publication, pr stackpublish.PR, parts []string) error {
-	if pr.Merged || pr.State != "open" || pr.HeadSHA != publication.Head || pr.Head != publication.Branch {
-		return loomgit.NewError(loomgit.Stale, "native PR moved before merge", nil)
-	}
-	if err := requireNativeVerdict(ctx, store, publication); err != nil {
+	merge journal.NativeMerge, publication journal.Publication, parts []string) error {
+	if err := checkNativePrefix(ctx, store, forge, merge, parts); err != nil {
 		return err
 	}
-	if err := store.AdvanceNativeMerge(ctx, merge, "dispatching", pr.HeadSHA, merge.Index); err != nil {
+	if err := store.AdvanceNativeMerge(ctx, merge, "dispatching", publication.Head, merge.Index); err != nil {
 		return err
 	}
-	if err := forge.MergeNativePull(ctx, parts[0], parts[1], publication.PRNumber, pr.HeadSHA); err != nil {
+	merge.Phase, merge.Head = "dispatching", publication.Head
+	result, err := forge.MergeNativePull(ctx, parts[0], parts[1], publication.PRNumber, publication.Head)
+	if err != nil {
 		if errors.Is(err, stackpublish.ErrMergeQueueRequired) {
-			merge.Phase, merge.Head = "dispatching", pr.HeadSHA
 			message := "GitHub requires this PR to merge through its merge queue"
 			if blockErr := store.BlockNativeMerge(ctx, merge, message); blockErr != nil {
 				return blockErr
@@ -191,32 +177,96 @@ func submitNativeMerge(ctx context.Context, store nativeMergeStore, forge native
 		}
 		return err
 	}
-	merge.Phase, merge.Head = "dispatching", pr.HeadSHA
-	return store.AdvanceNativeMerge(ctx, merge, "sent", pr.HeadSHA, merge.Index)
+	if result.Status == "failed" {
+		message := "GitHub rejected the native stack merge: " + result.Details.Message
+		if err := store.BlockNativeMerge(ctx, merge, message); err != nil {
+			return err
+		}
+		return loomgit.NewError(loomgit.MergeBlocked, message, nil)
+	}
+	return store.RecordNativeMergeRequest(ctx, merge, result.Details.UUID)
 }
 
-func reconcileNativeSent(ctx context.Context, store nativeMergeStore, merge journal.NativeMerge,
-	publication journal.Publication, pr stackpublish.PR) error {
-	if pr.HeadSHA != merge.Head {
-		return loomgit.NewError(loomgit.Stale, "submitted native PR head changed", nil)
+func checkNativePrefix(ctx context.Context, store nativeMergeStore, forge nativeMergeForge,
+	merge journal.NativeMerge, parts []string) error {
+	if len(merge.Changes) == 0 || merge.Changes[len(merge.Changes)-1] != merge.Target {
+		return loomgit.NewError(loomgit.Stale, "native merge target differs from prefix", nil)
 	}
-	if !pr.Merged {
-		if pr.State != "open" {
-			return loomgit.NewError(loomgit.MergeBlocked, "submitted native merge changed or closed", nil)
+	for _, change := range merge.Changes {
+		publication, found, err := store.Publication(ctx, merge.Workspace, change)
+		if err != nil {
+			return err
 		}
-		return nil
+		if !found || publication.StackID != merge.StackID || publication.Phase != "done" {
+			return loomgit.NewError(loomgit.MergeBlocked, "native stack publication is incomplete", nil)
+		}
+		pr, err := forge.PullByNumber(ctx, parts[0], parts[1], publication.PRNumber)
+		if err != nil {
+			return err
+		}
+		if pr.Merged || pr.State != "open" || pr.Head != publication.Branch || pr.HeadSHA != publication.Head {
+			return loomgit.NewError(loomgit.Stale, "native stack PR moved before merge", nil)
+		}
+		if err := requireNativeVerdict(ctx, store, publication); err != nil {
+			return err
+		}
 	}
-	status, err := store.LandingStatus(ctx, merge.Workspace, publication.Change)
+	return nil
+}
+
+func recoverNativeDispatch(ctx context.Context, store nativeMergeStore, forge nativeMergeForge,
+	merge journal.NativeMerge, publication journal.Publication, parts []string) error {
+	pr, err := forge.PullByNumber(ctx, parts[0], parts[1], publication.PRNumber)
 	if err != nil {
 		return err
 	}
-	if status.State != "landed" {
+	if !pr.Merged {
+		return loomgit.NewError(loomgit.AttentionRequired, "native merge submission outcome is unknown", nil)
+	}
+	if pr.HeadSHA != merge.Head {
+		return loomgit.NewError(loomgit.Stale, "native merge target head changed", nil)
+	}
+	return store.RecordNativeMergeRequest(ctx, merge, "")
+}
+
+func pollNativeMerge(ctx context.Context, store nativeMergeStore, forge nativeMergeForge,
+	merge journal.NativeMerge, publication journal.Publication, parts []string) error {
+	if merge.UUID != "" {
+		result, err := forge.NativeMergeStatus(ctx, parts[0], parts[1], publication.PRNumber, merge.UUID)
+		if err != nil {
+			return loomgit.NewError(loomgit.AttentionRequired, "native async merge result unavailable", err)
+		}
+		if result.Details.ExpectedHeadSHA != "" && result.Details.ExpectedHeadSHA != merge.Head {
+			return loomgit.NewError(loomgit.Stale, "native async merge head differs", nil)
+		}
+		if result.Details.BypassRules {
+			return loomgit.NewError(loomgit.Protected, "native merge used a rules bypass", nil)
+		}
+		if result.Status == "pending" {
+			return nil
+		}
+		if result.Status == "failed" {
+			return loomgit.NewError(loomgit.MergeBlocked, "GitHub native merge failed: "+result.Details.Message, nil)
+		}
+	}
+	pr, err := forge.PullByNumber(ctx, parts[0], parts[1], publication.PRNumber)
+	if err != nil {
+		return err
+	}
+	if pr.HeadSHA != merge.Head || (pr.State != "open" && !pr.Merged) {
+		return loomgit.NewError(loomgit.Stale, "native target PR changed after submission", nil)
+	}
+	if !pr.Merged {
 		return nil
 	}
-	index := merge.Index + 1
-	phase := "ready"
-	if index == len(merge.Changes) {
-		phase = "done"
+	for _, change := range merge.Changes {
+		status, err := store.LandingStatus(ctx, merge.Workspace, change)
+		if err != nil {
+			return err
+		}
+		if status.State != "landed" {
+			return nil
+		}
 	}
-	return store.AdvanceNativeMerge(ctx, merge, phase, "", index)
+	return store.AdvanceNativeMerge(ctx, merge, "done", merge.Head, merge.Index)
 }

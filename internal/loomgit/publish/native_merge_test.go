@@ -15,9 +15,11 @@ func (allowedMerge) AuthorizeMerge(context.Context, StackRequest, string) error 
 
 type fakeMergeForge struct {
 	*fakeForge
-	prs       []stackpublish.PR
-	submitted []int
-	mergeErr  error
+	prs          []stackpublish.PR
+	submitted    []int
+	mergeErr     error
+	resultStatus string
+	statusCalls  int
 }
 
 func (forge *fakeMergeForge) PullByNumber(_ context.Context, _, _ string, number int) (stackpublish.PR, error) {
@@ -29,16 +31,32 @@ func (forge *fakeMergeForge) PullByNumber(_ context.Context, _, _ string, number
 	return stackpublish.PR{}, journal.ErrNotFound
 }
 
-func (forge *fakeMergeForge) MergeNativePull(_ context.Context, _, _ string, number int, head string) error {
+func (forge *fakeMergeForge) MergeNativePull(_ context.Context, _, _ string, number int, head string) (stackpublish.NativeMergeResult, error) {
 	if forge.mergeErr != nil {
-		return forge.mergeErr
+		return stackpublish.NativeMergeResult{}, forge.mergeErr
 	}
 	pr, err := forge.PullByNumber(context.Background(), "", "", number)
 	if err != nil || pr.HeadSHA != head {
-		return journal.ErrStale
+		return stackpublish.NativeMergeResult{}, journal.ErrStale
 	}
 	forge.submitted = append(forge.submitted, number)
-	return nil
+	result := stackpublish.NativeMergeResult{Status: "pending"}
+	result.Details.UUID = "request-uuid"
+	return result, nil
+}
+
+func (forge *fakeMergeForge) NativeMergeStatus(_ context.Context, _, _ string, _ int, uuid string) (stackpublish.NativeMergeResult, error) {
+	if uuid != "request-uuid" {
+		return stackpublish.NativeMergeResult{}, journal.ErrStale
+	}
+	forge.statusCalls++
+	status := forge.resultStatus
+	if status == "" {
+		status = "pending"
+	}
+	result := stackpublish.NativeMergeResult{Status: status}
+	result.Details.UUID = uuid
+	return result, nil
 }
 
 func nativeMergeFixture(t *testing.T) (fixture, *fakeMergeForge, StackRequest) {
@@ -82,14 +100,14 @@ func TestNativeMergeRequiresAuthorityAndStackMode(t *testing.T) {
 	codeIs(t, beginNativeMerge(ctx, caseFixture.store, request, "B"), loomgit.ModeMismatch)
 }
 
-func TestNativeMergeResumesAfterSubmittedLayer(t *testing.T) {
+func TestNativeMergeResumesAtomicDownstackRequest(t *testing.T) {
 	caseFixture, forge, request := nativeMergeFixture(t)
 	ctx := context.Background()
 	request.forge = forge
 	if err := (GitHubStackBackend{Store: caseFixture.store}).MergeUpTo(ctx, request, "B"); err != nil {
 		t.Fatal(err)
 	}
-	if len(forge.submitted) != 1 || forge.submitted[0] != 1 {
+	if len(forge.submitted) != 1 || forge.submitted[0] != 2 {
 		t.Fatalf("submitted = %v", forge.submitted)
 	}
 	reopened, err := journal.OpenSQLite(caseFixture.storePath)
@@ -97,13 +115,19 @@ func TestNativeMergeResumesAfterSubmittedLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = reopened.Close() }()
+	openMerges, err := reopened.OpenNativeMerges(ctx)
+	if err != nil || len(openMerges) != 1 || openMerges[0].UUID != "request-uuid" {
+		t.Fatalf("reopened merge = %v, %v", openMerges, err)
+	}
 	if err := ReconcileNativeMerges(ctx, reopened, forge); err != nil {
 		t.Fatal(err)
 	}
 	if len(forge.submitted) != 1 {
 		t.Fatalf("resubmitted after restart: %v", forge.submitted)
 	}
+	forge.resultStatus = "merged"
 	forge.prs[0].Merged, forge.prs[0].State = true, "closed"
+	forge.prs[1].Merged, forge.prs[1].State = true, "closed"
 	if err := ReconcileNativeMerges(ctx, reopened, forge); err != nil {
 		t.Fatal(err)
 	}
@@ -116,11 +140,40 @@ func TestNativeMergeResumesAfterSubmittedLayer(t *testing.T) {
 	if err := ReconcileNativeMerges(ctx, reopened, forge); err != nil {
 		t.Fatal(err)
 	}
+	if err := reopened.MarkLanded(ctx, "W", "B"); err != nil {
+		t.Fatal(err)
+	}
 	if err := ReconcileNativeMerges(ctx, reopened, forge); err != nil {
 		t.Fatal(err)
 	}
-	if len(forge.submitted) != 2 || forge.submitted[1] != 2 {
-		t.Fatalf("submitted = %v", forge.submitted)
+	merges, err := reopened.OpenNativeMerges(ctx)
+	if err != nil || len(merges) != 0 || len(forge.submitted) != 1 || forge.statusCalls == 0 {
+		t.Fatalf("merges=%v submitted=%v polls=%d err=%v", merges, forge.submitted, forge.statusCalls, err)
+	}
+}
+
+func TestNativeMergeEnqueuedWaitsForLanding(t *testing.T) {
+	caseFixture, forge, request := nativeMergeFixture(t)
+	ctx := context.Background()
+	request.forge = forge
+	if err := (GitHubStackBackend{Store: caseFixture.store}).MergeUpTo(ctx, request, "B"); err != nil {
+		t.Fatal(err)
+	}
+	forge.resultStatus = "enqueued"
+	if err := ReconcileNativeMerges(ctx, caseFixture.store, forge); err != nil {
+		t.Fatal(err)
+	}
+	merges, err := caseFixture.store.OpenNativeMerges(ctx)
+	if err != nil || len(merges) != 1 || len(forge.submitted) != 1 {
+		t.Fatalf("merge=%v submits=%v err=%v", merges, forge.submitted, err)
+	}
+	forge.prs[1].Merged, forge.prs[1].State = true, "closed"
+	if err := ReconcileNativeMerges(ctx, caseFixture.store, forge); err != nil {
+		t.Fatal(err)
+	}
+	merges, err = caseFixture.store.OpenNativeMerges(ctx)
+	if err != nil || len(merges) != 1 {
+		t.Fatalf("advanced before landing: %v, %v", merges, err)
 	}
 }
 
@@ -164,16 +217,10 @@ func TestNativeMergeStopsAfterHigherLayerMoves(t *testing.T) {
 	if err := (GitHubStackBackend{Store: caseFixture.store}).MergeUpTo(ctx, request, "B"); err != nil {
 		t.Fatal(err)
 	}
-	forge.prs[0].Merged, forge.prs[0].State = true, "closed"
-	if err := caseFixture.store.MarkLanded(ctx, "W", "A"); err != nil {
-		t.Fatal(err)
-	}
-	if err := ReconcileNativeMerges(ctx, caseFixture.store, forge); err != nil {
-		t.Fatal(err)
-	}
 	forge.prs[1].HeadSHA = "human-pushed"
+	forge.resultStatus = "merged"
 	codeIs(t, ReconcileNativeMerges(ctx, caseFixture.store, forge), loomgit.Stale)
-	if len(forge.submitted) != 1 {
+	if len(forge.submitted) != 1 || forge.submitted[0] != 2 {
 		t.Fatalf("submitted = %v", forge.submitted)
 	}
 }
@@ -189,5 +236,20 @@ func TestNativeMergeQueueRequiredStopsWithoutRetry(t *testing.T) {
 	}
 	if len(forge.submitted) != 0 {
 		t.Fatalf("submitted = %v", forge.submitted)
+	}
+}
+
+func TestNativeMergeFailedAsyncResultBlocks(t *testing.T) {
+	caseFixture, forge, request := nativeMergeFixture(t)
+	request.forge = forge
+	ctx := context.Background()
+	if err := (GitHubStackBackend{Store: caseFixture.store}).MergeUpTo(ctx, request, "B"); err != nil {
+		t.Fatal(err)
+	}
+	forge.resultStatus = "failed"
+	codeIs(t, ReconcileNativeMerges(ctx, caseFixture.store, forge), loomgit.MergeBlocked)
+	merges, err := caseFixture.store.OpenNativeMerges(ctx)
+	if err != nil || len(merges) != 0 || len(forge.submitted) != 1 {
+		t.Fatalf("merges=%v submits=%v err=%v", merges, forge.submitted, err)
 	}
 }

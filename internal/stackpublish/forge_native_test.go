@@ -83,15 +83,16 @@ func TestGitHubForgeNativeAsyncMerge(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Error(err)
 		}
-		if body["merge_action"] != "direct_merge" || body["merge_method"] != "squash" || body["sha"] != "abc" || body["bypass_rules"] != false {
+		if body["merge_action"] != "default" || body["merge_method"] != nil || body["sha"] != "abc" || body["bypass_rules"] != false {
 			t.Errorf("body = %+v", body)
 		}
 		writer.WriteHeader(http.StatusAccepted)
-		_, _ = writer.Write([]byte(`{"status":"pending"}`))
+		_, _ = writer.Write([]byte(`{"status":"pending","details":{"uuid":"test-uuid","expected_head_sha":"abc","merge_action":"default"}}`))
 	}))
 	defer server.Close()
-	if err := NewGitHubForge("fixture", server.Client(), server.URL).MergeNativePull(context.Background(), "owner", "repo", 11, "abc"); err != nil {
-		t.Fatal(err)
+	result, err := NewGitHubForge("fixture", server.Client(), server.URL).MergeNativePull(context.Background(), "owner", "repo", 11, "abc")
+	if err != nil || result.Status != "pending" || result.Details.UUID != "test-uuid" {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 
@@ -101,8 +102,52 @@ func TestGitHubForgeNativeMergeQueueRejection(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"message":"Merge queue is required for this branch"}`))
 	}))
 	defer server.Close()
-	err := NewGitHubForge("fixture", server.Client(), server.URL).MergeNativePull(context.Background(), "owner", "repo", 11, "abc")
+	_, err := NewGitHubForge("fixture", server.Client(), server.URL).MergeNativePull(context.Background(), "owner", "repo", 11, "abc")
 	if !errors.Is(err, ErrMergeQueueRequired) {
 		t.Fatalf("queue rejection = %v", err)
+	}
+}
+
+func TestGitHubForgeNativeAsyncResultAndExistingRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("X-GitHub-Api-Version") != "2026-03-10" {
+			t.Errorf("API version = %q", request.Header.Get("X-GitHub-Api-Version"))
+		}
+		if request.Method == http.MethodPut {
+			writer.WriteHeader(http.StatusConflict)
+			_, _ = writer.Write([]byte(`{"status":"pending","details":{"uuid":"existing","expected_head_sha":"abc","merge_action":"default"}}`))
+			return
+		}
+		if request.Method != http.MethodGet || request.URL.Path != "/repos/owner/repo/pulls/11/merge-async/existing" {
+			t.Errorf("request = %s %s", request.Method, request.URL)
+		}
+		_, _ = writer.Write([]byte(`{"status":"enqueued","details":{"message":"Added to queue"}}`))
+	}))
+	defer server.Close()
+	forge := NewGitHubForge("fixture", server.Client(), server.URL)
+	started, err := forge.MergeNativePull(context.Background(), "owner", "repo", 11, "abc")
+	if err != nil || started.Details.UUID != "existing" {
+		t.Fatalf("existing=%+v err=%v", started, err)
+	}
+	result, err := forge.NativeMergeStatus(context.Background(), "owner", "repo", 11, started.Details.UUID)
+	if err != nil || result.Status != "enqueued" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestGitHubForgeNativeMergeRejectsAmbiguousResponse(t *testing.T) {
+	for _, body := range []string{
+		`{"status":"pending","details":{}}`,
+		`{"status":"unknown","details":{"uuid":"test"}}`,
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writer.WriteHeader(http.StatusAccepted)
+			_, _ = writer.Write([]byte(body))
+		}))
+		_, err := NewGitHubForge("fixture", server.Client(), server.URL).MergeNativePull(context.Background(), "owner", "repo", 11, "abc")
+		server.Close()
+		if err == nil {
+			t.Fatalf("accepted ambiguous response %s", body)
+		}
 	}
 }
