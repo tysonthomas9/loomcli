@@ -155,13 +155,7 @@ func (app *Server) registerWorkspaceRoutes() {
 	app.mux.Handle("GET /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendGet(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/backend", workspaceMW(handlermux.HandleWorkspaceBackendPatch(app.workspaceSvc)))
 	app.mux.Handle("PATCH /api/workspaces/{ws}/config/design-format", workspaceMW(handlermux.HandleWorkspaceDesignFormatPatch(app.workspaceSvc)))
-	if app.config.AgentAPIRoutes != nil {
-		var validateToken func(token, workspace string) (string, error)
-		if app.sseTokens != nil {
-			validateToken = app.sseTokens.Validate
-		}
-		app.config.AgentAPIRoutes(app.mux, workspaceMW, validateToken)
-	}
+	app.registerAgentAPIRoutes(workspaceMW)
 	if statusHandler := app.config.MonitorHandlers.Status; statusHandler != nil {
 		app.mux.Handle("GET /api/workspaces/{ws}/monitor/status", workspaceMW(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			q := r.URL.Query()
@@ -204,6 +198,19 @@ func (app *Server) registerWorkspaceRoutes() {
 		}
 		workspaceMW(wsHandler).ServeHTTP(w, r)
 	}))
+}
+
+// registerAgentAPIRoutes mounts the Agent API on the outer mux; its event
+// stream checks the server's one-time SSE tokens when auth is on.
+func (app *Server) registerAgentAPIRoutes(workspaceMW middleware.Middleware) {
+	if app.config.AgentAPIRoutes == nil {
+		return
+	}
+	var validateToken func(token, workspace string) (string, error)
+	if app.sseTokens != nil {
+		validateToken = app.sseTokens.Validate
+	}
+	app.config.AgentAPIRoutes(app.mux, workspaceMW, validateToken)
 }
 
 func (app *Server) workspaceMiddleware() middleware.Middleware {

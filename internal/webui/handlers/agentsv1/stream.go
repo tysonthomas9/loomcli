@@ -27,33 +27,10 @@ const StreamError = "error"
 // event is one frame named by its kind with id "<agent_id>:<seq>"; live-only
 // notices (delta, feed.gap) carry no id. The data is an Event.
 func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
-	ws := middleware.WorkspaceFromContext(r.Context())
-	if h.validateToken != nil {
-		token := r.URL.Query().Get("token")
-		if token == "" {
-			handler.RespondError(w, http.StatusUnauthorized, "authentication required")
-			return
-		}
-		if _, err := h.validateToken(token, ws); err != nil {
-			handler.RespondError(w, http.StatusUnauthorized, "invalid or expired token")
-			return
-		}
-	}
-	s := h.services(ws)
-	if s == nil {
-		handler.RespondError(w, http.StatusNotFound, "agent API not available in this workspace")
-		return
-	}
-	req, err := subscribeRequest(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
-	sub, err := s.Subscribe(ctx, req)
-	if err != nil {
-		writeError(w, err)
+	sub := h.subscribe(ctx, w, r)
+	if sub == nil {
 		return
 	}
 	sw, err := realtime.NewWriter(w)
@@ -68,6 +45,45 @@ func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	_ = rc.Flush() // the client sees the stream open; Subscribe already registered
+	pump(ctx, sw, sub)
+}
+
+// subscribe checks the token, then starts the subscription; on failure it
+// writes the error and returns nil.
+func (h *Handler) subscribe(ctx context.Context, w http.ResponseWriter, r *http.Request) *loomagent.Subscription {
+	ws := middleware.WorkspaceFromContext(r.Context())
+	if h.validateToken != nil {
+		token := r.URL.Query().Get("token")
+		if token == "" {
+			handler.RespondError(w, http.StatusUnauthorized, "authentication required")
+			return nil
+		}
+		if _, err := h.validateToken(token, ws); err != nil {
+			handler.RespondError(w, http.StatusUnauthorized, "invalid or expired token")
+			return nil
+		}
+	}
+	s := h.services(ws)
+	if s == nil {
+		handler.RespondError(w, http.StatusNotFound, "agent API not available in this workspace")
+		return nil
+	}
+	req, err := subscribeRequest(r)
+	if err == nil {
+		var sub *loomagent.Subscription
+		if sub, err = s.Subscribe(ctx, req); err == nil {
+			return sub
+		}
+	}
+	writeError(w, err)
+	return nil
+}
+
+// pump writes sub's events, and a heartbeat comment when idle, until sub
+// ends or a write fails. A sub ended by an Agent API error (subscriber_lagged)
+// gets a last error frame.
+func pump(ctx context.Context, sw *realtime.Writer, sub *loomagent.Subscription) {
+	var err error
 	beat := time.NewTicker(realtime.HeartbeatInterval)
 	defer beat.Stop()
 	for {
