@@ -52,6 +52,9 @@ type Harness struct {
 	scripts  map[string][]Turn
 	feeds    map[*feed]bool
 	install  error // set by FailInstall: Resume fails before installing rules
+	open     error // set by FailOpen: Open fails, leaving its session if leave
+	leave    bool
+	purge    error // set by FailPurge: Purge fails and removes nothing
 }
 
 type session struct {
@@ -115,8 +118,11 @@ func (h *Harness) Open(_ context.Context, spec loomharness.OpenSpec) (loomharnes
 	if h.down {
 		return loomharness.NativeRef{}, loomharness.ErrUnavailable
 	}
+	if h.open != nil && !h.leave {
+		return loomharness.NativeRef{}, h.open
+	}
 	if ref, ok := h.byKey[spec.Key]; ok {
-		if s, ok := h.sessions[ref]; ok { // a repeat installs the current rules
+		if s, ok := h.sessions[ref]; ok && h.open == nil { // a repeat installs the current rules
 			s.rules = slices.Clone(spec.Rules)
 		}
 		return ref, nil
@@ -126,7 +132,23 @@ func (h *Harness) Open(_ context.Context, spec loomharness.OpenSpec) (loomharnes
 	h.byKey[spec.Key] = ref
 	h.sessions[ref] = &session{ref: ref, key: spec.Key, model: spec.Model, dir: spec.Dir, inputs: map[string]loomharness.Landed{},
 		rules: slices.Clone(spec.Rules)}
-	return ref, nil
+	return ref, h.open
+}
+
+// FailOpen makes every Open fail with err. With leave, Open still creates
+// (or finds) the session and returns its ref with err, as an Open that could
+// not remove what it created; without, it creates nothing. nil restores Open.
+func (h *Harness) FailOpen(err error, leave bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.open, h.leave = err, leave
+}
+
+// FailPurge makes every Purge fail with err and remove nothing; nil restores it.
+func (h *Harness) FailPurge(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.purge = err
 }
 
 // FailInstall makes every Resume fail to install its rules with err; nil
@@ -169,6 +191,9 @@ func (h *Harness) Feed(ctx context.Context) (loomharness.Feed, error) {
 func (h *Harness) Purge(_ context.Context, owned []loomharness.NativeRef) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.purge != nil {
+		return h.purge
+	}
 	for _, ref := range owned {
 		if s, ok := h.sessions[ref]; ok {
 			delete(h.byKey, s.key)

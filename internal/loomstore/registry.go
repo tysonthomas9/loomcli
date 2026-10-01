@@ -107,21 +107,63 @@ type NativeSession struct {
 // Recording the same session for the same agent again is a no-op; a session
 // already owned by another agent returns ErrSessionOwned.
 func (s *Store) RecordNativeSession(ctx context.Context, n NativeSession) error {
+	return s.tx(ctx, func(tx *sql.Tx) error { return recordNative(ctx, tx, n) })
+}
+
+func recordNative(ctx context.Context, tx *sql.Tx, n NativeSession) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_native_sessions (agent_id, harness, native_root, native_id, recorded_at)
+		VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING`,
+		n.AgentID, n.Harness, n.NativeRoot, n.NativeID, Stamp(time.Now())); err != nil {
+		return err
+	}
+	owner, err := nativeSessionOwner(ctx, tx, n.Harness, n.NativeRoot, n.NativeID)
+	if err != nil {
+		return err
+	}
+	if owner != n.AgentID {
+		return ErrSessionOwned
+	}
+	return nil
+}
+
+// RecordPurgePending records n as owned, as RecordNativeSession does, and
+// as purge-pending, in one transaction: a failed Open left it behind.
+func (s *Store) RecordPurgePending(ctx context.Context, n NativeSession) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_native_sessions (agent_id, harness, native_root, native_id, recorded_at)
-			VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING`,
-			n.AgentID, n.Harness, n.NativeRoot, n.NativeID, Stamp(time.Now())); err != nil {
+		if err := recordNative(ctx, tx, n); err != nil {
 			return err
 		}
-		owner, err := nativeSessionOwner(ctx, tx, n.Harness, n.NativeRoot, n.NativeID)
-		if err != nil {
-			return err
-		}
-		if owner != n.AgentID {
-			return ErrSessionOwned
-		}
-		return nil
+		_, err := tx.ExecContext(ctx, `INSERT INTO native_purge_pending (harness, native_root, native_id)
+			VALUES (?,?,?) ON CONFLICT DO NOTHING`, n.Harness, n.NativeRoot, n.NativeID)
+		return err
 	})
+}
+
+// ClearPurgePending drops n's purge-pending mark: it was purged, or a later
+// Open returned it as a working session.
+func (s *Store) ClearPurgePending(ctx context.Context, n NativeSession) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM native_purge_pending WHERE harness = ? AND native_root = ? AND native_id = ?`,
+		n.Harness, n.NativeRoot, n.NativeID)
+	return err
+}
+
+// PurgePending lists the purge-pending native sessions with their owners.
+func (s *Store) PurgePending(ctx context.Context) ([]NativeSession, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT n.agent_id, n.harness, n.native_root, n.native_id, n.recorded_at
+		FROM native_purge_pending p JOIN agent_native_sessions n USING (harness, native_root, native_id) ORDER BY n.recorded_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []NativeSession
+	for rows.Next() {
+		var n NativeSession
+		if err := rows.Scan(&n.AgentID, &n.Harness, &n.NativeRoot, &n.NativeID, &n.RecordedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 // NativeSessions lists every native session agentID has owned, oldest first.

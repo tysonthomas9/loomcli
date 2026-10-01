@@ -273,11 +273,13 @@ func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomha
 }
 
 // RunDispatcher wakes the dispatcher on agent.idle until ctx ends. It first
-// dispatches every agent with a pending slot (a restart), and does so again
-// whenever its subscription lags and is replaced.
+// retries purge-pending native sessions and dispatches every agent with a
+// pending slot (a restart), and does so again whenever its subscription lags
+// and is replaced.
 func (s *Service) RunDispatcher(ctx context.Context) {
 	for ctx.Err() == nil {
 		sub := s.Bus.Subscribe()
+		_ = s.PurgeLeftovers(ctx)
 		if ids, err := s.store.PendingAgents(ctx); err == nil {
 			for _, id := range ids {
 				_ = s.dispatchWake(ctx, id)

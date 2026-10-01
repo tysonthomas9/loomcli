@@ -54,10 +54,9 @@ func (s *Service) switchHarness(ctx context.Context, a loomstore.Agent, req Upda
 		Launch: launch, Preset: cfg.Open, Dir: deref(a.WorktreePath), Model: model, Rules: rules,
 		Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
-		return failed(harnessErr(err))
+		return failed(s.leftover(ctx, a.AgentID, req.Harness, ref, harnessErr(err)))
 	}
-	if err := s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: a.AgentID, Harness: req.Harness,
-		NativeRoot: ref.Root, NativeID: ref.NativeID}); err != nil {
+	if err := s.owned(ctx, a.AgentID, req.Harness, ref); err != nil {
 		_ = h.Purge(ctx, []loomharness.NativeRef{ref}) // unrecorded, so remove the orphan now
 		return failed(err)
 	}

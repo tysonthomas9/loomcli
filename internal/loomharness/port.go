@@ -16,7 +16,11 @@ type Harness interface {
 	Name() string // "opencode" | "codex" | "claude"
 	Models(ctx context.Context) ([]Model, error)
 	Health(ctx context.Context) (Health, error)
-	Open(ctx context.Context, spec OpenSpec) (NativeRef, error) // idempotent by spec.Key
+	// Open is idempotent by spec.Key. On failure it returns the zero ref if it
+	// left nothing behind, or the ref of a native session it created and
+	// could not remove; the caller records that ref as owned and
+	// purge-pending, then Purges it (retried after a restart, R29).
+	Open(ctx context.Context, spec OpenSpec) (NativeRef, error)
 	Session(ref NativeRef) Session
 	Feed(ctx context.Context) (Feed, error) // live events for all sessions; reconnects itself and emits feed.gap, ends only on ctx or Close
 	// Purge deletes exactly the recorded refs it is given, never more, and

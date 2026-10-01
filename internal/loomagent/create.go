@@ -316,11 +316,60 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 	ref, err := h.Open(ctx, loomharness.OpenSpec{Key: a.AgentID, Launch: launch, Preset: cfg.Open,
 		Dir: deref(a.WorktreePath), Model: cfg.Model, Rules: rules, Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
-		return ref, harnessErr(err)
+		return loomharness.NativeRef{}, s.leftover(ctx, a.AgentID, a.Harness, ref, harnessErr(err))
 	}
 	createCrash("recorded")
-	return ref, s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: a.AgentID, Harness: a.Harness,
-		NativeRoot: ref.Root, NativeID: ref.NativeID})
+	return ref, s.owned(ctx, a.AgentID, a.Harness, ref)
+}
+
+// owned records ref, which Open returned, as a's working session; a
+// purge-pending mark left by an earlier failed Open of it is dropped.
+func (s *Service) owned(ctx context.Context, agentID, harness string, ref loomharness.NativeRef) error {
+	n := loomstore.NativeSession{AgentID: agentID, Harness: harness, NativeRoot: ref.Root, NativeID: ref.NativeID}
+	if err := s.store.RecordNativeSession(ctx, n); err != nil {
+		return err
+	}
+	return s.store.ClearPurgePending(ctx, n)
+}
+
+// leftover handles a failed Open: a non-zero ref it returned is a session it
+// created and could not remove, so it is recorded as owned and
+// purge-pending, then purged (PurgeLeftovers retries it). It returns cause,
+// with any recording or purge error joined.
+func (s *Service) leftover(ctx context.Context, agentID, harness string, ref loomharness.NativeRef, cause error) error {
+	if ref == (loomharness.NativeRef{}) {
+		return cause
+	}
+	n := loomstore.NativeSession{AgentID: agentID, Harness: harness, NativeRoot: ref.Root, NativeID: ref.NativeID}
+	if err := s.store.RecordPurgePending(ctx, n); err != nil {
+		return errors.Join(cause, err)
+	}
+	if err := s.purgeLeftover(ctx, n); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
+}
+
+// purgeLeftover purges one purge-pending session and drops its mark.
+func (s *Service) purgeLeftover(ctx context.Context, n loomstore.NativeSession) error {
+	h, ok := s.harnesses[n.Harness]
+	if !ok {
+		return fmt.Errorf("loomagent: %s is not available to purge %s", n.Harness, n.NativeID)
+	}
+	if err := h.Purge(ctx, []loomharness.NativeRef{{Root: n.NativeRoot, NativeID: n.NativeID}}); err != nil {
+		return err
+	}
+	return s.store.ClearPurgePending(ctx, n)
+}
+
+// PurgeLeftovers retries every purge-pending session; the dispatcher runs it
+// at start-up, so a purge that failed is retried after a restart.
+func (s *Service) PurgeLeftovers(ctx context.Context) error {
+	pending, err := s.store.PurgePending(ctx)
+	for _, n := range pending {
+		err = errors.Join(err, s.purgeLeftover(ctx, n))
+	}
+	return err
 }
 
 // loadConfig decodes a's stored Config. Its saved Rules are kept as saved:
