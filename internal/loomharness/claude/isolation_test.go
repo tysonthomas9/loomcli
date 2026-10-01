@@ -68,19 +68,10 @@ func within(p, root string) bool {
 
 // isolated fails closed unless every path the launch resolves (HOME, the
 // effective Claude config dir, the transcript root and the working dir)
-// resolves, through any symlinks, inside the owned test root or one of the
-// extra owned roots.
-func isolated(cfg Config, spec ProcessSpec, extra ...string) error {
+// resolves, through any symlinks, inside the owned test root.
+func isolated(cfg Config, spec ProcessSpec) error {
 	if ownedRoot == "" {
 		return errors.New("isolation: no owned test root")
-	}
-	roots := []string{ownedRoot}
-	for _, r := range extra {
-		rr, err := resolve(r)
-		if err != nil {
-			return fmt.Errorf("isolation: extra root %q: %w", r, err)
-		}
-		roots = append(roots, rr)
 	}
 	env := NewProcess(cfg, spec).env()
 	home, _ := lookup(env, "HOME")
@@ -100,12 +91,8 @@ func isolated(cfg Config, spec ProcessSpec, extra ...string) error {
 		if err != nil {
 			return fmt.Errorf("isolation: %s %q: %w", name, p, err)
 		}
-		owned := false
-		for _, root := range roots {
-			owned = owned || within(r, root)
-		}
-		if !owned {
-			return fmt.Errorf("isolation: %s %q resolves to %q, outside the owned roots %v", name, p, r, roots)
+		if !within(r, ownedRoot) {
+			return fmt.Errorf("isolation: %s %q resolves to %q, outside the owned root %s", name, p, r, ownedRoot)
 		}
 	}
 	return nil

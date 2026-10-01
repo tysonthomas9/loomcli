@@ -31,7 +31,7 @@ func TestAdapterContract(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	l := ownedLaunch(t)
 	ctx := context.Background()
-	if err := isolated(a.cfg, ProcessSpec{Launch: l, Dir: dir}, l.Root); err != nil {
+	if err := isolated(a.cfg, ProcessSpec{Launch: l, Dir: dir}); err != nil {
 		t.Fatal(err)
 	}
 	ref, err := a.Open(ctx, loomharness.OpenSpec{Key: uuid.NewString(), Launch: l, Dir: dir, Model: "haiku"})

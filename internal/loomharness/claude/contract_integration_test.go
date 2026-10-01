@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -17,9 +18,10 @@ import (
 )
 
 // Real-Claude contract tests: LOOM_REAL_CLAUDE=1 runs them against the
-// user's installed claude with the cheapest model, in a /tmp working
-// directory and the owned config root LOOM_REAL_CLAUDE_CONFIG_DIR (see
-// ownedLaunch), so nothing is written to the user's ~/.claude.
+// user's installed claude with the cheapest model. HOME, the config,
+// project and transcript roots and the working directories all sit in the
+// test binary's owned /tmp root (isolation_test.go); the user's local login
+// reaches the child only as CLAUDE_CODE_OAUTH_TOKEN (see ownedLaunch).
 
 type realRun struct {
 	p      *Process
@@ -58,26 +60,48 @@ func realBin(t *testing.T) string {
 	return bin
 }
 
-// ownedLaunch is a launch on the owned, logged-in config root named by
-// LOOM_REAL_CLAUDE_CONFIG_DIR, which must sit under /tmp. It fails closed
-// when none is configured, so a real run never uses the user's ~/.claude.
-// LOOM_REAL_CLAUDE_OAUTH_TOKEN_FILE optionally names a token file exported
-// as CLAUDE_CODE_OAUTH_TOKEN.
+// ownedLaunch is a launch on a fresh owned config root inside the test
+// binary's owned TMPDIR, never ~/.claude, logged in with the user's existing
+// local Claude login passed only as CLAUDE_CODE_OAUTH_TOKEN.
 func ownedLaunch(t *testing.T) loomharness.Launch {
 	t.Helper()
-	root := os.Getenv("LOOM_REAL_CLAUDE_CONFIG_DIR")
-	if r, err := resolve(root); root == "" || err != nil || !strings.HasPrefix(r, "/private/tmp/") {
-		t.Fatalf("set LOOM_REAL_CLAUDE_CONFIG_DIR to an owned, logged-in Claude config dir under /tmp (got %q, resolved %q); real tests never use ~/.claude", root, r)
+	token := localLoginToken(t)
+	root, err := os.MkdirTemp("", "claude-config-")
+	if err != nil {
+		t.Fatal(err)
 	}
-	l := loomharness.Launch{Root: root, Env: map[string]string{"CLAUDE_CONFIG_DIR": root}}
-	if file := os.Getenv("LOOM_REAL_CLAUDE_OAUTH_TOKEN_FILE"); file != "" {
-		raw, err := os.ReadFile(file) //nolint:gosec // G304: the test's own token file.
-		if err != nil {
-			t.Fatal(err)
-		}
-		l.Env["CLAUDE_CODE_OAUTH_TOKEN"] = strings.TrimSpace(string(raw))
+	return loomharness.Launch{Root: root, Env: map[string]string{"CLAUDE_CONFIG_DIR": root, "CLAUDE_CODE_OAUTH_TOKEN": token}}
+}
+
+// localLoginToken reads, read-only, the access token of the user's existing
+// Claude login from the macOS login keychain item Claude Code stores it in
+// ("Claude Code-credentials"). It never writes the keychain or ~/.claude,
+// never refreshes the token, and never prints, logs or saves its value. It
+// skips with a clear message when the login cannot be read or has expired;
+// there is no fallback to ~/.claude.
+func localLoginToken(t *testing.T) string {
+	t.Helper()
+	u, err := user.Current()
+	if err != nil {
+		t.Skip("real Claude: cannot resolve the account for the local Claude login")
 	}
-	return l
+	out, err := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-a", u.Username, "-w").Output()
+	if err != nil {
+		t.Skip("real Claude: cannot read the local Claude login from the login keychain (run `claude` once to log in); no fallback to ~/.claude")
+	}
+	var c struct {
+		ClaudeAiOauth struct {
+			AccessToken string `json:"accessToken"`
+			ExpiresAt   int64  `json:"expiresAt"` // Unix ms
+		} `json:"claudeAiOauth"`
+	}
+	if json.Unmarshal(out, &c) != nil || c.ClaudeAiOauth.AccessToken == "" {
+		t.Skip("real Claude: the local Claude login has no OAuth access token")
+	}
+	if time.UnixMilli(c.ClaudeAiOauth.ExpiresAt).Before(time.Now().Add(15 * time.Minute)) {
+		t.Skip("real Claude: the local Claude login token expires within 15 minutes; run `claude` once to refresh it (tests never refresh or write it)")
+	}
+	return c.ClaudeAiOauth.AccessToken
 }
 
 func startReal(t *testing.T, args ...string) *realRun {
@@ -92,7 +116,7 @@ func startReal(t *testing.T, args ...string) *realRun {
 	r := &realRun{frames: make(chan Frame, 100000), dir: dir, id: SessionID(uuid.NewString())}
 	cfg := Config{Bin: bin, Env: hostEnv(), Args: args, OnFrame: func(f Frame) { r.frames <- f }}
 	spec := ProcessSpec{SessionID: r.id, Launch: l, Dir: dir, Model: "haiku"}
-	if err := isolated(cfg, spec, l.Root); err != nil {
+	if err := isolated(cfg, spec); err != nil {
 		t.Fatal(err)
 	}
 	r.p = NewProcess(cfg, spec)
@@ -253,10 +277,8 @@ func TestClaudeNestedLaunchStripsGitHubTokens(t *testing.T) {
 				t.Errorf("launch %d: %s reached the nested tool", i, k)
 			}
 		}
-		if v, ok := lookup(os.Environ(), "CLAUDE_CODE_OAUTH_TOKEN"); ok {
-			if got, _ := lookup(spawned, "CLAUDE_CODE_OAUTH_TOKEN"); got != v {
-				t.Errorf("launch %d: Claude's own auth token was dropped", i)
-			}
+		if got, _ := lookup(spawned, "CLAUDE_CODE_OAUTH_TOKEN"); got == "" || got != r.p.spec.Launch.Env["CLAUDE_CODE_OAUTH_TOKEN"] {
+			t.Errorf("launch %d: Claude's own auth token was dropped", i)
 		}
 	}
 	if os.Getenv("GH_TOKEN") != "gh-secret" || os.Getenv("GITHUB_TOKEN") != "github-secret" {
