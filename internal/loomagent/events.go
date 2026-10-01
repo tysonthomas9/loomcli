@@ -62,15 +62,19 @@ func (s *Service) RunFeed(ctx context.Context, harness string) {
 func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Harness) (read bool, err error) {
 	f, err := h.Feed(ctx)
 	if err != nil {
-		return false, err
+		return false, errors.Join(err, s.harnessAttention(ctx, harness, true))
 	}
 	defer func() { _ = f.Close() }()
 	if err := s.backfill(ctx, harness); err != nil { // after subscribing, so nothing falls between
 		return false, err
 	}
+	if err := s.harnessAttention(ctx, harness, false); err != nil {
+		return false, err
+	}
 	for e := range f.Events() {
 		ok := false
 		if e.Type == loomharness.EventFeedGap {
+			s.events.Notify(loomstore.Event{Kind: KindFeedGap, Payload: json.RawMessage(strconv.Quote(harness))})
 			err = s.backfill(ctx, harness)
 		} else {
 			ok, err = s.ingest(ctx, harness, e)
@@ -95,6 +99,7 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 			continue
 		}
 		sess := s.harnesses[harness].Session(loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID})
+		s.dropAsks(a.AgentID, true) // the history rebuilds them; loseAsks reports the rest
 		for after := ""; ; {
 			page, err := sess.Messages(ctx, after, 100)
 			if errors.Is(err, loomharness.ErrSessionNotFound) {
@@ -104,6 +109,9 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 				return err
 			}
 			for _, e := range page.Events {
+				if e.Type == loomharness.EventDelta {
+					continue // live only: a subscriber had it, or missed it with the gap
+				}
 				if _, err := s.ingest(ctx, harness, e); err != nil {
 					return err
 				}
@@ -112,8 +120,48 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 				break
 			}
 		}
+		if err := s.loseAsks(ctx, a.AgentID); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// harnessAttention raises Attention harness_unavailable on each live agent
+// of harness (raise), or clears it and retries their waiting messages. Only
+// that harness's agents are touched; one already showing another Attention
+// keeps it.
+func (s *Service) harnessAttention(ctx context.Context, harness string, raise bool) error {
+	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Harness: harness})
+	if err != nil {
+		return err
+	}
+	for _, a := range agents {
+		if raise == (a.AttentionReason == nil) && (raise || deref(a.AttentionReason) == AttentionHarnessUnavailable) {
+			err = errors.Join(err, s.flipAttention(ctx, a.AgentID, raise))
+		}
+	}
+	return err
+}
+
+func (s *Service) flipAttention(ctx context.Context, agentID string, raise bool) error {
+	defer s.lock(agentID)()
+	a, err := s.live(ctx, agentID)
+	if err != nil || (a.AttentionReason == nil) != raise {
+		return err
+	}
+	if raise {
+		_, err = s.raiseAttention(ctx, a, AttentionHarnessUnavailable)
+		return err
+	}
+	if deref(a.AttentionReason) != AttentionHarnessUnavailable {
+		return nil
+	}
+	if a, err = s.clearAttention(ctx, a); err != nil {
+		return err
+	}
+	_, err = s.wake(ctx, a)
+	return err
 }
 
 // ingest saves one native event of an owned session, then applies it. A
@@ -137,6 +185,8 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 		if _, err := s.events.Append(ctx, nativeRow(id, kind, e)); err != nil {
 			return false, err
 		}
+	} else if e.Type == loomharness.EventDelta {
+		s.events.Notify(nativeRow(id, KindDelta, e))
 	}
 	return true, s.HarnessEvent(ctx, id, e)
 }

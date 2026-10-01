@@ -111,6 +111,9 @@ type Service struct {
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+	asks  map[string]map[string]Ask // open asks by agent and ask ID, under mu
+	// rebuilding marks agents whose asks a backfill is replaying, under mu
+	rebuilding map[string]bool
 }
 
 // New returns a Service for cfg.
@@ -120,7 +123,7 @@ func New(cfg ServiceConfig) *Service {
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
 		workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey,
-		locks:    map[string]*sync.Mutex{}}
+		locks:    map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, rebuilding: map[string]bool{}}
 	if s.presets == nil {
 		s.presets = BuiltinPresets{}
 	}

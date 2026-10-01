@@ -20,10 +20,11 @@ import (
 
 // Step is one scripted step of a turn. Set exactly one of Delta, Ask or Crash.
 type Step struct {
-	Delta string // emits a delta on the turn's message item
-	Ask   string // opens an ask with this ID; the turn waits for Reply
-	Crash bool   // the harness process dies here, mid-turn
-	Gap   bool   // the live Feed misses this step's event (it gets feed.gap); Messages still has it
+	Delta    string // emits a delta on the turn's message item
+	Ask      string // opens an ask with this ID; the turn waits for Reply
+	Question bool   // the Ask is a question, not an approval
+	Crash    bool   // the harness process dies here, mid-turn
+	Gap      bool   // the live Feed misses this step's event (it gets feed.gap); Messages still has it
 }
 
 // Turn is one scripted turn.
@@ -265,7 +266,11 @@ func (h *Harness) run(s *session) {
 			return
 		case st.Ask != "":
 			s.ask = st.Ask
-			h.emit(s, loomharness.Event{Type: loomharness.EventAskOpened, AskID: st.Ask}, !st.Gap)
+			kind := "approval"
+			if st.Question {
+				kind = "question"
+			}
+			h.emit(s, loomharness.Event{Type: loomharness.EventAskOpened, AskID: st.Ask, ItemKind: kind}, !st.Gap)
 			return
 		default:
 			h.emit(s, loomharness.Event{Type: loomharness.EventDelta, ItemID: s.turnID + "/msg", ItemKind: "message", Text: st.Delta}, !st.Gap)

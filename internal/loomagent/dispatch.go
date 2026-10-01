@@ -206,6 +206,8 @@ func (s *Service) HarnessEvent(ctx context.Context, agentID string, e loomharnes
 		return s.turnStarted(ctx, a, e)
 	case loomharness.EventTurnCompleted:
 		return s.turnCompleted(ctx, a, e)
+	case loomharness.EventAskOpened, loomharness.EventAskResolved, loomharness.EventAskLost:
+		return s.askEvent(ctx, a, e)
 	}
 	return nil
 }
@@ -254,6 +256,9 @@ func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomha
 				return err
 			}
 		}
+	}
+	if err := s.endTurnAsks(ctx, a, e.TurnID); err != nil {
+		return err
 	}
 	more := slices.ContainsFunc(slots, func(sl loomstore.Slot) bool { return sl.State == loomstore.SlotWaiting })
 	to := a.StateOf()

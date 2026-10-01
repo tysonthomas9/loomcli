@@ -18,6 +18,7 @@ type AgentInfo struct {
 	loomstore.Agent
 	Compute         string           // always "local" in Phase 1
 	WaitingMessages []WaitingMessage // Get only
+	OpenAsks        []Ask            // Get only
 }
 
 func info(a loomstore.Agent) AgentInfo {
@@ -36,6 +37,7 @@ func (s *Service) Get(ctx context.Context, agentID string) (AgentInfo, error) {
 		return AgentInfo{}, err
 	}
 	out := info(a)
+	out.OpenAsks = s.openAsks(agentID)
 	for _, sl := range slots {
 		if sl.State == loomstore.SlotWaiting {
 			out.WaitingMessages = append(out.WaitingMessages, WaitingMessage{Sender: sl.Sender, Text: sl.Body, Since: deref(sl.QueuedAt)})

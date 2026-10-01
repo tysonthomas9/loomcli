@@ -97,6 +97,7 @@ type Input struct {
 // Reply answers an ask.
 type Reply struct {
 	Allow  bool
+	Always bool // with Allow: for the rest of the session; an adapter that cannot narrows it to once
 	Answer string
 }
 
@@ -168,7 +169,7 @@ type Event struct {
 	Session    NativeRef
 	TurnID     string
 	ItemID     string
-	ItemKind   string // message | reasoning | tool
+	ItemKind   string // message | reasoning | tool; for ask.opened: approval (or "") | question
 	Seq        int64
 	Time       time.Time
 	InputKey   string // the input's key, for message.delivered and the turn.started it began

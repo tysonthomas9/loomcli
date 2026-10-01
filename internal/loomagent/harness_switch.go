@@ -128,6 +128,7 @@ func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 			return a, err
 		}
 	}
+	s.dropAsks(a.AgentID, false) // reported lost above
 	to := a.StateOf()
 	to.State, to.WaitingOn, to.RunningTurn = StateIdle, nil, nil
 	return s.setState(ctx, a, to)
