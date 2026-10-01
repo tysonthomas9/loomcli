@@ -96,7 +96,7 @@ func TestEnsureThroughWorkspacePortUsesInjectedRunner(t *testing.T) {
 	if _, err := New(tmp, TargetLocal, nil); err == nil {
 		t.Fatal("want error for nil runner")
 	}
-	if _, err := ws.Status(context.Background(), loomagent.WorkspaceSpec{}); !errors.Is(err, ErrNotImplemented) {
-		t.Fatalf("Status err = %v, want ErrNotImplemented", err)
+	if _, err := ws.Publish(context.Background(), loomagent.PublishRequest{}); !errors.Is(err, ErrNotImplemented) {
+		t.Fatalf("Publish err = %v, want ErrNotImplemented", err)
 	}
 }

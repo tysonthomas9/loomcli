@@ -85,8 +85,8 @@ func (w *Worktrees) Path(s Spec) (string, error) {
 // belongs to s. A removed worktree is remade from its kept branch. It is
 // idempotent by s.Key.
 func (w *Worktrees) Ensure(ctx context.Context, s Spec) (Worktree, error) {
-	if s.Detached == (s.Branch != "") {
-		return Worktree{}, errors.New("agentworktree: set exactly one of Branch or Detached")
+	if err := checkSpec(s); err != nil {
+		return Worktree{}, err
 	}
 	if s.Detached && s.BaseRef == "" {
 		return Worktree{}, errors.New("agentworktree: detached worktree needs BaseRef")
@@ -95,10 +95,7 @@ func (w *Worktrees) Ensure(ctx context.Context, s Spec) (Worktree, error) {
 	if err != nil {
 		return Worktree{}, err
 	}
-	lockAny, _ := w.locks.LoadOrStore(path, &sync.Mutex{})
-	lock := lockAny.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	defer w.lock(path)()
 
 	if _, err := os.Lstat(path); err == nil {
 		return w.checkOwned(ctx, s, path)
@@ -130,49 +127,72 @@ func (w *Worktrees) Ensure(ctx context.Context, s Spec) (Worktree, error) {
 // checkOwned verifies that path is a worktree of s.Repo on s.Branch, or, when
 // detached, clean at s.BaseRef's commit.
 func (w *Worktrees) checkOwned(ctx context.Context, s Spec, path string) (Worktree, error) {
-	refuse := func(format string, args ...any) (Worktree, error) {
-		return Worktree{}, fmt.Errorf("%w: %s: %s", ErrNotOwned, path, fmt.Sprintf(format, args...))
+	wt, err := w.owned(ctx, s, path)
+	if err != nil || !s.Detached {
+		return wt, err
 	}
+	sha, err := w.git.Run(ctx, s.Repo, "rev-parse", "--verify", s.BaseRef+"^{commit}")
+	if err != nil {
+		return Worktree{}, fmt.Errorf("agentworktree: resolve %q: %w", s.BaseRef, err)
+	}
+	if wt.HEAD != sha {
+		return Worktree{}, notOwned(path, "at %s, want %s", wt.HEAD, sha)
+	}
+	if dirty, err := w.git.Run(ctx, path, "status", "--porcelain"); err != nil || dirty != "" {
+		return Worktree{}, notOwned(path, "reviewer worktree has local changes")
+	}
+	return wt, nil
+}
+
+// owned verifies that path is a worktree root of s.Repo on s.Branch, or
+// detached when s is. It does not look at the commit or local changes.
+func (w *Worktrees) owned(ctx context.Context, s Spec, path string) (Worktree, error) {
 	top, err := w.git.Run(ctx, path, "rev-parse", "--show-toplevel")
 	if err != nil || !samePath(top, path) {
-		return refuse("not a git worktree root")
+		return Worktree{}, notOwned(path, "not a git worktree root")
 	}
 	have, err := w.git.Run(ctx, path, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
-		return refuse("read git dir: %v", err)
+		return Worktree{}, notOwned(path, "read git dir: %v", err)
 	}
 	want, err := w.git.Run(ctx, s.Repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
 		return Worktree{}, fmt.Errorf("agentworktree: read repo git dir: %w", err)
 	}
 	if !samePath(have, want) {
-		return refuse("belongs to repo %s, not %s", have, want)
+		return Worktree{}, notOwned(path, "belongs to repo %s, not %s", have, want)
 	}
 	head, err := w.git.Run(ctx, path, "rev-parse", "HEAD")
 	if err != nil {
-		return refuse("read HEAD: %v", err)
+		return Worktree{}, notOwned(path, "read HEAD: %v", err)
 	}
 	branch, _ := w.git.Run(ctx, path, "symbolic-ref", "--short", "-q", "HEAD")
-	if !s.Detached {
-		if branch != s.Branch {
-			return refuse("on branch %q, want %q", branch, s.Branch)
-		}
-		return Worktree{Path: path, Branch: branch, HEAD: head}, nil
+	if s.Detached && branch != "" {
+		return Worktree{}, notOwned(path, "on branch %q, want detached", branch)
 	}
-	if branch != "" {
-		return refuse("on branch %q, want detached", branch)
+	if !s.Detached && branch != s.Branch {
+		return Worktree{}, notOwned(path, "on branch %q, want %q", branch, s.Branch)
 	}
-	sha, err := w.git.Run(ctx, s.Repo, "rev-parse", "--verify", s.BaseRef+"^{commit}")
-	if err != nil {
-		return Worktree{}, fmt.Errorf("agentworktree: resolve %q: %w", s.BaseRef, err)
+	return Worktree{Path: path, Branch: branch, HEAD: head}, nil
+}
+
+func checkSpec(s Spec) error {
+	if s.Detached == (s.Branch != "") {
+		return errors.New("agentworktree: set exactly one of Branch or Detached")
 	}
-	if head != sha {
-		return refuse("at %s, want %s", head, sha)
-	}
-	if dirty, err := w.git.Run(ctx, path, "status", "--porcelain"); err != nil || dirty != "" {
-		return refuse("reviewer worktree has local changes")
-	}
-	return Worktree{Path: path, HEAD: head}, nil
+	return nil
+}
+
+func notOwned(path, format string, args ...any) error {
+	return fmt.Errorf("%w: %s: %s", ErrNotOwned, path, fmt.Sprintf(format, args...))
+}
+
+// lock serializes work on one worktree path and returns the unlock.
+func (w *Worktrees) lock(path string) func() {
+	l, _ := w.locks.LoadOrStore(path, &sync.Mutex{})
+	m := l.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
 }
 
 func samePath(a, b string) bool {
