@@ -38,7 +38,7 @@ func (s *Service) Withdraw(ctx context.Context, req WithdrawRequest) (WithdrawRe
 		return WithdrawResult{}, err
 	}
 	if res == loomstore.Withdrawn {
-		if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWithdrawn, Reason: sender, Time: time.Now()}, true); err != nil {
+		if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWithdrawn, Reason: sender, Time: time.Now()}); err != nil {
 			return WithdrawResult{}, err
 		}
 	}

@@ -547,11 +547,6 @@ func hasPublishDenies(rules []loomharness.PermissionRule) bool {
 	return len(rules) >= 2 && slices.Equal(rules[len(rules)-2:], publishDenies)
 }
 
-func isCode(err error, c Code) bool {
-	var e *Error
-	return errors.As(err, &e) && e.Code == c
-}
-
 // leadWithDenies serves a lead preset that names the gh and git push denies
 // itself, exactly as the bridge would.
 type leadWithDenies struct{ BuiltinPresets }

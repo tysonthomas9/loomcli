@@ -20,6 +20,7 @@ const (
 // Event is one service event. It is saved in agent_events before the Bus
 // publishes it (emit); the Bus is delivery only (§4.11, §5.2).
 type Event struct {
+	EventID string    `json:"-"` // the saved row's EventID, set by emit
 	AgentID string    `json:"agentId"`
 	Type    string    `json:"type"`
 	Time    time.Time `json:"time"`

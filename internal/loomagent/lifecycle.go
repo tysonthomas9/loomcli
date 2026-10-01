@@ -81,7 +81,7 @@ func (s *Service) finishArchive(ctx context.Context, a loomstore.Agent, reason s
 		if a, err = s.setState(ctx, a, loomstore.AgentState{State: StateArchived, Outcome: a.Outcome, Attempt: a.Attempt}); err != nil {
 			return err
 		}
-		if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventArchived, Reason: reason, Time: time.Now()}, true); err != nil {
+		if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventArchived, Reason: reason, Time: time.Now()}); err != nil {
 			return err
 		}
 	}
@@ -169,8 +169,7 @@ func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
 	if err := s.publishChange(ctx, before, a); err != nil {
 		return err
 	}
-	s.Bus.publish(Event{AgentID: a.AgentID, Type: EventDeleted, Time: now}) // its history is purged: not saved
-	return nil
+	return s.emit(ctx, Event{AgentID: a.AgentID, Type: EventDeleted, Time: now})
 }
 
 // deleteChildren refuses with children_live while a child is not settled,
@@ -247,7 +246,7 @@ func (s *Service) stop(ctx context.Context, a loomstore.Agent) (loomstore.Agent,
 			return a, err
 		}
 		if res == loomstore.Withdrawn {
-			if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWithdrawn, Reason: sl.Sender, Time: time.Now()}, true); err != nil {
+			if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWithdrawn, Reason: sl.Sender, Time: time.Now()}); err != nil {
 				return a, err
 			}
 		}

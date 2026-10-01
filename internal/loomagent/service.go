@@ -239,7 +239,7 @@ func (s *Service) publishChange(ctx context.Context, before, after loomstore.Age
 		out = append(out, c)
 	}
 	for _, c := range out {
-		if err := s.emit(ctx, c, after.DeletedAt == nil); err != nil {
+		if err := s.emit(ctx, c); err != nil {
 			return err
 		}
 	}

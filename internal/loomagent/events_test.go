@@ -3,9 +3,12 @@ package loomagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
@@ -70,7 +73,7 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 			mu.Lock()
 			seen[ev.Type]++
 			saved := rows(t, s, ev.AgentID, 0)
-			if n := len(kinds(saved, ev.Type)); n < seen[ev.Type] {
+			if !slices.ContainsFunc(saved, func(r loomstore.Event) bool { return r.EventID == ev.EventID && r.Kind == ev.Type }) {
 				problems = append(problems, ev.Type+" published before it was saved")
 			}
 			if ev.Type == EventIdle && !slices.ContainsFunc(kinds(saved, EventTurnCompleted), func(r loomstore.Event) bool { return r.TurnID == ev.TurnID }) {
@@ -89,7 +92,27 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 1 })
+	idleRows := len(rows(t, s, a.AgentID, 0))
+	if err := s.backfill(ctx, "opencode"); err != nil { // a repeat of the whole native history
+		t.Fatal(err)
+	}
+	if again := len(rows(t, s, a.AgentID, 0)); again != idleRows {
+		t.Fatalf("a repeat backfill added %d rows", again-idleRows)
+	}
 	if err := s.Archive(ctx, ArchiveRequest{AgentID: a.AgentID, Reason: ArchiveDone}); err != nil {
+		t.Fatal(err)
+	}
+	n := len(rows(t, s, a.AgentID, 0))
+	same := Event{AgentID: a.AgentID, Type: EventWaiting, Reason: "user:u", Time: time.Unix(1, 0)}
+	for range 2 { // the same event saved again is one row
+		if err := s.emit(ctx, same); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(rows(t, s, a.AgentID, 0)); got != n+1 {
+		t.Fatalf("one event emitted twice saved %d rows", got-n)
+	}
+	if err := s.Delete(ctx, DeleteRequest{AgentID: a.AgentID}); err != nil {
 		t.Fatal(err)
 	}
 	stop()
@@ -98,12 +121,13 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 	if len(problems) > 0 {
 		t.Fatal(problems)
 	}
-	for _, k := range []string{EventStateChanged, EventIdle, EventSettled, EventWaiting} {
+	for _, k := range []string{EventStateChanged, EventIdle, EventSettled, EventWaiting, EventDeleted} {
 		if seen[k] == 0 {
 			t.Fatalf("no %s published", k)
 		}
 	}
-	saved := rows(t, s, a.AgentID, 0)
+	all := rows(t, s, a.AgentID, 0)
+	saved := all[:len(all)-len(kinds(all, EventDeleted))] // written after the purge
 	tc := kinds(saved, EventTurnCompleted)
 	if len(tc) != 1 || len(kinds(saved, EventIdle)) != 1 || tc[0].TurnID == "" {
 		t.Fatalf("turn_completed %v idle %d; want one each", tc, len(kinds(saved, EventIdle)))
@@ -114,10 +138,6 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 	}
 	if saved[0].Kind != EventStateChanged || saved[0].TurnID != "" {
 		t.Fatalf("first row %s turn %q; want the pre-turn state change", saved[0].Kind, saved[0].TurnID)
-	}
-	s.backfill(ctx, "opencode") // a repeat of the whole native history
-	if again := rows(t, s, a.AgentID, 0); len(again) != len(saved) {
-		t.Fatalf("a repeat backfill added %d rows", len(again)-len(saved))
 	}
 }
 
@@ -179,8 +199,85 @@ func TestOpenCodeWatchReplayAfterRestart(t *testing.T) {
 		t.Fatal("the gap's ask.opened or the down-time ask.resolved is missing")
 	}
 	before := len(rows(t, s2, a.AgentID, 0))
-	s2.backfill(ctx, "opencode")
+	_ = s2.backfill(ctx, "opencode")
 	if after := len(rows(t, s2, a.AgentID, 0)); after != before {
 		t.Fatalf("a repeat backfill added %d rows", after-before)
+	}
+}
+
+// TestOpenCodeEventsNativeIDs: a row's EventID uses only ids the live feed
+// and a catch-up read share: an item seen live (with its TurnID) and in
+// history (without one) is one row; two usage events of one turn are two
+// rows, whether they carry their step's ItemID or only a native Seq.
+func TestOpenCodeEventsNativeIDs(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	a, ref := newLead(t, e, s, "alpha")
+	before := rows(t, s, a.AgentID, 0)
+	n := before[len(before)-1].Seq
+	for _, ev := range []loomharness.Event{
+		{Type: loomharness.EventItemCompleted, Session: ref, TurnID: "T1", ItemID: "i1", Text: "done"}, // live
+		{Type: loomharness.EventItemCompleted, Session: ref, ItemID: "i1", Text: "done"},               // history
+		{Type: loomharness.EventUsage, Session: ref, TurnID: "T1", ItemID: "step1"},
+		{Type: loomharness.EventUsage, Session: ref, TurnID: "T1", ItemID: "step2"},
+		{Type: loomharness.EventUsage, Session: ref, TurnID: "T1", Seq: 7},
+		{Type: loomharness.EventUsage, Session: ref, TurnID: "T1", Seq: 8},
+	} {
+		if err := s.ingest(ctx, "opencode", ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := rows(t, s, a.AgentID, n)
+	if len(kinds(got, "item.completed")) != 1 || len(kinds(got, "usage")) != 4 {
+		t.Fatalf("rows %v; want one item and four usage", ids(got))
+	}
+}
+
+// flaky fails a session's history read once, after the history holds an
+// ask.opened, as a backfill on feed.gap would meet it.
+type flaky struct {
+	loomharness.Harness
+	fails *atomic.Int32
+}
+
+func (f flaky) Session(ref loomharness.NativeRef) loomharness.Session {
+	return flakySession{f.Harness.Session(ref), f.fails}
+}
+
+type flakySession struct {
+	loomharness.Session
+	fails *atomic.Int32
+}
+
+func (f flakySession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
+	p, err := f.Session.Messages(ctx, after, limit)
+	asked := slices.ContainsFunc(p.Events, func(e loomharness.Event) bool { return e.Type == loomharness.EventAskOpened })
+	if err == nil && asked && f.fails.Add(-1) >= 0 {
+		return loomharness.MessagePage{}, errors.New("history read failed")
+	}
+	return p, err
+}
+
+// TestOpenCodeEventsBackfillRetriesFailedRead: a backfill that fails on
+// feed.gap is not skipped: the feed is reopened and the next backfill saves
+// the missed event.
+func TestOpenCodeEventsBackfillRetriesFailedRead(t *testing.T) {
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	var fails atomic.Int32
+	fails.Store(1)
+	s.harnesses["opencode"] = flaky{e.h, &fails}
+	stop := startFeed(s, e)
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "t1", Gap: true}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
+	eventually(t, "the missed ask saved after the failed read", func() bool {
+		return len(kinds(rows(t, s, a.AgentID, 0), "ask.opened")) == 1
+	})
+	if fails.Load() >= 0 {
+		t.Fatal("the history read never failed")
 	}
 }

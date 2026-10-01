@@ -95,7 +95,7 @@ func (s *Service) accepted(ctx context.Context, a loomstore.Agent, rec loomstore
 			return SendResult{}, err
 		}
 	}
-	if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWaiting, Reason: sender, Time: time.Now()}, true); err != nil {
+	if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWaiting, Reason: sender, Time: time.Now()}); err != nil {
 		return SendResult{}, err
 	}
 	res, err := decodeResult(rec)
