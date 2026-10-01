@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/types";
 import { RevisionsSection } from "../RevisionsSection";
 
 const { applyRevision, getTaskRevisions, submitRevisionVerdict } = vi.hoisted(
@@ -57,6 +58,27 @@ describe("RevisionsSection", () => {
     expect(applyRevision).toHaveBeenCalledWith("W", revision, "lead-a");
     expect(
       screen.queryByText("Approved: Apply to create the lead working area"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the missing-lead error and no Apply when the lead agent is absent", async () => {
+    submitRevisionVerdict.mockResolvedValue(
+      "approved_waiting_for_working_area",
+    );
+    applyRevision.mockRejectedValue(
+      new ApiError(404, "Not Found", {
+        error:
+          'lead agent "lead-a" does not exist: create the lead agent first',
+      }),
+    );
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apply" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "create the lead agent first",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Apply" }),
     ).not.toBeInTheDocument();
   });
 

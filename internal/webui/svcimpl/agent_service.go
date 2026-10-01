@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
@@ -159,7 +160,33 @@ func (s *agentServiceImpl) GitApply(ctx context.Context, request ops.ApplyRevisi
 	if request.RequestID == "" {
 		request.RequestID = uuid.NewString()
 	}
+	result, err := s.gitOps.ApplyRevision(ctx, request)
+	var gitErr *loomgit.Error
+	if err == nil || s.store == nil || !errors.As(err, &gitErr) || gitErr.Kind != loomgit.AttentionRequired {
+		return result, err
+	}
+	// The lead has no usable working area: open it the way lead creation does,
+	// but only for a lead agent that already exists.
+	lead := request.Lead
+	if lead == "" {
+		lead = "lead"
+	}
+	agent, getErr := s.store.Agents().Get(ctx, request.Workspace, lead)
+	if errors.Is(getErr, domain.ErrNotFound) {
+		return nil, service.ErrNotFound(fmt.Sprintf("lead agent %q does not exist: create the lead agent first", lead))
+	}
+	if getErr != nil {
+		return nil, classifyStoreError("load lead agent", getErr)
+	}
+	if ensureErr := ensureLeadWorkingArea(ctx, s, *agent); ensureErr != nil {
+		return nil, ensureErr
+	}
 	return s.gitOps.ApplyRevision(ctx, request)
+}
+
+// ensureLeadWorkingArea is replaced in tests.
+var ensureLeadWorkingArea = func(ctx context.Context, s *agentServiceImpl, agent domain.Agent) error {
+	return s.ensureLocalAgentWorktrees(ctx, agent)
 }
 
 func (s *agentServiceImpl) GitPushAll(_ context.Context, wsID string) (*service.GitPushAllResult, error) {

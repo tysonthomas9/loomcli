@@ -5,6 +5,7 @@ import {
   submitRevisionVerdict,
   type ReviewRevision,
 } from "@/hooks/api";
+import { ApiError } from "@/types";
 import styles from "./RevisionsSection.module.css";
 
 export function RevisionsSection({
@@ -84,6 +85,9 @@ export function RevisionsSection({
       await applyRevision(workspaceId, revision, lead);
       setFollow((prev) => ({ ...prev, [key]: "applied" }));
     } catch (err) {
+      // 404: the lead agent does not exist, so Apply cannot open its area.
+      if (err instanceof ApiError && err.status === 404)
+        setFollow((prev) => ({ ...prev, [key]: "" }));
       setError(err instanceof Error ? err.message : "Could not apply revision");
     } finally {
       setBusy("");
