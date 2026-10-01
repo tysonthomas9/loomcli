@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -402,9 +403,9 @@ func TestProbePartialBackfillKeepsOpenAsk(t *testing.T) {
 			w.msgErr = errors.New("page 2 failed")
 		} else {
 			w.page2 = func() (loomharness.MessagePage, error) {
-				cancel() // the store write of page 2's event fails
 				return loomharness.MessagePage{Events: []loomharness.Event{item("new2")}}, nil
 			}
+			failInsert(t, e, ":new2") // the batch's third write fails, after new1 and the resolve
 		}
 		s.harnesses["opencode"] = w
 		sub, err := s.Subscribe(context.Background(), SubscribeRequest{AgentIDs: []string{a.AgentID}})
@@ -412,8 +413,9 @@ func TestProbePartialBackfillKeepsOpenAsk(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := len(rows(t, s, a.AgentID, 0))
-		if err := s.replay(ctx, "opencode", s.get(t, a.AgentID)); err == nil {
-			t.Fatalf("%s: the replay succeeded", fail)
+		if err := s.replay(ctx, "opencode", s.get(t, a.AgentID)); err == nil ||
+			(fail == "write") != strings.Contains(err.Error(), "injected write failure") {
+			t.Fatalf("%s: replay = %v", fail, err)
 		}
 		cancel()
 		if n := len(rows(t, s, a.AgentID, 0)); n != before {
@@ -564,10 +566,8 @@ func TestReplayRetryConverges(t *testing.T) {
 		case "read", "read+restart":
 			w.msgErr = errors.New("page 2 failed")
 		case "write":
-			w.page2 = func() (loomharness.MessagePage, error) {
-				cancel()
-				return loomharness.MessagePage{Events: page2}, nil
-			}
+			w = good
+			failInsert(t, e, ":new2") // dropped before the retry
 		case "crash+restart":
 			w = good
 			appendAllCrash = func() { panic("crash") }
@@ -582,6 +582,9 @@ func TestReplayRetryConverges(t *testing.T) {
 				}
 			}()
 			appendAllCrash = func() {}
+			if mode == "write" {
+				failInsert(t, e, "")
+			}
 			if n := len(rows(t, s, a.AgentID, 0)) - before; mode != "crash+restart" && n != 0 {
 				t.Fatalf("%s: the failed replay saved %d rows", mode, n)
 			}
@@ -614,7 +617,8 @@ func TestReplayRetryConverges(t *testing.T) {
 }
 
 // TestReplayReadHoldsNoLock: while alpha's history read is blocked, another
-// agent's events are still saved and published.
+// agent's events are still saved and published, and a direct store write
+// for it succeeds promptly: the read holds no lock and no transaction.
 func TestReplayReadHoldsNoLock(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -643,6 +647,12 @@ func TestReplayReadHoldsNoLock(t *testing.T) {
 	}
 	if got := recv(t, sub, 1); got[0].EventID != "n1" {
 		t.Fatalf("published %s; want n1", got[0].EventID)
+	}
+	direct, cancel := context.WithTimeout(ctx, 2*time.Second) // under busy_timeout, so a held write lock fails it
+	defer cancel()
+	if _, err := s.store.AppendEvent(direct, loomstore.Event{AgentID: beta.AgentID, EventID: "n2", Kind: "note",
+		Payload: json.RawMessage(`{}`)}); err != nil {
+		t.Fatalf("beta's direct store write during alpha's history read: %v", err)
 	}
 	close(block)
 	if err := <-done; err != nil {
@@ -708,4 +718,24 @@ func TestReplayOverCapFailsClosed(t *testing.T) {
 	if ag := s.get(t, a.AgentID); ag.AttentionReason != nil || len(askIDs(t, s, a.AgentID)) != 0 {
 		t.Fatalf("after a replay with room: Attention %v, asks %v; want cleared, a1 resolved", ag.AttentionReason, askIDs(t, s, a.AgentID))
 	}
+}
+
+// failInsert makes e's store abort the insert of any event whose EventID
+// ends in suffix, as a failed write; "" removes that. It returns the undo.
+func failInsert(t *testing.T, e *createEnv, suffix string) func() {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+e.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	stmt := `DROP TRIGGER IF EXISTS fail_insert`
+	if suffix != "" {
+		stmt = `CREATE TRIGGER fail_insert BEFORE INSERT ON agent_events WHEN NEW.event_id LIKE '%` + suffix +
+			`' BEGIN SELECT RAISE(ABORT, 'injected write failure'); END`
+	}
+	if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+		t.Fatal(err)
+	}
+	return func() { failInsert(t, e, "") }
 }

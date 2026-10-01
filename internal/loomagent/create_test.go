@@ -34,19 +34,21 @@ func (o *openRec) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharn
 
 // createEnv is one store and one harness that outlive service restarts.
 type createEnv struct {
-	st *loomstore.Store
-	h  *openRec
-	ws *fakeWorkspace
+	st   *loomstore.Store
+	path string // the store's file
+	h    *openRec
+	ws   *fakeWorkspace
 }
 
 func newCreateEnv(t *testing.T) *createEnv {
 	t.Helper()
-	st, err := loomstore.Open(context.Background(), filepath.Join(t.TempDir(), "loom.db"))
+	path := filepath.Join(t.TempDir(), "loom.db")
+	st, err := loomstore.Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return &createEnv{st: st, h: &openRec{Harness: fake.New()}, ws: &fakeWorkspace{}}
+	return &createEnv{st: st, path: path, h: &openRec{Harness: fake.New()}, ws: &fakeWorkspace{}}
 }
 
 // service starts a service on e, as after a loom serve (re)start.
