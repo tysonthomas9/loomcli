@@ -18,7 +18,7 @@ import (
 // switches on the real claude.
 func TestAdapterContract(t *testing.T) {
 	bin := realBin(t)
-	a := New(Config{Bin: bin, Env: hostEnv()})
+	a := New(Config{Bin: bin, Env: hostEnv(), Args: noTools})
 	feed, err := a.Feed(context.Background())
 	if err != nil {
 		t.Fatal(err)

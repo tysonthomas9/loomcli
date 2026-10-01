@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -118,7 +117,12 @@ func authAccepted(t *testing.T, p *Process) {
 	}
 }
 
-func startReal(t *testing.T, args ...string) *realRun {
+// noTools is passed to every real launch: the child carries the user's login
+// token, so it gets no built-in tools (no shell that could read the token)
+// and no MCP servers.
+var noTools = []string{"--tools", "", "--strict-mcp-config"}
+
+func startReal(t *testing.T) *realRun {
 	t.Helper()
 	bin := realBin(t)
 	dir, err := os.MkdirTemp("", "loom-claude-contract-")
@@ -128,7 +132,7 @@ func startReal(t *testing.T, args ...string) *realRun {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	l := ownedLaunch(t)
 	r := &realRun{frames: make(chan Frame, 100000), dir: dir, id: SessionID(uuid.NewString())}
-	cfg := Config{Bin: bin, Env: hostEnv(), Args: args, OnFrame: func(f Frame) { r.frames <- f }}
+	cfg := Config{Bin: bin, Env: hostEnv(), Args: noTools, OnFrame: func(f Frame) { r.frames <- f }}
 	spec := ProcessSpec{SessionID: r.id, Launch: l, Dir: dir, Model: "haiku"}
 	if err := isolated(cfg, spec); err != nil {
 		t.Fatal(err)
@@ -251,64 +255,4 @@ func TestContract(t *testing.T) {
 			t.Fatalf("relaunch must start a new process with --resume %s; args %v", r.id, args)
 		}
 	})
-}
-
-// TestClaudeNestedLaunchStripsGitHubTokens proves on the real claude that
-// neither the Claude process nor a tool subprocess it runs receives a GitHub
-// token, on first launch and on relaunch, while Claude's own auth and the
-// host's credentials stay intact.
-var strippedTokens = []string{"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_TOKEN_FILE"}
-
-func TestClaudeNestedLaunchStripsGitHubTokens(t *testing.T) {
-	for _, kv := range seededGitHubTokens {
-		k, v, _ := strings.Cut(kv, "=")
-		t.Setenv(k, v)
-	}
-	r := startReal(t, "--allowedTools", "Bash")
-	for i, name := range []string{"first.presence", "relaunch.presence"} {
-		if i == 1 {
-			if err := r.p.Close(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-		}
-		// The tool records only whether each variable is set, never a value:
-		// the child's environment holds the login token.
-		cmd := `for k in ` + strings.Join(append(slices.Clone(strippedTokens), "CLAUDE_CODE_OAUTH_TOKEN"), " ") + `; do if printenv "$k" >/dev/null; then echo "$k=present"; else echo "$k=absent"; fi; done > ` + name
-		res, _ := r.prompt(t, "Use the Bash tool to run exactly this command: "+cmd+"\nThen reply DONE.")
-		if res.Subtype != "success" {
-			t.Fatalf("launch %d: %+v", i, res)
-		}
-		r.p.mu.Lock()
-		spawned, args := r.p.cmd.Env, r.p.cmd.Args
-		r.p.mu.Unlock()
-		if i == 1 && !slices.Contains(args, "--resume") {
-			t.Fatal("second launch was not a relaunch")
-		}
-		raw, err := os.ReadFile(filepath.Join(r.dir, name))
-		if err != nil {
-			t.Fatalf("launch %d: the tool did not write its report: %v", i, err)
-		}
-		nested := strings.Split(string(raw), "\n")
-		for _, k := range strippedTokens {
-			if _, ok := lookup(spawned, k); ok {
-				t.Errorf("launch %d: %s reached the claude process", i, k)
-			}
-			if got, ok := lookup(nested, k); !ok {
-				t.Errorf("launch %d: the tool did not report %s", i, k)
-			} else if got != "absent" {
-				t.Errorf("launch %d: %s reached the nested tool", i, k)
-			}
-		}
-		if got, ok := lookup(nested, "CLAUDE_CODE_OAUTH_TOKEN"); ok {
-			t.Logf("launch %d: CLAUDE_CODE_OAUTH_TOKEN=%s in the nested tool", i, got) // present or absent, never a value
-		} else {
-			t.Errorf("launch %d: the tool did not report CLAUDE_CODE_OAUTH_TOKEN", i)
-		}
-		if got, _ := lookup(spawned, "CLAUDE_CODE_OAUTH_TOKEN"); got == "" || got != r.p.spec.Launch.Env["CLAUDE_CODE_OAUTH_TOKEN"] {
-			t.Errorf("launch %d: Claude's own auth token was dropped", i)
-		}
-	}
-	if os.Getenv("GH_TOKEN") != "gh-secret" || os.Getenv("GITHUB_TOKEN") != "github-secret" {
-		t.Fatal("the host lost its GitHub credentials")
-	}
 }
