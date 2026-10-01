@@ -73,9 +73,11 @@ type ServiceConfig struct {
 	// DefaultBackend reads the workspace default harness and model
 	// (/config/backend); nil has none.
 	DefaultBackend func(ctx context.Context) (Backend, error)
-	// Bridge returns the capabilities the host bridge registers for a preset;
-	// nil registers none. Create never takes them from the request.
-	Bridge func(ctx context.Context, p Preset) BridgeCaps
+	// Bridge returns the capabilities the host bridge currently registers for
+	// a preset. It errors when the preset needs bridge wiring that is absent,
+	// or the bridge is down; the agent then does not launch. nil registers
+	// none. Loom never takes capabilities from a request or a stored row.
+	Bridge func(ctx context.Context, p Preset) (BridgeCaps, error)
 }
 
 // Backend is a workspace default harness and model.
@@ -98,7 +100,7 @@ type Service struct {
 	workspaceID string
 	presets     Presets
 	backend     func(context.Context) (Backend, error)
-	bridge      func(context.Context, Preset) BridgeCaps
+	bridge      func(context.Context, Preset) (BridgeCaps, error)
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -118,7 +120,7 @@ func New(cfg ServiceConfig) *Service {
 		s.backend = func(context.Context) (Backend, error) { return Backend{}, nil }
 	}
 	if s.bridge == nil {
-		s.bridge = func(context.Context, Preset) BridgeCaps { return BridgeCaps{} }
+		s.bridge = func(context.Context, Preset) (BridgeCaps, error) { return BridgeCaps{}, nil }
 	}
 	if s.target == "" {
 		s.target = TargetLocal

@@ -124,7 +124,7 @@ type Config struct {
 	MaxRunDuration *int
 	Open           loomharness.PresetConfig
 	Rules          []loomharness.PermissionRule
-	Bridge         BridgeCaps // the host bridge capabilities Rules were compiled with
+	Bridge         BridgeCaps `json:"-"` // host registration only; never stored in spec_json
 }
 
 // Resolve validates req against p and renders the harness config.

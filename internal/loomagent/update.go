@@ -136,8 +136,8 @@ func (s *Service) setModel(ctx context.Context, a loomstore.Agent, model string)
 
 // current returns a's current native session and ref, or nil when a has
 // none or its harness is not wired. The ref is the recorded row matching the
-// row's session id and root; with no root saved (Create), the oldest
-// recorded row with that id.
+// row's session id and root. A legacy row with no root saved resolves only
+// when exactly one recorded row has that id; several roots fail closed.
 func (s *Service) current(ctx context.Context, a loomstore.Agent) (loomharness.Session, loomharness.NativeRef, error) {
 	h, ok := s.harnesses[a.Harness]
 	if !ok || a.HarnessSessionID == nil {
@@ -147,14 +147,21 @@ func (s *Service) current(ctx context.Context, a loomstore.Agent) (loomharness.S
 	if err != nil {
 		return nil, loomharness.NativeRef{}, err
 	}
+	var refs []loomharness.NativeRef
 	for _, n := range owned {
 		if n.Harness == a.Harness && n.NativeID == *a.HarnessSessionID &&
 			(a.HarnessSessionRoot == nil || n.NativeRoot == *a.HarnessSessionRoot) {
-			ref := loomharness.NativeRef{Root: n.NativeRoot, NativeID: n.NativeID}
-			return h.Session(ref), ref, nil
+			refs = append(refs, loomharness.NativeRef{Root: n.NativeRoot, NativeID: n.NativeID})
 		}
 	}
-	return nil, loomharness.NativeRef{}, fmt.Errorf("loomagent: %s's current session is not recorded", a.AgentID)
+	switch len(refs) {
+	case 0:
+		return nil, loomharness.NativeRef{}, fmt.Errorf("loomagent: %s's current session is not recorded", a.AgentID)
+	case 1:
+		return h.Session(refs[0]), refs[0], nil
+	}
+	return nil, loomharness.NativeRef{}, fmt.Errorf("loomagent: %s's current session %s is recorded under %d roots and has no saved root",
+		a.AgentID, *a.HarnessSessionID, len(refs))
 }
 
 // appendEvent saves one agent-level event; a repeated eventID is a no-op.

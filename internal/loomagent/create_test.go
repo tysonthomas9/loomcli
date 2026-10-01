@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -15,14 +16,21 @@ import (
 )
 
 // openRec records every OpenSpec passed to the wrapped harness.
+// openRec records every OpenSpec passed to the wrapped harness. A non-empty
+// root replaces the root Open returns, as a changed launch root would.
 type openRec struct {
 	loomharness.Harness
 	specs []loomharness.OpenSpec
+	root  string
 }
 
 func (o *openRec) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharness.NativeRef, error) {
 	o.specs = append(o.specs, spec)
-	return o.Harness.Open(ctx, spec)
+	ref, err := o.Harness.Open(ctx, spec)
+	if o.root != "" {
+		ref.Root = o.root
+	}
+	return ref, err
 }
 
 // createEnv is one store and one harness that outlive service restarts.
@@ -212,7 +220,7 @@ func TestCreateValidatesBeforeSideEffects(t *testing.T) {
 }
 
 func TestCreateCrashAtEachStepConverges(t *testing.T) {
-	for _, point := range []string{"row", "worktree", "open", "recorded", "created"} {
+	for _, point := range []string{"row", "worktree", "open", "recorded", "session", "created"} {
 		t.Run(point, func(t *testing.T) {
 			ctx := context.Background()
 			e := newCreateEnv(t)
@@ -367,65 +375,153 @@ func TestCreateUsesWorkspaceDefaultBackend(t *testing.T) {
 
 func TestCreateBridgeCapsFromHostOnly(t *testing.T) {
 	ctx := context.Background()
-	var forged CreateRequest
-	if err := json.Unmarshal([]byte(`{"Preset":"lead","Bridge":{"HasGitHubRead":true,"HasPublish":true}}`), &forged); err != nil {
-		t.Fatal(err)
+	both := BridgeCaps{HasGitHubRead: true, HasPublish: true}
+	out, err := json.Marshal(Config{Bridge: both})
+	if err != nil || strings.Contains(string(out), "Bridge") || strings.Contains(string(out), "HasPublish") {
+		t.Fatalf("Config JSON carries bridge caps: %s, %v", out, err)
 	}
 	e := newCreateEnv(t)
 	s := e.service(ServiceConfig{})
 	req := leadReq("r1")
-	req.Bridge = BridgeCaps{HasGitHubRead: true, HasPublish: true} // a forged in-process value
-	if forged.Bridge != (BridgeCaps{}) {
-		t.Fatalf("request body set Bridge: %+v", forged.Bridge)
-	}
+	req.Bridge = both // a caller-set value
 	a, err := s.Create(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg := specOf(t, e, a.AgentID); cfg.Bridge != (BridgeCaps{}) || hasPublishDenies(cfg.Rules) {
-		t.Fatalf("no host registration, yet config = %+v", cfg)
+	row, _ := e.st.GetAgent(ctx, a.AgentID)
+	if strings.Contains(row.SpecJSON, "Bridge") || hasPublishDenies(e.h.specs[0].Rules) {
+		t.Fatalf("caller caps reached the agent: spec %s, rules %+v", row.SpecJSON, e.h.specs[0].Rules)
 	}
-
-	host := e.service(ServiceConfig{Bridge: func(_ context.Context, p Preset) BridgeCaps {
-		return BridgeCaps{HasGitHubRead: p.Name == "lead", HasPublish: p.Name == "lead"}
-	}})
-	req = leadReq("r2")
-	req.Name = "b"
-	b, err := host.Create(ctx, req)
-	if err != nil {
+	var legacy Config // a spec_json written when caps were still stored
+	if err := json.Unmarshal([]byte(`{"Preset":{"Name":"lead"},"Bridge":{"HasGitHubRead":true,"HasPublish":true}}`), &legacy); err != nil {
 		t.Fatal(err)
 	}
-	cfg := specOf(t, e, b.AgentID)
-	if cfg.Bridge != (BridgeCaps{HasGitHubRead: true, HasPublish: true}) || !hasPublishDenies(cfg.Rules) ||
-		!hasPublishDenies(e.h.specs[1].Rules) {
-		t.Fatalf("host registration not applied: %+v", cfg)
+	if rules, err := s.policy(ctx, legacy); err != nil || legacy.Bridge != (BridgeCaps{}) || hasPublishDenies(rules) {
+		t.Fatalf("legacy stored caps enabled: %+v, %v", rules, err)
+	}
+
+	// Absent, partial and full wiring keep each role's own restrictions;
+	// only full wiring adds the gh and git push denies.
+	ro := Overrides{Harness: "opencode", ReadOnly: true, DeniedTools: []string{"webfetch"}}
+	for i, caps := range []BridgeCaps{{}, {HasGitHubRead: true}, {HasPublish: true}, both} {
+		e := newCreateEnv(t)
+		s := e.service(ServiceConfig{Bridge: func(context.Context, Preset) (BridgeCaps, error) { return caps, nil }})
+		for j, preset := range []string{"daemon-worker", "pr-review-webhook"} {
+			req := CreateRequest{Envelope: Envelope{RequestID: preset}, Preset: preset, Name: preset, Repo: "/repo",
+				Overrides: Overrides{Harness: "opencode"}}
+			if preset == "daemon-worker" {
+				req.Overrides = ro
+			}
+			if _, err := s.Create(ctx, req); err != nil {
+				t.Fatal(err)
+			}
+			base, _ := Resolve(mustPreset(t, preset), req, "opencode", nil)
+			got := e.h.specs[j].Rules
+			if !slices.Equal(got[:len(base.Rules)], base.Rules) || hasPublishDenies(got) != (caps == both) {
+				t.Fatalf("wiring %d, %s: rules %+v", i, preset, got)
+			}
+		}
 	}
 }
 
-func TestResumeRecompilesWithStoredBridgeCaps(t *testing.T) {
+func TestBridgeRegistrationRequiredOnRestart(t *testing.T) {
 	ctx := context.Background()
+	both := BridgeCaps{HasGitHubRead: true, HasPublish: true}
+	errAbsent := errors.New("lead needs the github_read and publish bridge, which is not wired")
+	errDown := errors.New("bridge unavailable")
 	e := newCreateEnv(t)
+	launches := 0
+	start := func(bridge func(context.Context, Preset) (BridgeCaps, error)) *Service {
+		return e.service(ServiceConfig{Bridge: bridge,
+			Launch: func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
+				launches++ // the only place launch credentials come from
+				return loomharness.Launch{Root: "/root/opencode"}, nil
+			}})
+	}
 	run := crashAt(t, "open")
-	both := func(context.Context, Preset) BridgeCaps { return BridgeCaps{HasGitHubRead: true, HasPublish: true} }
-	if !run(func() { _, _ = e.service(ServiceConfig{Bridge: both}).Create(ctx, leadReq("r1")) }) {
+	if !run(func() {
+		_, _ = start(func(context.Context, Preset) (BridgeCaps, error) { return both, nil }).Create(ctx, leadReq("r1"))
+	}) {
 		t.Fatal("did not crash")
 	}
-	// After the restart the host has not registered the bridge yet; recovery
-	// uses the capabilities stored with the agent.
-	a, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r1"))
+	// Restart without the registration, then during an outage: recovery
+	// stops before launching and loosens nothing.
+	for _, cause := range []error{errAbsent, errDown} {
+		s := start(func(context.Context, Preset) (BridgeCaps, error) { return BridgeCaps{}, cause })
+		if _, err := s.Create(ctx, leadReq("r1")); !errors.Is(err, cause) {
+			t.Fatalf("recovery = %v, want %v", err, cause)
+		}
+	}
+	if launches != 0 || len(e.h.specs) != 0 {
+		t.Fatalf("launched %d times, opened %d, without the bridge", launches, len(e.h.specs))
+	}
+	// Restored registration compiles the current rules; nothing was stored.
+	s := start(func(context.Context, Preset) (BridgeCaps, error) { return both, nil })
+	a, err := s.Create(ctx, leadReq("r1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := specOf(t, e, a.AgentID)
-	if cfg.Bridge != (BridgeCaps{HasGitHubRead: true, HasPublish: true}) || len(e.h.specs) != 1 ||
-		!hasPublishDenies(e.h.specs[0].Rules) {
-		t.Fatalf("recovery lost the stored caps: %+v, opens %+v", cfg, e.h.specs)
+	if row, _ := e.st.GetAgent(ctx, a.AgentID); strings.Contains(row.SpecJSON, "Bridge") ||
+		hasPublishDenies(specOf(t, e, a.AgentID).Rules) || !hasPublishDenies(e.h.specs[0].Rules) {
+		t.Fatalf("restored registration: spec %s, opened %+v", row.SpecJSON, e.h.specs[0].Rules)
 	}
-	// The stored caps recompile to the same rules.
-	p := mustPreset(t, "lead")
-	re, err := Resolve(p, CreateRequest{Overrides: Overrides{Harness: "opencode"}, Bridge: cfg.Bridge}, "opencode", nil)
-	if err != nil || !reflect.DeepEqual(re.Rules, cfg.Rules) {
-		t.Fatalf("recompiled rules %+v, stored %+v, %v", re.Rules, cfg.Rules, err)
+	// Resume and harness switch also stop before launching without it.
+	launches = 0
+	s = start(func(context.Context, Preset) (BridgeCaps, error) { return BridgeCaps{}, errAbsent })
+	if _, err := s.resume(ctx, s.get(t, a.AgentID)); !errors.Is(err, errAbsent) {
+		t.Fatalf("resume = %v", err)
+	}
+	fb := &openRec{Harness: fake.New()}
+	s.harnesses["codex"] = fb
+	v := int64(1)
+	if _, err := s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "u1", Expect: &Expect{SpecVersion: &v}},
+		AgentID: a.AgentID, Harness: "codex"}); !errors.Is(err, errAbsent) {
+		t.Fatalf("switch = %v", err)
+	}
+	if launches != 0 || len(fb.specs) != 0 {
+		t.Fatalf("launched %d, opened %d without the bridge", launches, len(fb.specs))
+	}
+}
+
+func TestCreateReplayChangedRootSameID(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	run := crashAt(t, "session") // ownership recorded, checkpoint not written
+	if !run(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) }) {
+		t.Fatal("did not crash")
+	}
+	e.h.root = "/root/replaced" // the replay's Open returns the same id under another root
+	s := e.service(ServiceConfig{})
+	a, err := s.Create(ctx, leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned, _ := e.st.NativeSessions(ctx, a.AgentID)
+	_, ref, err := s.current(ctx, s.get(t, a.AgentID))
+	if err != nil || len(owned) != 2 || ref != (loomharness.NativeRef{Root: "/root/replaced", NativeID: owned[0].NativeID}) {
+		t.Fatalf("current = %+v, %v; owned %+v", ref, err, owned)
+	}
+}
+
+func TestCurrentAmbiguousLegacyRootFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	a := svcAgent("a1", "persistent", StateIdle)
+	a.HarnessSessionID = sp("s1") // a legacy row: no saved root
+	s := newService(t, ServiceConfig{Harnesses: map[string]loomharness.Harness{"fake": fake.New()}}, a)
+	record := func(root string) {
+		if err := s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: "a1", Harness: "fake",
+			NativeRoot: root, NativeID: "s1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record("/r1")
+	if _, ref, err := s.current(ctx, s.get(t, "a1")); err != nil || ref.Root != "/r1" {
+		t.Fatalf("single root = %+v, %v", ref, err)
+	}
+	record("/r2")
+	if sess, _, err := s.current(ctx, s.get(t, "a1")); err == nil || sess != nil ||
+		!strings.Contains(err.Error(), "2 roots") {
+		t.Fatalf("ambiguous roots = %v, %v; want a clear error", sess, err)
 	}
 }
 

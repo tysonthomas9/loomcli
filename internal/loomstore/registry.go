@@ -398,11 +398,12 @@ func (s *Store) FindCreated(ctx context.Context, workspaceID, externalKey, reque
 }
 
 // SetCreateStep records that Create finished step on agentID, with the
-// columns that step filled; a nil column is kept.
-func (s *Store) SetCreateStep(ctx context.Context, agentID string, step int64, worktreePath, branch, sessionID *string) error {
+// columns that step filled; a nil column is kept. The session step saves the
+// returned NativeRef whole: its id and its root.
+func (s *Store) SetCreateStep(ctx context.Context, agentID string, step int64, worktreePath, sessionID, sessionRoot *string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE agents SET create_step = MAX(create_step, ?),
-		worktree_path = COALESCE(?, worktree_path), branch = COALESCE(?, branch),
-		harness_session_id = COALESCE(?, harness_session_id), updated_at = ? WHERE agent_id = ?`,
-		step, worktreePath, branch, sessionID, Stamp(time.Now()), agentID)
+		worktree_path = COALESCE(?, worktree_path), harness_session_id = COALESCE(?, harness_session_id),
+		harness_session_root = COALESCE(?, harness_session_root), updated_at = ? WHERE agent_id = ?`,
+		step, worktreePath, sessionID, sessionRoot, Stamp(time.Now()), agentID)
 	return err
 }
