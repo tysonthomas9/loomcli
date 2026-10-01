@@ -24,8 +24,7 @@ teardown: >-
 
 tests:
   - name: trunk replay requires and uses the operator Git identity
-    intent: Expected fail on 02f975361 — trunk Publish resolves task labels without its workspace, so 502 no-active-workspace precedes the identity gate
-    skip: true
+    intent: A real TaskRun change is replayed over a foreign trunk commit before publication to the fake forge
     steps:
       - api:
           method: POST
@@ -73,11 +72,11 @@ tests:
           api="$AFT_BASE_URL/api/workspaces/E2E-WS-TRUNK";
           read change revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"],item["head_sha"])' "$AFT_WORK_DIR/trunk-revisions.json");
           curl -sf -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json'
-          -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null;
-          curl -sf -X POST "$api/git/apply" -H 'Content-Type: application/json'
-          -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}" >/dev/null;
+          -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$AFT_WORK_DIR/trunk-approve.json";
+          grep -q '"status":"applied"' "$AFT_WORK_DIR/trunk-approve.json";
+          test "$(git -C "$AFT_WORK_DIR/trunk-repo" rev-parse refs/heads/loom/ws/E2E-WS-TRUNK/interactive/lead)" = "$sha";
           printf '%s\n' "$change" > "$AFT_WORK_DIR/trunk-change-id"
-        intent: Approve and apply the genuine revision to create the lead working area
+        intent: Approval alone applies the genuine revision to the lead working area
       - run: >-
           set -e;
           repo="$AFT_WORK_DIR/trunk-repo";
@@ -100,21 +99,16 @@ tests:
           set -e;
           api="$AFT_BASE_URL/api/workspaces/E2E-WS-TRUNK";
           change="$(cat "$AFT_WORK_DIR/trunk-change-id")";
-          status="$(curl -s -o "$AFT_WORK_DIR/trunk-derived-gate.json" -w '%{http_code}' -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$change\"}")";
-          test "$status" = 409;
-          task="$(cat "$AFT_WORK_DIR/trunkTaskId")";
-          curl -sf "$api/issues/$task/revisions" > "$AFT_WORK_DIR/trunk-derived.json";
-          read revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; assert item["number"] > 1; print(item["number"],item["head_sha"])' "$AFT_WORK_DIR/trunk-derived.json");
-          curl -sf -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json'
-          -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null;
           curl -sf -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$change\"}" > "$AFT_WORK_DIR/trunk-publish.json";
           grep -q '"created":true' "$AFT_WORK_DIR/trunk-publish.json"
-        intent: A configured user can approve the derived replay and publish the PR
+        intent: A configured user replays the approved change onto advanced trunk and publishes the PR
       - run: >-
           set -e;
           repo="$AFT_WORK_DIR/trunk-repo";
           change="$(cat "$AFT_WORK_DIR/trunk-change-id")";
           git -C "$repo" fetch -q origin "loom/ws/E2E-WS-TRUNK/change/$change";
           sha="$(git -C "$repo" rev-parse FETCH_HEAD)";
+          test "$sha" != "$(git --git-dir="$AFT_WORK_DIR/trunk-origin.git" rev-parse refs/heads/main)";
+          test "$(git -C "$repo" show "$sha:trunk-change.txt")" != '';
           test "$(git -C "$repo" show -s --format='%an <%ae>|%cn <%ce>' "$sha")" = 'AFT Operator <aft-operator@example.test>|AFT Operator <aft-operator@example.test>'
-        intent: The actual PR commit author and committer are the configured operator
+        intent: The PR contains the task edit and its commit author and committer are the configured operator
