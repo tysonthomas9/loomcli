@@ -58,6 +58,11 @@ CASES=(
   "c_pass_reconcile|pass|"
   "c_pass_reconcile_crash|pass|"
   "c_fail_reconcile_pgskew|fail|NoStrandedBeforeClaim"
+  # Fix for the PgSkew gap: G4 also guards session create.
+  "c_pass_reconcile_pgskew_fenced|pass|"
+  # Last-attempt liveness stays open in this module. Stage d owns it (task
+  # 20ad52d8, branch formal/daemon-attempt-stage-d: DaemonAttemptD.tla,
+  # rule F durable retry + reaper, d_pass_finalize_liveness).
   "c_stranded_reconcile|fail|NoStrandedSession"
   # #761, #348, #92, #541: every agent claims as one FleetDB actor.
   "b_fail_shared_actor|fail|NoForeignIssueWrite"

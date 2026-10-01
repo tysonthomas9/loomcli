@@ -31,6 +31,9 @@
 (* LockOnlyRelease splits lock and assignment release for label-only       *)
 (* handoffs (#634); ReviewCrash/RecoverReview cover restart recovery       *)
 (* of review status (#381). All new switches are FALSE in old configs.     *)
+(* FenceSessionCreate: the session row is created at spawn only if the     *)
+(* attempt passes WriteCheck atomically with the insert (G4 extended to    *)
+(* session create, enforcement-map row 5). Closes the PgSkew #396 gap.     *)
 (*                                                                         *)
 (* Time is abstract ticks of the FleetDB Go clock. A daemon may believe   *)
 (* its lease is valid for up to Drift ticks past the server expiry (slow   *)
@@ -46,7 +49,7 @@ CONSTANTS Hosts, Agents, Issues, NoOne, Srv,
           WriteCheck, HolderCheck, TerminalGuard, GuardedSpawn, SessionCheck,
           Reconcile, SharedActor, NonAtomicClaim, HookStatus, HookGuard,
           DeferredStatus, RespectDeferred, LockOnlyRelease, ReleaseAssignment,
-          ReviewCrash, RecoverReview
+          ReviewCrash, RecoverReview, FenceSessionCreate
 
 ASSUME /\ STAGE \in {1, 2, 3}
        /\ WriteCheck \in {"none", "token", "fence_eq", "fence"}
@@ -58,7 +61,7 @@ ASSUME /\ STAGE \in {1, 2, 3}
        /\ HookGuard \in BOOLEAN /\ DeferredStatus \in BOOLEAN
        /\ RespectDeferred \in BOOLEAN /\ LockOnlyRelease \in BOOLEAN
        /\ ReleaseAssignment \in BOOLEAN /\ ReviewCrash \in BOOLEAN
-       /\ RecoverReview \in BOOLEAN
+       /\ RecoverReview \in BOOLEAN /\ FenceSessionCreate \in BOOLEAN
        /\ \A n \in {TTL, LockTTL, MaxTime, Drift, Pause, Grace, PgSkew,
                     MaxFence, MaxInFlight, MaxInc} : n \in Nat
        /\ TTL > 0 /\ LockTTL > 0
@@ -378,10 +381,15 @@ WorkerHb(h, a) ==
 (* Attempt lifecycle: spawn, agent writes over IPC, exit, finalize, recover. *)
 
 \* T7 spawn. Current code does not re-check ownership before spawning.
+\* FenceSessionCreate: FleetDB inserts the session row only if the attempt
+\* passes WriteCheck in the same step (G4 applied to create); a rejected
+\* create means no spawn. Without it a superseded attempt can create a
+\* session after the new owner's ReconcileSessions pass (PgSkew, #396).
 Spawn(h, a) ==
     /\ up[h]
     /\ ph[h][a] = IF STAGE = 1 THEN "owned" ELSE "claimed"
     /\ GuardedSpawn => (hb[h][a] /\ now < my[h][a].sent + TTL)
+    /\ (FenceSessionCreate /\ STAGE = 3) => PassNow(h, a)
     /\ ph' = [ph EXCEPT ![h][a] = "running"]
     /\ proc' = [proc EXCEPT ![h][a] = "run"]
     /\ IF STAGE = 3
@@ -676,6 +684,9 @@ NoStrandedSession ==
 \* still unfinished. Covers both strand routes: a daemon crash and a
 \* completion rejected after release. The session of the agent's final
 \* attempt is not covered; NoStrandedSession above still shows that gap.
+\* Under PgSkew a superseded attempt can create its session after the new
+\* owner reconciled (c_fail_reconcile_pgskew); FenceSessionCreate closes
+\* that route (c_pass_reconcile_pgskew_fenced).
 NoStrandedBeforeClaim ==
     \A h \in Hosts, a \in Agents :
         ph[h][a] \in {"claimed", "running", "exited"} =>
