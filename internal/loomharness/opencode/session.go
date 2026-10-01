@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -54,14 +55,27 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	return ref, s.isolate(ctx)
 }
 
-// hasAgent fails closed when the running service has no agent named agent
-// for dir. OpenCode accepts an unknown agent id at session create without an
-// error, and a service Loom did not start lacks Loom's presets. It reads the
-// agent list for dir: b30c4d0's GET /api/agent/:id ignores the location and
-// misses configured agents (server/src/handlers/agent.ts:15-25). A location
-// that is still loading lists no agents at all, not even the built-in ones,
-// so an empty list is retried until agentWait.
+// hasAgent fails closed unless the running service offers agent for dir.
+// Loom's presets are loom-<name> agents in <worktrees root>/.opencode/agent,
+// which OpenCode finds by walking up from a session's directory
+// (core/src/config/discovery.ts:34-48, config/plugin/agent.ts:21-26) on any
+// service, Loom-started or not, and reloads when the files change. So dir
+// must be under that root, and the service must not disable project config.
+// OpenCode accepts an unknown agent id at session create without an error.
+// It reads the agent list for dir: b30c4d0's GET /api/agent/:id ignores the
+// location and misses project agents (server/src/handlers/agent.ts:15-25). A
+// missing agent is retried until agentWait, for a location still loading
+// (it lists no agents at all) or a preset file not yet reloaded.
 func (c *Client) hasAgent(ctx context.Context, agent, dir string) error {
+	if c.presets == "" {
+		return &Error{Code: "bad_request", Message: fmt.Sprintf("preset %s: no Loom worktrees root is configured for OpenCode presets", agent)}
+	}
+	if c.defined != nil && !c.defined(agent) {
+		return &Error{Code: "bad_request", Message: fmt.Sprintf("preset %s is not one of Loom's current presets", agent)}
+	}
+	if rel, err := filepath.Rel(c.presets, filepath.Clean(dir)); err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || !filepath.IsAbs(dir) {
+		return &Error{Code: "bad_request", Message: fmt.Sprintf("preset %s: session directory %s is not under the Loom worktrees root %s, where OpenCode finds Loom's presets", agent, dir, c.presets)}
+	}
 	for deadline := time.Now().Add(agentWait); ; {
 		var r struct {
 			Data []struct {
@@ -76,11 +90,12 @@ func (c *Client) hasAgent(ctx context.Context, agent, dir string) error {
 				return nil
 			}
 		}
-		if len(r.Data) > 0 {
-			return &Error{Code: "bad_request", Message: fmt.Sprintf("preset %s is not on the running OpenCode service (a service Loom did not start has no Loom presets)", agent)}
-		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("opencode lists no agents for %s after %s: %w", dir, agentWait, loomharness.ErrUnavailable)
+			if len(r.Data) == 0 {
+				return fmt.Errorf("opencode lists no agents for %s after %s: %w", dir, agentWait, loomharness.ErrUnavailable)
+			}
+			return &Error{Code: "bad_request", Message: fmt.Sprintf("preset %s is not on the running OpenCode service for %s: Loom writes it to %s; the service may disable project config (OPENCODE_DISABLE_PROJECT_CONFIG)",
+				agent, dir, filepath.Join(c.presets, ".opencode", "agent", agent+".md"))}
 		}
 		select {
 		case <-ctx.Done():
@@ -91,7 +106,7 @@ func (c *Client) hasAgent(ctx context.Context, agent, dir string) error {
 }
 
 // agentWait bounds hasAgent's wait for a loading location's agents.
-var agentWait = 15 * time.Second
+var agentWait = 5 * time.Second
 
 // nativeActions maps Loom's permission actions to the actions OpenCode
 // b30c4d0 asserts: packages/core/src/tool/plugin/shell.ts asserts "shell";
@@ -153,8 +168,21 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 	if err != nil {
 		return loomharness.NativeRef{}, err
 	}
-	if err := s.c.call(ctx, "GET", s.path(""), nil, nil); err != nil {
+	var info struct {
+		Data struct {
+			Agent    string `json:"agent"`
+			Location struct {
+				Directory string `json:"directory"`
+			} `json:"location"`
+		} `json:"data"`
+	}
+	if err := s.c.call(ctx, "GET", s.path(""), nil, &info); err != nil {
 		return loomharness.NativeRef{}, err
+	}
+	if agent := info.Data.Agent; strings.HasPrefix(agent, "loom-") {
+		if err := s.c.hasAgent(ctx, agent, info.Data.Location.Directory); err != nil {
+			return loomharness.NativeRef{}, err
+		}
 	}
 	if err := s.install(ctx, native); err != nil {
 		return loomharness.NativeRef{}, err

@@ -83,7 +83,7 @@ func fakeOpenCode(mode string) int {
 	_ = os.WriteFile(filepath.Join(state, "config-content"), []byte(os.Getenv("OPENCODE_CONFIG_CONTENT")), 0o600)
 	var tokens []string
 	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD",
-		"OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD"} {
+		"OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD", "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_CONFIG_PROJECT_DISABLE"} {
 		if _, ok := os.LookupEnv(k); ok {
 			tokens = append(tokens, k) // names only: test output never carries values
 		}
@@ -175,7 +175,7 @@ func fakeEnv(mode, version, state, config string, extra ...string) []string {
 func fakeAdapter(t *testing.T, mode, version string, presets ...loomharness.PresetConfig) (*Adapter, string) {
 	t.Helper()
 	state, config := fakeRoots(t)
-	a := New(Config{Bin: os.Args[0], Presets: presets, Env: fakeEnv(mode, version, state, config)})
+	a := New(Config{Bin: os.Args[0], Presets: presets, Worktrees: t.TempDir(), Env: fakeEnv(mode, version, state, config)})
 	t.Cleanup(a.Stop)
 	return a, state
 }
@@ -245,7 +245,8 @@ func TestAdapterRefusesOldVersion(t *testing.T) {
 }
 
 // TestAdapterStartsServiceWhenNoneRuns: with nothing registered, Loom starts
-// `opencode serve --service` with its filtered environment and presets; the
+// `opencode serve --service` with its filtered environment, leaving the
+// user's OPENCODE_CONFIG_CONTENT as it is (presets are files, not config); the
 // service initializes the absent config password, and Loom uses the
 // registered endpoint.
 func TestAdapterStartsServiceWhenNoneRuns(t *testing.T) {
@@ -270,19 +271,8 @@ func TestAdapterStartsServiceWhenNoneRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var content struct {
-		Theme  string `json:"theme"`
-		Agents map[string]struct {
-			System string `json:"system"`
-			Mode   string `json:"mode"`
-		} `json:"agents"`
-	}
-	if err := json.Unmarshal(b, &content); err != nil {
-		t.Fatal(err)
-	}
-	if content.Theme != "user" || content.Agents["mine"].System != "user agent" ||
-		content.Agents["loom-lead"].System != "be the lead" || content.Agents["loom-lead"].Mode != "primary" {
-		t.Fatalf("merged config content = %s", b)
+	if string(b) != `{"theme":"user","agents":{"mine":{"system":"user agent"}}}` {
+		t.Fatalf("Loom changed OPENCODE_CONFIG_CONTENT: %s", b)
 	}
 }
 
@@ -462,9 +452,10 @@ func TestAdapterCancelledStart(t *testing.T) {
 func TestOpenCodeServeStripsGitHubTokens(t *testing.T) {
 	for _, presets := range [][]loomharness.PresetConfig{nil, {{Name: "lead", Persona: "p"}}} {
 		state, config := fakeRoots(t)
-		a := New(Config{Bin: os.Args[0], Presets: presets, Env: fakeEnv("serve", "opencode v2.0.19", state, config,
+		a := New(Config{Bin: os.Args[0], Presets: presets, Worktrees: t.TempDir(), Env: fakeEnv("serve", "opencode v2.0.19", state, config,
 			"GITHUB_TOKEN=fixture-ghp", "GH_TOKEN=fixture-gho", "GH_ENTERPRISE_TOKEN=fixture-ghe",
-			"GITHUB_TOKEN_FILE=/tmp/fixture-token", "LOOM_PR_GIT_PASSWORD=fixture-pr", "OPENCODE_PASSWORD=fixture-pw", "LOOM_KEEP=1")})
+			"GITHUB_TOKEN_FILE=/tmp/fixture-token", "LOOM_PR_GIT_PASSWORD=fixture-pr", "OPENCODE_PASSWORD=fixture-pw",
+			"OPENCODE_DISABLE_PROJECT_CONFIG=1", "OPENCODE_CONFIG_PROJECT_DISABLE=1", "LOOM_KEEP=1")})
 		t.Cleanup(a.Stop)
 		if _, err := a.Models(context.Background()); err != nil {
 			t.Fatal(err)
@@ -477,5 +468,67 @@ func TestOpenCodeServeStripsGitHubTokens(t *testing.T) {
 		if err != nil || !slices.Contains(env, "LOOM_KEEP=1") {
 			t.Fatalf("other env dropped: %v", err)
 		}
+	}
+}
+
+// TestAdapterPresetFiles: Loom keeps exactly its presets as
+// <worktrees>/.opencode/agent/loom-<name>.md, rewrites one only when it
+// changes, removes loom-* files it no longer defines, and never touches
+// other files there.
+func TestAdapterPresetFiles(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".opencode", "agent")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"mine.md": "user agent", "loom-old.md": "stale", "notes.txt": "x"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state, config := fakeRoots(t)
+	a := New(Config{Bin: os.Args[0], Worktrees: root, Env: fakeEnv("serve", "opencode v2.0.19", state, config),
+		Presets: []loomharness.PresetConfig{{Name: "lead", Persona: "be the lead"}, {Name: "reviewer", Persona: "review"}}})
+	t.Cleanup(a.Stop)
+	if _, err := a.Models(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	files := func() map[string]string {
+		out := map[string]string{}
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			b, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+			out[e.Name()] = string(b)
+		}
+		return out
+	}
+	got := files()
+	if got["loom-lead.md"] != "---\ndescription: Loom preset lead\nmode: primary\n---\nbe the lead\n" || got["loom-reviewer.md"] == "" ||
+		got["mine.md"] != "user agent" || got["notes.txt"] != "x" || got["loom-old.md"] != "" || len(got) != 4 {
+		t.Fatalf("preset files after start = %q", got)
+	}
+	lead, _ := os.Stat(filepath.Join(dir, "loom-lead.md"))
+
+	if err := a.SetPresets([]loomharness.PresetConfig{{Name: "lead", Persona: "be the lead"}, {Name: "added", Persona: "new"}}); err != nil {
+		t.Fatal(err)
+	}
+	got = files()
+	if got["loom-added.md"] == "" || got["loom-reviewer.md"] != "" || got["mine.md"] != "user agent" || len(got) != 4 {
+		t.Fatalf("preset files after change = %q", got)
+	}
+	if !a.definesPreset("loom-added") || a.definesPreset("loom-reviewer") {
+		t.Fatal("definesPreset does not follow SetPresets")
+	}
+	if same, _ := os.Stat(filepath.Join(dir, "loom-lead.md")); !os.SameFile(lead, same) {
+		t.Fatal("an unchanged preset file was rewritten")
+	}
+
+	if err := a.SetPresets([]loomharness.PresetConfig{{Name: "../escape", Persona: "x"}}); err == nil {
+		t.Fatal("SetPresets accepted a name that is not a file name")
+	}
+	b := New(Config{Bin: os.Args[0], Env: fakeEnv("serve", "opencode v2.0.19", state, config), Presets: []loomharness.PresetConfig{{Name: "lead"}}})
+	t.Cleanup(b.Stop)
+	if _, err := b.Models(context.Background()); !errors.Is(err, loomharness.ErrUnavailable) {
+		t.Fatalf("Models with presets and no worktrees root = %v; want ErrUnavailable", err)
 	}
 }

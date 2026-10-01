@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -22,7 +24,11 @@ import (
 type Config struct {
 	Bin     string                     // the pinned build (LOOM_OPENCODE_BIN)
 	Env     []string                   // the environment of a service Loom starts, and where its registration lives; nil is the user's own (R1)
-	Presets []loomharness.PresetConfig // rendered as loom-<name> agents over the user's config
+	Presets []loomharness.PresetConfig // written as loom-<name> agents under Worktrees
+	// Worktrees is the root above every agent worktree (agentworktree's
+	// <root>/<repo>/<key>). Loom keeps its presets in Worktrees/.opencode/agent,
+	// where every OpenCode service finds them for sessions below it.
+	Worktrees string
 }
 
 // Supervisor timings; variables so tests can shorten them.
@@ -63,6 +69,7 @@ type Adapter struct {
 	cfg Config
 
 	mu       sync.Mutex
+	synced   bool         // the preset files match cfg.Presets
 	cmd      *exec.Cmd    // a service Loom started; nil once it exits
 	reg      registration // the service in use; zero when none
 	failures int
@@ -85,6 +92,10 @@ var _ loomharness.Harness = (*Adapter)(nil)
 func New(cfg Config) *Adapter {
 	a := &Adapter{Client: NewClient("", ""), cfg: cfg}
 	a.ready, a.shellEnv = a.ensure, a.env
+	if cfg.Worktrees != "" {
+		a.presets = filepath.Clean(cfg.Worktrees)
+	}
+	a.defined = a.definesPreset
 	return a
 }
 
@@ -173,6 +184,12 @@ func (a *Adapter) ensure(ctx context.Context) error {
 	defer a.mu.Unlock()
 	if a.stopped {
 		return fmt.Errorf("opencode stopped: %w", loomharness.ErrUnavailable)
+	}
+	if !a.synced {
+		if err := a.syncPresets(); err != nil {
+			return err
+		}
+		a.synced = true
 	}
 	if a.reg.PID != 0 {
 		if r, ok := a.registered(); ok && r == a.reg && alive(r.PID) {
@@ -350,44 +367,108 @@ func alive(pid int) bool {
 // env without either (see Session.isolate).
 var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"}
 
-// env is the configured environment without GitHub tokens, plus the Loom
-// presets merged into OPENCODE_CONFIG_CONTENT, which OpenCode applies over the
-// user's config.
+// projectConfigOff are OpenCode's switches that stop it reading project
+// .opencode directories, where Loom's presets live (server-process.ts:108-110).
+var projectConfigOff = []string{"OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_CONFIG_PROJECT_DISABLE"}
+
+// env is the configured environment without GitHub tokens, OpenCode
+// passwords or the project-config switches.
 func (a *Adapter) env() ([]string, error) {
 	env := a.cfg.Env
 	if env == nil {
 		env = os.Environ()
 	}
-	content := map[string]any{}
-	out := make([]string, 0, len(env)+1)
+	out := make([]string, 0, len(env))
 	for _, kv := range env {
-		k, v, _ := strings.Cut(kv, "=")
-		switch {
-		case slices.Contains(githubTokens, k), k == "OPENCODE_SERVER_PASSWORD", k == "OPENCODE_PASSWORD":
-		case k == "OPENCODE_CONFIG_CONTENT" && len(a.cfg.Presets) > 0:
-			if err := json.Unmarshal([]byte(v), &content); err != nil {
-				return nil, fmt.Errorf("opencode: merge presets into OPENCODE_CONFIG_CONTENT: %w", err)
+		k, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(githubTokens, k) || slices.Contains(projectConfigOff, k) || k == "OPENCODE_SERVER_PASSWORD" || k == "OPENCODE_PASSWORD" {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out, nil
+}
+
+// SetPresets replaces Loom's presets and rewrites their files; running
+// services reload them without a restart.
+func (a *Adapter) SetPresets(presets []loomharness.PresetConfig) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfg.Presets = slices.Clone(presets)
+	a.synced = false
+	if err := a.syncPresets(); err != nil {
+		return err
+	}
+	a.synced = true
+	return nil
+}
+
+// definesPreset reports whether agent is loom-<name> for a current preset.
+// A removed preset's file can still be listed until the service reloads.
+func (a *Adapter) definesPreset(agent string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.ContainsFunc(a.cfg.Presets, func(p loomharness.PresetConfig) bool { return "loom-"+p.Name == agent })
+}
+
+// presetName is what a preset name may be: it becomes a file name.
+var presetName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// syncPresets makes <Worktrees>/.opencode/agent hold exactly one
+// loom-<name>.md per preset (frontmatter mode primary, body the persona;
+// config/plugin/agent.ts:98-120) and no other loom-*.md. Other files in the
+// directory are never touched. Files are replaced atomically and only when
+// their content changes, so services reload only on a real change.
+func (a *Adapter) syncPresets() error {
+	if len(a.cfg.Presets) == 0 && a.presets == "" {
+		return nil
+	}
+	if a.presets == "" {
+		return fmt.Errorf("opencode presets: no worktrees root configured: %w", loomharness.ErrUnavailable)
+	}
+	dir := filepath.Join(a.presets, ".opencode", "agent")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("opencode presets: %w", err)
+	}
+	want := map[string][]byte{}
+	for _, p := range a.cfg.Presets {
+		if !presetName.MatchString(p.Name) {
+			return fmt.Errorf("opencode presets: invalid preset name %q", p.Name)
+		}
+		want["loom-"+p.Name+".md"] = []byte("---\ndescription: Loom preset " + p.Name + "\nmode: primary\n---\n" + p.Persona + "\n")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("opencode presets: %w", err)
+	}
+	for _, e := range entries {
+		if name := e.Name(); strings.HasPrefix(name, "loom-") && strings.HasSuffix(name, ".md") && want[name] == nil && e.Type().IsRegular() {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil {
+				return fmt.Errorf("opencode presets: %w", err)
 			}
-		default:
-			out = append(out, kv)
 		}
 	}
-	if len(a.cfg.Presets) == 0 {
-		return out, nil
+	for name, content := range want {
+		file := filepath.Join(dir, name)
+		if old, err := os.ReadFile(file); err == nil && bytes.Equal(old, content) { //nolint:gosec // G304: Loom's own preset file under the configured worktrees root.
+			continue
+		}
+		tmp, err := os.CreateTemp(dir, ".loom-preset-*")
+		if err != nil {
+			return fmt.Errorf("opencode presets: %w", err)
+		}
+		_, werr := tmp.Write(content)
+		cerr := tmp.Close()
+		if err := errors.Join(werr, cerr); err != nil {
+			_ = os.Remove(tmp.Name())
+			return fmt.Errorf("opencode presets: %w", err)
+		}
+		if err := os.Rename(tmp.Name(), file); err != nil {
+			_ = os.Remove(tmp.Name())
+			return fmt.Errorf("opencode presets: %w", err)
+		}
 	}
-	agents, _ := content["agents"].(map[string]any)
-	if agents == nil {
-		agents = map[string]any{}
-	}
-	for _, p := range a.cfg.Presets {
-		agents["loom-"+p.Name] = map[string]any{"system": p.Persona, "mode": "primary"}
-	}
-	content["agents"] = agents
-	b, err := json.Marshal(content)
-	if err != nil {
-		return nil, err
-	}
-	return append(out, "OPENCODE_CONFIG_CONTENT="+string(b)), nil
+	return nil
 }
 
 // answers reports whether the server at base is up and is process pid.

@@ -233,6 +233,7 @@ func TestProtocolSessionMethods(t *testing.T) {
 	st := newStore()
 	st.agents = map[string]bool{"loom-lead": true}
 	c := fakeServer(t, st)
+	c.presets = "/"
 	spec := loomharness.OpenSpec{
 		Key: "agent-1", Launch: loomharness.Launch{Root: "/root"}, Dir: "/repo", Model: "openai/gpt-x",
 		Preset: loomharness.PresetConfig{Name: "lead"}, Metadata: map[string]string{"agent_id": "agent-1"},
@@ -549,23 +550,35 @@ func TestProtocolResumeInstallsPermissions(t *testing.T) {
 	}
 }
 
-// TestProtocolPresetFailsClosed: a preset the running service lacks (a
-// service Loom did not start has no loom-* agents) refuses Open before any
-// session exists, instead of running as OpenCode's default agent.
+// TestProtocolPresetFailsClosed: a preset session needs a configured
+// worktrees root, a directory under it, and the loom-<name> agent on the
+// running service for that directory; otherwise Open and Resume refuse
+// before anything runs, instead of running as OpenCode's default agent.
 func TestProtocolPresetFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	st := newStore()
 	c := fakeServer(t, st)
-	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo dir", Preset: loomharness.PresetConfig{Name: "lead"}}
-	if _, err := c.Open(ctx, spec); !isCode(err, "bad_request") || !strings.Contains(err.Error(), "loom-lead") {
-		t.Fatalf("Open with a missing preset = %v; want bad_request", err)
-	}
-	if len(st.sessions) != 0 {
-		t.Fatal("a refused preset created a session")
-	}
-	st.loading = true
 	defer func(d time.Duration) { agentWait = d }(agentWait)
 	agentWait = 300 * time.Millisecond
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/wt/repo dir/k", Preset: loomharness.PresetConfig{Name: "lead"}}
+	refused := func(what, want string) {
+		t.Helper()
+		if _, err := c.Open(ctx, spec); !isCode(err, "bad_request") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: Open = %v; want bad_request with %q", what, err, want)
+		}
+		if len(st.sessions) != 0 {
+			t.Fatalf("%s: a refused preset created a session", what)
+		}
+	}
+	refused("no root", "no Loom worktrees root")
+	c.presets = "/wt"
+	for _, dir := range []string{"/elsewhere/repo", "/wt", "/wtx/repo", "/wt/../etc", "wt/relative"} {
+		spec.Dir = dir
+		refused(dir, "not under the Loom worktrees root")
+	}
+	spec.Dir = "/wt/repo dir/k"
+	refused("missing agent", "may disable project config")
+	st.loading = true
 	if _, err := c.Open(ctx, spec); !errors.Is(err, loomharness.ErrUnavailable) || len(st.sessions) != 0 {
 		t.Fatalf("Open while the location loads = %v; want ErrUnavailable and no session", err)
 	}
@@ -575,8 +588,18 @@ func TestProtocolPresetFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.sessions[ref.NativeID]["agent"] != "loom-lead" || st.agentDir[len(st.agentDir)-1] != "/repo dir" {
+	if st.sessions[ref.NativeID]["agent"] != "loom-lead" || st.agentDir[len(st.agentDir)-1] != "/wt/repo dir/k" {
 		t.Fatalf("session agent %v, looked up in %q", st.sessions[ref.NativeID]["agent"], st.agentDir)
+	}
+	s := c.Session(ref)
+	if _, err := s.Resume(ctx, loomharness.Launch{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Loom dropped the preset: Resume refuses before installing anything.
+	st.agents = nil
+	n := len(st.messages[ref.NativeID])
+	if _, err := s.Resume(ctx, loomharness.Launch{}, nil); !isCode(err, "bad_request") || len(st.messages[ref.NativeID]) != n {
+		t.Fatalf("Resume of a session whose preset is gone = %v; want bad_request", err)
 	}
 }
 

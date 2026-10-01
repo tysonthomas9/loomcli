@@ -48,7 +48,7 @@ func TestContract(t *testing.T) {
 	user := startService(t, bin, sbx, contractEnv(sbx))
 	regFile, cfgFile := filepath.Join(sbx, "state/opencode/service.json"), filepath.Join(sbx, "config/opencode/service.json")
 	before := readAll(t, []string{regFile, cfgFile})
-	a := New(Config{Bin: bin, Env: contractEnv(sbx), Presets: []loomharness.PresetConfig{{Name: "tester", Persona: "LOOM-PERSONA-MARKER"}}})
+	a := New(Config{Bin: bin, Env: contractEnv(sbx)})
 	if !strings.HasPrefix(a.registrationFile(), sbx+"/") {
 		t.Fatal("the adapter looks for a service outside the sandbox")
 	}
@@ -94,19 +94,6 @@ func TestContract(t *testing.T) {
 	})
 
 	launch := loomharness.Launch{Root: sbx}
-	t.Run("PresetFailsClosedOnUserService", func(t *testing.T) {
-		// The user's service has no loom-* agents; Open refuses rather than
-		// run the session as OpenCode's default agent.
-		_, err := a.Open(ctx, loomharness.OpenSpec{Key: "preset-missing", Launch: launch, Preset: loomharness.PresetConfig{Name: "tester"},
-			Dir: repo, Model: "fake/m"})
-		if !isCode(err, "bad_request") || !strings.Contains(err.Error(), "loom-tester") {
-			t.Fatalf("Open with a preset the service lacks = %v; want bad_request", err)
-		}
-		if _, err := a.Session(loomharness.NativeRef{NativeID: SessionID("preset-missing")}).Resume(ctx, launch, nil); !isCode(err, "session_missing") {
-			t.Fatalf("a refused preset created a session: %v", err)
-		}
-	})
-
 	feed, err := a.Feed(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -283,7 +270,7 @@ func TestContract(t *testing.T) {
 
 	t.Run("StartsServiceWhenNoneRuns", func(t *testing.T) {
 		// The user stops his service (the test owns it). Loom's next call
-		// starts one with its filtered environment and presets; the configured
+		// starts one with its filtered environment; the configured
 		// password is used and the config is not rewritten.
 		stopService(t, user.PID)
 		if got, err := s.Resume(ctx, spec.Launch, spec.Rules); err != nil || got != ref {
@@ -298,21 +285,6 @@ func TestContract(t *testing.T) {
 		}
 		if after := readAll(t, []string{cfgFile}); after[cfgFile] != before[cfgFile] {
 			t.Fatal("the service config changed although it had a password")
-		}
-		pref, err := a.Open(ctx, loomharness.OpenSpec{Key: "agent-preset", Launch: launch, Preset: loomharness.PresetConfig{Name: "tester"},
-			Dir: repo, Model: "fake/m"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		owned = append(owned, pref)
-		if err := a.Session(pref).Prompt(ctx, loomharness.Input{Key: PromptID("agent-preset", "req-1"), Text: "persona check"}); err != nil {
-			t.Fatal(err)
-		}
-		events.wait(t, "preset turn completed", func(e loomharness.Event) bool {
-			return e.Session.NativeID == pref.NativeID && e.Type == loomharness.EventTurnCompleted
-		})
-		if !model.sawSystem("LOOM-PERSONA-MARKER") {
-			t.Fatal("the loom-tester preset persona never reached the model (preset merge)")
 		}
 	})
 
@@ -581,6 +553,11 @@ func fakeModelConfig(url string) string {
 func newSandbox(t *testing.T, prefix, opencodeJSON string) string {
 	t.Helper()
 	sbx, err := os.MkdirTemp("/tmp", prefix)
+	if err == nil {
+		// macOS /tmp is a symlink; OpenCode's file watcher reports resolved
+		// paths, so preset reloads need the resolved root.
+		sbx, err = filepath.EvalSymlinks(sbx)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -28,6 +28,8 @@ type Client struct {
 	http     *http.Client
 	ready    func(context.Context) error // starts a supervised server on first use; nil for a fixed one
 	shellEnv func() ([]string, error)    // environment for session shell commands; nil leaves OpenCode's default
+	presets  string                      // the worktrees root whose .opencode/agent holds Loom's presets; "" refuses preset sessions
+	defined  func(agent string) bool     // whether Loom currently defines the loom-* agent; nil skips the check
 
 	rulesMu sync.Mutex
 	rules   map[string][]map[string]string // native session id -> the rules Loom last installed
