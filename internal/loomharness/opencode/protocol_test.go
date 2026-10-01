@@ -37,6 +37,7 @@ type store struct {
 	patchErr bool
 	delErr   bool                // DELETE /api/session/{id} fails
 	patchLie int                 // the next n session PATCHes commit, then answer 500
+	hangLie  bool                // a PATCH that commits (patchLie) never answers instead
 	stops    int                 // POST /interrupt calls
 	lateRuns int                 // prompts accepted after an interrupt
 	stopErr  bool                // POST /interrupt answers 500
@@ -140,6 +141,12 @@ func fakeServer(t *testing.T, st *store) *Client {
 		case st.patchLie > 0:
 			st.patchLie--
 			s["permissions"] = body["permissions"]
+			if st.hangLie && st.patchLie == 0 {
+				st.mu.Unlock()
+				<-r.Context().Done()
+				st.mu.Lock()
+				return
+			}
 			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "boom after commit"})
 		default:
 			if p, ok := body["permissions"]; ok {
@@ -1276,6 +1283,26 @@ func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
 			t.Fatal(err)
 		}
 		works(t, st, s)
+	})
+
+	// Codex (8a80643d3): a restore that runs out its deadline must not
+	// spend the stop's; exactly one interrupt is still sent.
+	t.Run("RestoreTimesOut", func(t *testing.T) {
+		defer func(w time.Duration) { cleanupWait = w }(cleanupWait)
+		cleanupWait = 300 * time.Millisecond
+		st, _, s := setup(t)
+		st.patchLie, st.hangLie = 2, true
+		err := s.Reply(ctx, "per_1", always)
+		if err == nil || !strings.Contains(err.Error(), "active turn was stopped") {
+			t.Fatalf("Reply = %v; want the stop attempted and confirmed", err)
+		}
+		st.mu.Lock()
+		stops := st.stops
+		st.mu.Unlock()
+		if stops != 1 {
+			t.Fatalf("%d interrupts after the restore timed out; want 1", stops)
+		}
+		refused(t, st, s, "quarantined")
 	})
 
 	for name, set := range map[string]func(*store){

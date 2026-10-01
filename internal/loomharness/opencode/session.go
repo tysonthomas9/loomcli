@@ -344,7 +344,7 @@ func (s *Session) grant(ctx context.Context, id string) error {
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupWait)
 		defer cancel()
 		if rerr := s.install(rctx, rules); rerr != nil {
-			return s.quarantine(rctx, errors.Join(err, fmt.Errorf("opencode: restore session %s permissions without the grant: %w", sid, rerr)))
+			return s.quarantine(errors.Join(err, fmt.Errorf("opencode: restore session %s permissions without the grant: %w", sid, rerr)))
 		}
 		return err
 	}
@@ -363,7 +363,7 @@ var cleanupWait = 10 * time.Second
 // turn, so its asks end (Loom records them lost) and no Deny is applied
 // while the native allow may remain. This guards Loom's own paths only;
 // other clients of the shared service can still use the session.
-func (s *Session) quarantine(ctx context.Context, cause error) error {
+func (s *Session) quarantine(cause error) error {
 	sid := s.ref.NativeID
 	why := "an Always grant on session " + sid + " is unconfirmed and could not be removed; the native session may still allow its pattern"
 	s.c.rulesMu.Lock()
@@ -371,6 +371,9 @@ func (s *Session) quarantine(ctx context.Context, cause error) error {
 	delete(s.c.grants, sid)
 	s.c.held[sid] = why
 	s.c.rulesMu.Unlock()
+	// Its own bounded context: the restore's may already have expired.
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupWait)
+	defer cancel()
 	if _, err := s.Interrupt(ctx); err != nil {
 		return errors.Join(cause, fmt.Errorf("opencode: %s; native stop unconfirmed, tools may still run under the grant; no Loom prompt or reply until Open or Resume: %w", why, err))
 	}
