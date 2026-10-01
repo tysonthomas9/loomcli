@@ -47,8 +47,9 @@ func (s *Service) openAsks(agentID string) []Ask {
 }
 
 // Respond checks the ask is open, then replies through the harness. An
-// unknown, answered or lost ask fails with ask_not_found. A decision is never
-// widened: allow_always becomes once on a harness that cannot keep it.
+// unknown, answered or lost ask fails with ask_not_found. A decision is
+// passed as given, never narrowed: a harness that cannot keep allow_always
+// fails the reply, Respond returns that error and the ask stays open.
 func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 	defer s.lock(req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
