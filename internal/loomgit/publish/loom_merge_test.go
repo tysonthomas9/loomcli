@@ -25,6 +25,7 @@ type mergeForgeFake struct {
 	checks        string
 	prChecks      map[int]string
 	reviews       map[int]string
+	mergeStates   map[int]string
 	queued        bool
 	pending       bool
 	putStatus     string
@@ -52,7 +53,8 @@ func (forge *mergeForgeFake) PRStatuses(_ context.Context, _, _, prefix string) 
 			if !ok {
 				checks = forge.checks
 			}
-			statuses[pr.Head] = stackpublish.PRStatus{Number: pr.Number, Checks: checks, Review: forge.reviews[pr.Number], Mergeable: "mergeable"}
+			statuses[pr.Head] = stackpublish.PRStatus{Number: pr.Number, Checks: checks, Review: forge.reviews[pr.Number], Mergeable: "mergeable",
+				MergeState: forge.mergeStates[pr.Number]}
 		}
 	}
 	return statuses, nil

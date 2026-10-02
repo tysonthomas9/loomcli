@@ -213,7 +213,17 @@ func highestGreenLayer(ctx context.Context, store *journal.SQLite, forge loomMer
 }
 
 func greenStatus(status stackpublish.PRStatus) bool {
-	return (status.Checks == "passing" || status.Checks == "none") && reviewMet(status) && status.Mergeable == "mergeable"
+	return requiredChecksPass(status) && reviewMet(status) && status.Mergeable == "mergeable"
+}
+
+// requiredChecksPass follows branch protection: the provider's merge state
+// clears a PR whose only failing or pending checks are optional.
+func requiredChecksPass(status stackpublish.PRStatus) bool {
+	switch status.MergeState {
+	case "clean", "unstable", "has_hooks":
+		return true
+	}
+	return status.Checks == "passing" || status.Checks == "none"
 }
 
 // reviewMet follows the provider's rule: "none" means the repo requires no review.
