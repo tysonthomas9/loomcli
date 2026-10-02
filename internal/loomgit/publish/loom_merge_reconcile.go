@@ -201,11 +201,12 @@ func loomMergeHealth(ctx context.Context, forge loomMergeForge, publication jour
 	if !found || status.Number != pr.Number {
 		return false, loomgit.NewError(loomgit.MergeBlocked, "required PR status is unavailable", nil)
 	}
-	if status.Checks == "failing" || status.Review == "changes_requested" || status.Mergeable == "conflicting" {
+	checksFailing := status.Checks == "failing" && !(reviewRequired && requiredChecksPass(status))
+	if checksFailing || status.Review == "changes_requested" || status.Mergeable == "conflicting" {
 		return false, loomMergeFailure(ctx, forge, owner, repo, pr)
 	}
-	if reviewRequired && !reviewMet(status) {
-		return false, nil
+	if reviewRequired {
+		return requiredChecksPass(status) && reviewMet(status) && status.Mergeable == "mergeable", nil
 	}
 	return (status.Checks == "passing" || status.Checks == "none") && status.Mergeable == "mergeable", nil
 }
@@ -311,7 +312,7 @@ func loomNextLayerReady(ctx context.Context, store *journal.SQLite, forge loomMe
 	if pr.Base != landed.Trunk {
 		return false, loomgit.NewError(loomgit.Stale, "restacked PR changed or was not retargeted", nil)
 	}
-	ready, err := loomNextChecks(ctx, forge, publication, pr, owner, repo)
+	ready, err := loomNextChecks(ctx, forge, publication, pr, owner, repo, merge.Authority == leadMergeAuthority)
 	if err != nil || !ready {
 		return ready, err
 	}
@@ -329,12 +330,15 @@ func loomRestackDone(ctx context.Context, store *journal.SQLite, change string, 
 }
 
 func loomNextChecks(ctx context.Context, forge loomMergeForge, publication journal.Publication,
-	pr stackpublish.PR, owner, repo string) (bool, error) {
+	pr stackpublish.PR, owner, repo string, policy bool) (bool, error) {
 	statuses, err := forge.PRStatuses(ctx, owner, repo, publication.Branch)
 	if err != nil {
 		return false, err
 	}
 	status, found := statuses[publication.Branch]
+	if policy && found && status.Number == pr.Number && requiredChecksPass(status) {
+		return true, nil
+	}
 	if status.Checks == "failing" {
 		return false, loomMergeFailure(ctx, forge, owner, repo, pr)
 	}

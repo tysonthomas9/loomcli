@@ -67,4 +67,7 @@ type PRStatus struct {
 	Checks    string `json:"checks"`    // passing | failing | pending | none
 	Review    string `json:"review"`    // approved | changes_requested | review_required | none
 	Mergeable string `json:"mergeable"` // mergeable | conflicting | unknown
+	// MergeState is the provider's branch-protection verdict: clean | unstable
+	// (only non-required checks fail) | has_hooks | blocked | behind | dirty | draft | unknown.
+	MergeState string `json:"merge_state,omitempty"`
 }

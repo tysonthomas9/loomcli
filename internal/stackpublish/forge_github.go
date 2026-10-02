@@ -392,12 +392,13 @@ func (g *GitHubForge) ClosePR(ctx context.Context, owner, repo string, number in
 	return nil
 }
 
-const prGraphQuery = `query($owner:String!,$repo:String!,$cursor:String){repository(owner:$owner,name:$repo){pullRequests(states:OPEN,first:100,after:$cursor){nodes{number headRefName mergeable reviewDecision mergeQueueEntry{id} commits(last:1){nodes{commit{statusCheckRollup{state}}}}} pageInfo{hasNextPage endCursor}}}}`
+const prGraphQuery = `query($owner:String!,$repo:String!,$cursor:String){repository(owner:$owner,name:$repo){pullRequests(states:OPEN,first:100,after:$cursor){nodes{number headRefName mergeable mergeStateStatus reviewDecision mergeQueueEntry{id} commits(last:1){nodes{commit{statusCheckRollup{state}}}}} pageInfo{hasNextPage endCursor}}}}`
 
 type prGraphNode struct {
 	Number          int     `json:"number"`
 	HeadRefName     string  `json:"headRefName"`
 	Mergeable       string  `json:"mergeable"`
+	MergeState      string  `json:"mergeStateStatus"`
 	ReviewDecision  *string `json:"reviewDecision"`
 	MergeQueueEntry *struct {
 		ID string `json:"id"`
@@ -484,10 +485,11 @@ func (g *GitHubForge) PRStatuses(ctx context.Context, owner, repo, headPrefix st
 			continue
 		}
 		out[n.HeadRefName] = PRStatus{
-			Number:    n.Number,
-			Checks:    rollupToChecks(n),
-			Review:    reviewToStatus(n.ReviewDecision),
-			Mergeable: mergeableToStatus(n.Mergeable),
+			Number:     n.Number,
+			Checks:     rollupToChecks(n),
+			Review:     reviewToStatus(n.ReviewDecision),
+			Mergeable:  mergeableToStatus(n.Mergeable),
+			MergeState: strings.ToLower(n.MergeState),
 		}
 	}
 	return out, nil

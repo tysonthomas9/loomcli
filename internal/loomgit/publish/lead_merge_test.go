@@ -42,7 +42,8 @@ func leadMerge(t *testing.T, item fixture) journal.LoomMerge {
 
 func TestWhenGreenMergesGreenLayersAndLeavesPendingLayer(t *testing.T) {
 	item, forge := leadMergeFixture(t, "approved", "approved", "approved", "approved")
-	forge.prChecks = map[int]string{forge.prs[2].Number: "pending"}
+	forge.prChecks = map[int]string{forge.prs[1].Number: "failing", forge.prs[2].Number: "pending"}
+	forge.mergeStates = map[int]string{forge.prs[1].Number: "unstable"}
 	ctx := context.Background()
 	setLeadMayMerge(t, item, "when_green")
 	if err := ReconcileLeadMergesAt(ctx, item.storePath, forge); err != nil {
@@ -310,5 +311,45 @@ func TestTurningPolicyOffCancelsProviderQueuedLeadMerge(t *testing.T) {
 	merge := leadMerge(t, item)
 	if merge.Phase != "blocked" || merge.Reason != "cancelled: lead_may_merge is off" || forge.merged != 0 {
 		t.Fatalf("queued merge after policy off = %+v, merged = %d", merge, forge.merged)
+	}
+}
+
+func TestWhenGreenIgnoresFailingOptionalChecks(t *testing.T) {
+	item, forge := leadMergeFixture(t, "approved", "approved")
+	forge.prChecks = map[int]string{forge.prs[0].Number: "failing", forge.prs[1].Number: "failing"}
+	forge.mergeStates = map[int]string{forge.prs[0].Number: "unstable", forge.prs[1].Number: "blocked"}
+	ctx := context.Background()
+	setLeadMayMerge(t, item, "when_green")
+	if err := ReconcileLeadMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	merge := leadMerge(t, item)
+	if merge.Target != "A" || forge.merged != 1 || !forge.prs[0].Merged || forge.prs[1].Merged {
+		t.Fatalf("merge = %+v, merged = %d; want A merged past its optional check, B held by a required one", merge, forge.merged)
+	}
+}
+
+func TestSetWorkspacePolicyRecordsEachChange(t *testing.T) {
+	item, _ := leadMergeFixture(t)
+	ctx := context.Background()
+	setLeadMayMerge(t, item, "when_green")
+	if _, err := SetWorkspacePolicy(ctx, item.store, "W", "off", review.Actor{Kind: "agent", ID: "task-1"}, nil); err == nil {
+		t.Fatal("agent changed policy")
+	}
+	if _, err := SetWorkspacePolicy(ctx, item.store, "W", "off", review.Actor{Kind: "human", ID: "alice"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := item.store.PolicyChanges(ctx, "W")
+	if err != nil || len(changes) != 2 {
+		t.Fatalf("policy changes = %+v, %v", changes, err)
+	}
+	for index, want := range []journal.PolicyChange{{Old: "off", New: "when_green", Actor: "tyson"}, {Old: "when_green", New: "off", Actor: "alice"}} {
+		got := changes[index]
+		if got.Setting != "lead_may_merge" || got.Old != want.Old || got.New != want.New || got.Actor != want.Actor || got.ChangedAt == "" {
+			t.Fatalf("change %d = %+v, want %+v", index, got, want)
+		}
 	}
 }
