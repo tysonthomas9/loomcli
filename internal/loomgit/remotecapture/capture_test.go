@@ -114,7 +114,7 @@ func TestRemoteCaptureProxyAndSnapshot(t *testing.T) {
 		remotecapture.ServeHTTP(w, r, journalPath, "W")
 	}))
 	defer server.Close()
-	push := exec.Command("git", "push", "--force", server.URL+"/capture.git", capture.SHA+":"+ref) //nolint:norawexec // Scoped-token push targets the temporary fake provider.
+	push := exec.Command("git", "push", server.URL+"/capture.git", capture.SHA+":"+ref) //nolint:norawexec // Scoped-token push targets the temporary fake provider.
 	push.Dir = task
 	push.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader", "GIT_CONFIG_VALUE_0=Authorization: Bearer "+token)

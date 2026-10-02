@@ -386,7 +386,7 @@ func TestDaytonaTaskRunnerSourceContract(t *testing.T) {
 		`captureOp("capture-token", input.request`,
 		`captureOp("capture-finalize", input.request`,
 		`captureRemoteWork(setup, sandbox, captureContext, secrets)`,
-		`git(["push", "--force", input.proxyURL`,
+		`git(["push", input.proxyURL`,
 		`remote.origin.pushurl loom-no-push://task-copy`,
 		`config credential.helper ''`,
 		`env.GIT_CONFIG_KEY_0 = "credential.helper"`,
@@ -400,7 +400,7 @@ func TestDaytonaTaskRunnerSourceContract(t *testing.T) {
 			t.Fatalf("daytona-task-runner source missing %q", want)
 		}
 	}
-	for _, stale := range []string{"uploadPatchArtifact(", "patch_artifact_id"} {
+	for _, stale := range []string{"uploadPatchArtifact(", "patch_artifact_id", `"push", "--force"`} {
 		if strings.Contains(source, stale) {
 			t.Fatalf("daytona-task-runner source retains obsolete patch artifact path %q", stale)
 		}
