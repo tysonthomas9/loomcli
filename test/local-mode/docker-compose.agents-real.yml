@@ -1,0 +1,17 @@
+# Real-model mode for the Agent API stack (LOCAL_MODE_AGENTS_REAL=1 make
+# local-mode-agents-up): serve's OpenCode uses the providers in the host's
+# OpenCode auth.json, mounted read-only, instead of the fake model.
+#
+# One pattern per harness: each host credential file gets one read-only bind
+# here, at the path that harness reads, with a LOCAL_MODE_<HARNESS>_AUTH knob.
+# Never copy it, never log in inside the container. Only OpenCode exists now;
+# Codex (~/.codex/auth.json) and Claude follow the same shape when added.
+
+services:
+  loom-local:
+    environment:
+      LOCAL_MODE_AGENTS_REAL: "1"
+      LOCAL_MODE_AGENTS_MODEL: "${LOCAL_MODE_AGENTS_MODEL:-}"
+      OPENCODE_DISABLE_MODELS_FETCH: ""
+    volumes:
+      - ${LOCAL_MODE_OPENCODE_AUTH:-${HOME}/.local/share/opencode/auth.json}:/root/.loom/agents-opencode/data/opencode/auth.json:ro

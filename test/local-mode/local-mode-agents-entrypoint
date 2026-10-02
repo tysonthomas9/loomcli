@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Agent API variant: start the scripted fake model, point OpenCode's XDG roots
+# Agent API variant: start the scripted fake model (unless LOCAL_MODE_AGENTS_REAL
+# selects the read-only auth.json providers), point OpenCode's XDG roots
 # at a sandbox on the loom-data volume (so sessions survive a container
 # restart) whose opencode.json routes provider "aft" to it, then run the
 # default local-mode entrypoint, which builds its workspace from the 2.0f
@@ -11,13 +12,29 @@ set -euo pipefail
 
 sbx="${LOOM_CONFIG_DIR:-/root/.loom}/agents-opencode"
 mkdir -p "$sbx/config/opencode"
-cat > "$sbx/config/opencode/opencode.json" <<JSON
+if [ -n "${LOCAL_MODE_AGENTS_REAL:-}" ]; then
+  # Real providers from the read-only auth.json mount; optional default model.
+  printf '{%s}\n' "${LOCAL_MODE_AGENTS_MODEL:+\"model\":\"$LOCAL_MODE_AGENTS_MODEL\"}" \
+    > "$sbx/config/opencode/opencode.json"
+else
+  cat > "$sbx/config/opencode/opencode.json" <<JSON
 {"provider":{"aft":{"name":"AFT fake","npm":"@ai-sdk/openai-compatible",
   "options":{"baseURL":"http://127.0.0.1:${FAKE_MODEL_PORT}/v1","apiKey":"x"},
   "models":{"m":{"name":"M","limit":{"context":100000,"output":4000}}}}},"model":"aft/m"}
 JSON
+  node /opt/fake-model/server.mjs >/tmp/fake-model.log 2>&1 &
+fi
 export XDG_CONFIG_HOME="$sbx/config" XDG_DATA_HOME="$sbx/data" \
   XDG_STATE_HOME="$sbx/state" XDG_CACHE_HOME="$sbx/cache"
+if [ -n "${LOCAL_MODE_AGENTS_REAL:-}" ]; then
+  # OpenCode v2 reads auth.json only in a one-time migration, which a new
+  # database skips. Create the database, then re-queue that migration so the
+  # service imports the read-only auth.json when it starts.
+  opencode auth list --standalone >/dev/null
+  node -e 'new (require("node:sqlite").DatabaseSync)(process.argv[1])
+    .prepare("DELETE FROM migration WHERE id LIKE ?").run(process.argv[2])' \
+    "$XDG_DATA_HOME/opencode/opencode.db" '%_import_legacy_credentials'
+fi
 
 src="${LOOM_LOCAL_MODE_SOURCE_REPO:-/workspace/source-repo}"
 origin="${LOOM_LOCAL_MODE_ORIGIN_REPO:-/workspace/source-repo-origin.git}"
@@ -27,7 +44,5 @@ if [ ! -d "$src/.git" ]; then
   git -C "$src" remote add origin "$origin"
   git -C "$src" push -q -u origin main
 fi
-
-node /opt/fake-model/server.mjs >/tmp/fake-model.log 2>&1 &
 
 exec /usr/local/bin/local-mode-entrypoint "$@"

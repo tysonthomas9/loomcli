@@ -155,6 +155,31 @@ project; this also removes its volumes:
 LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-<you> make local-mode-agents-down
 ```
 
+Real-model mode: `LOCAL_MODE_AGENTS_REAL=1` adds
+`docker-compose.agents-real.yml`. It mounts the host's OpenCode
+`~/.local/share/opencode/auth.json` (or `LOCAL_MODE_OPENCODE_AUTH`) READ-ONLY
+at the container's OpenCode data path, and does not start the fake model, so
+Leads use the providers you are logged in to. Nothing on the host is written,
+and the file is never copied into an image. At each start the entrypoint has
+OpenCode import it into the container's OpenCode database, which lives on the
+project's `loom-data` volume and goes away with `make local-mode-agents-down`. The create flow's model list comes
+from those providers. To set a default model, use `LOCAL_MODE_AGENTS_MODEL`
+(`provider/model`); otherwise OpenCode picks one. The fake-model mode stays
+the default for AFT and CI.
+
+```sh
+LOCAL_MODE_AGENTS_REAL=1 LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-<you> \
+LOCAL_MODE_FLEETDB_PORT=8680 LOCAL_MODE_API_PORT=8682 LOCAL_MODE_UI_PORT=8683 \
+LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" make local-mode-agents-up
+```
+
+Tear it down with the same `make local-mode-agents-down` as above. If a
+provider token expires, refresh it on the host with `opencode auth login`,
+then `podman restart` the container. Never log in inside the container: the
+file is read-only there. Prefer an API-key provider, or an OAuth login whose
+access token has not expired: refreshing a stale OAuth token in the container
+can invalidate the host's login.
+
 Codex variant knobs:
 
 The Codex image installs the current npm `latest` release by default. Set

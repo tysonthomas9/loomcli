@@ -18,7 +18,7 @@ LOCAL_MODE_COMPOSE_EXTRA := $(foreach file,$(LOCAL_MODE_COMPOSE_FILES),-f $(file
 LOCAL_MODE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CODEX_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CLAUDE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.claude.yml $(LOCAL_MODE_COMPOSE_EXTRA)
-LOCAL_MODE_AGENTS_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml $(LOCAL_MODE_COMPOSE_EXTRA)
+LOCAL_MODE_AGENTS_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml $(if $(LOCAL_MODE_AGENTS_REAL),-f test/local-mode/docker-compose.agents-real.yml) $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_DAYTONA_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.daytona.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 export LOCAL_MODE_FLEETDB_IMAGE
 export LOCAL_MODE_LOOM_IMAGE
