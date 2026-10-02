@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agentworktree"
 	"github.com/tysonthomas9/loomcli/internal/gitrunner"
@@ -94,7 +95,7 @@ func TestFakeServeForE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &http.Server{Handler: mux, BaseContext: func(net.Listener) context.Context { return ctx }}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, BaseContext: func(net.Listener) context.Context { return ctx }}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			t.Errorf("serve: %v", err)
