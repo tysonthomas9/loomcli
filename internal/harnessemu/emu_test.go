@@ -257,3 +257,66 @@ func TestEmulatorRestartResumesRunningTurn(t *testing.T) {
 		t.Fatalf("HasInput after restart = %v", got)
 	}
 }
+
+func TestEmulatorChildSessionQuery(t *testing.T) {
+	ctx := context.Background()
+	child := []harnessemu.Turn{{Text: "x", Child: true}}
+	sc := scenarios(t, map[string][]harnessemu.Turn{"p1": child, "p2": append(child, child...)})
+	c, url, _ := emuURL(t, filepath.Join(t.TempDir(), "state.json"), sc)
+	refs := map[string]loomharness.NativeRef{}
+	for _, key := range []string{"p1", "p2", "lone"} {
+		ref, err := c.Open(ctx, loomharness.OpenSpec{Key: key, Dir: t.TempDir(), Metadata: map[string]string{"agent_id": key}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		refs[key] = ref
+	}
+	for i, key := range []string{"p1", "p2", "p2"} {
+		s := c.Session(refs[key])
+		if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID(key, string(rune('a'+i))), Text: "go"}); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+			if st, _ := s.Status(ctx); !st.Running {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("turn never finished")
+			}
+		}
+	}
+	list := func(q string) map[string]string {
+		var page struct {
+			Data []struct{ ID, ParentID string } `json:"data"`
+		}
+		if err := getJSON(url+"/api/session"+q, &page); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, s := range page.Data {
+			out[s.ID] = s.ParentID
+		}
+		return out
+	}
+	if all := list(""); len(all) != 6 {
+		t.Fatalf("unfiltered list = %v; want 3 roots and 3 children", all)
+	}
+	for key, n := range map[string]int{"p1": 1, "p2": 2, "lone": 0} {
+		kids := list("?parentID=" + refs[key].NativeID)
+		if len(kids) != n {
+			t.Fatalf("children of %s = %v; want %d", key, kids, n)
+		}
+		for _, p := range kids {
+			if p != refs[key].NativeID {
+				t.Fatalf("children of %s = %v", key, kids)
+			}
+		}
+	}
+	roots := list("?parentID=null")
+	if len(roots) != 3 || roots[refs["p1"].NativeID] != "" || roots[refs["p2"].NativeID] != "" || roots[refs["lone"].NativeID] != "" {
+		t.Fatalf("roots = %v", roots)
+	}
+	if _, ok := roots[refs["lone"].NativeID]; !ok {
+		t.Fatalf("roots = %v; want the unrelated root", roots)
+	}
+}

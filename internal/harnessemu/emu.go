@@ -325,12 +325,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/agent", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"data": agents(r.URL.Query().Get("location[directory]"))})
 	})
-	mux.HandleFunc("GET /api/session", func(w http.ResponseWriter, _ *http.Request) {
+	// The child-session query: ?parentID=<id> lists that session's children
+	// and ?parentID=null the roots (b30c4d0 SessionsQueryFields.parentID).
+	mux.HandleFunc("GET /api/session", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		q := r.URL.Query()
+		want := q.Get("parentID")
+		if want == "null" {
+			want = ""
+		}
 		out := []map[string]any{}
 		for _, ss := range s.st.Sessions {
-			out = append(out, ss.Info)
+			parent, _ := ss.Info["parentID"].(string)
+			if !q.Has("parentID") || parent == want {
+				out = append(out, ss.Info)
+			}
 		}
 		reply(w, 200, map[string]any{"data": out})
 	})
