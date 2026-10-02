@@ -6,7 +6,6 @@ package bridge
 
 import (
 	"context"
-	"os"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -14,15 +13,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomagent/client"
 )
 
-// Run serves the bridge for the agent whose worktree is the working
-// directory until ctx ends or the harness closes stdin. It fails closed
-// when the agent has no settings or the Agent API refuses its token.
+// Run serves the bridge for the agent its environment names until ctx ends
+// or the harness closes stdin. It fails closed when the agent has no
+// settings or the Agent API refuses its token.
 func Run(ctx context.Context) error {
-	dir, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	cfg, err := agentmcp.Load(dir)
+	cfg, err := agentmcp.Load()
 	if err != nil {
 		return err
 	}

@@ -29,14 +29,11 @@ type Config struct {
 	// <root>/<repo>/<key>). Loom keeps its presets in Worktrees/.opencode/agent,
 	// where every OpenCode service finds them for sessions below it.
 	Worktrees string
-	// Bridge is the `loom agent mcp-bridge` command. It is registered once as
-	// the "loom" MCP server in Worktrees/.opencode/opencode.json; OpenCode
-	// starts it in each session's directory, where it finds that agent's
-	// settings (bridgeEnv). nil registers none.
+	// Bridge is the `loom agent mcp-bridge` command. Open and Resume register
+	// it, with the agent's Launch.Env, as the "loom" MCP server of the
+	// session's location through OpenCode's runtime MCP API (bridge); nothing
+	// is written to disk. nil refuses an agent with bridge settings.
 	Bridge []string
-	// BridgeFile names where the settings of the agent whose worktree is dir
-	// go (agentmcp.EnvFile); nil refuses an agent with settings.
-	BridgeFile func(dir string) (string, error)
 }
 
 // Supervisor timings; variables so tests can shorten them.
@@ -104,7 +101,7 @@ func New(cfg Config) *Adapter {
 	if cfg.Worktrees != "" {
 		a.presets = filepath.Clean(cfg.Worktrees)
 	}
-	a.defined, a.bridgeFile = a.definesPreset, cfg.BridgeFile
+	a.defined, a.bridgeCmd = a.definesPreset, cfg.Bridge
 	return a
 }
 
@@ -439,8 +436,7 @@ var presetName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // loom-<name>.md per preset (frontmatter mode primary, body the persona;
 // config/plugin/agent.ts:98-120) and no other loom-*.md. Other files in the
 // directory are never touched. Files are replaced atomically and only when
-// their content changes, so services reload only on a real change. With a
-// Bridge, <Worktrees>/.opencode/opencode.json registers it as MCP server "loom".
+// their content changes, so services reload only on a real change.
 func (a *Adapter) syncPresets() error {
 	if len(a.cfg.Presets) == 0 && a.presets == "" {
 		return nil
@@ -475,17 +471,6 @@ func (a *Adapter) syncPresets() error {
 			return fmt.Errorf("opencode presets: %w", err)
 		}
 	}
-	if len(a.cfg.Bridge) == 0 {
-		return nil
-	}
-	cfg, err := json.Marshal(map[string]any{"mcp": map[string]any{"loom": map[string]any{
-		"type": "local", "command": a.cfg.Bridge}}})
-	if err == nil {
-		err = replaceFile(filepath.Join(a.presets, ".opencode", "opencode.json"), cfg)
-	}
-	if err != nil {
-		return fmt.Errorf("opencode bridge: %w", err)
-	}
 	return nil
 }
 
@@ -512,21 +497,20 @@ func replaceFile(file string, content []byte) error {
 	return nil
 }
 
-// bridgeEnv writes the agent's bridge settings (its Launch.Env, with its
-// token) where the bridge OpenCode starts in dir reads them, mode 0600.
-func (c *Client) bridgeEnv(dir string, env map[string]string) error {
-	if c.bridgeFile == nil {
-		return errors.New("no bridge settings file configured")
+// Unbridge removes the "loom" MCP server Open or Resume registered for dir,
+// so an archived or deleted agent's bridge, and its token, do not outlive
+// it in OpenCode. Registrations live only in the memory of a running
+// service, so with none running there is nothing to remove, and none is
+// started for it.
+func (a *Adapter) Unbridge(ctx context.Context, dir string) error {
+	a.mu.Lock()
+	r, ok := a.registered()
+	a.mu.Unlock()
+	if !ok || !alive(r.PID) {
+		a.settled.Delete(dir)
+		return nil
 	}
-	file, err := c.bridgeFile(dir)
-	if err != nil {
-		return err
-	}
-	raw, err := json.Marshal(env)
-	if err != nil {
-		return err
-	}
-	return replaceFile(file, raw)
+	return a.unbridge(ctx, dir)
 }
 
 // answers reports whether the server at base is up and is process pid.

@@ -2,10 +2,9 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,38 +12,43 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
 
-// TestBridgeSettingsPrivateAndUnloaded: an agent's bridge settings, with its
-// token, are written mode 0600 into its worktree's private git dir, refused
-// with no place configured, and removed when its session unloads.
-func TestBridgeSettingsPrivateAndUnloaded(t *testing.T) {
-	root := t.TempDir()
-	repo, dir := filepath.Join(root, "repo"), filepath.Join(root, "agent1")
-	for _, args := range [][]string{{"init", "-q", repo}, {"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t",
-		"commit", "-q", "--allow-empty", "-m", "init"}, {"-C", repo, "worktree", "add", "-q", "--detach", dir}} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil { //nolint:norawexec // a real git worktree is what EnvFile reads
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
+// TestBridgeRegisteredNotWritten: an agent's bridge, with its token, is
+// registered as the "loom" MCP server of its location through OpenCode's
+// runtime API, nothing is written to disk, an agent with settings is refused
+// with no bridge command configured, and the registration is removed when
+// its session unloads.
+func TestBridgeRegisteredNotWritten(t *testing.T) {
+	dir := t.TempDir()
 	st := newStore()
 	st.sessions["ses_1"] = map[string]any{"id": "ses_1", "location": map[string]string{"directory": dir}}
 	c := fakeServer(t, st)
+	ctx := context.Background()
 	env := map[string]string{agentmcp.EnvToken: "tok"}
-	if err := c.bridgeEnv(dir, env); err == nil {
-		t.Fatal("bridgeEnv wrote settings with no settings file configured")
+	if err := c.bridge(ctx, dir, env); !errors.Is(err, loomharness.ErrUnavailable) || st.puts != 0 {
+		t.Fatalf("bridge with no command = %v, %d PUTs; want unavailable, none", err, st.puts)
 	}
-	c.bridgeFile = agentmcp.EnvFile
-	if err := c.bridgeEnv(dir, env); err != nil {
+	c.bridgeCmd = []string{"/loom", "agent", "mcp-bridge"}
+	if err := c.bridge(ctx, dir, env); err != nil {
 		t.Fatal(err)
 	}
-	file, _ := agentmcp.EnvFile(dir)
-	if fi, err := os.Stat(file); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("settings file = %v, %v; want mode 0600", fi, err)
+	st.mu.Lock()
+	got, _ := json.Marshal(st.bridges[dir])
+	st.mu.Unlock()
+	if want := `{"command":["/loom","agent","mcp-bridge"],"environment":{"LOOM_AGENT_TOKEN":"tok"},"type":"local"}`; string(got) != want {
+		t.Fatalf("registered config = %s; want %s", got, want)
 	}
-	if err := c.Session(loomharness.NativeRef{NativeID: "ses_1"}).Unload(context.Background()); err != nil {
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Fatalf("worktree holds %v, %v; want nothing written", entries, err)
+	}
+	s := c.Session(loomharness.NativeRef{NativeID: "ses_1"})
+	if err := s.Unload(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(file); !os.IsNotExist(err) {
-		t.Fatalf("settings after Unload: %v; want removed", err)
+	if _, ok := st.bridges[dir]; ok {
+		t.Fatal("bridge still registered after Unload")
+	}
+	if err := s.Unload(ctx); err != nil {
+		t.Fatalf("Unload with the bridge already gone = %v; want nil", err)
 	}
 }
 
@@ -58,7 +62,7 @@ func TestOpenWaitsForBridgeTools(t *testing.T) {
 	dir := t.TempDir()
 	st := newStore()
 	c := fakeServer(t, st)
-	c.bridgeFile = func(string) (string, error) { return filepath.Join(dir, "settings.json"), nil }
+	c.bridgeCmd = []string{"/loom", "agent", "mcp-bridge"}
 	spec := loomharness.OpenSpec{Key: "lead", Dir: dir, Launch: loomharness.Launch{Env: map[string]string{agentmcp.EnvToken: "tok"}}}
 	ctx := context.Background()
 
@@ -107,5 +111,19 @@ func TestOpenWaitsForBridgeTools(t *testing.T) {
 	}
 	if d := time.Since(start); d < 150*time.Millisecond+catalogSettle {
 		t.Fatalf("a hand-off after the bridge reconnected took %s; want the settle after it connected", d)
+	}
+
+	// OpenCode restarted and lost the registration: registered again, and
+	// settled again.
+	st.mu.Lock()
+	delete(st.bridges, dir)
+	puts := st.puts
+	st.mu.Unlock()
+	start = time.Now()
+	if err := c.bridge(ctx, dir, spec.Launch.Env); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < catalogSettle || st.puts != puts+1 {
+		t.Fatalf("a hand-off after a lost registration took %s with %d PUTs; want one PUT and the settle", d, st.puts-puts)
 	}
 }

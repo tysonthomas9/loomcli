@@ -35,22 +35,24 @@ type store struct {
 	envFail  bool
 	bareRuns int // prompts accepted while the session had no environment
 	patchErr bool
-	delErr   bool                // DELETE /api/session/{id} fails
-	patchLie int                 // the next n session PATCHes commit, then answer 500
-	hangLie  bool                // a PATCH that commits (patchLie) never answers instead
-	stops    int                 // POST /interrupt calls
-	lateRuns int                 // prompts accepted after an interrupt
-	stopErr  bool                // POST /interrupt answers 500
-	stopHang bool                // POST /interrupt never answers
-	postErr  bool                // POST /api/session creates the session, then fails
-	race     *openRace           // pairs two concurrent session GETs, counts creates
-	perms    map[string]permReq  // pending permission asks by id, readable and answerable
-	replies  map[string]string   // permission ask id -> the decision Loom sent
-	agents   map[string]bool     // agent ids the service offers
-	agentDir []string            // location[directory] of each agent lookup
-	loading  bool                // the location lists no agents yet
-	asks     map[string][]string // pending per_/frm_ ask ids, per session
-	mcp      string              // the loom MCP server's /api/mcp status; "" lists none
+	delErr   bool                      // DELETE /api/session/{id} fails
+	patchLie int                       // the next n session PATCHes commit, then answer 500
+	hangLie  bool                      // a PATCH that commits (patchLie) never answers instead
+	stops    int                       // POST /interrupt calls
+	lateRuns int                       // prompts accepted after an interrupt
+	stopErr  bool                      // POST /interrupt answers 500
+	stopHang bool                      // POST /interrupt never answers
+	postErr  bool                      // POST /api/session creates the session, then fails
+	race     *openRace                 // pairs two concurrent session GETs, counts creates
+	perms    map[string]permReq        // pending permission asks by id, readable and answerable
+	replies  map[string]string         // permission ask id -> the decision Loom sent
+	agents   map[string]bool           // agent ids the service offers
+	agentDir []string                  // location[directory] of each agent lookup
+	loading  bool                      // the location lists no agents yet
+	asks     map[string][]string       // pending per_/frm_ ask ids, per session
+	mcp      string                    // a registered loom MCP server's /api/mcp status; "" is connected
+	bridges  map[string]map[string]any // location dir -> the loom MCP config PUT there
+	puts     int                       // PUT /api/experimental/mcp/loom calls
 }
 
 func newStore() *store {
@@ -94,14 +96,46 @@ func fakeServer(t *testing.T, st *store) *Client {
 		}
 		reply(w, 200, map[string]any{"data": body})
 	})
-	mux.HandleFunc("GET /api/mcp", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /api/mcp", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		data := []map[string]any{}
-		if st.mcp != "" {
-			data = append(data, map[string]any{"name": "loom", "status": map[string]string{"status": st.mcp}})
+		if _, ok := st.bridges[r.URL.Query().Get("location[directory]")]; ok {
+			status := st.mcp
+			if status == "" {
+				status = "connected"
+			}
+			data = append(data, map[string]any{"name": "loom", "status": map[string]string{"status": status}})
 		}
 		reply(w, 200, map[string]any{"data": data})
+	})
+	mux.HandleFunc("PUT /api/experimental/mcp/loom", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Config map[string]any `json:"config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Config["type"] != "local" || body.Config["command"] == nil {
+			reply(w, 400, map[string]string{"_tag": "BadRequest", "message": "bad config"})
+			return
+		}
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if st.bridges == nil {
+			st.bridges = map[string]map[string]any{}
+		}
+		st.bridges[r.URL.Query().Get("location[directory]")] = body.Config
+		st.puts++
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("DELETE /api/experimental/mcp/loom", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		dir := r.URL.Query().Get("location[directory]")
+		if _, ok := st.bridges[dir]; !ok {
+			reply(w, 404, map[string]string{"_tag": "McpServerNotFoundError", "message": "loom"})
+			return
+		}
+		delete(st.bridges, dir)
+		w.WriteHeader(204)
 	})
 	mux.HandleFunc("GET /api/agent", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()

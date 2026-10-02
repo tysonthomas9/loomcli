@@ -30,10 +30,12 @@ type Client struct {
 	shellEnv func() ([]string, error)    // environment for session shell commands; nil leaves OpenCode's default
 	presets  string                      // the worktrees root whose .opencode/agent holds Loom's presets; "" refuses preset sessions
 	defined  func(agent string) bool     // whether Loom currently defines the loom-* agent; nil skips the check
-	// bridgeFile names a worktree's bridge settings file; nil refuses settings
-	bridgeFile func(dir string) (string, error)
-	// settled holds the dirs whose loom MCP server Loom saw connect and
-	// settled (catalogSettle) since it last saw it not connected
+	// bridgeCmd is the `loom agent mcp-bridge` command; nil refuses an agent
+	// with bridge settings
+	bridgeCmd []string
+	// settled holds, per dir, the bridge config whose loom MCP server Loom
+	// saw connected and settled (catalogSettle) since it last saw it not
+	// connected
 	settled sync.Map
 
 	rulesMu sync.Mutex

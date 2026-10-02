@@ -8,11 +8,9 @@ package agentmcp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -22,9 +20,10 @@ import (
 )
 
 // The launch settings a harness gives the bridge (the agent's Launch.Env).
-// OpenCode's one shared server cannot give a session its own MCP
-// environment, so its adapter writes them to EnvFile(worktree) instead.
-// They hold the agent's token: never log or print them.
+// Every harness gives them as the bridge process's environment; OpenCode's
+// adapter registers them with the bridge command through OpenCode's runtime
+// MCP API, never on disk. They hold the agent's token: never log or print
+// them.
 const (
 	EnvAPI       = "LOOM_AGENT_API" // the loom serve origin
 	EnvWorkspace = "LOOM_AGENT_WORKSPACE"
@@ -65,53 +64,15 @@ func (c Config) Env() map[string]string {
 		EnvHarness: c.Harness, EnvTools: strings.Join(c.Tools, ",")}
 }
 
-// EnvFile is where the settings of the agent whose worktree is dir are kept
-// for OpenCode: in the worktree's private git dir, which the worktree's .git
-// file names. Git never commits it, and removing the worktree deletes it.
-// OpenCode starts the bridge in the session's directory.
-func EnvFile(dir string) (string, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, ".git")) //nolint:gosec // G304: the agent's own worktree.
-	if err != nil {
-		return "", fmt.Errorf("agentmcp: %s is not a linked git worktree: %w", dir, err)
+// Load reads the settings from the environment. It fails closed when they
+// name no token.
+func Load() (Config, error) {
+	if os.Getenv(EnvToken) == "" {
+		return Config{}, fmt.Errorf("agentmcp: no %s: Loom launches the bridge with its agent's settings", EnvToken)
 	}
-	gitDir, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir: ")
-	if !ok {
-		return "", fmt.Errorf("agentmcp: %s/.git names no git dir", dir)
-	}
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(dir, gitDir)
-	}
-	return filepath.Join(gitDir, "loom-bridge.json"), nil
-}
-
-// Load reads the settings from the environment, else from EnvFile(dir). It
-// fails closed when there are none or they name no token.
-func Load(dir string) (Config, error) {
-	env := map[string]string{}
-	for _, k := range []string{EnvAPI, EnvWorkspace, EnvToken, EnvRepo, EnvHarness, EnvTools} {
-		if v := os.Getenv(k); v != "" {
-			env[k] = v
-		}
-	}
-	if env[EnvToken] == "" {
-		file, err := EnvFile(dir)
-		if err != nil {
-			return Config{}, fmt.Errorf("no %s and no settings file: %w", EnvToken, err)
-		}
-		raw, err := os.ReadFile(file) //nolint:gosec // G304: the agent's own settings in its worktree's git dir.
-		if err == nil {
-			err = json.Unmarshal(raw, &env)
-		}
-		if err != nil {
-			return Config{}, fmt.Errorf("no %s and no readable settings file: %w", EnvToken, err)
-		}
-		if env[EnvToken] == "" {
-			return Config{}, fmt.Errorf("agentmcp: %s names no token", file)
-		}
-	}
-	c := Config{API: env[EnvAPI], Workspace: env[EnvWorkspace], Token: env[EnvToken], Repo: env[EnvRepo],
-		Harness: env[EnvHarness]}
-	if t := env[EnvTools]; t != "" {
+	c := Config{API: os.Getenv(EnvAPI), Workspace: os.Getenv(EnvWorkspace), Token: os.Getenv(EnvToken),
+		Repo: os.Getenv(EnvRepo), Harness: os.Getenv(EnvHarness)}
+	if t := os.Getenv(EnvTools); t != "" {
 		c.Tools = strings.Split(t, ",")
 	}
 	return c, nil

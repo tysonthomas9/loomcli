@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -166,69 +164,23 @@ func TestAgentSendReportsReplaced(t *testing.T) {
 	}
 }
 
-// worktree returns a linked git worktree of a new repo, as agentworktree
-// makes for an agent.
-func worktree(t *testing.T) (repo, dir string) {
-	t.Helper()
-	root := t.TempDir()
-	repo, dir = filepath.Join(root, "repo"), filepath.Join(root, "agent1")
-	git(t, root, "init", "-q", "-b", "main", repo)
-	git(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
-	git(t, repo, "worktree", "add", "-q", "--detach", dir)
-	return repo, dir
-}
-
-func git(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil { //nolint:norawexec // a real git worktree is what EnvFile reads
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
-
-// TestAgentBridgeSettings: the settings come from the environment, else from
-// the file in the worktree's private git dir, which git never shows and
-// removing the worktree deletes. With none, or no token, the bridge fails
-// closed; only the named tools are listed; an unknown tool is refused.
+// TestAgentBridgeSettings: the settings come only from the environment, and
+// with no token the bridge fails closed; only the named tools are listed; an
+// unknown tool is refused.
 func TestAgentBridgeSettings(t *testing.T) {
-	repo, dir := worktree(t)
-	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), EnvToken) {
-		t.Fatalf("Load with no settings = %v; want a missing-token error", err)
-	}
-	if _, err := EnvFile(repo); err == nil {
-		t.Fatal("EnvFile accepted the main checkout, whose git dir every worktree shares")
-	}
 	want := Config{API: "http://x", Workspace: "ws", Token: "tok", Repo: "/repo", Tools: leadTools}
-	file, err := EnvFile(dir)
-	if err != nil {
-		t.Fatal(err)
+	for k := range want.Env() {
+		t.Setenv(k, "")
 	}
-	if !strings.HasSuffix(file, filepath.Join("repo", ".git", "worktrees", "agent1", "loom-bridge.json")) {
-		t.Fatalf("EnvFile = %s; want the worktree's git dir", file)
+	t.Setenv(EnvAPI, "http://x")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), EnvToken) {
+		t.Fatalf("Load with no token = %v; want a missing-token error", err)
 	}
-	if err := os.WriteFile(file, []byte(`{"LOOM_AGENT_API":"http://x"}`), 0o600); err != nil {
-		t.Fatal(err)
+	for k, v := range want.Env() {
+		t.Setenv(k, v)
 	}
-	if _, err := Load(dir); err == nil {
-		t.Fatal("Load accepted settings with no token")
-	}
-	raw, _ := json.Marshal(want.Env())
-	if err := os.WriteFile(file, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := Load(dir); err != nil || !slices.Equal(got.Tools, leadTools) || got.Token != "tok" || got.Repo != "/repo" {
-		t.Fatalf("Load from file = %+v, %v", got, err)
-	}
-	if out, err := exec.Command("git", "-C", dir, "status", "--porcelain", "--ignored").CombinedOutput(); err != nil || len(out) != 0 { //nolint:norawexec // a real git worktree is what EnvFile reads
-		t.Fatalf("git status in the worktree = %q, %v; want the settings invisible to git", out, err)
-	}
-	t.Setenv(EnvToken, "env-tok")
-	t.Setenv(EnvTools, "agent_list")
-	if got, err := Load(dir); err != nil || got.Token != "env-tok" || !slices.Equal(got.Tools, []string{"agent_list"}) {
-		t.Fatalf("Load from env = %+v, %v", got, err)
-	}
-	git(t, repo, "worktree", "remove", dir)
-	if _, err := os.Stat(file); !os.IsNotExist(err) {
-		t.Fatalf("settings after the worktree was removed: %v; want gone", err)
+	if got, err := Load(); err != nil || !slices.Equal(got.Tools, leadTools) || got.Token != "tok" || got.Repo != "/repo" || got.API != "http://x" {
+		t.Fatalf("Load = %+v, %v", got, err)
 	}
 	if got := names(t, connect(t, Config{})); len(got) != 0 {
 		t.Fatalf("tools with no settings = %v", got)

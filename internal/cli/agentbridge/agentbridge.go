@@ -17,10 +17,9 @@ var mcpBridgeCmd = &cobra.Command{
 
 A harness starts this for a Loom agent; it is not run by hand. The agent's
 settings come from LOOM_AGENT_API, LOOM_AGENT_WORKSPACE, LOOM_AGENT_TOKEN,
-LOOM_AGENT_REPO, LOOM_AGENT_HARNESS and LOOM_AGENT_TOOLS, or, for OpenCode,
-from the settings file Loom keeps in the private git dir of the agent's
-worktree (the working directory). Every tool acts as the agent the token
-names. With no settings, or a token the Agent API refuses, it exits with an
+LOOM_AGENT_REPO, LOOM_AGENT_HARNESS and LOOM_AGENT_TOOLS, which Loom gives
+each agent's bridge process; nothing is read from disk. Every tool acts as
+the agent the token names. With no settings, or a token the Agent API refuses, it exits with an
 error and serves nothing.`,
 	Args:         cobra.NoArgs,
 	SilenceUsage: true, // a refused start prints its reason, not the usage

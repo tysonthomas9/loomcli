@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/agentmcp"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/agentwire"
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 	"github.com/tysonthomas9/loomcli/internal/loomagent/client"
@@ -133,20 +133,18 @@ func leadCreatesChildren(ctx context.Context, t *testing.T, user *client.Client,
 		t.Error("a task child was offered the agent tools")
 	}
 
-	// The lead's settings, with its token, are at rest only while it is
-	// live: archiving removes them, and its next turn after an Unarchive
-	// writes them again before the prompt.
+	// The lead's bridge, with its token, is registered with OpenCode only
+	// while it is live, and never written to disk: archiving removes it, and
+	// its next turn after an Unarchive registers it again before the prompt.
 	got, err := user.Get(ctx, lead.AgentID)
 	if err != nil || got.WorktreePath == nil {
 		t.Fatalf("lead worktree: %+v, %v", got.WorktreePath, err)
 	}
-	settings, err := agentmcp.EnvFile(*got.WorktreePath)
-	if err != nil {
-		t.Fatal(err)
+	dir := *got.WorktreePath
+	if s := loomMCP(ctx, t, sbx, dir); s != "connected" {
+		t.Fatalf("live lead's loom MCP server = %q; want connected", s)
 	}
-	if fi, err := os.Stat(settings); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("live lead's settings: %v, %v; want mode 0600", fi, err)
-	}
+	assertNoTokenAtRest(t, sbx, dir)
 	wait(ctx, t, "lead idle after its turn", func() bool {
 		a, err := user.Get(ctx, lead.AgentID)
 		return err == nil && a.State == loomagent.StateIdle
@@ -154,19 +152,19 @@ func leadCreatesChildren(ctx context.Context, t *testing.T, user *client.Client,
 	if err := user.Archive(ctx, "arch-1", lead.AgentID, "done"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(settings); !os.IsNotExist(err) {
-		t.Fatalf("archived lead's settings: %v; want removed", err)
+	if s := loomMCP(ctx, t, sbx, dir); s != "" {
+		t.Fatalf("archived lead's loom MCP server = %q; want removed", s)
 	}
 	if err := user.Unarchive(ctx, "unarch-1", lead.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	model.watch(settings)
+	model.watch()
 	if _, err := user.Send(ctx, "go-2", lead.AgentID, "once more"); err != nil {
 		t.Fatal(err)
 	}
 	wait(ctx, t, "lead's turn after unarchive", func() bool { return model.leadSaw("once more") })
-	if !model.settingsAtPrompt() {
-		t.Error("the unarchived lead's prompt came before its settings were written again")
+	if !model.toolsAtPrompt() {
+		t.Error("the unarchived lead's prompt came before its bridge was registered again")
 	}
 }
 
@@ -179,8 +177,8 @@ type leadModel struct {
 	childDone chan struct{}
 
 	mu           sync.Mutex
-	settings     string // watch: whether this file exists at the next "once more" prompt
-	sawSettings  bool
+	watching     bool // watch: whether the next "once more" prompt lists the loom tools
+	sawTools     bool
 	leadBodies   []string
 	leadEnded    bool
 	childrenSeen int
@@ -212,9 +210,8 @@ func (m *leadModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(body, "You are a lead agent"):
 		m.mu.Lock()
 		m.leadBodies = append(m.leadBodies, body)
-		if m.settings != "" && strings.Contains(body, "once more") {
-			_, err := os.Stat(m.settings)
-			m.sawSettings, m.settings = err == nil, ""
+		if m.watching && strings.Contains(body, "once more") {
+			m.sawTools, m.watching = bridged, false
 		}
 		ended := m.leadEnded
 		m.mu.Unlock()
@@ -272,16 +269,69 @@ func (m *leadModel) leadSaw(text string) bool {
 	return false
 }
 
-func (m *leadModel) watch(settings string) {
+func (m *leadModel) watch() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.settings = settings
+	m.watching = true
 }
 
-func (m *leadModel) settingsAtPrompt() bool {
+func (m *leadModel) toolsAtPrompt() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.sawSettings
+	return m.sawTools
+}
+
+// loomMCP is the status the sandbox's OpenCode service reports for the
+// "loom" MCP server of location dir; "" when it lists none.
+func loomMCP(ctx context.Context, t *testing.T, sbx realloom.Sandbox, dir string) string {
+	t.Helper()
+	var reg struct{ URL, Password string }
+	raw, err := os.ReadFile(filepath.Join(sbx.Dir, "state/opencode/service.json"))
+	if err == nil {
+		err = json.Unmarshal(raw, &reg)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", reg.URL+"/api/mcp?location[directory]="+url.QueryEscape(dir), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth("opencode", reg.Password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var r struct {
+		Data []struct {
+			Name   string
+			Status struct{ Status string }
+		}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/mcp: %d, %v", resp.StatusCode, err)
+	}
+	for _, m := range r.Data {
+		if m.Name == "loom" {
+			return m.Status.Status
+		}
+	}
+	return ""
+}
+
+// assertNoTokenAtRest fails if Loom wrote bridge settings in the lead's
+// worktree's private git dir or an MCP entry under its worktrees root, as
+// the file design did.
+func assertNoTokenAtRest(t *testing.T, sbx realloom.Sandbox, dir string) {
+	t.Helper()
+	files, _ := filepath.Glob(filepath.Join(sbx.Repo, ".git", "worktrees", "*", "loom-bridge.json"))
+	if len(files) != 0 {
+		t.Errorf("bridge settings at rest: %v", files)
+	}
+	if raw, err := os.ReadFile(filepath.Join(filepath.Dir(filepath.Dir(dir)), ".opencode", "opencode.json")); err == nil && strings.Contains(string(raw), "mcp") {
+		t.Errorf("an MCP entry at rest under the worktrees root: %s", raw)
+	}
 }
 
 func (m *leadModel) childrenDoneWhileLeadBusy() bool {

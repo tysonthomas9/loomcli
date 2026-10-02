@@ -99,7 +99,7 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		c := serviceConfig(st, ws, wt, cfg.Skills,
 			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}})
 		c.RecoverFirst = true // writes wait for the dispatcher's start-up Reconcile
-		c.Bridge, c.Launch, c.Retire = bridge(a.APIBase), launch(a.APIBase, ws, tokens), retire
+		c.Bridge, c.Launch, c.Retire = bridge(a.APIBase), launch(a.APIBase, ws, tokens), retire(oc)
 		svc = loomagent.New(c)
 		return svc, feed
 	}
@@ -133,7 +133,7 @@ func newOpenCode(ctx context.Context, cfg Config, root string) (*opencode.Adapte
 		}
 	}
 	oc := opencode.New(opencode.Config{Bin: cfg.OpenCodeBin, Env: cfg.OpenCodeEnv, Worktrees: root,
-		Bridge: []string{cfg.LoomBin, "agent", "mcp-bridge"}, BridgeFile: agentmcp.EnvFile})
+		Bridge: []string{cfg.LoomBin, "agent", "mcp-bridge"}})
 	if err := oc.SetPresets(harnessPresets(presets)); err != nil {
 		return nil, fmt.Errorf("agentwire: opencode presets: %w", err)
 	}
@@ -246,20 +246,20 @@ func launch(apiBase func() string, ws string, tokens *agentsv1.Tokens) func(cont
 	}
 }
 
-// retire removes an archived or deleted agent's bridge settings, its token
-// at rest; Resume writes them again after an Unarchive.
-func retire(_ context.Context, a loomstore.Agent) error {
-	if a.WorktreePath == nil {
+// retire removes an archived or deleted OpenCode agent's bridge from
+// OpenCode, and with it its token; Resume registers it again after an
+// Unarchive. Other harnesses give the token to a process that ends with the
+// turn, so nothing outlives it.
+func retire(oc *opencode.Adapter) func(context.Context, loomstore.Agent) error {
+	return func(ctx context.Context, a loomstore.Agent) error {
+		if a.Harness != "opencode" || a.WorktreePath == nil {
+			return nil
+		}
+		if err := oc.Unbridge(ctx, *a.WorktreePath); err != nil {
+			return fmt.Errorf("agentwire: remove the agent's bridge: %w", err)
+		}
 		return nil
 	}
-	file, err := agentmcp.EnvFile(*a.WorktreePath)
-	if err != nil {
-		return nil //nolint:nilerr // no worktree left: nothing at rest
-	}
-	if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("agentwire: remove bridge settings: %w", err)
-	}
-	return nil
 }
 
 // harnessPresets renders presets as the harness preset files.
