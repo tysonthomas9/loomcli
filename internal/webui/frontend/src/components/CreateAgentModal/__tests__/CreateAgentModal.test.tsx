@@ -36,8 +36,8 @@ const mockCreateLead = vi.fn();
 // ---------- Helpers ----------
 
 const repos: RepoInfo[] = [
-  { name: "alpha", default_branch: "main", local_path: "/a" },
-  { name: "beta", default_branch: "main", local_path: "/b" },
+  { name: "alpha", default_branch: "main", path: "/a" },
+  { name: "beta", default_branch: "main", path: "/b" },
 ];
 
 const sampleAgent: WorkspaceAgentInfo = {
@@ -376,7 +376,7 @@ describe("CreateAgentModal: submission", () => {
     expect(mockCreateLead.mock.calls[0][0]).toEqual({
       preset: "lead",
       name: "lead-nova",
-      repo: "alpha",
+      repo: "/a",
       base_ref: "main",
       overrides: { harness: "codex" },
     });
@@ -418,7 +418,7 @@ describe("CreateAgentModal: submission", () => {
     expect(mockCreateLead.mock.calls[0][0]).toEqual({
       preset: "lead",
       name: "custom-review",
-      repo: "alpha",
+      repo: "/a",
       base_ref: "main",
       overrides: { harness: "codex" },
       persona: { text: "Review literally: {{ marker }}" },

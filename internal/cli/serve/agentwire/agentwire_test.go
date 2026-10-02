@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,5 +119,33 @@ func TestStartResumesWorkspacesWithAgents(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCreateRejectsUnknownRepo: a repo that is not the path of a clone, such
+// as a repo's name, is a 400 at Create, not a git failure (500).
+func TestCreateRejectsUnknownRepo(t *testing.T) {
+	dir := t.TempDir()
+	api, err := Start(context.Background(), Config{Dir: dir, OpenCodeBin: filepath.Join(dir, "no-opencode")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(api.Stop)
+	mux := http.NewServeMux()
+	api.Register(mux, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(middleware.WithWorkspace(r.Context(), r.PathValue("ws"))))
+		})
+	}, nil)
+	for _, repo := range []string{"agv1-lead-repo", filepath.Join(dir, "missing")} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/workspaces/ws/v1/agents",
+			strings.NewReader(`{"preset":"lead","name":"l","repo":"`+repo+`","base_ref":"main","overrides":{"harness":"opencode"}}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "k-"+filepath.Base(repo))
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "not the absolute path") {
+			t.Errorf("Create repo %q = %d %s; want 400 naming the repo", repo, rec.Code, rec.Body)
+		}
 	}
 }

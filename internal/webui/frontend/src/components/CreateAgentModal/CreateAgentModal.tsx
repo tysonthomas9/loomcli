@@ -316,16 +316,16 @@ export function CreateAgentModal({
         (selectedBuiltinPromptID === "lead" ||
           selectedBuiltinPromptID === CUSTOM_PROMPT_ID)
       ) {
-        const repo = selectedRepos[0];
+        const repo = repos.find((r) => r.name === selectedRepos[0]);
         if (!repo) {
           setError("Pick a repo for the lead to work in.");
           return;
         }
-        const baseRef = repos.find((r) => r.name === repo)?.default_branch;
+        const baseRef = repo.default_branch;
         const agent = await createLead({
           preset: "lead",
           name: trimmedName,
-          repo,
+          repo: repo.path, // the Agent API takes the clone path, not the name
           ...(baseRef ? { base_ref: baseRef } : {}),
           ...(trimmedBackend ? { overrides: { harness: trimmedBackend } } : {}),
           ...(selectedBuiltinPromptID === CUSTOM_PROMPT_ID

@@ -219,7 +219,17 @@ func (a *API) Stop() {
 func serviceConfig(st *loomstore.Store, ws string, wt *agentworktree.Worktrees, skills store.Store,
 	harnesses map[string]loomharness.Harness) loomagent.ServiceConfig {
 	return loomagent.ServiceConfig{Store: st, WorkspaceID: ws, Workspace: agentworktree.Port{W: wt},
-		PrepareWorktree: prepareWorktree(skills, ws), Harnesses: harnesses}
+		ResolveRepo: resolveRepo, PrepareWorktree: prepareWorktree(skills, ws), Harnesses: harnesses}
+}
+
+// resolveRepo accepts a repo only as the absolute path of an existing
+// directory, so an unknown repo is a 400 at Create, not a git failure.
+func resolveRepo(_ context.Context, _ loomagent.Target, repo string) (string, error) {
+	if info, err := os.Stat(repo); err != nil || !info.IsDir() || !filepath.IsAbs(repo) {
+		return "", &loomagent.Error{Code: loomagent.CodePresetInvalid,
+			Message: fmt.Sprintf("repo %q is not the absolute path of a repo clone", repo)}
+	}
+	return repo, nil
 }
 
 // bridge registers a preset's tools when the bridge serves them all and
