@@ -270,3 +270,59 @@ func TestFakeFixturesKinds(t *testing.T) {
 		}
 	}
 }
+
+func TestFakeResumeContinuesLosesOpenAsk(t *testing.T) {
+	h := New()
+	ref, s, f := start(t, h, "agt_1", Turn{Steps: []Step{{Ask: "ask_1"}, {Delta: "b"}}, ResumeContinues: true})
+	_ = s.Prompt(ctx, lh.Input{Key: "m1"})
+	drain(f)
+	h.Crash()
+	_ = h.Restart(ctx)
+	f, _ = h.Feed(ctx)
+	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}); err != nil {
+		t.Fatal(err)
+	}
+	want(t, f, lh.EventAskLost, lh.EventTurnResumed, lh.EventDelta, lh.EventTurnCompleted)
+	if err := s.Reply(ctx, "ask_1", lh.Reply{Allow: true}); err == nil {
+		t.Fatal("Reply to a pre-crash ask succeeded")
+	}
+}
+
+func TestFakeCloseKeepsHistoryUntilResume(t *testing.T) {
+	h := New()
+	ref, s, f := start(t, h, "agt_1", fixture(t, "streamed_reply"), fixture(t, "ask_then_reply"))
+	_ = s.Prompt(ctx, lh.Input{Key: "m1"})
+	_ = s.Prompt(ctx, lh.Input{Key: "m2"})
+	drain(f)
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Prompt(ctx, lh.Input{Key: "m3"}); !errors.Is(err, lh.ErrUnavailable) {
+		t.Fatalf("Prompt after Close = %v; want ErrUnavailable", err)
+	}
+	if err := s.Reply(ctx, "ask_1", lh.Reply{Allow: true}); !errors.Is(err, lh.ErrUnavailable) {
+		t.Fatalf("Reply after Close = %v; want ErrUnavailable", err)
+	}
+	if ok, err := s.Interrupt(ctx); ok || !errors.Is(err, lh.ErrUnavailable) {
+		t.Fatalf("Interrupt after Close = %v, %v", ok, err)
+	}
+	if err := s.SetModel(ctx, "m"); !errors.Is(err, lh.ErrUnavailable) {
+		t.Fatalf("SetModel after Close = %v", err)
+	}
+	if st := status(t, s); st.Running {
+		t.Fatal("closed session reports running")
+	}
+	if got, _ := s.HasInput(ctx, "m1"); got != lh.LandedFound {
+		t.Fatalf("HasInput after Close = %s", got)
+	}
+	if page, err := s.Messages(ctx, "", 0); err != nil || len(page.Events) == 0 {
+		t.Fatalf("history after Close = %+v, %v", page, err)
+	}
+	if _, err := s.Resume(ctx, lh.Launch{Root: ref.Root}); err != nil {
+		t.Fatal(err)
+	}
+	want(t, f, lh.EventAskLost, lh.EventTurnCompleted)
+	if err := s.Prompt(ctx, lh.Input{Key: "m3"}); err != nil {
+		t.Fatalf("Prompt after Resume = %v", err)
+	}
+}
