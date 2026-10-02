@@ -206,7 +206,7 @@ func TestUsageProducersAreDisjoint(t *testing.T) {
 	check := func(pkgs []string, banned ...string) {
 		t.Helper()
 		args := append([]string{"list", "-deps"}, pkgs...)
-		out, err := exec.Command(gobin, args...).Output()
+		out, err := exec.Command(gobin, args...).Output() //nolint:norawexec // reads the real go list -deps graph
 		if err != nil {
 			t.Fatalf("go list: %v", err)
 		}

@@ -47,7 +47,7 @@ func TestFakeServeForE2E(t *testing.T) {
 	repo := filepath.Join(dir, "demo")
 	for _, args := range [][]string{{"init", "-q", "-b", "main", repo},
 		{"-C", repo, "-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "commit", "-q", "--allow-empty", "-m", "init"}} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil { //nolint:norawexec // a real git repo for the fake serve
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}

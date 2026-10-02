@@ -225,7 +225,7 @@ func startFakeModel(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("node is required for the fake-model fixture: %v", err)
 	}
-	cmd := exec.Command(node, "../../../tests/aft/fixtures/fake-model/server.mjs")
+	cmd := exec.Command(node, "../../../tests/aft/fixtures/fake-model/server.mjs") //nolint:norawexec // the real AFT fake-model fixture is the point
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "FAKE_MODEL_PORT=0"}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
