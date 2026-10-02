@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,12 +33,23 @@ func endAttempt(t *testing.T, s *Service, id, outcome string) {
 	}
 }
 
-// nextAttempt starts c's next attempt with a running turn, as a lead's Send does.
+// nextAttempt starts c's next attempt with a running turn through the
+// store's reopen, as a lead's Send does, but stops before Send publishes its
+// state change (a crash there): only what the reopen committed remains.
 func nextAttempt(t *testing.T, s *Service, id string) {
 	t.Helper()
+	ctx := context.Background()
 	a := s.get(t, id)
-	to := loomstore.AgentState{State: StateActive, Attempt: a.Attempt + 1, RunningTurn: sp("turn_next")}
-	if _, err := s.setState(context.Background(), a, to); err != nil {
+	req := "next-" + strconv.FormatInt(a.Attempt+1, 10)
+	if _, _, err := s.store.Send(ctx, loomstore.SlotSend{AgentID: id, Sender: "agent:lead", RequestID: req, Body: "again",
+		Source: "agent", Hand: true, NativeKey: "k-" + req, Reopen: true,
+		Result: func(bool) (string, error) { return "{}", nil }}); err != nil {
+		t.Fatal(err)
+	}
+	a = s.get(t, id)
+	to := a.StateOf()
+	to.RunningTurn = sp("turn_" + req)
+	if _, err := s.setState(ctx, a, to); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -360,6 +373,32 @@ func TestTaskCompletedSummaryIsCurrentAttempts(t *testing.T) {
 	endAttempt(t, s, "c1", "completed")
 	got := completions(t, s, "L")
 	if len(got) != 3 || got[0].Summary != "attempt one done" || got[1].Summary != "" || got[2].Summary != "attempt three done" {
+		t.Fatalf("records = %+v", got)
+	}
+}
+
+// TestTaskCompletedSummaryAfterReopenCrash: Loom crashes after a reopen
+// committed but before Send published it, then restarts; the attempt with
+// no reply still has an empty summary, not the previous attempt's reply.
+func TestTaskCompletedSummaryAfterReopenCrash(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := serviceAt(t, path, busy("L", "persistent", StateActive), childOf("c1", "L"))
+	if err := s.appendEvent(ctx, "c1", "item.completed", "item:old", map[string]string{"itemKind": "message", "text": "old reply"}); err != nil {
+		t.Fatal(err)
+	}
+	endAttempt(t, s, "c1", "completed")
+	nextAttempt(t, s, "c1")  // the reopen commits; Send's state change is never published
+	s2 := serviceAt(t, path) // restart on the same database
+	for _, e := range kinds(rows(t, s2, "c1", 0), EventStateChanged) {
+		if strings.Contains(string(e.Payload), `"from":"finished"`) {
+			t.Fatalf("setup: a reopen event was saved: %s", e.Payload)
+		}
+	}
+	endAttempt(t, s2, "c1", "failed")
+	s2.recordCompletions(ctx)
+	got := completions(t, s2, "L")
+	if len(got) != 2 || got[0].Summary != "old reply" || got[1].Attempt != 2 || got[1].Summary != "" {
 		t.Fatalf("records = %+v", got)
 	}
 }

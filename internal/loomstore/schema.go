@@ -137,4 +137,6 @@ ALTER TABLE agent_send_receipts ADD COLUMN native_key TEXT; -- the input key the
 CREATE INDEX agent_send_receipts_native_key ON agent_send_receipts(agent_id, native_key);
 `, `
 CREATE INDEX agent_events_kind ON agent_events(agent_id, kind); -- task_completed notices and the last message, without a history scan
+`, `
+ALTER TABLE agents ADD COLUMN attempt_after_seq INTEGER NOT NULL DEFAULT 0; -- the last event seq before the current attempt began; set with the reopen
 `}

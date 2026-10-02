@@ -48,8 +48,8 @@ type SlotSend struct {
 	First bool
 	// Reopen starts a new attempt of the finished agent: in the same
 	// transaction it moves the agent finished -> active with the next attempt,
-	// clears its outcome, and clears finished_at, which cancels its R29
-	// history deadline. It fails with ErrHistoryPurged if the sweep already
+	// records the agent's last event seq as the attempt's start, clears its
+	// outcome, and clears finished_at, which cancels its R29 history deadline. It fails with ErrHistoryPurged if the sweep already
 	// purged the history, or ErrStateChanged if the agent is no longer
 	// finished; then nothing is stored.
 	Reopen bool
@@ -224,7 +224,9 @@ func reopen(ctx context.Context, tx *sql.Tx, in SlotSend) error {
 	}
 	agentID := in.AgentID
 	res, err := tx.ExecContext(ctx, `UPDATE agents SET state = 'active', attempt = attempt + 1, outcome = NULL,
-		finished_at = NULL, updated_at = ? WHERE agent_id = ? AND state = 'finished' AND deleted_at IS NULL
+		finished_at = NULL, updated_at = ?,
+		attempt_after_seq = (SELECT COALESCE(MAX(seq), 0) FROM agent_events WHERE agent_id = agents.agent_id)
+		WHERE agent_id = ? AND state = 'finished' AND deleted_at IS NULL
 		AND history_purged_at IS NULL`, Stamp(time.Now()), agentID)
 	if err != nil {
 		return err

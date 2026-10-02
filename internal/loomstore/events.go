@@ -226,16 +226,17 @@ func (s *Store) Unreceipted(ctx context.Context, agentID, kind string) ([]Event,
 }
 
 // LastMessage returns the text of the last completed message item of
-// agentID's current attempt, or "" when that attempt has none. An attempt
-// after the first starts at the agent.state_changed event that reopened the
-// finished agent, so an earlier attempt's message is never returned.
+// agentID's current attempt, or "" when that attempt has none. The attempt
+// starts after attempt_after_seq, which the reopen sets in its own
+// transaction, so an earlier attempt's message is never returned, even after
+// a crash right after the reopen.
 func (s *Store) LastMessage(ctx context.Context, agentID string) (string, error) {
 	var text sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT json_extract(redacted_payload, '$.text') FROM agent_events
-		WHERE agent_id = ? AND kind = 'item.completed' AND json_extract(redacted_payload, '$.itemKind') = 'message'
-		AND seq > (SELECT COALESCE(MAX(seq), 0) FROM agent_events WHERE agent_id = ? AND kind = 'agent.state_changed'
-			AND json_extract(redacted_payload, '$.from') = 'finished')
-		ORDER BY seq DESC LIMIT 1`, agentID, agentID).Scan(&text)
+	err := s.db.QueryRowContext(ctx, `SELECT json_extract(e.redacted_payload, '$.text') FROM agent_events e
+		JOIN agents a USING (agent_id)
+		WHERE e.agent_id = ? AND e.kind = 'item.completed' AND json_extract(e.redacted_payload, '$.itemKind') = 'message'
+		AND e.seq > a.attempt_after_seq
+		ORDER BY e.seq DESC LIMIT 1`, agentID).Scan(&text)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
