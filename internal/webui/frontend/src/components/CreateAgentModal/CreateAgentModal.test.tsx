@@ -77,6 +77,7 @@ describe("CreateAgentModal", () => {
       preset: "lead",
       name: "lead-nova",
       repo: "hello-world",
+      base_ref: "main",
       overrides: { harness: "codex" },
     });
     expect(mockCreateAgent).not.toHaveBeenCalled();

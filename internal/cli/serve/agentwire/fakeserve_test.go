@@ -66,6 +66,11 @@ func TestFakeServeForE2E(t *testing.T) {
 		}
 		return repo, nil
 	}
+	// No bridge is launched yet (2.2b), and the fake never calls tools, so a
+	// stub bridge with no extra capabilities lets the lead preset start.
+	cfg.Bridge = func(context.Context, loomagent.Preset) (loomagent.BridgeCaps, error) {
+		return loomagent.BridgeCaps{}, nil
+	}
 	svc := loomagent.New(cfg)
 
 	var wg sync.WaitGroup

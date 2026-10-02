@@ -1,7 +1,7 @@
 /**
  * AgentChat on the real Agent API and the fake harness (playwright.fake-agent
  * .config.ts starts both): a lead on each harness takes a message, the turn
- * streams and ends, a reload rebuilds the same transcript from ListEvents with
+ * runs and ends, a reload rebuilds the same transcript from ListEvents with
  * nothing missing or doubled, the default lead never asks, and all three
  * harnesses render the same transcript.
  */
@@ -27,6 +27,7 @@ test("a lead chats the same on OpenCode, codex and Claude", async ({
         preset: "lead",
         name: `lead-${harness}`,
         repo: "demo",
+        base_ref: "main",
         overrides: { harness },
       },
     });
@@ -39,13 +40,22 @@ test("a lead chats the same on OpenCode, codex and Claude", async ({
     const input = page.getByLabel("Message");
     await input.fill("hi there");
     await input.press("Enter");
-    await expect(transcript.getByText("Turn completed")).toHaveCount(1);
+    // The turn ran and ended on the server; a completed turn adds no line.
+    await expect
+      .poll(async () => {
+        const r = await request.get(
+          `${API}/api/workspaces/w1/v1/agents/${agent_id}/events`,
+        );
+        const { events } = await r.json();
+        return events.map((e: { kind: string }) => e.kind);
+      })
+      .toContain("agent.turn_completed");
+    await expect(page.getByText("idle", { exact: true })).toBeVisible();
     await expect(transcript.getByText("hi there")).toHaveCount(1);
     await expect(page.getByTestId("ask-card")).toHaveCount(0);
 
     await page.reload();
     await expect(page.getByTestId("harness-label")).toHaveText(harness);
-    await expect(transcript.getByText("Turn completed")).toHaveCount(1);
     await expect(transcript.getByText("hi there")).toHaveCount(1);
     await expect(page.getByTestId("ask-card")).toHaveCount(0);
     transcripts.push(await transcript.innerHTML());

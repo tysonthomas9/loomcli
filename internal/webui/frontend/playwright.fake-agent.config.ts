@@ -28,7 +28,7 @@ export default defineConfig({
       timeout: 300_000,
     },
     {
-      command: `VITE_API_BASE_URL=http://127.0.0.1:${apiPort} npx vite --host 127.0.0.1 --port ${uiPort} --strictPort`,
+      command: `env -u PLAYWRIGHT_TEST VITE_API_BASE_URL=http://127.0.0.1:${apiPort} npx vite --host 127.0.0.1 --port ${uiPort} --strictPort`,
       url: `http://127.0.0.1:${uiPort}`,
       reuseExistingServer: false,
       timeout: 60_000,

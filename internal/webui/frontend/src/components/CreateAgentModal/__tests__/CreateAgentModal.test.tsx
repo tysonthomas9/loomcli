@@ -377,6 +377,7 @@ describe("CreateAgentModal: submission", () => {
       preset: "lead",
       name: "lead-nova",
       repo: "alpha",
+      base_ref: "main",
       overrides: { harness: "codex" },
     });
     expect(mockCreateAgent).not.toHaveBeenCalled();
@@ -418,6 +419,7 @@ describe("CreateAgentModal: submission", () => {
       preset: "lead",
       name: "custom-review",
       repo: "alpha",
+      base_ref: "main",
       overrides: { harness: "codex" },
       persona: { text: "Review literally: {{ marker }}" },
     });

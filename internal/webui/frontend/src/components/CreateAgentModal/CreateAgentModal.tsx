@@ -321,10 +321,12 @@ export function CreateAgentModal({
           setError("Pick a repo for the lead to work in.");
           return;
         }
+        const baseRef = repos.find((r) => r.name === repo)?.default_branch;
         const agent = await createLead({
           preset: "lead",
           name: trimmedName,
           repo,
+          ...(baseRef ? { base_ref: baseRef } : {}),
           ...(trimmedBackend ? { overrides: { harness: trimmedBackend } } : {}),
           ...(selectedBuiltinPromptID === CUSTOM_PROMPT_ID
             ? { persona: { text: customPrompt.trim() } }
