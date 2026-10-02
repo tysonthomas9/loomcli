@@ -70,7 +70,7 @@ func TestPresetResolveConvertsToHarnessConfig(t *testing.T) {
 	if c.Harness != "opencode" || c.Model != "m1" || c.Effort != "high" || *c.MaxBudgetUSD != 2.5 || *c.MaxRunDuration != 600 {
 		t.Fatalf("config = %+v", c)
 	}
-	if c.Open.Name != "daemon-worker" || c.Open.Persona == "" || !slices.Equal(c.Rules, append(slices.Clone(allowAll), publishDenies...)) {
+	if c.Open.Name != "daemon-worker" || c.Open.Persona == "" || !slices.Equal(c.Rules, allowAll) {
 		t.Fatalf("open = %+v rules = %v", c.Open, c.Rules)
 	}
 
@@ -125,7 +125,6 @@ func TestPolicyRestrictionsFailClosed(t *testing.T) {
 		loomharness.PermissionRule{Action: "edit", Resource: "*", Effect: "deny"},
 		loomharness.PermissionRule{Action: "bash", Resource: "*", Effect: "deny"},
 		loomharness.PermissionRule{Action: "webfetch", Resource: "*", Effect: "deny"})
-	want = append(want, publishDenies...)
 	if !slices.Equal(c.Rules, want) {
 		t.Fatalf("rules = %v", c.Rules)
 	}
@@ -199,7 +198,7 @@ func decide(rules []loomharness.PermissionRule, action, resource string) string 
 func TestPolicyDeniesGHAndGitPush(t *testing.T) {
 	ps, _ := BuiltinPresets{}.List(context.Background())
 	for _, p := range ps {
-		req := CreateRequest{}
+		req := CreateRequest{Bridge: BridgeCaps{HasGitHubRead: true, HasPublish: true}}
 		if slices.Contains(p.Overridable, "tools") {
 			req.Overrides.AllowedTools = []string{"bash"} // must not re-allow them
 		}
@@ -223,5 +222,43 @@ func TestPolicyDeniesGHAndGitPush(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestPolicyGHAndGitPushDeniesNeedBothBridgeCaps(t *testing.T) {
+	hasDeny := func(rules []loomharness.PermissionRule) bool {
+		return slices.ContainsFunc(rules, func(r loomharness.PermissionRule) bool { return slices.Contains(publishDenies, r) })
+	}
+	ps, _ := BuiltinPresets{}.List(context.Background())
+	for _, p := range ps {
+		for _, caps := range []BridgeCaps{{}, {HasGitHubRead: true}, {HasPublish: true}, {HasGitHubRead: true, HasPublish: true}} {
+			c, err := Resolve(p, CreateRequest{Bridge: caps}, "opencode", nil)
+			if err != nil {
+				t.Fatalf("%s %+v: %v", p.Name, caps, err)
+			}
+			if want := caps.HasGitHubRead && caps.HasPublish; hasDeny(c.Rules) != want {
+				t.Errorf("%s %+v: denies present = %v, want %v", p.Name, caps, !want, want)
+			}
+			if !slices.Equal(c.Rules[:len(p.Rules)], p.Rules) { // the preset's own denies are kept
+				t.Errorf("%s %+v: preset rules = %v", p.Name, caps, c.Rules)
+			}
+		}
+	}
+	// Read-only and denied-tool denies stay in every case.
+	ro := Overrides{ReadOnly: true, DeniedTools: []string{"webfetch"}}
+	for _, caps := range []BridgeCaps{{}, {HasGitHubRead: true}, {HasPublish: true}, {HasGitHubRead: true, HasPublish: true}} {
+		c, err := Resolve(mustPreset(t, "daemon-worker"), CreateRequest{Overrides: ro, Bridge: caps}, "opencode", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range []string{"edit", "bash", "webfetch"} {
+			if got := decide(c.Rules, a, "x"); got != "deny" {
+				t.Errorf("%+v: %s = %s, want deny", caps, a, got)
+			}
+		}
+	}
+	lead, _ := Resolve(mustPreset(t, "lead"), CreateRequest{Bridge: BridgeCaps{HasPublish: true}}, "opencode", nil)
+	if got := decide(lead.Rules, "bash", "gh pr create"); got != "allow" {
+		t.Errorf("lead without github_read: bash gh = %s, want allow", got)
 	}
 }

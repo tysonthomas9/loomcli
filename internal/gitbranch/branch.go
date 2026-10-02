@@ -2,6 +2,7 @@
 package gitbranch
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,17 +35,36 @@ type Recovery struct {
 // Inspect reports whether refs/heads/<branch> resolves to a commit, is missing,
 // or has a broken loose ref that blocks git from creating the branch.
 func Inspect(sourceRepo, branch string) (Recovery, error) {
+	return inspect(runGit, sourceRepo, branch)
+}
+
+// GitFunc runs one git command in dir, for callers that inject their own runner.
+type GitFunc func(ctx context.Context, dir string, args ...string) (string, error)
+
+// InspectWith is Inspect with every git command run through git.
+func InspectWith(ctx context.Context, git GitFunc, sourceRepo, branch string) (Recovery, error) {
+	return inspect(bind(ctx, git), sourceRepo, branch)
+}
+
+// runFunc is the context-free git runner the helpers below share.
+type runFunc func(dir string, args ...string) (string, error)
+
+func bind(ctx context.Context, git GitFunc) runFunc {
+	return func(dir string, args ...string) (string, error) { return git(ctx, dir, args...) }
+}
+
+func inspect(run runFunc, sourceRepo, branch string) (Recovery, error) {
 	info := Recovery{Branch: branch, State: StateMissing}
-	if _, err := runGit(sourceRepo, "rev-parse", "--git-dir"); err != nil {
+	if _, err := run(sourceRepo, "rev-parse", "--git-dir"); err != nil {
 		return info, fmt.Errorf("%w: %v", ErrRepositoryNotUsable, err)
 	}
-	sha, err := revisionCommit(sourceRepo, "refs/heads/"+branch)
+	sha, err := revisionCommit(run, sourceRepo, "refs/heads/"+branch)
 	if err == nil {
 		info.State = StateHealthy
 		info.BaseSHA = sha
 		return info, nil
 	}
-	broken, err := looseBranchRefExists(sourceRepo, branch)
+	broken, err := looseBranchRefExists(run, sourceRepo, branch)
 	if err != nil {
 		return info, err
 	}
@@ -57,12 +77,21 @@ func Inspect(sourceRepo, branch string) (Recovery, error) {
 // Recover selects the best available recovery base and clears a broken branch
 // ref so callers can recreate it with git worktree add -b.
 func Recover(sourceRepo, branch, baseBranch string, info Recovery) (Recovery, error) {
-	recovery, err := selectRecoveryBase(sourceRepo, branch, baseBranch, info)
+	return recoverBranch(runGit, sourceRepo, branch, baseBranch, info)
+}
+
+// RecoverWith is Recover with every git command run through git.
+func RecoverWith(ctx context.Context, git GitFunc, sourceRepo, branch, baseBranch string, info Recovery) (Recovery, error) {
+	return recoverBranch(bind(ctx, git), sourceRepo, branch, baseBranch, info)
+}
+
+func recoverBranch(run runFunc, sourceRepo, branch, baseBranch string, info Recovery) (Recovery, error) {
+	recovery, err := selectRecoveryBase(run, sourceRepo, branch, baseBranch, info)
 	if err != nil {
 		return recovery, err
 	}
 	if info.State == StateBroken {
-		if err := ClearBrokenBranch(sourceRepo, branch); err != nil {
+		if err := clearBrokenBranch(run, sourceRepo, branch); err != nil {
 			return recovery, err
 		}
 	}
@@ -72,10 +101,14 @@ func Recover(sourceRepo, branch, baseBranch string, info Recovery) (Recovery, er
 // ClearBrokenBranch removes a corrupt branch ref, falling back to renaming a
 // loose ref aside if git update-ref cannot resolve it.
 func ClearBrokenBranch(sourceRepo, branch string) error {
+	return clearBrokenBranch(runGit, sourceRepo, branch)
+}
+
+func clearBrokenBranch(run runFunc, sourceRepo, branch string) error {
 	ref := "refs/heads/" + branch
-	if _, err := runGit(sourceRepo, "update-ref", "-d", ref); err == nil {
+	if _, err := run(sourceRepo, "update-ref", "-d", ref); err == nil {
 		return nil
-	} else if renamed, renameErr := renameBrokenLooseRef(sourceRepo, branch); !renamed || renameErr != nil {
+	} else if renamed, renameErr := renameBrokenLooseRef(run, sourceRepo, branch); !renamed || renameErr != nil {
 		return fmt.Errorf("clear corrupt branch ref %q: %w", branch, firstError(renameErr, err))
 	}
 	return nil
@@ -83,7 +116,11 @@ func ClearBrokenBranch(sourceRepo, branch string) error {
 
 // CommonDir returns git's common metadata directory for sourceRepo.
 func CommonDir(sourceRepo string) (string, error) {
-	out, err := runGit(sourceRepo, "rev-parse", "--git-common-dir")
+	return commonDir(runGit, sourceRepo)
+}
+
+func commonDir(run runFunc, sourceRepo string) (string, error) {
+	out, err := run(sourceRepo, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", err
 	}
@@ -94,21 +131,21 @@ func CommonDir(sourceRepo string) (string, error) {
 	return filepath.Abs(common)
 }
 
-func selectRecoveryBase(sourceRepo, branch, baseBranch string, info Recovery) (Recovery, error) {
-	if sha, ok, err := recoverFromReflog(sourceRepo, branch); err != nil || ok {
+func selectRecoveryBase(run runFunc, sourceRepo, branch, baseBranch string, info Recovery) (Recovery, error) {
+	if sha, ok, err := recoverFromReflog(run, sourceRepo, branch); err != nil || ok {
 		info.Base = "reflog"
 		info.BaseSHA = sha
 		return info, err
 	}
 	baseBranch = strings.TrimSpace(baseBranch)
 	if baseBranch != "" {
-		if sha, err := revisionCommit(sourceRepo, "refs/heads/"+baseBranch); err == nil {
+		if sha, err := revisionCommit(run, sourceRepo, "refs/heads/"+baseBranch); err == nil {
 			info.Base = "default branch " + baseBranch
 			info.BaseSHA = sha
 			return info, nil
 		}
 	}
-	if sha, err := revisionCommit(sourceRepo, "HEAD"); err == nil {
+	if sha, err := revisionCommit(run, sourceRepo, "HEAD"); err == nil {
 		info.Base = "HEAD"
 		info.BaseSHA = sha
 		return info, nil
@@ -116,16 +153,16 @@ func selectRecoveryBase(sourceRepo, branch, baseBranch string, info Recovery) (R
 	return info, fmt.Errorf("recover branch %q: no reflog, default branch, or HEAD commit is usable", branch)
 }
 
-func revisionCommit(sourceRepo, revision string) (string, error) {
-	out, err := runGit(sourceRepo, "rev-parse", "--verify", "--quiet", revision+"^{commit}")
+func revisionCommit(run runFunc, sourceRepo, revision string) (string, error) {
+	out, err := run(sourceRepo, "rev-parse", "--verify", "--quiet", revision+"^{commit}")
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
 }
 
-func recoverFromReflog(sourceRepo, branch string) (string, bool, error) {
-	logPath, err := commonPath(sourceRepo, "logs", "refs", "heads", filepath.FromSlash(branch))
+func recoverFromReflog(run runFunc, sourceRepo, branch string) (string, bool, error) {
+	logPath, err := commonPath(run, sourceRepo, "logs", "refs", "heads", filepath.FromSlash(branch))
 	if err != nil {
 		return "", false, err
 	}
@@ -136,31 +173,31 @@ func recoverFromReflog(sourceRepo, branch string) (string, bool, error) {
 	if err != nil {
 		return "", false, fmt.Errorf("read branch reflog %s: %w", logPath, err)
 	}
-	sha := latestValidReflogSHA(sourceRepo, string(data))
+	sha := latestValidReflogSHA(run, sourceRepo, string(data))
 	return sha, sha != "", nil
 }
 
-func latestValidReflogSHA(sourceRepo, data string) string {
+func latestValidReflogSHA(run runFunc, sourceRepo, data string) string {
 	lines := strings.Split(strings.TrimSpace(data), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		fields := strings.Fields(lines[i])
-		if len(fields) >= 2 && commitExists(sourceRepo, fields[1]) {
+		if len(fields) >= 2 && commitExists(run, sourceRepo, fields[1]) {
 			return fields[1]
 		}
 	}
 	return ""
 }
 
-func commitExists(sourceRepo, sha string) bool {
+func commitExists(run runFunc, sourceRepo, sha string) bool {
 	if sha == "" {
 		return false
 	}
-	_, err := runGit(sourceRepo, "cat-file", "-e", sha+"^{commit}")
+	_, err := run(sourceRepo, "cat-file", "-e", sha+"^{commit}")
 	return err == nil
 }
 
-func renameBrokenLooseRef(sourceRepo, branch string) (bool, error) {
-	refPath, err := commonPath(sourceRepo, "refs", "heads", filepath.FromSlash(branch))
+func renameBrokenLooseRef(run runFunc, sourceRepo, branch string) (bool, error) {
+	refPath, err := commonPath(run, sourceRepo, "refs", "heads", filepath.FromSlash(branch))
 	if err != nil {
 		return false, err
 	}
@@ -173,8 +210,8 @@ func renameBrokenLooseRef(sourceRepo, branch string) (bool, error) {
 	return true, os.Rename(refPath, uniqueBackupPath(refPath, "broken"))
 }
 
-func looseBranchRefExists(sourceRepo, branch string) (bool, error) {
-	refPath, err := commonPath(sourceRepo, "refs", "heads", filepath.FromSlash(branch))
+func looseBranchRefExists(run runFunc, sourceRepo, branch string) (bool, error) {
+	refPath, err := commonPath(run, sourceRepo, "refs", "heads", filepath.FromSlash(branch))
 	if err != nil {
 		return false, err
 	}
@@ -188,8 +225,8 @@ func looseBranchRefExists(sourceRepo, branch string) (bool, error) {
 	return false, err
 }
 
-func commonPath(sourceRepo string, parts ...string) (string, error) {
-	common, err := CommonDir(sourceRepo)
+func commonPath(run runFunc, sourceRepo string, parts ...string) (string, error) {
+	common, err := commonDir(run, sourceRepo)
 	if err != nil {
 		return "", err
 	}

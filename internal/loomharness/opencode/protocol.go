@@ -14,20 +14,36 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
 
-// Client talks to one running OpenCode server.
+// Client talks to one running OpenCode server. The endpoint can change when
+// a supervising Adapter restarts the server.
 type Client struct {
+	mu       sync.RWMutex
 	base     string // e.g. http://127.0.0.1:4096
 	password string
 	http     *http.Client
+	ready    func(context.Context) error // starts a supervised server on first use; nil for a fixed one
 }
 
 // NewClient returns a client for the server at base with the per-boot password.
 func NewClient(base, password string) *Client {
 	return &Client{base: strings.TrimRight(base, "/"), password: password, http: &http.Client{}}
+}
+
+func (c *Client) setEndpoint(base, password string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.base, c.password = base, password
+}
+
+func (c *Client) endpoint() (string, string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.base, c.password
 }
 
 // SessionID derives the native session id from the stable OpenSpec.Key.
@@ -76,7 +92,7 @@ func translate(status int, body []byte) error {
 	switch {
 	case status >= 500:
 		e.Code = "harness_down"
-	case b.Tag == "PermissionNotFoundError":
+	case b.Tag == "PermissionNotFoundError", b.Tag == "FormNotFoundError", b.Tag == "FormAlreadySettledError":
 		e.Code = "ask_missing"
 	case b.Tag == "SessionNotFoundError" || status == http.StatusNotFound:
 		e.Code = "session_missing"
@@ -112,6 +128,12 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in any) (*http.Response, error) {
+	if c.ready != nil {
+		if err := c.ready(ctx); err != nil {
+			return nil, fmt.Errorf("opencode %s %s: %w", method, path, err)
+		}
+	}
+	base, password := c.endpoint()
 	var rd io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -120,11 +142,11 @@ func (c *Client) do(ctx context.Context, method, path string, in any) (*http.Res
 		}
 		rd = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
+	req, err := http.NewRequestWithContext(ctx, method, base+path, rd)
 	if err != nil {
 		return nil, err
 	}
-	req.SetBasicAuth("opencode", c.password)
+	req.SetBasicAuth("opencode", password)
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

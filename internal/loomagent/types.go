@@ -100,4 +100,13 @@ type CreateRequest struct {
 	BaseRef      string
 	ExternalKey  string
 	FirstMessage string
+	// Bridge is set only by Loom's host-owned bridge wiring, never from a
+	// request body or any model or agent input.
+	Bridge BridgeCaps
+}
+
+// BridgeCaps are the agent's Loom bridge capabilities that replace gh and git push.
+type BridgeCaps struct {
+	HasGitHubRead bool // the github_read bridge tools
+	HasPublish    bool // the publish bridge tool
 }

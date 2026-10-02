@@ -1,6 +1,7 @@
 package gitbranch
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,6 +90,35 @@ func TestRecoverBranchFallsBackToHEAD(t *testing.T) {
 	}
 	if recovery.Base != "HEAD" || recovery.BaseSHA != headSHA {
 		t.Fatalf("recovery = %+v, want HEAD %s", recovery, headSHA)
+	}
+	assertLooseRefAbsent(t, repo, "worker")
+}
+
+func TestInspectRecoverWithUseInjectedRunner(t *testing.T) {
+	repo := initBranchTestRepo(t)
+	workerSHA := commitBranchChange(t, repo, "worker", "worker.txt", "worker\n")
+	git(t, repo, "checkout", "main")
+	corruptBranchRef(t, repo, "worker")
+	var calls []string
+	inject := func(_ context.Context, dir string, args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		return runGit(dir, args...)
+	}
+
+	info, err := InspectWith(context.Background(), inject, repo, "worker")
+	if err != nil || info.State != StateBroken {
+		t.Fatalf("InspectWith = %+v, %v; want broken", info, err)
+	}
+	inspectCalls := len(calls)
+	if inspectCalls == 0 {
+		t.Fatal("InspectWith ran no git through the injected runner")
+	}
+	recovery, err := RecoverWith(context.Background(), inject, repo, "worker", "main", info)
+	if err != nil || recovery.Base != "reflog" || recovery.BaseSHA != workerSHA {
+		t.Fatalf("RecoverWith = %+v, %v; want reflog %s", recovery, err, workerSHA)
+	}
+	if len(calls) == inspectCalls {
+		t.Fatal("RecoverWith ran no git through the injected runner")
 	}
 	assertLooseRefAbsent(t, repo, "worker")
 }
