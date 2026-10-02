@@ -1,12 +1,15 @@
 package loomagent
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
+	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
 // TestUsageCostFromSessionTotal: a harness that reports its session's running
@@ -58,5 +61,29 @@ func TestUsageCostFromSessionTotal(t *testing.T) {
 	turn(s2, "u4", total(0.125)) // a total below the last: the session started again
 	if got, want := costs(s2), []float64{0.25, 0, 0.5, 0.25, 0.125}; !slices.Equal(got, want) {
 		t.Fatalf("costs after a restart %v, want %v", got, want)
+	}
+}
+
+// TestLastCostTotal: the baseline lookup returns the newest saved total of
+// the asked session, skipping other sessions and rows without a total, and 0
+// for a session with none.
+func TestLastCostTotal(t *testing.T) {
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	a, _ := newLead(t, e, s, "alpha")
+	ctx := context.Background()
+	for i, p := range []string{
+		`{"session":"s1","costTotalUsd":0.25}`, `{"session":"s1","costTotalUsd":0.5}`,
+		`{"session":"s2","costTotalUsd":9}`, `{"session":"s1","inputTokens":3}`,
+	} {
+		if _, err := s.store.AppendEvent(ctx, loomstore.Event{AgentID: a.AgentID, Kind: "usage",
+			EventID: fmt.Sprintf("usage:%d", i), Payload: json.RawMessage(p)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for session, want := range map[string]float64{"s1": 0.5, "s2": 9, "s3": 0} {
+		if got, err := s.store.LastCostTotal(ctx, a.AgentID, session); err != nil || got != want {
+			t.Fatalf("LastCostTotal(%s) = %v, %v; want %v", session, got, err, want)
+		}
 	}
 }

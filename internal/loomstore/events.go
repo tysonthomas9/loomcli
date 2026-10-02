@@ -225,6 +225,22 @@ func (s *Store) Unreceipted(ctx context.Context, agentID, kind string) ([]Event,
 	return out, rows.Err()
 }
 
+// LastCostTotal returns the costTotalUsd of agentID's newest usage row for
+// native session that has one, or 0 when none does. Rows are appended in seq
+// order, so the newest is the highest rowid: the lookup walks the kind index
+// back and stops at the first match.
+func (s *Store) LastCostTotal(ctx context.Context, agentID, session string) (float64, error) {
+	var total float64
+	err := s.db.QueryRowContext(ctx, `SELECT json_extract(redacted_payload, '$.costTotalUsd') FROM agent_events
+		WHERE agent_id = ? AND kind = 'usage' AND json_extract(redacted_payload, '$.session') = ?
+		AND json_extract(redacted_payload, '$.costTotalUsd') > 0
+		ORDER BY rowid DESC LIMIT 1`, agentID, session).Scan(&total)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return total, err
+}
+
 // LastMessage returns the text of the last completed message item of
 // agentID's current attempt, or "" when that attempt has none. The attempt
 // starts after attempt_after_seq, which the reopen sets in its own

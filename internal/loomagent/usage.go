@@ -2,10 +2,8 @@ package loomagent
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
-	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
 // withCost sets the cost of a usage event that reports its session's running
@@ -16,26 +14,9 @@ func (s *Service) withCost(ctx context.Context, agentID string, e loomharness.Ev
 	if e.Type != loomharness.EventUsage || e.Usage.CostTotalUSD == 0 {
 		return e, nil
 	}
-	last := 0.0
-	q := loomstore.EventQuery{AgentID: agentID, Kinds: []string{string(loomharness.EventUsage)}}
-	for {
-		p, err := s.store.ListEvents(ctx, q)
-		if err != nil {
-			return e, err
-		}
-		for _, r := range p.Events {
-			var u struct {
-				Session string  `json:"session"`
-				Total   float64 `json:"costTotalUsd"`
-			}
-			if json.Unmarshal(r.Payload, &u) == nil && u.Session == e.Session.NativeID && u.Total > 0 {
-				last = u.Total
-			}
-		}
-		if !p.More {
-			break
-		}
-		q.After, q.Snapshot = p.Next, p.SnapshotSeq
+	last, err := s.store.LastCostTotal(ctx, agentID, e.Session.NativeID)
+	if err != nil {
+		return e, err
 	}
 	if e.Usage.CostTotalUSD < last {
 		last = 0
