@@ -1,9 +1,13 @@
-package agent
+// Package agentbridge is `loom agent mcp-bridge`. It is apart from
+// internal/cli/agent so that package never depends on the Agent API
+// (loomagent, loomstore), which the bridge's client brings in.
+package agentbridge
 
 import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/agentmcp/bridge"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 )
 
 var mcpBridgeCmd = &cobra.Command{
@@ -26,4 +30,4 @@ error and serves nothing.`,
 	RunE:              func(cmd *cobra.Command, _ []string) error { return bridge.Run(cmd.Context()) },
 }
 
-func init() { agentCmd.AddCommand(mcpBridgeCmd) }
+func init() { agent.AddSubcommand(mcpBridgeCmd) }
