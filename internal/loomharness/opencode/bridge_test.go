@@ -70,12 +70,42 @@ func TestOpenWaitsForBridgeTools(t *testing.T) {
 		t.Fatalf("sessions after a failed bridge = %d; want none", len(st.sessions))
 	}
 
+	st.mu.Lock()
 	st.mcp = "connected"
+	st.mu.Unlock()
 	start := time.Now()
 	if _, err := c.Open(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
 	if d := time.Since(start); d < catalogSettle {
 		t.Fatalf("Open returned %s after connected; want at least catalogSettle %s", d, catalogSettle)
+	}
+
+	// A later hand-off finds the server still connected: no settle.
+	start = time.Now()
+	if err := c.bridge(ctx, dir, spec.Launch.Env); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d >= catalogSettle {
+		t.Fatalf("a hand-off on a settled bridge took %s; want no settle", d)
+	}
+
+	// The bridge restarts: the next hand-off sees it not yet connected, then
+	// connected, and settles again.
+	st.mu.Lock()
+	st.mcp = "pending"
+	st.mu.Unlock()
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		st.mu.Lock()
+		st.mcp = "connected"
+		st.mu.Unlock()
+	}()
+	start = time.Now()
+	if err := c.bridge(ctx, dir, spec.Launch.Env); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < 150*time.Millisecond+catalogSettle {
+		t.Fatalf("a hand-off after the bridge reconnected took %s; want the settle after it connected", d)
 	}
 }

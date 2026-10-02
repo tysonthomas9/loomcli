@@ -114,7 +114,11 @@ func (c *Client) discard(ref loomharness.NativeRef, cause error) (loomharness.Na
 // bridge writes the agent's bridge settings (env) for dir, before OpenCode
 // first loads dir, then waits until OpenCode has connected the "loom" MCP
 // server for dir and its tool catalog has settled, so the agent's first turn
-// has its tools. An agent with no settings has no bridge.
+// has its tools. The settle runs only when the server has just connected:
+// not when the first poll finds it connected in a dir already settled, as
+// on each later hand-off. A new or restarted OpenCode, an evicted location
+// or a restarting bridge reports it not yet connected on the first poll, so
+// the settle runs again. An agent with no settings has no bridge.
 func (c *Client) bridge(ctx context.Context, dir string, env map[string]string) error {
 	if len(env) == 0 {
 		return nil
@@ -122,7 +126,7 @@ func (c *Client) bridge(ctx context.Context, dir string, env map[string]string) 
 	if err := c.bridgeEnv(dir, env); err != nil {
 		return fmt.Errorf("opencode bridge: %w", err)
 	}
-	for deadline := time.Now().Add(agentWait); ; {
+	for deadline, first := time.Now().Add(agentWait), true; ; first = false {
 		var r struct {
 			Data []struct {
 				Name   string `json:"name"`
@@ -136,9 +140,17 @@ func (c *Client) bridge(ctx context.Context, dir string, env map[string]string) 
 		}
 		for _, m := range r.Data {
 			if m.Name == "loom" && m.Status.Status == "connected" {
-				return settle(ctx)
+				if _, ok := c.settled.Load(dir); ok && first {
+					return nil
+				}
+				if err := settle(ctx); err != nil {
+					return err
+				}
+				c.settled.Store(dir, true)
+				return nil
 			}
 		}
+		c.settled.Delete(dir)
 		if time.Now().After(deadline) {
 			return fmt.Errorf("opencode bridge for %s not connected after %s (%+v): %w", dir, agentWait, r.Data, loomharness.ErrUnavailable)
 		}

@@ -32,6 +32,9 @@ type Client struct {
 	defined  func(agent string) bool     // whether Loom currently defines the loom-* agent; nil skips the check
 	// bridgeFile names a worktree's bridge settings file; nil refuses settings
 	bridgeFile func(dir string) (string, error)
+	// settled holds the dirs whose loom MCP server Loom saw connect and
+	// settled (catalogSettle) since it last saw it not connected
+	settled sync.Map
 
 	rulesMu sync.Mutex
 	rules   map[string][]map[string]string // native session id -> the rules Loom last installed
