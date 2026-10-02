@@ -339,3 +339,27 @@ func TestClipBound(t *testing.T) {
 		t.Fatalf("clip(short) = %q", got)
 	}
 }
+
+// TestTaskCompletedSummaryIsCurrentAttempts: each record quotes only its own
+// attempt's last reply; an attempt with none has an empty summary.
+func TestTaskCompletedSummaryIsCurrentAttempts(t *testing.T) {
+	ctx := context.Background()
+	s := newService(t, ServiceConfig{}, busy("L", "persistent", StateActive), childOf("c1", "L"))
+	reply := func(text string) {
+		t.Helper()
+		if err := s.appendEvent(ctx, "c1", "item.completed", "item:"+text, map[string]string{"itemKind": "message", "text": text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply("attempt one done")
+	endAttempt(t, s, "c1", "completed")
+	nextAttempt(t, s, "c1") // no reply in attempt 2
+	endAttempt(t, s, "c1", "failed")
+	nextAttempt(t, s, "c1")
+	reply("attempt three done")
+	endAttempt(t, s, "c1", "completed")
+	got := completions(t, s, "L")
+	if len(got) != 3 || got[0].Summary != "attempt one done" || got[1].Summary != "" || got[2].Summary != "attempt three done" {
+		t.Fatalf("records = %+v", got)
+	}
+}

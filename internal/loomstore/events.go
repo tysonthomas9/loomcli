@@ -225,13 +225,17 @@ func (s *Store) Unreceipted(ctx context.Context, agentID, kind string) ([]Event,
 	return out, rows.Err()
 }
 
-// LastMessage returns the text of agentID's last saved completed message
-// item, or "" when it has none.
+// LastMessage returns the text of the last completed message item of
+// agentID's current attempt, or "" when that attempt has none. An attempt
+// after the first starts at the agent.state_changed event that reopened the
+// finished agent, so an earlier attempt's message is never returned.
 func (s *Store) LastMessage(ctx context.Context, agentID string) (string, error) {
 	var text sql.NullString
 	err := s.db.QueryRowContext(ctx, `SELECT json_extract(redacted_payload, '$.text') FROM agent_events
 		WHERE agent_id = ? AND kind = 'item.completed' AND json_extract(redacted_payload, '$.itemKind') = 'message'
-		ORDER BY seq DESC LIMIT 1`, agentID).Scan(&text)
+		AND seq > (SELECT COALESCE(MAX(seq), 0) FROM agent_events WHERE agent_id = ? AND kind = 'agent.state_changed'
+			AND json_extract(redacted_payload, '$.from') = 'finished')
+		ORDER BY seq DESC LIMIT 1`, agentID, agentID).Scan(&text)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
