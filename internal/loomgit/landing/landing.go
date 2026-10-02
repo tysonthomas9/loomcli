@@ -32,7 +32,13 @@ type Store interface {
 	OfferRestack(context.Context, journal.RestackOffer) error
 	OpenRestackOffers(context.Context) ([]journal.RestackOffer, error)
 	CompleteRestackOffer(context.Context, journal.RestackOffer, int) error
+	RecordLandingAttention(context.Context, string, string, string) (bool, error)
+	ClearLandingAttention(context.Context, string, string) (bool, error)
 }
+
+// errPublicationMismatch marks a published change whose owned PR no longer
+// matches it. Only that change needs repair; reconcile continues for the rest.
+var errPublicationMismatch = errors.New("publication mismatch")
 
 type Dependent struct {
 	Task, Repo string
@@ -124,37 +130,43 @@ func ReconcileWithOptions(ctx context.Context, store Store, forge Forge, options
 	if err != nil {
 		return err
 	}
+	// One change's failure must not stall landing for every other workspace.
+	var failures []error
 	for _, item := range fetched {
-		status, err := store.LandingStatus(ctx, item.publication.Workspace, item.publication.Change)
-		if err != nil {
-			return err
-		}
-		if status.State != "landed" && status.State != "dependency_abandoned" {
-			if err := detect(ctx, store, forge, item, publications); err != nil {
-				return err
-			}
-		}
-		status, err = store.LandingStatus(ctx, item.publication.Workspace, item.publication.Change)
-		if err != nil {
-			return err
-		}
-		if status.State == "landed" {
-			if err := offerDependents(ctx, store, item, options); err != nil {
-				return err
-			}
+		if err := reconcilePublication(ctx, store, forge, item, publications, options); err != nil {
+			failures = append(failures, fmt.Errorf("landing %s/%s: %w", item.publication.Workspace, item.publication.Change, err))
 		}
 	}
 	if err := propagateClosure(ctx, store, publications); err != nil {
-		return err
+		return errors.Join(append(failures, err)...)
 	}
-	var dependencyErr error
 	if options.Predecessors != nil {
-		dependencyErr = reconcileDependencies(ctx, store, forge, publications, options.Predecessors)
+		failures = append(failures, reconcileDependencies(ctx, store, forge, publications, options.Predecessors))
 	}
 	if options.Restack != nil {
-		return errors.Join(dependencyErr, runRestacks(ctx, store, forge, options.Restack))
+		failures = append(failures, runRestacks(ctx, store, forge, options.Restack))
 	}
-	return dependencyErr
+	return errors.Join(failures...)
+}
+
+func reconcilePublication(ctx context.Context, store Store, forge Forge, item fetchedPublication, publications []journal.Publication, options Options) error {
+	status, err := store.LandingStatus(ctx, item.publication.Workspace, item.publication.Change)
+	if err != nil {
+		return err
+	}
+	if status.State != "landed" && status.State != "dependency_abandoned" {
+		if err := detect(ctx, store, forge, item, publications); err != nil {
+			return err
+		}
+	}
+	status, err = store.LandingStatus(ctx, item.publication.Workspace, item.publication.Change)
+	if err != nil {
+		return err
+	}
+	if status.State == "landed" {
+		return offerDependents(ctx, store, item, options)
+	}
+	return nil
 }
 
 func fetchPublications(ctx context.Context, store Store, publications []journal.Publication, includeLanded bool) ([]fetchedPublication, error) {
@@ -213,8 +225,22 @@ func targetTrunk(publication journal.Publication, all []journal.Publication) str
 func detect(ctx context.Context, store Store, forge Forge, item fetchedPublication, publications []journal.Publication) error {
 	publication := item.publication
 	pull, err := ownedPull(ctx, forge, publication)
+	if errors.Is(err, errPublicationMismatch) {
+		// Recorded for status and doctor; logged once per change of reason.
+		if recorded, err2 := store.RecordLandingAttention(ctx, publication.Workspace, publication.Change, err.Error()); err2 != nil || !recorded {
+			return err2
+		}
+		slog.Warn("landing needs attention", "workspace", publication.Workspace, "change", publication.Change,
+			"pr", publication.PRNumber, "err", err)
+		return nil
+	}
 	if err != nil {
 		return err
+	}
+	if cleared, err := store.ClearLandingAttention(ctx, publication.Workspace, publication.Change); err != nil {
+		return err
+	} else if cleared {
+		slog.Info("landing attention cleared", "workspace", publication.Workspace, "change", publication.Change, "pr", publication.PRNumber)
 	}
 	if err := observeProvider(ctx, store, forge, item, pull, publications); err != nil {
 		return err
@@ -260,7 +286,7 @@ func ownedPull(ctx context.Context, forge Forge, publication journal.Publication
 		return stackpublish.PR{}, err
 	}
 	if pull.Number != publication.PRNumber || pull.Head != publication.Branch {
-		return stackpublish.PR{}, fmt.Errorf("owned PR %d does not match published change %s", publication.PRNumber, publication.Change)
+		return stackpublish.PR{}, fmt.Errorf("%w: owned PR %d does not match published change %s", errPublicationMismatch, publication.PRNumber, publication.Change)
 	}
 	return pull, nil
 }
@@ -343,14 +369,15 @@ func runRestacks(ctx context.Context, store Store, forge Forge, restack func(con
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, offer := range offers {
 		derivedRevision, err := restack(ctx, offer, forge)
-		if err != nil {
-			return err
+		if err == nil {
+			err = store.CompleteRestackOffer(ctx, offer, derivedRevision)
 		}
-		if err := store.CompleteRestackOffer(ctx, offer, derivedRevision); err != nil {
-			return err
+		if err != nil {
+			failures = append(failures, fmt.Errorf("restack %s/%s: %w", offer.Workspace, offer.Change, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

@@ -173,6 +173,9 @@ func Scan(ctx context.Context, integrity bool) (Snapshot, error) {
 	appendAreas(rows.Areas, knownPaths, &out)
 	appendRevisions(ctx, rows, runners, integrity, &out)
 	appendPublications(ctx, rows.Publications, runners, integrity, &out)
+	if err := markLandingAttention(ctx, store, &out); err != nil {
+		return out, err
+	}
 	appendMirrorRefs(ctx, rows.Mirrors, integrity, &out)
 	if err := appendLeadMergePolicies(ctx, store, &out); err != nil {
 		return out, err
@@ -227,6 +230,26 @@ func appendPublications(ctx context.Context, publications []journal.Publication,
 		}
 		out.Entries = append(out.Entries, item)
 	}
+}
+
+// markLandingAttention flags publications landing reconcile skips until repaired.
+func markLandingAttention(ctx context.Context, store *journal.SQLite, out *Snapshot) error {
+	attentions, err := store.LandingAttentions(ctx)
+	if err != nil || len(attentions) == 0 {
+		return err
+	}
+	reasons := make(map[string]string, len(attentions))
+	for _, attention := range attentions {
+		reasons[attention.Workspace+"\x00"+attention.Change] = attention.Reason
+	}
+	for i := range out.Entries {
+		item := &out.Entries[i]
+		if reason, ok := reasons[item.Workspace+"\x00"+item.ID]; ok && item.Kind == "publication" {
+			item.State, item.Reason = "attention_required", reason
+			item.NextAction = "republish the change or restore its PR; landing skips it until then"
+		}
+	}
+	return nil
 }
 
 // appendDependencyChecks shows loom/dependencies per change and whether each
