@@ -701,7 +701,7 @@ func TestClaudeSelfStartedTurnHasNoInputKey(t *testing.T) {
 // TestClaudeUsageSumsTurnSteps: a turn's usage is the sum of its steps'
 // stream usage (input and cache from message_start, output from
 // message_delta), not the result's own counts, and the next turn starts at
-// zero.
+// zero, as does a turn after a process exit.
 func TestClaudeUsageSumsTurnSteps(t *testing.T) {
 	m := newMapper(loomharness.NativeRef{NativeID: "s"})
 	step := func(id string, in, read, write, out int) {
@@ -726,6 +726,14 @@ func TestClaudeUsageSumsTurnSteps(t *testing.T) {
 	step("msg_3", 1, 0, 0, 2)
 	if u2 := usage(); u2.Usage != (loomharness.Usage{InputTokens: 1, OutputTokens: 2}) || u2.ItemID == u.ItemID {
 		t.Fatalf("second turn usage = %+v (item %q)", u2.Usage, u2.ItemID)
+	}
+	// A process that exits mid-turn: its partial steps are not carried into
+	// the next turn's row.
+	step("msg_4", 10, 0, 0, 2)
+	m.exited()
+	step("msg_5", 5, 0, 0, 3)
+	if u3 := usage(); u3.Usage != (loomharness.Usage{InputTokens: 5, OutputTokens: 3}) {
+		t.Fatalf("usage after an exit = %+v, want 5/3", u3.Usage)
 	}
 }
 

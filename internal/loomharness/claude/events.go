@@ -244,6 +244,7 @@ func (m *mapper) item(msg string, index int, b block) (kind, id string) {
 // lost, so it emits feed.gap.
 func (m *mapper) exited() loomharness.Event {
 	m.turnID, m.cancelled, m.msgID, m.handed, m.cost = "", false, "", "", 0
+	m.usage = loomharness.Usage{} // the cut-off turn's partial steps are dropped, not carried on
 	m.seq++
 	return loomharness.Event{Type: loomharness.EventFeedGap, Session: m.ref, Seq: m.seq, Time: time.Now()}
 }
