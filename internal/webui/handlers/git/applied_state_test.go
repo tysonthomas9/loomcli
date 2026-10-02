@@ -60,10 +60,10 @@ func TestTaskRevisionsReportAppliedStateFromAppliedLog(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", handleVerdict)
-	state := func() (bool, bool) {
+	stateFor := func(query string) (bool, bool) {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/workspaces/W/issues/T/revisions", nil))
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/workspaces/W/issues/T/revisions"+query, nil))
 		var body struct {
 			Data []map[string]any `json:"data"`
 		}
@@ -77,6 +77,7 @@ func TestTaskRevisionsReportAppliedStateFromAppliedLog(t *testing.T) {
 		}
 		return value, needs
 	}
+	state := func() (bool, bool) { t.Helper(); return stateFor("") }
 	applied := func() bool { t.Helper(); a, _ := state(); return a }
 	needsArea := func() bool { t.Helper(); _, n := state(); return n }
 	if applied() || needsArea() {
@@ -87,14 +88,18 @@ func TestTaskRevisionsReportAppliedStateFromAppliedLog(t *testing.T) {
 	previousArea := hasWorkingArea
 	hasWorkingArea = func(context.Context, *review.Local, string, string) (bool, error) { return false, nil }
 	t.Cleanup(func() { hasWorkingArea = previousArea })
-	verdictBody, _ := json.Marshal(map[string]any{"head_sha": revision.HeadSHA, "verdict": "approve",
-		"actor": map[string]string{"kind": "human", "id": "user"}})
-	post := httptest.NewRecorder()
-	mux.ServeHTTP(post, httptest.NewRequest("POST", "/api/workspaces/W/changes/"+revision.Change+"/revisions/"+
-		strconv.Itoa(revision.Number)+"/verdict", bytes.NewReader(verdictBody)))
-	if post.Code != 200 || !strings.Contains(post.Body.String(), "approved_waiting_for_working_area") {
-		t.Fatalf("verdict: %d %s", post.Code, post.Body.String())
+	approve := func(lead string) {
+		t.Helper()
+		verdictBody, _ := json.Marshal(map[string]any{"head_sha": revision.HeadSHA, "verdict": "approve", "lead": lead,
+			"actor": map[string]string{"kind": "human", "id": "user"}})
+		post := httptest.NewRecorder()
+		mux.ServeHTTP(post, httptest.NewRequest("POST", "/api/workspaces/W/changes/"+revision.Change+"/revisions/"+
+			strconv.Itoa(revision.Number)+"/verdict", bytes.NewReader(verdictBody)))
+		if post.Code != 200 || !strings.Contains(post.Body.String(), "approved_waiting_for_working_area") {
+			t.Fatalf("verdict: %d %s", post.Code, post.Body.String())
+		}
 	}
+	approve("lead")
 	if !needsArea() {
 		t.Fatal("approved revision without a working area not reported as needing one")
 	}
@@ -122,5 +127,18 @@ func TestTaskRevisionsReportAppliedStateFromAppliedLog(t *testing.T) {
 	run(`INSERT INTO working_areas (workspace,lead,repo,path,branch,base_sha,mode) VALUES ('W','lead','repo','/x','b',?,'interactive')`, base)
 	if needsArea() {
 		t.Fatal("revision reported as needing a working area after the lead has one")
+	}
+	// Lead A ("lead") has it applied; lead B is approved but has no working
+	// area. Each lead sees its own state.
+	approve("B")
+	run(`UPDATE applied_layers SET phase='done' WHERE request_id='req-1'`)
+	if a, n := stateFor("?lead=lead"); !a || n {
+		t.Fatalf("lead A: applied=%t needs_working_area=%t", a, n)
+	}
+	if a, n := stateFor("?lead=B"); a || !n {
+		t.Fatalf("lead B: applied=%t needs_working_area=%t", a, n)
+	}
+	if a, n := stateFor(""); !a || !n {
+		t.Fatalf("no lead: applied=%t needs_working_area=%t", a, n)
 	}
 }

@@ -61,6 +61,13 @@ type TaskRevision struct {
 }
 
 func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]TaskRevision, error) {
+	return l.TaskRevisionsForLead(ctx, workspace, task, "")
+}
+
+// TaskRevisionsForLead reports applied and needs-working-area state for one
+// lead. An empty lead reports applied in any lead, and needs a working area
+// when any approved target lead without the revision applied has none.
+func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead string) ([]TaskRevision, error) {
 	revisions, err := l.store.ListTaskRevisions(ctx, workspace, task)
 	if err != nil {
 		return nil, err
@@ -74,11 +81,11 @@ func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]Ta
 		} else if !errors.Is(err, journal.ErrNotFound) {
 			return nil, err
 		}
-		if i.Applied, err = l.store.RevisionApplied(ctx, workspace, r.Change, r.Number); err != nil {
+		if i.Applied, err = l.store.RevisionApplied(ctx, workspace, lead, r.Change, r.Number); err != nil {
 			return nil, err
 		}
-		if !i.Applied && (v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy") {
-			if i.NeedsWorkingArea, err = l.needsWorkingArea(ctx, workspace, r.Change, r.Number); err != nil {
+		if v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy" {
+			if i.NeedsWorkingArea, err = l.needsWorkingArea(ctx, workspace, lead, r.Change, r.Number); err != nil {
 				return nil, err
 			}
 		}
@@ -88,13 +95,23 @@ func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]Ta
 }
 
 // needsWorkingArea reports whether a lead targeted by this revision's approval
-// still has no working area to apply it into.
-func (l *Local) needsWorkingArea(ctx context.Context, workspace, change string, revision int) (bool, error) {
+// (only, if set) has not applied it and has no working area to apply it into.
+func (l *Local) needsWorkingArea(ctx context.Context, workspace, only, change string, revision int) (bool, error) {
 	leads, err := l.store.ApprovalLeads(ctx, workspace, change, revision)
 	if err != nil {
 		return false, err
 	}
 	for _, lead := range leads {
+		if only != "" && lead != only {
+			continue
+		}
+		applied, err := l.store.RevisionApplied(ctx, workspace, lead, change, revision)
+		if err != nil {
+			return false, err
+		}
+		if applied {
+			continue
+		}
 		areas, err := l.store.WorkingAreas(ctx, workspace, lead)
 		if err != nil {
 			return false, err

@@ -28,7 +28,7 @@ export function RevisionsSection({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    getTaskRevisions(workspaceId, taskId)
+    getTaskRevisions(workspaceId, taskId, lead)
       .then((items) => {
         if (active) {
           setRevisions(items);
@@ -47,7 +47,7 @@ export function RevisionsSection({
     return () => {
       active = false;
     };
-  }, [workspaceId, taskId]);
+  }, [workspaceId, taskId, lead]);
 
   async function decide(
     revision: ReviewRevision,
@@ -66,7 +66,7 @@ export function RevisionsSection({
         lead,
       );
       if (status) setFollow((prev) => ({ ...prev, [key]: status }));
-      setRevisions(await getTaskRevisions(workspaceId, taskId));
+      setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
       setOverride("");
       setReason("");
     } catch (err) {
@@ -85,7 +85,7 @@ export function RevisionsSection({
       await applyRevision(workspaceId, revision, lead);
       setFollow((prev) => ({ ...prev, [key]: "" }));
       // Applied state comes from the server's applied log, never browser state.
-      setRevisions(await getTaskRevisions(workspaceId, taskId));
+      setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
     } catch (err) {
       // 404: the lead agent does not exist, so Apply cannot open its area.
       if (err instanceof ApiError && err.status === 404)
@@ -118,7 +118,7 @@ export function RevisionsSection({
         const needsArea =
           follow[key] !== undefined
             ? follow[key] === "approved_waiting_for_working_area"
-            : Boolean(revision.needs_working_area) && !revision.applied;
+            : Boolean(revision.needs_working_area);
         return (
           <div className={styles.revision} key={key}>
             <div>

@@ -3393,6 +3393,12 @@ paths:
           required: true
           schema:
             type: string
+        - name: lead
+          in: query
+          required: false
+          description: Report applied and needs_working_area for this lead. Without it, applied means applied in any lead and needs_working_area means some approved target lead still lacks a working area.
+          schema:
+            type: string
       responses:
         "200":
           description: Revisions with current verdicts
