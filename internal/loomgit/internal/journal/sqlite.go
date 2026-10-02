@@ -202,11 +202,11 @@ func (s *SQLite) SetLeadMayMerge(ctx context.Context, workspace, value, setBy st
 }
 
 // LeadMergePolicies lists workspaces with lead_may_merge=when_green. A read-only
-// store from before the setting existed has none.
+// store from before the setting (or its table) existed has none.
 func (s *SQLite) LeadMergePolicies(ctx context.Context) ([]LeadMergePolicy, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT workspace,lead_may_merge,lead_may_merge_set_by FROM workspace_settings
 		WHERE lead_may_merge='when_green' ORDER BY workspace`)
-	if err != nil && strings.Contains(err.Error(), "no such column") {
+	if err != nil && (strings.Contains(err.Error(), "no such column") || strings.Contains(err.Error(), "no such table")) {
 		return nil, nil
 	}
 	if err != nil {
