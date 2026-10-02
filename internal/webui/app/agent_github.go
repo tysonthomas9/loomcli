@@ -11,8 +11,8 @@ import (
 // built before the Agent API so no agent opens or resumes without it: a PR
 // review module of its own (no reviewer services) on serve's store and
 // connector vault. Each read re-resolves the host credential, so a settings
-// change applies at once. nil without a store or vault key; github_read
-// agents then fail closed at launch.
+// change applies at once. nil without a store or vault key; agents are then
+// not offered github_read.
 func AgentGitHubRead(cfg webui.ServerConfig) func(ctx context.Context, ws, agentID, repoPath, op string, args map[string]any) (map[string]any, error) {
 	disp := (&Server{config: cfg}).buildConnectorDispatcher()
 	if disp == nil {
