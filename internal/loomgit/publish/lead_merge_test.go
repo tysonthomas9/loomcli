@@ -269,6 +269,74 @@ func TestWhenGreenMergesNativeGreenPrefix(t *testing.T) {
 	}
 }
 
+func nativeLeadFixture(t *testing.T) (fixture, leadNativeForge) {
+	t.Helper()
+	item, loomForge, _ := fourLayerMergeEntryFixture(t, "native")
+	loomForge.reviews = map[int]string{}
+	for _, pr := range loomForge.prs {
+		loomForge.reviews[pr.Number] = "approved"
+	}
+	loomForge.prChecks = map[int]string{loomForge.prs[2].Number: "pending"}
+	return item, leadNativeForge{mergeForgeFake: loomForge, native: &fakeMergeForge{fakeForge: loomForge.fakeForge, prs: loomForge.prs}}
+}
+
+func TestNativeLeadMergeRechecksProviderAtDispatch(t *testing.T) {
+	item, forge := nativeLeadFixture(t)
+	ctx := context.Background()
+	setLeadMayMerge(t, item, "when_green")
+	if err := item.store.BeginNativeMerge(ctx, journal.NativeMerge{Workspace: "W", StackID: "feature", Target: "B",
+		Changes: []string{"A", "B"}, Authority: leadMergeAuthority, SetBy: "tyson"}); err != nil {
+		t.Fatal(err)
+	}
+	forge.prChecks[forge.prs[1].Number] = "pending"
+	if err := ReconcileNativeMerges(ctx, item.store, forge); err != nil {
+		t.Fatal(err)
+	}
+	if merge, err := item.store.NativeMerge(ctx, "W", "feature"); err != nil || merge.Phase != "ready" || len(forge.native.submitted) != 0 {
+		t.Fatalf("pending layer: merge = %+v, submitted = %v, %v", merge, forge.native.submitted, err)
+	}
+	forge.reviews[forge.prs[1].Number] = "changes_requested"
+	var coded *loomgit.Error
+	if err := ReconcileNativeMerges(ctx, item.store, forge); !errors.As(err, &coded) || coded.Kind != loomgit.MergeBlocked {
+		t.Fatalf("changes requested reconcile err = %v", err)
+	}
+	merge, err := item.store.NativeMerge(ctx, "W", "feature")
+	if err != nil || merge.Phase != "blocked" || len(forge.native.submitted) != 0 {
+		t.Fatalf("changes requested: merge = %+v, submitted = %v, %v", merge, forge.native.submitted, err)
+	}
+}
+
+func TestNativeLeadMergeContinuesWithNextGreenPrefix(t *testing.T) {
+	item, forge := nativeLeadFixture(t)
+	ctx := context.Background()
+	setLeadMayMerge(t, item, "when_green")
+	if err := ReconcileLeadMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	first, err := item.store.NativeMerge(ctx, "W", "feature")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := item.store.AdvanceNativeMerge(ctx, first, "done", first.Head); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := item.store.NativeMerge(ctx, "W", "feature"); err != nil || done.MergedBy != "lead under setting set by tyson" {
+		t.Fatalf("native audit = %+v, %v", done, err)
+	}
+	forge.prs[0].Merged, forge.prs[1].Merged = true, true
+	forge.prChecks[forge.prs[2].Number] = "passing"
+	if err := ReconcileLeadMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	next, err := item.store.NativeMerge(ctx, "W", "feature")
+	if err != nil || next.Target != "D" || len(next.Changes) != 2 || next.Changes[0] != "C" || next.MergedBy != "" {
+		t.Fatalf("next native lead merge = %+v, %v", next, err)
+	}
+	if len(forge.native.submitted) != 2 || forge.native.submitted[1] != forge.prs[3].Number {
+		t.Fatalf("submitted = %v, want B then D", forge.native.submitted)
+	}
+}
+
 func TestTurningPolicyOffCancelsQueuedNativeLeadMerge(t *testing.T) {
 	item, loomForge, _ := fourLayerMergeEntryFixture(t, "native")
 	native := &fakeMergeForge{fakeForge: loomForge.fakeForge, prs: loomForge.prs}

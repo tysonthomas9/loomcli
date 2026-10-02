@@ -20,7 +20,7 @@ type Publication struct {
 
 type NativeMerge struct {
 	Workspace, StackID, Target, Phase, Head, UUID, Reason string
-	Authority                                             string
+	Authority, SetBy, MergedBy                            string
 	Changes                                               []string
 }
 
@@ -34,7 +34,7 @@ func createNativeMergeSchema(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	for _, column := range []string{"request_uuid", "authority"} {
+	for _, column := range []string{"request_uuid", "authority", "set_by", "merged_by"} {
 		_, err = db.Exec(`ALTER TABLE native_stack_merges ADD COLUMN ` + column + ` TEXT NOT NULL DEFAULT ''`)
 		if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return err
@@ -48,9 +48,14 @@ func (s *SQLite) BeginNativeMerge(ctx context.Context, merge NativeMerge) error 
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT OR IGNORE INTO native_stack_merges
-		(workspace,stack_id,target,changes,phase,authority) VALUES (?,?,?,?, 'ready',?)`,
-		merge.Workspace, merge.StackID, merge.Target, string(encoded), merge.Authority)
+	// A finished lead-policy merge gives way to the next green prefix; any other
+	// recorded merge is never replaced.
+	_, err = s.db.ExecContext(ctx, `INSERT INTO native_stack_merges
+		(workspace,stack_id,target,changes,phase,authority,set_by) VALUES (?,?,?,?, 'ready',?,?)
+		ON CONFLICT(workspace,stack_id) DO UPDATE SET target=excluded.target,changes=excluded.changes,
+		phase='ready',head_sha='',request_uuid='',reason='',authority=excluded.authority,set_by=excluded.set_by,merged_by=''
+		WHERE native_stack_merges.phase IN ('done','blocked') AND excluded.authority='lead_may_merge'`,
+		merge.Workspace, merge.StackID, merge.Target, string(encoded), merge.Authority, merge.SetBy)
 	if err != nil {
 		return err
 	}
@@ -67,7 +72,7 @@ func (s *SQLite) BeginNativeMerge(ctx context.Context, merge NativeMerge) error 
 }
 
 func (s *SQLite) OpenNativeMerges(ctx context.Context) ([]NativeMerge, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace,stack_id,target,changes,phase,head_sha,request_uuid,authority
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,stack_id,target,changes,phase,head_sha,request_uuid,authority,set_by
 		FROM native_stack_merges WHERE phase != 'done' AND phase != 'blocked'`)
 	if err != nil {
 		return nil, err
@@ -77,7 +82,7 @@ func (s *SQLite) OpenNativeMerges(ctx context.Context) ([]NativeMerge, error) {
 	for rows.Next() {
 		var merge NativeMerge
 		var changes string
-		if err := rows.Scan(&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Phase, &merge.Head, &merge.UUID, &merge.Authority); err != nil {
+		if err := rows.Scan(&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Phase, &merge.Head, &merge.UUID, &merge.Authority, &merge.SetBy); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(changes), &merge.Changes); err != nil {
@@ -91,9 +96,10 @@ func (s *SQLite) OpenNativeMerges(ctx context.Context) ([]NativeMerge, error) {
 func (s *SQLite) NativeMerge(ctx context.Context, workspace, stackID string) (NativeMerge, error) {
 	var merge NativeMerge
 	var changes string
-	err := s.db.QueryRowContext(ctx, `SELECT workspace,stack_id,target,changes,phase,head_sha,request_uuid,reason,authority
+	err := s.db.QueryRowContext(ctx, `SELECT workspace,stack_id,target,changes,phase,head_sha,request_uuid,reason,authority,set_by,merged_by
 		FROM native_stack_merges WHERE workspace=? AND stack_id=?`, workspace, stackID).Scan(
-		&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Phase, &merge.Head, &merge.UUID, &merge.Reason, &merge.Authority)
+		&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Phase, &merge.Head, &merge.UUID, &merge.Reason,
+		&merge.Authority, &merge.SetBy, &merge.MergedBy)
 	if err != nil {
 		return NativeMerge{}, err
 	}
@@ -121,9 +127,10 @@ func (s *SQLite) RecordNativeMergeRequest(ctx context.Context, merge NativeMerge
 }
 
 func (s *SQLite) AdvanceNativeMerge(ctx context.Context, merge NativeMerge, phase, head string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE native_stack_merges SET phase=?,head_sha=?
+	result, err := s.db.ExecContext(ctx, `UPDATE native_stack_merges SET phase=?,head_sha=?,
+		merged_by=CASE WHEN ?='done' AND authority='lead_may_merge' THEN 'lead under setting set by '||set_by ELSE merged_by END
 		WHERE workspace=? AND stack_id=? AND phase=? AND head_sha=?`,
-		phase, head, merge.Workspace, merge.StackID, merge.Phase, merge.Head)
+		phase, head, phase, merge.Workspace, merge.StackID, merge.Phase, merge.Head)
 	if err != nil {
 		return err
 	}

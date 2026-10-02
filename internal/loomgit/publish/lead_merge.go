@@ -129,10 +129,11 @@ func startLeadMerge(ctx context.Context, store *journal.SQLite, forge leadMergeF
 	if stack.Lead == "" {
 		return nil
 	}
-	target, err := highestGreenLayer(ctx, store, forge, stack)
-	if err != nil || target == "" {
+	run, err := greenRun(ctx, store, forge, stack)
+	if err != nil || len(run) == 0 {
 		return err
 	}
+	target := run[len(run)-1]
 	if existing.Target == target {
 		return nil
 	}
@@ -143,23 +144,33 @@ func startLeadMerge(ctx context.Context, store *journal.SQLite, forge leadMergeF
 	return beginLoomMerge(ctx, store, request, target)
 }
 
-// startNativeLeadMerge hands the provider one merge of the green prefix. A
-// recorded native merge is never replaced, so any earlier one ends the policy run.
+// startNativeLeadMerge hands the provider one merge of the unmerged green
+// prefix. A finished merge gives way to the next prefix; an open one, or one
+// that already covered this target, is left alone.
 func startNativeLeadMerge(ctx context.Context, store *journal.SQLite, forge leadMergeForge, stack journal.LeadMergeStack) error {
-	if _, err := store.NativeMerge(ctx, stack.Workspace, stack.StackID); !errors.Is(err, sql.ErrNoRows) {
+	existing, err := store.NativeMerge(ctx, stack.Workspace, stack.StackID)
+	if err == nil && existing.Phase != "done" && existing.Phase != "blocked" {
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	if stack.Lead == "" {
 		return nil
 	}
-	target, err := highestGreenLayer(ctx, store, forge, stack)
-	if err != nil || target == "" {
+	run, err := greenRun(ctx, store, forge, stack)
+	if err != nil || len(run) == 0 {
 		return err
+	}
+	target := run[len(run)-1]
+	if existing.Target == target {
+		return nil
 	}
 	request, err := leadMergeRequest(ctx, store, forge, stack, target)
 	if err != nil {
 		return err
 	}
+	request.Changes = run
 	return GitHubStackBackend{Store: store}.MergeUpTo(ctx, request, target)
 }
 
@@ -178,38 +189,38 @@ func leadMergeRequest(ctx context.Context, store *journal.SQLite, forge leadMerg
 	return request, err
 }
 
-// highestGreenLayer walks the stack bottom-up and returns the last layer of the
+// greenRun walks the stack bottom-up and returns the unmerged layers of the
 // unbroken run whose required checks and reviews pass on the provider.
-func highestGreenLayer(ctx context.Context, store *journal.SQLite, forge loomMergeForge, stack journal.LeadMergeStack) (string, error) {
+func greenRun(ctx context.Context, store *journal.SQLite, forge loomMergeForge, stack journal.LeadMergeStack) ([]string, error) {
 	publications, err := store.StackPublications(ctx, stack.Workspace, stack.StackID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	target := ""
+	var run []string
 	for _, publication := range publications {
 		owner, repo, ok := strings.Cut(publication.Slug, "/")
 		if !ok || publication.Phase != "done" || publication.PRNumber == 0 {
-			return target, nil
+			return run, nil
 		}
 		pr, err := forge.PullByNumber(ctx, owner, repo, publication.PRNumber)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if pr.Merged {
 			continue
 		}
 		statuses, err := forge.PRStatuses(ctx, owner, repo, publication.Branch)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		status, found := statuses[publication.Branch]
 		if !found || status.Number != pr.Number || pr.State != "open" || pr.HeadSHA != publication.Head ||
 			!greenStatus(status) || requireNativeVerdict(ctx, store, publication) != nil {
-			return target, nil
+			return run, nil
 		}
-		target = publication.Change
+		run = append(run, publication.Change)
 	}
-	return target, nil
+	return run, nil
 }
 
 func greenStatus(status stackpublish.PRStatus) bool {
