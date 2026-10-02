@@ -12,38 +12,9 @@ import { AgentHistory } from "./history";
 import { listEventsAfter } from "./rest";
 import type { AgentApiErrorBody, AgentEvent } from "./types";
 
-/** Saved event kinds the stream listens for when no types are given. */
-export const AGENT_EVENT_KINDS = [
-  "agent.created",
-  "agent.updated",
-  "agent.state_changed",
-  "agent.idle",
-  "agent.settled",
-  "agent.turn_completed",
-  "agent.archived",
-  "agent.deleted",
-  "attention.raised",
-  "attention.cleared",
-  "harness.changed",
-  "harness.subagent.started",
-  "message.waiting",
-  "message.withdrawn",
-  "message.delivered",
-  "turn.started",
-  "turn.resumed",
-  "turn.completed",
-  "item.started",
-  "item.completed",
-  "usage",
-  "ask.opened",
-  "ask.resolved",
-  "ask.lost",
-  "error",
-];
-
 export interface AgentStreamOptions {
   agents: string[];
-  /** Saved kinds to receive; all known kinds when omitted. */
+  /** Saved kinds to receive; all kinds when omitted or empty. */
   types?: string[];
   deltas?: boolean;
   /** The cache to merge into; a new one when omitted. */
@@ -69,6 +40,9 @@ export class AgentEventStream {
   private gen = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private expired = new Set<string>();
+  private syncing = false; // a catch-up is paging; live saved events wait
+  private again = false; // another catch-up was asked for meanwhile
+  private buffer: AgentEvent[] = [];
 
   constructor(
     private ws: string,
@@ -81,10 +55,12 @@ export class AgentEventStream {
   async connect(): Promise<void> {
     const gen = ++this.gen;
     this.closeSource();
+    this.syncing = false;
+    this.buffer = [];
     this.setState(this.attempts > 0 ? "reconnecting" : "connecting");
     let token: SseTokenResult;
     try {
-      await this.catchUp();
+      await this.catchUp(gen);
       token = await (this.opts.fetchToken ?? (() => fetchSseToken(this.ws)))();
       if (token.kind === "error") throw new Error(token.message);
     } catch (err) {
@@ -99,10 +75,10 @@ export class AgentEventStream {
       this.attempts = 0;
       this.setState("connected");
     };
-    const kinds = this.opts.types ?? AGENT_EVENT_KINDS;
-    for (const kind of new Set([...kinds, "error", "delta", "feed.gap"])) {
-      es.addEventListener(kind, (e) => this.frame(es, e));
-    }
+    // Every saved event and notice is one "event" frame with its kind in the
+    // data; "error" is the server's error frame or a native connection error.
+    es.addEventListener("event", (e) => this.frame(es, e));
+    es.addEventListener("error", (e) => this.frame(es, e));
   }
 
   /** Closes the stream for good. */
@@ -113,7 +89,8 @@ export class AgentEventStream {
   }
 
   private url(token: SseTokenResult): string {
-    const { agents, types, deltas } = this.opts;
+    const { agents, deltas } = this.opts;
+    const types = this.filter();
     const p = new URLSearchParams({ agents: agents.join(",") });
     const after = agents
       .filter((a) => !this.expired.has(a))
@@ -125,33 +102,69 @@ export class AgentEventStream {
     return `${getApiOrigin()}${wsUrl(this.ws, "/v1/events")}?${p}`;
   }
 
-  // Pages every agent's committed events after its cursor into the cache. An
-  // agent whose history is purged (410) is followed live-only from then on.
-  private async catchUp(): Promise<void> {
-    await Promise.all(
-      this.opts.agents
-        .filter((a) => !this.expired.has(a))
-        .map(async (a) => {
-          try {
-            const events = await listEventsAfter(
-              this.ws,
-              a,
-              this.history.lastSeq(a),
-              this.opts.types,
-            );
-            this.emit(events);
-          } catch (err) {
-            if (!(err instanceof ApiError && err.status === 410)) throw err;
-            this.expired.add(a);
-          }
-        }),
+  /** The saved kinds asked for; undefined (all kinds) for none or []. */
+  private filter(): string[] | undefined {
+    return this.opts.types?.length ? this.opts.types : undefined;
+  }
+
+  // Pages every agent's committed events after its cursor into the cache,
+  // one catch-up at a time; live saved events that arrive meanwhile are
+  // buffered and merged after it, so onEvents stays in seq order. A stale
+  // catch-up (closed or reconnected since) emits nothing. An agent whose
+  // history is purged (410) is followed live-only from then on.
+  private async catchUp(gen: number): Promise<void> {
+    if (this.syncing) {
+      this.again = true;
+      return;
+    }
+    this.syncing = true;
+    try {
+      do {
+        this.again = false;
+        const pages = await Promise.all(
+          this.opts.agents
+            .filter((a) => !this.expired.has(a))
+            .map((a) =>
+              listEventsAfter(
+                this.ws,
+                a,
+                this.history.lastSeq(a),
+                this.filter(),
+              ).catch((err) => {
+                if (!(err instanceof ApiError && err.status === 410)) throw err;
+                this.expired.add(a);
+                return [];
+              }),
+            ),
+        );
+        if (gen !== this.gen) return;
+        this.emit(pages.flat());
+        this.opts.onResync?.();
+      } while (this.again);
+    } finally {
+      if (gen === this.gen) this.syncing = false;
+    }
+    const buffered = this.buffer.sort((a, b) => a.seq - b.seq);
+    this.buffer = [];
+    buffered.forEach((e) => this.saved(e));
+  }
+
+  private resync(): void {
+    const { gen, es } = this;
+    this.catchUp(gen).catch(
+      () => gen === this.gen && es === this.es && this.reconnect(),
     );
-    this.opts.onResync?.();
+  }
+
+  // A saved event from the stream; held while a catch-up is paging.
+  private saved(e: AgentEvent): void {
+    if (this.syncing) this.buffer.push(e);
+    else this.emit([e]);
   }
 
   // One SSE frame. A native connection error has no data; a saved event has
-  // seq > 0; a notice has seq 0; anything else is the server's error frame.
-  // The id field is not used: EventSource keeps the last id on frames without one.
+  // seq > 0; a notice has seq 0; the server's error frame has no seq. The id
+  // field is not used: EventSource keeps the last id on frames without one.
   private frame(es: EventSource, e: Event): void {
     if (es !== this.es) return;
     const data = (e as MessageEvent).data;
@@ -166,11 +179,9 @@ export class AgentEventStream {
       this.opts.onError?.(body.code || body.error);
       return this.reconnect();
     }
-    if (body.seq > 0) return this.emit([body]);
+    if (body.seq > 0) return this.saved(body);
     this.opts.onNotice?.(body);
-    if (body.kind === "feed.gap") {
-      this.catchUp().catch(() => es === this.es && this.reconnect());
-    }
+    if (body.kind === "feed.gap") this.resync();
   }
 
   private emit(events: AgentEvent[]): void {

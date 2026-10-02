@@ -21,6 +21,8 @@ const committed: Record<string, AgentEvent[]> = {};
 const purged = new Set<string>();
 let requests: { method: string; url: URL; headers: Headers; body: unknown }[];
 let tokens = 0;
+// While set, ListEvents reads wait for it: a slow page.
+let hold: Promise<void> | null = null;
 
 function ev(agent: string, seq: number, kind = "item.completed"): AgentEvent {
   return {
@@ -36,6 +38,15 @@ function ev(agent: string, seq: number, kind = "item.completed"): AgentEvent {
 
 function commit(agent: string, ...seqs: number[]) {
   (committed[agent] ??= []).push(...seqs.map((s) => ev(agent, s)));
+}
+
+function holdPages(): () => void {
+  let release = () => {};
+  hold = new Promise((r) => (release = r));
+  return () => {
+    hold = null;
+    release();
+  };
 }
 
 const json = (status: number, body: unknown) =>
@@ -58,6 +69,7 @@ async function fakeFetch(input: string, init: RequestInit = {}) {
   }
   const m = url.pathname.match(/\/v1\/agents\/([^/]+)\/events$/);
   if (m) {
+    if (hold) await hold;
     const id = m[1]!;
     if (purged.has(id)) return json(410, { error: id, code: "cursor_expired" });
     const all = committed[id] ?? [];
@@ -97,8 +109,12 @@ class MockEventSource {
     const e = new MessageEvent(name, { data: JSON.stringify(data) });
     this.listeners.get(name)?.forEach((fn) => fn(e));
   }
+  // Saved events and notices all come as "event" frames.
   saved(e: AgentEvent) {
-    this.send(e.kind, e);
+    this.send("event", e);
+  }
+  gap() {
+    this.saved({ ...ev("", 0, "feed.gap"), event_id: "" });
   }
   drop() {
     this.listeners.get("error")?.forEach((fn) => fn(new Event("error")));
@@ -120,6 +136,7 @@ beforeEach(() => {
   purged.clear();
   requests = [];
   tokens = 0;
+  hold = null;
   MockEventSource.instances = [];
   vi.stubGlobal("fetch", vi.fn(fakeFetch));
   vi.stubGlobal("EventSource", MockEventSource);
@@ -192,7 +209,7 @@ describe("AgentEventStream", () => {
     es.saved(ev("a1", 3));
     es.saved(ev("a1", 3)); // a repeat on the wire
     // 4..6 committed but missed live; the gap notice triggers paging.
-    es.send("feed.gap", { ...ev("", 0, "feed.gap"), event_id: "" });
+    es.gap();
     await flush();
     es.saved(ev("a1", 5)); // late live copy of a paged event
     commit("a1", 7);
@@ -250,6 +267,90 @@ describe("AgentEventStream", () => {
     await s.connect();
     expect(lastES().url.searchParams.get("after")).toBe("a1:1");
     s.close();
+  });
+
+  it("delivers any saved kind, live, after a reconnect and after feed.gap", async () => {
+    const commitKind = (seq: number, kind: string) =>
+      committed["a1"]!.push(ev("a1", seq, kind));
+    commit("a1", 1);
+    const { s, onEvents } = open(["a1"]);
+    await s.connect();
+    let es = lastES();
+    // Live: a kind no client list knows, then a known one.
+    commitKind(2, "custom.kind");
+    commit("a1", 3);
+    es.saved(ev("a1", 2, "custom.kind"));
+    es.saved(ev("a1", 3));
+    // Missed while the stream is down: recovered by the reconnect's paging.
+    es.drop();
+    commitKind(4, "custom.kind");
+    commit("a1", 5);
+    await vi.advanceTimersByTimeAsync(1000);
+    es = lastES();
+    expect(es.url.searchParams.get("after")).toBe("a1:5");
+    // Missed live, then a feed.gap: recovered by the gap's paging.
+    commitKind(6, "custom.kind");
+    commit("a1", 7);
+    es.gap();
+    await flush();
+    expect(seqs(s.history, "a1")).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(s.history.events("a1")[1]!.kind).toBe("custom.kind");
+    expect(delivered(onEvents)).toEqual(
+      [1, 2, 3, 4, 5, 6, 7].map((n) => `a1-e${n}`),
+    );
+    s.close();
+  });
+
+  it("treats types: [] as all kinds", async () => {
+    const { s } = open(["a1"], { types: [] });
+    await s.connect();
+    const es = lastES();
+    expect(es.url.searchParams.has("types")).toBe(false);
+    es.saved(ev("a1", 1, "custom.kind"));
+    expect(seqs(s.history, "a1")).toEqual([1]);
+    s.close();
+  });
+
+  it("holds live events while a feed.gap page is in flight, keeping seq order", async () => {
+    commit("a1", 1);
+    const { s, onEvents, onResync } = open(["a1"]);
+    await s.connect();
+    const es = lastES();
+    commit("a1", 2, 3, 4);
+    const release = holdPages();
+    es.gap();
+    es.gap();
+    commit("a1", 5);
+    es.saved(ev("a1", 5)); // newer, arrives before the page
+    es.saved(ev("a1", 4));
+    expect(seqs(s.history, "a1")).toEqual([1]);
+    release();
+    await flush();
+    expect(delivered(onEvents)).toEqual([
+      "a1-e1",
+      "a1-e2",
+      "a1-e3",
+      "a1-e4",
+      "a1-e5",
+    ]);
+    // Connect, then one catch-up per gap, run one after the other.
+    expect(onResync).toHaveBeenCalledTimes(3);
+    s.close();
+  });
+
+  it("emits nothing from a page still in flight at close", async () => {
+    commit("a1", 1, 2);
+    const { s, onEvents, onResync } = open(["a1"]);
+    const release = holdPages();
+    const done = s.connect();
+    await flush();
+    s.close();
+    release();
+    await done;
+    expect(onEvents).not.toHaveBeenCalled();
+    expect(onResync).not.toHaveBeenCalled();
+    expect(MockEventSource.instances).toHaveLength(0);
+    expect(seqs(s.history, "a1")).toEqual([]);
   });
 
   it("stops reconnecting after close", async () => {

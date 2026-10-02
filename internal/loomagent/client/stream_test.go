@@ -96,14 +96,15 @@ func TestClientSubscribeSSEFieldRules(t *testing.T) {
 		if n == 1 {
 			_, _ = io.WriteString(w, ": comment\nretry: 10\n\n"+
 				"event: empty\n\n"+
-				"foo: bar\nid: a1:5\nevent: item.completed\ndata:{\"agent_id\":\"a1\",\n"+
+				"foo: bar\nid: a1:5\nevent: event\ndata:{\"agent_id\":\"a1\",\n"+
 				"data: \"seq\":5,\"kind\":\"item.completed\",\"payload\":{\"text\":\"a: b\"}}\n\n"+
-				"event: item.completed\r\ndata: {\"agent_id\":\"a1\",\"seq\":5}\r\n\r\n"+
-				"event: delta\ndata: {\"agent_id\":\"a1\",\"seq\":0,\"kind\":\"delta\"}\n\n"+
+				"event: event\r\ndata: {\"agent_id\":\"a1\",\"seq\":5}\r\n\r\n"+
+				"event: event\ndata: {\"agent_id\":\"a1\",\"seq\":0,\"kind\":\"delta\"}\n\n"+
 				"event: error\ndata: {\"error\":\"slow\",\"code\":\"subscriber_lagged\"}\n\n")
 			return
 		}
-		_, _ = io.WriteString(w, "event: item.completed\ndata: {\"agent_id\":\"a1\",\"seq\":6}\n\n"+
+		// A saved event of kind error is an event, not the stream's error frame.
+		_, _ = io.WriteString(w, "event: event\ndata: {\"agent_id\":\"a1\",\"seq\":6,\"kind\":\"error\"}\n\n"+
 			"event: error\ndata: {\"error\":\"gone\",\"code\":\"cursor_expired\"}\n\n")
 	}))
 	t.Cleanup(srv.Close)
@@ -120,7 +121,7 @@ func TestClientSubscribeSSEFieldRules(t *testing.T) {
 	if e, err = s.Next(); err != nil || e.Kind != "delta" || e.Seq != 0 {
 		t.Fatalf("second = %+v, %v; want the delta (the repeated seq 5 dropped)", e, err)
 	}
-	if e, err = s.Next(); err != nil || e.Seq != 6 {
+	if e, err = s.Next(); err != nil || e.Seq != 6 || e.Kind != "error" {
 		t.Fatalf("after lag = %+v, %v; want seq 6", e, err)
 	}
 	if _, err = s.Next(); code(err) != loomagent.CodeCursorExpired {

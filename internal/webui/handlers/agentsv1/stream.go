@@ -16,15 +16,20 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// StreamError is the event name of the stream's last frame when it ends on
-// an error, for example subscriber_lagged; its data is an Error.
-const StreamError = "error"
+// The stream's SSE event names. Every saved event and live-only notice is
+// one StreamEvent frame with its kind in the data, so a reader needs no list
+// of kinds. StreamError is the last frame when the stream ends on an error,
+// for example subscriber_lagged; its data is an Error.
+const (
+	StreamEvent = "event"
+	StreamError = "error"
+)
 
 // stream serves Subscribe as server-sent events (design v2 §9.1):
 // GET …/v1/events?agents=a,b&after=a:12&types=k1,k2&deltas=true. An agent
 // with an after cursor replays its committed events after that seq, then
 // gets live ones; an agent without one gets new events only. Each saved
-// event is one frame named by its kind with id "<agent_id>:<seq>"; live-only
+// event is one StreamEvent frame with id "<agent_id>:<seq>"; live-only
 // notices (delta, feed.gap) carry no id. The data is an Event.
 func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
@@ -105,9 +110,9 @@ func pump(ctx context.Context, sw *realtime.Writer, sub *loomagent.Subscription)
 			}
 			data := mustJSON(eventOut(e))
 			if e.Seq == 0 {
-				err = sw.WriteEventNoID(e.Kind, data)
+				err = sw.WriteEventNoID(StreamEvent, data)
 			} else {
-				err = sw.WriteEventID(e.AgentID+":"+strconv.FormatInt(e.Seq, 10), e.Kind, data)
+				err = sw.WriteEventID(e.AgentID+":"+strconv.FormatInt(e.Seq, 10), StreamEvent, data)
 			}
 		case <-beat.C:
 			err = sw.WriteComment("ping")

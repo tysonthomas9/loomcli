@@ -81,7 +81,8 @@ func (e *streamEnv) commit(t *testing.T, agent, kind string) {
 	}
 }
 
-type frame struct{ id, event, data string }
+// frame is one SSE frame; kind is the data's kind, for a StreamEvent frame.
+type frame struct{ id, event, data, kind string }
 
 type sseConn struct {
 	resp *http.Response
@@ -122,6 +123,10 @@ func (c *sseConn) next(t *testing.T) frame {
 		line = strings.TrimSuffix(line, "\n")
 		switch {
 		case line == "" && f.event != "":
+			if f.event != StreamEvent {
+				t.Fatalf("frame named %q; want %q", f.event, StreamEvent)
+			}
+			f.kind = f.decode(t).Kind
 			return f
 		case strings.HasPrefix(line, "id: "):
 			f.id = line[4:]
@@ -171,7 +176,7 @@ func TestAgentSSETokenAuth(t *testing.T) {
 		t.Fatalf("fresh token = %d", status)
 	}
 	e.commit(t, "a1", "item.completed")
-	if f := c.next(t); f.event != "item.completed" || f.id != "a1:1" {
+	if f := c.next(t); f.kind != "item.completed" || f.id != "a1:1" {
 		t.Fatalf("frame = %+v", f)
 	}
 	if _, status, _ := e.open(t, "agents=a1&token="+tok); status != http.StatusUnauthorized {
@@ -206,14 +211,14 @@ func TestAgentSSECursorReplayExactlyOnce(t *testing.T) {
 		var last int64
 		for last < until {
 			f := c.next(t)
-			if f.event == loomagent.KindFeedGap {
+			if f.kind == loomagent.KindFeedGap {
 				if f.id != "" {
 					t.Fatalf("feed.gap has id %q", f.id)
 				}
 				continue
 			}
 			ev := f.decode(t)
-			if ev.AgentID != "a1" || f.id != fmt.Sprintf("a1:%d", ev.Seq) || ev.Kind != f.event {
+			if ev.AgentID != "a1" || f.id != fmt.Sprintf("a1:%d", ev.Seq) || ev.Kind != f.kind {
 				t.Fatalf("frame %+v", f)
 			}
 			got[ev.Seq]++
@@ -243,13 +248,13 @@ func TestAgentSSECursorReplayExactlyOnce(t *testing.T) {
 	e.ev.Notify(loomstore.Event{AgentID: "b1", Kind: loomagent.KindDelta, Payload: json.RawMessage(`{"text":"y"}`)})
 	e.commit(t, "a1", "item.completed")
 	e.commit(t, "a1", "agent.updated")
-	if f := c.next(t); f.event != "agent.updated" {
+	if f := c.next(t); f.kind != "agent.updated" {
 		t.Fatalf("types filter: %+v", f)
 	}
-	if f := d.next(t); f.event != loomagent.KindDelta || f.id != "" || f.decode(t).AgentID != "a1" {
+	if f := d.next(t); f.kind != loomagent.KindDelta || f.id != "" || f.decode(t).AgentID != "a1" {
 		t.Fatalf("delta: %+v", f)
 	}
-	if f := d.next(t); f.event != "item.completed" {
+	if f := d.next(t); f.kind != "item.completed" {
 		t.Fatalf("after delta: %+v", f)
 	}
 }
