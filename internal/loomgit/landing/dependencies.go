@@ -48,6 +48,13 @@ func CrossRepoDependencies(ctx context.Context, store DependencyStore, workspace
 		if err != nil {
 			return stackpublish.DependencyStatus{}, false, err
 		}
+		if len(changes) == 0 {
+			// Its repository is unknown until it records a change, so it may be
+			// another repo: fail closed.
+			found = true
+			waiting = append(waiting, "task "+predecessor+" (no change recorded yet)")
+			continue
+		}
 		repos := make([]string, 0, len(changes))
 		for name := range changes {
 			if name != repo {
@@ -105,9 +112,9 @@ func predecessorWait(ctx context.Context, store DependencyStore, workspace, repo
 
 // DependencyForge posts loom/dependencies and reads whether a repo requires it.
 type DependencyForge interface {
-	PostDependencyStatus(context.Context, string, string, string, stackpublish.DependencyStatus) error
+	PostDependencyStatus(context.Context, string, string, string, stackpublish.DependencyStatus) (int64, error)
 	MergeQueueHead(context.Context, string, string, int) (string, error)
-	DependencyEnforcement(context.Context, string, string, string) (string, error)
+	DependencyEnforcement(context.Context, string, string, string, int64) (string, error)
 }
 
 type dependencyJournal interface {
@@ -117,6 +124,8 @@ type dependencyJournal interface {
 	DependencyPosted(context.Context, string, string, string, string, string) (bool, error)
 	RecordDependencyPost(context.Context, string, string, string, string, string) error
 	RecordDependencyEnforcement(context.Context, journal.DependencyEnforcement) error
+	RecordDependencyApp(context.Context, string, int64) error
+	DependencyApp(context.Context, string) (int64, error)
 }
 
 // reconcileDependencies keeps loom/dependencies current on every open PR whose
@@ -208,9 +217,13 @@ func postDependencyStatus(ctx context.Context, store Store, deps dependencyJourn
 			failures = append(failures, err)
 			continue
 		}
-		if err := forge.PostDependencyStatus(ctx, owner, repo, sha, status); err != nil {
+		app, err := forge.PostDependencyStatus(ctx, owner, repo, sha, status)
+		if err != nil {
 			failures = append(failures, fmt.Errorf("post loom/dependencies on %s@%s: %w", publication.Slug, sha, err))
 			continue
+		}
+		if app > 0 {
+			failures = append(failures, deps.RecordDependencyApp(ctx, publication.Slug, app))
 		}
 		failures = append(failures, deps.RecordDependencyPost(ctx, publication.Workspace, publication.Change, sha, status.State, status.Description))
 	}
@@ -219,9 +232,14 @@ func postDependencyStatus(ctx context.Context, store Store, deps dependencyJourn
 
 func recordEnforcement(ctx context.Context, deps dependencyJournal, forge DependencyForge, slug, branch string) error {
 	owner, repo, _ := strings.Cut(slug, "/")
-	state, err := forge.DependencyEnforcement(ctx, owner, repo, branch)
+	app, err := deps.DependencyApp(ctx, slug)
+	if err != nil {
+		return err
+	}
+	state, err := forge.DependencyEnforcement(ctx, owner, repo, branch, app)
 	reason := map[string]string{
-		"enforced":     "branch protection requires loom/dependencies from an app",
+		"enforced":     "branch protection requires loom/dependencies from the app Loom posts as",
+		"wrong_app":    "loom/dependencies is pinned to an app Loom does not post as: Loom's result cannot satisfy it",
 		"not_pinned":   "loom/dependencies is required but not pinned to the Loom app: any collaborator could post it",
 		"not_enforced": "not enforced: branch protection does not require loom/dependencies, so only Loom's own merges wait",
 	}[state]

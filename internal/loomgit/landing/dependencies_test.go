@@ -26,6 +26,8 @@ type twoRepoForge struct {
 	enforcement map[string]string
 	posts       []dependencyPost
 	failPosts   int
+	app         int64
+	askedApp    int64
 }
 
 func (forge *twoRepoForge) PullByNumber(_ context.Context, owner, repo string, number int) (stackpublish.PR, error) {
@@ -36,20 +38,21 @@ func (forge *twoRepoForge) PullsForCommit(_ context.Context, _, _, sha string) (
 	return forge.associated[sha], nil
 }
 
-func (forge *twoRepoForge) PostDependencyStatus(_ context.Context, owner, repo, sha string, status stackpublish.DependencyStatus) error {
+func (forge *twoRepoForge) PostDependencyStatus(_ context.Context, owner, repo, sha string, status stackpublish.DependencyStatus) (int64, error) {
 	if forge.failPosts > 0 {
 		forge.failPosts--
-		return errors.New("github POST statuses: 403: API rate limit exceeded")
+		return 0, errors.New("github POST statuses: 403: API rate limit exceeded")
 	}
 	forge.posts = append(forge.posts, dependencyPost{slug: owner + "/" + repo, sha: sha, status: status})
-	return nil
+	return forge.app, nil
 }
 
 func (forge *twoRepoForge) MergeQueueHead(_ context.Context, owner, repo string, number int) (string, error) {
 	return forge.queued[fmt.Sprintf("%s/%s#%d", owner, repo, number)], nil
 }
 
-func (forge *twoRepoForge) DependencyEnforcement(_ context.Context, owner, repo, _ string) (string, error) {
+func (forge *twoRepoForge) DependencyEnforcement(_ context.Context, owner, repo, _ string, app int64) (string, error) {
+	forge.askedApp = app
 	if state := forge.enforcement[owner+"/"+repo]; state != "" {
 		return state, nil
 	}
@@ -315,5 +318,47 @@ func TestDependencyRemovedReleasesPendingPR(t *testing.T) {
 	}
 	if status := fixture.forge.last(t, fixture.head2); status.State != "success" {
 		t.Fatalf("PR2 after its dependency was removed = %+v", status)
+	}
+}
+
+func TestDependencyUnmappedPredecessorFailsClosed(t *testing.T) {
+	fixture := newCrossRepoFixture(t)
+	if _, err := fixture.store.DriverChange(context.Background(), "W", "T3", "repo2", "C3"); err != nil {
+		t.Fatal(err)
+	}
+	fixture.predecessors = func(_ context.Context, _, task string) ([]string, error) {
+		if task == "T2" {
+			return []string{"T3", "T9"}, nil
+		}
+		return nil, nil
+	}
+	if err := fixture.reconcile(t); err != nil {
+		t.Fatal(err)
+	}
+	status := fixture.forge.last(t, fixture.head2)
+	if status.State != "pending" || !strings.Contains(status.Description, "task T9 (no change recorded yet)") || strings.Contains(status.Description, "C3") {
+		t.Fatalf("PR2 with an unmapped predecessor = %+v", status)
+	}
+	fixture.predecessors = func(_ context.Context, _, task string) ([]string, error) {
+		if task == "T2" {
+			return []string{"T3"}, nil
+		}
+		return nil, nil
+	}
+	_, found, err := CrossRepoDependencies(context.Background(), fixture.store, "W", "C2", fixture.predecessors)
+	if err != nil || found {
+		t.Fatalf("same-repo predecessor counted as cross-repo: %v, %v", found, err)
+	}
+}
+
+func TestDependencyEnforcementUsesAppLoomPostsAs(t *testing.T) {
+	fixture := newCrossRepoFixture(t)
+	fixture.forge.app = 4242
+	if err := fixture.reconcile(t); err != nil {
+		t.Fatal(err)
+	}
+	app, err := fixture.store.DependencyApp(context.Background(), "owner/repo2")
+	if err != nil || app != 4242 || fixture.forge.askedApp != 4242 {
+		t.Fatalf("recorded app = %d, %v; enforcement asked for %d", app, err, fixture.forge.askedApp)
 	}
 }

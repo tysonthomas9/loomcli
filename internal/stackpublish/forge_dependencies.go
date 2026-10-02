@@ -17,10 +17,11 @@ type DependencyStatus struct {
 	State, Description string
 }
 
-// PostDependencyStatus posts loom/dependencies on a commit. It posts a check run
-// when the credential is a GitHub App installation, and a commit status
-// otherwise (GitHub refuses check runs from any other credential).
-func (g *GitHubForge) PostDependencyStatus(ctx context.Context, owner, repo, sha string, status DependencyStatus) error {
+// PostDependencyStatus posts loom/dependencies on a commit and returns the ID of
+// the GitHub App it posted as. It posts a check run when the credential is an
+// App installation, and a commit status otherwise (app ID 0): GitHub refuses
+// check runs from any other credential.
+func (g *GitHubForge) PostDependencyStatus(ctx context.Context, owner, repo, sha string, status DependencyStatus) (int64, error) {
 	run := map[string]any{"name": DependencyCheckName, "head_sha": sha, "status": "in_progress",
 		"output": map[string]string{"title": status.Description, "summary": status.Description}}
 	if status.State == "success" {
@@ -29,13 +30,21 @@ func (g *GitHubForge) PostDependencyStatus(ctx context.Context, owner, repo, sha
 	path := fmt.Sprintf("/repos/%s/%s/check-runs", owner, repo)
 	code, data, header, err := g.do(ctx, http.MethodPost, path, run)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if code == http.StatusCreated {
-		return nil
+		var created struct {
+			App struct {
+				ID int64 `json:"id"`
+			} `json:"app"`
+		}
+		if err := json.Unmarshal(data, &created); err != nil {
+			return 0, fmt.Errorf("github check run decode: %w", err)
+		}
+		return created.App.ID, nil
 	}
 	if code != http.StatusForbidden && code != http.StatusNotFound || rateLimited(header, data) {
-		return g.apiErr("POST", path, code, data)
+		return 0, g.apiErr("POST", path, code, data)
 	}
 	description := status.Description
 	if len(description) > 140 {
@@ -45,12 +54,12 @@ func (g *GitHubForge) PostDependencyStatus(ctx context.Context, owner, repo, sha
 	code, data, _, err = g.do(ctx, http.MethodPost, path, map[string]string{
 		"state": status.State, "context": DependencyCheckName, "description": description})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if code != http.StatusCreated {
-		return g.apiErr("POST", path, code, data)
+		return 0, g.apiErr("POST", path, code, data)
 	}
-	return nil
+	return 0, nil
 }
 
 func rateLimited(header http.Header, data []byte) bool {
@@ -100,19 +109,28 @@ func (g *GitHubForge) MergeQueueHead(ctx context.Context, owner, repo string, nu
 }
 
 // DependencyEnforcement reports whether branch protection or a ruleset on the
-// branch requires loom/dependencies: enforced (required and pinned to an app),
-// not_pinned (required from any source) or not_enforced. Loom only reads it.
-func (g *GitHubForge) DependencyEnforcement(ctx context.Context, owner, repo, branch string) (string, error) {
-	classicRequired, classicPinned, err := g.classicDependencyRequirement(ctx, owner, repo, branch)
+// branch requires loom/dependencies from loomApp, the app Loom posts as (0 when
+// Loom posts commit statuses): enforced (pinned to loomApp), wrong_app (pinned
+// to another app, which Loom's result cannot satisfy), not_pinned (required
+// from any source) or not_enforced. Loom only reads it.
+func (g *GitHubForge) DependencyEnforcement(ctx context.Context, owner, repo, branch string, loomApp int64) (string, error) {
+	classicRequired, classicApps, err := g.classicDependencyRequirement(ctx, owner, repo, branch)
 	if err != nil {
 		return "", err
 	}
-	rulesRequired, rulesPinned, err := g.rulesetDependencyRequirement(ctx, owner, repo, branch)
+	rulesRequired, rulesApps, err := g.rulesetDependencyRequirement(ctx, owner, repo, branch)
 	if err != nil {
 		return "", err
+	}
+	pinnedToLoom := false
+	for _, app := range append(classicApps, rulesApps...) {
+		if loomApp <= 0 || app != loomApp {
+			return "wrong_app", nil
+		}
+		pinnedToLoom = true
 	}
 	switch {
-	case classicPinned || rulesPinned:
+	case pinnedToLoom:
 		return "enforced", nil
 	case classicRequired || rulesRequired:
 		return "not_pinned", nil
@@ -135,7 +153,9 @@ func (g *GitHubForge) getJSON(ctx context.Context, path string, out any) error {
 	return nil
 }
 
-func (g *GitHubForge) classicDependencyRequirement(ctx context.Context, owner, repo, branch string) (bool, bool, error) {
+// classicDependencyRequirement returns whether classic protection requires the
+// check and the app IDs it is pinned to.
+func (g *GitHubForge) classicDependencyRequirement(ctx context.Context, owner, repo, branch string) (bool, []int64, error) {
 	var classic struct {
 		Protection struct {
 			RequiredStatusChecks struct {
@@ -148,21 +168,24 @@ func (g *GitHubForge) classicDependencyRequirement(ctx context.Context, owner, r
 		} `json:"protection"`
 	}
 	if err := g.getJSON(ctx, fmt.Sprintf("/repos/%s/%s/branches/%s", owner, repo, branch), &classic); err != nil {
-		return false, false, err
+		return false, nil, err
 	}
-	required, pinned := false, false
+	required, apps := false, []int64(nil)
 	for _, context := range classic.Protection.RequiredStatusChecks.Contexts {
 		required = required || context == DependencyCheckName
 	}
 	for _, check := range classic.Protection.RequiredStatusChecks.Checks {
 		if check.Context == DependencyCheckName {
-			required, pinned = true, pinned || check.AppID != nil && *check.AppID > 0
+			required = true
+			if check.AppID != nil && *check.AppID > 0 {
+				apps = append(apps, *check.AppID)
+			}
 		}
 	}
-	return required, pinned, nil
+	return required, apps, nil
 }
 
-func (g *GitHubForge) rulesetDependencyRequirement(ctx context.Context, owner, repo, branch string) (bool, bool, error) {
+func (g *GitHubForge) rulesetDependencyRequirement(ctx context.Context, owner, repo, branch string) (bool, []int64, error) {
 	var rules []struct {
 		Type       string `json:"type"`
 		Parameters struct {
@@ -173,15 +196,18 @@ func (g *GitHubForge) rulesetDependencyRequirement(ctx context.Context, owner, r
 		} `json:"parameters"`
 	}
 	if err := g.getJSON(ctx, fmt.Sprintf("/repos/%s/%s/rules/branches/%s", owner, repo, branch), &rules); err != nil {
-		return false, false, err
+		return false, nil, err
 	}
-	required, pinned := false, false
+	required, apps := false, []int64(nil)
 	for _, rule := range rules {
 		for _, check := range rule.Parameters.Checks {
 			if rule.Type == "required_status_checks" && check.Context == DependencyCheckName {
-				required, pinned = true, pinned || check.IntegrationID != nil && *check.IntegrationID > 0
+				required = true
+				if check.IntegrationID != nil && *check.IntegrationID > 0 {
+					apps = append(apps, *check.IntegrationID)
+				}
 			}
 		}
 	}
-	return required, pinned, nil
+	return required, apps, nil
 }

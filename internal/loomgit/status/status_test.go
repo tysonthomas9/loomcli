@@ -306,12 +306,17 @@ func TestScanShowsUnenforcedCrossRepoDelivery(t *testing.T) {
 	for _, row := range []journal.DependencyEnforcement{
 		{Repo: "owner/repo2", Branch: "main", State: "not_enforced", Reason: "not enforced: branch protection does not require loom/dependencies"},
 		{Repo: "owner/repo3", Branch: "main", State: "not_pinned", Reason: "loom/dependencies is required but not pinned to the Loom app: any collaborator could post it"},
+		{Repo: "owner/repo4", Branch: "main", State: "wrong_app", Reason: "loom/dependencies is pinned to an app Loom does not post as"},
 	} {
 		if err := store.RecordDependencyEnforcement(ctx, row); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := store.RecordDependencyCheck(ctx, journal.DependencyCheck{Workspace: "W", Change: "C2", Repo: "owner/repo2",
+		State: "pending", Reason: "Waiting for owner/repo1#1 to land"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordDependencyCheck(ctx, journal.DependencyCheck{Workspace: "W", Change: "C4", Repo: "owner/repo4",
 		State: "pending", Reason: "Waiting for owner/repo1#1 to land"}); err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +337,12 @@ func TestScanShowsUnenforcedCrossRepoDelivery(t *testing.T) {
 	}
 	if repo3.State != "not_pinned" || !strings.Contains(repo3.Reason, "any collaborator could post") {
 		t.Fatalf("repo3 enforcement = %+v", repo3)
+	}
+	if repo4 := found["dependency_enforcement:owner/repo4"]; repo4.State != "wrong_app" || repo4.NextAction == "" {
+		t.Fatalf("repo4 enforcement = %+v", repo4)
+	}
+	if change4 := found["dependency:owner/repo4"]; change4.Enforcement != "unenforced" {
+		t.Fatalf("delivery on a repo pinned to another app not flagged: %+v", change4)
 	}
 	if change.ID != "C2" || change.State != "pending" || change.Enforcement != "unenforced" ||
 		!strings.Contains(change.Reason, "owner/repo1#1") || !strings.Contains(change.Reason, "not enforced on owner/repo2") {

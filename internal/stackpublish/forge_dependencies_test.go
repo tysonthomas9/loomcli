@@ -31,6 +31,9 @@ func (server *dependencyServer) handler(t *testing.T) http.Handler {
 			}
 			if server.checkRunCode == http.StatusCreated {
 				server.checkRuns = append(server.checkRuns, body)
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":1,"app":{"id":42}}`))
+				return
 			}
 			w.WriteHeader(server.checkRunCode)
 			_, _ = w.Write([]byte(`{"message":"Resource not accessible by personal access token"}`))
@@ -64,10 +67,10 @@ func TestPostDependencyStatusUsesAppCheckRun(t *testing.T) {
 	server := &dependencyServer{checkRunCode: http.StatusCreated}
 	forge := newDependencyForge(t, server)
 	ctx := context.Background()
-	if err := forge.PostDependencyStatus(ctx, "owner", "repo", "abc123", DependencyStatus{State: "pending", Description: "Waiting for owner/api#7 to land"}); err != nil {
-		t.Fatal(err)
+	if app, err := forge.PostDependencyStatus(ctx, "owner", "repo", "abc123", DependencyStatus{State: "pending", Description: "Waiting for owner/api#7 to land"}); err != nil || app != 42 {
+		t.Fatalf("check run app = %d, %v", app, err)
 	}
-	if err := forge.PostDependencyStatus(ctx, "owner", "repo", "abc123", DependencyStatus{State: "success", Description: "All cross-repo predecessors landed"}); err != nil {
+	if _, err := forge.PostDependencyStatus(ctx, "owner", "repo", "abc123", DependencyStatus{State: "success", Description: "All cross-repo predecessors landed"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(server.checkRuns) != 2 || len(server.statuses) != 0 {
@@ -86,8 +89,8 @@ func TestPostDependencyStatusFallsBackToCommitStatusWithoutApp(t *testing.T) {
 	server := &dependencyServer{checkRunCode: http.StatusForbidden}
 	forge := newDependencyForge(t, server)
 	long := "Waiting for " + strings.Repeat("owner/api#7 to land; ", 10)
-	if err := forge.PostDependencyStatus(context.Background(), "owner", "repo", "abc123", DependencyStatus{State: "pending", Description: long}); err != nil {
-		t.Fatal(err)
+	if app, err := forge.PostDependencyStatus(context.Background(), "owner", "repo", "abc123", DependencyStatus{State: "pending", Description: long}); err != nil || app != 0 {
+		t.Fatalf("commit status app = %d, %v", app, err)
 	}
 	if len(server.statuses) != 1 || server.statuses[0]["context"] != DependencyCheckName || server.statuses[0]["state"] != "pending" ||
 		len(server.statuses[0]["description"]) > 140 {
@@ -98,7 +101,7 @@ func TestPostDependencyStatusFallsBackToCommitStatusWithoutApp(t *testing.T) {
 func TestPostDependencyStatusRateLimitIsAnError(t *testing.T) {
 	server := &dependencyServer{checkRunCode: http.StatusForbidden, rateLimited: true}
 	forge := newDependencyForge(t, server)
-	err := forge.PostDependencyStatus(context.Background(), "owner", "repo", "abc123", DependencyStatus{State: "success", Description: "ok"})
+	_, err := forge.PostDependencyStatus(context.Background(), "owner", "repo", "abc123", DependencyStatus{State: "success", Description: "ok"})
 	if err == nil || len(server.statuses) != 0 {
 		t.Fatalf("rate-limited post = %v, statuses = %+v", err, server.statuses)
 	}
@@ -120,15 +123,26 @@ func TestDependencyEnforcement(t *testing.T) {
 		{"other checks only", `{"protection":{"required_status_checks":{"contexts":["ci"],"checks":[{"context":"ci","app_id":15368}]}}}`, `[]`, "not_enforced"},
 		{"any source", `{"protection":{"required_status_checks":{"contexts":["loom/dependencies"],"checks":[{"context":"loom/dependencies","app_id":null}]}}}`, `[]`, "not_pinned"},
 		{"classic pinned", `{"protection":{"required_status_checks":{"contexts":["loom/dependencies"],"checks":[{"context":"loom/dependencies","app_id":42}]}}}`, `[]`, "enforced"},
+		{"classic other app", `{"protection":{"required_status_checks":{"contexts":["loom/dependencies"],"checks":[{"context":"loom/dependencies","app_id":7}]}}}`, `[]`, "wrong_app"},
 		{"ruleset any source", `{}`, `[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"loom/dependencies"}]}}]`, "not_pinned"},
 		{"ruleset pinned", `{}`, `[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"loom/dependencies","integration_id":42}]}}]`, "enforced"},
+		{"ruleset other app", `{}`, `[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"loom/dependencies","integration_id":7}]}}]`, "wrong_app"},
+		{"classic Loom, ruleset other app", `{"protection":{"required_status_checks":{"checks":[{"context":"loom/dependencies","app_id":42}]}}}`, `[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"loom/dependencies","integration_id":7}]}}]`, "wrong_app"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			forge := newDependencyForge(t, &dependencyServer{branch: test.branch, rules: test.rules})
-			state, err := forge.DependencyEnforcement(context.Background(), "owner", "repo", "main")
+			state, err := forge.DependencyEnforcement(context.Background(), "owner", "repo", "main", 42)
 			if err != nil || state != test.want {
 				t.Fatalf("enforcement = %q, %v; want %q", state, err, test.want)
 			}
 		})
+	}
+}
+
+func TestDependencyEnforcementPinnedWithoutLoomApp(t *testing.T) {
+	forge := newDependencyForge(t, &dependencyServer{branch: `{"protection":{"required_status_checks":{"checks":[{"context":"loom/dependencies","app_id":42}]}}}`, rules: `[]`})
+	state, err := forge.DependencyEnforcement(context.Background(), "owner", "repo", "main", 0)
+	if err != nil || state != "wrong_app" {
+		t.Fatalf("pinned check with Loom posting commit statuses = %q, %v", state, err)
 	}
 }

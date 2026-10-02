@@ -241,6 +241,9 @@ func appendDependencyChecks(ctx context.Context, store *journal.SQLite, out *Sna
 		case "not_enforced", "unknown":
 			item.NextAction = "ask a repo admin to require loom/dependencies from the Loom app in branch protection"
 			unenforced[row.Repo] = "not_enforced"
+		case "wrong_app":
+			item.NextAction = "ask a repo admin to pin the required loom/dependencies check to the app Loom posts as"
+			unenforced[row.Repo] = "not_pinned_to_loom"
 		case "not_pinned":
 			item.NextAction = "ask a repo admin to pin the required loom/dependencies check to the Loom app"
 			unenforced[row.Repo] = "not_pinned"
