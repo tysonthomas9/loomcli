@@ -18,9 +18,11 @@ internal/localworkspace/localworkspace.go:2
 internal/skillmat/materialize.go:1
 internal/stackpublish/gitutil.go:1'
 
-actual=$(grep -rEc --include='*.go' --exclude='*_test.go' "${skip[@]}" \
-	'exec\.Command(Context)?\(([A-Za-z_][A-Za-z0-9_.]*(\(\))?, )?"git"' . |
-	grep -v ':0$' | sed 's#^\./##' | grep -v '^internal/loomgit/internal/gitexec/' | sort || true)
+# The first string literal of the call is "git", whatever the context
+# expression and even when the call spans lines.
+actual=$(grep -rlE --include='*.go' --exclude='*_test.go' "${skip[@]}" 'exec\.Command' . |
+	xargs perl -0777 -ne '$c = () = /exec\.Command(?:Context)?\([^"]{0,300}"git"/g; print "$ARGV:$c\n" if $c' |
+	sed 's#^\./##' | grep -v '^internal/loomgit/internal/gitexec/' | sort || true)
 allowed=$(printf '%s\n' "$allowed" | sort)
 
 if [ "$actual" != "$allowed" ]; then
