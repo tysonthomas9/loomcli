@@ -223,12 +223,15 @@ func serviceConfig(st *loomstore.Store, ws string, wt *agentworktree.Worktrees, 
 }
 
 // resolveRepo accepts a repo only as the absolute path of a git clone (a
-// directory holding .git), so an unknown repo is a 400 at Create, not a git
-// failure.
-func resolveRepo(_ context.Context, _ loomagent.Target, repo string) (string, error) {
+// directory holding a .git that git can open, so not a dangling worktree
+// link), so an unknown repo is a 400 at Create, not a git failure.
+func resolveRepo(ctx context.Context, _ loomagent.Target, repo string) (string, error) {
 	info, err := os.Stat(repo)
 	if err == nil && info.IsDir() {
 		_, err = os.Stat(filepath.Join(repo, ".git"))
+	}
+	if err == nil && info.IsDir() {
+		_, err = gitrunner.Exec{}.Run(ctx, repo, "rev-parse", "--git-dir")
 	}
 	if err != nil || !info.IsDir() || !filepath.IsAbs(repo) {
 		return "", &loomagent.Error{Code: loomagent.CodePresetInvalid,
