@@ -150,12 +150,17 @@ func (c *Client) bridge(ctx context.Context, dir string, env map[string]string) 
 	}
 }
 
-// catalogSettle is how long after the bridge reports connected OpenCode's
-// session tool catalog takes to list its tools. Connecting publishes
-// ToolsChanged, and the location's tool registry reloads from it after a
-// 100 ms debounce (b30c4d0 core/src/tool/mcp.ts:132-141); a turn selects its
-// tools from that registry (session/context.ts:127-133), which no API
-// exposes. Five debounces cover the reload.
+// catalogSettle is the bounded wait, after /api/mcp reports the loom server
+// connected for a location, before that location's sessions list its tools.
+// It covers OpenCode's 100 ms ToolsChanged debounce, and is interim until
+// Loom's pinned OpenCode build makes a turn wait for its MCP servers. In
+// OpenCode b30c4d0 (2.0.19): a location starts its MCP servers in the
+// background (core/src/mcp/index.ts:533-546); its first tool discovery
+// reads only servers already connected, so it never has a stdio server, and
+// later tools reach the registry through ToolsChanged and a 100 ms debounced
+// reload (core/src/tool/mcp.ts:37-141); a turn waits only for that first
+// discovery before reading the registry (core/src/session/context.ts:127),
+// and no API reads the registry.
 var catalogSettle = 500 * time.Millisecond
 
 // settle waits out catalogSettle, so a first turn sent now lists the tools.

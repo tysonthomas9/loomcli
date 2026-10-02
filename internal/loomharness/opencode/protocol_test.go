@@ -50,6 +50,7 @@ type store struct {
 	agentDir []string            // location[directory] of each agent lookup
 	loading  bool                // the location lists no agents yet
 	asks     map[string][]string // pending per_/frm_ ask ids, per session
+	mcp      string              // the loom MCP server's /api/mcp status; "" lists none
 }
 
 func newStore() *store {
@@ -92,6 +93,15 @@ func fakeServer(t *testing.T, st *store) *Client {
 			return
 		}
 		reply(w, 200, map[string]any{"data": body})
+	})
+	mux.HandleFunc("GET /api/mcp", func(w http.ResponseWriter, _ *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		data := []map[string]any{}
+		if st.mcp != "" {
+			data = append(data, map[string]any{"name": "loom", "status": map[string]string{"status": st.mcp}})
+		}
+		reply(w, 200, map[string]any{"data": data})
 	})
 	mux.HandleFunc("GET /api/agent", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()

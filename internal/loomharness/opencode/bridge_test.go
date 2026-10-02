@@ -2,10 +2,12 @@ package opencode
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agentmcp"
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -43,5 +45,37 @@ func TestBridgeSettingsPrivateAndUnloaded(t *testing.T) {
 	}
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Fatalf("settings after Unload: %v; want removed", err)
+	}
+}
+
+// TestOpenWaitsForBridgeTools: a session with bridge settings opens only
+// once OpenCode reports the loom server connected for its directory, and
+// then only after catalogSettle; one whose server never connects fails
+// closed with no session made, so it is never prompted without its tools.
+func TestOpenWaitsForBridgeTools(t *testing.T) {
+	defer func(w, s time.Duration) { agentWait, catalogSettle = w, s }(agentWait, catalogSettle)
+	agentWait, catalogSettle = 300*time.Millisecond, 200*time.Millisecond
+	dir := t.TempDir()
+	st := newStore()
+	c := fakeServer(t, st)
+	c.bridgeFile = func(string) (string, error) { return filepath.Join(dir, "settings.json"), nil }
+	spec := loomharness.OpenSpec{Key: "lead", Dir: dir, Launch: loomharness.Launch{Env: map[string]string{agentmcp.EnvToken: "tok"}}}
+	ctx := context.Background()
+
+	st.mcp = "failed"
+	if _, err := c.Open(ctx, spec); !errors.Is(err, loomharness.ErrUnavailable) {
+		t.Fatalf("Open with the bridge failed = %v; want harness unavailable", err)
+	}
+	if len(st.sessions) != 0 {
+		t.Fatalf("sessions after a failed bridge = %d; want none", len(st.sessions))
+	}
+
+	st.mcp = "connected"
+	start := time.Now()
+	if _, err := c.Open(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < catalogSettle {
+		t.Fatalf("Open returned %s after connected; want at least catalogSettle %s", d, catalogSettle)
 	}
 }
