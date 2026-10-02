@@ -162,6 +162,30 @@ tests:
           exit 1
         intent: "An operator reads back the shell tab metadata and confirms it has no agent launch spec"
 
+  # covers: 2.0y; the minified xterm 6.0.0 DECRQM handler threw and froze the pane
+  # on the first mode query, which OpenCode 2's TUI sends at start.
+  - name: shell tab keeps rendering after DECRQM mode queries
+    intent: An operator runs a program that asks the terminal which modes it supports, and the pane keeps showing later output
+    steps:
+      - open: /ws/E2E-WS-LEAD/terminal
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid^="terminal-tab-label-"]'))
+              .map((n) => (n.textContent || '').trim()).includes('lead-shell-1')
+        intent: "Wait until the shell tab from the previous case is listed"
+      - click: { text: "lead-shell-1", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=tabpanel][aria-hidden="false"] .xterm')
+        intent: "Wait until the shell pane renders a terminal grid"
+      - fill: { label: "Terminal input", value: "printf '\\033[?2026$p\\033[4$p'; echo DECRQM-$((6*7))" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[role=tabpanel][aria-hidden="false"] .xterm-rows')?.textContent || '').includes('DECRQM-42')
+        budget: 40000
+        intent: "Wait until the pane shows output printed after the mode queries"
+
   # covers: LED-D1; CreateAgentModal lead template; GET /api/workspaces/:ws/agents; role list; no lead worktree
   - name: lead template creates an interactive lead agent and role
     intent: An operator creates a Lead agent through CreateAgentModal and verifies the stored agent, role, and absence of an agent worktree
