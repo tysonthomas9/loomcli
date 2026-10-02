@@ -90,11 +90,14 @@ func TestMergeRequestHTTPCreatesListsAndConfirms(t *testing.T) {
 	if response := serveMergeRequest(http.MethodPost, base+"/R1/confirm", `{"actor":{"kind":"lead","id":"L"}}`); response.Code != http.StatusConflict {
 		t.Fatalf("agent confirm %d %s", response.Code, response.Body.String())
 	}
-	if response := serveMergeRequest(http.MethodPost, base+"/R1/confirm", `{"actor":{"kind":"human","id":"local-user"}}`); response.Code != http.StatusOK ||
+	oldHuman := localHumanID
+	localHumanID = func() string { return "Tyson" }
+	t.Cleanup(func() { localHumanID = oldHuman })
+	if response := serveMergeRequest(http.MethodPost, base+"/R1/confirm", `{"actor":{"kind":"human"}}`); response.Code != http.StatusOK ||
 		!strings.Contains(response.Body.String(), `"phase":"ready"`) {
 		t.Fatalf("human confirm %d %s", response.Code, response.Body.String())
 	}
-	want := "request W L feature C lead:L|list W L|confirm W L R1 lead:L|confirm W L R1 human:local-user"
+	want := "request W L feature C lead:L|list W L|confirm W L R1 lead:L|confirm W L R1 human:Tyson"
 	if strings.Join(calls, "|") != want {
 		t.Fatalf("calls=%v", calls)
 	}

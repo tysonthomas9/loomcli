@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os/user"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
@@ -41,7 +42,7 @@ func handleMergeUpTo(w http.ResponseWriter, r *http.Request) {
 			handler.RespondError(w, http.StatusBadRequest, "stack_id, target and confirmed heads are required")
 			return
 		}
-		result, err = mergeRequest(r.Context(), workspace, lead, request.StackID, request.Target, request.Heads, request.Actor)
+		result, err = mergeRequest(r.Context(), workspace, lead, request.StackID, request.Target, request.Heads, reportedHuman(request.Actor))
 	}
 	writeMergeResult(w, result, err)
 }
@@ -74,7 +75,7 @@ func handleMergeRequests(w http.ResponseWriter, r *http.Request) {
 		handler.RespondError(w, http.StatusBadRequest, "stack_id, target and actor are required")
 		return
 	}
-	result, err := requestMerge(r.Context(), workspace, lead, request.StackID, request.Target, request.Actor)
+	result, err := requestMerge(r.Context(), workspace, lead, request.StackID, request.Target, reportedHuman(request.Actor))
 	writeMergeResult(w, result, err)
 }
 
@@ -87,6 +88,22 @@ func handleConfirmMergeRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := confirmMergeRequest(r.Context(), middleware.WorkspaceFromContext(r.Context()), r.PathValue("name"),
-		r.PathValue("id"), request.Actor)
+		r.PathValue("id"), reportedHuman(request.Actor))
 	writeMergeResult(w, result, err)
+}
+
+// reportedHuman names a browser human with no ID as the OS user running the
+// local server: in local mode the browser user is that user (advisory, D28).
+func reportedHuman(actor publish.MergeActor) publish.MergeActor {
+	if actor.Kind == "human" && actor.ID == "" {
+		actor.ID = localHumanID()
+	}
+	return actor
+}
+
+var localHumanID = func() string {
+	if current, err := user.Current(); err == nil {
+		return current.Username
+	}
+	return ""
 }
