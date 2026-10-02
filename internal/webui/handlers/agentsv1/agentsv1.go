@@ -282,6 +282,7 @@ var statusOf = map[loomagent.Code]int{
 	loomagent.CodeSpecVersionMismatch: http.StatusConflict,
 	loomagent.CodeExternalKeyConflict: http.StatusConflict,
 	loomagent.CodeExternalKeyTaken:    http.StatusConflict,
+	loomagent.CodeWorktreeTaken:       http.StatusConflict,
 	loomagent.CodeUnsavedWork:         http.StatusConflict,
 	loomagent.CodeStaleSubject:        http.StatusConflict,
 	loomagent.CodeSubscriberLagged:    http.StatusConflict,

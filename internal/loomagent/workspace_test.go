@@ -35,11 +35,18 @@ func TestWorkspaceImportBoundary(t *testing.T) {
 	walk(module+"internal/loomagent", ".")
 }
 
-type fakeWorkspace struct{ ensured []WorkspaceSpec }
+type fakeWorkspace struct {
+	ensured []WorkspaceSpec
+	path    string // every Ensure's path; "" is /wt/<key>
+}
 
 func (f *fakeWorkspace) Ensure(_ context.Context, s WorkspaceSpec) (WorkingCopy, error) {
 	f.ensured = append(f.ensured, s)
-	return WorkingCopy{Path: "/wt/" + s.Key, Branch: s.Branch, HEAD: "abc"}, nil
+	path := f.path
+	if path == "" {
+		path = "/wt/" + s.Key
+	}
+	return WorkingCopy{Path: path, Branch: s.Branch, HEAD: "abc"}, nil
 }
 
 func (f *fakeWorkspace) Status(_ context.Context, s WorkspaceSpec) (WorkspaceStatus, error) {

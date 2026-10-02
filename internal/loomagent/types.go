@@ -28,6 +28,7 @@ const (
 	CodeSubscriberLagged    Code = "subscriber_lagged"
 	CodeHistoryExpired      Code = "history_expired"
 	CodeCursorExpired       Code = "cursor_expired"
+	CodeWorktreeTaken       Code = "worktree_taken"
 )
 
 // Error is a loomagent error. Allowed lists the accepted values for

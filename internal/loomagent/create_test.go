@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
@@ -737,5 +738,56 @@ func TestHarnessResumeInstallsCurrentPolicy(t *testing.T) {
 	owned, _ := e.st.NativeSessions(ctx, a.AgentID)
 	if *after.HarnessSessionID != ref.NativeID || *after.HarnessSessionRoot != ref.Root || after.SpecVersion != row.SpecVersion || len(owned) != 1 {
 		t.Fatalf("resume changed identity: %+v, owned %+v", after, owned)
+	}
+}
+
+// TestCreateRefusesSharedBridgeFolder: OpenCode runs one MCP bridge per
+// folder, so a worktree that a live agent already has is refused with
+// worktree_taken when either agent has bridge tools, before any session
+// opens; agents without tools may share, and a deleted agent's folder is
+// free.
+func TestCreateRefusesSharedBridgeFolder(t *testing.T) {
+	ctx := context.Background()
+	worker := func(id string) CreateRequest { // a preset with no bridge tools
+		return CreateRequest{Envelope: Envelope{RequestID: id}, Preset: "daemon-worker", Name: id, Repo: "/repo",
+			Overrides: Overrides{Harness: "opencode"}}
+	}
+	for name, c := range map[string]struct {
+		first, second CreateRequest
+		deleteFirst   bool
+		want          Code
+	}{
+		"lead then lead":         {leadReq("l1"), CreateRequest{Envelope: Envelope{RequestID: "l2"}, Preset: "lead", Name: "beta", Repo: "/repo", Overrides: Overrides{Harness: "opencode"}}, false, CodeWorktreeTaken},
+		"lead then worker":       {leadReq("l1"), worker("w1"), false, CodeWorktreeTaken},
+		"worker then lead":       {worker("w1"), leadReq("l1"), false, CodeWorktreeTaken},
+		"worker then worker":     {worker("w1"), worker("w2"), false, ""},
+		"deleted lead then lead": {leadReq("l1"), CreateRequest{Envelope: Envelope{RequestID: "l2"}, Preset: "lead", Name: "beta", Repo: "/repo", Overrides: Overrides{Harness: "opencode"}}, true, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newCreateEnv(t)
+			e.ws.path = "/wt/shared"
+			s := e.service(ServiceConfig{})
+			first, err := s.Create(ctx, c.first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.deleteFirst {
+				if err := s.store.Tombstone(ctx, first.AgentID, time.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			opened := len(e.h.specs)
+			_, err = s.Create(ctx, c.second)
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("second Create: %v", err)
+				}
+				return
+			}
+			wantCode(t, err, c.want)
+			if len(e.h.specs) != opened {
+				t.Fatal("a session opened in a folder that belongs to another agent")
+			}
+		})
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -295,8 +296,39 @@ func (s *Service) ensureWorktree(ctx context.Context, a loomstore.Agent) (loomst
 	if err != nil {
 		return a, err
 	}
+	if err := s.worktreeFree(ctx, a, wc.Path); err != nil {
+		return a, err
+	}
 	a.WorktreePath, a.CreateStep = &wc.Path, stepWorktree
 	return a, s.store.SetCreateStep(ctx, a.AgentID, stepWorktree, &wc.Path, nil, nil)
+}
+
+// worktreeFree refuses with worktree_taken to bind path to a when another
+// live (not deleted) agent has it and either has bridge tools: OpenCode
+// runs one MCP bridge per folder, so two agents there would share one
+// agent's tools and token.
+func (s *Service) worktreeFree(ctx context.Context, a loomstore.Agent, path string) error {
+	all, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+	if err != nil {
+		return err
+	}
+	for _, o := range all {
+		if o.AgentID == a.AgentID || o.WorktreePath == nil || filepath.Clean(*o.WorktreePath) != filepath.Clean(path) {
+			continue
+		}
+		if s.hasBridgeTools(ctx, a.Preset) || s.hasBridgeTools(ctx, o.Preset) {
+			return &Error{Code: CodeWorktreeTaken, Message: path + " belongs to agent " + o.AgentID +
+				"; an agent with bridge tools needs a folder of its own"}
+		}
+	}
+	return nil
+}
+
+// hasBridgeTools reports whether preset has bridge tools; an unknown preset
+// counts as having them, so the check fails closed.
+func (s *Service) hasBridgeTools(ctx context.Context, preset string) bool {
+	p, err := s.presets.Get(ctx, preset)
+	return err != nil || len(p.Tools) > 0
 }
 
 // openSession stages skills, opens a's session keyed by its AgentID and
