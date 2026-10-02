@@ -52,7 +52,7 @@ var publishDenies = []loomharness.PermissionRule{
 var presets = []Preset{
 	{Name: "lead", Version: 1, Mode: "persistent", RoleKind: "interactive", OwnerKind: "user",
 		Persona: "You are a lead agent. You own one feature, work in your worktree and delegate to task agents.",
-		Rules:   allowAll, Tools: []string{"agent_create", "agent_list", "agent_get", "agent_send", "agent_archive"},
+		Rules:   allowAll, Tools: []string{"agent_create", "agent_list", "agent_get", "agent_send", "agent_archive", "github_read"},
 		Subagents: true, Overridable: []string{"persona", "max_budget_usd"}},
 	{Name: "task", Version: 1, Mode: "single_task", RoleKind: "worker", OwnerKind: "parent", ExternalKeyFmt: "task:<ticket>",
 		Persona: "You are a task agent. Do the brief in your worktree and commit the result.",

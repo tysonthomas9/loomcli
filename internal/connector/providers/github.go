@@ -46,6 +46,7 @@ func GitHubActions() []string {
 		ActionGitHubPullsList,
 		ActionGitHubCompareRead,
 		ActionGitHubIssueCommentPost,
+		ActionGitHubRead,
 	}
 }
 
@@ -98,6 +99,8 @@ func (g *GitHub) Call(ctx context.Context, spec CallSpec) (CallResult, error) {
 		return g.compareRead(ctx, spec)
 	case ActionGitHubIssueCommentPost:
 		return g.issueCommentPost(ctx, spec)
+	case ActionGitHubRead:
+		return g.githubRead(ctx, spec)
 	default:
 		return CallResult{Decision: domain.ConnectorCallUpstreamError},
 			fmt.Errorf("github provider does not implement %q: %w", spec.Action, ErrUnknownAction)

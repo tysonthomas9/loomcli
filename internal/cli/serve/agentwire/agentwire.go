@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,6 +42,9 @@ type Config struct {
 	APIBase string
 	// LoomBin runs `loom agent mcp-bridge`; "" is this executable.
 	LoomBin string
+	// GitHubRead is serve's host GitHub connector for the agents' github_read
+	// tool; nil leaves presets with github_read failing closed at launch.
+	GitHubRead agentsv1.GitHubReader
 }
 
 // API is a running Agent API: one service per workspace on a shared
@@ -99,11 +103,11 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		c := serviceConfig(st, ws, wt, cfg.Skills,
 			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}})
 		c.RecoverFirst = true // writes wait for the dispatcher's start-up Reconcile
-		c.Bridge, c.Launch, c.Retire = bridge(a.APIBase), launch(a.APIBase, ws, tokens), retire(oc)
+		c.Bridge, c.Launch, c.Retire = bridge(a.APIBase, cfg.GitHubRead != nil), launch(a.APIBase, ws, tokens), retire(oc)
 		svc = loomagent.New(c)
 		return svc, feed
 	}
-	a.handler = agentsv1.New(a.service, nil).WithTokens(tokens)
+	a.handler = agentsv1.New(a.service, nil).WithTokens(tokens).WithGitHub(cfg.GitHubRead)
 	a.run(a.runIdle)
 	known, _, err := st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true})
 	if err != nil {
@@ -243,11 +247,18 @@ func resolveRepo(ctx context.Context, _ loomagent.Target, repo string) (string, 
 }
 
 // bridge registers a preset's tools when the bridge serves them all and
-// knows where serve is; otherwise the agent fails closed at launch.
-func bridge(apiBase func() string) func(context.Context, loomagent.Preset) (loomagent.BridgeCaps, error) {
+// knows where serve is; otherwise the agent fails closed at launch. A preset
+// with github_read also needs serve's host GitHub reader (github), and never
+// falls back to gh or an agent credential.
+func bridge(apiBase func() string, github bool) func(context.Context, loomagent.Preset) (loomagent.BridgeCaps, error) {
 	return func(_ context.Context, p loomagent.Preset) (loomagent.BridgeCaps, error) {
 		if len(p.Tools) > 0 && apiBase() == "" {
 			return loomagent.BridgeCaps{}, errors.New("no Agent API address for the bridge")
+		}
+		if read := slices.Contains(p.Tools, "github_read"); read && !github {
+			return loomagent.BridgeCaps{}, errors.New("github_read: no host GitHub connector is wired")
+		} else if read {
+			return loomagent.BridgeCaps{HasGitHubRead: true}, agentmcp.Check(p.Tools)
 		}
 		return loomagent.BridgeCaps{}, agentmcp.Check(p.Tools)
 	}

@@ -260,7 +260,8 @@ func startAgentAPI(ctx context.Context, cfg webui.ServerConfig) *agentwire.API {
 		bin = filepath.Join(bootstrap.LoomDir(), "harness/opencode/2.0.19/opencode")
 	}
 	api, err := agentwire.Start(ctx, agentwire.Config{Dir: bootstrap.LoomDir(),
-		OpenCodeBin: bin, Skills: cfg.Store, APIBase: agentAPIBase(cfg.BindAddress, cfg.Port)})
+		OpenCodeBin: bin, Skills: cfg.Store, APIBase: agentAPIBase(cfg.BindAddress, cfg.Port),
+		GitHubRead: webuiapp.AgentGitHubRead(cfg)})
 	if err != nil {
 		slog.Warn("Agent API not started", "error", err)
 		return nil

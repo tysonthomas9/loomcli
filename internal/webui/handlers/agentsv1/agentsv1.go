@@ -21,6 +21,7 @@ type Handler struct {
 	presets       loomagent.Presets
 	validateToken func(token, workspace string) (string, error)
 	tokens        *Tokens
+	github        GitHubReader
 }
 
 // New returns a Handler. services returns the workspace's Agent API service,
@@ -65,6 +66,7 @@ func (h *Handler) Register(mux *http.ServeMux, workspace middleware.Middleware,
 		"GET " + p + "agents/{id}/events":              listEvents,
 		"GET " + p + "presets":                         h.listPresets,
 		"GET " + p + "presets/{name}":                  h.getPreset,
+		"POST " + p + "github/read":                    h.githubRead,
 	} {
 		mux.Handle(pattern, workspace(h.serve(fn)))
 	}
@@ -292,6 +294,11 @@ var statusOf = map[loomagent.Code]int{
 	loomagent.CodeGitFailed:           http.StatusBadGateway,
 	loomagent.CodeHistoryExpired:      http.StatusGone,
 	loomagent.CodeCursorExpired:       http.StatusGone,
+	CodeGitHubInvalid:                 http.StatusBadRequest,
+	CodeGitHubDenied:                  http.StatusForbidden,
+	CodeGitHubNotFound:                http.StatusNotFound,
+	CodeGitHubRateLimited:             http.StatusTooManyRequests,
+	CodeGitHubUnavailable:             http.StatusServiceUnavailable,
 }
 
 // writeError writes a loomagent error as {error, code, allowed, paths,

@@ -4,6 +4,7 @@
 package modbuilder
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 type PRReviewModule interface {
 	Register(*http.ServeMux)
 	InvalidateCredentialSeeds()
+	GitHubRead(ctx context.Context, ws, agentID, repoPath, op string, args map[string]any) (map[string]any, error)
 }
 
 // CredentialSeedInvalidator is the cross-module notification surface needed

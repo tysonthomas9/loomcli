@@ -55,6 +55,7 @@ type fakeGitHub struct {
 	headSha string
 	state   string
 	lists   map[string]fakePullList
+	extra   map[string]http.HandlerFunc // more routes by path, checked first
 
 	server *httptest.Server
 }
@@ -92,7 +93,12 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 	if !hasList {
 		list, hasList = g.lists[r.URL.Path]
 	}
+	extra := g.extra[r.URL.Path]
 	g.mu.Unlock()
+	if extra != nil {
+		extra(w, r)
+		return
+	}
 
 	switch {
 	case r.Method == http.MethodGet && hasList:

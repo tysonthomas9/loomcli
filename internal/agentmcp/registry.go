@@ -40,6 +40,7 @@ var tools = map[string]func(*mcp.Server, *bridge){
 	"agent_get":     addAgentGet,
 	"agent_send":    addAgentSend,
 	"agent_archive": addAgentArchive,
+	"github_read":   addGitHubRead,
 }
 
 // Check fails unless the bridge serves every tool in names.
@@ -87,6 +88,7 @@ type API interface {
 	Send(ctx context.Context, requestID, agentID, text string) (agentsv1.SendResult, error)
 	Interrupt(ctx context.Context, requestID, agentID, text string) (agentsv1.SendResult, error)
 	Archive(ctx context.Context, requestID, agentID, reason string) error
+	GitHubRead(ctx context.Context, in agentsv1.GitHubReadBody) (agentsv1.GitHubReadResult, error)
 }
 
 // Verify fails closed unless the Agent API accepts the bridge's token: a

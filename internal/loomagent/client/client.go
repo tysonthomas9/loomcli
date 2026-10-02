@@ -132,6 +132,12 @@ func (c *Client) Interrupt(ctx context.Context, requestID, agentID, text string)
 		agentsv1.SendBody{Text: text, Delivery: loomagent.DeliveryInterrupt}, &r)
 }
 
+// GitHubRead runs one github_read op as the authenticated agent, on its
+// own repo, through serve's host GitHub connector.
+func (c *Client) GitHubRead(ctx context.Context, in agentsv1.GitHubReadBody) (r agentsv1.GitHubReadResult, err error) {
+	return r, c.do(ctx, http.MethodPost, "github/read", nil, "", in, &r)
+}
+
 // Withdraw clears the authenticated caller's waiting message.
 func (c *Client) Withdraw(ctx context.Context, requestID, agentID string) (r agentsv1.WithdrawResult, err error) {
 	return r, c.do(ctx, http.MethodDelete, agent(agentID)+"/messages/waiting", nil, requestID, nil, &r)

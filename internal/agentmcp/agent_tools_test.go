@@ -23,7 +23,7 @@ var leadTools = []string{"agent_create", "agent_list", "agent_get", "agent_send"
 
 // agentAPI serves the real Agent API routes for workspace "ws" with leads
 // a1 and b1, each with one busy task child (c1 under a1, c2 under b1).
-func agentAPI(t *testing.T) (*httptest.Server, *agentsv1.Tokens) {
+func agentAPI(t *testing.T, github ...agentsv1.GitHubReader) (*httptest.Server, *agentsv1.Tokens) {
 	t.Helper()
 	ctx := context.Background()
 	st, err := loomstore.Open(ctx, filepath.Join(t.TempDir(), "loom.db"))
@@ -57,7 +57,11 @@ func agentAPI(t *testing.T) (*httptest.Server, *agentsv1.Tokens) {
 			next.ServeHTTP(w, r.WithContext(middleware.WithWorkspace(r.Context(), r.PathValue("ws"))))
 		})
 	}
-	agentsv1.New(func(string) *loomagent.Service { return svc }, nil).WithTokens(tokens).Register(mux, ws, nil)
+	h := agentsv1.New(func(string) *loomagent.Service { return svc }, nil).WithTokens(tokens)
+	if len(github) > 0 {
+		h.WithGitHub(github[0])
+	}
+	h.Register(mux, ws, nil)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv, tokens

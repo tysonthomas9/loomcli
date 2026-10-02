@@ -3,6 +3,7 @@ package agentmcp_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -41,7 +42,10 @@ func TestRealOpenCodeLeadCreatesChildren(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	api, err := agentwire.Start(ctx, agentwire.Config{Dir: filepath.Join(sbx.Dir, "loom"), OpenCodeBin: realloom.OpenCodeBin(),
-		OpenCodeEnv: sbx.Env(), APIBase: "http://" + l.Addr().String(), LoomBin: loom})
+		OpenCodeEnv: sbx.Env(), APIBase: "http://" + l.Addr().String(), LoomBin: loom,
+		GitHubRead: func(context.Context, string, string, string, string, map[string]any) (map[string]any, error) {
+			return nil, errors.New("this test has no GitHub")
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}
