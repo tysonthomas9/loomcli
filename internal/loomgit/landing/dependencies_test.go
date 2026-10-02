@@ -83,6 +83,13 @@ type crossRepoFixture struct {
 // owner/repo2 PR 2); T2 depends on T1.
 func newCrossRepoFixture(t *testing.T) *crossRepoFixture {
 	t.Helper()
+	return newCrossRepoFixtureAt(t, "owner")
+}
+
+// newCrossRepoFixtureAt is newCrossRepoFixture with slugs <owner>/repo1 and
+// <owner>/repo2; owner may be a GitLab group path such as group/subgroup.
+func newCrossRepoFixtureAt(t *testing.T, owner string) *crossRepoFixture {
+	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
 	store, err := journal.OpenSQLite(filepath.Join(root, "store.db"))
@@ -120,7 +127,7 @@ func newCrossRepoFixture(t *testing.T) *crossRepoFixture {
 		change, task, number := fmt.Sprintf("C%d", index+1), fmt.Sprintf("T%d", index+1), index+1
 		branch := "loom/ws/W/change/" + change
 		publication := journal.Publication{Workspace: "W", Change: change, Repo: source, Branch: branch,
-			Trunk: "main", Slug: "owner/" + name, Head: head}
+			Trunk: "main", Slug: owner + "/" + name, Head: head}
 		if err := store.BeginPublication(ctx, publication); err != nil {
 			t.Fatal(err)
 		}

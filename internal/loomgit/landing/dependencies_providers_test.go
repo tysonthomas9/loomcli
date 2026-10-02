@@ -35,7 +35,7 @@ type gitlabFake struct {
 	rateLimits int
 }
 
-var gitlabRoute = regexp.MustCompile(`^/api/v4/projects/owner%2F(repo[12])(/.*)?$`)
+var gitlabRoute = regexp.MustCompile(`^/api/v4/projects/(?:owner|group%2Fsubgroup)%2F(repo[12])(/.*)?$`)
 
 func (fake *gitlabFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	match := gitlabRoute.FindStringSubmatch(r.URL.EscapedPath())
@@ -108,7 +108,12 @@ func lastPost(t *testing.T, posts []providerPost, repo, sha string) map[string]a
 
 func newGitLabDependencyFixture(t *testing.T) (*crossRepoFixture, *gitlabFake, Options) {
 	t.Helper()
-	fixture := newCrossRepoFixture(t)
+	return newGitLabDependencyFixtureAt(t, "owner")
+}
+
+func newGitLabDependencyFixtureAt(t *testing.T, owner string) (*crossRepoFixture, *gitlabFake, Options) {
+	t.Helper()
+	fixture := newCrossRepoFixtureAt(t, owner)
 	fake := &gitlabFake{t: t, mrs: map[string]map[string]any{}, trains: map[string]map[string]any{}}
 	for number, head := range []string{fixture.head1, fixture.head2} {
 		fake.mrs[fmt.Sprintf("repo%d", number+1)] = map[string]any{"id": 100 + number, "iid": number + 1, "state": "opened",
@@ -165,6 +170,36 @@ func TestGitLabDependencyCheckPendingThenPassedAfterLanding(t *testing.T) {
 	_, enforcement, err := fixture.store.DependencyChecks(context.Background())
 	if err != nil || len(enforcement) != 1 || enforcement[0].State != "not_enforced" || !strings.Contains(enforcement[0].Reason, "not enforced") {
 		t.Fatalf("enforcement = %+v, %v", enforcement, err)
+	}
+}
+
+// A GitLab project in a nested group (group/subgroup/project) goes through
+// landing detection and loom/dependencies like a top-level one.
+func TestGitLabNestedGroupProjectPendingThenPassed(t *testing.T) {
+	fixture, fake, options := newGitLabDependencyFixtureAt(t, "group/subgroup")
+	if err := reconcileWith(t, fixture, options); err != nil {
+		t.Fatal(err)
+	}
+	status := lastPost(t, fake.statuses, "repo2", fixture.head2)
+	if status["state"] != "pending" || !strings.Contains(status["description"].(string), "group/subgroup/repo1#1") {
+		t.Fatalf("MR2 commit status = %+v", status)
+	}
+	if response := lastPost(t, fake.responses, "repo2", fixture.head2); response["status"] != "pending" {
+		t.Fatalf("MR2 external status check = %+v", response)
+	}
+	merged := landOnTrunk(t, fixture)
+	fake.mrs["repo1"]["state"], fake.mrs["repo1"]["merge_commit_sha"] = "merged", merged
+	if err := reconcileWith(t, fixture, options); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := fixture.store.LandingStatus(context.Background(), "W", "C1"); err != nil || status.State != "landed" {
+		t.Fatalf("nested-group MR1 landing = %+v, %v", status, err)
+	}
+	if status := lastPost(t, fake.statuses, "repo2", fixture.head2); status["state"] != "success" {
+		t.Fatalf("MR2 commit status after MR1 landed = %+v", status)
+	}
+	if response := lastPost(t, fake.responses, "repo2", fixture.head2); response["status"] != "passed" {
+		t.Fatalf("MR2 external status check after MR1 landed = %+v", response)
 	}
 }
 
@@ -347,7 +382,7 @@ func TestBitbucketRateLimitedPostRetriesAndNeverShowsFalseSuccess(t *testing.T) 
 		t.Fatalf("retried success post = %+v", status)
 	}
 	_, enforcement, err := fixture.store.DependencyChecks(context.Background())
-	if err != nil || len(enforcement) != 1 || enforcement[0].State != "not_pinned" {
+	if err != nil || len(enforcement) != 1 || enforcement[0].State != "not_enforced" {
 		t.Fatalf("enforcement = %+v, %v", enforcement, err)
 	}
 }

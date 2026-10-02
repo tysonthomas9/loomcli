@@ -154,24 +154,18 @@ func TestBitbucketForgeFailsClosedOnUnknownResponses(t *testing.T) {
 	}
 }
 
+// Bitbucket's require_passing_builds_to_merge counts passing builds of any key:
+// with an unrelated green build on the head, the PR can merge while
+// loom/dependencies is INPROGRESS. So it is never reported as enforcing Loom.
 func TestBitbucketDependencyEnforcement(t *testing.T) {
-	ctx := context.Background()
-	restrictions := "GET " + bitbucketRepoPath + "/branch-restrictions"
-	for _, test := range []struct {
-		name, values, want string
-	}{
-		{"no restriction", `[]`, "not_enforced"},
-		{"other branch", `[{"kind":"require_passing_builds_to_merge","branch_match_kind":"glob","pattern":"release/*","value":1}]`, "not_enforced"},
-		{"glob covers trunk", `[{"kind":"require_passing_builds_to_merge","branch_match_kind":"glob","pattern":"ma*","value":1}]`, "not_pinned"},
-	} {
-		forge, _ := newCannedBitbucket(t, map[string]cannedResponse{restrictions: {200, `{"pagelen":10,"values":` + test.values + `}`}})
-		if got, err := forge.DependencyEnforcement(ctx, "owner", "repo", "main", 0); err != nil || got != test.want {
-			t.Errorf("%s: enforcement = %q, %v; want %q", test.name, got, err, test.want)
-		}
-	}
-	forge, _ := newCannedBitbucket(t, map[string]cannedResponse{restrictions: {200,
-		`{"values":[{"kind":"require_passing_builds_to_merge","branch_match_kind":"branching_model","branch_type":"production","value":1}]}`}})
-	if _, err := forge.DependencyEnforcement(ctx, "owner", "repo", "main", 0); err == nil {
-		t.Fatal("branching-model restriction reported as known enforcement")
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	forge, _ := newCannedBitbucket(t, map[string]cannedResponse{
+		"GET " + bitbucketRepoPath + "/branch-restrictions": {200,
+			`{"values":[{"kind":"require_passing_builds_to_merge","branch_match_kind":"glob","pattern":"main","value":1}]}`},
+		"GET " + bitbucketRepoPath + "/commit/" + sha + "/statuses": {200,
+			`{"values":[{"key":"ci/build","state":"SUCCESSFUL"},{"key":"loom/dependencies","state":"INPROGRESS"}]}`},
+	})
+	if got, err := forge.DependencyEnforcement(context.Background(), "owner", "repo", "main", 0); err != nil || got != "not_enforced" {
+		t.Fatalf("generic passing-builds rule = %q, %v; want not_enforced", got, err)
 	}
 }
