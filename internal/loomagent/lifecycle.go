@@ -86,7 +86,18 @@ func (s *Service) finishArchive(ctx context.Context, a loomstore.Agent, reason s
 		}
 	}
 	now := time.Now()
-	return s.store.SetArchive(ctx, a.AgentID, sp(reason), &now)
+	if err := s.store.SetArchive(ctx, a.AgentID, sp(reason), &now); err != nil {
+		return err
+	}
+	return s.retireLaunch(ctx, a)
+}
+
+// retireLaunch runs the Retire hook for a, which is archived or deleted.
+func (s *Service) retireLaunch(ctx context.Context, a loomstore.Agent) error {
+	if s.retire == nil {
+		return nil
+	}
+	return s.retire(ctx, a)
 }
 
 // Unarchive returns a persistent agent to idle and a single task to finished,
@@ -170,6 +181,9 @@ func (s *Service) delete(ctx context.Context, req DeleteRequest) error {
 	}
 	now := time.Now()
 	if err := s.store.Tombstone(ctx, a.AgentID, now); err != nil {
+		return err
+	}
+	if err := s.retireLaunch(ctx, a); err != nil {
 		return err
 	}
 	before := a

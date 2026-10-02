@@ -261,3 +261,44 @@ func TestDeleteChildrenAndPurgeFailure(t *testing.T) {
 		t.Fatalf("not tombstoned: p1 %v c1 %v", p.DeletedAt, c.DeletedAt)
 	}
 }
+
+// TestRetireRunsOnArchiveAndDelete: the Retire hook runs once an agent is
+// archived (not while it is still stopping) and once it is deleted; a
+// failed Retire fails the Archive, and repeating the Archive runs it again.
+func TestRetireRunsOnArchiveAndDelete(t *testing.T) {
+	ctx := context.Background()
+	var retired []string
+	fail := true
+	s := newService(t, ServiceConfig{Workspace: &deleteWorkspace{}, Retire: func(_ context.Context, a loomstore.Agent) error {
+		if a.AgentID == "flaky" && fail {
+			fail = false
+			return errors.New("boom")
+		}
+		retired = append(retired, a.AgentID)
+		return nil
+	}}, svcAgent("idle", "persistent", StateIdle), svcAgent("busy", "persistent", StateActive),
+		svcAgent("flaky", "persistent", StateIdle), svcAgent("gone", "persistent", StateIdle))
+	for _, id := range []string{"idle", "busy"} {
+		if err := s.Archive(ctx, ArchiveRequest{AgentID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !slices.Equal(retired, []string{"idle"}) {
+		t.Fatalf("retired after archive = %v; want only the archived agent", retired)
+	}
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: "flaky"}); err == nil {
+		t.Fatal("Archive succeeded although Retire failed")
+	}
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: "flaky"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Unarchive(ctx, ArchiveRequest{AgentID: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(ctx, DeleteRequest{AgentID: "gone"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(retired, []string{"idle", "flaky", "gone"}) {
+		t.Fatalf("retired = %v; want idle, flaky (on the retry), gone", retired)
+	}
+}

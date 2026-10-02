@@ -98,7 +98,7 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		c := serviceConfig(st, ws, wt, cfg.Skills,
 			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}})
 		c.RecoverFirst = true // writes wait for the dispatcher's start-up Reconcile
-		c.Bridge, c.Launch = bridge(a.APIBase), launch(a.APIBase, ws, tokens)
+		c.Bridge, c.Launch, c.Retire = bridge(a.APIBase), launch(a.APIBase, ws, tokens), retire
 		svc = loomagent.New(c)
 		return svc, feed
 	}
@@ -239,6 +239,22 @@ func launch(apiBase func() string, ws string, tokens *agentsv1.Tokens) func(cont
 		return loomharness.Launch{Env: agentmcp.Config{API: apiBase(), Workspace: ws, Token: tokens.Agent(ws, a.AgentID),
 			Repo: a.Repo, Harness: harness, Tools: p.Tools}.Env()}, nil
 	}
+}
+
+// retire removes an archived or deleted agent's bridge settings, its token
+// at rest; Resume writes them again after an Unarchive.
+func retire(_ context.Context, a loomstore.Agent) error {
+	if a.WorktreePath == nil {
+		return nil
+	}
+	file, err := agentmcp.EnvFile(*a.WorktreePath)
+	if err != nil {
+		return nil //nolint:nilerr // no worktree left: nothing at rest
+	}
+	if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("agentwire: remove bridge settings: %w", err)
+	}
+	return nil
 }
 
 // harnessPresets renders presets as the harness preset files.

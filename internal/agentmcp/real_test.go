@@ -8,12 +8,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agentmcp"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/agentwire"
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 	"github.com/tysonthomas9/loomcli/internal/loomagent/client"
@@ -130,6 +132,42 @@ func leadCreatesChildren(ctx context.Context, t *testing.T, user *client.Client,
 	if model.taskSawTools {
 		t.Error("a task child was offered the agent tools")
 	}
+
+	// The lead's settings, with its token, are at rest only while it is
+	// live: archiving removes them, and its next turn after an Unarchive
+	// writes them again before the prompt.
+	got, err := user.Get(ctx, lead.AgentID)
+	if err != nil || got.WorktreePath == nil {
+		t.Fatalf("lead worktree: %+v, %v", got.WorktreePath, err)
+	}
+	settings, err := agentmcp.EnvFile(*got.WorktreePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(settings); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("live lead's settings: %v, %v; want mode 0600", fi, err)
+	}
+	wait(ctx, t, "lead idle after its turn", func() bool {
+		a, err := user.Get(ctx, lead.AgentID)
+		return err == nil && a.State == loomagent.StateIdle
+	})
+	if err := user.Archive(ctx, "arch-1", lead.AgentID, "done"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(settings); !os.IsNotExist(err) {
+		t.Fatalf("archived lead's settings: %v; want removed", err)
+	}
+	if err := user.Unarchive(ctx, "unarch-1", lead.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	model.watch(settings)
+	if _, err := user.Send(ctx, "go-2", lead.AgentID, "once more"); err != nil {
+		t.Fatal(err)
+	}
+	wait(ctx, t, "lead's turn after unarchive", func() bool { return model.leadSaw("once more") })
+	if !model.settingsAtPrompt() {
+		t.Error("the unarchived lead's prompt came before its settings were written again")
+	}
 }
 
 // leadModel is an OpenAI-compatible streaming chat model. To the lead it
@@ -141,6 +179,8 @@ type leadModel struct {
 	childDone chan struct{}
 
 	mu           sync.Mutex
+	settings     string // watch: whether this file exists at the next "once more" prompt
+	sawSettings  bool
 	leadBodies   []string
 	leadEnded    bool
 	childrenSeen int
@@ -172,6 +212,10 @@ func (m *leadModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(body, "You are a lead agent"):
 		m.mu.Lock()
 		m.leadBodies = append(m.leadBodies, body)
+		if m.settings != "" && strings.Contains(body, "once more") {
+			_, err := os.Stat(m.settings)
+			m.sawSettings, m.settings = err == nil, ""
+		}
 		ended := m.leadEnded
 		m.mu.Unlock()
 		tools := 0
@@ -226,6 +270,18 @@ func (m *leadModel) leadSaw(text string) bool {
 		}
 	}
 	return false
+}
+
+func (m *leadModel) watch(settings string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settings = settings
+}
+
+func (m *leadModel) settingsAtPrompt() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sawSettings
 }
 
 func (m *leadModel) childrenDoneWhileLeadBusy() bool {
