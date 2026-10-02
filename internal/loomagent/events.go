@@ -154,6 +154,10 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID}
 	sess := s.harnesses[harness].Session(ref)
 	f := fold{running: deref(a.RunningTurnID), asks: map[string]*Ask{}}
+	slots, err := s.store.Slots(ctx, a.AgentID)
+	if err != nil {
+		return err
+	}
 	var rows []loomstore.Event
 	size := 0
 	for after := ""; ; {
@@ -166,6 +170,7 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 			if !ok || e.Session != ref {
 				continue // a delta is live only: a subscriber had it, or missed it with the gap
 			}
+			e = withText(e, slots)
 			r := nativeRow(a.AgentID, kind, e)
 			size += len(r.EventID) + len(r.Kind) + len(r.TurnID) + len(r.Payload) + f.add(e)
 			if size > replayCap {
@@ -315,6 +320,13 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 	} else if err != nil {
 		return false, err
 	}
+	if e.Type == loomharness.EventMessageDelivered {
+		slots, err := s.store.Slots(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		e = withText(e, slots)
+	}
 	if kind, ok := savedKinds[e.Type]; ok {
 		if _, err := s.events.Append(ctx, nativeRow(id, kind, e)); err != nil {
 			return false, err
@@ -323,6 +335,23 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 		s.events.Notify(nativeRow(id, KindDelta, e))
 	}
 	return true, s.HarnessEvent(ctx, id, e)
+}
+
+// withText sets a message.delivered event's Text to the delivered message's
+// own text from its slot, which Loom holds on every harness (OpenCode's and
+// Claude's deliveries name only the input key). A delivery whose slot has
+// since moved on keeps the harness's text, if any.
+func withText(e loomharness.Event, slots []loomstore.Slot) loomharness.Event {
+	if e.Type != loomharness.EventMessageDelivered || e.InputKey == "" {
+		return e
+	}
+	for _, sl := range slots {
+		if deref(sl.NativeKey) == e.InputKey {
+			e.Text = sl.Body
+			break
+		}
+	}
+	return e
 }
 
 // savedKinds maps the completed native events Phase 1 saves to their Loom
