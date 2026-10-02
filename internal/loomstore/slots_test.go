@@ -467,8 +467,9 @@ func TestNotifyMergesOnceByKey(t *testing.T) {
 // TestMigrationAttemptBoundaryBackfill: a database from before migration 6
 // gets each agent's current-attempt boundary: a first attempt keeps every
 // reply; a reopened agent, active or finished, starts at its last saved
-// reopen event; one past its first attempt with no reopen event starts at
-// its last event, so no earlier reply counts.
+// reopen event when every reopen saved one; otherwise (no reopen event, a
+// missing latest one, or a finished -> stopping change that is no reopen)
+// it starts at its last event, so no earlier reply counts.
 func TestMigrationAttemptBoundaryBackfill(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "loom.db")
@@ -485,11 +486,14 @@ func TestMigrationAttemptBoundaryBackfill(t *testing.T) {
 	reply := func(id, text string) {
 		event(id, "item:"+text, "item.completed", `{"itemKind":"message","text":"`+text+`"}`)
 	}
-	reopened := func(id string) { event(id, "reopen:"+id, "agent.state_changed", `{"from":"finished","to":"active"}`) }
+	reopened := func(id, n string) {
+		event(id, "reopen:"+id+":"+n, "agent.state_changed", `{"from":"finished","to":"active"}`)
+	}
 	for _, a := range []struct {
 		id, state string
 		attempt   int64
-	}{{"first", "finished", 0}, {"active", "active", 1}, {"finished", "finished", 1}, {"newer", "active", 1}, {"unmarked", "finished", 2}} {
+	}{{"first", "finished", 0}, {"active", "active", 1}, {"finished", "finished", 1}, {"newer", "active", 1}, {"unmarked", "finished", 2},
+		{"partial", "active", 2}, {"archiving", "stopping", 1}, {"twice", "finished", 2}} {
 		ag := agent(a.id, "interactive")
 		ag.Mode, ag.State, ag.Attempt = "single_task", a.state, a.attempt
 		if err := old.InsertAgent(ctx, ag); err != nil {
@@ -497,19 +501,28 @@ func TestMigrationAttemptBoundaryBackfill(t *testing.T) {
 		}
 	}
 	reply("first", "first reply")
-	for _, id := range []string{"active", "finished", "newer", "unmarked"} {
+	for _, id := range []string{"active", "finished", "newer", "unmarked", "partial", "archiving", "twice"} {
 		reply(id, "old reply "+id)
 	}
-	reopened("active")
-	reopened("finished")
-	reopened("newer")
+	reopened("active", "1")
+	reopened("finished", "1")
+	reopened("newer", "1")
 	reply("newer", "new reply")
+	reopened("partial", "1") // attempt 1 was published; attempt 2's reopen was lost in a crash
+	reply("partial", "reply from attempt one")
+	reopened("archiving", "1")
+	reply("archiving", "kept reply")
+	event("archiving", "stop:archiving", "agent.state_changed", `{"from":"finished","to":"stopping"}`) // not a reopen
+	reopened("twice", "1")
+	reply("twice", "reply from attempt one")
+	reopened("twice", "2")
 	if err := old.Close(); err != nil {
 		t.Fatal(err)
 	}
 	migrations = all
 	s := openAt(t, path)
-	for id, want := range map[string]string{"first": "first reply", "active": "", "finished": "", "newer": "new reply", "unmarked": ""} {
+	for id, want := range map[string]string{"first": "first reply", "active": "", "finished": "", "newer": "new reply",
+		"unmarked": "", "partial": "", "archiving": "kept reply", "twice": ""} {
 		if got, err := s.LastMessage(ctx, id); err != nil || got != want {
 			t.Errorf("%s: LastMessage = %q, %v; want %q", id, got, err, want)
 		}
