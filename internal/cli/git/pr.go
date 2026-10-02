@@ -87,7 +87,7 @@ func init() {
 	}
 	deliveryModeCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(deliveryModeCmd)
-	leadMayMergeCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
+	leadMayMergeCmd.Flags().StringVarP(&prStackWorkspace, "workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(leadMayMergeCmd)
 }
 
@@ -105,14 +105,9 @@ branch protection and adds no review requirement of its own. Only a human can ch
 }
 
 func runLeadMayMerge(cmd *cobra.Command, args []string) error {
-	resolver, err := cli.NewResolver()
+	resolver, err := resolvePRStackWorkspace()
 	if err != nil {
 		return err
-	}
-	if selected, _ := cmd.Flags().GetString("workspace"); selected != "" {
-		if err := resolver.SetWorkspace(selected); err != nil {
-			return err
-		}
 	}
 	workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
 	if len(args) == 1 {
