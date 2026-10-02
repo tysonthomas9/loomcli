@@ -61,11 +61,11 @@ func init() {
 		Long:    "Trunk mode publishes one PR per change against trunk. Add a feature-flag:<name> label to a task to name its flag in the PR body.",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolver, err := cli.NewResolver()
+			selected, _ := cmd.Flags().GetString("workspace")
+			resolver, err := resolverFor(selected, cli.NewResolver)
 			if err != nil {
 				return err
 			}
-			selected, _ := cmd.Flags().GetString("workspace")
 			if selected != "" {
 				if err := resolver.SetWorkspace(selected); err != nil {
 					return err
@@ -323,6 +323,20 @@ func runPRStack(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// resolverFor returns the fallback resolver when no workspace is selected.
+// With a selection it skips active-workspace resolution, so -W works when no
+// workspace is active; the caller then calls SetWorkspace(selected).
+func resolverFor(selected string, fallback func() (*cli.Resolver, error)) (*cli.Resolver, error) {
+	if selected == "" {
+		return fallback()
+	}
+	cfg, err := config.LoadConfigCached()
+	if err != nil {
+		return nil, err
+	}
+	return &cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg}, nil
+}
+
 func resolvePRStackWorkspace() (*cli.Resolver, error) {
 	if prStackWorkspace == "" {
 		return prStackResolver()
@@ -339,7 +353,7 @@ func resolvePRStackWorkspace() (*cli.Resolver, error) {
 }
 
 func runPR(cmd *cobra.Command, args []string) error {
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverFor(prWorkspace, cli.NewResolver)
 	if err != nil {
 		return err
 	}

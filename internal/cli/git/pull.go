@@ -78,11 +78,11 @@ var unapplyCmd = &cobra.Command{
 	GroupID: "git",
 	Args:    cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resolver, err := cli.NewResolver()
+		workspace, _ := cmd.Flags().GetString("workspace")
+		resolver, err := resolverFor(workspace, cli.NewResolver)
 		if err != nil {
 			return err
 		}
-		workspace, _ := cmd.Flags().GetString("workspace")
 		if workspace != "" {
 			if err := resolver.SetWorkspace(workspace); err != nil {
 				return err
@@ -110,11 +110,11 @@ var restackCmd = &cobra.Command{
 	GroupID: "git",
 	Args:    cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resolver, err := cli.NewResolver()
+		workspace, _ := cmd.Flags().GetString("workspace")
+		resolver, err := resolverFor(workspace, cli.NewResolver)
 		if err != nil {
 			return err
 		}
-		workspace, _ := cmd.Flags().GetString("workspace")
 		if workspace != "" {
 			if err := resolver.SetWorkspace(workspace); err != nil {
 				return err
@@ -165,7 +165,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 		sourceBranch = args[1]
 	}
 
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverFor(ws, cli.NewResolver)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
 		os.Exit(1)
