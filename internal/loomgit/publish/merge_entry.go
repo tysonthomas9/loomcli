@@ -190,7 +190,7 @@ func recordedMergeView(ctx context.Context, store *journal.SQLite, workspace, st
 	view := MergeStackView{StackID: stackID, Target: target, Backend: backend}
 	if backend == "loom" {
 		merge, err := store.LoomMerge(ctx, workspace, stackID)
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && finishedForOtherTarget(merge, target)) {
 			return view, false, nil
 		}
 		if err != nil {
@@ -230,6 +230,12 @@ func recordedMergeView(ctx context.Context, store *journal.SQLite, workspace, st
 	return view, true, nil
 }
 
+// finishedForOtherTarget reports a done merge of another target. It is history,
+// not the current request, so a later target is read from the current stack.
+func finishedForOtherTarget(merge journal.LoomMerge, target string) bool {
+	return merge.Phase == "done" && merge.Target != target
+}
+
 func fillMergeLayers(ctx context.Context, store *journal.SQLite, workspace, stackID, target string, applied []loomgit.AppliedLayer, view *MergeStackView) error {
 	containsTarget := false
 	for _, layer := range applied {
@@ -254,7 +260,7 @@ func mergeViewProgress(ctx context.Context, store *journal.SQLite, workspace str
 		return nativeMergeProgress(ctx, store, workspace, view)
 	}
 	merge, err := store.LoomMerge(ctx, workspace, view.StackID)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && finishedForOtherTarget(merge, view.Target)) {
 		return nil
 	}
 	if err != nil {
