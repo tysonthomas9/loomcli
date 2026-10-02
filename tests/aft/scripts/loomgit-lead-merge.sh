@@ -61,7 +61,7 @@ if [[ "$phase" == setup ]]; then
 fi
 
 if [[ "$phase" == teardown ]]; then
-  LOOM_WORKSPACE="$workspace" loom lead-may-merge off >/dev/null 2>&1 || true
+  loom lead-may-merge off >/dev/null 2>&1 || true
   AFT_WS="$workspace" "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
   curl -s -X DELETE "$api/agents/lead" >/dev/null || true
   curl -s -X DELETE "$api" >/dev/null || true
@@ -226,9 +226,7 @@ case "$case_name" in
     two="$(pull_number 2)"
     pr_status "$one" '"checks":"PENDING","merge_state":"BLOCKED"'
     pr_status "$two" '"review":"CHANGES_REQUESTED","merge_state":"BLOCKED"'
-    # LOOM_WORKSPACE: lead-may-merge resolves the active workspace before its
-    # --workspace flag, so the flag alone fails with no active workspace.
-    LOOM_WORKSPACE="$workspace" loom lead-may-merge when_green > "$case_dir/policy.txt" 2> "$case_dir/policy-warning.txt"
+    loom lead-may-merge when_green > "$case_dir/policy.txt" 2> "$case_dir/policy-warning.txt"
     grep -q when_green "$case_dir/policy.txt"
     hold_unmerged 10 "0 0" "required check pending"
     test "$(merge_puts "$one")" = 0
@@ -238,7 +236,7 @@ case "$case_name" in
     test "$(merge_puts "$two")" = 0
     pr_status "$two" '"review":"APPROVED","merge_state":"CLEAN"'
     wait_merged "1 1" "layer two approved"
-    LOOM_WORKSPACE="$workspace" loom lead-may-merge off > "$case_dir/policy-off.txt"
+    loom lead-may-merge off > "$case_dir/policy-off.txt"
     for layer in 1 2; do git --git-dir="$case_dir/app.git" show "main:lead-green-$layer.txt" >/dev/null; done
     ;;
 
