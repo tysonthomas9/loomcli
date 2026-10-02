@@ -27,9 +27,13 @@ func TestSendInterrupt(t *testing.T) {
 	fh := e.h.Harness.(*fake.Harness)
 	s := e.service(ServiceConfig{})
 	pump(t, s, e.h, e.st)
-	a, _ := newLead(t, e, s, "alpha")
+	a, ref := newLead(t, e, s, "alpha")
 	ask := func(id string) fake.Turn { return fake.Turn{Steps: []fake.Step{{Delta: id}, {Ask: id}}} }
 	fh.Script(a.AgentID, ask("t1"), ask("t2"), ask("t3"), ask("t4"), ask("t5"))
+	running := func() bool {
+		st, err := fh.Session(ref).Status(context.Background())
+		return err == nil && st.Running
+	}
 	reqs := []string{"u1", "c1", "x1"} // the messages sent so far
 	handed := func(want ...string) {
 		t.Helper()
@@ -45,19 +49,23 @@ func TestSendInterrupt(t *testing.T) {
 	mustSendMsg(t, s, sendReq(a.AgentID, "x1", "from the system", ActorRef{Kind: "system", ID: "x"}))
 
 	// Stop with no message: t1 ends, the waiting slots stay, oldest first.
-	before := s.get(t, a.AgentID).State
+	// Stop once t1's ask is open, so the agent's state is settled at waiting.
+	eventually(t, "t1's ask open", func() bool { return s.get(t, a.AgentID).State == StateWaiting })
 	stop := mustSendMsg(t, s, interruptReq(a.AgentID, "stop1", "", user))
-	if stop.Interrupted == nil || !*stop.Interrupted || stop.State != before || stop.MessageID != "" {
-		t.Fatalf("stop = %+v; want interrupted, no message, state %s", stop, before)
+	if stop.Interrupted == nil || !*stop.Interrupted || stop.State != StateWaiting || stop.MessageID != "" {
+		t.Fatalf("stop = %+v; want interrupted, no message, state waiting", stop)
 	}
 	handed("u1", "c1")
 	if w := waiting(t, s, a.AgentID); !slices.Equal(w, []string{"system:x=from the system"}) {
 		t.Fatalf("waiting = %v after stop", w)
 	}
+	// The fake's Interrupt ends a turn at once, so c1's turn still running
+	// right after the retry returns means the retry interrupted nothing.
+	eventually(t, "c1's turn running", running)
 	if again := mustSendMsg(t, s, interruptReq(a.AgentID, "stop1", "", user)); again.State != stop.State || again.Interrupted == nil || !*again.Interrupted {
 		t.Fatalf("retry = %+v; want %+v", again, stop)
 	}
-	if r := s.get(t, a.AgentID); r.RunningTurnID == nil {
+	if !running() {
 		t.Fatal("the retried stop interrupted c1's turn")
 	}
 
