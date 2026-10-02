@@ -8,7 +8,8 @@
 // Behavior comes only from a test-owned scenario file: a JSON map from a
 // native session id or an AgentID (the session's metadata agent_id) to the
 // turns that key's prompts play, in order. User text never selects a
-// scenario; a prompt with no scripted turn left echoes its text.
+// scenario. A prompt with no scripted turn left asks Model, 2.0's scripted
+// fake model, when set, and otherwise echoes its text.
 //
 // Modeled, not proven: real OpenCode keeps sessions in its database. The
 // emulator saves its state to one JSON file, so a restart keeps sessions,
@@ -17,13 +18,17 @@
 package harnessemu
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -98,17 +103,19 @@ type state struct {
 // Server is one emulated OpenCode service.
 type Server struct {
 	Password  string
+	Model     string // the fake model's OpenAI base URL; "" echoes
 	path      string // state file
 	scenarios string // scenario file
 	mu        sync.Mutex
 	st        state
 	subs      map[chan []byte]bool
 	quit      chan struct{}
+	mcp       map[string]map[string]map[string]any // runtime MCP servers: directory, name, config
 }
 
 // New loads the state file (absent is empty) and resumes turns a stop left running.
 func New(statePath, scenarios, password string) (*Server, error) {
-	s := &Server{Password: password, path: statePath, scenarios: scenarios, subs: map[chan []byte]bool{}, quit: make(chan struct{}),
+	s := &Server{Password: password, path: statePath, scenarios: scenarios, subs: map[chan []byte]bool{}, quit: make(chan struct{}), mcp: map[string]map[string]map[string]any{},
 		st: state{Sessions: map[string]*session{}}}
 	if b, err := os.ReadFile(statePath); err == nil { //nolint:gosec // G304: the test-owned state file.
 		if err := json.Unmarshal(b, &s.st); err != nil {
@@ -201,7 +208,51 @@ func (s *Server) next(ss *session, text string) Turn {
 		ss.Played++
 		return turns[ss.Played-1]
 	}
+	if s.Model != "" {
+		return s.ask(ss)
+	}
 	return Turn{Text: text}
+}
+
+var modelClient = &http.Client{Timeout: 30 * time.Second}
+
+// ask sends the session's user texts to the fake model's chat completions,
+// as OpenCode would, and plays its reply. A tool call holds the turn until
+// it is interrupted: the emulator runs no tools.
+func (s *Server) ask(ss *session) Turn {
+	msgs := []map[string]any{}
+	for _, m := range ss.Messages {
+		if m["type"] == "user" {
+			msgs = append(msgs, map[string]any{"role": "user", "content": m["text"]})
+		}
+	}
+	b, _ := json.Marshal(map[string]any{"model": "m", "stream": true, "messages": msgs})
+	resp, err := modelClient.Post(s.Model+"/chat/completions", "application/json", bytes.NewReader(b))
+	if err != nil {
+		return Turn{Fail: err.Error()}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return Turn{Fail: "model: " + resp.Status}
+	}
+	var t Turn
+	for sc := bufio.NewScanner(resp.Body); sc.Scan(); {
+		var c struct {
+			Choices []struct {
+				Delta struct {
+					Content   string `json:"content"`
+					ToolCalls []any  `json:"tool_calls"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		_, v, _ := strings.Cut(sc.Text(), ":") // a data field's JSON; other lines don't parse
+		_ = json.Unmarshal([]byte(v), &c)
+		for _, ch := range c.Choices {
+			t.Text += ch.Delta.Content
+			t.Hold = t.Hold || len(ch.Delta.ToolCalls) > 0
+		}
+	}
+	return t
 }
 
 // play streams turn r of session sid. Every change happens under the lock
@@ -378,6 +429,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		reply(w, 200, map[string]any{"data": out})
 	})
+	s.mcpRoutes(mux)
 	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
 		ch := make(chan []byte, 1024)
 		s.mu.Lock()
@@ -409,6 +461,74 @@ func (s *Server) Handler() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// mcpRoutes serves b30c4d0's runtime MCP servers per location: list, add
+// or replace, and remove (protocol/src/groups/mcp.ts:9-56,
+// server/src/handlers/mcp.ts:14-44, core/src/mcp/index.ts:615-647). Like
+// OpenCode, the emulator keeps them in memory until it restarts. It starts
+// no server: a local one whose command resolves reports connected.
+func (s *Server) mcpRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/mcp", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		dir := r.URL.Query().Get("location[directory]")
+		names := make([]string, 0, len(s.mcp[dir]))
+		for name := range s.mcp[dir] {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		out := []map[string]any{}
+		for _, name := range names {
+			out = append(out, map[string]any{"name": name, "status": mcpStatus(s.mcp[dir][name])})
+		}
+		reply(w, 200, map[string]any{"location": map[string]string{"directory": dir}, "data": out})
+	})
+	mux.HandleFunc("PUT /api/experimental/mcp/{server}", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Config map[string]any `json:"config"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		cmd, _ := body.Config["command"].([]any)
+		if !(body.Config["type"] == "local" && len(cmd) > 0) && !(body.Config["type"] == "remote" && body.Config["url"] != nil) {
+			reply(w, 400, map[string]string{"_tag": "HttpApiDecodeError", "message": "invalid MCP server config"})
+			return
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		dir := r.URL.Query().Get("location[directory]")
+		if s.mcp[dir] == nil {
+			s.mcp[dir] = map[string]map[string]any{}
+		}
+		s.mcp[dir][r.PathValue("server")] = body.Config
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("DELETE /api/experimental/mcp/{server}", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		dir, name := r.URL.Query().Get("location[directory]"), r.PathValue("server")
+		if _, ok := s.mcp[dir][name]; !ok {
+			reply(w, 404, map[string]string{"_tag": "McpServerNotFoundError", "server": name, "message": "MCP server not found: " + name})
+			return
+		}
+		delete(s.mcp[dir], name)
+		w.WriteHeader(204)
+	})
+}
+
+// mcpStatus is disabled, failed for a local command that does not resolve,
+// or connected.
+func mcpStatus(cfg map[string]any) map[string]string {
+	if cfg["disabled"] == true {
+		return map[string]string{"status": "disabled"}
+	}
+	if cmd, _ := cfg["command"].([]any); len(cmd) > 0 {
+		bin, _ := cmd[0].(string)
+		if _, err := exec.LookPath(bin); err != nil {
+			return map[string]string{"status": "failed", "error": err.Error()}
+		}
+	}
+	return map[string]string{"status": "connected"}
 }
 
 // sessionRoutes serves the routes of one session.

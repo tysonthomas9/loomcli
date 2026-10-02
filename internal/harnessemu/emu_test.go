@@ -3,10 +3,15 @@ package harnessemu_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -318,5 +323,199 @@ func TestEmulatorChildSessionQuery(t *testing.T) {
 	}
 	if _, ok := roots[refs["lone"].NativeID]; !ok {
 		t.Fatalf("roots = %v; want the unrelated root", roots)
+	}
+}
+
+func send(t *testing.T, method, url, body string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(method, url, strings.NewReader(body))
+	req.SetBasicAuth("opencode", "pw")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+// The runtime MCP endpoints Loom's bridge registration uses, per location.
+func TestEmulatorMCPRuntimeServers(t *testing.T) {
+	_, url, _ := emuURL(t, filepath.Join(t.TempDir(), "state.json"), "")
+	at := func(dir string) string { return "?location[directory]=" + neturl.QueryEscape(dir) }
+	list := func(dir string) string {
+		_, b := send(t, "GET", url+"/api/mcp"+at(dir), "")
+		return strings.TrimSpace(b)
+	}
+	if got := list("/w/a"); got != `{"data":[],"location":{"directory":"/w/a"}}` {
+		t.Fatalf("empty list = %s", got)
+	}
+	put := func(dir, name, cfg string) int {
+		code, _ := send(t, "PUT", url+"/api/experimental/mcp/"+name+at(dir), `{"config":`+cfg+`}`)
+		return code
+	}
+	if c := put("/w/a", "loom", `{"type":"local","command":["sh","-c","x"],"environment":{"LOOM_AGENT_TOKEN":"t"}}`); c != 204 {
+		t.Fatalf("PUT = %d", c)
+	}
+	if c := put("/w/a", "off", `{"type":"local","command":["sh"],"disabled":true}`); c != 204 {
+		t.Fatalf("PUT disabled = %d", c)
+	}
+	if c := put("/w/a", "gone", `{"type":"local","command":["/no/such/bridge"]}`); c != 204 {
+		t.Fatalf("PUT missing command = %d", c)
+	}
+	if c := put("/w/a", "bad", `{"type":"local"}`); c != 400 {
+		t.Fatalf("PUT without command = %d; want 400", c)
+	}
+	want := `{"data":[{"name":"gone","status":{"error":"exec: \"/no/such/bridge\": stat /no/such/bridge: no such file or directory","status":"failed"}},` +
+		`{"name":"loom","status":{"status":"connected"}},{"name":"off","status":{"status":"disabled"}}],"location":{"directory":"/w/a"}}`
+	if got := list("/w/a"); got != want {
+		t.Fatalf("list = %s\nwant %s", got, want)
+	}
+	if got := list("/w/b"); !strings.HasPrefix(got, `{"data":[]`) {
+		t.Fatalf("another location lists %s", got)
+	}
+	if code, _ := send(t, "DELETE", url+"/api/experimental/mcp/loom"+at("/w/a"), ""); code != 204 {
+		t.Fatalf("DELETE = %d", code)
+	}
+	code, b := send(t, "DELETE", url+"/api/experimental/mcp/loom"+at("/w/a"), "")
+	if code != 404 || !strings.Contains(b, `"_tag":"McpServerNotFoundError"`) || !strings.Contains(b, "MCP server not found: loom") {
+		t.Fatalf("second DELETE = %d %s", code, b)
+	}
+	if strings.Contains(list("/w/a"), `"loom"`) {
+		t.Fatal("removed server still listed")
+	}
+	if c := put("/w/a", "loom", `{"type":"local","command":["sh"]}`); c != 204 || !strings.Contains(list("/w/a"), `{"name":"loom","status":{"status":"connected"}}`) {
+		t.Fatalf("re-add after remove = %d, %s", c, list("/w/a"))
+	}
+}
+
+// Echo parity (R29: keep echo's behavior and contracts): every new prompt
+// is captured once, in order, with its session, agent and text (echo's
+// invocation capture and counting, under concurrency); an unscripted turn
+// plays the fake model's reply and sends it the session's user texts, a
+// model tool call holds the turn until Stop, and a model error fails the
+// turn. Streaming, usage, errors and the scripted sequence are in
+// TestEmulatorScenarioTurns.
+func TestEmulatorEchoParity(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var bodies []string
+	replies := []string{
+		`{"choices":[{"delta":{"content":"from "}}]}` + "\n\ndata: " + `{"choices":[{"delta":{"content":"model"}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"shell"}}]}}]}`,
+	}
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		defer mu.Unlock()
+		bodies = append(bodies, string(b))
+		if len(replies) == 0 {
+			w.WriteHeader(500)
+			return
+		}
+		_, _ = io.WriteString(w, "data: "+replies[0]+"\n\ndata: [DONE]\n\n")
+		replies = replies[1:]
+	}))
+	defer model.Close()
+	state := filepath.Join(t.TempDir(), "state.json")
+	s, err := harnessemu.New(state, "", "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer func() { s.Close(); srv.Close() }()
+	c := opencode.NewClient(srv.URL, "pw")
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	const n = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			key := fmt.Sprintf("agent-%d", i)
+			ref, err := c.Open(ctx, loomharness.OpenSpec{Key: key, Dir: t.TempDir(), Metadata: map[string]string{"agent_id": key}})
+			if err == nil {
+				in := loomharness.Input{Key: opencode.PromptID(key, "r1"), Text: "prompt " + key}
+				if err = c.Session(ref).Prompt(ctx, in); err == nil {
+					err = c.Session(ref).Prompt(ctx, in) // a repeat is not a new prompt
+				}
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var st struct{ Prompts []harnessemu.Prompt }
+	b, _ := os.ReadFile(state)
+	if err := json.Unmarshal(b, &st); err != nil || len(st.Prompts) != n {
+		t.Fatalf("captured %d prompts, want %d: %v", len(st.Prompts), n, err)
+	}
+	for _, p := range st.Prompts {
+		if p.Session == "" || p.Text != "prompt "+p.Agent || p.ID != opencode.PromptID(p.Agent, "r1") {
+			t.Fatalf("captured %+v", p)
+		}
+	}
+
+	s.Model = model.URL
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "m", Dir: t.TempDir(), Metadata: map[string]string{"agent_id": "m"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := c.Session(ref)
+	turn := func(r, text string) []loomharness.Event {
+		if err := sess.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("m", r), Text: text}); err != nil {
+			t.Fatal(err)
+		}
+		return until(t, f, func(e loomharness.Event) bool { return completed(e) && e.Session.NativeID == ref.NativeID })
+	}
+	text := ""
+	for _, e := range turn("r1", "first") {
+		if e.Type == loomharness.EventDelta && e.Session.NativeID == ref.NativeID {
+			text += e.Text
+		}
+	}
+	if text != "from model" {
+		t.Fatalf("model turn text = %q", text)
+	}
+	if err := sess.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("m", "r2"), Text: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if st, _ := sess.Status(ctx); st.Running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("tool-call turn never ran")
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	if st, _ := sess.Status(ctx); !st.Running {
+		t.Fatal("a tool-call turn ended without Stop")
+	}
+	if ok, err := sess.Interrupt(ctx); err != nil || !ok {
+		t.Fatalf("Interrupt = %v, %v", ok, err)
+	}
+	if e := until(t, f, func(e loomharness.Event) bool { return completed(e) && e.Session.NativeID == ref.NativeID }); e[len(e)-1].StopReason != "cancelled" {
+		t.Fatalf("stopped tool-call turn = %+v", e[len(e)-1])
+	}
+	if e := turn("r3", "third"); e[len(e)-1].StopReason != "failed" {
+		t.Fatalf("model error turn = %+v", e[len(e)-1])
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 3 || !strings.Contains(bodies[0], `"content":"first"`) || !strings.Contains(bodies[2], `"content":"second"`) ||
+		!strings.Contains(bodies[2], `"content":"third"`) {
+		t.Fatalf("model requests = %v", bodies)
 	}
 }

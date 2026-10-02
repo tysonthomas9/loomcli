@@ -524,6 +524,18 @@ test-aft-live-workers:
 test-aft-podman:
 	@tests/aft/run-aft-podman.sh $(AFT_ARGS)
 
+# Run the isolated e2e stack (scripts/start-e2e-server.sh) against the
+# test-only OpenCode emulator instead of OpenCode (R29), with OpenCode's XDG
+# roots in an owned /tmp sandbox and the stub farm on PATH. With no
+# LOOM_HARNESS_EMU_SCENARIOS or LOOM_HARNESS_EMU_MODEL, a turn echoes its prompt.
+.PHONY: serve-emu
+serve-emu:
+	@go build -o tmp/emu-bin/opencode ./cmd/loom-harness-emu
+	@sbx=$$(mktemp -d /tmp/loom-serve-emu.XXXXXX) && \
+	LOOM_HARNESS_EMU=1 LOOM_OPENCODE_BIN="$(CURDIR)/tmp/emu-bin/opencode" GOCACHE="$$(go env GOCACHE)" \
+	PATH="$(CURDIR)/tmp/emu-bin:$(CURDIR)/e2e/stubs:$$PATH" XDG_CONFIG_HOME="$$sbx/config" XDG_DATA_HOME="$$sbx/data" \
+	XDG_STATE_HOME="$$sbx/state" XDG_CACHE_HOME="$$sbx/cache" scripts/start-e2e-server.sh
+
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
 # Run the browser e2e suite exactly as CI does: the chromium-ci project, which
 # is the mocked chromium suite minus the quarantined specs listed in

@@ -1,9 +1,13 @@
 // Command loom-harness-emu is Loom's test-support OpenCode emulator
 // (internal/harnessemu). It answers `--version` and `serve --service` the
 // way the opencode adapter starts OpenCode: it listens on a loopback port
-// and registers in <XDG_STATE_HOME or HOME/.local/state>/opencode/
-// service.json. Its state is emu-state.json beside that file, and
-// LOOM_HARNESS_EMU_SCENARIOS names the test-owned scenario file.
+// and registers in $XDG_STATE_HOME/opencode/service.json. Its state is
+// emu-state.json beside that file, LOOM_HARNESS_EMU_SCENARIOS names the
+// test-owned scenario file and LOOM_HARNESS_EMU_MODEL the fake model.
+//
+// It runs only with LOOM_HARNESS_EMU=1 and a test-owned XDG_STATE_HOME, so
+// a product run that reaches it fails closed and never replaces the user's
+// own OpenCode registration.
 package main
 
 import (
@@ -24,6 +28,10 @@ import (
 )
 
 func main() {
+	if os.Getenv("LOOM_HARNESS_EMU") != "1" || os.Getenv("XDG_STATE_HOME") == "" {
+		fmt.Fprintln(os.Stderr, "loom-harness-emu: test only; needs LOOM_HARNESS_EMU=1 and a test-owned XDG_STATE_HOME")
+		os.Exit(2)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Println(harnessemu.Version)
 		return
@@ -39,11 +47,7 @@ func main() {
 }
 
 func serve() error {
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".local", "state")
-	}
-	dir = filepath.Join(dir, "opencode")
+	dir := filepath.Join(os.Getenv("XDG_STATE_HOME"), "opencode")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -53,6 +57,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	s.Model = os.Getenv("LOOM_HARNESS_EMU_MODEL")
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return err

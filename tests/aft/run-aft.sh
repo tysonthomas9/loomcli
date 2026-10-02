@@ -563,6 +563,23 @@ stop_fake_github() {
 # Deterministic tier only, and only serve's environment changes: OpenCode's XDG
 # roots point at an owned /tmp sandbox whose opencode.json routes provider "aft"
 # to the fake model. The product itself still reads the user's own config (R1).
+# LOOM_HARNESS_EMU=1 is the one switch for emulator mode (R28/R29), in the
+# deterministic tier only: it builds the test-only OpenCode emulator
+# (cmd/loom-harness-emu), which refuses to run without that switch, puts it
+# in place of the pinned build, as LOOM_OPENCODE_BIN and as `opencode` ahead
+# of the stub farm on serve's PATH, and points it at the same fake model.
+EMU_BIN_DIR=""
+case "${LOOM_HARNESS_EMU:-}" in
+    "") ;;
+    1)  if [[ -n "${AFT_REAL_BACKEND:-}" || -n "$AFT_LIVE" ]]; then
+            echo "[aft] LOOM_HARNESS_EMU=1 runs only the deterministic tier" >&2; exit 1
+        fi
+        EMU_BIN_DIR="$REPORT_DIR/emu-bin"
+        mkdir -p "$EMU_BIN_DIR"
+        (cd "$REPO_ROOT" && go build -o "$EMU_BIN_DIR/opencode" ./cmd/loom-harness-emu) || exit 1
+        LOOM_OPENCODE_BIN="$EMU_BIN_DIR/opencode" ;;
+    *)  echo "[aft] LOOM_HARNESS_EMU must be 1 or unset" >&2; exit 1 ;;
+esac
 : "${LOOM_OPENCODE_BIN:=$HOME/.loom/harness/opencode/2.0.19/opencode}"
 FAKE_MODEL_PID=""
 OPENCODE_SBX=""
@@ -604,6 +621,11 @@ JSON
         LOOM_AGENT_HISTORY_RETENTION=60s
         XDG_CONFIG_HOME="$OPENCODE_SBX/config" XDG_DATA_HOME="$OPENCODE_SBX/data"
         XDG_STATE_HOME="$OPENCODE_SBX/state" XDG_CACHE_HOME="$OPENCODE_SBX/cache")
+    if [[ -n "$EMU_BIN_DIR" ]]; then
+        export AFT_EMU_SCENARIOS="$OPENCODE_SBX/emu-scenarios.json"
+        OPENCODE_ENV+=(LOOM_HARNESS_EMU=1 LOOM_HARNESS_EMU_MODEL="$AFT_FAKE_MODEL_URL/v1"
+            LOOM_HARNESS_EMU_SCENARIOS="$AFT_EMU_SCENARIOS")
+    fi
     echo "[aft] fake-model ready at $AFT_FAKE_MODEL_URL; OpenCode sandbox $OPENCODE_SBX"
 }
 
@@ -804,8 +826,8 @@ else
     # 503 egress_unavailable contract into a live connector-seed + egress attempt
     # with the operator's real PAT. The deterministic tier also needs no Gemini keys.
     # Load-bearing: the seed resolver's fallback reads a sealed settings credential; that is only safe because scripts/start-e2e-server.sh exports LOOM_CONFIG_DIR to tmp/e2e-workspace/.loom-config (wiped per run) — do not remove that export.
-    SERVER_PATH="$REPO_ROOT/e2e/stubs:$PATH"
-    assert_server_cli_closure "$SERVER_PATH" "$REPO_ROOT/e2e/stubs" || exit 1
+    SERVER_PATH="${EMU_BIN_DIR:+$EMU_BIN_DIR:}$REPO_ROOT/e2e/stubs:$PATH"
+    assert_server_cli_closure "$SERVER_PATH" "$REPO_ROOT/e2e/stubs" "$EMU_BIN_DIR" || exit 1
     start_fake_model || exit 1
     env -u LOOM_WEBUI_GITHUB_TOKEN -u GH_TOKEN -u GITHUB_TOKEN \
         -u GEMINI_API_KEY -u GOOGLE_API_KEY \
