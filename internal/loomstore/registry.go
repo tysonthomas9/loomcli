@@ -275,7 +275,7 @@ func (s *Store) ClearWorktree(ctx context.Context, agentID string) error {
 
 func (s *Store) dueIDs(ctx context.Context, pred string, now time.Time) ([]string, error) {
 	cutoff := Stamp(now.Add(-HistoryRetention))
-	rows, err := s.db.QueryContext(ctx, `SELECT agent_id FROM agents WHERE `+pred+` ORDER BY agent_id`, cutoff, cutoff)
+	rows, err := s.db.QueryContext(ctx, `SELECT agent_id FROM agents WHERE `+pred+` ORDER BY agent_id`, cutoff, cutoff) //nolint:gosec // G202: pred is a constant predicate.
 	if err != nil {
 		return nil, err
 	}
