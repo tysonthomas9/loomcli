@@ -116,6 +116,9 @@ func ReconcileLeadMergesAt(ctx context.Context, path string, forge leadMergeForg
 }
 
 func startLeadMerge(ctx context.Context, store *journal.SQLite, forge leadMergeForge, stack journal.LeadMergeStack) error {
+	if stack.Backend == "native" {
+		return startNativeLeadMerge(ctx, store, forge, stack)
+	}
 	existing, err := store.LoomMerge(ctx, stack.Workspace, stack.StackID)
 	if err == nil && existing.Phase != "done" && existing.Phase != "blocked" {
 		return nil
@@ -133,20 +136,46 @@ func startLeadMerge(ctx context.Context, store *journal.SQLite, forge leadMergeF
 	if existing.Target == target {
 		return nil
 	}
-	publication, _, err := store.Publication(ctx, stack.Workspace, target)
+	request, err := leadMergeRequest(ctx, store, forge, stack, target)
 	if err != nil {
 		return err
+	}
+	return beginLoomMerge(ctx, store, request, target)
+}
+
+// startNativeLeadMerge hands the provider one merge of the green prefix. A
+// recorded native merge is never replaced, so any earlier one ends the policy run.
+func startNativeLeadMerge(ctx context.Context, store *journal.SQLite, forge leadMergeForge, stack journal.LeadMergeStack) error {
+	if _, err := store.NativeMerge(ctx, stack.Workspace, stack.StackID); !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if stack.Lead == "" {
+		return nil
+	}
+	target, err := highestGreenLayer(ctx, store, forge, stack)
+	if err != nil || target == "" {
+		return err
+	}
+	request, err := leadMergeRequest(ctx, store, forge, stack, target)
+	if err != nil {
+		return err
+	}
+	return GitHubStackBackend{Store: store}.MergeUpTo(ctx, request, target)
+}
+
+func leadMergeRequest(ctx context.Context, store *journal.SQLite, forge leadMergeForge,
+	stack journal.LeadMergeStack, target string) (StackRequest, error) {
+	publication, _, err := store.Publication(ctx, stack.Workspace, target)
+	if err != nil {
+		return StackRequest{}, err
 	}
 	view, err := appliedMergeView(ctx, store, stack.Workspace, stack.Lead, stack.StackID, target, publication)
 	if err != nil {
-		return err
+		return StackRequest{}, err
 	}
 	request, err := mergeEntryRequest(ctx, store, stack.Workspace, stack.Lead, stack.StackID, view, forge)
-	if err != nil {
-		return err
-	}
 	request.MergeAuthority = whenGreenMerge{Store: store, SetBy: stack.SetBy}
-	return beginLoomMerge(ctx, store, request, target)
+	return request, err
 }
 
 // highestGreenLayer walks the stack bottom-up and returns the last layer of the
@@ -193,9 +222,10 @@ func reviewMet(status stackpublish.PRStatus) bool {
 }
 
 // cancelLeadMerge stops a queued lead merge once the human turns the policy off.
-// A layer already submitted to the provider is left to finish.
+// A layer that may already have reached the provider is left to finish.
 func cancelLeadMerge(ctx context.Context, store *journal.SQLite, merge journal.LoomMerge) (bool, error) {
-	if merge.Authority != leadMergeAuthority || merge.Phase != "ready" {
+	queued := merge.Phase == "ready" || (merge.Phase == "dispatching" && merge.DispatchAttempts == 0 && merge.ProviderRequestID == "")
+	if merge.Authority != leadMergeAuthority || !queued {
 		return false, nil
 	}
 	policy, err := store.LeadMayMerge(ctx, merge.Workspace)
