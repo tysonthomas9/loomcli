@@ -46,7 +46,7 @@ func requireMergeAuthority(ctx context.Context, request StackRequest, target str
 func requireDependenciesLanded(ctx context.Context, store Store, request StackRequest, target string) error {
 	predecessors := request.Predecessors
 	if predecessors == nil {
-		predecessors = IssuePredecessors
+		predecessors = mergePredecessors
 	}
 	changes := request.Changes
 	for index, change := range changes {
