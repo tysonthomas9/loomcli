@@ -17,9 +17,17 @@ setup: |
   git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
   printf '{"name":"e2e-agv1-lead","type":"empty","repos":["%s"]}' "$repo" |
     curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO" >/dev/null || true
+  bad="$AFT_WORK_DIR/agv1-badrepo-repo"
+  mkdir -p "$bad"
+  git -C "$bad" init -q -b main
+  git -C "$bad" -c user.email=e2e@x -c user.name=e2e commit -q --allow-empty -m init
+  printf '{"name":"e2e-agv1-badrepo","type":"empty","repos":["%s"]}' "$bad" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
 teardown: |
   set +e
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO" >/dev/null
 
 tests:
   - name: canary - an OpenCode lead replies, replays after reload and survives an OpenCode restart
@@ -187,3 +195,89 @@ tests:
               assert text not in body, f"a withdrawn waiting message reached the model: {text}"
           PY
         intent: "Check that the cleared waiting message never reached the model"
+
+  - name: the New lead modal shows the clear 400 when the repo is not a clone
+    intent: An operator picks a workspace repo that is no longer a git clone; Create is refused with the server's clear repo message, the modal stays open and no lead is made, and an unknown repo gets the same 400
+    steps:
+      - open: /ws/E2E-AGV1-BADREPO/agents
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "agv1-badrepo-${RUN_ID:-local}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - run: |
+          set -e
+          path="$(curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO" |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("data") or d)["repos"][0]["path"])')"
+          [ -e "$path/.git" ]
+          mv "$path/.git" "$path/.git-moved"
+        intent: "Make the repo checkout the modal offers no longer a git clone"
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-error]')?.textContent || '').includes('is not the absolute path of a repo clone') &&
+            !!document.querySelector('[data-testid=create-agent-overlay]')
+        intent: "Wait until the modal shows the server's clear repo message and stays open"
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO/v1/agents" > "$AFT_WORK_DIR/agv1-badrepo-agents.json"
+          code="$(printf '{"preset":"lead","name":"agv1-unknown-%s","repo":"%s/agv1-no-such-repo","base_ref":"main","overrides":{"harness":"opencode"}}' "${RUN_ID:-local}" "$AFT_WORK_DIR" |
+            curl -s -o "$AFT_WORK_DIR/agv1-unknown-repo.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO/v1/agents" \
+              -H "Content-Type: application/json" -H "Idempotency-Key: agv1-unknown-${RUN_ID:-local}" -d @-)"
+          [ "$code" = 400 ] || { echo "unknown repo answered $code, want 400"; exit 1; }
+          python3 - "$AFT_WORK_DIR/agv1-badrepo-agents.json" "$AFT_WORK_DIR/agv1-unknown-repo.json" <<'PY'
+          import json, sys
+          agents = json.load(open(sys.argv[1])).get("agents") or []
+          assert not agents, f"a refused Create made agents: {agents}"
+          err = json.dumps(json.load(open(sys.argv[2])))
+          assert "preset_invalid" in err and "is not the absolute path of a repo clone" in err, err
+          PY
+        intent: "Check that no lead was made and that an unknown repo gets the same 400"
+
+  - name: a lead calls a Loom bridge tool and the chat shows the call and the reply
+    intent: The lead's model calls loom.agent_list through OpenCode's execute tool, the Loom bridge answers from the Agent API, the chat shows the tool call and the follow-up reply, and the model received the tool's result
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-bridge-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-bridge-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1BridgeId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"tool_calls":[{"name":"execute","arguments":{"code":"return await tools.loom.agent_list({})"}}]},{"text":"AGV1-BRIDGE-REPLY"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$(cat "$AFT_WORK_DIR/agv1BridgeId")"
+        intent: "Script a Code Mode call of loom.agent_list and the reply after it, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "list your agents" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('Tool call') && t.indexOf('AGV1-BRIDGE-REPLY') > t.indexOf('Tool call'); })()
+        budget: 90000
+        intent: "Wait until the chat shows the tool call and then the reply"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-bridge-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-bridge-requests.json" <<'PY'
+          import json, sys
+          def text(c):
+              return c if isinstance(c, str) else "".join(p.get("text", "") for p in (c or []) if isinstance(p, dict))
+          results = [text(m.get("content")) for r in json.load(open(sys.argv[1]))["requests"]
+                     for m in r.get("messages", []) if m.get("role") == "tool"]
+          assert any('"agents":[]' in "".join(t.split()) for t in results), f"the model never got agent_list's result: {results}"
+          PY
+        intent: "Check that the model received the bridge's agent list"
