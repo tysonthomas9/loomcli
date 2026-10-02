@@ -28,13 +28,9 @@ type Event struct {
 // allocation and insert share one transaction. Appending an EventID the agent
 // already has returns the stored event unchanged.
 func (s *Store) AppendEvent(ctx context.Context, e Event) (Event, error) {
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, e.Payload); err != nil {
-		return Event{}, fmt.Errorf("loomstore: event payload: %w", err)
-	}
-	red, err := redact.JSONLContent(buf.String())
+	red, err := redactPayload(e.Payload)
 	if err != nil {
-		return Event{}, err
+		return Event{}, fmt.Errorf("loomstore: event payload: %w", err)
 	}
 	e.Payload = json.RawMessage(red)
 	e.CreatedAt = Stamp(time.Now())
@@ -56,6 +52,44 @@ func (s *Store) AppendEvent(ctx context.Context, e Event) (Event, error) {
 		return err
 	})
 	return e, err
+}
+
+// redactPayload runs redact.String over every string value in a JSON
+// payload. Unlike redact.JSONLContent it skips no key (path, signature, ID)
+// and no object type (images), so metadata is covered too.
+func redactPayload(p json.RawMessage) (string, error) {
+	dec := json.NewDecoder(bytes.NewReader(p))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return "", err
+	}
+	if dec.More() {
+		return "", errors.New("trailing data after JSON value")
+	}
+	var walk func(any) any
+	walk = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, c := range x {
+				x[k] = walk(c)
+			}
+		case []any:
+			for i, c := range x {
+				x[i] = walk(c)
+			}
+		case string:
+			return redact.String(x)
+		}
+		return v
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(walk(v)); err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(buf.String(), "\n"), nil
 }
 
 func getEvent(ctx context.Context, tx *sql.Tx, agentID, eventID string) (Event, error) {
