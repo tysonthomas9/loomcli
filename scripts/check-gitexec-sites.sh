@@ -27,4 +27,17 @@ if [ "$actual" != "$allowed" ]; then
 	echo "Run Git through internal/loomgit; remove a deleted site from scripts/check-gitexec-sites.sh." >&2
 	exit 1
 fi
-echo "gitexec boundary: no new raw Git callers."
+# No plain force push, clean -f or reset --hard outside gitexec guards (D27).
+# Only the capture-first reset (P1.5) remains.
+allowed_writes='internal/cli/git/git_deps.go:1
+internal/cli/git/reset_safety.go:1'
+writes=$(grep -rEc --include='*.go' --include='*.ts' --include='*.mjs' --exclude='*_test.go' \
+	--exclude='*.test.*' --exclude-dir=node_modules \
+	'"push"[^])]*"(--force|-f)"|"clean", *"-[a-z]*f|"reset", *"--hard"' internal cmd |
+	grep -v ':0$' | grep -v '^internal/loomgit/internal/gitexec/' | sort || true)
+if [ "$writes" != "$allowed_writes" ]; then
+	echo "force push, clean -f or reset --hard sites changed (want left, got right):" >&2
+	diff <(printf '%s\n' "$allowed_writes") <(printf '%s\n' "$writes") >&2 || true
+	exit 1
+fi
+echo "gitexec boundary: no new raw Git callers or destructive Git writes."
