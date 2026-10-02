@@ -47,7 +47,8 @@ func (s *Service) openAsks(agentID string) []Ask {
 	return out
 }
 
-// Respond checks the ask is open, then replies through the harness. An
+// Respond checks the ask is open, resumes the session if this process has
+// not yet, then replies through the harness. An
 // unknown, answered or lost ask fails with ask_not_found. A decision is
 // passed as given, never narrowed: a harness that cannot keep allow_always
 // fails the reply, Respond returns that error and the ask stays open.
@@ -73,6 +74,9 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 	case req.Decision == "" && ask.Type == "question":
 	default:
 		return invalid("Respond needs a Decision for an approval", "allow_once", "allow_always", "deny")
+	}
+	if a, err = s.resumeOnce(ctx, a); err != nil { // lazily installs the policy (§4.15)
+		return err
 	}
 	sess, _, err := s.current(ctx, a)
 	if err != nil || sess == nil {

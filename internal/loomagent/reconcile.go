@@ -24,11 +24,13 @@ const (
 // order it:
 //  1. finishes rows left creating (recording the returned NativeRef before
 //     agent.created) and Deletes left half done;
-//  2. resumes each live session this process has not opened or resumed
-//     since it started or the harness restarted: Resume installs the
-//     current policy (an OpenCode session refuses Prompt and Reply until
-//     then), recovers an interrupted turn, and a new NativeRef it returns is
-//     recorded before it is used;
+//  2. resumes each session with a running or interrupted turn or an open
+//     ask that this process has not opened or resumed since it started or
+//     the harness restarted: Resume installs the current policy (an OpenCode
+//     session refuses Prompt and Reply until then), recovers an interrupted
+//     turn, and a new NativeRef it returns is recorded before it is used.
+//     An idle session is resumed lazily (§4.15), before its next Prompt
+//     (handOff) or Respond;
 //  3. backfills every session's native history: missed events are saved
 //     once, open asks are rebuilt and stale ones saved as ask.lost, and a
 //     turn that ended while Loom was down ends (a single task finishes once);
@@ -55,7 +57,7 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 		case a.State == StateCreating:
 			_, err := s.finishCreate(ctx, a.AgentID) // clears create_incomplete when done
 			s.failed(ctx, a.AgentID, AttentionCreateIncomplete, err)
-		case a.State != StateArchived:
+		case a.State != StateArchived && (a.RunningTurnID != nil || len(s.openAsks(a.AgentID)) > 0):
 			if err := s.resumeLive(ctx, a.AgentID); err != nil {
 				slog.Warn("loomagent: reconcile could not resume a session", "agent", a.AgentID, "error", err)
 			}
@@ -96,22 +98,31 @@ func (s *Service) failed(ctx context.Context, agentID, reason string, err error)
 	}
 }
 
-// resumeLive resumes agentID's current session if it is live and this
-// process has not opened or resumed it since the harness last restarted.
+// resumeLive is resumeOnce for agentID under its lock.
 func (s *Service) resumeLive(ctx context.Context, agentID string) error {
 	defer s.lock(agentID)()
 	a, err := s.live(ctx, agentID)
-	if err != nil || a.HarnessSessionID == nil || a.State == StateArchived || a.State == StateCreating {
+	if err != nil {
 		return err
+	}
+	_, err = s.resumeOnce(ctx, a)
+	return err
+}
+
+// resumeOnce resumes a's current session, with the agent lock held, if it
+// is live and this process has not opened or resumed it since the harness
+// last restarted.
+func (s *Service) resumeOnce(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
+	if a.HarnessSessionID == nil || a.State == StateArchived || a.State == StateCreating {
+		return a, nil
 	}
 	s.mu.Lock()
 	done := s.resumed[a.Harness][loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID}]
 	s.mu.Unlock()
 	if done {
-		return nil
+		return a, nil
 	}
-	_, err = s.resume(ctx, a)
-	return err
+	return s.resume(ctx, a)
 }
 
 // settle runs after the backfill: it ends agentID's running turn if the

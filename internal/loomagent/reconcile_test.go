@@ -29,6 +29,7 @@ type restarted struct {
 	mu        sync.Mutex
 	installed map[loomharness.NativeRef]bool // by the wrapped ref
 	resumes   int
+	statuses  int // Status calls; a Reconcile pass ends with one per running turn
 }
 
 func newRestarted(h loomharness.Harness, move bool) *restarted {
@@ -79,6 +80,13 @@ func (x restartedSession) Resume(ctx context.Context, l loomharness.Launch, rule
 		got.NativeID = "moved-" + got.NativeID
 	}
 	return got, nil
+}
+
+func (x restartedSession) Status(ctx context.Context) (loomharness.Status, error) {
+	x.r.mu.Lock()
+	x.r.statuses++
+	x.r.mu.Unlock()
+	return x.Session.Status(ctx)
 }
 
 func (x restartedSession) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
@@ -291,7 +299,8 @@ func TestReconcileFinishesDeleteAndFlagsMissingSession(t *testing.T) {
 
 // TestReconcileGatesWritesUntilRecovered: with RecoverFirst, a Respond that
 // arrives while start-up recovery is still reading history waits for it,
-// then finds the rebuilt ask and succeeds; an idle session is resumed too.
+// then finds the rebuilt ask and succeeds; an idle session is not resumed
+// at boot (§4.15: lazily, before its next Prompt or Respond).
 func TestReconcileGatesWritesUntilRecovered(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -324,8 +333,32 @@ func TestReconcileGatesWritesUntilRecovered(t *testing.T) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	ref := loomharness.NativeRef{Root: deref(idle.HarnessSessionRoot), NativeID: deref(idle.HarnessSessionID)}
-	if w.resumes != 2 || !w.installed[ref] {
-		t.Fatalf("resumes %d, idle session installed %v; want both sessions resumed", w.resumes, w.installed[ref])
+	if w.resumes != 1 || w.installed[ref] {
+		t.Fatalf("resumes %d, idle session installed %v; want only the session with the open ask resumed", w.resumes, w.installed[ref])
+	}
+}
+
+// TestRespondResumesLazily: after a restart the backfill rebuilds an open
+// ask without a Resume; Respond resumes the session first, so the Reply is
+// not refused as quarantined, and a second resume is not needed.
+func TestRespondResumesLazily(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	a := waitingOnAsk(t, e)
+	s := e.service(ServiceConfig{})
+	w := newRestarted(e.h, false)
+	s.harnesses["opencode"] = w
+	if _, err := s.backfill(ctx, "opencode"); err != nil {
+		t.Fatal(err)
+	}
+	if w.resumeCount() != 0 {
+		t.Fatalf("resumes %d before Respond", w.resumeCount())
+	}
+	if err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"}); err != nil {
+		t.Fatalf("Respond = %v", err)
+	}
+	if n := w.resumeCount(); n != 1 {
+		t.Fatalf("resumes %d; want Respond's one", n)
 	}
 }
 
@@ -357,26 +390,44 @@ func TestReconcileOneAgentFailureDoesNotBlockOthers(t *testing.T) {
 }
 
 // TestReconcileResumesAgainAfterHarnessRestart: each harness restart under
-// one serve resumes the live session again (its process and rules are
-// new), while a feed.gap Reconcile resumes nothing.
+// one serve resumes the session of a turn waiting on an ask again (its
+// process and rules are new; the fake continues the turn to its next ask),
+// while a feed.gap Reconcile resumes nothing.
 func TestReconcileResumesAgainAfterHarnessRestart(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
-	a, _ := newLead(t, e, e.service(ServiceConfig{}), "alpha")
+	s1 := e.service(ServiceConfig{})
+	stop1 := startFeed(s1, e)
+	a, _ := newLead(t, e, s1, "alpha")
+	fh.Script(a.AgentID, fake.Turn{ResumeContinues: true,
+		Steps: []fake.Step{{Ask: "a1"}, {Ask: "a2"}, {Ask: "a3"}, {Delta: "x", Gap: true}}})
+	mustSendMsg(t, s1, sendReq(a.AgentID, "u1", "go", user))
+	eventually(t, "a1 opens", func() bool { return s1.get(t, a.AgentID).State == StateWaiting })
+	stop1()
+
 	s := e.service(ServiceConfig{})
 	w := newRestarted(e.h, false)
 	s.harnesses["opencode"] = w
 	stop := startFeed(s, e)
 	defer stop()
-	eventually(t, "the start-up resume", func() bool { return w.resumeCount() == 1 })
+	passDone := func(n int) func() bool { // pass n resumed, then checked the turn's status
+		return func() bool {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			return w.resumes == n && w.statuses >= n
+		}
+	}
+	eventually(t, "the start-up pass", passDone(1))
 	for n := 2; n <= 3; n++ {
 		_ = fh.Restart(context.Background())
-		eventually(t, fmt.Sprintf("resume %d", n), func() bool { return w.resumeCount() == n })
+		eventually(t, fmt.Sprintf("pass %d", n), passDone(n))
 	}
-	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Delta: "x", Gap: true}}})
-	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user)) // its hand-over resumes once
+	eventually(t, "a3 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a3:approval"}) })
+	if err := s.Respond(context.Background(), RespondRequest{AgentID: a.AgentID, AskID: "a3", Decision: "allow_once"}); err != nil {
+		t.Fatal(err) // the rest of the turn misses the live feed: a feed.gap
+	}
 	eventually(t, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
-	if n := w.resumeCount(); n != 4 {
-		t.Fatalf("resumes %d; want 4: the gap resumed again", n)
+	if n := w.resumeCount(); n != 3 {
+		t.Fatalf("resumes %d; want 3: the gap or Respond resumed again", n)
 	}
 }
