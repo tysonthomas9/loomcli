@@ -116,6 +116,9 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		logger.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", app.actualPort)
 	}
 	addBundledLoopbackFrontendOrigins(&app.config, app.actualPort)
+	if config.OnListen != nil {
+		config.OnListen(app.actualPort)
+	}
 
 	// MultiPool for workspace-aware connection routing.
 	app.multiPool = appinfra.NewMultiPool(middleware.WorkspaceFromContext, config.PoolSize)

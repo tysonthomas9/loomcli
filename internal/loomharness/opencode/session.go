@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -118,7 +119,7 @@ func (c *Client) bridge(ctx context.Context, dir string, env map[string]string) 
 	if len(env) == 0 {
 		return nil
 	}
-	if err := bridgeEnv(dir, env); err != nil {
+	if err := c.bridgeEnv(dir, env); err != nil {
 		return fmt.Errorf("opencode bridge: %w", err)
 	}
 	for deadline := time.Now().Add(agentWait); ; {
@@ -754,9 +755,33 @@ func (s *Session) SetModel(ctx context.Context, model string) error {
 	return s.c.call(ctx, "POST", s.path("/model"), map[string]any{"model": map[string]string{"providerID": provider, "id": id}}, nil)
 }
 
-// Unload is a no-op: OpenCode frees idle session memory only on a server
-// restart (design v2 §4.15).
-func (s *Session) Unload(context.Context) error { return nil }
+// Unload removes the session's bridge settings, which Resume writes again;
+// OpenCode frees idle session memory only on a server restart (design v2
+// §4.15). An archived agent is unloaded once idle, so its settings, whose
+// token the Agent API already refuses, do not outlive it there.
+func (s *Session) Unload(ctx context.Context) error {
+	if s.c.bridgeFile == nil {
+		return nil
+	}
+	var info struct {
+		Data struct {
+			Location struct {
+				Directory string `json:"directory"`
+			} `json:"location"`
+		} `json:"data"`
+	}
+	if err := s.c.call(ctx, "GET", s.path(""), nil, &info); err != nil {
+		return err
+	}
+	file, err := s.c.bridgeFile(info.Data.Location.Directory)
+	if err != nil {
+		return nil // not a worktree: no settings were written
+	}
+	if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("opencode bridge: %w", err)
+	}
+	return nil
+}
 
 // Close stops the session's active turn. It never deletes the native
 // session, which stays recorded for Purge (R29).

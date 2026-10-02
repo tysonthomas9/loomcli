@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tysonthomas9/loomcli/internal/agentmcp"
 	"github.com/tysonthomas9/loomcli/internal/agentworktree"
@@ -33,8 +34,9 @@ type Config struct {
 	OpenCodeBin string      // the pinned OpenCode build
 	OpenCodeEnv []string    // nil is the user's own environment (R1)
 	Skills      store.Store // FleetDB skills staged into worktrees; nil stages none
-	// APIBase is the loom serve origin the agent bridges call back to; ""
-	// leaves presets with bridge tools failing closed at launch.
+	// APIBase is the loom serve origin the agent bridges call back to until
+	// SetAPIBase gives the one serve actually bound; "" leaves presets with
+	// bridge tools failing closed at launch.
 	APIBase string
 	// LoomBin runs `loom agent mcp-bridge`; "" is this executable.
 	LoomBin string
@@ -50,6 +52,7 @@ type API struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	newSvc   func(ws string) (*loomagent.Service, func())
+	apiBase  atomic.Pointer[string] // where the bridges call back
 
 	mu       sync.Mutex // guards services and orders run against Stop
 	services map[string]*loomagent.Service
@@ -88,13 +91,14 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	a := &API{store: st, tokens: tokens, opencode: oc, ctx: ctx, cancel: cancel, services: map[string]*loomagent.Service{}}
+	a.SetAPIBase(cfg.APIBase)
 	a.newSvc = func(ws string) (*loomagent.Service, func()) {
 		var svc *loomagent.Service
 		feed := sync.OnceFunc(func() { a.run(func(ctx context.Context) { svc.RunFeed(ctx, "opencode") }) })
 		c := serviceConfig(st, ws, wt, cfg.Skills,
 			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}})
 		c.RecoverFirst = true // writes wait for the dispatcher's start-up Reconcile
-		c.Bridge, c.Launch = bridge(cfg.APIBase), launch(cfg.APIBase, ws, tokens)
+		c.Bridge, c.Launch = bridge(a.APIBase), launch(a.APIBase, ws, tokens)
 		svc = loomagent.New(c)
 		return svc, feed
 	}
@@ -123,7 +127,7 @@ func newOpenCode(ctx context.Context, cfg Config, root string) (*opencode.Adapte
 		}
 	}
 	oc := opencode.New(opencode.Config{Bin: cfg.OpenCodeBin, Env: cfg.OpenCodeEnv, Worktrees: root,
-		Bridge: []string{cfg.LoomBin, "agent", "mcp-bridge"}})
+		Bridge: []string{cfg.LoomBin, "agent", "mcp-bridge"}, BridgeFile: agentmcp.EnvFile})
 	if err := oc.SetPresets(harnessPresets(presets)); err != nil {
 		return nil, fmt.Errorf("agentwire: opencode presets: %w", err)
 	}
@@ -175,6 +179,14 @@ func (h lazyFeed) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharn
 	return h.Harness.Open(ctx, spec)
 }
 
+// SetAPIBase sets the loom serve origin the bridges of agents launched from
+// now on call back to: the address serve actually bound, which differs from
+// the configured one when that port was taken.
+func (a *API) SetAPIBase(base string) { a.apiBase.Store(&base) }
+
+// APIBase is the loom serve origin the bridges call back to.
+func (a *API) APIBase() string { return *a.apiBase.Load() }
+
 // Tokens issues the per-agent bridge and daemon tokens the routes accept.
 func (a *API) Tokens() *agentsv1.Tokens { return a.tokens }
 
@@ -206,9 +218,9 @@ func serviceConfig(st *loomstore.Store, ws string, wt *agentworktree.Worktrees, 
 
 // bridge registers a preset's tools when the bridge serves them all and
 // knows where serve is; otherwise the agent fails closed at launch.
-func bridge(apiBase string) func(context.Context, loomagent.Preset) (loomagent.BridgeCaps, error) {
+func bridge(apiBase func() string) func(context.Context, loomagent.Preset) (loomagent.BridgeCaps, error) {
 	return func(_ context.Context, p loomagent.Preset) (loomagent.BridgeCaps, error) {
-		if len(p.Tools) > 0 && apiBase == "" {
+		if len(p.Tools) > 0 && apiBase() == "" {
 			return loomagent.BridgeCaps{}, errors.New("no Agent API address for the bridge")
 		}
 		return loomagent.BridgeCaps{}, agentmcp.Check(p.Tools)
@@ -217,13 +229,13 @@ func bridge(apiBase string) func(context.Context, loomagent.Preset) (loomagent.B
 
 // launch gives an agent whose preset has bridge tools its bridge settings,
 // with the bridge token that names it, on every harness.
-func launch(apiBase, ws string, tokens *agentsv1.Tokens) func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
+func launch(apiBase func() string, ws string, tokens *agentsv1.Tokens) func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
 	return func(ctx context.Context, a loomstore.Agent, harness string) (loomharness.Launch, error) {
 		p, err := loomagent.BuiltinPresets{}.Get(ctx, a.Preset)
 		if err != nil || len(p.Tools) == 0 {
 			return loomharness.Launch{}, err
 		}
-		return loomharness.Launch{Env: agentmcp.Config{API: apiBase, Workspace: ws, Token: tokens.Agent(ws, a.AgentID),
+		return loomharness.Launch{Env: agentmcp.Config{API: apiBase(), Workspace: ws, Token: tokens.Agent(ws, a.AgentID),
 			Repo: a.Repo, Harness: harness, Tools: p.Tools}.Env()}, nil
 	}
 }

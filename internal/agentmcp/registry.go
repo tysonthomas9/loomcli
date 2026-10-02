@@ -24,6 +24,7 @@ import (
 // The launch settings a harness gives the bridge (the agent's Launch.Env).
 // OpenCode's one shared server cannot give a session its own MCP
 // environment, so its adapter writes them to EnvFile(worktree) instead.
+// They hold the agent's token: never log or print them.
 const (
 	EnvAPI       = "LOOM_AGENT_API" // the loom serve origin
 	EnvWorkspace = "LOOM_AGENT_WORKSPACE"
@@ -65,15 +66,26 @@ func (c Config) Env() map[string]string {
 }
 
 // EnvFile is where the settings of the agent whose worktree is dir are kept
-// for OpenCode: beside the worktree, never inside it, so they are never
-// committed. OpenCode starts the bridge in the session's directory.
-func EnvFile(dir string) string {
-	dir = filepath.Clean(dir)
-	return filepath.Join(filepath.Dir(dir), "."+filepath.Base(dir)+".loom-bridge.json")
+// for OpenCode: in the worktree's private git dir, which the worktree's .git
+// file names. Git never commits it, and removing the worktree deletes it.
+// OpenCode starts the bridge in the session's directory.
+func EnvFile(dir string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, ".git")) //nolint:gosec // G304: the agent's own worktree.
+	if err != nil {
+		return "", fmt.Errorf("agentmcp: %s is not a linked git worktree: %w", dir, err)
+	}
+	gitDir, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir: ")
+	if !ok {
+		return "", fmt.Errorf("agentmcp: %s/.git names no git dir", dir)
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(dir, gitDir)
+	}
+	return filepath.Join(gitDir, "loom-bridge.json"), nil
 }
 
-// Load reads the settings from the environment, else from EnvFile(dir).
-// With neither, the agent has no bridge tools and none are served.
+// Load reads the settings from the environment, else from EnvFile(dir). It
+// fails closed when there are none or they name no token.
 func Load(dir string) (Config, error) {
 	env := map[string]string{}
 	for _, k := range []string{EnvAPI, EnvWorkspace, EnvToken, EnvRepo, EnvHarness, EnvTools} {
@@ -82,15 +94,19 @@ func Load(dir string) (Config, error) {
 		}
 	}
 	if env[EnvToken] == "" {
-		raw, err := os.ReadFile(EnvFile(dir)) //nolint:gosec // G304: the agent's own settings beside its worktree.
-		if errors.Is(err, os.ErrNotExist) {
-			return Config{}, nil
+		file, err := EnvFile(dir)
+		if err != nil {
+			return Config{}, fmt.Errorf("no %s and no settings file: %w", EnvToken, err)
 		}
+		raw, err := os.ReadFile(file) //nolint:gosec // G304: the agent's own settings in its worktree's git dir.
 		if err == nil {
 			err = json.Unmarshal(raw, &env)
 		}
 		if err != nil {
-			return Config{}, fmt.Errorf("agentmcp: %s: %w", EnvFile(dir), err)
+			return Config{}, fmt.Errorf("no %s and no readable settings file: %w", EnvToken, err)
+		}
+		if env[EnvToken] == "" {
+			return Config{}, fmt.Errorf("agentmcp: %s names no token", file)
 		}
 	}
 	c := Config{API: env[EnvAPI], Workspace: env[EnvWorkspace], Token: env[EnvToken], Repo: env[EnvRepo],
@@ -110,6 +126,16 @@ type API interface {
 	Send(ctx context.Context, requestID, agentID, text string) (agentsv1.SendResult, error)
 	Interrupt(ctx context.Context, requestID, agentID, text string) (agentsv1.SendResult, error)
 	Archive(ctx context.Context, requestID, agentID, reason string) error
+}
+
+// Verify fails closed unless the Agent API accepts the bridge's token: a
+// bridge for an agent that is archived or deleted, or with a forged token,
+// serves nothing.
+func Verify(ctx context.Context, api API) error {
+	if _, err := api.List(ctx, loomstore.AgentFilter{Limit: 1}); err != nil {
+		return fmt.Errorf("agentmcp: the Agent API refused this agent's bridge token: %w", err)
+	}
+	return nil
 }
 
 // bridge is what every tool calls through.

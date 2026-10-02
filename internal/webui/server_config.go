@@ -102,6 +102,7 @@ type ServerConfig struct {
 	AgentInputFn         agentcontrol.AgentInputFn                            // Reads/answers pending interactive prompts over the same socket; nil disables the answer routes
 	ClaimHoldFn          agentcontrol.ClaimHoldFn                             // Reads/sets the workspace claim hold over the same socket; nil disables the claim-hold routes
 	AgentAPIRoutes       AgentAPIRoutesFn                                     // Registers the Agent API routes (agentsv1); nil = no Agent API
+	OnListen             func(port int)                                       // Told the port actually bound (a fallback when Port was taken) before serving; nil = none
 	DaemonSupervisorFn   func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable
 	DaemonConfigFn       func() (json.RawMessage, error)                      // Returns effective merged daemon config as JSON; nil = endpoint unavailable
 	AgentQueueFn         func(agentName string) ([]AgentQueueEntry, error)    // Returns scored work queue for named agent; nil = endpoint unavailable

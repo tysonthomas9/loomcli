@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -165,38 +166,103 @@ func TestAgentSendReportsReplaced(t *testing.T) {
 	}
 }
 
-// TestAgentBridgeSettings: only the named tools are listed (none without
-// settings), from the environment or else the file beside the worktree; an
-// unknown tool is refused.
-func TestAgentBridgeSettings(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "repo", "agent1")
-	if cfg, err := Load(dir); err != nil || len(cfg.Tools) != 0 {
-		t.Fatalf("Load with no settings = %+v, %v; want no tools", cfg, err)
+// worktree returns a linked git worktree of a new repo, as agentworktree
+// makes for an agent.
+func worktree(t *testing.T) (repo, dir string) {
+	t.Helper()
+	root := t.TempDir()
+	repo, dir = filepath.Join(root, "repo"), filepath.Join(root, "agent1")
+	git(t, root, "init", "-q", "-b", "main", repo)
+	git(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+	git(t, repo, "worktree", "add", "-q", "--detach", dir)
+	return repo, dir
+}
+
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
-	if got := names(t, connect(t, Config{})); len(got) != 0 {
-		t.Fatalf("tools with no settings = %v", got)
+}
+
+// TestAgentBridgeSettings: the settings come from the environment, else from
+// the file in the worktree's private git dir, which git never shows and
+// removing the worktree deletes. With none, or no token, the bridge fails
+// closed; only the named tools are listed; an unknown tool is refused.
+func TestAgentBridgeSettings(t *testing.T) {
+	repo, dir := worktree(t)
+	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), EnvToken) {
+		t.Fatalf("Load with no settings = %v; want a missing-token error", err)
+	}
+	if _, err := EnvFile(repo); err == nil {
+		t.Fatal("EnvFile accepted the main checkout, whose git dir every worktree shares")
 	}
 	want := Config{API: "http://x", Workspace: "ws", Token: "tok", Repo: "/repo", Tools: leadTools}
-	raw, _ := json.Marshal(want.Env())
-	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+	file, err := EnvFile(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(dir), ".agent1.loom-bridge.json"), raw, 0o600); err != nil {
+	if !strings.HasSuffix(file, filepath.Join("repo", ".git", "worktrees", "agent1", "loom-bridge.json")) {
+		t.Fatalf("EnvFile = %s; want the worktree's git dir", file)
+	}
+	if err := os.WriteFile(file, []byte(`{"LOOM_AGENT_API":"http://x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil {
+		t.Fatal("Load accepted settings with no token")
+	}
+	raw, _ := json.Marshal(want.Env())
+	if err := os.WriteFile(file, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := Load(dir); err != nil || !slices.Equal(got.Tools, leadTools) || got.Token != "tok" || got.Repo != "/repo" {
 		t.Fatalf("Load from file = %+v, %v", got, err)
+	}
+	if out, err := exec.Command("git", "-C", dir, "status", "--porcelain", "--ignored").CombinedOutput(); err != nil || len(out) != 0 {
+		t.Fatalf("git status in the worktree = %q, %v; want the settings invisible to git", out, err)
 	}
 	t.Setenv(EnvToken, "env-tok")
 	t.Setenv(EnvTools, "agent_list")
 	if got, err := Load(dir); err != nil || got.Token != "env-tok" || !slices.Equal(got.Tools, []string{"agent_list"}) {
 		t.Fatalf("Load from env = %+v, %v", got, err)
 	}
+	git(t, repo, "worktree", "remove", dir)
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("settings after the worktree was removed: %v; want gone", err)
+	}
+	if got := names(t, connect(t, Config{})); len(got) != 0 {
+		t.Fatalf("tools with no settings = %v", got)
+	}
 	if got := names(t, connect(t, want)); !slices.Equal(got, []string{"agent_archive", "agent_create", "agent_get", "agent_list", "agent_send"}) {
 		t.Fatalf("lead tools = %v", got)
 	}
 	if err := Check([]string{"review_post"}); err == nil {
 		t.Fatal("Check accepted review_post, which the bridge does not serve yet")
+	}
+}
+
+// TestAgentBridgeVerifiesToken: a bridge starts only with a token the Agent
+// API accepts; a forged token, or one of an archived agent, fails closed
+// without the token in the error.
+func TestAgentBridgeVerifiesToken(t *testing.T) {
+	srv, tokens := agentAPI(t)
+	api := func(tok string) API {
+		return client.New(client.Config{BaseURL: srv.URL, Workspace: "ws",
+			Token: func(context.Context) (string, error) { return tok, nil }})
+	}
+	ctx := context.Background()
+	if err := Verify(ctx, api(tokens.Agent("ws", "a1"))); err != nil {
+		t.Fatalf("Verify with a1's token: %v", err)
+	}
+	forged := agentsv1.NewTokens([]byte(strings.Repeat("x", 32))).Agent("ws", "a1")
+	if err := Verify(ctx, api(forged)); err == nil || !strings.Contains(err.Error(), "refused") || strings.Contains(err.Error(), forged) {
+		t.Fatalf("Verify with a forged token = %v; want a clear refusal without the token", err)
+	}
+	if err := api(tokens.Daemon("ws")).Archive(ctx, "arch-a1", "a1", "done"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(ctx, api(tokens.Agent("ws", "a1"))); err == nil {
+		t.Fatal("Verify accepted the token of an archived agent")
 	}
 }
 

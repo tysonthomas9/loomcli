@@ -30,6 +30,8 @@ type Client struct {
 	shellEnv func() ([]string, error)    // environment for session shell commands; nil leaves OpenCode's default
 	presets  string                      // the worktrees root whose .opencode/agent holds Loom's presets; "" refuses preset sessions
 	defined  func(agent string) bool     // whether Loom currently defines the loom-* agent; nil skips the check
+	// bridgeFile names a worktree's bridge settings file; nil refuses settings
+	bridgeFile func(dir string) (string, error)
 
 	rulesMu sync.Mutex
 	rules   map[string][]map[string]string // native session id -> the rules Loom last installed

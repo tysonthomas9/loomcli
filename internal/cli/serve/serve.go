@@ -243,7 +243,7 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
 	if api := startAgentAPI(ctx, cfg); api != nil {
-		cfg.AgentAPIRoutes = api.Register
+		wireAgentAPI(&cfg, api)
 		defer api.Stop()
 	}
 	webuiErr := make(chan error, 1)
@@ -260,19 +260,31 @@ func startAgentAPI(ctx context.Context, cfg webui.ServerConfig) *agentwire.API {
 	if bin == "" {
 		bin = filepath.Join(bootstrap.LoomDir(), "harness/opencode/2.0.19/opencode")
 	}
-	// The bridges call back on loopback unless serve binds one address only.
-	// A fallback port (the configured one was taken) is not seen here.
-	host := cfg.BindAddress
-	if ip := net.ParseIP(host); host == "" || ip != nil && ip.IsUnspecified() {
-		host = "127.0.0.1"
-	}
 	api, err := agentwire.Start(ctx, agentwire.Config{Dir: bootstrap.LoomDir(),
-		OpenCodeBin: bin, Skills: cfg.Store, APIBase: "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Port))})
+		OpenCodeBin: bin, Skills: cfg.Store, APIBase: agentAPIBase(cfg.BindAddress, cfg.Port)})
 	if err != nil {
 		slog.Warn("Agent API not started", "error", err)
 		return nil
 	}
 	return api
+}
+
+// wireAgentAPI mounts api on the server cfg configures and points its
+// bridges at the port the server actually binds, which is a fallback when
+// the configured one is taken.
+func wireAgentAPI(cfg *webui.ServerConfig, api *agentwire.API) {
+	cfg.AgentAPIRoutes = api.Register
+	bind := cfg.BindAddress
+	cfg.OnListen = func(port int) { api.SetAPIBase(agentAPIBase(bind, port)) }
+}
+
+// agentAPIBase is the origin the bridges call back to: loopback unless
+// serve binds one address only.
+func agentAPIBase(bind string, port int) string {
+	if ip := net.ParseIP(bind); bind == "" || ip != nil && ip.IsUnspecified() {
+		bind = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(bind, strconv.Itoa(port))
 }
 
 func configureServeLocalRuntimeMode() {

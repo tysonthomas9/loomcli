@@ -34,6 +34,9 @@ type Config struct {
 	// starts it in each session's directory, where it finds that agent's
 	// settings (bridgeEnv). nil registers none.
 	Bridge []string
+	// BridgeFile names where the settings of the agent whose worktree is dir
+	// go (agentmcp.EnvFile); nil refuses an agent with settings.
+	BridgeFile func(dir string) (string, error)
 }
 
 // Supervisor timings; variables so tests can shorten them.
@@ -101,7 +104,7 @@ func New(cfg Config) *Adapter {
 	if cfg.Worktrees != "" {
 		a.presets = filepath.Clean(cfg.Worktrees)
 	}
-	a.defined = a.definesPreset
+	a.defined, a.bridgeFile = a.definesPreset, cfg.BridgeFile
 	return a
 }
 
@@ -509,16 +512,21 @@ func replaceFile(file string, content []byte) error {
 	return nil
 }
 
-// bridgeEnv writes the agent's bridge settings (its Launch.Env) beside its
-// worktree dir, where the bridge OpenCode starts in dir reads them
-// (agentmcp.EnvFile; the same name).
-func bridgeEnv(dir string, env map[string]string) error {
+// bridgeEnv writes the agent's bridge settings (its Launch.Env, with its
+// token) where the bridge OpenCode starts in dir reads them, mode 0600.
+func (c *Client) bridgeEnv(dir string, env map[string]string) error {
+	if c.bridgeFile == nil {
+		return errors.New("no bridge settings file configured")
+	}
+	file, err := c.bridgeFile(dir)
+	if err != nil {
+		return err
+	}
 	raw, err := json.Marshal(env)
 	if err != nil {
 		return err
 	}
-	dir = filepath.Clean(dir)
-	return replaceFile(filepath.Join(filepath.Dir(dir), "."+filepath.Base(dir)+".loom-bridge.json"), raw)
+	return replaceFile(file, raw)
 }
 
 // answers reports whether the server at base is up and is process pid.
