@@ -2,6 +2,9 @@ package cleanup
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,7 +13,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
-	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 type e2eWorkspace struct{}
@@ -31,12 +33,14 @@ func (e2eWorkspace) Publish(context.Context, loomagent.PublishRequest) (loomagen
 
 // TestUsageShowsNewAgentTokens is end to end on the fake harness: a new
 // Agent API agent runs a turn with two usage steps through the real
-// loomagent service, and loom usage's read of that agents.db shows the
-// steps' summed tokens and cost.
+// loomagent service, and `loom usage --format json` (its command path, on
+// that agents.db as the Loom data dir) shows the steps' summed tokens and cost.
 func TestUsageShowsNewAgentTokens(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dir) // agents.db is read from the Loom data dir
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", dir)
 	st, err := loomstore.Open(ctx, filepath.Join(dir, "agents.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -69,23 +73,55 @@ func TestUsageShowsNewAgentTokens(t *testing.T) {
 		Text: "go", Source: "user_chat", Actor: loomagent.ActorRef{Kind: "user", ID: "u"}}); err != nil {
 		t.Fatal(err)
 	}
-	var rec usage.SessionUsage
-	for deadline := time.Now().Add(10 * time.Second); ; {
-		recs, err := readAgentUsage(ctx, dir, "ws", usage.Filter{})
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		p, err := st.ListEvents(ctx, loomstore.EventQuery{AgentID: info.AgentID, Kinds: []string{"usage"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if recs = joinUsage(nil, recs); len(recs) == 1 && recs[0].OutputTokens == 15 {
-			rec = recs[0]
+		if len(p.Events) == 2 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("loom usage never showed the turn's tokens: %+v", recs)
+			t.Fatalf("the turn's 2 usage rows were never saved: %d", len(p.Events))
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	if rec.AgentName != "nova" || rec.Backend != "opencode" || rec.InputTokens != 150 || rec.CacheReadTokens != 5 ||
-		rec.CacheWriteTokens != 1 || rec.EstimatedCostUSD != 0.75 {
-		t.Fatalf("loom usage record = %+v", rec)
+
+	var out struct {
+		Input      int64   `json:"total_input_tokens"`
+		Output     int64   `json:"total_output_tokens"`
+		CacheRead  int64   `json:"total_cache_read_tokens"`
+		CacheWrite int64   `json:"total_cache_write_tokens"`
+		Cost       float64 `json:"total_cost"`
+		Sessions   []struct {
+			AgentName string `json:"agent_name"`
+		} `json:"sessions"`
 	}
+	if err := json.Unmarshal(runUsageJSON(t), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sessions) != 1 || out.Sessions[0].AgentName != "nova" || out.Input != 150 || out.Output != 15 ||
+		out.CacheRead != 5 || out.CacheWrite != 1 || out.Cost != 0.75 {
+		t.Fatalf("loom usage --format json = %+v", out)
+	}
+}
+
+// runUsageJSON runs `loom usage --format json` and returns what it printed.
+func runUsageJSON(t *testing.T) []byte {
+	t.Helper()
+	if err := usageCmd.Flags().Set("format", "json"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = usageCmd.Flags().Set("format", "table") })
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = stdout }()
+	got := make(chan []byte)
+	go func() { b, _ := io.ReadAll(r); got <- b }()
+	usageCmd.Run(usageCmd, nil)
+	_ = w.Close()
+	return <-got
 }
