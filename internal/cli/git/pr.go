@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/user"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -11,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
 
 var prWorkspace string
@@ -85,6 +87,55 @@ func init() {
 	}
 	deliveryModeCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(deliveryModeCmd)
+	leadMayMergeCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
+	cli.RegisterCommand(leadMayMergeCmd)
+}
+
+var setWorkspacePolicy = publish.SetWorkspacePolicyLocal
+
+var leadMayMergeCmd = &cobra.Command{
+	Use:     "lead-may-merge [off|when_green]",
+	Short:   "Show or set whether the lead may merge a stack once the provider shows it green",
+	GroupID: "git",
+	Long: `With when_green, Reconcile lets the lead merge a Loom stack up to the highest layer whose
+required checks and reviews pass on the provider, with no confirmation. Loom follows the repo's
+branch protection and adds no review requirement of its own. Only a human can change this setting.`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runLeadMayMerge,
+}
+
+func runLeadMayMerge(cmd *cobra.Command, args []string) error {
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		return err
+	}
+	if selected, _ := cmd.Flags().GetString("workspace"); selected != "" {
+		if err := resolver.SetWorkspace(selected); err != nil {
+			return err
+		}
+	}
+	workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
+	if len(args) == 1 {
+		name := "local-user"
+		if current, err := user.Current(); err == nil && current.Username != "" {
+			name = current.Username
+		}
+		warning, err := setWorkspacePolicy(cmd.Context(), workspace.ID, args[0], review.Actor{Kind: "human", ID: name}, os.Environ())
+		if err != nil {
+			return err
+		}
+		if warning != "" {
+			if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+warning); err != nil {
+				return err
+			}
+		}
+	}
+	policy, err := publish.LeadMayMergeLocal(cmd.Context(), workspace.ID)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), policy.Value)
+	return err
 }
 
 var mergeUpToCmd = &cobra.Command{

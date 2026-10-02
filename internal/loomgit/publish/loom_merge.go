@@ -69,8 +69,13 @@ func recordLoomMerge(ctx context.Context, store *journal.SQLite, request StackRe
 	if err != nil {
 		return err
 	}
-	_, err = store.BeginLoomMerge(ctx, journal.LoomMerge{Workspace: request.Workspace,
-		StackID: request.StackID, Target: target, RequestID: fmt.Sprintf("loom-merge:%s:%s:%s", request.Workspace, request.StackID, target), Layers: layers})
+	merge := journal.LoomMerge{Workspace: request.Workspace, StackID: request.StackID, Target: target,
+		RequestID: fmt.Sprintf("loom-merge:%s:%s:%s", request.Workspace, request.StackID, target), Layers: layers}
+	if policy, ok := request.MergeAuthority.(whenGreenMerge); ok {
+		merge.RequestID = "lead-" + strings.TrimPrefix(merge.RequestID, "loom-")
+		merge.Authority, merge.PolicySetBy = leadMergeAuthority, policy.SetBy
+	}
+	_, err = store.BeginLoomMerge(ctx, merge)
 	return err
 }
 

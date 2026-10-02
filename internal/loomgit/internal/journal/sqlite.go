@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 
@@ -115,6 +116,7 @@ func OpenSQLite(path string) (*SQLite, error) {
 		{"provider journal", createProviderSchema},
 		{"feedback journal", createFeedbackSchema},
 		{"delivery mode", ensureDeliveryMode},
+		{"lead merge policy", ensureLeadMayMerge},
 		{"abandonment journal", createAbandonSchema},
 		{"retention journal", createRetentionSchema},
 	} {
@@ -151,6 +153,146 @@ func (s *SQLite) SetLeadMayApprovePublish(ctx context.Context, workspace string,
 	_, err := s.db.ExecContext(ctx, `INSERT INTO workspace_settings(workspace, lead_may_approve_publish) VALUES (?, ?)
 		ON CONFLICT(workspace) DO UPDATE SET lead_may_approve_publish = excluded.lead_may_approve_publish`, workspace, value)
 	return err
+}
+
+// LeadMayMergeWarning is shown whenever lead_may_merge=when_green is on.
+const LeadMayMergeWarning = "no required review: Loom adds no review requirement of its own, so on a repo " +
+	"without a required-review rule an agent chain can land code no human reviewed"
+
+// LeadMergePolicy is the human-set lead_may_merge setting for one workspace.
+type LeadMergePolicy struct{ Workspace, Value, SetBy string }
+
+// LeadMergeStack is a Loom-backend stack in a workspace whose lead may merge when green.
+type LeadMergeStack struct{ Workspace, StackID, Backend, Lead, SetBy string }
+
+// PolicyChange is one durable change of a workspace merge policy.
+type PolicyChange struct {
+	Workspace, Setting, Old, New, Actor, ChangedAt string
+}
+
+func ensureLeadMayMerge(db *sql.DB) error {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workspace_policy_changes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, workspace TEXT NOT NULL, setting TEXT NOT NULL,
+		old_value TEXT NOT NULL, new_value TEXT NOT NULL, actor TEXT NOT NULL,
+		changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))`); err != nil {
+		return err
+	}
+	for _, column := range []string{"lead_may_merge TEXT NOT NULL DEFAULT 'off'", "lead_may_merge_set_by TEXT NOT NULL DEFAULT ''"} {
+		if _, err := db.Exec(`ALTER TABLE workspace_settings ADD COLUMN ` + column); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
+}
+
+// LeadMayMerge defaults off for workspaces without an explicit setting.
+func (s *SQLite) LeadMayMerge(ctx context.Context, workspace string) (LeadMergePolicy, error) {
+	policy := LeadMergePolicy{Workspace: workspace, Value: "off"}
+	if workspace == "" {
+		return policy, errors.New("workspace is required")
+	}
+	err := s.db.QueryRowContext(ctx, `SELECT lead_may_merge,lead_may_merge_set_by FROM workspace_settings WHERE workspace=?`,
+		workspace).Scan(&policy.Value, &policy.SetBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return policy, nil
+	}
+	return policy, err
+}
+
+func (s *SQLite) SetLeadMayMerge(ctx context.Context, workspace, value, setBy string) error {
+	if workspace == "" || setBy == "" {
+		return errors.New("workspace and setter are required")
+	}
+	if value != "off" && value != "when_green" {
+		return fmt.Errorf("invalid lead_may_merge %q", value)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	old := "off"
+	err = tx.QueryRowContext(ctx, `SELECT lead_may_merge FROM workspace_settings WHERE workspace=?`, workspace).Scan(&old)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_settings(workspace,lead_may_merge,lead_may_merge_set_by) VALUES (?,?,?)
+		ON CONFLICT(workspace) DO UPDATE SET lead_may_merge=excluded.lead_may_merge,lead_may_merge_set_by=excluded.lead_may_merge_set_by`,
+		workspace, value, setBy); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_policy_changes(workspace,setting,old_value,new_value,actor)
+		VALUES (?,'lead_may_merge',?,?,?)`, workspace, old, value, setBy); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// PolicyChanges returns every recorded policy change for a workspace, oldest first.
+func (s *SQLite) PolicyChanges(ctx context.Context, workspace string) ([]PolicyChange, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,setting,old_value,new_value,actor,changed_at
+		FROM workspace_policy_changes WHERE workspace=? ORDER BY id`, workspace)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var changes []PolicyChange
+	for rows.Next() {
+		var change PolicyChange
+		if err := rows.Scan(&change.Workspace, &change.Setting, &change.Old, &change.New, &change.Actor, &change.ChangedAt); err != nil {
+			return nil, err
+		}
+		changes = append(changes, change)
+	}
+	return changes, rows.Err()
+}
+
+// LeadMergePolicies lists workspaces with lead_may_merge=when_green. A read-only
+// store from before the setting (or its table) existed has none.
+func (s *SQLite) LeadMergePolicies(ctx context.Context) ([]LeadMergePolicy, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,lead_may_merge,lead_may_merge_set_by FROM workspace_settings
+		WHERE lead_may_merge='when_green' ORDER BY workspace`)
+	if err != nil && (strings.Contains(err.Error(), "no such column") || strings.Contains(err.Error(), "no such table")) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var policies []LeadMergePolicy
+	for rows.Next() {
+		var policy LeadMergePolicy
+		if err := rows.Scan(&policy.Workspace, &policy.Value, &policy.SetBy); err != nil {
+			return nil, err
+		}
+		policies = append(policies, policy)
+	}
+	return policies, rows.Err()
+}
+
+// LeadMergeStacks lists Loom and native stacks whose workspace lets the lead merge
+// when green, with the lead whose working area applied the stack.
+func (s *SQLite) LeadMergeStacks(ctx context.Context) ([]LeadMergeStack, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT b.workspace,b.stack_id,b.backend,ws.lead_may_merge_set_by,
+		COALESCE((SELECT a.lead FROM applied_layers a JOIN change_publications p
+			ON p.workspace=a.workspace AND p.change_id=a.change_id
+			WHERE p.workspace=b.workspace AND p.stack_id=b.stack_id AND a.phase='done'
+			ORDER BY a.rowid DESC LIMIT 1),'')
+		FROM stack_backends b JOIN workspace_settings ws ON ws.workspace=b.workspace
+		WHERE b.backend IN ('loom','native') AND ws.lead_may_merge='when_green' ORDER BY b.workspace,b.stack_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var stacks []LeadMergeStack
+	for rows.Next() {
+		var stack LeadMergeStack
+		if err := rows.Scan(&stack.Workspace, &stack.StackID, &stack.Backend, &stack.SetBy, &stack.Lead); err != nil {
+			return nil, err
+		}
+		stacks = append(stacks, stack)
+	}
+	return stacks, rows.Err()
 }
 
 // AutoCommit defaults on for workspaces without an explicit setting.
