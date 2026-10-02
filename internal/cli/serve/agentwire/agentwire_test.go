@@ -123,7 +123,8 @@ func TestStartResumesWorkspacesWithAgents(t *testing.T) {
 }
 
 // TestCreateRejectsUnknownRepo: a repo that is not the path of a clone, such
-// as a repo's name, is a 400 at Create, not a git failure (500).
+// as a repo's name, a missing path or a directory that is not a git clone, is
+// a 400 at Create, not a git failure (500).
 func TestCreateRejectsUnknownRepo(t *testing.T) {
 	dir := t.TempDir()
 	api, err := Start(context.Background(), Config{Dir: dir, OpenCodeBin: filepath.Join(dir, "no-opencode")})
@@ -137,7 +138,7 @@ func TestCreateRejectsUnknownRepo(t *testing.T) {
 			next.ServeHTTP(w, r.WithContext(middleware.WithWorkspace(r.Context(), r.PathValue("ws"))))
 		})
 	}, nil)
-	for _, repo := range []string{"agv1-lead-repo", filepath.Join(dir, "missing")} {
+	for _, repo := range []string{"agv1-lead-repo", filepath.Join(dir, "missing"), dir} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("POST", "/api/workspaces/ws/v1/agents",
 			strings.NewReader(`{"preset":"lead","name":"l","repo":"`+repo+`","base_ref":"main","overrides":{"harness":"opencode"}}`))
