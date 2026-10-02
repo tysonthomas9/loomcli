@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/agentmcp"
 	"github.com/tysonthomas9/loomcli/internal/agentworktree"
@@ -112,6 +113,10 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 	for _, ag := range known {
 		a.service(ag.WorkspaceID)
 	}
+	if d, err := time.ParseDuration(os.Getenv(retentionEnv)); err == nil && d > 0 {
+		loomstore.HistoryRetention, retentionTick = d, d/3
+	}
+	a.run(a.runRetention)
 	return a, nil
 }
 

@@ -62,8 +62,9 @@ type ServiceConfig struct {
 	// Interrupt stops a's running turn; nil uses the current session's own
 	// Interrupt, the same call on every harness.
 	Interrupt func(ctx context.Context, a loomstore.Agent) error
-	// Purge removes exactly the native sessions a owns (2.1c's R29 hook); nil
-	// until 2.1c wires it. A failure leaves the Delete pending for Reconcile.
+	// Purge removes exactly the native sessions a owns (R29); nil purges each
+	// through its recorded harness. A failure leaves the Delete pending for
+	// Reconcile.
 	Purge func(ctx context.Context, a loomstore.Agent, owned []loomstore.NativeSession) error
 	// Harnesses are the wired harness runtimes by name.
 	Harnesses map[string]loomharness.Harness
@@ -152,6 +153,9 @@ func New(cfg ServiceConfig) *Service {
 	}
 	if s.interrupt == nil {
 		s.interrupt = s.sessionInterrupt
+	}
+	if s.purge == nil {
+		s.purge = s.purgeOwned
 	}
 	if s.backend == nil {
 		s.backend = func(context.Context) (Backend, error) { return Backend{}, nil }

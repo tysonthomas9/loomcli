@@ -206,8 +206,8 @@ func nativeSessionOwner(ctx context.Context, q interface {
 }
 
 // HistoryRetention is how long history outlives Archive (interactive) or the
-// terminal finish (background), per R29.
-const HistoryRetention = 30 * 24 * time.Hour
+// terminal finish (background), per R29. Only AFT shortens it.
+var HistoryRetention = 30 * 24 * time.Hour
 
 // retentionDue is the sweep predicate; it binds the cutoff twice.
 const retentionDue = `history_purged_at IS NULL AND (deleted_at IS NOT NULL
@@ -239,6 +239,16 @@ func (s *Store) RetentionDue(ctx context.Context, now time.Time) ([]string, erro
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// Due reports whether agentID is still due for purge at now.
+func (s *Store) Due(ctx context.Context, agentID string, now time.Time) (bool, error) {
+	cutoff := Stamp(now.Add(-HistoryRetention))
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM agents WHERE agent_id = ? AND `+retentionDue, agentID, cutoff, cutoff).Scan(new(int))
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // MarkHistoryPurged re-checks that agentID is still due at now, then sets

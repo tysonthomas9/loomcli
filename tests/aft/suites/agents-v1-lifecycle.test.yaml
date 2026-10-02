@@ -98,3 +98,70 @@ tests:
           assert "while archived" not in body, "a message sent while archived reached the model"
           PY
         intent: "Check that only the messages sent while unarchived reached the model"
+
+  - name: the retention sweep expires an archived lead's history
+    intent: Once serve's R29 sweep passes an archived lead's (AFT-shortened) retention, its chat no longer shows the old history and Unarchive and ListEvents report history_expired
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LIFE/v1/agents
+          headers: { Idempotency-Key: "agv1-expiry-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-expiry-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-life-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1ExpiryId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-BEFORE-EXPIRY"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LIFE/chat/$(cat "$AFT_WORK_DIR/agv1ExpiryId")"
+        intent: "Script one reply and open the lead's chat"
+      - fill: { label: Message, value: "before expiry" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-BEFORE-EXPIRY') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 90000
+        intent: "Wait until the reply arrives and the lead is idle"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}/archive"
+          headers: { Idempotency-Key: "agv1-expiry-archive-${RUN_ID:-local}" }
+          body: { reason: done }
+        intent: "Archive the lead, which starts its retention clock"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1ExpiryId")"
+          for _ in $(seq 1 60); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE/v1/agents/$id" |
+              python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("history_purged_at") else 1)' && exit 0
+            sleep 2
+          done
+          echo "the sweep did not expire the lead's history" >&2
+          exit 1
+        intent: "Wait (retention 60s, sweep every 20s) until serve's own sweep marks the history purged"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('archived') &&
+            !(document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-BEFORE-EXPIRY')
+        intent: "Wait until the reloaded chat shows the lead archived with its old history gone"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}/unarchive"
+          headers: { Idempotency-Key: "agv1-expiry-unarchive-${RUN_ID:-local}" }
+          status: 410
+          assert:
+            - path: code
+              equals: history_expired
+        intent: "Check that Unarchive reports history_expired"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}/events"
+          status: 410
+          assert:
+            - path: code
+              equals: history_expired
+        intent: "Check that ListEvents reports history_expired"

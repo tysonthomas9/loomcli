@@ -598,7 +598,10 @@ start_fake_model() {
 JSON
     # GOCACHE is pinned because Go reads XDG_CACHE_HOME on Linux and serve's
     # start script builds loom.
+    # LOOM_AGENT_HISTORY_RETENTION shortens R29 retention, and its sweep, to
+    # a minute so agents-v1-lifecycle can watch the real sweep expire history.
     OPENCODE_ENV=(LOOM_OPENCODE_BIN="$LOOM_OPENCODE_BIN" GOCACHE="$(go env GOCACHE)" OPENCODE_DISABLE_MODELS_FETCH=1
+        LOOM_AGENT_HISTORY_RETENTION=60s
         XDG_CONFIG_HOME="$OPENCODE_SBX/config" XDG_DATA_HOME="$OPENCODE_SBX/data"
         XDG_STATE_HOME="$OPENCODE_SBX/state" XDG_CACHE_HOME="$OPENCODE_SBX/cache")
     echo "[aft] fake-model ready at $AFT_FAKE_MODEL_URL; OpenCode sandbox $OPENCODE_SBX"
