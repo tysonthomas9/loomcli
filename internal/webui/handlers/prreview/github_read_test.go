@@ -215,6 +215,24 @@ func TestGitHubReadPagination(t *testing.T) {
 	}
 }
 
+// TestGitHubReadStackHealthRedacts: a stack_health failure whose GitHub
+// error echoes the host token, here one from sealed settings that the forge's
+// env-only scrub does not know, reaches the agent without it.
+func TestGitHubReadStackHealthRedacts(t *testing.T) {
+	const tok = "ghp_settingsOnlyToken0123456789abcdef"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, tok)
+	h.rememberLocalPaths(t, "/clones", "hello", readRepoPath)
+	for _, status := range []int{http.StatusOK, http.StatusBadGateway} {
+		h.github.extra = map[string]http.HandlerFunc{"/graphql": func(w http.ResponseWriter, _ *http.Request) {
+			writeUpstreamJSON(w, status, map[string]any{"message": "bad credential " + tok, "errors": []any{map[string]any{"message": "token " + tok + " rejected"}}})
+		}}
+		_, err := h.read(t, "stack_health", map[string]any{"head": "loom/stack/"})
+		if err == nil || strings.Contains(err.Error(), tok) {
+			t.Errorf("status %d: err %v; want a failure without the token", status, err)
+		}
+	}
+}
+
 // TestGitHubReadStackHealthPages: stack_health answers one bounded page of
 // the stack's PRs, at most 100, with next while more remain.
 func TestGitHubReadStackHealthPages(t *testing.T) {

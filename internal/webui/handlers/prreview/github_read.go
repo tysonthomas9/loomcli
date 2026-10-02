@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
@@ -95,8 +96,8 @@ func (m *Module) stackHealth(ctx context.Context, owner, repo string, args map[s
 	prefix, _ := args["head"].(string)
 	forge := stackpublish.NewGitHubForge(token, nil, os.Getenv(connector.GitHubBaseURLEnvVar))
 	health, err := forge.PRStatuses(ctx, owner, repo, prefix)
-	if err != nil {
-		return nil, err
+	if err != nil { // the forge scrubs only env tokens; this one may be from settings
+		return nil, errors.New(strings.ReplaceAll(err.Error(), token, "[redacted]"))
 	}
 	items := []any{}
 	for head, s := range health {
