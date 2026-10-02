@@ -43,7 +43,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 	if err != nil || revision < 1 {
 		return fmt.Errorf("revision must be a positive number; branch Push is unavailable")
 	}
-	resolver, err := pushResolver()
+	resolver, err := resolverFor(pushWorkspace, pushResolver)
 	if err != nil {
 		return err
 	}
