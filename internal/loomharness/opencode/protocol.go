@@ -28,11 +28,77 @@ type Client struct {
 	http     *http.Client
 	ready    func(context.Context) error // starts a supervised server on first use; nil for a fixed one
 	shellEnv func() ([]string, error)    // environment for session shell commands; nil leaves OpenCode's default
+	presets  string                      // the worktrees root whose .opencode/agent holds Loom's presets; "" refuses preset sessions
+	defined  func(agent string) bool     // whether Loom currently defines the loom-* agent; nil skips the check
+
+	rulesMu sync.Mutex
+	rules   map[string][]map[string]string // native session id -> the rules Loom last installed
+	grants  map[string][]map[string]string // native session id -> its "always allow" grants (Reply.Always)
+	held    map[string]string              // native session id -> why it is quarantined (an unconfirmed grant)
+	roots   map[string]string              // native session id -> the Root Loom opened or resumed it with
+
+	idsMu sync.Mutex
+	ids   map[string]*idLock // native session id -> its lock while Open, Resume or Purge uses it
+}
+
+// lockWaitHook, test only, is told when a caller has to wait for an id's lock.
+var lockWaitHook func(id string)
+
+// idLock serializes Open, Resume and Purge of one native session id; n
+// counts holders and waiters, and the entry is deleted when it drops to 0.
+type idLock struct {
+	mu sync.Mutex
+	n  int
+}
+
+// lockID serializes Open, Resume, Purge, Prompt and Reply of one native
+// session id (per id, not global), so Open's "did not exist before" holds
+// from its GET through any cleanup, neither a Purge nor a Resume of the same
+// id interleaves with it, and a quarantine (Reply) never lands between
+// Prompt's check and its POST. No holder waits on the session's events. It
+// returns the unlock. The entry is counted before its mutex is taken, so it
+// is never deleted while a caller waits on it.
+func (c *Client) lockID(id string) func() {
+	c.idsMu.Lock()
+	l := c.ids[id]
+	if l == nil {
+		l = &idLock{}
+		c.ids[id] = l
+	}
+	l.n++
+	waiting := l.n > 1
+	c.idsMu.Unlock()
+	if waiting && lockWaitHook != nil {
+		lockWaitHook(id)
+	}
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		c.idsMu.Lock()
+		if l.n--; l.n == 0 {
+			delete(c.ids, id)
+		}
+		c.idsMu.Unlock()
+	}
+}
+
+// remember records the Root of a session Loom opened or resumed, for the feed.
+func (c *Client) remember(ref loomharness.NativeRef) {
+	c.rulesMu.Lock()
+	defer c.rulesMu.Unlock()
+	c.roots[ref.NativeID] = ref.Root
+}
+
+// rootOf is the recorded Root of a session, or "".
+func (c *Client) rootOf(nativeID string) string {
+	c.rulesMu.Lock()
+	defer c.rulesMu.Unlock()
+	return c.roots[nativeID]
 }
 
 // NewClient returns a client for the server at base with the per-boot password.
 func NewClient(base, password string) *Client {
-	return &Client{base: strings.TrimRight(base, "/"), password: password, http: &http.Client{}}
+	return &Client{base: strings.TrimRight(base, "/"), password: password, http: &http.Client{}, rules: map[string][]map[string]string{}, roots: map[string]string{}, grants: map[string][]map[string]string{}, held: map[string]string{}, ids: map[string]*idLock{}}
 }
 
 func (c *Client) setEndpoint(base, password string) {

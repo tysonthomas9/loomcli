@@ -2,15 +2,21 @@ package opencode
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
@@ -29,11 +35,26 @@ type store struct {
 	envFail  bool
 	bareRuns int // prompts accepted while the session had no environment
 	patchErr bool
+	delErr   bool                // DELETE /api/session/{id} fails
+	patchLie int                 // the next n session PATCHes commit, then answer 500
+	hangLie  bool                // a PATCH that commits (patchLie) never answers instead
+	stops    int                 // POST /interrupt calls
+	lateRuns int                 // prompts accepted after an interrupt
+	stopErr  bool                // POST /interrupt answers 500
+	stopHang bool                // POST /interrupt never answers
+	postErr  bool                // POST /api/session creates the session, then fails
+	race     *openRace           // pairs two concurrent session GETs, counts creates
+	perms    map[string]permReq  // pending permission asks by id, readable and answerable
+	replies  map[string]string   // permission ask id -> the decision Loom sent
+	agents   map[string]bool     // agent ids the service offers
+	agentDir []string            // location[directory] of each agent lookup
+	loading  bool                // the location lists no agents yet
+	asks     map[string][]string // pending per_/frm_ ask ids, per session
 }
 
 func newStore() *store {
 	return &store{sessions: map[string]map[string]any{}, messages: map[string][]map[string]any{}, active: map[string]string{},
-		envs: map[string]map[string]string{}}
+		envs: map[string]map[string]string{}, perms: map[string]permReq{}, replies: map[string]string{}}
 }
 
 func fakeServer(t *testing.T, st *store) *Client {
@@ -54,12 +75,36 @@ func fakeServer(t *testing.T, st *store) *Client {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		id, _ := body["id"].(string)
+		if st.race != nil {
+			if st.race.posts++; st.race.posts == st.race.failPost {
+				st.sessions[id] = body // committed, then the reply is lost
+				reply(w, 504, map[string]string{"_tag": "UnknownError", "message": "timeout"})
+				return
+			}
+		}
 		if _, ok := st.sessions[id]; ok {
 			reply(w, 409, map[string]string{"_tag": "ConflictError", "message": "exists"})
 			return
 		}
 		st.sessions[id] = body
+		if st.postErr {
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "boom after commit"})
+			return
+		}
 		reply(w, 200, map[string]any{"data": body})
+	})
+	mux.HandleFunc("GET /api/agent", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		st.agentDir = append(st.agentDir, r.URL.Query().Get("location[directory]"))
+		data := []map[string]string{{"id": "build"}}
+		if st.loading {
+			data = nil
+		}
+		for id := range st.agents {
+			data = append(data, map[string]string{"id": id})
+		}
+		reply(w, 200, map[string]any{"data": data})
 	})
 	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
 		st.mu.Lock()
@@ -71,6 +116,9 @@ func fakeServer(t *testing.T, st *store) *Client {
 		reply(w, 200, map[string]any{"data": data})
 	})
 	mux.HandleFunc("GET /api/session/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if st.race != nil {
+			st.race.pair()
+		}
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		if s, ok := st.sessions[r.PathValue("id")]; ok {
@@ -90,6 +138,16 @@ func fakeServer(t *testing.T, st *store) *Client {
 			missing(w, r.PathValue("id"))
 		case st.patchErr:
 			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "boom"})
+		case st.patchLie > 0:
+			st.patchLie--
+			s["permissions"] = body["permissions"]
+			if st.hangLie && st.patchLie == 0 {
+				st.mu.Unlock()
+				<-r.Context().Done()
+				st.mu.Lock()
+				return
+			}
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "boom after commit"})
 		default:
 			if p, ok := body["permissions"]; ok {
 				s["permissions"] = p
@@ -102,6 +160,10 @@ func fakeServer(t *testing.T, st *store) *Client {
 		defer st.mu.Unlock()
 		id := r.PathValue("id")
 		st.deleted = append(st.deleted, id)
+		if st.delErr {
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "disk full"})
+			return
+		}
 		if _, ok := st.sessions[id]; !ok {
 			missing(w, id)
 			return
@@ -127,6 +189,9 @@ func fakeServer(t *testing.T, st *store) *Client {
 		}
 		if st.envs[id] == nil {
 			st.bareRuns++
+		}
+		if st.stops > 0 {
+			st.lateRuns++
 		}
 		m := map[string]any{"id": body["id"], "type": "user", "text": body["text"], "time": map[string]int64{"created": 1}}
 		st.messages[id] = append(st.messages[id], m)
@@ -158,18 +223,110 @@ func fakeServer(t *testing.T, st *store) *Client {
 		st.sessions[r.PathValue("id")]["location"] = map[string]any{"directory": body["directory"]}
 		w.WriteHeader(204)
 	})
-	// The message list pages by index; the cursor is the next index.
+	// The message list pages like OpenCode's: the cursor is base64url JSON
+	// {id, order, direction} of the page's last message, and a cursor on an
+	// unknown message gives an empty page.
 	mux.HandleFunc("GET /api/session/{id}/message", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		all := st.messages[r.PathValue("id")]
-		from, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
-		to := len(all)
+		order, from := r.URL.Query().Get("order"), 0
+		if order == "" {
+			order = "desc"
+		}
+		if c := r.URL.Query().Get("cursor"); c != "" {
+			var cur struct{ ID, Order string }
+			raw, _ := base64.RawURLEncoding.DecodeString(c)
+			_ = json.Unmarshal(raw, &cur)
+			order, from = cur.Order, -1
+			for i, m := range all {
+				if m["id"] == cur.ID {
+					from = i
+				}
+			}
+			if from < 0 {
+				reply(w, 200, map[string]any{"data": []any{}, "cursor": map[string]string{}})
+				return
+			}
+			if order == "asc" {
+				from++
+			} else {
+				from = len(all) - from
+			}
+		}
+		seq := make([]map[string]any, 0, len(all))
+		for i := range all {
+			if order == "asc" {
+				seq = append(seq, all[i])
+			} else {
+				seq = append(seq, all[len(all)-1-i])
+			}
+		}
+		to := len(seq)
 		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && from+n < to {
 			to = from + n
 		}
-		reply(w, 200, map[string]any{"data": all[from:to], "cursor": map[string]string{"next": strconv.Itoa(to)}})
+		page := seq[from:to]
+		next := ""
+		if len(page) > 0 {
+			raw, _ := json.Marshal(map[string]any{"id": page[len(page)-1]["id"], "order": order, "direction": "next"})
+			next = base64.RawURLEncoding.EncodeToString(raw)
+		}
+		reply(w, 200, map[string]any{"data": page, "cursor": map[string]string{"next": next}})
 	})
+	pending := func(prefix string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			out := []map[string]string{}
+			for _, id := range st.asks[r.PathValue("id")] {
+				if strings.HasPrefix(id, prefix) {
+					out = append(out, map[string]string{"id": id})
+				}
+			}
+			reply(w, 200, map[string]any{"data": out})
+		}
+	}
+	mux.HandleFunc("POST /api/session/{id}/interrupt", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		st.stops++
+		fail, hang := st.stopErr, st.stopHang
+		st.mu.Unlock()
+		switch {
+		case hang:
+			<-r.Context().Done()
+		case fail:
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "stop failed"})
+		default:
+			reply(w, 200, map[string]any{"data": map[string]bool{"interrupted": true}})
+		}
+	})
+	mux.HandleFunc("GET /api/session/{id}/permission", pending("per_"))
+	mux.HandleFunc("GET /api/session/{id}/permission/{rid}", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		p, ok := st.perms[r.PathValue("rid")]
+		if !ok || p.Session != r.PathValue("id") {
+			reply(w, 404, map[string]string{"_tag": "PermissionNotFoundError", "message": "no request"})
+			return
+		}
+		reply(w, 200, map[string]any{"data": p})
+	})
+	mux.HandleFunc("POST /api/session/{id}/permission/{rid}/reply", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		rid := r.PathValue("rid")
+		if p, ok := st.perms[rid]; !ok || p.Session != r.PathValue("id") {
+			reply(w, 404, map[string]string{"_tag": "PermissionNotFoundError", "message": "no request"})
+			return
+		}
+		delete(st.perms, rid)
+		st.replies[rid] = body["decision"]
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("GET /api/session/{id}/form", pending("frm_"))
 	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
 		var lines []string
@@ -214,7 +371,9 @@ func TestProtocolDerivedIDs(t *testing.T) {
 func TestProtocolSessionMethods(t *testing.T) {
 	ctx := context.Background()
 	st := newStore()
+	st.agents = map[string]bool{"loom-lead": true}
 	c := fakeServer(t, st)
+	c.presets = "/"
 	spec := loomharness.OpenSpec{
 		Key: "agent-1", Launch: loomharness.Launch{Root: "/root"}, Dir: "/repo", Model: "openai/gpt-x",
 		Preset: loomharness.PresetConfig{Name: "lead"}, Metadata: map[string]string{"agent_id": "agent-1"},
@@ -279,46 +438,74 @@ func TestProtocolMessagesPagesAndMapsItems(t *testing.T) {
 	ctx := context.Background()
 	st := newStore()
 	c := fakeServer(t, st)
-	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"})
+	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Launch: loomharness.Launch{Root: "/root-a"}, Dir: "/repo"})
 	st.messages[ref.NativeID] = []map[string]any{
 		{"id": "msg_u1", "type": "user", "text": "hi", "time": map[string]int64{"created": 1}},
-		{"id": "msg_a1", "type": "assistant", "time": map[string]int64{"created": 2}, "content": []map[string]any{
+		{"id": "msg_a1", "type": "assistant", "finish": "tool-calls", "time": map[string]int64{"created": 2}, "content": []map[string]any{
 			{"type": "reasoning", "text": "think"},
-			{"type": "tool", "id": "call_1", "name": "shell"},
+			{"type": "tool", "id": "call_1", "name": "shell", "state": map[string]string{"status": "completed"}},
 			{"type": "text", "text": "done"},
 		}},
 		{"id": "msg_s1", "type": "synthetic", "text": "The server restarted", "metadata": map[string]string{"notice": "restart"}},
 		{"id": "msg_i1", "type": "idle", "outcome": "interrupted"},
+		{"id": "msg_x1", "type": "instructions"},
+		{"id": "msg_u2", "type": "user", "text": "again"},
+		{"id": "msg_a2", "type": "assistant", "content": []map[string]any{
+			{"type": "tool", "id": "call_2", "state": map[string]string{"status": "running"}},
+			{"type": "text", "text": "stream"},
+		}},
 	}
+	st.asks = map[string][]string{ref.NativeID: {"frm_1", "per_1"}}
 	s := c.Session(ref)
-	p1, err := s.Messages(ctx, "", 2)
-	if err != nil {
-		t.Fatal(err)
+	var pages []loomharness.MessagePage
+	for after := ""; ; {
+		p, err := s.Messages(ctx, after, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages = append(pages, p)
+		if after = p.Next; after == "" {
+			break
+		}
 	}
-	if p1.Next == "" || len(p1.Events) != 4 {
-		t.Fatalf("page 1 = %+v", p1)
-	}
-	p2, err := s.Messages(ctx, p1.Next, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p3, _ := s.Messages(ctx, p2.Next, 2); len(p3.Events) != 0 || p3.Next != "" {
-		t.Fatalf("page 3 = %+v", p3)
+	if len(pages) != 4 {
+		t.Fatalf("%d pages", len(pages))
 	}
 	var got []string
-	for _, e := range append(p1.Events, p2.Events...) {
-		got = append(got, string(e.Type)+" "+e.ItemKind+" "+e.ItemID+" "+e.InputKey+" "+e.StopReason)
+	for _, p := range pages {
+		for _, e := range p.Events {
+			if e.Session.Root != "/root-a" {
+				t.Errorf("%s: Root %q", e.Type, e.Session.Root)
+			}
+			got = append(got, strings.Join([]string{string(e.Type), e.TurnID, e.ItemKind, e.ItemID, e.InputKey, e.AskID, e.StopReason}, " "))
+		}
 	}
 	want := []string{
-		"message.delivered message msg_u1 msg_u1 ",
-		"item.completed reasoning msg_a1/reasoning/0  ",
-		"item.completed tool msg_a1/tool/call_1  ",
-		"item.completed message msg_a1/text/0  ",
-		"turn.resumed  msg_s1  ",
-		"turn.completed  msg_i1  cancelled",
+		"turn.started msg_u1   msg_u1  ",
+		"message.delivered msg_u1 message msg_u1 msg_u1  ",
+		"item.completed msg_u1 reasoning msg_a1/reasoning/0   ",
+		"item.completed msg_u1 tool msg_a1/tool/call_1   ",
+		"item.completed msg_u1 message msg_a1/text/0   ",
+		"usage msg_u1  msg_a1   ",
+		"turn.resumed msg_u1  msg_s1   ",
+		"turn.completed msg_u1     cancelled",
+		"turn.started msg_u2   msg_u2  ",
+		"message.delivered msg_u2 message msg_u2 msg_u2  ",
+		"ask.opened msg_u2    per_1 ",
+		"ask.opened msg_u2 question   frm_1 ",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	// A bare OpenCode cursor (no open turn recorded) reads the open turn back.
+	q, _ := url.ParseQuery(pages[0].Next)
+	p, err := s.Messages(ctx, q.Get("c"), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Events) != 2 || p.Events[0].Type != loomharness.EventTurnResumed || p.Events[0].TurnID != "msg_u1" {
+		t.Fatalf("bare cursor page = %+v", p.Events)
 	}
 }
 
@@ -528,5 +715,668 @@ func TestProtocolResumeInstallsPermissions(t *testing.T) {
 	}
 	if _, err := s.Resume(ctx, loomharness.Launch{}, []loomharness.PermissionRule{{Action: "webfetch", Resource: "*", Effect: "deny"}}); err == nil {
 		t.Fatal("Resume accepted a rule with no OpenCode action")
+	}
+}
+
+// TestProtocolPresetFailsClosed: a preset session needs a configured
+// worktrees root, a directory under it, and the loom-<name> agent on the
+// running service for that directory; otherwise Open and Resume refuse
+// before anything runs, instead of running as OpenCode's default agent.
+func TestProtocolPresetFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	defer func(d time.Duration) { agentWait = d }(agentWait)
+	agentWait = 300 * time.Millisecond
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/wt/repo dir/k", Preset: loomharness.PresetConfig{Name: "lead"}}
+	refused := func(what, want string) {
+		t.Helper()
+		if _, err := c.Open(ctx, spec); !isCode(err, "bad_request") || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: Open = %v; want bad_request with %q", what, err, want)
+		}
+		if len(st.sessions) != 0 {
+			t.Fatalf("%s: a refused preset created a session", what)
+		}
+	}
+	refused("no root", "no Loom worktrees root")
+	c.presets = "/wt"
+	for _, dir := range []string{"/elsewhere/repo", "/wt", "/wtx/repo", "/wt/../etc", "wt/relative"} {
+		spec.Dir = dir
+		refused(dir, "not under the Loom worktrees root")
+	}
+	spec.Dir = "/wt/repo dir/k"
+	refused("missing agent", "may disable project config")
+	st.loading = true
+	if _, err := c.Open(ctx, spec); !errors.Is(err, loomharness.ErrUnavailable) || len(st.sessions) != 0 {
+		t.Fatalf("Open while the location loads = %v; want ErrUnavailable and no session", err)
+	}
+	st.loading = false
+	st.agents = map[string]bool{"loom-lead": true}
+	ref, err := c.Open(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.sessions[ref.NativeID]["agent"] != "loom-lead" || st.agentDir[len(st.agentDir)-1] != "/wt/repo dir/k" {
+		t.Fatalf("session agent %v, looked up in %q", st.sessions[ref.NativeID]["agent"], st.agentDir)
+	}
+	s := c.Session(ref)
+	if _, err := s.Resume(ctx, loomharness.Launch{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Loom dropped the preset: Resume refuses before installing anything.
+	st.agents = nil
+	n := len(st.messages[ref.NativeID])
+	if _, err := s.Resume(ctx, loomharness.Launch{}, nil); !isCode(err, "bad_request") || len(st.messages[ref.NativeID]) != n {
+		t.Fatalf("Resume of a session whose preset is gone = %v; want bad_request", err)
+	}
+}
+
+// TestProtocolPromptReappliesRules: every Prompt installs the rules Loom last
+// installed before the prompt runs, so a turn Loom starts never runs under
+// rules someone else (or a boot-swept turn) left on the session row. A failed
+// install sends nothing.
+func TestProtocolPromptReappliesRules(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	deny := []loomharness.PermissionRule{{Action: "bash", Resource: "gh *", Effect: "deny"}}
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo", Rules: deny})
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms := func() string {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		b, _ := json.Marshal(st.sessions[ref.NativeID]["permissions"])
+		return string(b)
+	}
+	want := perms()
+	st.mu.Lock()
+	st.sessions[ref.NativeID]["permissions"] = []map[string]string{{"action": "*", "resource": "*", "effect": "allow"}}
+	st.mu.Unlock()
+	s := c.Session(ref)
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-1", "r1"), Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := perms(); got != want {
+		t.Fatalf("Prompt ran under %s; want Loom's %s", got, want)
+	}
+
+	// A client that never installed rules for the session refuses.
+	fresh := NewClient(c.base, "pw")
+	n := len(st.messages[ref.NativeID])
+	if err := fresh.Session(ref).Prompt(ctx, loomharness.Input{Key: PromptID("agent-1", "r0"), Text: "hi"}); !isCode(err, "bad_request") || len(st.messages[ref.NativeID]) != n {
+		t.Fatalf("Prompt with no installed rules = %v; want bad_request and nothing sent", err)
+	}
+
+	st.patchErr = true
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-1", "r2"), Text: "hi"}); err == nil {
+		t.Fatal("Prompt succeeded with a failed rules install")
+	}
+	if len(st.messages[ref.NativeID]) != n {
+		t.Fatal("the prompt reached OpenCode without Loom's rules")
+	}
+}
+
+// TestProtocolOpenLeavesNothingOnError: when Open fails after creating the
+// session (a create POST that errors after OpenCode made it, rules install
+// or environment), it deletes the session and returns
+// the zero ref with the error; when that delete fails too, it returns the
+// session's ref with both errors, for the caller to record and Purge. A
+// failed repeat Open never removes the session an earlier Open made.
+func TestProtocolOpenLeavesNothingOnError(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	c.shellEnv = func() ([]string, error) { return []string{"PATH=/bin"}, nil }
+	exists := func(id string) bool { st.mu.Lock(); defer st.mu.Unlock(); _, ok := st.sessions[id]; return ok }
+	spec := loomharness.OpenSpec{Key: "agent-1", Launch: loomharness.Launch{Root: "/root-a"}, Dir: "/repo"}
+	id := SessionID(spec.Key)
+
+	for name, fail := range map[string]*bool{"create": &st.postErr, "install": &st.patchErr, "environment": &st.envFail} {
+		*fail = true
+		ref, err := c.Open(ctx, spec)
+		if err == nil || ref != (loomharness.NativeRef{}) || exists(id) {
+			t.Fatalf("%s: Open = %+v, %v, session left %v; want the zero ref, the error, no session", name, ref, err, exists(id))
+		}
+		if c.rootOf(id) != "" {
+			t.Fatalf("%s: the failed session's Root is still recorded", name)
+		}
+		if err := c.Session(loomharness.NativeRef{NativeID: id}).Prompt(ctx, loomharness.Input{Key: "msg_x", Text: "x"}); !isCode(err, "bad_request") {
+			t.Fatalf("%s: Prompt after a failed Open = %v; want bad_request (no rules)", name, err)
+		}
+
+		st.delErr = true
+		ref, err = c.Open(ctx, spec)
+		if err == nil || !strings.Contains(err.Error(), "disk full") || ref.NativeID != id || ref.Root != "/root-a" || !exists(id) {
+			t.Fatalf("%s: Open with a failed delete = %+v, %v; want the session's ref and both errors", name, ref, err)
+		}
+		st.delErr, *fail = false, false
+		if err := c.Purge(ctx, []loomharness.NativeRef{ref}); err != nil || exists(id) {
+			t.Fatalf("%s: Purge of the returned ref: %v", name, err)
+		}
+	}
+
+	ref, err := c.Open(ctx, spec)
+	if err != nil || ref.NativeID != id {
+		t.Fatalf("Open after the failures = %+v, %v", ref, err)
+	}
+	st.patchErr = true
+	if again, err := c.Open(ctx, spec); err == nil || again != (loomharness.NativeRef{}) || !exists(id) {
+		t.Fatalf("a failed repeat Open = %+v, %v, session kept %v; want the zero ref and the earlier session kept", again, err, exists(id))
+	}
+}
+
+// openRace replays codex's interleavings (verdicts 8d783c86, 9f81cf39): two
+// Opens for one key. pair holds the first session GET until a second arrives
+// (or 300ms pass), so without the per-id lock both find no session.
+type openRace struct {
+	once     sync.Once
+	both     chan struct{}
+	mu       sync.Mutex
+	gets     int
+	posts    int // guarded by store.mu
+	failPost int // this create commits the session, then answers 504
+}
+
+func (r *openRace) pair() {
+	r.once.Do(func() { r.both = make(chan struct{}) })
+	r.mu.Lock()
+	r.gets++
+	n := r.gets
+	r.mu.Unlock()
+	if n == 2 {
+		close(r.both)
+	}
+	if n == 1 {
+		select {
+		case <-r.both:
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+}
+
+type openResult struct {
+	ref loomharness.NativeRef
+	err error
+}
+
+func openPair(c *Client, spec loomharness.OpenSpec) []openResult {
+	out := make(chan openResult, 2)
+	for range 2 {
+		go func() { ref, err := c.Open(context.Background(), spec); out <- openResult{ref, err} }()
+	}
+	return []openResult{<-out, <-out}
+}
+
+// TestProtocolConcurrentOpenSameRef: two concurrent Opens of one key both
+// return its ref, and only the first creates it (a repeat sends no POST).
+func TestProtocolConcurrentOpenSameRef(t *testing.T) {
+	st := newStore()
+	c := fakeServer(t, st)
+	st.race = &openRace{}
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"}
+	for _, r := range openPair(c, spec) {
+		if r.err != nil || r.ref.NativeID != SessionID(spec.Key) {
+			t.Fatalf("Open = %+v, %v; want the session's ref", r.ref, r.err)
+		}
+	}
+	if st.race.posts != 1 {
+		t.Fatalf("%d creates; want 1", st.race.posts)
+	}
+}
+
+// TestProtocolConcurrentOpenKeepsSession: when the first of two concurrent
+// Opens has its create committed and then answered 504, its cleanup never
+// deletes the session the other Open returns.
+func TestProtocolConcurrentOpenKeepsSession(t *testing.T) {
+	st := newStore()
+	c := fakeServer(t, st)
+	st.race = &openRace{failPost: 1}
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"}
+	var ok, failed int
+	for _, r := range openPair(c, spec) {
+		switch {
+		case r.err == nil && r.ref.NativeID == SessionID(spec.Key):
+			ok++
+		case r.err != nil && r.ref == (loomharness.NativeRef{}):
+			failed++
+		default:
+			t.Errorf("Open = %+v, %v", r.ref, r.err)
+		}
+	}
+	st.mu.Lock()
+	_, kept := st.sessions[SessionID(spec.Key)]
+	st.mu.Unlock()
+	if ok != 1 || failed != 1 || !kept {
+		t.Fatalf("%d Opens succeeded, %d failed, session kept %v; want 1, 1, true", ok, failed, kept)
+	}
+}
+
+// pauseRT holds the first request hit matches (after its response when
+// after is set, else instead of sending it, answering 500) until release.
+type pauseRT struct {
+	next    http.RoundTripper
+	hit     func(*http.Request) bool
+	after   bool
+	once    sync.Once
+	paused  chan struct{}
+	release chan struct{}
+}
+
+func (p *pauseRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	mine := false
+	if p.hit(r) {
+		p.once.Do(func() { mine = true })
+	}
+	if !mine {
+		return p.next.RoundTrip(r)
+	}
+	if p.after {
+		resp, err := p.next.RoundTrip(r)
+		close(p.paused)
+		<-p.release
+		return resp, err
+	}
+	close(p.paused)
+	<-p.release
+	return &http.Response{StatusCode: 500, Header: http.Header{}, Request: r,
+		Body: io.NopCloser(strings.NewReader(`{"_tag":"UnknownError","message":"boom"}`))}, nil
+}
+
+func pause(c *Client, after bool, hit func(*http.Request) bool) *pauseRT {
+	p := &pauseRT{next: http.DefaultTransport, hit: hit, after: after, paused: make(chan struct{}), release: make(chan struct{})}
+	c.http.Transport = p
+	return p
+}
+
+// notDone fails if done is ready within 100ms: the call should be waiting.
+func notDone[T any](t *testing.T, what string, done chan T) {
+	t.Helper()
+	select {
+	case <-done:
+		t.Fatalf("%s ran while Open held the session id", what)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestProtocolPurgeWaitsForOpen (codex 9f81cf39 #1): a Purge of a stale ref
+// does not run while an Open of the same id is between its rules install
+// and its return, so Open never reports a session Purge removed under it.
+func TestProtocolPurgeWaitsForOpen(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"}
+	stale, err := c.Open(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Purge(ctx, []loomharness.NativeRef{stale}); err != nil {
+		t.Fatal(err)
+	}
+	p := pause(c, true, func(r *http.Request) bool { return r.Method == "PATCH" })
+	opened := make(chan openResult, 1)
+	go func() { ref, err := c.Open(ctx, spec); opened <- openResult{ref, err} }()
+	<-p.paused
+	purged := make(chan error, 1)
+	go func() { purged <- c.Purge(ctx, []loomharness.NativeRef{stale}) }()
+	notDone(t, "Purge", purged)
+	close(p.release)
+	if r := <-opened; r.err != nil {
+		t.Fatalf("Open = %v", r.err)
+	}
+	if err := <-purged; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestProtocolResumeWaitsForOpenCleanup (codex 9f81cf39 #2): a Resume of
+// the id a failing Open created waits for Open's cleanup, so it never
+// returns a session that cleanup then deletes.
+func TestProtocolResumeWaitsForOpenCleanup(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	c.shellEnv = func() ([]string, error) { return []string{"PATH=/bin"}, nil }
+	spec := loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"}
+	ref := loomharness.NativeRef{NativeID: SessionID(spec.Key)}
+	p := pause(c, false, func(r *http.Request) bool { return r.Method == "PUT" })
+	opened := make(chan openResult, 1)
+	go func() { ref, err := c.Open(ctx, spec); opened <- openResult{ref, err} }()
+	<-p.paused
+	resumed := make(chan openResult, 1)
+	go func() {
+		ref, err := c.Session(ref).Resume(ctx, loomharness.Launch{}, nil)
+		resumed <- openResult{ref, err}
+	}()
+	notDone(t, "Resume", resumed)
+	close(p.release)
+	if r := <-opened; r.err == nil {
+		t.Fatal("Open succeeded with a failed environment")
+	}
+	r := <-resumed
+	st.mu.Lock()
+	_, exists := st.sessions[ref.NativeID]
+	st.mu.Unlock()
+	if r.err == nil && !exists {
+		t.Fatal("Resume returned a session Open's cleanup then deleted")
+	}
+}
+
+// TestProtocolIDLocksFreed (codex 9f81cf39 #3): the per-id lock entries go
+// once no Open, Resume or Purge holds or waits on them.
+func TestProtocolIDLocksFreed(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	var wg sync.WaitGroup
+	for i := range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ref, err := c.Open(ctx, loomharness.OpenSpec{Key: fmt.Sprintf("k%d", i%10), Dir: "/repo"})
+			if err == nil {
+				_, _ = c.Session(ref).Resume(ctx, loomharness.Launch{}, nil)
+				_ = c.Purge(ctx, []loomharness.NativeRef{ref})
+			}
+		}()
+	}
+	wg.Wait()
+	c.idsMu.Lock()
+	n := len(c.ids)
+	c.idsMu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d per-id lock entries left; want 0", n)
+	}
+}
+
+// permReq is a pending OpenCode permission request (schema/src/permission.ts).
+type permReq struct {
+	Session   string   `json:"sessionID"`
+	Action    string   `json:"action"`
+	Resources []string `json:"resources"`
+	Save      []string `json:"save,omitempty"`
+}
+
+// effect is what OpenCode decides for action on resource under the session's
+// stored rules: the last matching rule wins, "*" matches anything, and no
+// match asks (core/src/permission.ts:87-97).
+func (st *store) effect(sid, action, resource string) string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	b, _ := json.Marshal(st.sessions[sid]["permissions"])
+	var rules []map[string]string
+	_ = json.Unmarshal(b, &rules)
+	match := func(pattern, s string) bool {
+		re := "^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, ".*") + "$"
+		ok, _ := regexp.MatchString(re, s)
+		return ok
+	}
+	for i := len(rules) - 1; i >= 0; i-- {
+		if match(rules[i]["action"], action) && match(rules[i]["resource"], resource) {
+			return rules[i]["effect"]
+		}
+	}
+	return "ask"
+}
+
+// TestProtocolReplyAlwaysIsSessionScoped: an allowed Always reply answers
+// the ask "once" (never OpenCode's project-wide "always") and adds a grant
+// for the ask's save patterns to that session's rules only. A later matching
+// request in the session is allowed, Loom's deny rules still win, another
+// session is unaffected, every Prompt keeps the grant and Resume ends it.
+// Always on a question or on an ask with no save patterns is an explicit
+// error and leaves the ask open, as does a failed grant install (with its
+// restore failing too, the session then refuses prompts until Resume).
+func TestProtocolReplyAlwaysIsSessionScoped(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	ask := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}}
+	deny := append(slices.Clone(ask), loomharness.PermissionRule{Action: "bash", Resource: "git push*", Effect: "deny"})
+	a, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: deny})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-b", Dir: "/repo", Rules: ask})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sa := c.Session(a)
+	always := loomharness.Reply{Allow: true, Always: true}
+	st.perms["per_1"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"git status"}, Save: []string{"git *"}}
+	if err := sa.Reply(ctx, "per_1", always); err != nil {
+		t.Fatal(err)
+	}
+	if st.replies["per_1"] != "once" {
+		t.Fatalf("decision sent %q; want once (OpenCode's always is project-wide)", st.replies["per_1"])
+	}
+	check := func(when string, sid, resource, want string) {
+		t.Helper()
+		if got := st.effect(sid, "shell", resource); got != want {
+			t.Fatalf("%s: %s in %s = %s; want %s", when, resource, sid, got, want)
+		}
+	}
+	check("after Always", a.NativeID, "git log", "allow")
+	check("after Always", a.NativeID, "git push origin", "deny")
+	check("after Always", a.NativeID, "rm -rf x", "ask")
+	check("after Always", b.NativeID, "git log", "ask")
+
+	if err := sa.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r1"), Text: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	check("after Prompt", a.NativeID, "git log", "allow")
+	check("after Prompt", a.NativeID, "git push origin", "deny")
+
+	refused := func(what, id string, r loomharness.Reply) {
+		t.Helper()
+		if err := sa.Reply(ctx, id, r); !isCode(err, "bad_request") {
+			t.Fatalf("%s: Reply = %v; want bad_request", what, err)
+		}
+		if _, sent := st.replies[id]; sent {
+			t.Fatalf("%s: the ask was answered", what)
+		}
+	}
+	st.perms["per_2"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"make"}}
+	refused("no save patterns", "per_2", always)
+	refused("question", "frm_1", loomharness.Reply{Allow: true, Always: true, Answer: "blue"})
+	st.patchErr = true
+	st.perms["per_3"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
+	if err := sa.Reply(ctx, "per_3", always); err == nil {
+		t.Fatal("Reply succeeded with a failed grant install")
+	}
+	if _, sent := st.replies["per_3"]; sent {
+		t.Fatal("the ask was answered though its grant failed")
+	}
+	st.patchErr = false
+	// Every PATCH failed, the restore too, so the session fails closed.
+	if err := sa.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); !errors.Is(err, loomharness.ErrQuarantined) {
+		t.Fatalf("Prompt after a failed grant and restore = %v; want ErrQuarantined", err)
+	}
+
+	if _, err := sa.Resume(ctx, loomharness.Launch{}, deny); err != nil {
+		t.Fatal(err)
+	}
+	check("after Resume", a.NativeID, "git log", "ask")
+}
+
+// TestProtocolAlwaysGrantRollsBack (codex, 11588cd1e and 863aa26b5): a
+// grant PATCH that commits and then answers 500 leaves an unknown outcome.
+// When Reply can put the rules back, the ask stays open and asks again.
+// When it cannot, the session is quarantined: its active turn is stopped
+// (or the error says the stop is unconfirmed), Prompt and Reply refuse it,
+// a failed reinstall keeps it blocked, a fresh client (a Loom restart)
+// refuses it too, and a successful Resume restores normal asking.
+func TestProtocolAlwaysGrantRollsBack(t *testing.T) {
+	ctx := context.Background()
+	rules := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}}
+	always := loomharness.Reply{Allow: true, Always: true}
+	setup := func(t *testing.T) (*store, *Client, *Session) {
+		st := newStore()
+		c := fakeServer(t, st)
+		ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.perms["per_1"] = permReq{Session: ref.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
+		return st, c, c.Session(ref)
+	}
+	refused := func(t *testing.T, st *store, s *Session, want string) {
+		t.Helper()
+		if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "p"), Text: "hi"}); !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("Prompt = %v; want ErrQuarantined containing %q", err, want)
+		}
+		if err := s.Reply(ctx, "per_1", loomharness.Reply{}); !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("Reply (deny) = %v; want ErrQuarantined containing %q", err, want)
+		}
+		if _, sent := st.replies["per_1"]; sent {
+			t.Fatal("a reply reached the ask of a quarantined session")
+		}
+	}
+	works := func(t *testing.T, st *store, s *Session) {
+		t.Helper()
+		if got := st.effect(s.ref.NativeID, "shell", "ls x"); got != "ask" {
+			t.Fatalf("ls x = %s; want ask", got)
+		}
+		if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "ok"), Text: "hi"}); err != nil {
+			t.Fatalf("Prompt: %v", err)
+		}
+		if err := s.Reply(ctx, "per_1", loomharness.Reply{}); err != nil || st.replies["per_1"] != "reject" {
+			t.Fatalf("Reply (deny) = %v, sent %q", err, st.replies["per_1"])
+		}
+	}
+
+	t.Run("RestoreSucceeds", func(t *testing.T) {
+		st, _, s := setup(t)
+		st.patchLie = 1
+		if err := s.Reply(ctx, "per_1", always); err == nil {
+			t.Fatal("Reply succeeded with a failed grant install")
+		}
+		if _, sent := st.replies["per_1"]; sent || st.stops != 0 {
+			t.Fatalf("answered %v, stops %d; want the ask open and no stop", sent, st.stops)
+		}
+		if err := s.Reply(ctx, "per_1", loomharness.Reply{}); errors.Is(err, loomharness.ErrQuarantined) {
+			t.Fatalf("a restored session reports ErrQuarantined: %v", err)
+		}
+		delete(st.replies, "per_1")
+		st.perms["per_1"] = permReq{Session: s.ref.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
+		works(t, st, s)
+	})
+
+	t.Run("RestoreFails", func(t *testing.T) {
+		st, c, s := setup(t)
+		st.patchLie = 2
+		err := s.Reply(ctx, "per_1", always)
+		if !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), "Always grant on session") || !strings.Contains(err.Error(), "active turn was stopped") {
+			t.Fatalf("Reply = %v; want ErrQuarantined naming the unconfirmed grant and the stop", err)
+		}
+		if st.stops != 1 {
+			t.Fatalf("%d stops; want the active turn stopped once", st.stops)
+		}
+		refused(t, st, s, "quarantined")
+		if fresh := NewClient(c.base, "pw"); fresh.Session(s.ref).Reply(ctx, "per_1", loomharness.Reply{}) == nil {
+			t.Fatal("a fresh client (a Loom restart) replied on the session")
+		}
+		st.patchErr = true
+		if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err == nil {
+			t.Fatal("Resume succeeded with a failed reinstall")
+		}
+		st.patchErr = false
+		refused(t, st, s, "quarantined")
+		if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err != nil {
+			t.Fatal(err)
+		}
+		works(t, st, s)
+	})
+
+	// Codex (8a80643d3): a restore that runs out its deadline must not
+	// spend the stop's; exactly one interrupt is still sent.
+	t.Run("RestoreTimesOut", func(t *testing.T) {
+		defer func(w time.Duration) { cleanupWait = w }(cleanupWait)
+		cleanupWait = 300 * time.Millisecond
+		st, _, s := setup(t)
+		st.patchLie, st.hangLie = 2, true
+		err := s.Reply(ctx, "per_1", always)
+		if !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), "active turn was stopped") {
+			t.Fatalf("Reply = %v; want ErrQuarantined and the stop attempted and confirmed", err)
+		}
+		st.mu.Lock()
+		stops := st.stops
+		st.mu.Unlock()
+		if stops != 1 {
+			t.Fatalf("%d interrupts after the restore timed out; want 1", stops)
+		}
+		refused(t, st, s, "quarantined")
+	})
+
+	for name, set := range map[string]func(*store){
+		"StopFails": func(st *store) { st.stopErr = true },
+		"StopHangs": func(st *store) { st.stopHang = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func(w time.Duration) { cleanupWait = w }(cleanupWait)
+			cleanupWait = 300 * time.Millisecond
+			st, _, s := setup(t)
+			set(st)
+			st.patchLie = 2
+			err := s.Reply(ctx, "per_1", always)
+			if !errors.Is(err, loomharness.ErrQuarantined) || !strings.Contains(err.Error(), "native stop unconfirmed") || strings.Contains(err.Error(), "turn was stopped") {
+				t.Fatalf("Reply = %v; want ErrQuarantined with native stop unconfirmed", err)
+			}
+			refused(t, st, s, "quarantined")
+		})
+	}
+}
+
+// TestProtocolPromptRacesQuarantine (codex, cc46d517a): a Prompt paused
+// after its check and rules PATCH, while a Reply.Always quarantines the
+// session (grant and restore both commit, then answer 500), never sends its
+// turn after the quarantine stopped the session. The Reply waits for the
+// session's lock (lockWaitHook says so) until the Prompt's POST is done.
+func TestProtocolPromptRacesQuarantine(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	rules := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}}
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(ref)
+	st.perms["per_1"] = permReq{Session: ref.NativeID, Action: "shell", Resources: []string{"ls"}, Save: []string{"ls *"}}
+	waiting := make(chan struct{}, 1)
+	lockWaitHook = func(string) { waiting <- struct{}{} }
+	defer func() { lockWaitHook = nil }()
+
+	p := pause(c, true, func(r *http.Request) bool { return r.Method == "PATCH" })
+	prompted := make(chan error, 1)
+	go func() { prompted <- s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r1"), Text: "hi"}) }()
+	<-p.paused
+	st.mu.Lock()
+	st.patchLie = 2
+	st.mu.Unlock()
+	replied := make(chan error, 1)
+	go func() { replied <- s.Reply(ctx, "per_1", loomharness.Reply{Allow: true, Always: true}) }()
+	select {
+	case <-waiting: // the Reply waits for the Prompt
+	case <-replied: // it did not: the session is quarantined under the Prompt
+	}
+	close(p.release)
+	promptErr := <-prompted
+	st.mu.Lock()
+	late := st.lateRuns
+	st.mu.Unlock()
+	if late != 0 {
+		t.Fatalf("a turn was sent after the quarantine stopped the session (Prompt = %v)", promptErr)
+	}
+	if promptErr != nil {
+		t.Fatalf("Prompt before the quarantine = %v", promptErr)
+	}
+	if err := <-replied; err == nil || !strings.Contains(err.Error(), "active turn was stopped") {
+		t.Fatalf("Reply = %v; want the session quarantined and stopped", err)
+	}
+	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); err == nil || !strings.Contains(err.Error(), "quarantined") {
+		t.Fatalf("Prompt after the quarantine = %v; want quarantined", err)
 	}
 }

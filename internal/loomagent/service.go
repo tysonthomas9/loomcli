@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -78,6 +79,11 @@ type ServiceConfig struct {
 	// or the bridge is down; the agent then does not launch. nil registers
 	// none. Loom never takes capabilities from a request or a stored row.
 	Bridge func(ctx context.Context, p Preset) (BridgeCaps, error)
+	// InputKey derives the native input key the dispatcher prompts with from
+	// the AgentID and the Send's RequestID, per harness (design v2 §4.9); the
+	// same message always gets the same key, so HasInput can find it after a
+	// crash. nil uses OpenCode's msg_ form.
+	InputKey func(harness, agentID, requestID string) string
 }
 
 // Backend is a workspace default harness and model.
@@ -101,9 +107,11 @@ type Service struct {
 	presets     Presets
 	backend     func(context.Context) (Backend, error)
 	bridge      func(context.Context, Preset) (BridgeCaps, error)
+	inputKey    func(harness, agentID, requestID string) string
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+	asks  map[string]map[string]Ask // open asks by agent and ask ID, under mu
 }
 
 // New returns a Service for cfg.
@@ -112,7 +120,8 @@ func New(cfg ServiceConfig) *Service {
 		resolveRepo: cfg.ResolveRepo, prepare: cfg.PrepareWorktree, target: cfg.Target,
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
 		workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
-		locks: map[string]*sync.Mutex{}}
+		inputKey: cfg.InputKey,
+		locks:    map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}}
 	if s.presets == nil {
 		s.presets = BuiltinPresets{}
 	}
@@ -120,7 +129,13 @@ func New(cfg ServiceConfig) *Service {
 		s.backend = func(context.Context) (Backend, error) { return Backend{}, nil }
 	}
 	if s.bridge == nil {
-		s.bridge = func(context.Context, Preset) (BridgeCaps, error) { return BridgeCaps{}, nil }
+		s.bridge = noBridge
+	}
+	if s.events == nil {
+		s.events = NewEventLog(cfg.Store)
+	}
+	if s.inputKey == nil {
+		s.inputKey = defaultInputKey
 	}
 	if s.target == "" {
 		s.target = TargetLocal
@@ -171,8 +186,7 @@ func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.
 	before := a
 	a.State, a.StateReason, a.WaitingOn, a.Outcome = to.State, to.StateReason, to.WaitingOn, to.Outcome
 	a.AttentionReason, a.RunningTurnID, a.Attempt = to.AttentionReason, to.RunningTurn, to.Attempt
-	s.publishChange(before, a)
-	return a, nil
+	return a, s.publishChange(ctx, before, a)
 }
 
 // raiseAttention sets Attention{reason} beside a's state.
@@ -198,12 +212,13 @@ func (s *Service) handOver(ctx context.Context, a loomstore.Agent, nativeKey fun
 	return s.store.HandNext(ctx, a.AgentID, nativeKey)
 }
 
-func (s *Service) publishChange(before, after loomstore.Agent) {
-	e := Event{AgentID: after.AgentID, Time: time.Now()}
+// publishChange saves, then publishes, the events of a's committed change.
+func (s *Service) publishChange(ctx context.Context, before, after loomstore.Agent) error {
+	e, out := Event{AgentID: after.AgentID, Time: time.Now()}, []Event{}
 	if before.State != after.State {
 		c := e
 		c.Type, c.From, c.To, c.Reason = EventStateChanged, before.State, after.State, deref(after.StateReason)
-		s.Bus.publish(c)
+		out = append(out, c)
 	}
 	if deref(before.AttentionReason) != deref(after.AttentionReason) {
 		c := e
@@ -211,19 +226,25 @@ func (s *Service) publishChange(before, after loomstore.Agent) {
 		if after.AttentionReason == nil {
 			c.Type, c.Reason = EventAttentionCleared, deref(before.AttentionReason)
 		}
-		s.Bus.publish(c)
+		out = append(out, c)
 	}
 	if after.Mode == "persistent" && after.State == StateIdle &&
 		(before.State == StateActive || before.State == StateWaiting) {
 		c := e
 		c.Type, c.TurnID = EventIdle, deref(before.RunningTurnID)
-		s.Bus.publish(c)
+		out = append(out, c)
 	}
 	if r := settledReason(after); r != "" && settledReason(before) == "" {
 		c := e
 		c.Type, c.Reason, c.Outcome, c.Attempt = EventSettled, r, deref(after.Outcome), after.Attempt
-		s.Bus.publish(c)
+		out = append(out, c)
 	}
+	for _, c := range out {
+		if err := s.emit(ctx, c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // settledReason is why a is settled (§5.1), or "" when it is not.
@@ -246,4 +267,13 @@ func deref(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// noBridge is the Bridge when none is wired: a preset with bridge tools fails
+// closed (R-G); one without needs no registration.
+func noBridge(_ context.Context, p Preset) (BridgeCaps, error) {
+	if len(p.Tools) > 0 {
+		return BridgeCaps{}, errors.New("no bridge is wired for its tools")
+	}
+	return BridgeCaps{}, nil
 }

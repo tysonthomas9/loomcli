@@ -107,21 +107,63 @@ type NativeSession struct {
 // Recording the same session for the same agent again is a no-op; a session
 // already owned by another agent returns ErrSessionOwned.
 func (s *Store) RecordNativeSession(ctx context.Context, n NativeSession) error {
+	return s.tx(ctx, func(tx *sql.Tx) error { return recordNative(ctx, tx, n) })
+}
+
+func recordNative(ctx context.Context, tx *sql.Tx, n NativeSession) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_native_sessions (agent_id, harness, native_root, native_id, recorded_at)
+		VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING`,
+		n.AgentID, n.Harness, n.NativeRoot, n.NativeID, Stamp(time.Now())); err != nil {
+		return err
+	}
+	owner, err := nativeSessionOwner(ctx, tx, n.Harness, n.NativeRoot, n.NativeID)
+	if err != nil {
+		return err
+	}
+	if owner != n.AgentID {
+		return ErrSessionOwned
+	}
+	return nil
+}
+
+// RecordPurgePending records n as owned, as RecordNativeSession does, and
+// as purge-pending, in one transaction: a failed Open left it behind.
+func (s *Store) RecordPurgePending(ctx context.Context, n NativeSession) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_native_sessions (agent_id, harness, native_root, native_id, recorded_at)
-			VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING`,
-			n.AgentID, n.Harness, n.NativeRoot, n.NativeID, Stamp(time.Now())); err != nil {
+		if err := recordNative(ctx, tx, n); err != nil {
 			return err
 		}
-		owner, err := nativeSessionOwner(ctx, tx, n.Harness, n.NativeRoot, n.NativeID)
-		if err != nil {
-			return err
-		}
-		if owner != n.AgentID {
-			return ErrSessionOwned
-		}
-		return nil
+		_, err := tx.ExecContext(ctx, `INSERT INTO native_purge_pending (harness, native_root, native_id)
+			VALUES (?,?,?) ON CONFLICT DO NOTHING`, n.Harness, n.NativeRoot, n.NativeID)
+		return err
 	})
+}
+
+// ClearPurgePending drops n's purge-pending mark: it was purged, or a later
+// Open returned it as a working session.
+func (s *Store) ClearPurgePending(ctx context.Context, n NativeSession) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM native_purge_pending WHERE harness = ? AND native_root = ? AND native_id = ?`,
+		n.Harness, n.NativeRoot, n.NativeID)
+	return err
+}
+
+// PurgePending lists the purge-pending native sessions with their owners.
+func (s *Store) PurgePending(ctx context.Context) ([]NativeSession, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT n.agent_id, n.harness, n.native_root, n.native_id, n.recorded_at
+		FROM native_purge_pending p JOIN agent_native_sessions n USING (harness, native_root, native_id) ORDER BY n.recorded_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []NativeSession
+	for rows.Next() {
+		var n NativeSession
+		if err := rows.Scan(&n.AgentID, &n.Harness, &n.NativeRoot, &n.NativeID, &n.RecordedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 // NativeSessions lists every native session agentID has owned, oldest first.
@@ -235,13 +277,17 @@ var ErrStateChanged = errors.New("loomstore: agent state changed")
 
 // CompareAndSetState sets agentID's state columns to `to` only if they still
 // equal `from` and the agent is not deleted; otherwise it returns ErrStateChanged.
+// A turn ending in finished (from active or waiting) also sets finished_at,
+// the background R29 deadline, in the same statement.
 func (s *Store) CompareAndSetState(ctx context.Context, agentID string, from, to AgentState) error {
+	now := Stamp(time.Now())
 	res, err := s.db.ExecContext(ctx, `UPDATE agents SET state = ?, state_reason = ?, waiting_on = ?, outcome = ?,
-		attention_reason = ?, running_turn_id = ?, attempt = ?, updated_at = ?
+		attention_reason = ?, running_turn_id = ?, attempt = ?, updated_at = ?,
+		finished_at = CASE WHEN ? = 'finished' AND state IN ('active','waiting') THEN ? ELSE finished_at END
 		WHERE agent_id = ? AND deleted_at IS NULL AND state = ? AND state_reason IS ? AND waiting_on IS ?
 		AND outcome IS ? AND attention_reason IS ? AND running_turn_id IS ? AND attempt = ?`,
 		to.State, to.StateReason, to.WaitingOn, to.Outcome, to.AttentionReason, to.RunningTurn, to.Attempt,
-		Stamp(time.Now()), agentID, from.State, from.StateReason, from.WaitingOn, from.Outcome,
+		now, to.State, now, agentID, from.State, from.StateReason, from.WaitingOn, from.Outcome,
 		from.AttentionReason, from.RunningTurn, from.Attempt)
 	if err != nil {
 		return err

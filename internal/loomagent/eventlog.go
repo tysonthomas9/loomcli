@@ -3,7 +3,6 @@ package loomagent
 
 import (
 	"context"
-	"errors"
 	"math"
 	"sync"
 
@@ -13,7 +12,7 @@ import (
 
 // ErrSlowSubscriber ends a Subscription whose live buffer filled. The client
 // reconnects from the last Seq it received.
-var ErrSlowSubscriber = errors.New("loomagent: subscriber too slow; reconnect from the last seq")
+var ErrSlowSubscriber error = &Error{Code: CodeSubscriberLagged, Message: "subscriber too slow; reconnect from the last seq"}
 
 // LiveOnly as a Subscribe cursor skips replay and starts at the current last seq.
 const LiveOnly int64 = -1
@@ -44,6 +43,49 @@ func (l *EventLog) Append(ctx context.Context, e loomstore.Event) (loomstore.Eve
 	if err != nil {
 		return got, err
 	}
+	l.fanout(got)
+	return got, nil
+}
+
+// appendAllCrash runs between an AppendAll's commit and its publication;
+// tests crash there.
+var appendAllCrash = func() {}
+
+// AppendAll appends events to agentID in one short transaction and
+// publishes the new ones, in order, only after the commit: if any write or
+// the commit fails, nothing is saved or published.
+func (l *EventLog) AppendAll(ctx context.Context, agentID string, events []loomstore.Event) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	before, err := l.store.AppendEvents(ctx, agentID, events)
+	if err != nil {
+		return err
+	}
+	appendAllCrash() // committed, not yet published or applied
+	q := loomstore.EventQuery{AgentID: agentID, After: before}
+	for {
+		p, err := l.store.ListEvents(ctx, q)
+		if err != nil { // saved but not all published: its subscribers reconnect from their cursors
+			for s := range l.subs {
+				if s.agents[agentID] {
+					delete(l.subs, s)
+					close(s.live)
+				}
+			}
+			return err
+		}
+		for _, e := range p.Events {
+			l.fanout(e)
+		}
+		if !p.More {
+			return nil
+		}
+		q.After, q.Snapshot = p.Next, p.SnapshotSeq
+	}
+}
+
+// fanout hands a committed event to its agent's live subscribers, under l.mu.
+func (l *EventLog) fanout(got loomstore.Event) {
 	for s := range l.subs {
 		if !s.agents[got.AgentID] {
 			continue
@@ -55,7 +97,6 @@ func (l *EventLog) Append(ctx context.Context, e loomstore.Event) (loomstore.Eve
 			close(s.live)
 		}
 	}
-	return got, nil
 }
 
 // Page reads one snapshot-pinned page of an agent's committed events.
@@ -90,7 +131,9 @@ func (l *EventLog) Backfill(ctx context.Context, s loomharness.Session,
 }
 
 // Subscription delivers each subscribed agent's events in seq order: first
-// the committed rows after its cursor, then live rows.
+// the committed rows after its cursor, then live rows. A Service.Subscribe
+// subscription also gets live-only notices (Seq 0): deltas if it asked for
+// them, and feed.gap; and only the kinds it asked for.
 type Subscription struct {
 	C      <-chan loomstore.Event // closed when the subscription ends; then read Err
 	out    chan loomstore.Event
@@ -98,6 +141,27 @@ type Subscription struct {
 	agents map[string]bool  // fixed at Subscribe; read by Append
 	cursor map[string]int64 // last seq delivered per agent; owned by run
 	err    error
+	notes  bool            // gets Notify's live-only notices
+	deltas bool            // of those, deltas too
+	kinds  map[string]bool // saved kinds to deliver; empty means all
+}
+
+// Notify sends a live-only notice (Seq 0, never saved) to subscriptions that
+// take them: a delta to its agent's, a feed.gap (AgentID "") to all.
+func (l *EventLog) Notify(e loomstore.Event) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for s := range l.subs {
+		if !s.notes || (e.AgentID != "" && !s.agents[e.AgentID]) || (e.Kind == KindDelta && !s.deltas) {
+			continue
+		}
+		select {
+		case s.live <- e:
+		default:
+			delete(l.subs, s)
+			close(s.live)
+		}
+	}
 }
 
 // Err reports why C closed: the context's error or ErrSlowSubscriber.
@@ -108,8 +172,12 @@ func (s *Subscription) Err() error { return s.err }
 // before reading history, so every row is either replayed or live; rows
 // already delivered are dropped by seq.
 func (l *EventLog) Subscribe(ctx context.Context, cursors map[string]int64) (*Subscription, error) {
-	s := &Subscription{out: make(chan loomstore.Event), live: make(chan loomstore.Event, subscriberBuffer),
-		agents: map[string]bool{}, cursor: map[string]int64{}}
+	return l.subscribe(ctx, cursors, &Subscription{})
+}
+
+func (l *EventLog) subscribe(ctx context.Context, cursors map[string]int64, s *Subscription) (*Subscription, error) {
+	s.out, s.live = make(chan loomstore.Event), make(chan loomstore.Event, subscriberBuffer)
+	s.agents, s.cursor = map[string]bool{}, map[string]int64{}
 	s.C = s.out
 	l.mu.Lock()
 	for id, c := range cursors {
@@ -176,14 +244,20 @@ func (s *Subscription) run(ctx context.Context, l *EventLog) error {
 	}
 }
 
-// send delivers e unless its seq was already delivered for that agent.
+// send delivers e unless its seq was already delivered for that agent or
+// its kind is filtered out. A live-only notice (Seq 0) is always sent.
 func (s *Subscription) send(ctx context.Context, e loomstore.Event) error {
-	if e.Seq <= s.cursor[e.AgentID] {
-		return nil
+	if e.Seq != 0 {
+		if e.Seq <= s.cursor[e.AgentID] {
+			return nil
+		}
+		s.cursor[e.AgentID] = e.Seq
+		if len(s.kinds) > 0 && !s.kinds[e.Kind] {
+			return nil
+		}
 	}
 	select {
 	case s.out <- e:
-		s.cursor[e.AgentID] = e.Seq
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

@@ -27,30 +27,53 @@ type Event struct {
 // AppendEvent redacts e.Payload and appends it with the agent's next seq; seq
 // allocation and insert share one transaction. Appending an EventID the agent
 // already has returns the stored event unchanged.
-func (s *Store) AppendEvent(ctx context.Context, e Event) (Event, error) {
+func (s *Store) AppendEvent(ctx context.Context, e Event) (got Event, err error) {
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		got, err = appendEvent(ctx, tx, e)
+		return err
+	})
+	return got, err
+}
+
+// AppendEvents appends events to agentID in order, as AppendEvent does, all
+// in one transaction: none is saved unless every one is and the commit
+// succeeds. before is the agent's last seq before them.
+func (s *Store) AppendEvents(ctx context.Context, agentID string, events []Event) (before int64, err error) {
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) FROM agent_events WHERE agent_id = ?`,
+			agentID).Scan(&before); err != nil {
+			return err
+		}
+		for _, e := range events {
+			if e.AgentID != agentID {
+				return fmt.Errorf("loomstore: event of %s in a batch of %s", e.AgentID, agentID)
+			}
+			if _, err := appendEvent(ctx, tx, e); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return before, err
+}
+
+func appendEvent(ctx context.Context, tx *sql.Tx, e Event) (Event, error) {
 	red, err := redactPayload(e.Payload)
 	if err != nil {
 		return Event{}, fmt.Errorf("loomstore: event payload: %w", err)
 	}
 	e.Payload = json.RawMessage(red)
 	e.CreatedAt = Stamp(time.Now())
-	err = s.tx(ctx, func(tx *sql.Tx) error {
-		got, err := getEvent(ctx, tx, e.AgentID, e.EventID)
-		if err == nil {
-			e = got
-			return nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_events WHERE agent_id = ?`,
-			e.AgentID).Scan(&e.Seq); err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO agent_events (agent_id, seq, event_id, kind, turn_id, redacted_payload, created_at)
-			VALUES (?,?,?,?,NULLIF(?, ''),?,?)`, e.AgentID, e.Seq, e.EventID, e.Kind, e.TurnID, red, e.CreatedAt)
-		return err
-	})
+	got, err := getEvent(ctx, tx, e.AgentID, e.EventID)
+	if err == nil || !errors.Is(err, sql.ErrNoRows) {
+		return got, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_events WHERE agent_id = ?`,
+		e.AgentID).Scan(&e.Seq); err != nil {
+		return Event{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO agent_events (agent_id, seq, event_id, kind, turn_id, redacted_payload, created_at)
+		VALUES (?,?,?,?,NULLIF(?, ''),?,?)`, e.AgentID, e.Seq, e.EventID, e.Kind, e.TurnID, red, e.CreatedAt)
 	return e, err
 }
 

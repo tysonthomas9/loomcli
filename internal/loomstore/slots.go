@@ -45,6 +45,13 @@ type SlotSend struct {
 	NativeKey string
 	// First marks the slot to be handed over before older waiting slots (an interrupt).
 	First bool
+	// Reopen starts a new attempt of the finished agent: in the same
+	// transaction it moves the agent finished -> active with the next attempt,
+	// clears its outcome, and clears finished_at, which cancels its R29
+	// history deadline. It fails with ErrHistoryPurged if the sweep already
+	// purged the history, or ErrStateChanged if the agent is no longer
+	// finished; then nothing is stored.
+	Reopen bool
 	// Result builds the Send's result JSON, stored as its receipt. replaced
 	// reports that this Send replaced the sender's waiting text.
 	Result func(replaced bool) (string, error)
@@ -77,6 +84,9 @@ func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, e
 		if cur.State == SlotHanded || (in.Hand && cur.State == SlotWaiting) {
 			return ErrSlotBusy
 		}
+		if err := reopen(ctx, tx, in); err != nil {
+			return err
+		}
 		replaced := cur.State == SlotWaiting
 		now := Stamp(time.Now())
 		state, nativeKey, queuedAt := SlotWaiting, any(nil), any(nil)
@@ -106,6 +116,34 @@ func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, e
 		return err
 	})
 	return r, retry, err
+}
+
+// ErrHistoryPurged means the agent's history was purged under R29.
+var ErrHistoryPurged = errors.New("loomstore: agent history purged")
+
+// reopen starts the agent's next attempt when in.Reopen is set.
+func reopen(ctx context.Context, tx *sql.Tx, in SlotSend) error {
+	if !in.Reopen {
+		return nil
+	}
+	agentID := in.AgentID
+	res, err := tx.ExecContext(ctx, `UPDATE agents SET state = 'active', attempt = attempt + 1, outcome = NULL,
+		finished_at = NULL, updated_at = ? WHERE agent_id = ? AND state = 'finished' AND deleted_at IS NULL
+		AND history_purged_at IS NULL`, Stamp(time.Now()), agentID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return nil
+	}
+	var purged sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT history_purged_at FROM agents WHERE agent_id = ?`, agentID).Scan(&purged); err != nil {
+		return err
+	}
+	if purged.Valid {
+		return ErrHistoryPurged
+	}
+	return ErrStateChanged
 }
 
 // nextQueuedAt returns now, or just after the agent's latest queued_at if the
@@ -144,11 +182,53 @@ func (s *Store) HandNext(ctx context.Context, agentID string, nativeKey func(Slo
 		}
 		k := nativeKey(sl)
 		sl.State, sl.NativeKey, sl.UpdatedAt = SlotHanded, &k, Stamp(time.Now())
-		_, err = tx.ExecContext(ctx, `UPDATE agent_slots SET state = ?, native_key = ?, updated_at = ?
-			WHERE agent_id = ? AND sender = ?`, sl.State, k, sl.UpdatedAt, agentID, sl.Sender)
+		if _, err = tx.ExecContext(ctx, `UPDATE agent_slots SET state = ?, native_key = ?, updated_at = ?
+			WHERE agent_id = ? AND sender = ?`, sl.State, k, sl.UpdatedAt, agentID, sl.Sender); err != nil {
+			return err
+		}
+		// The Send's receipt now reports the hand-over, so a later retry of it
+		// returns state handed (design v2 §4.9).
+		_, err = tx.ExecContext(ctx, `UPDATE agent_send_receipts SET result_json = json_set(result_json, '$.state', ?)
+			WHERE agent_id = ? AND request_id = ? AND json_valid(result_json)`, SlotHanded, agentID, sl.RequestID)
 		return err
 	})
 	return sl, err
+}
+
+// Requeue puts the sender's handed message requestID back to waiting,
+// keeping its place, after the harness said it never landed. It returns
+// ErrNotFound if that message is no longer handed.
+func (s *Store) Requeue(ctx context.Context, agentID, sender, requestID string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE agent_slots SET state = ?, native_key = NULL, updated_at = ?
+		WHERE agent_id = ? AND sender = ? AND request_id = ? AND state = ?`,
+		SlotWaiting, Stamp(time.Now()), agentID, sender, requestID, SlotHanded)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// PendingAgents lists the live agents with a waiting or handed slot, for the
+// dispatcher's sweep at start.
+func (s *Store) PendingAgents(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT s.agent_id FROM agent_slots s JOIN agents a USING (agent_id)
+		WHERE s.state IN (?, ?) AND a.deleted_at IS NULL ORDER BY s.agent_id`, SlotWaiting, SlotHanded)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // MarkDelivered marks the sender's handed message requestID delivered and

@@ -123,4 +123,12 @@ CREATE TRIGGER agent_events_no_update BEFORE UPDATE ON agent_events
 BEGIN SELECT RAISE(ABORT, 'agent_events is append-only'); END;
 `, `
 ALTER TABLE agents ADD COLUMN harness_session_root TEXT; -- the current session's NativeRef root; NULL (a legacy row) resolves only when exactly one recorded root has harness_session_id
+`, `
+CREATE TABLE native_purge_pending (         -- an owned native session a failed Open left behind; removed once purged
+  harness     TEXT NOT NULL,
+  native_root TEXT NOT NULL,
+  native_id   TEXT NOT NULL,
+  PRIMARY KEY (harness, native_root, native_id),
+  FOREIGN KEY (harness, native_root, native_id) REFERENCES agent_native_sessions(harness, native_root, native_id)
+);
 `}

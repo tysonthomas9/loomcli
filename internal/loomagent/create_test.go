@@ -34,25 +34,30 @@ func (o *openRec) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharn
 
 // createEnv is one store and one harness that outlive service restarts.
 type createEnv struct {
-	st *loomstore.Store
-	h  *openRec
-	ws *fakeWorkspace
+	st   *loomstore.Store
+	path string // the store's file
+	h    *openRec
+	ws   *fakeWorkspace
 }
 
 func newCreateEnv(t *testing.T) *createEnv {
 	t.Helper()
-	st, err := loomstore.Open(context.Background(), filepath.Join(t.TempDir(), "loom.db"))
+	path := filepath.Join(t.TempDir(), "loom.db")
+	st, err := loomstore.Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return &createEnv{st: st, h: &openRec{Harness: fake.New()}, ws: &fakeWorkspace{}}
+	return &createEnv{st: st, path: path, h: &openRec{Harness: fake.New()}, ws: &fakeWorkspace{}}
 }
 
 // service starts a service on e, as after a loom serve (re)start.
 func (e *createEnv) service(cfg ServiceConfig) *Service {
 	cfg.Store, cfg.Events, cfg.Workspace, cfg.WorkspaceID = e.st, NewEventLog(e.st), e.ws, "ws"
 	cfg.Harnesses = map[string]loomharness.Harness{"opencode": e.h}
+	if cfg.Bridge == nil { // a host bridge that registers no capabilities
+		cfg.Bridge = func(context.Context, Preset) (BridgeCaps, error) { return BridgeCaps{}, nil }
+	}
 	if cfg.Launch == nil {
 		cfg.Launch = func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
 			return loomharness.Launch{Root: "/root/opencode"}, nil
@@ -183,7 +188,8 @@ func TestCreateReplayReturnsOneAgent(t *testing.T) {
 		t.Fatalf("reviewer working copy = %+v", e.ws.ensured[1])
 	}
 	slots, _ := e.st.Slots(ctx, r1.AgentID)
-	if len(slots) != 1 || slots[0].Body != "review it" || slots[0].State != loomstore.SlotWaiting {
+	// The dispatcher handed the first message over once, at the end of Create.
+	if len(slots) != 1 || slots[0].Body != "review it" || slots[0].State != loomstore.SlotHanded {
 		t.Fatalf("first message slots = %+v", slots)
 	}
 
@@ -236,9 +242,11 @@ func TestCreateCrashAtEachStepConverges(t *testing.T) {
 			row, _ := e.st.GetAgent(ctx, a.AgentID)
 			owned, _ := e.st.NativeSessions(ctx, a.AgentID)
 			slots, _ := e.st.Slots(ctx, a.AgentID)
-			if row.State != StateIdle || row.CreateStep != stepDone || len(owned) != 1 ||
-				*row.HarnessSessionID != owned[0].NativeID || len(slots) != 1 ||
-				e.events(t, a.AgentID, KindAgentCreated) != 1 {
+			// The first message is handed over exactly once (one turn ran).
+			_, turns := e.h.Harness.(*fake.Harness).Rules(loomharness.NativeRef{Root: *row.HarnessSessionRoot, NativeID: *row.HarnessSessionID})
+			if row.State != StateActive || row.CreateStep != stepDone || len(owned) != 1 ||
+				*row.HarnessSessionID != owned[0].NativeID || len(slots) != 1 || slots[0].State != loomstore.SlotHanded ||
+				len(turns) != 1 || e.events(t, a.AgentID, KindAgentCreated) != 1 {
 				t.Fatalf("after replay: row %+v owned %+v slots %d", row, owned, len(slots))
 			}
 			if *row.WorktreePath != "/wt/"+a.AgentID {
@@ -539,11 +547,6 @@ func specOf(t *testing.T, e *createEnv, id string) Config {
 
 func hasPublishDenies(rules []loomharness.PermissionRule) bool {
 	return len(rules) >= 2 && slices.Equal(rules[len(rules)-2:], publishDenies)
-}
-
-func isCode(err error, c Code) bool {
-	var e *Error
-	return errors.As(err, &e) && e.Code == c
 }
 
 // leadWithDenies serves a lead preset that names the gh and git push denies

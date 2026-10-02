@@ -18,8 +18,9 @@ func live(typ, data string) string {
 	return fmt.Sprintf(`{"id":"evt_x","type":%q,"created":1,"data":%s}`, typ, data)
 }
 
-// The first stream ends mid-turn (an OpenCode restart); the second replays
-// already-seen durable events, then continues.
+// The first stream ends mid-turn (an OpenCode restart, whose shutdown
+// interrupt ends no turn); the second replays already-seen durable events,
+// then continues the same turn.
 func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 	st := newStore()
 	st.streams = [][]string{
@@ -31,7 +32,7 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 			ev(4, "session.text.ended", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","ordinal":0,"text":"PAST"}`),
 			ev(5, "session.tool.called", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","id":"call_1"}`),
 			ev(6, "permission.asked", `{"sessionID":"ses_a","id":"per_1"}`),
-			ev(7, "session.instructions.updated", `{"sessionID":"ses_a"}`),
+			ev(7, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"shutdown"}`),
 		},
 		{
 			ev(4, "session.text.ended", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","ordinal":0,"text":"PAST"}`),
@@ -71,20 +72,20 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 		t.Fatal("Events not closed after Close")
 	}
 	want := []string{
-		"message.delivered ses_a  message msg_in msg_in  ",
-		"turn.started ses_a evt_2     ",
-		"item.started ses_a evt_2 message msg_a1/text/0   ",
-		"delta ses_a evt_2 message msg_a1/text/0   ",
-		"item.completed ses_a evt_2 message msg_a1/text/0   ",
-		"item.started ses_a evt_2 tool msg_a1/tool/call_1   ",
-		"ask.opened ses_a evt_2    per_1 ",
+		"turn.started ses_a msg_in   msg_in  ",
+		"message.delivered ses_a msg_in message msg_in msg_in  ",
+		"item.started ses_a msg_in message msg_a1/text/0   ",
+		"delta ses_a msg_in message msg_a1/text/0   ",
+		"item.completed ses_a msg_in message msg_a1/text/0   ",
+		"item.started ses_a msg_in tool msg_a1/tool/call_1   ",
+		"ask.opened ses_a msg_in    per_1 ",
 		"feed.gap       ",
-		"turn.resumed ses_a evt_2     ",
-		"item.completed ses_a evt_2 tool msg_a1/tool/call_1   ",
-		"ask.resolved ses_a evt_2    per_1 ",
-		"harness.subagent.started ses_a evt_2  ses_child   ",
-		"usage ses_a evt_2     ",
-		"turn.completed ses_a evt_2     cancelled",
+		"turn.resumed ses_a msg_in  msg_8   ",
+		"item.completed ses_a msg_in tool msg_a1/tool/call_1   ",
+		"ask.resolved ses_a msg_in    per_1 ",
+		"harness.subagent.started ses_a msg_in  ses_child   ",
+		"usage ses_a msg_in  msg_a1   ",
+		"turn.completed ses_a msg_in     cancelled",
 		"feed.gap       ",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -104,8 +105,8 @@ func TestEventsLiveAndCatchUpItemIDsMatch(t *testing.T) {
 	c := fakeServer(t, st)
 	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"})
 	st.messages[ref.NativeID] = []map[string]any{
-		{"id": "msg_a1", "type": "assistant", "content": []map[string]any{
-			{"type": "reasoning", "text": "r"}, {"type": "tool", "id": "call_1"}, {"type": "text", "text": "t"},
+		{"id": "msg_a1", "type": "assistant", "finish": "stop", "content": []map[string]any{
+			{"type": "reasoning", "text": "r"}, {"type": "tool", "id": "call_1", "state": map[string]string{"status": "completed"}}, {"type": "text", "text": "t"},
 		}},
 	}
 	page, err := c.Session(ref).Messages(ctx, "", 0)
@@ -119,14 +120,19 @@ func TestEventsLiveAndCatchUpItemIDsMatch(t *testing.T) {
 		`{"type":"session.text.ended","data":{"sessionID":"s","assistantMessageID":"msg_a1","ordinal":0}}`,
 	} {
 		e, ok := m.mapEvent([]byte(raw))
-		if !ok || e.ItemID != page.Events[i].ItemID || e.ItemKind != page.Events[i].ItemKind {
-			t.Errorf("live %+v vs catch-up %+v", e, page.Events[i])
+		if !ok || e.ItemID != page.Events[i+1].ItemID || e.ItemKind != page.Events[i+1].ItemKind {
+			t.Errorf("live %+v vs catch-up %+v", e, page.Events[i+1])
 		}
 	}
 }
 
+// TestEventsFormAsks: a form is a question ask (ItemKind question on its
+// ask.opened); a permission ask keeps no ItemKind (an approval).
 func TestEventsFormAsks(t *testing.T) {
 	m := mapper{seq: map[string]int64{}, turn: map[string]string{}}
+	if e, ok := m.mapEvent([]byte(`{"type":"permission.asked","data":{"sessionID":"ses_1","id":"per_1"}}`)); !ok || e.ItemKind != "" {
+		t.Fatalf("permission.asked -> %+v, %v; want no ItemKind", e, ok)
+	}
 	for _, c := range []struct {
 		raw  string
 		want loomharness.EventType
@@ -139,5 +145,112 @@ func TestEventsFormAsks(t *testing.T) {
 		if !ok || e.Type != c.want || e.Session.NativeID != "ses_1" || !strings.HasPrefix(e.AskID, "frm_") {
 			t.Fatalf("%s -> %+v, %v", c.raw, e, ok)
 		}
+		if want := map[bool]string{true: "question"}[c.want == loomharness.EventAskOpened]; e.ItemKind != want {
+			t.Fatalf("%s -> ItemKind %q; want %q", c.raw, e.ItemKind, want)
+		}
+	}
+}
+
+// TestEventsRootAndTurnInputKey: every feed event carries the Root Loom
+// opened or resumed its session with (dispatch matches Root plus NativeID),
+// and turn.started, emitted right before a turn's first mapped event, carries
+// the key of the input that began it, whether OpenCode delivers that input
+// after the execution starts (its runner's order) or before. A turn that
+// begins with no delivery has no key, and an execution start alone emits
+// nothing.
+func TestEventsRootAndTurnInputKey(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	st := newStore()
+	c := fakeServer(t, st)
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Launch: loomharness.Launch{Root: "/root-a"}, Dir: "/repo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := ref.NativeID
+	e := func(seq int, typ, data string) string {
+		return fmt.Sprintf(`{"id":"evt_%d","type":%q,"created":%d,"data":%s,"durable":{"aggregateID":%q,"seq":%d}}`,
+			seq, typ, 1000+seq, strings.ReplaceAll(data, "SID", sid), sid, seq)
+	}
+	st.streams = [][]string{
+		{
+			e(1, "session.execution.started", `{"sessionID":"SID"}`),
+			e(2, "session.inbox.delivered", `{"sessionID":"SID","inboxID":"msg_k1"}`),
+			e(3, "session.execution.succeeded", `{"sessionID":"SID"}`),
+			e(4, "session.inbox.delivered", `{"sessionID":"SID","inboxID":"msg_k2"}`),
+			e(5, "session.execution.started", `{"sessionID":"SID"}`),
+			e(6, "session.execution.succeeded", `{"sessionID":"SID"}`),
+			e(7, "session.execution.started", `{"sessionID":"SID"}`),
+			e(8, "session.text.started", `{"sessionID":"SID","assistantMessageID":"msg_r","ordinal":0}`),
+			e(9, "session.execution.succeeded", `{"sessionID":"SID"}`),
+			live("session.execution.started", `{"sessionID":"ses_other"}`),
+			live("session.inbox.delivered", `{"sessionID":"ses_other","inboxID":"msg_o"}`),
+			e(10, "session.execution.started", `{"sessionID":"SID"}`),
+		},
+	}
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var got []string
+	for len(got) < 12 {
+		select {
+		case ev := <-f.Events():
+			got = append(got, fmt.Sprintf("%s %s %s", ev.Type, ev.Session.Root, ev.InputKey))
+		case <-ctx.Done():
+			t.Fatalf("timed out after %d events:\n%s", len(got), strings.Join(got, "\n"))
+		}
+	}
+	want := []string{
+		"turn.started /root-a msg_k1",
+		"message.delivered /root-a msg_k1",
+		"turn.completed /root-a ",
+		"turn.started /root-a msg_k2",
+		"message.delivered /root-a msg_k2",
+		"turn.completed /root-a ",
+		"turn.started /root-a ",
+		"item.started /root-a ",
+		"turn.completed /root-a ",
+		"turn.started  msg_o",
+		"message.delivered  msg_o",
+		"feed.gap  ",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestReadSSE: data fields are parsed as the SSE spec says (the name up to
+// the first colon, one leading space dropped from the value), so multi-line
+// data joins with newlines, "data:" without a space and CRLF line ends work,
+// and comment lines and other fields are ignored.
+func TestReadSSE(t *testing.T) {
+	stream := ": keep-alive comment\n" +
+		"event: message\n" +
+		"data: {\"a\":\n" +
+		"data:1}\n" +
+		"\n" +
+		"id: 7\r\n" +
+		"data:no space\r\n" +
+		"retry: 100\r\n" +
+		"\r\n" +
+		"data:  two spaces\n" +
+		"data: x:y\n" +
+		"\n" +
+		": only a comment\n" +
+		"\n" +
+		"data: unterminated"
+	var got []string
+	readSSE(strings.NewReader(stream), func(b []byte) bool { got = append(got, string(b)); return true })
+	want := []string{"{\"a\":\n1}", "no space", " two spaces\nx:y"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("events %q; want %q", got, want)
+	}
+
+	var first []string
+	readSSE(strings.NewReader("data: 1\n\ndata: 2\n\n"), func(b []byte) bool { first = append(first, string(b)); return false })
+	if len(first) != 1 {
+		t.Fatalf("readSSE went on after fn returned false: %q", first)
 	}
 }

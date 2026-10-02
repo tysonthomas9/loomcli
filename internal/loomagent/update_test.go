@@ -3,6 +3,7 @@ package loomagent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +65,9 @@ func (e *switchEnv) startTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.appendEv(t, "item:partial", "item.completed")
+	if e.s.get(t, "a1").State == StateWaiting {
+		e.s.setAsk("a1", Ask{ID: "ask1", Type: "approval", TurnID: "turn1"}, true)
+	}
 }
 
 func (e *switchEnv) appendEv(t *testing.T, id, kind string) {
@@ -244,8 +248,9 @@ func TestHarnessSwitchOpenApprovalReportsAskLostOnce(t *testing.T) {
 	if _, err := e.s.Update(ctx, switchReq("r1", 1, "fb")); err != nil {
 		t.Fatal(err)
 	}
-	if n := e.kinds(t, KindAskLost); n != 1 {
-		t.Fatalf("ask.lost = %d, want 1", n)
+	p, err := e.s.events.Page(ctx, loomstore.EventQuery{AgentID: "a1", Kinds: []string{KindAskLost}})
+	if err != nil || len(p.Events) != 1 || !strings.Contains(string(p.Events[0].Payload), `"askId":"ask1"`) {
+		t.Fatalf("ask.lost = %+v, %v; want one, for ask1", p.Events, err)
 	}
 	if a := e.s.get(t, "a1"); a.State != StateIdle || a.WaitingOn != nil || a.RunningTurnID != nil {
 		t.Fatalf("state = %s waiting %v", a.State, a.WaitingOn)

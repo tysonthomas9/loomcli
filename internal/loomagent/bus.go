@@ -17,15 +17,19 @@ const (
 	EventWithdrawn        = "message.withdrawn" // Reason: the sender
 )
 
-// Event is one live service event. Watchers subscribe first, then Get the
-// agent (the §5.2 watch rule); these events are not saved.
+// Event is one service event. It is saved in agent_events before the Bus
+// publishes it (emit); the Bus is delivery only (§4.11, §5.2).
 type Event struct {
-	AgentID, Type    string
-	Time             time.Time
-	From, To, Reason string
-	TurnID           string // agent.idle: the turn that ended
-	Outcome          string // agent.settled: a single task's outcome
-	Attempt          int64
+	EventID string    `json:"-"` // the saved row's EventID, set by emit
+	AgentID string    `json:"agentId"`
+	Type    string    `json:"type"`
+	Time    time.Time `json:"time"`
+	From    string    `json:"from,omitempty"`
+	To      string    `json:"to,omitempty"`
+	Reason  string    `json:"reason,omitempty"`
+	TurnID  string    `json:"turnId,omitempty"`  // agent.idle: the turn that ended
+	Outcome string    `json:"outcome,omitempty"` // agent.settled: a single task's outcome
+	Attempt int64     `json:"attempt,omitempty"`
 }
 
 const busBuffer = 256

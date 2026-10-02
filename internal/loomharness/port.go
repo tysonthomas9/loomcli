@@ -16,7 +16,11 @@ type Harness interface {
 	Name() string // "opencode" | "codex" | "claude"
 	Models(ctx context.Context) ([]Model, error)
 	Health(ctx context.Context) (Health, error)
-	Open(ctx context.Context, spec OpenSpec) (NativeRef, error) // idempotent by spec.Key
+	// Open is idempotent by spec.Key. On failure it returns the zero ref if it
+	// left nothing behind, or the ref of a native session it created and
+	// could not remove; the caller records that ref as owned and
+	// purge-pending, then Purges it (retried after a restart, R29).
+	Open(ctx context.Context, spec OpenSpec) (NativeRef, error)
 	Session(ref NativeRef) Session
 	Feed(ctx context.Context) (Feed, error) // live events for all sessions; reconnects itself and emits feed.gap, ends only on ctx or Close
 	// Purge deletes exactly the recorded refs it is given, never more, and
@@ -92,7 +96,13 @@ type Input struct {
 
 // Reply answers an ask.
 type Reply struct {
-	Allow  bool
+	Allow bool
+	// Always, with Allow, grants for the rest of this native session only: on
+	// every harness the grant is gone after a Resume or a harness switch, and
+	// it is never broader than the session (no project-wide or persistent
+	// grant, such as OpenCode's "always"). An adapter that cannot honor it
+	// fails Reply with an explicit error, never narrowing it; the ask stays open.
+	Always bool
 	Answer string
 }
 
@@ -164,10 +174,10 @@ type Event struct {
 	Session    NativeRef
 	TurnID     string
 	ItemID     string
-	ItemKind   string // message | reasoning | tool
+	ItemKind   string // message | reasoning | tool; for ask.opened: approval (or "") | question
 	Seq        int64
 	Time       time.Time
-	InputKey   string // the delivered input's key, for message.delivered
+	InputKey   string // the input's key, for message.delivered and the turn.started it began
 	AskID      string
 	Text       string
 	StopReason string // completed | cancelled | failed, for turn.completed
@@ -178,4 +188,7 @@ var (
 	ErrUnavailable     = errors.New("loomharness: harness unavailable")
 	ErrBusy            = errors.New("loomharness: session busy")
 	ErrSessionNotFound = errors.New("loomharness: session not found")
+	// ErrQuarantined: the session's policy is unconfirmed, so it refuses
+	// Prompt and Reply until Open or Resume confirms one.
+	ErrQuarantined = errors.New("loomharness: session quarantined: its policy is unconfirmed")
 )

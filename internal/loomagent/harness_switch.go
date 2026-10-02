@@ -54,10 +54,9 @@ func (s *Service) switchHarness(ctx context.Context, a loomstore.Agent, req Upda
 		Launch: launch, Preset: cfg.Open, Dir: deref(a.WorktreePath), Model: model, Rules: rules,
 		Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
-		return failed(harnessErr(err))
+		return failed(s.leftover(ctx, a.AgentID, req.Harness, ref, harnessErr(err)))
 	}
-	if err := s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: a.AgentID, Harness: req.Harness,
-		NativeRoot: ref.Root, NativeID: ref.NativeID}); err != nil {
+	if err := s.owned(ctx, a.AgentID, req.Harness, ref); err != nil {
 		_ = h.Purge(ctx, []loomharness.NativeRef{ref}) // unrecorded, so remove the orphan now
 		return failed(err)
 	}
@@ -112,7 +111,7 @@ func (s *Service) switchTarget(ctx context.Context, a loomstore.Agent, req Updat
 }
 
 // stopTurn stops a's running turn for a switch (R30): the turn is interrupted
-// and not replayed, an open ask is reported once as ask.lost, and a goes idle.
+// and not replayed, each open ask is saved as ask.lost first, and a goes idle.
 func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
 	if a.State != StateActive && a.State != StateWaiting {
 		return a, nil
@@ -122,12 +121,8 @@ func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 			return a, harnessErr(err)
 		}
 	}
-	if a.State == StateWaiting {
-		turn := deref(a.RunningTurnID)
-		if err := s.appendEvent(ctx, a.AgentID, KindAskLost, fmt.Sprintf("ask.lost:switch:v%d:%s", a.SpecVersion, turn),
-			map[string]any{"reason": "harness_switch", "waiting_on": deref(a.WaitingOn), "turn_id": turn}); err != nil {
-			return a, err
-		}
+	if err := s.loseOpen(ctx, a, nil); err != nil {
+		return a, err
 	}
 	to := a.StateOf()
 	to.State, to.WaitingOn, to.RunningTurn = StateIdle, nil, nil

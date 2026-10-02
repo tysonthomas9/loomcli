@@ -23,77 +23,68 @@ import (
 var secretNames = []string{"OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD", "GITHUB_TOKEN", "GH_TOKEN",
 	"GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"}
 
-// TestContractSubagentEnv proves no tool process sees the server password or
-// a GitHub/publish alias: not the session's first shell, not a subagent's,
-// not a subagent-of-a-subagent's, before and after a server restart. Driven
-// by the AFT fake-model fixture (2.0d) with synthetic credentials; only names
-// are asserted or printed. The control runs plain `opencode serve` without
-// Loom's filters and shows the leak the adapter's --stdio launch prevents.
+// TestContractSubagentEnv pins which tool processes see the server password
+// or a GitHub/publish alias, driven by the AFT fake-model fixture (2.0d) with
+// synthetic credentials; only names are asserted or printed. Each case is a
+// separate sandbox user.
+//
+//   - Adapter: the service Loom starts has a filtered environment, so no
+//     shell sees a secret: not the session's first shell, not a subagent's,
+//     not a subagent-of-a-subagent's, before and after a restart.
+//   - ReusedUserService: on the user's own service (started with every
+//     secret), the session's shell gets Loom's per-session environment and
+//     sees none, but subagent shells get the service's own environment and
+//     see them all. Accepted for Phase 1 (Tyson, 17:50/17:52 UTC): Loom subagents
+//     see the user's env and tokens when his service runs.
+//   - PlainServeControl: plain `opencode serve` without Loom leaks to every
+//     shell.
 func TestContractSubagentEnv(t *testing.T) {
-	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
-		t.Skip("set LOOM_REAL_OPENCODE=1 to run against the real OpenCode build")
-	}
-	bin := os.Getenv("LOOM_OPENCODE_BIN")
-	if bin == "" {
-		home, _ := os.UserHomeDir()
-		bin = filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode")
-	}
+	bin := realOpenCode(t)
 	fixture := startFakeModelFixture(t)
-	sbx, err := os.MkdirTemp("/tmp", "loom-opencode-subagent-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(sbx) })
-	repo := filepath.Join(sbx, "repo")
-	for _, d := range []string{filepath.Join(sbx, "home"), filepath.Join(sbx, "tmp"), filepath.Join(sbx, "config/opencode"), repo} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
 	config := fmt.Sprintf(`{"provider":{"aft":{"name":"AFT fake","npm":"@ai-sdk/openai-compatible",
 		"options":{"baseURL":%q,"apiKey":"x"},
 		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}}}}},"model":"aft/m",
 		"experimental":{"subagent_depth":2}}`, fixture+"/v1")
-	if err := os.WriteFile(filepath.Join(sbx, "config/opencode/opencode.json"), []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	// The parent (loom serve) environment: scrubbed, plus every synthetic
-	// fixture credential and the marker.
-	parentEnv := contractEnv(sbx, "LOOM_NESTED_MARKER=kept")
-	for _, k := range secretNames {
-		parentEnv = append(parentEnv, k+"=fixture-"+strings.ToLower(k))
+	// The parent environment: scrubbed, plus every synthetic fixture
+	// credential and the marker.
+	parentEnv := func(sbx string) []string {
+		env := contractEnv(sbx, "LOOM_NESTED_MARKER=kept")
+		for _, k := range secretNames {
+			env = append(env, k+"=fixture-"+strings.ToLower(k))
+		}
+		return env
 	}
-	spec := loomharness.OpenSpec{Launch: loomharness.Launch{Root: sbx}, Dir: repo, Model: "aft/m",
-		Rules: []loomharness.PermissionRule{{Action: "*", Resource: "*", Effect: "allow"}}}
-	check := func(t *testing.T, envs map[string]map[string]bool, leaked func(name string) bool) {
+	spec := func(sbx, key string) loomharness.OpenSpec {
+		return loomharness.OpenSpec{Key: key, Launch: loomharness.Launch{Root: sbx}, Dir: filepath.Join(sbx, "repo"), Model: "aft/m",
+			Rules: []loomharness.PermissionRule{{Action: "*", Resource: "*", Effect: "allow"}}}
+	}
+	check := func(t *testing.T, envs map[string]map[string]bool, leaked func(role, name string) bool) {
 		t.Helper()
 		for role, env := range envs {
 			for _, k := range secretNames {
-				if saw := env[k]; saw != leaked(k) {
-					t.Errorf("%s shell saw %s = %v; want %v", role, k, saw, leaked(k))
+				if saw := env[k]; saw != leaked(role, k) {
+					t.Errorf("%s shell saw %s = %v; want %v", role, k, saw, leaked(role, k))
 				}
 			}
 		}
 	}
+	adapter := func(t *testing.T, sbx string) *Adapter {
+		a := New(Config{Bin: bin, Env: parentEnv(sbx)})
+		t.Cleanup(a.Stop)
+		waitFor(t, "aft/m in Models", func() bool { models, err := a.Models(ctx); return err == nil && hasModel(models, "aft/m") })
+		return a
+	}
 
 	t.Run("Adapter", func(t *testing.T) {
-		a := New(Config{Bin: bin, Env: parentEnv})
-		var owned []loomharness.NativeRef
-		t.Cleanup(func() {
-			if err := a.Purge(context.Background(), owned); err != nil {
-				t.Errorf("cleanup purge: %v", err)
-			}
-			a.Stop()
-		})
-		waitFor(t, "aft/m in Models", func() bool { models, err := a.Models(ctx); return err == nil && hasModel(models, "aft/m") })
-		spec.Key = "subagent-1"
-		ref, err := a.Open(ctx, spec)
+		sbx := newSandbox(t, "loom-opencode-subagent-", config)
+		a := adapter(t, sbx)
+		ref, err := a.Open(ctx, spec(sbx, "subagent-1"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		owned = append(owned, ref)
+		t.Cleanup(func() { _ = a.Purge(context.Background(), []loomharness.NativeRef{ref}) })
 		for i, restart := range []bool{false, true} {
 			if restart {
 				if err := a.Restart(ctx); err != nil {
@@ -101,11 +92,28 @@ func TestContractSubagentEnv(t *testing.T) {
 				}
 			}
 			envs := subagentShells(t, ctx, a.Client, ref, fixture, filepath.Join(sbx, fmt.Sprintf("adapter-%d", i)))
-			check(t, envs, func(string) bool { return false })
+			check(t, envs, func(string, string) bool { return false })
 		}
 	})
 
+	t.Run("ReusedUserService", func(t *testing.T) {
+		sbx := newSandbox(t, "loom-opencode-subagent-user-", config)
+		user := startService(t, bin, sbx, parentEnv(sbx)) // every synthetic credential, unfiltered
+		a := adapter(t, sbx)
+		if serverPID(a) != user.PID {
+			t.Fatalf("Loom uses service %d; want the user's %d", serverPID(a), user.PID)
+		}
+		ref, err := a.Open(ctx, spec(sbx, "subagent-user"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = a.Purge(context.Background(), []loomharness.NativeRef{ref}) })
+		envs := subagentShells(t, ctx, a.Client, ref, fixture, filepath.Join(sbx, "user"))
+		check(t, envs, func(role, _ string) bool { return role != "parent" })
+	})
+
 	t.Run("PlainServeControl", func(t *testing.T) {
+		sbx := newSandbox(t, "loom-opencode-subagent-plain-", config)
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
@@ -113,7 +121,7 @@ func TestContractSubagentEnv(t *testing.T) {
 		base := "http://" + l.Addr().String()
 		_ = l.Close()
 		cmd := exec.Command(bin, "serve", "--hostname", "127.0.0.1", "--port", strings.TrimPrefix(base, "http://127.0.0.1:"))
-		cmd.Env = parentEnv // every synthetic credential, unfiltered
+		cmd.Env = parentEnv(sbx) // every synthetic credential, unfiltered
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
@@ -121,14 +129,13 @@ func TestContractSubagentEnv(t *testing.T) {
 		t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); _ = cmd.Wait() })
 		c := NewClient(base, "fixture-opencode_password") // OPENCODE_PASSWORD wins over OPENCODE_SERVER_PASSWORD
 		waitFor(t, "plain serve", func() bool { return answers(ctx, base, "fixture-opencode_password", cmd.Process.Pid) })
-		spec.Key = "subagent-control"
-		ref, err := c.Open(ctx, spec)
+		ref, err := c.Open(ctx, spec(sbx, "subagent-control"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = c.Purge(context.Background(), []loomharness.NativeRef{ref}) })
 		envs := subagentShells(t, ctx, c, ref, fixture, filepath.Join(sbx, "control"))
-		check(t, envs, func(string) bool { return true })
+		check(t, envs, func(string, string) bool { return true })
 	})
 }
 
