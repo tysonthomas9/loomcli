@@ -38,6 +38,9 @@ func adoptNativeRestack(ctx context.Context, store *journal.SQLite, offer journa
 	if err != nil {
 		return err
 	}
+	if err := recheckNativeHeads(ctx, forge, publication.Slug, publications, heads); err != nil {
+		return err
+	}
 	if *revision <= offer.Revision {
 		result, restackErr := pull.AdoptRestackLocal(ctx, area.Path, offer.TrunkSHA, nil, heads,
 			"landing-restack:"+offer.Workspace+":"+offer.Change+":"+offer.Predecessor)
@@ -109,7 +112,7 @@ func nativeRestackHeads(ctx context.Context, store *journal.SQLite, runner *gite
 		if err != nil {
 			return nil, nil, err
 		}
-		if pr.Merged || pr.State != "open" || pr.Head != item.Branch || pr.Base != baseBranch {
+		if !nativePROpenOn(pr, item.Branch, baseBranch) {
 			return nil, nil, loomgit.NewError(loomgit.Stale, "native PR lineage or head is not ready", nil)
 		}
 		if pr.HeadSHA == "" {
@@ -127,6 +130,27 @@ func nativeRestackHeads(ctx context.Context, store *journal.SQLite, runner *gite
 		return nil, nil, errors.New("native stack has no remaining layers")
 	}
 	return publications, heads, nil
+}
+
+// recheckNativeHeads re-reads every PR just before adoption writes anything and
+// fails closed when its head SHA, head branch, base or open state moved since it was read.
+func recheckNativeHeads(ctx context.Context, forge landing.Forge, slug string,
+	publications []journal.Publication, heads map[string]string) error {
+	owner, repo, _ := strings.Cut(slug, "/")
+	for _, item := range publications {
+		pr, err := forge.PullByNumber(ctx, owner, repo, item.PRNumber)
+		if err != nil {
+			return err
+		}
+		if !nativePROpenOn(pr, item.Branch, item.Trunk) || pr.HeadSHA != heads[item.Change] {
+			return loomgit.NewError(loomgit.Stale, "native PR changed before adoption", nil)
+		}
+	}
+	return nil
+}
+
+func nativePROpenOn(pr stackpublish.PR, head, base string) bool {
+	return !pr.Merged && pr.State == "open" && pr.Head == head && pr.Base == base
 }
 
 func nativeTrunkBranch(ctx context.Context, store *journal.SQLite, workspace, repo string) (string, error) {
