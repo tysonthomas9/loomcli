@@ -246,12 +246,6 @@ func (m *mockGitOps) ApplyRevision(context.Context, ops.ApplyRevisionRequest) (*
 	return nil, nil
 }
 
-func (m *mockGitOps) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
-	if m.pushFunc != nil {
-		return m.pushFunc(worktreePath, sourceBranch, targetBranch, remote)
-	}
-	return &ops.GitPushResult{Success: true, Message: "pushed"}, nil
-}
 func (m *mockGitOps) Pull(worktreePath, currentBranch, sourceBranch, remote string) (*ops.GitPullResult, error) {
 	if m.pullFunc != nil {
 		return m.pullFunc(worktreePath, currentBranch, sourceBranch, remote)

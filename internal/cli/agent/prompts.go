@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -35,10 +34,6 @@ type promptTemplateData struct {
 	TestStep          string
 	ReviewStep        string
 	InspectReviewStep string
-	SourceBranch      string
-	TargetBranch      string
-	ConflictList      string
-	PushRef           string
 	DesignFormat      string
 }
 
@@ -350,23 +345,6 @@ func GenerateFleetTaskPrompt(agentName, taskID string, workspace *config.Workspa
 	return injectCheckpointIfNotResuming(prompt)
 }
 
-// GenerateConflictResolutionPrompt creates the prompt for merge conflict resolution
-func GenerateConflictResolutionPrompt(sourceBranch, targetBranch string, conflicts []string) string {
-	return GenerateConflictResolutionPromptWithPush(sourceBranch, targetBranch, conflicts, targetBranch)
-}
-
-// generateConflictResolutionPromptWithPush creates a conflict resolution prompt with a custom push ref.
-// pushRef is used in the "git push origin <pushRef>" command (e.g., "main" or "HEAD:main").
-func GenerateConflictResolutionPromptWithPush(sourceBranch, targetBranch string, conflicts []string, pushRef string) string {
-	return renderPrompt("conflict_resolution", promptTemplateData{
-		SafetyBlock:  buildSafetyGuardrailsBlock(),
-		SourceBranch: sourceBranch,
-		TargetBranch: targetBranch,
-		ConflictList: strings.Join(conflicts, "\n"),
-		PushRef:      pushRef,
-	})
-}
-
 // GenerateLeadPrompt creates the prompt for the interactive lead/manager mode
 func GenerateLeadPrompt() string {
 	return renderPrompt("lead", promptTemplateData{
@@ -572,9 +550,4 @@ func truncateUTF8Safe(s string, max int) string { //nolint:unparam // max is par
 		max--
 	}
 	return s[:max] + "\n... [truncated]"
-}
-
-func init() {
-	git.ConflictPromptGen = GenerateConflictResolutionPrompt
-	git.ConflictPromptGenWithPush = GenerateConflictResolutionPromptWithPush
 }

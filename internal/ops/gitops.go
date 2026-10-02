@@ -18,9 +18,6 @@ type GitOps interface {
 	ResolveAgentWorktree(workspaceID, name string) (*AgentWorktree, error)
 	ApplyRevision(context.Context, ApplyRevisionRequest) (*GitPushResult, error)
 
-	// Push merges the source branch into the target branch (loom push semantics).
-	Push(worktreePath, sourceBranch, targetBranch, remote string) (*GitPushResult, error)
-
 	// Pull merges the source branch into the worktree's current branch.
 	Pull(worktreePath, currentBranch, sourceBranch, remote string) (*GitPullResult, error)
 

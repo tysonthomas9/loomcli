@@ -172,54 +172,6 @@ func TestGeneratePrompts_NoParent_NoEpicScope(t *testing.T) {
 	}
 }
 
-func TestGenerateConflictResolutionPrompt(t *testing.T) {
-	tests := []struct {
-		name         string
-		sourceBranch string
-		targetBranch string
-		conflicts    []string
-		wantParts    []string
-	}{
-		{
-			name:         "single conflict",
-			sourceBranch: "feature/test",
-			targetBranch: "main",
-			conflicts:    []string{"src/main.go"},
-			wantParts: []string{
-				"feature/test",
-				"main",
-				"src/main.go",
-				"Resolve Merge Conflicts",
-			},
-		},
-		{
-			name:         "multiple conflicts",
-			sourceBranch: "feature/auth",
-			targetBranch: "develop",
-			conflicts:    []string{"pkg/auth.go", "pkg/util.go", "README.md"},
-			wantParts: []string{
-				"feature/auth",
-				"develop",
-				"pkg/auth.go",
-				"pkg/util.go",
-				"README.md",
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			prompt := GenerateConflictResolutionPrompt(tc.sourceBranch, tc.targetBranch, tc.conflicts)
-
-			for _, part := range tc.wantParts {
-				if !strings.Contains(prompt, part) {
-					t.Errorf("prompt missing expected part: %q", part)
-				}
-			}
-		})
-	}
-}
-
 func TestGenerateLeadPrompt(t *testing.T) {
 	prompt := GenerateLeadPrompt()
 
@@ -490,12 +442,11 @@ func TestBuildSafetyGuardrailsBlock(t *testing.T) {
 
 func TestAllPromptsContainSafetyRules(t *testing.T) {
 	prompts := map[string]string{
-		"planning":            GeneratePlanningPrompt("test", nil, ""),
-		"task":                GenerateTaskPrompt("test", nil, "", "claude"),
-		"fleet_planning":      GenerateFleetPlanningPrompt("test", "loom-test.1", nil),
-		"fleet_task":          GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude"),
-		"conflict_resolution": GenerateConflictResolutionPrompt("feature", "main", []string{"file.go"}),
-		"lead":                GenerateLeadPrompt(),
+		"planning":       GeneratePlanningPrompt("test", nil, ""),
+		"task":           GenerateTaskPrompt("test", nil, "", "claude"),
+		"fleet_planning": GenerateFleetPlanningPrompt("test", "loom-test.1", nil),
+		"fleet_task":     GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude"),
+		"lead":           GenerateLeadPrompt(),
 	}
 
 	for name, prompt := range prompts {
@@ -548,107 +499,6 @@ func TestBuildWorkspaceContextBlock_DefaultBranch(t *testing.T) {
 	// Verify the repo row contains "main"
 	if !strings.Contains(result, "| myrepo | ./myrepo | main |") {
 		t.Errorf("expected table row with default branch 'main', got:\n%s", result)
-	}
-}
-
-func TestGenerateConflictResolutionPromptWithPush(t *testing.T) {
-	tests := []struct {
-		name         string
-		sourceBranch string
-		targetBranch string
-		conflicts    []string
-		pushRef      string
-		wantParts    []string
-		notWantParts []string
-	}{
-		{
-			name:         "custom pushRef HEAD:main for detached mode",
-			sourceBranch: "feature/auth",
-			targetBranch: "main",
-			conflicts:    []string{"pkg/auth.go", "pkg/handler.go"},
-			pushRef:      "HEAD:main",
-			wantParts: []string{
-				"feature/auth",
-				"main",
-				"pkg/auth.go",
-				"pkg/handler.go",
-				"git push origin HEAD:main",
-				"Resolve Merge Conflicts",
-			},
-		},
-		{
-			name:         "standard pushRef equals target branch",
-			sourceBranch: "feature/ui",
-			targetBranch: "develop",
-			conflicts:    []string{"src/app.go"},
-			pushRef:      "develop",
-			wantParts: []string{
-				"feature/ui",
-				"develop",
-				"src/app.go",
-				"git push origin develop",
-			},
-		},
-		{
-			name:         "pushRef with refspec format",
-			sourceBranch: "hotfix",
-			targetBranch: "release",
-			conflicts:    []string{"main.go"},
-			pushRef:      "loom-push-temp-123:release",
-			wantParts: []string{
-				"git push origin loom-push-temp-123:release",
-			},
-		},
-		{
-			name:         "empty pushRef keeps local-only conflict resolution local",
-			sourceBranch: "feature/local",
-			targetBranch: "Slack_UI",
-			conflicts:    []string{"src/data.js"},
-			pushRef:      "",
-			wantParts: []string{
-				"No remote is configured for this repo",
-				"Do not run git push origin",
-				"git commit -m \"Resolve merge conflicts: feature/local -> Slack_UI",
-			},
-			notWantParts: []string{
-				"\ngit push origin",
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			prompt := GenerateConflictResolutionPromptWithPush(tc.sourceBranch, tc.targetBranch, tc.conflicts, tc.pushRef)
-
-			for _, part := range tc.wantParts {
-				if !strings.Contains(prompt, part) {
-					t.Errorf("prompt missing expected part: %q", part)
-				}
-			}
-			for _, part := range tc.notWantParts {
-				if strings.Contains(prompt, part) {
-					t.Errorf("prompt should not contain: %q", part)
-				}
-			}
-		})
-	}
-}
-
-func TestGenerateConflictResolutionPrompt_DelegatesToInternal(t *testing.T) {
-	// Verify that GenerateConflictResolutionPrompt delegates to
-	// GenerateConflictResolutionPromptWithPush with pushRef = targetBranch
-	conflicts := []string{"file.go"}
-
-	publicPrompt := GenerateConflictResolutionPrompt("feature", "main", conflicts)
-	internalPrompt := GenerateConflictResolutionPromptWithPush("feature", "main", conflicts, "main")
-
-	if publicPrompt != internalPrompt {
-		t.Error("GenerateConflictResolutionPrompt should produce identical output to GenerateConflictResolutionPromptWithPush with pushRef=targetBranch")
-	}
-
-	// The public function should use targetBranch as the push ref
-	if !strings.Contains(publicPrompt, "git push origin main") {
-		t.Error("expected public prompt to use targetBranch as push ref")
 	}
 }
 
@@ -1124,37 +974,6 @@ func TestBuildWorkspaceContextBlock_RepoWithEmptyName(t *testing.T) {
 	}
 }
 
-func TestGenerateConflictResolutionPrompt_EmptyConflicts(t *testing.T) {
-	prompt := GenerateConflictResolutionPrompt("feature", "main", []string{})
-	wantParts := []string{
-		"Resolve Merge Conflicts",
-		"Step 1",
-		"Step 2",
-		"Step 3",
-		"Step 4",
-		"Step 5",
-	}
-	for _, part := range wantParts {
-		if !strings.Contains(prompt, part) {
-			t.Errorf("prompt missing expected part: %q", part)
-		}
-	}
-}
-
-func TestGenerateConflictResolutionPrompt_EmptyBranchNames(t *testing.T) {
-	prompt := GenerateConflictResolutionPrompt("", "", []string{"file.go"})
-	wantParts := []string{
-		"Resolve Merge Conflicts",
-		"file.go",
-		"Step 1",
-	}
-	for _, part := range wantParts {
-		if !strings.Contains(prompt, part) {
-			t.Errorf("prompt missing expected part: %q", part)
-		}
-	}
-}
-
 func TestRenderPrompt_EmbeddedTemplate(t *testing.T) {
 	// Verify each embedded template renders without errors
 	templates := []struct {
@@ -1165,7 +984,6 @@ func TestRenderPrompt_EmbeddedTemplate(t *testing.T) {
 		{"task", promptTemplateData{AgentName: "test", ReadyJSON: "loom data ready --limit 200 --output json", ReadyFallback: "loom data ready --limit 200", TestStep: "test step", ReviewStep: "review step"}},
 		{"fleet_planning", promptTemplateData{AgentName: "test", TaskID: "loom-test.1"}},
 		{"fleet_task", promptTemplateData{AgentName: "test", TaskID: "loom-test.1", TestStep: "test step", ReviewStep: "review step"}},
-		{"conflict_resolution", promptTemplateData{SourceBranch: "feature", TargetBranch: "main", ConflictList: "file.go", PushRef: "main"}},
 		{"lead", promptTemplateData{}},
 	}
 
@@ -1268,13 +1086,9 @@ func TestAllTemplatesRender(t *testing.T) {
 		TaskID:         "task-456",
 		TestStep:       "### Step 5: Write Tests\n- test content",
 		ReviewStep:     "### Step 6: Code Review\n- review content",
-		SourceBranch:   "feature/test",
-		TargetBranch:   "main",
-		ConflictList:   "file1.go\nfile2.go",
-		PushRef:        "HEAD:main",
 	}
 
-	templates := []string{"planning", "task", "fleet_planning", "fleet_task", "conflict_resolution", "lead"}
+	templates := []string{"planning", "task", "fleet_planning", "fleet_task", "lead"}
 	for _, name := range templates {
 		t.Run(name, func(t *testing.T) {
 			result := renderPrompt(name, data)
