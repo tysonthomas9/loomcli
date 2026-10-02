@@ -3,9 +3,13 @@ package loomagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -275,5 +279,63 @@ func TestTaskCompletedReconcileOnce(t *testing.T) {
 	}
 	if c := s.get(t, info.AgentID); c.State != StateFinished {
 		t.Fatalf("child state = %s", c.State)
+	}
+}
+
+// flakyStatus is a Workspace port whose Status fails while fail is set.
+type flakyStatus struct {
+	headWorkspace
+	fail atomic.Bool
+}
+
+func (w *flakyStatus) Status(ctx context.Context, s WorkspaceSpec) (WorkspaceStatus, error) {
+	if w.fail.Load() {
+		return WorkspaceStatus{}, errors.New("status failed")
+	}
+	return w.headWorkspace.Status(ctx, s)
+}
+
+// TestTaskCompletedPortFailureRetries: a failed Workspace.Status saves no
+// record; the dispatcher retries it and saves one, with the port's head.
+func TestTaskCompletedPortFailureRetries(t *testing.T) {
+	ctx := context.Background()
+	defer func(d time.Duration) { completionRetry = d }(completionRetry)
+	completionRetry = 10 * time.Millisecond
+	ws := &flakyStatus{headWorkspace: headWorkspace{branch: "loom/agent/c1", head: "abc123"}}
+	ws.fail.Store(true)
+	c := childOf("c1", "L")
+	c.WorktreePath, c.Branch = sp("/wt/c1"), sp("loom/agent/c1")
+	s := newService(t, ServiceConfig{Workspace: ws}, busy("L", "persistent", StateActive), c)
+	endAttempt(t, s, "c1", "completed")
+	if got := completions(t, s, "L"); len(got) != 0 || s.get(t, "c1").State != StateFinished {
+		t.Fatalf("records after a failed status = %+v", got)
+	}
+	run, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); s.RunDispatcher(run) }()
+	defer func() { stop(); <-done }()
+	time.Sleep(5 * completionRetry) // retries while the port still fails save nothing
+	if got := completions(t, s, "L"); len(got) != 0 {
+		t.Fatalf("saved while failing: %+v", got)
+	}
+	ws.fail.Store(false)
+	eventually(t, "the record is saved", func() bool { return len(completions(t, s, "L")) == 1 })
+	time.Sleep(5 * completionRetry)
+	if got := completions(t, s, "L"); len(got) != 1 || got[0].Head != "abc123" || got[0].Branch != "loom/agent/c1" {
+		t.Fatalf("records = %+v", got)
+	}
+}
+
+// TestClipBound: the summary, its mark included, never exceeds the cap and
+// never splits a rune.
+func TestClipBound(t *testing.T) {
+	for _, in := range []string{strings.Repeat("a", 501), strings.Repeat("é", 400), strings.Repeat("a", 499) + "€€"} {
+		got := clip(in, summaryCap)
+		if len(got) > summaryCap || !utf8.ValidString(got) || !strings.HasSuffix(got, "…") {
+			t.Fatalf("clip(%d bytes) = %d bytes, valid %v", len(in), len(got), utf8.ValidString(got))
+		}
+	}
+	if got := clip("short", summaryCap); got != "short" {
+		t.Fatalf("clip(short) = %q", got)
 	}
 }

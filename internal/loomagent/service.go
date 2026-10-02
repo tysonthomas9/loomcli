@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -124,6 +125,9 @@ type Service struct {
 	// ready closes when start-up recovery is done (nil: no gate); recovered closes it.
 	ready     chan struct{}
 	recovered func()
+	// owed is set when a task_completed record could not be saved; the
+	// dispatcher retries the sweep while it is set.
+	owed atomic.Bool
 }
 
 // New returns a Service for cfg.
@@ -240,7 +244,7 @@ func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.
 		return a, err
 	}
 	if completed(a) && !completed(before) { // a child's attempt ended: tell its parent (§10.3)
-		return a, s.recordCompletion(ctx, a)
+		s.tryRecordCompletion(ctx, a) // the change is committed; a failed record is retried
 	}
 	return a, nil
 }

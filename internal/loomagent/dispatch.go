@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -301,12 +302,22 @@ func (s *Service) RunDispatcher(ctx context.Context) {
 	}
 }
 
-// follow dispatches on each agent.idle until sub ends or ctx does.
+// completionRetry is how often the dispatcher retries owed task_completed records.
+var completionRetry = 5 * time.Second
+
+// follow dispatches on each agent.idle and task_completed until sub ends or
+// ctx does, and retries owed task_completed records.
 func (s *Service) follow(ctx context.Context, sub *BusSubscription) {
+	retry := time.NewTicker(completionRetry)
+	defer retry.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-retry.C:
+			if s.owed.Swap(false) {
+				s.recordCompletions(ctx)
+			}
 		case e, ok := <-sub.C:
 			if !ok {
 				return

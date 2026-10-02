@@ -77,18 +77,17 @@ func (s *Service) recordCompletion(ctx context.Context, a loomstore.Agent) error
 		return err
 	}
 	rec := TaskCompleted{Child: a.AgentID, Attempt: a.Attempt, Outcome: *a.Outcome, Branch: deref(a.Branch)}
-	if a.WorktreePath != nil && s.workspace != nil {
+	if a.WorktreePath != nil && s.workspace != nil { // nothing is saved without the port's branch and head
 		repo, err := s.repoPath(ctx, a.Repo)
-		if err == nil {
-			var st WorkspaceStatus
-			st, err = s.workspace.Status(ctx, WorkspaceSpec{Key: a.AgentID, Repo: repo, BaseRef: deref(a.BaseRef),
-				Branch: deref(a.Branch), Detached: a.Branch == nil})
-			rec.Branch, rec.Head = st.Branch, st.HEAD
+		if err != nil {
+			return err
 		}
-		if err != nil { // still notify; the lead can read the branch itself
-			slog.Warn("loomagent: task_completed without a workspace status", "agent", a.AgentID, "error", err)
-			rec.Branch = deref(a.Branch)
+		st, err := s.workspace.Status(ctx, WorkspaceSpec{Key: a.AgentID, Repo: repo, BaseRef: deref(a.BaseRef),
+			Branch: deref(a.Branch), Detached: a.Branch == nil})
+		if err != nil {
+			return fmt.Errorf("loomagent: task_completed workspace status: %w", err)
 		}
+		rec.Branch, rec.Head = st.Branch, st.HEAD
 	}
 	summary, err := s.store.LastMessage(ctx, a.AgentID)
 	if err != nil {
@@ -103,19 +102,28 @@ func (s *Service) recordCompletion(ctx context.Context, a loomstore.Agent) error
 	return nil
 }
 
+// tryRecordCompletion is recordCompletion for a change already committed:
+// a failure is logged and marks the record owed, for the dispatcher to retry.
+func (s *Service) tryRecordCompletion(ctx context.Context, a loomstore.Agent) {
+	if err := s.recordCompletion(ctx, a); err != nil {
+		slog.Warn("loomagent: task_completed not saved; will retry", "agent", a.AgentID, "error", err)
+		s.owed.Store(true)
+	}
+}
+
 // recordCompletions saves every owed task_completed record in the
-// workspace: an attempt that ended just before a crash. Each is saved once.
+// workspace: an attempt that ended just before a crash, or whose record
+// failed to save. Each is saved once.
 func (s *Service) recordCompletions(ctx context.Context) {
 	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Mode: "single_task",
 		IncludeArchived: true})
 	if err != nil {
 		slog.Warn("loomagent: task_completed sweep", "error", err)
+		s.owed.Store(true)
 		return
 	}
 	for _, a := range agents {
-		if err := s.recordCompletion(ctx, a); err != nil {
-			slog.Warn("loomagent: task_completed sweep", "agent", a.AgentID, "error", err)
-		}
+		s.tryRecordCompletion(ctx, a)
 	}
 }
 
@@ -166,13 +174,15 @@ func (s *Service) deliverCompletions(ctx context.Context, a loomstore.Agent) err
 	return nil
 }
 
-// clip cuts s to at most n bytes on a rune boundary.
+// clip cuts s to at most n bytes, the "…" mark included, on a rune boundary.
 func clip(s string, n int) string {
+	const mark = "…"
 	if len(s) <= n {
 		return s
 	}
+	n = max(n-len(mark), 0)
 	for n > 0 && !utf8.RuneStart(s[n]) {
 		n--
 	}
-	return s[:n] + "…"
+	return s[:n] + mark
 }
