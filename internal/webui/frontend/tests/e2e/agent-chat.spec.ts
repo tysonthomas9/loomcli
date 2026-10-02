@@ -276,3 +276,55 @@ test("a question card disappears on ask.lost", async ({ page }) => {
   await expect(page.getByTestId("ask-card")).toHaveCount(0);
   expect(m.writes).toHaveLength(0);
 });
+
+test("a reload shows each completed item once, from ListEvents", async ({
+  page,
+}) => {
+  const m = mock({
+    events: [
+      ev("message.delivered", { text: "hi" }),
+      ev("item.completed", { itemId: "m1", itemKind: "message", text: "one" }),
+    ],
+  });
+  await open(page, m);
+  await push(
+    page,
+    m,
+    ev("delta", { itemId: "m2", itemKind: "message", text: "tw" }, true),
+    ev("item.completed", { itemId: "m2", itemKind: "message", text: "two" }),
+  );
+  await expect(transcript(page).getByText("two")).toHaveCount(1);
+  await page.reload();
+  await expect(page.getByText("lead")).toBeVisible();
+  for (const text of ["hi", "one", "two"])
+    await expect(transcript(page).getByText(text, { exact: true })).toHaveCount(
+      1,
+    );
+  await expect(transcript(page).getByText("tw", { exact: true })).toHaveCount(
+    0,
+  );
+});
+
+test("feed.gap pages the missed event once; a late replay is not shown twice", async ({
+  page,
+}) => {
+  const m = mock({
+    events: [ev("item.completed", { itemKind: "message", text: "before" })],
+  });
+  await open(page, m);
+  // Committed on the server but never streamed: only ListEvents has it.
+  const missed = ev("item.completed", { itemKind: "message", text: "missed" });
+  m.events.push(missed);
+  await push(page, m, ev("feed.gap", {}, true));
+  await expect(transcript(page).getByText("missed")).toHaveCount(1);
+  await push(page, m, missed);
+  await push(
+    page,
+    m,
+    ev("item.completed", { itemKind: "message", text: "after" }),
+  );
+  await expect(transcript(page).getByText("after")).toHaveCount(1);
+  await expect(transcript(page).getByText("missed")).toHaveCount(1);
+  const texts = await transcript(page).locator("li").allInnerTexts();
+  expect(texts).toEqual(["before", "missed", "after"]);
+});

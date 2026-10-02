@@ -16,6 +16,7 @@
  *     /files                               → FilesPage (lazy)
  *     /skills                              → SkillsPage (lazy)
  *     /issues/:issueId                     → KanbanPage + issue slide-over
+ *     /chat/:agentId                       → AgentChatPage (Agent API chat, any harness)
  *   /test/*                                → TestFixtures (dev only, preserved)
  *   *                                      → NotFound (404 page)
  */
@@ -186,6 +187,13 @@ const viewRoutes = [
     lazy: () =>
       import("@/views/KanbanPage").then((m) => ({
         Component: m.KanbanPage,
+      })),
+  },
+  {
+    path: "chat/:agentId",
+    lazy: () =>
+      import("@/views/AgentChatPage").then((m) => ({
+        Component: m.AgentChatPage,
       })),
   },
   {

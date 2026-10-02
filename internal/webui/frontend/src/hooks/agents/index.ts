@@ -8,7 +8,10 @@ export type {
   UseAgentDiffStatReturn,
 } from "./useAgentDiffStat";
 
-export { useCreateWorkspaceAgent } from "./useCreateWorkspaceAgent";
+export {
+  useCreateLead,
+  useCreateWorkspaceAgent,
+} from "./useCreateWorkspaceAgent";
 
 export { useInteractivePrompts } from "./useInteractivePrompts";
 export type { UseInteractivePromptsReturn } from "./useInteractivePrompts";

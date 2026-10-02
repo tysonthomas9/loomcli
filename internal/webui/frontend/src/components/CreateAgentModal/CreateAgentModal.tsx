@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
+import type { Agent } from "@/api/agentsv1";
 import type {
   InteractivePromptInfo,
   RepoInfo,
   WorkspaceAgentInfo,
 } from "@/api/workspace";
-import { useCreateWorkspaceAgent, useInteractivePrompts } from "@/hooks/agents";
+import {
+  useCreateLead,
+  useCreateWorkspaceAgent,
+  useInteractivePrompts,
+} from "@/hooks/agents";
 import { useBackends } from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
 import {
@@ -66,7 +71,7 @@ const BACKGROUND_TEMPLATES: {
 
 const CUSTOM_PROMPT_TEMPLATE = {
   title: "Custom prompt",
-  description: "Define a terminal teammate with your own inline instructions.",
+  description: "A lead that follows your own inline instructions.",
   glyph: "✦",
   placeholder: "reviewer",
   testId: "create-agent-template-custom-prompt",
@@ -76,7 +81,7 @@ const CUSTOM_PROMPT_TEMPLATE = {
 function interactivePromptCard(prompt: InteractivePromptInfo) {
   if (prompt.id === "lead") {
     return {
-      description: "Orchestrates work interactively in a terminal.",
+      description: "Orchestrates work in a chat and delegates to task agents.",
       glyph: "L",
       placeholder: "lead",
       testId: "create-agent-template-lead",
@@ -122,6 +127,8 @@ export interface CreateAgentModalProps {
   defaultKind?: AgentKind;
   onClose: () => void;
   onSuccess: (agent: WorkspaceAgentInfo) => void;
+  /** A lead, or a lead with a custom persona, made through the Agent API. */
+  onLeadCreated?: (agent: Agent) => void;
 }
 
 export function CreateAgentModal({
@@ -134,6 +141,7 @@ export function CreateAgentModal({
   defaultKind,
   onClose,
   onSuccess,
+  onLeadCreated,
 }: CreateAgentModalProps): JSX.Element | null {
   const resolvedDefaultBackend = defaultBackend?.trim() || "codex";
   const resolvedDefaultName = defaultName?.trim() ?? "";
@@ -160,6 +168,7 @@ export function CreateAgentModal({
   const wasOpenRef = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
+  const createLead = useCreateLead(workspaceId);
   const { backends } = useBackends();
   const { prompts: fetchedInteractivePrompts, error: promptLoadError } =
     useInteractivePrompts(workspaceId);
@@ -300,6 +309,30 @@ export function CreateAgentModal({
 
     setIsSubmitting(true);
     try {
+      // Lead and Custom prompt (a lead with a persona override) go through
+      // the Agent API and open its chat; the other templates are unchanged.
+      if (
+        selectedKind === "interactive" &&
+        (selectedBuiltinPromptID === "lead" ||
+          selectedBuiltinPromptID === CUSTOM_PROMPT_ID)
+      ) {
+        const repo = selectedRepos[0];
+        if (!repo) {
+          setError("Pick a repo for the lead to work in.");
+          return;
+        }
+        const agent = await createLead({
+          preset: "lead",
+          name: trimmedName,
+          repo,
+          ...(trimmedBackend ? { overrides: { harness: trimmedBackend } } : {}),
+          ...(selectedBuiltinPromptID === CUSTOM_PROMPT_ID
+            ? { persona: { text: customPrompt.trim() } }
+            : {}),
+        });
+        onLeadCreated?.(agent);
+        return;
+      }
       let roleName: string;
       let interactiveFields: {
         kind?: "interactive";

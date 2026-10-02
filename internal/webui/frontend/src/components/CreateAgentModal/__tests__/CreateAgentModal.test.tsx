@@ -27,8 +27,11 @@ const mockCreateAgent = vi.fn();
 const mockUseInteractivePrompts = vi.fn();
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
+  useCreateLead: () => mockCreateLead,
   useInteractivePrompts: () => mockUseInteractivePrompts(),
 }));
+
+const mockCreateLead = vi.fn();
 
 // ---------- Helpers ----------
 
@@ -64,6 +67,8 @@ function renderModal(
 
 beforeEach(() => {
   mockCreateAgent.mockReset();
+  mockCreateLead.mockReset();
+  mockCreateLead.mockResolvedValue({ agent_id: "ag_1", name: "x" });
   mockUseInteractivePrompts.mockReset();
   mockUseInteractivePrompts.mockReturnValue({
     prompts: [
@@ -362,18 +367,19 @@ describe("CreateAgentModal: submission", () => {
     });
   });
 
-  it("submits lead agent when Lead template is selected", async () => {
-    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
-    renderModal({ defaultName: "lead-nova" });
+  it("submits a lead through the Agent API when Lead template is selected", async () => {
+    const onLeadCreated = vi.fn();
+    renderModal({ defaultName: "lead-nova", onLeadCreated });
     fireEvent.click(screen.getByTestId("create-agent-template-lead"));
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
-    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
-    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(onLeadCreated).toHaveBeenCalled());
+    expect(mockCreateLead.mock.calls[0][0]).toEqual({
+      preset: "lead",
       name: "lead-nova",
-      role_name: "lead",
+      repo: "alpha",
+      overrides: { harness: "codex" },
     });
-    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("kind");
-    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
+    expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
   it("submits interactive agent with a built-in prompt", async () => {
@@ -396,8 +402,7 @@ describe("CreateAgentModal: submission", () => {
     });
   });
 
-  it("reveals a textarea and submits a custom inline prompt", async () => {
-    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+  it("reveals a textarea and submits a lead with a persona override", async () => {
     renderModal({ defaultName: "custom-review" });
 
     fireEvent.click(screen.getByTestId("create-agent-template-custom-prompt"));
@@ -408,16 +413,15 @@ describe("CreateAgentModal: submission", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
 
-    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
-    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(mockCreateLead).toHaveBeenCalled());
+    expect(mockCreateLead.mock.calls[0][0]).toEqual({
+      preset: "lead",
       name: "custom-review",
-      role_name: "custom-review",
-      kind: "interactive",
-      prompt: "Review literally: {{ marker }}",
-      cross_repo: false,
-      repos: ["alpha"],
+      repo: "alpha",
+      overrides: { harness: "codex" },
+      persona: { text: "Review literally: {{ marker }}" },
     });
-    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
+    expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
   it("switches background template selection when Planner is clicked", () => {

@@ -1672,6 +1672,13 @@ function App() {
             }
           : {})}
         onClose={() => setShowCreateAgent(false)}
+        onLeadCreated={(agent) => {
+          setShowCreateAgent(false);
+          showToast(`Agent "${agent.name}" created`, { type: "success" });
+          navigate(
+            `/ws/${encodeURIComponent(workspaceId)}/chat/${encodeURIComponent(agent.agent_id)}`,
+          );
+        }}
         onSuccess={(agent) => {
           setShowCreateAgent(false);
           upsertWorkspaceAgent?.(agent);
