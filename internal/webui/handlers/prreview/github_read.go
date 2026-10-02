@@ -2,6 +2,7 @@ package prreview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,17 @@ import (
 // registry, never from the agent or its clone's git config. stack_health is
 // `loom stack status`'s live PR health, from the host's stack forge.
 func (m *Module) GitHubRead(ctx context.Context, ws, agentID, repoPath, op string, args map[string]any) (map[string]any, error) {
+	body, err := m.githubRead(ctx, ws, agentID, repoPath, op, args)
+	if errors.Is(err, errEgressUnavailable) {
+		err = errNoGitHubToken
+	}
+	return body, err
+}
+
+// errNoGitHubToken is github_read's answer when the host has no GitHub token.
+var errNoGitHubToken = errors.New("GitHub is not configured on this Loom host: no GitHub token is set in its settings")
+
+func (m *Module) githubRead(ctx context.Context, ws, agentID, repoPath, op string, args map[string]any) (map[string]any, error) {
 	owner, repo, err := m.boundRepo(ctx, ws, repoPath)
 	if err != nil {
 		return nil, err

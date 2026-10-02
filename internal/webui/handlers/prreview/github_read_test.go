@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -354,6 +355,21 @@ func TestGitHubReadAgentCommandParity(t *testing.T) {
 		w := want[m["head"].(string)]
 		if m["number"] != w.Number || m["checks"] != w.Checks || m["review"] != w.Review || m["mergeable"] != w.Mergeable {
 			t.Errorf("stack_health %v; want %+v", m, w)
+		}
+	}
+}
+
+// TestGitHubReadNoCredential: with the reader wired but no GitHub token on
+// the host, github_read fails at once with a clear error, before any GitHub
+// call.
+func TestGitHubReadNoCredential(t *testing.T) {
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialNone, "")
+	h.rememberLocalPaths(t, "/clones", "hello", readRepoPath)
+	for _, op := range []string{"pr_view", "stack_health"} {
+		start := time.Now()
+		_, err := h.read(t, op, map[string]any{"number": 8})
+		if !errors.Is(err, errNoGitHubToken) || time.Since(start) > 5*time.Second {
+			t.Errorf("%s with no GitHub token: %v after %v; want errNoGitHubToken at once", op, err, time.Since(start))
 		}
 	}
 }
