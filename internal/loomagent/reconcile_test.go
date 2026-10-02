@@ -273,48 +273,59 @@ func TestReconcileInterruptedTurnsAndHandedMessages(t *testing.T) {
 	}
 }
 
-// afterRead is a harness that calls then after each history read.
+// afterRead is a harness that calls then after each history read. With
+// codex set, its history has no turn.started, as codex's does: only the
+// message.delivered names the turn.
 type afterRead struct {
 	loomharness.Harness
-	then func()
+	codex bool
+	then  func()
 }
 
 func (h afterRead) Session(ref loomharness.NativeRef) loomharness.Session {
-	return afterReadSession{h.Harness.Session(ref), h.then}
+	return afterReadSession{h.Harness.Session(ref), h}
 }
 
 type afterReadSession struct {
 	loomharness.Session
-	then func()
+	h afterRead
 }
 
 func (x afterReadSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
 	page, err := x.Session.Messages(ctx, after, limit)
-	x.then()
+	if x.h.codex {
+		page.Events = slices.DeleteFunc(page.Events, func(e loomharness.Event) bool { return e.Type == loomharness.EventTurnStarted })
+	}
+	x.h.then()
 	return page, err
 }
 
 // TestReconcileTurnEndedAfterBackfill: a turn handed over and ended natively
 // after the backfill read the history, and before settle, is not ended as
 // lost: its native end is applied by the next backfill, so agent.idle names
-// the native turn and follows its agent.turn_completed.
+// the native turn and follows its agent.turn_completed. The same holds for
+// a codex-shaped history, where message.delivered names the turn.
 func TestReconcileTurnEndedAfterBackfill(t *testing.T) {
-	e := newCreateEnv(t)
-	s := e.service(ServiceConfig{})
-	a, _ := newLead(t, e, s, "alpha")
-	var once sync.Once
-	s.harnesses["opencode"] = afterRead{e.h, func() {
-		once.Do(func() { mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user)) }) // the fake runs the whole turn
-	}}
-	reconcile(t, s)
-	if got := s.get(t, a.AgentID); got.RunningTurnID == nil || len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) != 0 {
-		t.Fatalf("Reconcile ended the natively ended turn as lost: state %s", got.State)
-	}
-	reconcile(t, s)
-	all := rows(t, s, a.AgentID, 0)
-	tc, idle := kinds(all, EventTurnCompleted), kinds(all, EventIdle)
-	if len(tc) != 1 || len(idle) != 1 || idle[0].TurnID != tc[0].TurnID || idle[0].Seq < tc[0].Seq {
-		t.Fatalf("turn_completed %v idle %v; want one each, idle after and naming the native turn", ids(tc), ids(idle))
+	for _, codex := range []bool{false, true} {
+		t.Run(fmt.Sprintf("codex=%v", codex), func(t *testing.T) {
+			e := newCreateEnv(t)
+			s := e.service(ServiceConfig{})
+			a, _ := newLead(t, e, s, "alpha")
+			var once sync.Once
+			s.harnesses["opencode"] = afterRead{e.h, codex, func() {
+				once.Do(func() { mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user)) }) // the fake runs the whole turn
+			}}
+			reconcile(t, s)
+			if got := s.get(t, a.AgentID); got.RunningTurnID == nil || len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) != 0 {
+				t.Fatalf("Reconcile ended the natively ended turn as lost: state %s", got.State)
+			}
+			reconcile(t, s)
+			all := rows(t, s, a.AgentID, 0)
+			tc, idle := kinds(all, EventTurnCompleted), kinds(all, EventIdle)
+			if len(tc) != 1 || len(idle) != 1 || idle[0].TurnID != tc[0].TurnID || idle[0].Seq < tc[0].Seq {
+				t.Fatalf("turn_completed %v idle %v; want one each, idle after and naming the native turn", ids(tc), ids(idle))
+			}
+		})
 	}
 }
 
