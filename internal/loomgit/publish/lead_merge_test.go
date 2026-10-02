@@ -14,7 +14,7 @@ import (
 
 var human = review.Actor{Kind: "human", ID: "tyson"}
 
-func leadMergeFixture(t *testing.T, reviews ...string) (fixture, *mergeForgeFake) {
+func whenGreenFixture(t *testing.T, reviews ...string) (fixture, *mergeForgeFake) {
 	t.Helper()
 	item, forge, _ := fourLayerMergeEntryFixture(t, "loom")
 	forge.reviews = map[int]string{}
@@ -41,7 +41,7 @@ func leadMerge(t *testing.T, item fixture) journal.LoomMerge {
 }
 
 func TestWhenGreenMergesGreenLayersAndLeavesPendingLayer(t *testing.T) {
-	item, forge := leadMergeFixture(t, "approved", "approved", "approved", "approved")
+	item, forge := whenGreenFixture(t, "approved", "approved", "approved", "approved")
 	forge.prChecks = map[int]string{forge.prs[1].Number: "failing", forge.prs[2].Number: "pending"}
 	forge.mergeStates = map[int]string{forge.prs[1].Number: "unstable"}
 	ctx := context.Background()
@@ -94,7 +94,7 @@ func TestWhenGreenMergesGreenLayersAndLeavesPendingLayer(t *testing.T) {
 }
 
 func TestLeadMayMergeOffNeverMergesGreenStack(t *testing.T) {
-	item, forge := leadMergeFixture(t, "approved", "approved", "approved", "approved")
+	item, forge := whenGreenFixture(t, "approved", "approved", "approved", "approved")
 	ctx := context.Background()
 	for _, explicit := range []bool{false, true} {
 		if explicit {
@@ -127,7 +127,7 @@ func TestLeadMayMergeOffNeverMergesGreenStack(t *testing.T) {
 }
 
 func TestSetWorkspacePolicyRefusesAgents(t *testing.T) {
-	item, _ := leadMergeFixture(t)
+	item, _ := whenGreenFixture(t)
 	ctx := context.Background()
 	for name, call := range map[string]struct {
 		actor review.Actor
@@ -156,7 +156,7 @@ func TestSetWorkspacePolicyRefusesAgents(t *testing.T) {
 }
 
 func TestWhenGreenMergesWithoutRequiredReview(t *testing.T) {
-	item, forge := leadMergeFixture(t, "none", "review_required")
+	item, forge := whenGreenFixture(t, "none", "review_required")
 	ctx := context.Background()
 	warning, err := SetWorkspacePolicy(ctx, item.store, "W", "when_green", human, nil)
 	if err != nil || warning == "" {
@@ -175,7 +175,7 @@ func TestWhenGreenMergesWithoutRequiredReview(t *testing.T) {
 }
 
 func TestWhenGreenWaitsForRequiredReviewAtDispatch(t *testing.T) {
-	item, forge := leadMergeFixture(t, "approved")
+	item, forge := whenGreenFixture(t, "approved")
 	ctx := context.Background()
 	setLeadMayMerge(t, item, "when_green")
 	if err := ReconcileLeadMergesAt(ctx, item.storePath, forge); err != nil {
@@ -191,7 +191,7 @@ func TestWhenGreenWaitsForRequiredReviewAtDispatch(t *testing.T) {
 }
 
 func TestWhenGreenStopsBelowChangesRequested(t *testing.T) {
-	item, forge := leadMergeFixture(t, "approved", "changes_requested", "approved", "approved")
+	item, forge := whenGreenFixture(t, "approved", "changes_requested", "approved", "approved")
 	ctx := context.Background()
 	setLeadMayMerge(t, item, "when_green")
 	if err := ReconcileLeadMergesAt(ctx, item.storePath, forge); err != nil {
@@ -211,7 +211,7 @@ func TestWhenGreenStopsBelowChangesRequested(t *testing.T) {
 }
 
 func TestTurningPolicyOffCancelsQueuedLeadMerge(t *testing.T) {
-	item, forge := leadMergeFixture(t, "approved", "approved")
+	item, forge := whenGreenFixture(t, "approved", "approved")
 	ctx := context.Background()
 	setLeadMayMerge(t, item, "when_green")
 	if err := ReconcileLeadMergesAt(ctx, item.storePath, forge); err != nil {
@@ -356,7 +356,7 @@ func TestTurningPolicyOffCancelsQueuedNativeLeadMerge(t *testing.T) {
 }
 
 func TestTurningPolicyOffCancelsProviderQueuedLeadMerge(t *testing.T) {
-	item, forge := leadMergeFixture(t, "approved", "approved")
+	item, forge := whenGreenFixture(t, "approved", "approved")
 	forge.queued = true
 	ctx := context.Background()
 	setLeadMayMerge(t, item, "when_green")
@@ -383,7 +383,7 @@ func TestTurningPolicyOffCancelsProviderQueuedLeadMerge(t *testing.T) {
 }
 
 func TestWhenGreenIgnoresFailingOptionalChecks(t *testing.T) {
-	item, forge := leadMergeFixture(t, "approved", "approved")
+	item, forge := whenGreenFixture(t, "approved", "approved")
 	forge.prChecks = map[int]string{forge.prs[0].Number: "failing", forge.prs[1].Number: "failing"}
 	forge.mergeStates = map[int]string{forge.prs[0].Number: "unstable", forge.prs[1].Number: "blocked"}
 	ctx := context.Background()
@@ -401,7 +401,7 @@ func TestWhenGreenIgnoresFailingOptionalChecks(t *testing.T) {
 }
 
 func TestSetWorkspacePolicyRecordsEachChange(t *testing.T) {
-	item, _ := leadMergeFixture(t)
+	item, _ := whenGreenFixture(t)
 	ctx := context.Background()
 	setLeadMayMerge(t, item, "when_green")
 	if _, err := SetWorkspacePolicy(ctx, item.store, "W", "off", review.Actor{Kind: "agent", ID: "task-1"}, nil); err == nil {
