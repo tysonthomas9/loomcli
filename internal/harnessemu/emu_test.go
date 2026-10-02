@@ -1,0 +1,259 @@
+package harnessemu_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/harnessemu"
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/opencode"
+)
+
+// emu starts an emulator on state and returns the adapter's client for it.
+func emu(t *testing.T, state, scenarios string) (*opencode.Client, func()) {
+	c, _, stop := emuURL(t, state, scenarios)
+	return c, stop
+}
+
+func emuURL(t *testing.T, state, scenarios string) (*opencode.Client, string, func()) {
+	t.Helper()
+	s, err := harnessemu.New(state, scenarios, "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	stop := func() { s.Close(); srv.Close() }
+	t.Cleanup(stop)
+	return opencode.NewClient(srv.URL, "pw"), srv.URL, stop
+}
+
+func scenarios(t *testing.T, m map[string][]harnessemu.Turn) string {
+	t.Helper()
+	f := filepath.Join(t.TempDir(), "scenarios.json")
+	b, _ := json.Marshal(m)
+	if err := os.WriteFile(f, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// until reads feed events until ok matches one, and returns all read.
+func until(t *testing.T, f loomharness.Feed, ok func(loomharness.Event) bool) []loomharness.Event {
+	t.Helper()
+	var got []loomharness.Event
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-f.Events():
+			got = append(got, e)
+			if ok(e) {
+				return got
+			}
+		case <-timeout:
+			t.Fatalf("no matching event; got %+v", got)
+		}
+	}
+}
+
+func completed(e loomharness.Event) bool { return e.Type == loomharness.EventTurnCompleted }
+
+func history(t *testing.T, s *opencode.Session, limit int) []loomharness.Event {
+	t.Helper()
+	var out []loomharness.Event
+	for after := ""; ; {
+		p, err := s.Messages(context.Background(), after, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, p.Events...)
+		if p.Next == "" {
+			return out
+		}
+		after = p.Next
+	}
+}
+
+func TestEmulatorScenarioTurns(t *testing.T) {
+	ctx := context.Background()
+	sc := scenarios(t, map[string][]harnessemu.Turn{"agent-1": {
+		{Reasoning: "think", Text: "hello there world", Child: true, Tokens: harnessemu.Tokens{Input: 10, Output: 3}, Cost: 0.5},
+		{Fail: "model exploded"},
+		{Hold: true, Text: "slow"},
+	}})
+	c, url, _ := emuURL(t, filepath.Join(t.TempDir(), "state.json"), sc)
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: t.TempDir(), Metadata: map[string]string{"agent_id": "agent-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(ref)
+	k1 := opencode.PromptID("agent-1", "r1")
+
+	// Turn 1 streams, starts a child and reports usage. The prompt text
+	// ("FAIL") never selects behavior.
+	if err := s.Prompt(ctx, loomharness.Input{Key: k1, Text: "FAIL"}); err != nil {
+		t.Fatal(err)
+	}
+	live := until(t, f, completed)
+	var text string
+	var usage *loomharness.Usage
+	child := false
+	for _, e := range live {
+		switch e.Type {
+		case loomharness.EventDelta:
+			if e.ItemKind == "message" {
+				text += e.Text
+			}
+		case loomharness.EventUsage:
+			usage = &e.Usage
+		case loomharness.EventSubagentStarted:
+			child = e.Session.NativeID == ref.NativeID
+		}
+	}
+	if text != "hello there world" || usage == nil || usage.InputTokens != 10 || usage.CostUSD != 0.5 || !child || live[len(live)-1].StopReason != "completed" {
+		t.Fatalf("turn 1: text %q usage %+v child %v events %+v", text, usage, child, live)
+	}
+	var list struct {
+		Data []struct{ ID, ParentID string } `json:"data"`
+	}
+	if err := getJSON(url+"/api/session", &list); err != nil || len(list.Data) != 2 {
+		t.Fatalf("session list %+v, %v", list, err)
+	}
+
+	// History matches the live feed, paged or not.
+	var liveTurn []loomharness.Event
+	for _, e := range live {
+		if e.Type != loomharness.EventDelta && e.Type != loomharness.EventItemStarted && e.Type != loomharness.EventSubagentStarted {
+			liveTurn = append(liveTurn, e)
+		}
+	}
+	whole, paged := history(t, s, 100), history(t, s, 1)
+	if len(whole) != len(liveTurn) || len(paged) != len(whole) {
+		t.Fatalf("history %d, paged %d, live %d: %+v vs %+v", len(whole), len(paged), len(liveTurn), whole, liveTurn)
+	}
+	for i := range whole {
+		if whole[i].Type != liveTurn[i].Type || whole[i].ItemID != liveTurn[i].ItemID || whole[i].TurnID != liveTurn[i].TurnID ||
+			paged[i].Type != whole[i].Type || paged[i].ItemID != whole[i].ItemID {
+			t.Fatalf("event %d: history %+v, paged %+v, live %+v", i, whole[i], paged[i], liveTurn[i])
+		}
+	}
+
+	// A repeat prompt id is kept once; HasInput finds only sent ids.
+	if err := s.Prompt(ctx, loomharness.Input{Key: k1, Text: "again"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.HasInput(ctx, k1); got != loomharness.LandedFound {
+		t.Fatalf("HasInput(sent) = %v", got)
+	}
+	if got, _ := s.HasInput(ctx, opencode.PromptID("agent-1", "nope")); got != loomharness.LandedNotFound {
+		t.Fatalf("HasInput(unsent) = %v", got)
+	}
+
+	// Turn 2 fails with no usage.
+	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r2"), Text: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range until(t, f, completed) {
+		if e.Type == loomharness.EventUsage || (completed(e) && e.StopReason != "failed") {
+			t.Fatalf("failed turn: %+v", e)
+		}
+	}
+
+	// Turn 3 holds until interrupted; a late interrupt does nothing.
+	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r3"), Text: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	until(t, f, func(e loomharness.Event) bool { return e.Type == loomharness.EventItemCompleted })
+	if st, _ := s.Status(ctx); !st.Running {
+		t.Fatalf("Status = %+v; want running", st)
+	}
+	if ok, err := s.Interrupt(ctx); err != nil || !ok {
+		t.Fatalf("Interrupt = %v, %v", ok, err)
+	}
+	if e := until(t, f, completed); e[len(e)-1].StopReason != "cancelled" {
+		t.Fatalf("interrupted turn = %+v", e)
+	}
+	if st, _ := s.Status(ctx); st.Running || !st.LastTurnInterrupt {
+		t.Fatalf("Status = %+v; want idle, interrupted", st)
+	}
+	if ok, err := s.Interrupt(ctx); err != nil || ok {
+		t.Fatalf("late Interrupt = %v, %v", ok, err)
+	}
+
+	// No scripted turn left: the reply echoes the prompt.
+	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r4"), Text: "echo me"}); err != nil {
+		t.Fatal(err)
+	}
+	text = ""
+	for _, e := range until(t, f, completed) {
+		if e.Type == loomharness.EventDelta {
+			text += e.Text
+		}
+	}
+	if text != "echo me" {
+		t.Fatalf("echo = %q", text)
+	}
+}
+
+func getJSON(url string, out any) error {
+	req, _ := http.NewRequest("GET", url, nil)
+	req.SetBasicAuth("opencode", "pw")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func TestEmulatorRestartResumesRunningTurn(t *testing.T) {
+	ctx := context.Background()
+	state := filepath.Join(t.TempDir(), "state.json")
+	sc := scenarios(t, map[string][]harnessemu.Turn{"agent-2": {{Text: "a b c d e f g h", DelayMS: 50}}})
+	c, stop := emu(t, state, sc)
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-2", Dir: t.TempDir(), Metadata: map[string]string{"agent_id": "agent-2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := opencode.PromptID("agent-2", "r1")
+	if err := c.Session(ref).Prompt(ctx, loomharness.Input{Key: key, Text: "go"}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(120 * time.Millisecond)
+	stop() // a graceful stop mid-turn
+
+	c, _ = emu(t, state, sc)
+	s := c.Session(ref)
+	deadline := time.Now().Add(5 * time.Second)
+	for st, _ := s.Status(ctx); st.Running; st, _ = s.Status(ctx) {
+		if time.Now().After(deadline) {
+			t.Fatal("resumed turn never finished")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	var resumed, done int
+	for _, e := range history(t, s, 100) {
+		switch {
+		case e.Type == loomharness.EventTurnResumed && e.Text == harnessemu.RestartNotice:
+			resumed++
+		case completed(e) && e.StopReason == "completed":
+			done++
+		}
+	}
+	if resumed != 1 || done != 1 {
+		t.Fatalf("restart: %d resumed, %d completed", resumed, done)
+	}
+	if got, _ := s.HasInput(ctx, key); got != loomharness.LandedFound {
+		t.Fatalf("HasInput after restart = %v", got)
+	}
+}
