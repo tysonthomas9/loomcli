@@ -28,7 +28,8 @@ if [ "$actual" != "$allowed" ]; then
 	exit 1
 fi
 # No plain force push, clean -f or reset --hard outside gitexec guards (D27).
-# Only the capture-first reset (P1.5) remains.
+# P4.11 AC deviation (coordinator, 2026-10-02): only the P1.5 capture-first
+# reset remains, until Reset moves into loomgit (design §2.4 follow-up).
 allowed_writes='internal/cli/git/git_deps.go:1
 internal/cli/git/reset_safety.go:1'
 writes=$(grep -rEc --include='*.go' --include='*.ts' --include='*.mjs' --exclude='*_test.go' \

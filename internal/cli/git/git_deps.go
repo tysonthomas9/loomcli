@@ -21,6 +21,8 @@ func gitReset(deps *cli.Deps, dir, ref string) error {
 		return err
 	}
 	fmt.Printf("Resetting to %s...\n", ref)
+	// P4.11 AC deviation: allowlisted raw writer for the P1.5 capture-first
+	// reset until Reset moves into loomgit (design §2.4 follow-up).
 	return runGitOutput(deps, dir, "reset", "--hard", ref)
 }
 
