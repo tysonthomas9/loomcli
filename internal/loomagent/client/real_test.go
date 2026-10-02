@@ -2,22 +2,18 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/agentwire"
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
+	"github.com/tysonthomas9/loomcli/internal/testutil/realloom"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsv1"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -30,16 +26,14 @@ import (
 // token, and neither workspace sees the other's agent. LOOM_REAL_OPENCODE=1
 // runs it.
 func TestRealServeAgentAPI(t *testing.T) {
-	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
-		t.Skip("set LOOM_REAL_OPENCODE=1 to run against the real OpenCode build")
-	}
+	realloom.Skip(t)
 	model := httptest.NewServer(http.HandlerFunc(fakeModel))
 	t.Cleanup(model.Close)
-	bin, sbx, env, repo, head := realOpenCode(t, model.URL)
+	sbx := realloom.NewSandbox(t, model.URL)
 
 	ctx := context.Background()
-	api, err := agentwire.Start(ctx, agentwire.Config{Dir: filepath.Join(sbx, "loom"),
-		OpenCodeBin: bin, OpenCodeEnv: env})
+	api, err := agentwire.Start(ctx, agentwire.Config{Dir: filepath.Join(sbx.Dir, "loom"),
+		OpenCodeBin: realloom.OpenCodeBin(), OpenCodeEnv: sbx.Env()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,8 +60,8 @@ func TestRealServeAgentAPI(t *testing.T) {
 	ids := map[string]string{}
 	for _, ws := range []string{"ws", "ws2"} {
 		c := newClient(srv, ws, "alice")
-		a, err := c.Create(ctx, "r1", agentsv1.CreateBody{Preset: "pr-review-interactive", Name: "rev", Repo: repo,
-			BaseRef: head, Overrides: agentsv1.Overrides{Harness: "opencode"}})
+		a, err := c.Create(ctx, "r1", agentsv1.CreateBody{Preset: "pr-review-interactive", Name: "rev", Repo: sbx.Repo,
+			BaseRef: sbx.Head, Overrides: agentsv1.Overrides{Harness: "opencode"}})
 		if err != nil {
 			t.Fatalf("%s Create: %v", ws, err)
 		}
@@ -104,83 +98,6 @@ func TestRealServeAgentAPI(t *testing.T) {
 		if _, err := newClient(srv, ws, "alice").Get(ctx, ids[other]); code(err) != loomagent.CodeAgentNotFound {
 			t.Errorf("%s Get of %s's agent = %v; want agent_not_found", ws, other, err)
 		}
-	}
-}
-
-// realOpenCode sets up the pinned OpenCode build in a realSandbox with the
-// model at modelURL as its only provider, and a git repo with one commit. It
-// returns the build, the sandbox, OpenCode's environment, the repo and its
-// head.
-func realOpenCode(t *testing.T, modelURL string) (bin, sbx string, env []string, repo, head string) {
-	t.Helper()
-	bin = os.Getenv("LOOM_OPENCODE_BIN")
-	if bin == "" {
-		home, _ := os.UserHomeDir()
-		bin = filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode")
-	}
-	sbx = realSandbox(t)
-	writeFile(t, filepath.Join(sbx, "config/opencode/opencode.json"), fmt.Sprintf(`{"provider":{"fake":{"name":"Fake",
-		"npm":"@ai-sdk/openai-compatible","options":{"baseURL":%q,"apiKey":"x"},
-		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}}}}},"model":"fake/m"}`, modelURL+"/v1"))
-	env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + sbx + "/home", "TMPDIR=" + sbx + "/tmp/",
-		"XDG_DATA_HOME=" + sbx + "/data", "XDG_CONFIG_HOME=" + sbx + "/config",
-		"XDG_STATE_HOME=" + sbx + "/state", "XDG_CACHE_HOME=" + sbx + "/cache", "OPENCODE_DISABLE_MODELS_FETCH=1"}
-	repo = filepath.Join(sbx, "repo")
-	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"-c", "user.name=t", "-c", "user.email=t@t",
-		"commit", "-q", "--allow-empty", "-m", "init"}} {
-		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
-	out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return bin, sbx, env, repo, strings.TrimSpace(string(out))
-}
-
-// realSandbox is an owned /tmp dir for one OpenCode user, with a service
-// config on a free loopback port. Cleanup stops the service registered there
-// (Loom leaves the one it starts running) and removes the dir.
-func realSandbox(t *testing.T) string {
-	t.Helper()
-	sbx, err := os.MkdirTemp("/tmp", "agentapi-real-")
-	if err == nil {
-		sbx, err = filepath.EvalSymlinks(sbx) // OpenCode reports resolved paths
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		var reg struct{ PID int }
-		if b, err := os.ReadFile(filepath.Join(sbx, "state/opencode/service.json")); err == nil && json.Unmarshal(b, &reg) == nil && reg.PID > 0 {
-			_ = syscall.Kill(reg.PID, syscall.SIGTERM)
-			for end := time.Now().Add(10 * time.Second); syscall.Kill(reg.PID, 0) == nil && time.Now().Before(end); {
-				time.Sleep(50 * time.Millisecond)
-			}
-			_ = syscall.Kill(reg.PID, syscall.SIGKILL)
-		}
-		_ = os.RemoveAll(sbx)
-	})
-	for _, d := range []string{"home", "tmp", "config/opencode", "repo"} {
-		if err := os.MkdirAll(filepath.Join(sbx, d), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	writeFile(t, filepath.Join(sbx, "config/opencode/service.json"), fmt.Sprintf(`{"port":%d}`, port))
-	return sbx
-}
-
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
 	}
 }
 

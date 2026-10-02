@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -14,19 +13,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
-	"github.com/tysonthomas9/loomcli/internal/netutil"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil/realloom"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsv1"
 )
 
@@ -40,101 +35,27 @@ import (
 // Attention or error. LOOM_REAL_OPENCODE=1 runs it.
 func TestSeamlessResume(t *testing.T) {
 	t.Run("opencode/serve_restart", func(t *testing.T) {
-		if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
-			t.Skip("set LOOM_REAL_OPENCODE=1 to run against the real OpenCode build")
-		}
-		dir, err := os.MkdirTemp("/tmp", "loom-bin-")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.RemoveAll(dir) })
-		loom := filepath.Join(dir, "loom")
-		if out, err := exec.Command("go", "build", "-o", loom, "../../../cmd/loom").CombinedOutput(); err != nil {
-			t.Fatalf("build loom: %v %s", err, out)
-		}
-		t.Run("sigterm", func(t *testing.T) { serveRestart(t, loom, syscall.SIGTERM) })
-		t.Run("sigkill", func(t *testing.T) { serveRestart(t, loom, syscall.SIGKILL) })
+		realloom.Skip(t)
+		t.Run("sigterm", func(t *testing.T) { serveRestart(t, syscall.SIGTERM) })
+		t.Run("sigkill", func(t *testing.T) { serveRestart(t, syscall.SIGKILL) })
 	})
 }
 
-func serveRestart(t *testing.T, loom string, sig syscall.Signal) {
+func serveRestart(t *testing.T, sig syscall.Signal) {
+	ctx := context.Background()
 	fixture := startFakeModel(t)
 	model := newModelGate(t, fixture)
-	bin, sbx, env, repo, head := realOpenCode(t, model.URL)
+	sbx := realloom.NewSandbox(t, model.URL)
 	if resp, err := http.Post(fixture+"/__script", "application/json",
 		strings.NewReader(`{"steps":[{"text":"reply-one"},{"text":"reply-two"},{"text":"reply-three"}]}`)); err != nil {
 		t.Fatal(err)
 	} else {
 		_ = resp.Body.Close()
 	}
-
-	// An owned fleet-db with the workspace, and serve on a free port.
-	ctx := context.Background()
-	fleet, err := bootstrap.StartEmbedded(ctx, filepath.Join(sbx, "fleet"), slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = fleet.Stop() })
-	fc, err := fleetdb.New(fleetdb.Config{BaseURL: fleet.URL(), Actor: "loom-test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = fc.Close() }()
-	if _, err := fc.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
-		t.Fatal(err)
-	}
-	_, port, err := netutil.PickFreeLoopbackPort()
-	if err != nil {
-		t.Fatal(err)
-	}
-	base := "http://127.0.0.1:" + strconv.Itoa(port)
-	env = append(env, "LOOM_OPENCODE_BIN="+bin, "LOOM_CONFIG_DIR="+sbx+"/loom", "LOOM_WORKSPACE=WS",
-		"LOOM_FLEET_DB_URL="+fleet.URL(), "LOOM_FLEET_DB_ACTOR=loom-test", "LOOM_DRIVER_EXECUTOR=0",
-		"LOOM_ISSUE_BRIDGE_DISABLED=1", "LOOM_DISABLE_H2C=1")
-	var serve *exec.Cmd
-	var logs bytes.Buffer
-	stop := func(sig syscall.Signal) { // stops and reaps the serve child, if one runs
-		if serve == nil || serve.ProcessState != nil {
-			return
-		}
-		_ = serve.Process.Signal(sig)
-		done := make(chan struct{})
-		go func() { _ = serve.Wait(); close(done) }()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			_ = serve.Process.Kill()
-			<-done
-		}
-	}
-	t.Cleanup(func() { // before realSandbox's cleanup removes serve's data
-		stop(syscall.SIGTERM)
-		if t.Failed() {
-			t.Logf("loom serve output:\n%s", logs.String())
-		}
-	})
-	start := func() {
-		serve = exec.Command(loom, "serve", "--no-daemon", "--bind", "127.0.0.1", "--port", strconv.Itoa(port))
-		serve.Dir, serve.Env, serve.Stdout, serve.Stderr = repo, env, &logs, &logs
-		if err := serve.Start(); err != nil {
-			t.Fatal(err)
-		}
-		for end := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-			if resp, err := http.Get(base + "/health"); err == nil {
-				_ = resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
-					return
-				}
-			}
-			if time.Now().After(end) {
-				t.Fatal("loom serve never became healthy")
-			}
-		}
-	}
-	start()
-	c := New(Config{BaseURL: base + "/", Workspace: "WS", HTTP: &http.Client{}})
-	a, err := c.Create(ctx, "r1", agentsv1.CreateBody{Preset: "pr-review-interactive", Name: "rev", Repo: repo,
-		BaseRef: head, Overrides: agentsv1.Overrides{Harness: "opencode"}})
+	serve := sbx.StartServer(t, sbx.BuildLoom(t))
+	c := New(Config{BaseURL: serve.URL + "/", Workspace: realloom.Workspace, HTTP: &http.Client{}})
+	a, err := c.Create(ctx, "r1", agentsv1.CreateBody{Preset: "pr-review-interactive", Name: "rev", Repo: sbx.Repo,
+		BaseRef: sbx.Head, Overrides: agentsv1.Overrides{Harness: "opencode"}})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -178,14 +99,14 @@ func serveRestart(t *testing.T, loom string, sig syscall.Signal) {
 	}
 
 	// Stop serve; the turn ends in OpenCode while serve is down; restart serve.
-	stop(sig)
+	serve.Stop(sig)
 	<-firstDone
 	_ = first.Close()
-	nativeBefore := nativeSession(t, sbx, a.AgentID)
+	nativeBefore := nativeSession(t, sbx.Dir, a.AgentID)
 	close(model.gate)
 	wait(t, model.done, "turn two's reply")
 	restarted := time.Now()
-	start()
+	serve.Start()
 	eventually(t, "the waiting message reaching the model", func() bool { return model.count(t, "msg-three") == 1 })
 	if d := time.Since(restarted); d > 5*time.Second {
 		t.Errorf("the waiting message's turn started %s after the restart; want under 5s", d)
@@ -265,8 +186,8 @@ func serveRestart(t *testing.T, loom string, sig syscall.Signal) {
 			t.Errorf("ListEvents event %d is %s; the stream had %s", e.Seq, e.EventID, seen[i].EventID)
 		}
 	}
-	stop(syscall.SIGTERM)
-	if got := nativeSession(t, sbx, a.AgentID); got != nativeBefore || got == "" {
+	serve.Stop(syscall.SIGTERM)
+	if got := nativeSession(t, sbx.Dir, a.AgentID); got != nativeBefore || got == "" {
 		t.Errorf("native session %q after restart; want %q", got, nativeBefore)
 	}
 	t.Logf("%s: the stream reconnected at seq %d and read %d events, no gap", sig, cursor, len(seen))
