@@ -114,6 +114,11 @@ func mergeStackView(ctx context.Context, store *journal.SQLite, workspace, lead,
 	if recorded, found, err := recordedMergeView(ctx, store, workspace, stackID, target); err != nil || found {
 		return recorded, err
 	}
+	return appliedMergeView(ctx, store, workspace, lead, stackID, target, publication)
+}
+
+func appliedMergeView(ctx context.Context, store *journal.SQLite, workspace, lead, stackID, target string,
+	publication journal.Publication) (MergeStackView, error) {
 	repoName, err := mergeRepoName(workspace, publication.Repo)
 	if err != nil {
 		return MergeStackView{}, err

@@ -563,6 +563,7 @@ type LoomMergeLayer struct {
 	Change   string `json:"change"`
 	Head     string `json:"head"`
 	Revision int    `json:"revision"`
+	MergedBy string `json:"merged_by,omitempty"`
 }
 
 type LoomMerge struct {
@@ -578,6 +579,8 @@ type LoomMerge struct {
 	DispatchHead      string           `json:"dispatch_head,omitempty"`
 	ProviderRequestID string           `json:"provider_request_id,omitempty"`
 	DispatchAttempts  int              `json:"dispatch_attempts,omitempty"`
+	Authority         string           `json:"authority,omitempty"`
+	PolicySetBy       string           `json:"policy_set_by,omitempty"`
 	Version           int              `json:"-"`
 }
 

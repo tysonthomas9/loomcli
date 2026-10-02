@@ -37,6 +37,9 @@ func ReconcileLoomMergesAt(ctx context.Context, path string, forge loomMergeForg
 			if err != nil || current.Phase == "done" || current.Phase == "blocked" {
 				return err
 			}
+			if cancelled, err := cancelLeadMerge(lockedCtx, store, current); err != nil || cancelled {
+				return err
+			}
 			return advanceLoomMerge(lockedCtx, store, forge, current)
 		}); err != nil {
 			return err
@@ -91,7 +94,7 @@ func reconcileLoomDispatch(ctx context.Context, store *journal.SQLite, forge loo
 		return blockConfirmedError(ctx, store, merge, err)
 	}
 	if pr.Merged {
-		return setLoomPhase(ctx, store, merge, "landing", merge.Index, "")
+		return recordLayerMerged(ctx, store, merge)
 	}
 	if pr.State != "open" {
 		return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, "merge PR is not open")
@@ -102,7 +105,7 @@ func reconcileLoomDispatch(ctx context.Context, store *journal.SQLite, forge loo
 	if merge.ProviderRequestID != "" {
 		return pollLoomMerge(ctx, store, forge, merge, publication, owner, repo)
 	}
-	ready, err := loomMergeHealth(ctx, forge, publication, pr, owner, repo)
+	ready, err := loomMergeHealth(ctx, forge, publication, pr, owner, repo, merge.Authority == leadMergeAuthority)
 	if err != nil {
 		return blockConfirmedError(ctx, store, merge, err)
 	}
@@ -148,7 +151,7 @@ func submitLoomMerge(ctx context.Context, store *journal.SQLite, forge loomMerge
 		return blockLoomMerge(ctx, store, merge, loomgit.Stale, "provider accepted a different merge head")
 	}
 	if result.Status == "merged" {
-		return setLoomPhase(ctx, store, merge, "landing", merge.Index, "")
+		return recordLayerMerged(ctx, store, merge)
 	}
 	if result.Status == "failed" {
 		return blockLoomMerge(ctx, store, merge, loomgit.MergeBlocked, "provider merge failed: "+result.Details.Message)
@@ -189,7 +192,7 @@ func pollLoomMerge(ctx context.Context, store *journal.SQLite, forge loomMergeFo
 }
 
 func loomMergeHealth(ctx context.Context, forge loomMergeForge, publication journal.Publication,
-	pr stackpublish.PR, owner, repo string) (bool, error) {
+	pr stackpublish.PR, owner, repo string, reviewRequired bool) (bool, error) {
 	statuses, err := forge.PRStatuses(ctx, owner, repo, publication.Branch)
 	if err != nil {
 		return false, err
@@ -200,6 +203,9 @@ func loomMergeHealth(ctx context.Context, forge loomMergeForge, publication jour
 	}
 	if status.Checks == "failing" || status.Review == "changes_requested" || status.Mergeable == "conflicting" {
 		return false, loomMergeFailure(ctx, forge, owner, repo, pr)
+	}
+	if reviewRequired && !reviewMet(status) {
+		return false, nil
 	}
 	return (status.Checks == "passing" || status.Checks == "none") && status.Mergeable == "mergeable", nil
 }

@@ -291,3 +291,42 @@ func TestScanReportsUnownedWithoutJournal(t *testing.T) {
 		t.Fatalf("unowned checkout hidden without journal: %+v", snapshot)
 	}
 }
+
+func TestScanWarnsWhileLeadMayMergeWhenGreen(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	path := filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	for _, value := range []string{"when_green", "off"} {
+		if err := store.SetLeadMayMerge(ctx, "W1", value, "tyson"); err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := Scan(ctx, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var warnings []Entry
+		for _, entry := range snapshot.Entries {
+			if entry.Kind == "policy" {
+				warnings = append(warnings, entry)
+			}
+		}
+		if value == "off" {
+			if len(warnings) != 0 {
+				t.Fatalf("warning after policy off: %+v", warnings)
+			}
+			continue
+		}
+		if len(warnings) != 1 || warnings[0].Workspace != "W1" || warnings[0].State != "warning" ||
+			!strings.Contains(warnings[0].Reason, "no required review") || !strings.Contains(warnings[0].Reason, "set by tyson") {
+			t.Fatalf("missing no-required-review warning: %+v", snapshot.Entries)
+		}
+	}
+}

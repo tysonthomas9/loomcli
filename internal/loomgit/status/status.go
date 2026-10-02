@@ -172,6 +172,15 @@ func Scan(ctx context.Context, integrity bool) (Snapshot, error) {
 	appendRevisions(ctx, rows, runners, integrity, &out)
 	appendPublications(ctx, rows.Publications, runners, integrity, &out)
 	appendMirrorRefs(ctx, rows.Mirrors, integrity, &out)
+	policies, err := store.LeadMergePolicies(ctx)
+	if err != nil {
+		return out, err
+	}
+	for _, policy := range policies {
+		out.Entries = append(out.Entries, Entry{Kind: "policy", Workspace: policy.Workspace, ID: "lead_may_merge",
+			State: "warning", Reason: "lead_may_merge=when_green set by " + policy.SetBy + "; " + journal.LeadMayMergeWarning,
+			NextAction: "require reviews in the provider's branch protection, or turn lead_may_merge off"})
+	}
 	for workspace, state := range local.Workspaces {
 		discoverCopies(ctx, workspace, state.Path, runners, trunks, knownPaths, integrity, &out)
 	}
