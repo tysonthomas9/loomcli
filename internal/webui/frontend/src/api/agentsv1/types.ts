@@ -99,6 +99,7 @@ export interface Agent {
   archived_at: string | null;
   finished_at: string | null;
   history_purged_at: string | null;
+  history_purge_failed_at: string | null; // a due R29 purge failed: expiry incomplete
   deleted_at: string | null;
   compute: string;
   waiting_messages: WaitingMessage[]; // filled by Get only

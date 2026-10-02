@@ -54,6 +54,11 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
               {agent.harness}
             </span>
             <span className={styles.state}>{agent.state}</span>
+            {agent.history_purge_failed_at && !agent.history_purged_at && (
+              <span className={styles.state} role="status">
+                History expiry incomplete
+              </span>
+            )}
           </>
         )}
       </header>

@@ -224,7 +224,7 @@ func reopen(ctx context.Context, tx *sql.Tx, in SlotSend) error {
 	}
 	agentID := in.AgentID
 	res, err := tx.ExecContext(ctx, `UPDATE agents SET state = 'active', attempt = attempt + 1, outcome = NULL,
-		finished_at = NULL, updated_at = ?,
+		finished_at = NULL, history_purge_failed_at = NULL, updated_at = ?,
 		attempt_after_seq = (SELECT COALESCE(MAX(seq), 0) FROM agent_events WHERE agent_id = agents.agent_id)
 		WHERE agent_id = ? AND state = 'finished' AND deleted_at IS NULL
 		AND history_purged_at IS NULL`, Stamp(time.Now()), agentID)

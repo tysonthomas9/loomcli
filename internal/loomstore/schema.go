@@ -153,4 +153,6 @@ UPDATE agents SET attempt_after_seq = CASE
           AND json_extract(e.redacted_payload, '$.to') = 'active')
   ELSE (SELECT COALESCE(MAX(seq), 0) FROM agent_events e WHERE e.agent_id = agents.agent_id) END
 WHERE attempt > 0;
+`, `
+ALTER TABLE agents ADD COLUMN history_purge_failed_at TEXT; -- set while a due R29 purge has failed (incomplete expiry); cleared when the purge succeeds or the deadline ends
 `}

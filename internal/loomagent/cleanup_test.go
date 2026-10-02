@@ -115,14 +115,14 @@ func TestHistoryPurgeRetriesFailedDelete(t *testing.T) {
 	ref := own(t, s, h, "i1", "/r")
 	h.FailPurge(errors.New("delete failed"))
 	s.RetentionSweep(ctx, day0.Add(30*day))
-	if s.get(t, "i1").HistoryPurgedAt != nil || !exists(h, ref) {
-		t.Fatal("the history was marked purged although the native delete failed")
+	if a := s.get(t, "i1"); a.HistoryPurgedAt != nil || a.HistoryPurgeFailedAt == nil || !exists(h, ref) {
+		t.Fatal("a failed native delete did not leave an incomplete expiry")
 	}
 	h.FailPurge(nil)
 	cfg.Store, cfg.WorkspaceID = s.store, "ws"
 	New(cfg).RetentionSweep(ctx, day0.Add(31*day)) // restart
-	if s.get(t, "i1").HistoryPurgedAt == nil || exists(h, ref) {
-		t.Fatal("the retry did not purge")
+	if a := s.get(t, "i1"); a.HistoryPurgedAt == nil || a.HistoryPurgeFailedAt != nil || exists(h, ref) {
+		t.Fatal("the retry did not purge and clear the incomplete expiry")
 	}
 }
 
@@ -213,7 +213,8 @@ func TestPurgeUsesRecordedNativeRoot(t *testing.T) {
 
 // TestWorkspaceRetentionPort: the sweep removes a clean working copy through
 // the Workspace port at day 30 and 31, never at day 29, and never a dirty or
-// reused (unarchived) one.
+// reused (unarchived) one; a dirty copy is kept, its history still purged,
+// and removed by a later sweep once clean.
 func TestWorkspaceRetentionPort(t *testing.T) {
 	ctx := context.Background()
 	withCopy := func(a loomstore.Agent) loomstore.Agent {
@@ -241,5 +242,41 @@ func TestWorkspaceRetentionPort(t *testing.T) {
 	s.RetentionSweep(ctx, day0.Add(31*day))
 	if len(ws.removed) != 0 || s.get(t, "dirty").HistoryPurgedAt == nil {
 		t.Fatalf("dirty copy removed %v; history purged %v", ws.removed, s.get(t, "dirty").HistoryPurgedAt)
+	}
+	ws.status = WorkspaceStatus{} // committed since: a later sweep removes it once
+	for i := 0; i < 2; i++ {
+		s.RetentionSweep(ctx, day0.Add(32*day))
+	}
+	if len(ws.removed) != 1 || s.get(t, "dirty").WorktreePath != nil {
+		t.Fatalf("after cleaning: removed %v, worktree %v", ws.removed, s.get(t, "dirty").WorktreePath)
+	}
+}
+
+// TestDeletePurgesHistoryImmediately: Delete purges the recorded native
+// sessions and the Loom history at once; a failed native purge leaves the
+// Delete pending with the history kept, and a retry finishes it.
+func TestDeletePurgesHistoryImmediately(t *testing.T) {
+	ctx := context.Background()
+	h := fake.New()
+	s := newService(t, ServiceConfig{Harnesses: map[string]loomharness.Harness{"fake": h}}, svcAgent("a1", "persistent", StateIdle))
+	ref := own(t, s, h, "a1", "/r")
+	if err := s.emit(ctx, Event{AgentID: "a1", Type: EventWaiting, Time: day0}); err != nil {
+		t.Fatal(err)
+	}
+	h.FailPurge(errors.New("delete failed"))
+	if err := s.Delete(ctx, DeleteRequest{AgentID: "a1"}); err == nil {
+		t.Fatal("Delete succeeded with a failing native purge")
+	}
+	page, _ := s.store.ListEvents(ctx, loomstore.EventQuery{AgentID: "a1"})
+	if a := s.get(t, "a1"); a.DeletedAt != nil || !a.DeleteRequested || a.HistoryPurgedAt != nil || len(page.Events) == 0 || !exists(h, ref) {
+		t.Fatalf("after a failed purge: deleted %v requested %v purged %v events %d", a.DeletedAt, a.DeleteRequested, a.HistoryPurgedAt, len(page.Events))
+	}
+	h.FailPurge(nil)
+	if err := s.Delete(ctx, DeleteRequest{AgentID: "a1"}); err != nil {
+		t.Fatal(err)
+	}
+	page, _ = s.store.ListEvents(ctx, loomstore.EventQuery{AgentID: "a1"})
+	if a := s.get(t, "a1"); a.DeletedAt == nil || a.HistoryPurgedAt == nil || len(page.Events) != 0 || exists(h, ref) {
+		t.Fatalf("after Delete: deleted %v purged %v events %d", a.DeletedAt, a.HistoryPurgedAt, len(page.Events))
 	}
 }

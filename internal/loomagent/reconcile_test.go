@@ -345,8 +345,8 @@ func TestReconcileFinishesDeleteAndFlagsMissingSession(t *testing.T) {
 	}
 	s := e.service(ServiceConfig{})
 	reconcile(t, s)
-	if row, _ := e.st.GetAgent(ctx, del.AgentID); row.DeletedAt == nil || e.events(t, del.AgentID, EventDeleted) != 1 {
-		t.Fatalf("delete not finished: %+v", row.DeletedAt)
+	if row, _ := e.st.GetAgent(ctx, del.AgentID); row.DeletedAt == nil || row.HistoryPurgedAt == nil || e.events(t, del.AgentID, EventDeleted) != 0 {
+		t.Fatalf("delete not finished: deleted %v purged %v", row.DeletedAt, row.HistoryPurgedAt)
 	}
 	if r := deref(s.get(t, gone.AgentID).AttentionReason); r != AttentionSessionMissing {
 		t.Fatalf("Attention %q; want session_missing", r)

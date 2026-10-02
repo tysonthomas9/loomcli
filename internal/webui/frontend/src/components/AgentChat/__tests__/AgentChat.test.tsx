@@ -115,6 +115,30 @@ describe("AgentChat", () => {
     expect((window as { pwned?: number }).pwned).toBeUndefined();
   });
 
+  it("marks an incomplete history expiry until the purge succeeds", async () => {
+    await mount(
+      agent({
+        state: "archived",
+        history_purge_failed_at: "t",
+        history_purged_at: null,
+      }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "History expiry incomplete",
+    );
+  });
+
+  it("shows no expiry marker once history is purged", async () => {
+    await mount(
+      agent({
+        state: "archived",
+        history_purge_failed_at: null,
+        history_purged_at: "t",
+      }),
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("cuts a very long message until the user expands it", async () => {
     await mount(agent());
     const long = "x".repeat(LONG_TEXT_LIMIT + 10);

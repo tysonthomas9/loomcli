@@ -153,6 +153,8 @@ type Agent struct {
 	Compute         string           `json:"compute"`
 	WaitingMessages []WaitingMessage `json:"waiting_messages"`
 	OpenAsks        []Ask            `json:"open_asks"`
+
+	HistoryPurgeFailedAt *string `json:"history_purge_failed_at"` // a due purge failed: expiry incomplete
 }
 
 // WaitingMessage is one sender's message waiting for the agent.
@@ -182,7 +184,7 @@ func agentOut(i loomagent.AgentInfo) Agent {
 		Outcome: a.Outcome, ArchiveReason: a.ArchiveReason, AttentionReason: a.AttentionReason,
 		RunningTurnID: a.RunningTurnID, DeleteRequested: a.DeleteRequested, LastActiveAt: a.LastActiveAt,
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, ArchivedAt: a.ArchivedAt, FinishedAt: a.FinishedAt,
-		HistoryPurgedAt: a.HistoryPurgedAt, DeletedAt: a.DeletedAt, Compute: i.Compute,
+		HistoryPurgedAt: a.HistoryPurgedAt, HistoryPurgeFailedAt: a.HistoryPurgeFailedAt, DeletedAt: a.DeletedAt, Compute: i.Compute,
 		WaitingMessages: []WaitingMessage{}, OpenAsks: []Ask{}}
 	for _, w := range i.WaitingMessages {
 		out.WaitingMessages = append(out.WaitingMessages, WaitingMessage{w.Sender, w.Text, w.Since})

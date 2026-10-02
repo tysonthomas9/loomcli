@@ -2555,6 +2555,8 @@ export interface components {
       archived_at: string | null;
       finished_at: string | null;
       history_purged_at: string | null;
+      /** @description Set while a due history purge has failed (an incomplete expiry); cleared when the purge succeeds or the deadline ends. */
+      history_purge_failed_at: string | null;
       deleted_at: string | null;
       compute: string;
       waiting_messages: components["schemas"]["AgentV1WaitingMessage"][];

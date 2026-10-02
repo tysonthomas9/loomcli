@@ -68,6 +68,11 @@ func appendEvent(ctx context.Context, tx *sql.Tx, e Event) (Event, error) {
 	if err == nil || !errors.Is(err, sql.ErrNoRows) {
 		return got, err
 	}
+	var purged bool
+	err = tx.QueryRowContext(ctx, `SELECT history_purged_at IS NOT NULL FROM agents WHERE agent_id = ?`, e.AgentID).Scan(&purged)
+	if purged || (err != nil && !errors.Is(err, sql.ErrNoRows)) {
+		return e, err // purged history stays purged: a later event is live only (seq 0)
+	}
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_events WHERE agent_id = ?`,
 		e.AgentID).Scan(&e.Seq); err != nil {
 		return Event{}, err

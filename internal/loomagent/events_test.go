@@ -73,6 +73,10 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 			mu.Lock()
 			seen[ev.Type]++
 			saved := rows(t, s, ev.AgentID, 0)
+			if a, _ := s.store.GetAgent(ctx, ev.AgentID); a.HistoryPurgedAt != nil {
+				mu.Unlock()
+				continue // Delete purged the history: later events are live only
+			}
 			if !slices.ContainsFunc(saved, func(r loomstore.Event) bool { return r.EventID == ev.EventID && r.Kind == ev.Type }) {
 				problems = append(problems, ev.Type+" published before it was saved")
 			}
@@ -112,8 +116,12 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 	if got := len(rows(t, s, a.AgentID, 0)); got != n+1 {
 		t.Fatalf("one event emitted twice saved %d rows", got-n)
 	}
+	saved := rows(t, s, a.AgentID, 0)
 	if err := s.Delete(ctx, DeleteRequest{AgentID: a.AgentID}); err != nil {
 		t.Fatal(err)
+	}
+	if left := rows(t, s, a.AgentID, 0); len(left) != 0 {
+		t.Fatalf("Delete left %d saved events", len(left))
 	}
 	stop()
 	s.Bus.Unsubscribe(bus)
@@ -126,8 +134,6 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 			t.Fatalf("no %s published", k)
 		}
 	}
-	all := rows(t, s, a.AgentID, 0)
-	saved := all[:len(all)-len(kinds(all, EventDeleted))] // written after the purge
 	tc := kinds(saved, EventTurnCompleted)
 	if len(tc) != 1 || len(kinds(saved, EventIdle)) != 1 || tc[0].TurnID == "" {
 		t.Fatalf("turn_completed %v idle %d; want one each", tc, len(kinds(saved, EventIdle)))

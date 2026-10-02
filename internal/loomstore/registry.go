@@ -36,9 +36,14 @@ type Agent struct {
 	DeleteResultJSON, LastActiveAt                                *string
 	CreatedAt, UpdatedAt                                          string
 	ArchivedAt, FinishedAt, HistoryPurgedAt, DeletedAt            *string
+	// HistoryPurgeFailedAt is set while a due history purge has failed (an
+	// incomplete expiry); whatever ends the deadline clears it.
+	HistoryPurgeFailedAt *string
 }
 
-const agentCols = `agent_id, workspace_id, name, profile_key, preset, preset_version, mode, interaction_mode,
+// insertCols are the columns InsertAgent writes; agentCols adds those only
+// later changes set.
+const insertCols = `agent_id, workspace_id, name, profile_key, preset, preset_version, mode, interaction_mode,
  role_kind, spec_json, spec_version, owner_kind, owner_id, created_by_kind, created_by_id,
  parent_agent_id, root_agent_id, subject_type, subject_id, subject_version, external_key,
  create_request_id, last_request_id, repo, base_ref, worktree_path, branch, harness,
@@ -46,6 +51,8 @@ const agentCols = `agent_id, workspace_id, name, profile_key, preset, preset_ver
  archive_reason, attention_reason, running_turn_id, create_step, delete_requested,
  delete_result_json, last_active_at, created_at, updated_at, archived_at, finished_at,
  history_purged_at, deleted_at, harness_session_root`
+
+const agentCols = insertCols + `, history_purge_failed_at`
 
 // fields lists a's fields in agentCols order; used both to bind and to scan.
 func (a *Agent) fields() []any {
@@ -57,7 +64,7 @@ func (a *Agent) fields() []any {
 		&a.Host, &a.Model, &a.State, &a.StateReason, &a.WaitingOn, &a.Attempt, &a.Outcome,
 		&a.ArchiveReason, &a.AttentionReason, &a.RunningTurnID, &a.CreateStep,
 		&a.DeleteRequested, &a.DeleteResultJSON, &a.LastActiveAt, &a.CreatedAt, &a.UpdatedAt,
-		&a.ArchivedAt, &a.FinishedAt, &a.HistoryPurgedAt, &a.DeletedAt, &a.HarnessSessionRoot}
+		&a.ArchivedAt, &a.FinishedAt, &a.HistoryPurgedAt, &a.DeletedAt, &a.HarnessSessionRoot, &a.HistoryPurgeFailedAt}
 }
 
 var (
@@ -79,8 +86,10 @@ func (s *Store) InsertAgent(ctx context.Context, a Agent) error {
 	if a.Host == "" {
 		a.Host = "local"
 	}
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(a.fields())), ",")
-	_, err := s.db.ExecContext(ctx, "INSERT INTO agents ("+agentCols+") VALUES ("+ph+")", a.fields()...) //nolint:gosec // G202: constant column list and placeholders only.
+	f := a.fields()
+	f = f[:len(f)-1] // insertCols: a new agent has no failed purge
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(f)), ",")
+	_, err := s.db.ExecContext(ctx, "INSERT INTO agents ("+insertCols+") VALUES ("+ph+")", f...) //nolint:gosec // G202: constant column list and placeholders only.
 	return err
 }
 
@@ -214,6 +223,12 @@ const retentionDue = `history_purged_at IS NULL AND (deleted_at IS NOT NULL
 	OR (interaction_mode = 'interactive' AND archived_at <= ?)
 	OR (interaction_mode = 'background' AND finished_at <= ?))`
 
+// worktreeDue selects a live agent's working copy past retention, whether
+// or not its history is purged yet; it binds the cutoff twice.
+const worktreeDue = `worktree_path IS NOT NULL AND deleted_at IS NULL
+	AND ((interaction_mode = 'interactive' AND archived_at <= ?)
+	OR (interaction_mode = 'background' AND finished_at <= ?))`
+
 // ErrNotDue means the agent is no longer due for purge (unarchived, sent to,
 // or already purged).
 var ErrNotDue = errors.New("loomstore: history not due for purge")
@@ -224,8 +239,43 @@ var ErrNotDue = errors.New("loomstore: history not due for purge")
 // purged. Unarchive (archived_at cleared) or a new background Send
 // (finished_at cleared) drops an agent out of this list.
 func (s *Store) RetentionDue(ctx context.Context, now time.Time) ([]string, error) {
+	return s.dueIDs(ctx, retentionDue, now)
+}
+
+// Due reports whether agentID's history is still due for purge at now.
+func (s *Store) Due(ctx context.Context, agentID string, now time.Time) (bool, error) {
+	return s.isDue(ctx, retentionDue, agentID, now)
+}
+
+// WorktreesDue lists live agents whose working copy is past retention at
+// now (the same deadline as their history), independent of the history purge.
+func (s *Store) WorktreesDue(ctx context.Context, now time.Time) ([]string, error) {
+	return s.dueIDs(ctx, worktreeDue, now)
+}
+
+// WorktreeDue reports whether agentID's working copy is still due at now.
+func (s *Store) WorktreeDue(ctx context.Context, agentID string, now time.Time) (bool, error) {
+	return s.isDue(ctx, worktreeDue, agentID, now)
+}
+
+// MarkPurgeFailed records that agentID's due history purge failed at now,
+// so its expiry shows as incomplete until a retry succeeds.
+func (s *Store) MarkPurgeFailed(ctx context.Context, agentID string, now time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET history_purge_failed_at = ?, updated_at = ? WHERE agent_id = ?`,
+		Stamp(now), Stamp(time.Now()), agentID)
+	return err
+}
+
+// ClearWorktree records that agentID's working copy was removed.
+func (s *Store) ClearWorktree(ctx context.Context, agentID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET worktree_path = NULL, updated_at = ? WHERE agent_id = ?`,
+		Stamp(time.Now()), agentID)
+	return err
+}
+
+func (s *Store) dueIDs(ctx context.Context, pred string, now time.Time) ([]string, error) {
 	cutoff := Stamp(now.Add(-HistoryRetention))
-	rows, err := s.db.QueryContext(ctx, `SELECT agent_id FROM agents WHERE `+retentionDue+` ORDER BY agent_id`, cutoff, cutoff)
+	rows, err := s.db.QueryContext(ctx, `SELECT agent_id FROM agents WHERE `+pred+` ORDER BY agent_id`, cutoff, cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -241,10 +291,9 @@ func (s *Store) RetentionDue(ctx context.Context, now time.Time) ([]string, erro
 	return ids, rows.Err()
 }
 
-// Due reports whether agentID is still due for purge at now.
-func (s *Store) Due(ctx context.Context, agentID string, now time.Time) (bool, error) {
+func (s *Store) isDue(ctx context.Context, pred, agentID string, now time.Time) (bool, error) {
 	cutoff := Stamp(now.Add(-HistoryRetention))
-	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM agents WHERE agent_id = ? AND `+retentionDue, agentID, cutoff, cutoff).Scan(new(int))
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM agents WHERE agent_id = ? AND `+pred, agentID, cutoff, cutoff).Scan(new(int))
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -258,7 +307,7 @@ func (s *Store) Due(ctx context.Context, agentID string, now time.Time) (bool, e
 func (s *Store) MarkHistoryPurged(ctx context.Context, agentID string, now time.Time) error {
 	cutoff := Stamp(now.Add(-HistoryRetention))
 	return s.tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE agents SET history_purged_at = ?, updated_at = ?
+		res, err := tx.ExecContext(ctx, `UPDATE agents SET history_purged_at = ?, history_purge_failed_at = NULL, updated_at = ?
 			WHERE agent_id = ? AND `+retentionDue, Stamp(now), Stamp(now), agentID, cutoff, cutoff)
 		if err != nil {
 			return err
@@ -381,8 +430,9 @@ func (s *Store) SetArchive(ctx context.Context, agentID string, reason *string, 
 		stamp = &v
 	}
 	_, err := s.db.ExecContext(ctx, `UPDATE agents SET archive_reason = ?,
-		archived_at = CASE WHEN ? IS NULL THEN NULL ELSE COALESCE(archived_at, ?) END, updated_at = ?
-		WHERE agent_id = ?`, reason, stamp, stamp, Stamp(time.Now()), agentID)
+		archived_at = CASE WHEN ? IS NULL THEN NULL ELSE COALESCE(archived_at, ?) END,
+		history_purge_failed_at = CASE WHEN ? IS NULL THEN NULL ELSE history_purge_failed_at END, updated_at = ?
+		WHERE agent_id = ?`, reason, stamp, stamp, stamp, Stamp(time.Now()), agentID)
 	return err
 }
 
@@ -396,9 +446,15 @@ func (s *Store) MarkDeleteRequested(ctx context.Context, agentID string) error {
 
 // Tombstone marks agentID deleted at now, keeping an earlier tombstone.
 func (s *Store) Tombstone(ctx context.Context, agentID string, now time.Time) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE agents SET deleted_at = COALESCE(deleted_at, ?), updated_at = ?
-		WHERE agent_id = ?`, Stamp(now), Stamp(now), agentID)
-	return err
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE agents SET deleted_at = COALESCE(deleted_at, ?),
+			history_purged_at = COALESCE(history_purged_at, ?), history_purge_failed_at = NULL, updated_at = ?
+			WHERE agent_id = ?`, Stamp(now), Stamp(now), Stamp(now), agentID); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM agent_events WHERE agent_id = ?`, agentID)
+		return err
+	})
 }
 
 // AgentSpec is the agent columns Update changes: the spec, its version, the

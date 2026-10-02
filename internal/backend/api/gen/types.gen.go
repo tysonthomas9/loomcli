@@ -1690,43 +1690,46 @@ type AgentV1 struct {
 	CreatedById     string  `json:"created_by_id"`
 
 	// CreatedByKind user, agent or system; from the caller's token, never the body
-	CreatedByKind   string                  `json:"created_by_kind"`
-	DeleteRequested bool                    `json:"delete_requested"`
-	DeletedAt       *string                 `json:"deleted_at"`
-	ExternalKey     *string                 `json:"external_key"`
-	FinishedAt      *string                 `json:"finished_at"`
-	Harness         string                  `json:"harness"`
-	HistoryPurgedAt *string                 `json:"history_purged_at"`
-	Host            string                  `json:"host"`
-	InteractionMode string                  `json:"interaction_mode"`
-	LastActiveAt    *string                 `json:"last_active_at"`
-	Mode            string                  `json:"mode"`
-	Model           *string                 `json:"model"`
-	Name            string                  `json:"name"`
-	OpenAsks        []AgentV1Ask            `json:"open_asks"`
-	Outcome         *string                 `json:"outcome"`
-	OwnerId         string                  `json:"owner_id"`
-	OwnerKind       string                  `json:"owner_kind"`
-	ParentAgentId   *string                 `json:"parent_agent_id"`
-	Preset          string                  `json:"preset"`
-	PresetVersion   string                  `json:"preset_version"`
-	ProfileKey      string                  `json:"profile_key"`
-	Repo            string                  `json:"repo"`
-	RoleKind        string                  `json:"role_kind"`
-	RootAgentId     *string                 `json:"root_agent_id"`
-	RunningTurnId   *string                 `json:"running_turn_id"`
-	SpecJson        string                  `json:"spec_json"`
-	SpecVersion     int64                   `json:"spec_version"`
-	State           string                  `json:"state"`
-	StateReason     *string                 `json:"state_reason"`
-	SubjectId       *string                 `json:"subject_id"`
-	SubjectType     *string                 `json:"subject_type"`
-	SubjectVersion  *string                 `json:"subject_version"`
-	UpdatedAt       string                  `json:"updated_at"`
-	WaitingMessages []AgentV1WaitingMessage `json:"waiting_messages"`
-	WaitingOn       *string                 `json:"waiting_on"`
-	WorkspaceId     string                  `json:"workspace_id"`
-	WorktreePath    *string                 `json:"worktree_path"`
+	CreatedByKind   string  `json:"created_by_kind"`
+	DeleteRequested bool    `json:"delete_requested"`
+	DeletedAt       *string `json:"deleted_at"`
+	ExternalKey     *string `json:"external_key"`
+	FinishedAt      *string `json:"finished_at"`
+	Harness         string  `json:"harness"`
+
+	// HistoryPurgeFailedAt Set while a due history purge has failed (an incomplete expiry); cleared when the purge succeeds or the deadline ends.
+	HistoryPurgeFailedAt *string                 `json:"history_purge_failed_at"`
+	HistoryPurgedAt      *string                 `json:"history_purged_at"`
+	Host                 string                  `json:"host"`
+	InteractionMode      string                  `json:"interaction_mode"`
+	LastActiveAt         *string                 `json:"last_active_at"`
+	Mode                 string                  `json:"mode"`
+	Model                *string                 `json:"model"`
+	Name                 string                  `json:"name"`
+	OpenAsks             []AgentV1Ask            `json:"open_asks"`
+	Outcome              *string                 `json:"outcome"`
+	OwnerId              string                  `json:"owner_id"`
+	OwnerKind            string                  `json:"owner_kind"`
+	ParentAgentId        *string                 `json:"parent_agent_id"`
+	Preset               string                  `json:"preset"`
+	PresetVersion        string                  `json:"preset_version"`
+	ProfileKey           string                  `json:"profile_key"`
+	Repo                 string                  `json:"repo"`
+	RoleKind             string                  `json:"role_kind"`
+	RootAgentId          *string                 `json:"root_agent_id"`
+	RunningTurnId        *string                 `json:"running_turn_id"`
+	SpecJson             string                  `json:"spec_json"`
+	SpecVersion          int64                   `json:"spec_version"`
+	State                string                  `json:"state"`
+	StateReason          *string                 `json:"state_reason"`
+	SubjectId            *string                 `json:"subject_id"`
+	SubjectType          *string                 `json:"subject_type"`
+	SubjectVersion       *string                 `json:"subject_version"`
+	UpdatedAt            string                  `json:"updated_at"`
+	WaitingMessages      []AgentV1WaitingMessage `json:"waiting_messages"`
+	WaitingOn            *string                 `json:"waiting_on"`
+	WorkspaceId          string                  `json:"workspace_id"`
+	WorktreePath         *string                 `json:"worktree_path"`
 }
 
 // AgentV1ArchiveBody defines model for AgentV1ArchiveBody.
