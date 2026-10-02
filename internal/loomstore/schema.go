@@ -139,4 +139,12 @@ CREATE INDEX agent_send_receipts_native_key ON agent_send_receipts(agent_id, nat
 CREATE INDEX agent_events_kind ON agent_events(agent_id, kind); -- task_completed notices and the last message, without a history scan
 `, `
 ALTER TABLE agents ADD COLUMN attempt_after_seq INTEGER NOT NULL DEFAULT 0; -- the last event seq before the current attempt began; set with the reopen
+-- An existing agent past its first attempt (0) starts its attempt at its last
+-- saved reopen (agent.state_changed from finished); with no such event, at its
+-- last event, so an earlier attempt's reply never counts as this one's.
+UPDATE agents SET attempt_after_seq = COALESCE(
+  (SELECT MAX(seq) FROM agent_events e WHERE e.agent_id = agents.agent_id AND e.kind = 'agent.state_changed'
+     AND json_extract(e.redacted_payload, '$.from') = 'finished'),
+  (SELECT MAX(seq) FROM agent_events e WHERE e.agent_id = agents.agent_id), 0)
+WHERE attempt > 0;
 `}

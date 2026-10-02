@@ -2,6 +2,7 @@ package loomstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -460,5 +461,57 @@ func TestNotifyMergesOnceByKey(t *testing.T) {
 	}
 	if text, ok, err := st.HandedText(ctx, "a1", "nk"); err != nil || !ok || text != "one\ntwo" {
 		t.Fatalf("handed text = %q, %v, %v", text, ok, err)
+	}
+}
+
+// TestMigrationAttemptBoundaryBackfill: a database from before migration 6
+// gets each agent's current-attempt boundary: a first attempt keeps every
+// reply; a reopened agent, active or finished, starts at its last saved
+// reopen event; one past its first attempt with no reopen event starts at
+// its last event, so no earlier reply counts.
+func TestMigrationAttemptBoundaryBackfill(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	all := migrations
+	defer func() { migrations = all }()
+	migrations = all[:5] // the schema before attempt_after_seq
+	old := openAt(t, path)
+	event := func(id, eid, kind, payload string) {
+		t.Helper()
+		if _, err := old.AppendEvent(ctx, Event{AgentID: id, EventID: eid, Kind: kind, Payload: json.RawMessage(payload)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply := func(id, text string) {
+		event(id, "item:"+text, "item.completed", `{"itemKind":"message","text":"`+text+`"}`)
+	}
+	reopened := func(id string) { event(id, "reopen:"+id, "agent.state_changed", `{"from":"finished","to":"active"}`) }
+	for _, a := range []struct {
+		id, state string
+		attempt   int64
+	}{{"first", "finished", 0}, {"active", "active", 1}, {"finished", "finished", 1}, {"newer", "active", 1}, {"unmarked", "finished", 2}} {
+		ag := agent(a.id, "interactive")
+		ag.Mode, ag.State, ag.Attempt = "single_task", a.state, a.attempt
+		if err := old.InsertAgent(ctx, ag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply("first", "first reply")
+	for _, id := range []string{"active", "finished", "newer", "unmarked"} {
+		reply(id, "old reply "+id)
+	}
+	reopened("active")
+	reopened("finished")
+	reopened("newer")
+	reply("newer", "new reply")
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrations = all
+	s := openAt(t, path)
+	for id, want := range map[string]string{"first": "first reply", "active": "", "finished": "", "newer": "new reply", "unmarked": ""} {
+		if got, err := s.LastMessage(ctx, id); err != nil || got != want {
+			t.Errorf("%s: LastMessage = %q, %v; want %q", id, got, err, want)
+		}
 	}
 }
