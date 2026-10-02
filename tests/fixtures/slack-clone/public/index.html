@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Slack clone</title></head>
+<body>
+  <ul id="channels"></ul>
+  <h2 id="current"></h2>
+  <ul id="messages"></ul>
+  <form id="post"><input id="text" placeholder="Message" autocomplete="off"><button>Send</button></form>
+  <script>
+    let channel = 'general';
+    const $ = (id) => document.getElementById(id);
+    async function load() {
+      const channels = await (await fetch('/api/channels')).json();
+      $('channels').innerHTML = '';
+      for (const c of channels) {
+        const li = document.createElement('li');
+        li.textContent = '#' + c;
+        li.onclick = () => { channel = c; load(); };
+        $('channels').append(li);
+      }
+      $('current').textContent = '#' + channel;
+      const messages = await (await fetch(`/api/channels/${channel}/messages`)).json();
+      $('messages').innerHTML = '';
+      for (const m of messages) {
+        const li = document.createElement('li');
+        li.textContent = `${m.user}: ${m.text}`;
+        $('messages').append(li);
+      }
+    }
+    $('post').onsubmit = async (e) => {
+      e.preventDefault();
+      await fetch(`/api/channels/${channel}/messages`, { method: 'POST', body: JSON.stringify({ user: 'me', text: $('text').value }) });
+      $('text').value = '';
+      load();
+    };
+    load();
+  </script>
+</body>
+</html>
