@@ -5,6 +5,7 @@
  */
 
 import { IssueDetailPanel, ToastContainer } from "@/components";
+import { AgentChat } from "@/components/AgentChat";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel";
 import { SessionNamePrompt } from "@/components/TerminalView/layout";
@@ -595,5 +596,21 @@ export function SplitDetailSummaryFixture(): JSX.Element {
         <SplitDetailSummary issue={issue} />
       </div>
     </WorkspaceProvider>
+  );
+}
+
+/**
+ * AgentChat for one agent, read from ?ws=&agent= (defaults w1 and a1). The
+ * e2e spec mocks the Agent API routes.
+ */
+export function AgentChatFixture(): JSX.Element {
+  const params = new URLSearchParams(window.location.search);
+  return (
+    <div style={{ width: 480, height: 640, padding: 8 }}>
+      <AgentChat
+        workspaceId={params.get("ws") ?? "w1"}
+        agentId={params.get("agent") ?? "a1"}
+      />
+    </div>
   );
 }

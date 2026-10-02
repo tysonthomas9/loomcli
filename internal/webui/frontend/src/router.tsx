@@ -43,6 +43,7 @@ const devRoutes = import.meta.env.DEV
             PasteConfirmFixture,
             WorkspaceTreeFixture,
             SplitDetailSummaryFixture,
+            AgentChatFixture,
           } = await import("@/TestFixtures");
           return {
             Component: () => {
@@ -63,6 +64,8 @@ const devRoutes = import.meta.env.DEV
                 fixture = <WorkspaceTreeFixture />;
               else if (path === "/test/split-detail-summary")
                 fixture = <SplitDetailSummaryFixture />;
+              else if (path === "/test/agent-chat")
+                fixture = <AgentChatFixture />;
               else return <NotFound />;
               return (
                 <ErrorBoundary>

@@ -44,3 +44,8 @@ export type {
   ClaimHoldRunningAgent,
   UseClaimHoldReturn,
 } from "./useClaimHold";
+
+export { useAgentChat } from "./useAgentChat";
+export type { UseAgentChatReturn } from "./useAgentChat";
+export { isUserSender } from "./agentChatModel";
+export type { ChatItem } from "./agentChatModel";

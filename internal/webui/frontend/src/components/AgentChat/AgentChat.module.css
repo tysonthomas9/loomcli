@@ -1,0 +1,125 @@
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  color: var(--color-text-primary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label,
+.state {
+  font-size: 12px;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+}
+
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.user,
+.agent,
+.waiting,
+.reasoning,
+.tool,
+.turn_end {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.user,
+.waiting {
+  align-self: flex-end;
+  max-width: 80%;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+}
+
+.waiting {
+  border: 1px dashed var(--color-border-light);
+}
+
+.waitingTitle,
+.askTitle {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.waitingActions,
+.askActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.reasoning,
+.tool,
+.note {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* Untrusted text: kept as text, and any unbroken run wraps. */
+.text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.showAll {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.askCard {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+}
+
+.askInput,
+.input {
+  flex: 1;
+  min-height: 2.5em;
+  resize: vertical;
+  font: inherit;
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.composer {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
