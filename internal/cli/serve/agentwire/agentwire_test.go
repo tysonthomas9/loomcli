@@ -65,40 +65,58 @@ func TestStartNeedsDir(t *testing.T) {
 	}
 }
 
-// TestStartResumesWorkspacesWithAgents: a workspace that already has an
-// OpenCode agent gets its service and feed at boot, before any request.
+// TestStartResumesWorkspacesWithAgents: a workspace with a live OpenCode
+// agent gets its service and feed at boot, before any request; one whose
+// only agent is deleted gets its service (for pending purges) but OpenCode
+// is never run.
 func TestStartResumesWorkspacesWithAgents(t *testing.T) {
-	ctx := context.Background()
-	dir := t.TempDir()
-	st, err := loomstore.Open(ctx, filepath.Join(dir, "agents.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.InsertAgent(ctx, loomstore.Agent{AgentID: "a1", WorkspaceID: "ws2", Name: "a1", ProfileKey: "a1",
-		Preset: "lead", PresetVersion: "1", Mode: "persistent", InteractionMode: "interactive", RoleKind: "interactive",
-		SpecJSON: "{}", SpecVersion: 1, OwnerKind: "user", OwnerID: "u", CreatedByKind: "user", CreatedByID: "u",
-		CreateRequestID: "r1", Repo: "/repo", Harness: "opencode", State: "idle"}); err != nil {
-		t.Fatal(err)
-	}
-	_ = st.Close()
-	bin, ran := filepath.Join(dir, "opencode"), filepath.Join(dir, "ran")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\ntouch "+ran+"\nexit 1\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	api, err := Start(ctx, Config{Dir: dir, OpenCodeBin: bin})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer api.Stop()
-	if len(api.services) != 1 || api.services["ws2"] == nil {
-		t.Fatalf("services = %v; want ws2", api.services)
-	}
-	for end := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		if _, err := os.Stat(ran); err == nil {
-			break
-		}
-		if time.Now().After(end) {
-			t.Fatal("the feed of a workspace with OpenCode agents never reached OpenCode")
-		}
+	for name, deleted := range map[string]bool{"live": false, "deleted": true} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			dir := t.TempDir()
+			st, err := loomstore.Open(ctx, filepath.Join(dir, "agents.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := st.InsertAgent(ctx, loomstore.Agent{AgentID: "a1", WorkspaceID: "ws2", Name: "a1", ProfileKey: "a1",
+				Preset: "lead", PresetVersion: "1", Mode: "persistent", InteractionMode: "interactive", RoleKind: "interactive",
+				SpecJSON: "{}", SpecVersion: 1, OwnerKind: "user", OwnerID: "u", CreatedByKind: "user", CreatedByID: "u",
+				CreateRequestID: "r1", Repo: "/repo", Harness: "opencode", State: "idle"}); err != nil {
+				t.Fatal(err)
+			}
+			if deleted {
+				if err := st.Tombstone(ctx, "a1", time.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_ = st.Close()
+			bin, ran := filepath.Join(dir, "opencode"), filepath.Join(dir, "ran")
+			if err := os.WriteFile(bin, []byte("#!/bin/sh\ntouch "+ran+"\nexit 1\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			api, err := Start(ctx, Config{Dir: dir, OpenCodeBin: bin})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer api.Stop()
+			if len(api.services) != 1 || api.services["ws2"] == nil {
+				t.Fatalf("services = %v; want ws2", api.services)
+			}
+			if deleted {
+				time.Sleep(500 * time.Millisecond) // longer than the first feed retry
+				if _, err := os.Stat(ran); err == nil {
+					t.Fatal("a workspace with only a deleted agent ran OpenCode")
+				}
+				return
+			}
+			for end := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+				if _, err := os.Stat(ran); err == nil {
+					break
+				}
+				if time.Now().After(end) {
+					t.Fatal("the feed of a workspace with OpenCode agents never reached OpenCode")
+				}
+			}
+		})
 	}
 }

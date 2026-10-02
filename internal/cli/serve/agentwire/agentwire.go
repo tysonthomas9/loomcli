@@ -102,8 +102,8 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 
 // service returns ws's service, starting it with its dispatcher on first
 // use. The workspace middleware has already checked that ws exists. Its
-// OpenCode feed starts now only when ws has OpenCode agents, else on the
-// first Open (design v2 §8.1.4).
+// OpenCode feed starts now only when ws has live (not deleted) OpenCode
+// agents, else on the first Open (design v2 §8.1.4).
 func (a *API) service(ws string) *loomagent.Service {
 	a.mu.Lock()
 	svc, ok := a.services[ws]
@@ -116,7 +116,7 @@ func (a *API) service(ws string) *loomagent.Service {
 	a.mu.Unlock()
 	a.run(svc.RunDispatcher)
 	if oc, _, err := a.store.ListAgents(a.ctx, loomstore.AgentFilter{WorkspaceID: ws, Harness: "opencode",
-		IncludeArchived: true, IncludeDeleted: true, Limit: 1}); err != nil || len(oc) > 0 {
+		IncludeArchived: true, Limit: 1}); err != nil || len(oc) > 0 {
 		feed()
 	}
 	return svc
