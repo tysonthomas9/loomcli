@@ -67,6 +67,7 @@ func fakeCodex() int {
 		var p struct {
 			ThreadID, Method string
 			Params           json.RawMessage // the ask's params; default {threadId}
+			Async            bool            // answer the ask call at once; the ask stays open
 		}
 		_ = json.Unmarshal(req.Params, &p)
 		var result any
@@ -88,6 +89,10 @@ func fakeCodex() int {
 				params = json.RawMessage(fmt.Sprintf(`{"threadId":%q}`, p.ThreadID))
 			}
 			_ = out.Encode(map[string]any{"id": "srv-1", "method": method, "params": params})
+			if p.Async {
+				result = map[string]any{}
+				break
+			}
 			in.Scan()
 			result = json.RawMessage(in.Bytes())
 		default:

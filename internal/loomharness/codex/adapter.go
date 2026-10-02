@@ -185,15 +185,20 @@ func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 		if err := a.delete(ctx, ref); err != nil {
 			return err
 		}
-		a.openMu.Lock()
-		for k, id := range a.opened {
-			if k.root == a.Root(ref.Root) && id == ref.NativeID {
-				delete(a.opened, k)
-			}
-		}
-		a.openMu.Unlock()
+		a.forget(ref)
 	}
 	return nil
+}
+
+// forget drops the record that this process opened ref.
+func (a *Adapter) forget(ref loomharness.NativeRef) {
+	a.openMu.Lock()
+	defer a.openMu.Unlock()
+	for k, id := range a.opened {
+		if k.root == a.Root(ref.Root) && id == ref.NativeID {
+			delete(a.opened, k)
+		}
+	}
 }
 
 // delete deletes one thread on its recorded root; one already gone is fine.

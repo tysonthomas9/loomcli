@@ -192,13 +192,22 @@ func (s *Session) turns(ctx context.Context, p protocol.ThreadTurnsListParams) (
 	return r, err
 }
 
-// Unload and Close free nothing per thread: the thread lives in its root's
-// shared app-server, where thread/unsubscribe left it loaded and did not
-// lower memory, so the idle timer frees memory with Restart (design §4.15).
-// They never touch a running turn, a waiting message or an open ask.
-func (s *Session) Unload(context.Context) error { return nil }
+// Unload frees what Loom holds for an idle thread: the record that it opened
+// it, once the thread has a first message and Open can find it by name
+// again (a thread with none keeps it, so Open stays idempotent). The thread
+// lives in its root's shared app-server, where thread/unsubscribe left it
+// loaded and did not lower memory, so Restart frees that (design §4.15).
+// Unload never touches a running turn, a waiting message or an open ask.
+func (s *Session) Unload(ctx context.Context) error {
+	one := int64(1)
+	page, err := s.turns(ctx, protocol.ThreadTurnsListParams{Limit: &one, ItemsView: json.RawMessage(`"notLoaded"`)})
+	if err == nil && len(page.Data) > 0 {
+		s.a.forget(s.ref)
+	}
+	return err
+}
 
-// Close keeps the thread; see Unload.
+// Close keeps the thread and stops nothing: the app-server is shared.
 func (s *Session) Close(context.Context) error { return nil }
 
 // Resume (4.2b) must install the rules first; until then it fails and

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -770,21 +771,32 @@ func TestCodexSlowCleanupDoesNotBlockOpen(t *testing.T) {
 	}
 }
 
-// TestCodexIdleUnloadAndRestart: Unload leaves an active turn and its open
-// ask alone, and the next Prompt works; Restart replaces every running
-// root's app-server and starts none for a root that was not running.
+// TestCodexIdleUnloadAndRestart: Unload leaves an active turn and its
+// pending approval alone; it frees the opened record of a thread with a first
+// message, which Open then finds by name, and keeps that of one without, so
+// Open stays idempotent; the next Prompt works. Once nothing runs and no ask
+// is open (the idle timer's guard), Restart replaces the running root's
+// app-server and starts none for a root that was not running.
 func TestCodexIdleUnloadAndRestart(t *testing.T) {
 	f := newFixture(t, "codex-cli 0.157.1")
 	a, ctx := newAdapter(t, f), context.Background()
 	root := a.Root("")
-	saveStore(root, fakeStore{Threads: map[string]fakeThread{"t-1": {Active: true}, "t-2": {}}})
+	saveStore(root, fakeStore{Next: 10, Threads: map[string]fakeThread{"t-1": {Active: true}}})
 	conn, err := a.Conn(ctx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.mu.Lock()
-	a.asks[root] = map[string]Message{"srv-1": {ThreadID: "t-1"}} // an open ask on the active turn
-	a.mu.Unlock()
+	feed, err := a.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = feed.Close() }()
+	if err := conn.Call(ctx, "ask", map[string]any{"threadId": "t-1", "method": "item/fileChange/requestApproval", "async": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if e := next(t, feed); e.Type != loomharness.EventAskOpened || e.AskID != "srv-1" {
+		t.Fatalf("event %+v, want ask.opened srv-1", e)
+	}
 	busy := a.Session(loomharness.NativeRef{Root: root, NativeID: "t-1"})
 	if err := busy.Unload(ctx); err != nil {
 		t.Fatal(err)
@@ -792,20 +804,61 @@ func TestCodexIdleUnloadAndRestart(t *testing.T) {
 	if st, err := busy.Status(ctx); err != nil || !st.Running {
 		t.Fatalf("Unload touched the active turn: %+v %v", st, err)
 	}
-	a.mu.Lock()
-	open := len(a.asks[root])
-	a.mu.Unlock()
-	if open != 1 {
-		t.Fatal("Unload dropped the open ask")
+
+	fresh, errF := a.Open(ctx, spec("fresh", "/work", ""))
+	used, errU := a.Open(ctx, spec("used", "/work", ""))
+	if errF != nil || errU != nil {
+		t.Fatal(errF, errU)
 	}
-	idle := a.Session(loomharness.NativeRef{Root: root, NativeID: "t-2"})
-	if err := idle.Unload(ctx); err != nil {
+	st := loadStore(root) // used's first user message materializes it
+	th := st.Threads[used.NativeID]
+	th.Listed = true
+	st.Threads[used.NativeID] = th
+	saveStore(root, st)
+	if err := os.WriteFile(filepath.Join(root, "turns-"+used.NativeID+".json"), []byte(`{"data":[{"id":"u1","status":"completed","items":[]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := idle.Prompt(ctx, loomharness.Input{Key: "k", Text: "hi"}); err != nil {
+	for _, ref := range []loomharness.NativeRef{fresh, used} {
+		if err := a.Session(ref).Unload(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.openMu.Lock()
+	kept := slices.Collect(maps.Values(a.opened))
+	a.openMu.Unlock()
+	if !slices.Equal(kept, []string{fresh.NativeID}) {
+		t.Fatalf("opened records after Unload %v, want only %s", kept, fresh.NativeID)
+	}
+	for _, c := range []struct {
+		key string
+		ref loomharness.NativeRef
+	}{{"fresh", fresh}, {"used", used}} {
+		if again, err := a.Open(ctx, spec(c.key, "/work", "")); err != nil || again != c.ref {
+			t.Fatalf("Open %s after Unload: %+v %v, want %+v", c.key, again, err, c.ref)
+		}
+	}
+	if n := len(loadStore(root).Threads); n != 3 {
+		t.Fatalf("%d threads after re-Open, want 3", n)
+	}
+	if err := a.Session(used).Prompt(ctx, loomharness.Input{Key: "k", Text: "hi"}); err != nil {
 		t.Fatalf("Prompt after Unload: %v", err)
 	}
 
+	if err := busy.Reply(ctx, "srv-1", loomharness.Reply{Allow: true}); err != nil {
+		t.Fatalf("the approval did not stay open across Unload: %v", err)
+	}
+	st = loadStore(root) // the turn ends: now nothing runs and no ask is open
+	st.Threads["t-1"] = fakeThread{}
+	saveStore(root, st)
+	if s, err := busy.Status(ctx); err != nil || s.Running {
+		t.Fatalf("still running: %+v %v", s, err)
+	}
+	a.mu.Lock()
+	open := len(a.asks[root])
+	a.mu.Unlock()
+	if open != 0 {
+		t.Fatalf("%d asks still open before Restart", open)
+	}
 	var before, after int
 	_ = conn.Call(ctx, "pid", nil, &before)
 	if err := a.Restart(ctx); err != nil {
@@ -819,10 +872,10 @@ func TestCodexIdleUnloadAndRestart(t *testing.T) {
 	if before == 0 || after == before {
 		t.Fatalf("Restart kept the app-server: pid %d, then %d", before, after)
 	}
-	if n := len(f.spawns(t)); n != 4 { // two spawns per start: pid and CODEX_HOME
+	if n := len(f.spawns(t)); n != 4 { // pid and CODEX_HOME per start: two starts of one root
 		t.Fatalf("spawns %v: Restart started a root that was not running", f.spawns(t))
 	}
-	if err := idle.Prompt(ctx, loomharness.Input{Key: "k2", Text: "again"}); err != nil {
+	if err := a.Session(used).Prompt(ctx, loomharness.Input{Key: "k2", Text: "again"}); err != nil {
 		t.Fatalf("Prompt after Restart: %v", err)
 	}
 }
