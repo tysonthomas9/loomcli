@@ -17,25 +17,35 @@ import (
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 )
 
+// Each pass after journal recovery runs even when an earlier one fails, so one
+// workspace's landing error cannot hold back native merges or abandon cleanup.
+var (
+	landingPass = func(ctx context.Context) error {
+		landingErr := landing.RunOnceWithOptions(ctx, landingOptions())
+		leadErr := publish.ReconcileLeadMerges(ctx)
+		mergeErr := publish.ReconcileLoomMerges(ctx)
+		return errors.Join(landingErr, leadErr, mergeErr)
+	}
+	nativePass  = publish.ReconcileNativeAt
+	abandonPass = abandon.ReconcileLocal
+)
+
 // ReconcileJournal classifies open journal work before dispatching it to the
 // workspace owner. Apply recovery is wired by its owner separately.
 func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
+	var landingErr error
 	if err := reconcile.RunOnce(ctx, reconcile.Handlers{
 		Workspace: reconcile.RecoverFunc(func(ctx context.Context) error { return Reconcile(ctx, s) }),
 		Apply:     reconcile.RecoverFunc(func(ctx context.Context) error { return recoverPullThenApply(ctx, applyrecovery.Recover) }),
 		Landing: reconcile.RecoverFunc(func(ctx context.Context) error {
-			landingErr := landing.RunOnceWithOptions(ctx, landingOptions())
-			leadErr := publish.ReconcileLeadMerges(ctx)
-			mergeErr := publish.ReconcileLoomMerges(ctx)
-			return errors.Join(landingErr, leadErr, mergeErr)
+			landingErr = landingPass(ctx)
+			return nil
 		}),
 	}); err != nil {
 		return err
 	}
-	if err := publish.ReconcileNativeAt(ctx); err != nil {
-		return err
-	}
-	return abandon.ReconcileLocal(ctx, s.AgentSessions())
+	nativeErr := nativePass(ctx)
+	return errors.Join(landingErr, nativeErr, abandonPass(ctx, s.AgentSessions()))
 }
 
 func landingOptions() landing.Options {

@@ -322,12 +322,33 @@ func TestFetchFailureChangesNoStatus(t *testing.T) {
 	}
 	fixture.forge.pull.Merged = true
 	fixture.forge.pull.MergeCommitSHA = fixture.initial
-	if err := Reconcile(context.Background(), fixture.store, fixture.forge); err == nil {
-		t.Fatal("missing second trunk fetch succeeded")
+	ctx := context.Background()
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	for range 3 {
+		if err := Reconcile(ctx, fixture.store, fixture.forge); err != nil {
+			t.Fatalf("one repository's fetch failure failed the pass: %v", err)
+		}
 	}
-	status, err := fixture.store.LandingStatus(context.Background(), "W", "A")
+	// Landing is never decided without a fresh trunk: B's repository could
+	// not be fetched, so B keeps its state while A's repository lands.
+	status, err := fixture.store.LandingStatus(ctx, "W", "B")
 	if err != nil || status.State != "published" {
 		t.Fatalf("state after fetch failure = %+v, %v", status, err)
+	}
+	status, err = fixture.store.LandingStatus(ctx, "W", "A")
+	if err != nil || status.State != "landed" {
+		t.Fatalf("fetched repository landing = %+v, %v", status, err)
+	}
+	attentions, err := fixture.store.LandingAttentions(ctx)
+	if err != nil || len(attentions) != 1 || attentions[0].Change != "B" ||
+		!strings.Contains(attentions[0].Reason, "trunk unavailable") || !strings.Contains(attentions[0].Reason, publication.Repo) {
+		t.Fatalf("fetch failure attention = %+v, %v", attentions, err)
+	}
+	if count := strings.Count(logs.String(), "landing needs attention"); count != 1 {
+		t.Fatalf("fetch failure logged %d times over 3 passes:\n%s", count, logs.String())
 	}
 }
 
@@ -474,5 +495,41 @@ func TestFailingChangeDoesNotStallOtherWorkspaces(t *testing.T) {
 	status, err := fixture.store.LandingStatus(ctx, "W2", "B")
 	if err != nil || status.State != "landed" {
 		t.Fatalf("healthy workspace landing = %+v, %v", status, err)
+	}
+}
+
+func TestLayerOnMismatchedPRNeedsAttentionOnce(t *testing.T) {
+	fixture, heads := stackedLineage(t, true)
+	ctx := context.Background()
+	// A's PR was reused for another branch; B moved to trunk, so deciding
+	// whether that is GitHub restacking needs A's PR.
+	fixture.forge.pulls = map[int]stackpublish.PR{
+		41: {Number: 41, Head: "someone/else", HeadSHA: heads["A"], Base: "main", State: "open"},
+		42: {Number: 42, Head: "loom/ws/W/change/B", HeadSHA: heads["B"], Base: "main", State: "open"},
+		43: {Number: 43, Head: "loom/ws/W/change/C", HeadSHA: heads["C"], Base: "loom/ws/W/change/B", State: "open"},
+	}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	for range 3 {
+		if err := Reconcile(ctx, fixture.store, fixture.forge); err != nil {
+			t.Fatalf("layer above a mismatched PR failed the pass: %v", err)
+		}
+	}
+	attentions, err := fixture.store.LandingAttentions(ctx)
+	if err != nil || len(attentions) != 2 {
+		t.Fatalf("attentions = %+v, %v", attentions, err)
+	}
+	reasons := map[string]string{}
+	for _, attention := range attentions {
+		reasons[attention.Change] = attention.Reason
+	}
+	if !strings.HasPrefix(reasons["A"], "publication mismatch: owned PR 41") ||
+		!strings.HasPrefix(reasons["B"], "blocked by the layer below: publication mismatch: owned PR 41") {
+		t.Fatalf("attention reasons = %+v", reasons)
+	}
+	if count := strings.Count(logs.String(), "landing needs attention"); count != 2 {
+		t.Fatalf("attention logged %d times over 3 passes:\n%s", count, logs.String())
 	}
 }
