@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { isUserSender, useAgentChat } from "@/hooks";
+import { useAuth } from "@/contexts/AuthContext";
+import { ownSender, useAgentChat } from "@/hooks";
 import type { ChatItem } from "@/hooks";
 import { AskCard } from "./AskCard";
 import { LongText } from "./LongText";
@@ -19,6 +20,7 @@ export interface AgentChatProps {
 export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   const { agent, items, asks, error, send, clear, stop, respond } =
     useAgentChat(workspaceId, agentId);
+  const own = ownSender(useAuth().user?.id);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
   const [sending, setSending] = useState(false);
@@ -66,10 +68,10 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
           <li key={`waiting:${w.sender}`} className={styles.waiting}>
             <div className={styles.waitingTitle}>
               Waiting
-              {!isUserSender(w.sender) && ` · from ${w.sender}`}
+              {w.sender !== own && ` · from ${w.sender}`}
             </div>
             <LongText text={w.text} />
-            {isUserSender(w.sender) && (
+            {w.sender === own && (
               <div className={styles.waitingActions}>
                 <button
                   onClick={() => {

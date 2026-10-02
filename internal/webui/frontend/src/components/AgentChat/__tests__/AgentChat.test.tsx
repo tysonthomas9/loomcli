@@ -16,6 +16,11 @@ const api = vi.hoisted(() => ({
   respondToAsk: vi.fn(),
   streams: [] as { opts: AgentStreamOptions; events: AgentEvent[] }[],
   ids: 0,
+  user: null as { id: string } | null,
+}));
+
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => ({ user: api.user }),
 }));
 
 vi.mock("@/api/agentsv1", () => ({
@@ -97,6 +102,7 @@ const fixture = () => [
 beforeEach(() => {
   vi.clearAllMocks();
   api.streams = [];
+  api.user = null;
   seq = 0;
 });
 
@@ -170,6 +176,29 @@ describe("AgentChat", () => {
         expect.any(String),
       ),
     );
+  });
+
+  it("with two signed-in users, shows Edit and Clear only on the caller's own slot", async () => {
+    api.user = { id: "u1" };
+    api.sendMessage.mockResolvedValue({ state: "waiting" });
+    api.withdrawMessage.mockResolvedValue({ result: "withdrawn" });
+    await mount(
+      agent({
+        state: "active",
+        waiting_messages: [
+          { sender: "user:u2", text: "theirs", since: "" },
+          { sender: "user:u1", text: "mine", since: "" },
+        ],
+      }),
+    );
+    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Clear" })).toHaveLength(1);
+    expect(
+      screen.getByText("from user:u2", { exact: false }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("from user:u1", { exact: false })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Message")).toHaveValue("mine");
   });
 
   it("answers an approval once and hides the card", async () => {

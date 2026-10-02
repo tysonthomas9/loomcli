@@ -47,5 +47,5 @@ export type {
 
 export { useAgentChat } from "./useAgentChat";
 export type { UseAgentChatReturn } from "./useAgentChat";
-export { isUserSender } from "./agentChatModel";
+export { ownSender } from "./agentChatModel";
 export type { ChatItem } from "./agentChatModel";

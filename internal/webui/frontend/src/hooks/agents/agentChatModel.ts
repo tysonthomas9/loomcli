@@ -97,5 +97,10 @@ export const REFRESH_KINDS = new Set([
   "ask.lost",
 ]);
 
-/** A waiting message is the user's own, so it can be edited or cleared. */
-export const isUserSender = (sender: string) => sender.startsWith("user:");
+/**
+ * The caller's own waiting-slot sender, as the server names it: user:<JWT
+ * subject> (the session user's id) when signed in, else user:local. Only that
+ * slot can be edited or cleared from here.
+ */
+export const ownSender = (userId?: string | null) =>
+  `user:${userId || "local"}`;

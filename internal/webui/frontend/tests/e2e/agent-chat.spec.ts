@@ -185,11 +185,18 @@ test("waiting bubble: edit is a new Send with a new key, clear is Withdraw", asy
   const m = mock({
     agent: agent({
       state: "active",
-      waiting_messages: [{ sender: "user:local", text: "first", since: "" }],
+      waiting_messages: [
+        { sender: "user:local", text: "first", since: "" },
+        { sender: "user:someone-else", text: "theirs", since: "" },
+      ],
     }),
   });
   await open(page, m);
-  await expect(page.getByText("Waiting")).toHaveCount(1);
+  // Only the caller's own slot (user:local in open mode) has controls.
+  await expect(page.getByText("Waiting", { exact: false })).toHaveCount(2);
+  await expect(page.getByText("from user:someone-else")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Clear" })).toHaveCount(1);
 
   const input = page.getByLabel("Message");
   await input.fill("another");
