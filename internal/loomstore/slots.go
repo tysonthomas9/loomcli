@@ -111,8 +111,8 @@ func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, e
 			return err
 		}
 		r = Receipt{AgentID: in.AgentID, RequestID: in.RequestID, Sender: in.Sender, ResultJSON: res, CreatedAt: now}
-		_, err = tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at)
-			VALUES (?,?,?,?,?)`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt)
+		_, err = tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at,
+			body, native_key) VALUES (?,?,?,?,?,?,?)`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt, in.Body, nativeKey)
 		return err
 	})
 	return r, retry, err
@@ -197,9 +197,10 @@ func (s *Store) HandNext(ctx context.Context, agentID string, nativeKey func(Slo
 			return err
 		}
 		// The Send's receipt now reports the hand-over, so a later retry of it
-		// returns state handed (design v2 §4.9).
-		_, err = tx.ExecContext(ctx, `UPDATE agent_send_receipts SET result_json = json_set(result_json, '$.state', ?)
-			WHERE agent_id = ? AND request_id = ? AND json_valid(result_json)`, SlotHanded, agentID, sl.RequestID)
+		// returns state handed (design v2 §4.9), and records the input key.
+		_, err = tx.ExecContext(ctx, `UPDATE agent_send_receipts SET native_key = ?,
+			result_json = CASE WHEN json_valid(result_json) THEN json_set(result_json, '$.state', ?) ELSE result_json END
+			WHERE agent_id = ? AND request_id = ?`, k, SlotHanded, agentID, sl.RequestID)
 		return err
 	})
 	return sl, err
@@ -308,6 +309,19 @@ func (s *Store) Slots(ctx context.Context, agentID string) ([]Slot, error) {
 		out = append(out, sl)
 	}
 	return out, rows.Err()
+}
+
+// HandedText returns the text of the agent's message that was handed over
+// with input key nativeKey, kept on its Send's receipt; ok is false when no
+// receipt records that key (a legacy row, or a key Loom never handed).
+func (s *Store) HandedText(ctx context.Context, agentID, nativeKey string) (text string, ok bool, err error) {
+	var body sql.NullString
+	err = s.db.QueryRowContext(ctx, `SELECT body FROM agent_send_receipts WHERE agent_id = ? AND native_key = ?
+		ORDER BY created_at DESC LIMIT 1`, agentID, nativeKey).Scan(&body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return body.String, err == nil && body.Valid, err
 }
 
 // GetReceipt returns the receipt of the agent's Send requestID, or ErrNotFound.

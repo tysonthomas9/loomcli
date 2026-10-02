@@ -9,93 +9,190 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
-// deliveredText is the text of the one message.delivered row in es.
-func deliveredText(t *testing.T, es []loomstore.Event) string {
-	t.Helper()
-	got := kinds(es, string(loomharness.EventMessageDelivered))
-	if len(got) != 1 {
-		t.Fatalf("message.delivered rows = %d; want 1", len(got))
-	}
-	var p struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(got[0].Payload, &p); err != nil {
-		t.Fatal(err)
-	}
-	return p.Text
+// shaped is the fake harness registered as name, its message.delivered in
+// that harness's port shape: OpenCode (session.inbox.delivered) and Claude
+// (user_message_uuids) name only the input key, codex's userMessage item
+// carries its own copy of the text.
+type shaped struct {
+	loomharness.Harness
+	name string
 }
 
-// TestDeliveredCarriesText: each harness's message.delivered, live or from
-// its history, is saved and published with the delivered message's text
-// from Loom's slot: OpenCode and Claude name only the input key, codex also
-// sends its own copy of the text.
-func TestDeliveredCarriesText(t *testing.T) {
-	shapes := map[string]func(ref loomharness.NativeRef, key string) loomharness.Event{
-		"opencode": func(ref loomharness.NativeRef, key string) loomharness.Event { // session.inbox.delivered
-			return loomharness.Event{Type: loomharness.EventMessageDelivered, Session: ref, ItemKind: "message", ItemID: key, InputKey: key}
-		},
-		"claude": func(ref loomharness.NativeRef, key string) loomharness.Event { // user_message_uuids
-			return loomharness.Event{Type: loomharness.EventMessageDelivered, Session: ref, ItemKind: "message", ItemID: key, InputKey: key}
-		},
-		"codex": func(ref loomharness.NativeRef, key string) loomharness.Event { // userMessage item
-			return loomharness.Event{Type: loomharness.EventMessageDelivered, Session: ref, TurnID: "T1", ItemKind: "message",
-				InputKey: key, Text: "first message"}
-		},
+func (h shaped) shape(e loomharness.Event) loomharness.Event {
+	if e.Type != loomharness.EventMessageDelivered {
+		return e
 	}
-	for name, shape := range shapes {
-		t.Run(name+"/live", func(t *testing.T) {
+	e.ItemKind = "message"
+	if h.name != "codex" {
+		e.ItemID, e.Text = e.InputKey, ""
+	}
+	return e
+}
+
+func (h shaped) Name() string { return h.name }
+
+func (h shaped) Feed(ctx context.Context) (loomharness.Feed, error) {
+	f, err := h.Harness.Feed(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan loomharness.Event, 64)
+	go func() {
+		defer close(out)
+		for e := range f.Events() {
+			out <- h.shape(e)
+		}
+	}()
+	return shapedFeed{f, out}, nil
+}
+
+type shapedFeed struct {
+	loomharness.Feed
+	ch chan loomharness.Event
+}
+
+func (f shapedFeed) Events() <-chan loomharness.Event { return f.ch }
+
+func (h shaped) Session(ref loomharness.NativeRef) loomharness.Session {
+	return shapedSession{h.Harness.Session(ref), h}
+}
+
+type shapedSession struct {
+	loomharness.Session
+	h shaped
+}
+
+func (s shapedSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
+	p, err := s.Session.Messages(ctx, after, limit)
+	for i := range p.Events {
+		p.Events[i] = s.h.shape(p.Events[i])
+	}
+	return p, err
+}
+
+var harnessNames = []string{"opencode", "codex", "claude"}
+
+// shapedService is a service whose only harness is the fake as name, with
+// a lead agent on it.
+func shapedService(t *testing.T, name string) (*Service, *createEnv, loomstore.Agent, loomharness.NativeRef) {
+	t.Helper()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	s.harnesses = map[string]loomharness.Harness{name: shaped{e.h, name}}
+	info, err := s.Create(context.Background(), CreateRequest{Envelope: Envelope{RequestID: "alpha"}, Preset: "lead",
+		Name: "alpha", Repo: "/repo", Overrides: Overrides{Harness: name, Model: "fake-model"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := s.get(t, info.AgentID)
+	return s, e, a, loomharness.NativeRef{Root: *a.HarnessSessionRoot, NativeID: *a.HarnessSessionID}
+}
+
+// deliveredTexts maps each message.delivered row in es by input key to its text.
+func deliveredTexts(t *testing.T, es []loomstore.Event) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, r := range kinds(es, string(loomharness.EventMessageDelivered)) {
+		var p struct {
+			InputKey string `json:"inputKey"`
+			Text     string `json:"text"`
+		}
+		if err := json.Unmarshal(r.Payload, &p); err != nil {
+			t.Fatal(err)
+		}
+		out[p.InputKey] = p.Text
+	}
+	return out
+}
+
+func listed(t *testing.T, s *Service, agentID string) []loomstore.Event {
+	t.Helper()
+	p, err := s.ListEvents(context.Background(), loomstore.EventQuery{AgentID: agentID, Limit: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p.Events
+}
+
+// TestDeliveredCarriesTextLive: on each harness, the delivery its live feed
+// reports is published and listed with the message's text.
+func TestDeliveredCarriesTextLive(t *testing.T) {
+	for _, name := range harnessNames {
+		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			e := newCreateEnv(t)
-			s := e.service(ServiceConfig{})
-			a, ref := newLead(t, e, s, "alpha")
-			mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first message", user))
+			s, _, a, _ := shapedService(t, name)
 			sub, err := s.Subscribe(ctx, SubscribeRequest{AgentIDs: []string{a.AgentID}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.ingest(ctx, "opencode", shape(ref, defaultInputKey("", a.AgentID, "u1"))); err != nil {
-				t.Fatal(err)
+			feedCtx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() { defer close(done); s.RunFeed(feedCtx, name) }()
+			defer func() { cancel(); <-done }()
+			mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first message", user))
+			key := s.inputKey(name, a.AgentID, "u1")
+			var live []loomstore.Event
+			for deliveredTexts(t, live)[key] == "" {
+				live = append(live, recv(t, sub, 1)...)
 			}
-			live := recv(t, sub, 1)
-			if got := deliveredText(t, live); got != "first message" {
+			if got := deliveredTexts(t, live)[key]; got != "first message" {
 				t.Fatalf("live text = %q", got)
 			}
-			page, err := s.ListEvents(ctx, loomstore.EventQuery{AgentID: a.AgentID})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := deliveredText(t, page.Events); got != "first message" {
+			if got := deliveredTexts(t, listed(t, s, a.AgentID))[key]; got != "first message" {
 				t.Fatalf("ListEvents text = %q", got)
-			}
-		})
-		t.Run(name+"/history", func(t *testing.T) {
-			ctx := context.Background()
-			e := newCreateEnv(t)
-			s := e.service(ServiceConfig{})
-			a, ref := newLead(t, e, s, "alpha")
-			mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first message", user))
-			ev := shape(ref, defaultInputKey("", a.AgentID, "u1"))
-			s.harnesses["opencode"] = tweaked{Harness: e.h, page1: []loomharness.Event{ev},
-				page2: func() (loomharness.MessagePage, error) { return loomharness.MessagePage{}, nil }}
-			if err := s.replay(ctx, "opencode", s.get(t, a.AgentID)); err != nil {
-				t.Fatal(err)
-			}
-			if got := deliveredText(t, rows(t, s, a.AgentID, 0)); got != "first message" {
-				t.Fatalf("replayed text = %q", got)
 			}
 		})
 	}
 }
 
-// TestDeliveredWithoutSlotKeepsHarnessText: a delivery no slot holds (its
-// slot moved on) keeps whatever text the harness sent, and a row saved with
-// no text still reads.
-func TestDeliveredWithoutSlotKeepsHarnessText(t *testing.T) {
+// TestDeliveredTextAfterSlotMovedOn: on each harness, a delivery reported
+// late (live, or from the history) carries the text that was handed over,
+// after the sender's slot was reused and another sender's waiting text was
+// edited and handed over in its place; the edited-away draft never appears.
+func TestDeliveredTextAfterSlotMovedOn(t *testing.T) {
+	for _, name := range harnessNames {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			s, e, a, ref := shapedService(t, name)
+			h := shaped{e.h, name}
+			k1, k2 := s.inputKey(name, a.AgentID, "u1"), s.inputKey(name, a.AgentID, "c2")
+			mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
+			mustSendMsg(t, s, sendReq(a.AgentID, "c1", "draft", child))
+			mustSendMsg(t, s, sendReq(a.AgentID, "c2", "second", child)) // edits the waiting text
+			// k1's turn ends with its delivery missed: c2 is handed over next.
+			if err := s.HarnessEvent(ctx, a.AgentID, loomharness.Event{Type: loomharness.EventTurnCompleted,
+				Session: ref, TurnID: k1, StopReason: "completed"}); err != nil {
+				t.Fatal(err)
+			}
+			mustSendMsg(t, s, sendReq(a.AgentID, "u2", "third", user)) // the user's slot is reused
+			delivered := func(key, text string) loomharness.Event {
+				return h.shape(loomharness.Event{Type: loomharness.EventMessageDelivered, Session: ref,
+					InputKey: key, Text: text})
+			}
+			if _, err := s.ingest(ctx, name, delivered(k1, "first")); err != nil { // late, live
+				t.Fatal(err)
+			}
+			s.harnesses[name] = tweaked{Harness: h, page1: []loomharness.Event{delivered(k1, "first"), delivered(k2, "second")},
+				page2: func() (loomharness.MessagePage, error) { return loomharness.MessagePage{}, nil }}
+			if err := s.replay(ctx, name, s.get(t, a.AgentID)); err != nil {
+				t.Fatal(err)
+			}
+			got := deliveredTexts(t, listed(t, s, a.AgentID))
+			if len(got) != 2 || got[k1] != "first" || got[k2] != "second" {
+				t.Fatalf("delivered texts = %v; want %s first, %s second", got, k1, k2)
+			}
+		})
+	}
+}
+
+// TestDeliveredUnknownKeyKeepsHarnessText: a delivery Loom has no record of
+// (a legacy receipt) keeps whatever text the harness sent, and a row saved
+// with no text still reads.
+func TestDeliveredUnknownKeyKeepsHarnessText(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
 	s := e.service(ServiceConfig{})
 	a, ref := newLead(t, e, s, "alpha")
-	n := rows(t, s, a.AgentID, 0)
 	for _, ev := range []loomharness.Event{
 		{Type: loomharness.EventMessageDelivered, Session: ref, InputKey: "gone1"},
 		{Type: loomharness.EventMessageDelivered, Session: ref, InputKey: "gone2", Text: "native"},
@@ -104,8 +201,8 @@ func TestDeliveredWithoutSlotKeepsHarnessText(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := rows(t, s, a.AgentID, n[len(n)-1].Seq)
-	if t1, t2 := deliveredText(t, got[:1]), deliveredText(t, got[1:]); t1 != "" || t2 != "native" {
-		t.Fatalf("texts = %q, %q; want none and the harness's", t1, t2)
+	got := deliveredTexts(t, listed(t, s, a.AgentID))
+	if t1, ok := got["gone1"]; !ok || t1 != "" || got["gone2"] != "native" {
+		t.Fatalf("texts = %v; want gone1 none and gone2 the harness's", got)
 	}
 }

@@ -131,4 +131,8 @@ CREATE TABLE native_purge_pending (         -- an owned native session a failed 
   PRIMARY KEY (harness, native_root, native_id),
   FOREIGN KEY (harness, native_root, native_id) REFERENCES agent_native_sessions(harness, native_root, native_id)
 );
+`, `
+ALTER TABLE agent_send_receipts ADD COLUMN body TEXT;       -- the Send's message text; NULL on a legacy row or a Send with no message
+ALTER TABLE agent_send_receipts ADD COLUMN native_key TEXT; -- the input key the message was handed over with
+CREATE INDEX agent_send_receipts_native_key ON agent_send_receipts(agent_id, native_key);
 `}
