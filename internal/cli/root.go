@@ -207,10 +207,14 @@ func Execute() error {
 			return
 		}
 		span.End()
-		// Reset to default handler so the second signal terminates immediately,
-		// and re-raise so unwinding code paths run before exit.
-		signal.Reset(s.(syscall.Signal))
-		_ = syscall.Kill(syscall.Getpid(), s.(syscall.Signal))
+		// A command that took the signal (cmdstore.Notify/NotifyContext) shuts
+		// down on its own; re-raising would kill it mid-shutdown. Otherwise
+		// re-raise so the command dies by the default action. Stopping only
+		// this channel lets a later signal reach the default action.
+		signal.Stop(sigCh)
+		if !cmdstore.SignalTaken(s) {
+			_ = syscall.Kill(syscall.Getpid(), s.(syscall.Signal))
+		}
 	}()
 	defer signal.Stop(sigCh)
 

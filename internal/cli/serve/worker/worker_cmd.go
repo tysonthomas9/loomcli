@@ -18,6 +18,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
@@ -219,7 +220,7 @@ func setupWorkerInterfaces(reg *workerRegistration, authToken string) (*cli.HTTP
 func setupWorkerShutdown() chan struct{} {
 	shutdown := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	cmdstore.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		sig := <-sigChan
 		signal.Stop(sigChan)

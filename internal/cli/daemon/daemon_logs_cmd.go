@@ -6,12 +6,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	webuilog "github.com/tysonthomas9/loomcli/internal/webui/log"
 )
@@ -140,7 +140,7 @@ func showAgentLog(logPath string) {
 	}
 
 	if daemonLogsFollow {
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		ctx, stop := cmdstore.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
 		if err := followLogFile(ctx, logPath); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "Error following log: %v\n", err)

@@ -364,7 +364,7 @@ func sanitizePrefix(value string) string {
 func signalContext(parent context.Context) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	cmdstore.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		select {
 		case <-sig:

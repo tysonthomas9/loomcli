@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
@@ -18,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 )
 
@@ -125,7 +125,7 @@ func init() {
 }
 
 func runService(cmd *cobra.Command, _ []string) error {
-	serviceCtx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	serviceCtx, stopSignals := cmdstore.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
 	cfg, err := prepareLocalServiceConfig()

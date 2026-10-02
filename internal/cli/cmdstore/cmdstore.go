@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"syscall"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -76,7 +75,7 @@ func RootContext() context.Context {
 // by SetRootContext, which lets a trace span installed at CLI startup
 // parent every command's context-attached spans.
 func SignalContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(runtimectx.RootContext(), os.Interrupt, syscall.SIGTERM)
+	return NotifyContext(runtimectx.RootContext(), os.Interrupt, syscall.SIGTERM)
 }
 
 // ActiveWorkspace resolves the explicit active workspace key

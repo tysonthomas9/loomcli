@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -189,7 +188,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	defer cancel()
 
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	cmdstore.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	daemonWeStarted := ensureIssueBackend()
 	if daemonWeStarted {
