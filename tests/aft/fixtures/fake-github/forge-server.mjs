@@ -162,7 +162,13 @@ const server = createServer(async (request, response) => {
       const numbers = stack ? stack.numbers.slice(0, stack.numbers.indexOf(merge.number) + 1) : [merge.number];
       const target = pulls.find((item) => item.number === merge.number);
       const sha = currentPull(target).head.sha;
-      if (remoteFor(target.repo)) execFileSync("git", [`--git-dir=${remoteFor(target.repo)}`, "update-ref", "refs/heads/main", sha]);
+      if (remoteFor(target.repo)) {
+        try {
+          execFileSync("git", [`--git-dir=${remoteFor(target.repo)}`, "update-ref", "refs/heads/main", sha]);
+        } catch {
+          return send(response, 409, { message: "merge head is not in this repository's remote" });
+        }
+      }
       for (const number of numbers) {
         const pull = pulls.find((item) => item.number === number);
         pull.state = "closed";

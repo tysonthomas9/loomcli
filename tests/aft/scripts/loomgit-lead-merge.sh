@@ -19,8 +19,12 @@ case "$case_name" in
   request | green) backend=native ;;
   *) backend=loom ;;
 esac
-repos=(app)
-if [[ "$case_name" == deps ]]; then repos=(api app); fi
+# Each case has its own owner/<repo> so the fake forge routes every PR to the
+# right bare remote even while earlier cases' PRs are still open.
+app_repo="lead-$case_name"
+api_repo=""
+repos=("$app_repo")
+if [[ "$case_name" == deps ]]; then app_repo="lead-deps-app"; api_repo="lead-deps-api"; repos=("$api_repo" "$app_repo"); fi
 
 loom() {
   LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" "$@" --workspace "$workspace"
@@ -50,7 +54,7 @@ if [[ "$phase" == setup ]]; then
     paths+=("$repo")
   done
   single="$case_dir/${repos[0]}.git"
-  python3 -c 'import json,sys; print(json.dumps({"remote":sys.argv[1],"remotes":json.loads(sys.argv[2]) if sys.argv[4]=="deps" else {},"native_stacks":sys.argv[3]=="native","preserve":True}))' \
+  python3 -c 'import json,sys; print(json.dumps({"remote":sys.argv[1],"remotes":json.loads(sys.argv[2]),"native_stacks":sys.argv[3]=="native","preserve":True}))' \
     "$single" "$remotes" "$backend" "$case_name" |
     curl -fsS -X POST "$AFT_FAKE_GH_BASE/__reset" -H 'Content-Type: application/json' -d @- >/dev/null
   python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"type":"empty","repos":sys.argv[2:]}))' "e2e-ws-lead-$case_name" "${paths[@]}" |
@@ -190,7 +194,7 @@ pr_status() { # pr_status <number> <json fields>
 
 case "$case_name" in
   request)
-    make_tasks lead-chain app:lead-request-1.txt app:lead-request-2.txt
+    make_tasks lead-chain "$app_repo":lead-request-1.txt "$app_repo":lead-request-2.txt
     approve_and_apply
     publish_stack
     target="$(cat "$case_dir/change-2.id")"
@@ -215,11 +219,11 @@ case "$case_name" in
     wait_merged "1 1" "human-confirmed merge"
     curl -fsS "$api/agents/lead/git/merge-requests" > "$case_dir/requests-after.json"
     json "$case_dir/requests-after.json" 'r=[x for x in v if x["id"]==sys.argv[2]][0]; assert r["status"]=="confirmed" and r["confirmed_by"] and r["requested_by"]=="lead", r; assert "requested by lead lead, confirmed by "+r["confirmed_by"] in r["audit"], r' "$request_id"
-    for layer in 1 2; do git --git-dir="$case_dir/app.git" show "main:lead-request-$layer.txt" >/dev/null; done
+    for layer in 1 2; do git --git-dir="$case_dir/$app_repo.git" show "main:lead-request-$layer.txt" >/dev/null; done
     ;;
 
   green)
-    make_tasks lead-chain app:lead-green-1.txt app:lead-green-2.txt
+    make_tasks lead-chain "$app_repo":lead-green-1.txt "$app_repo":lead-green-2.txt
     approve_and_apply
     publish_stack
     one="$(pull_number 1)"
@@ -237,11 +241,11 @@ case "$case_name" in
     pr_status "$two" '"review":"APPROVED","merge_state":"CLEAN"'
     wait_merged "1 1" "layer two approved"
     loom lead-may-merge off > "$case_dir/policy-off.txt"
-    for layer in 1 2; do git --git-dir="$case_dir/app.git" show "main:lead-green-$layer.txt" >/dev/null; done
+    for layer in 1 2; do git --git-dir="$case_dir/$app_repo.git" show "main:lead-green-$layer.txt" >/dev/null; done
     ;;
 
   later)
-    make_tasks lead-chain app:lead-later-a.txt app:lead-later-b.txt app:lead-later-c.txt
+    make_tasks lead-chain "$app_repo":lead-later-a.txt "$app_repo":lead-later-b.txt "$app_repo":lead-later-c.txt
     approve_and_apply
     publish_stack
     b="$(cat "$case_dir/change-2.id")"
@@ -262,11 +266,11 @@ case "$case_name" in
     cat "$case_dir/merge-c.txt"
     test "$rc" = 0
     wait_merged "1 1 1" "later merge up to C"
-    git --git-dir="$case_dir/app.git" show main:lead-later-c.txt >/dev/null
+    git --git-dir="$case_dir/$app_repo.git" show main:lead-later-c.txt >/dev/null
     ;;
 
   deps)
-    make_tasks deps api:lead-deps-api.txt app:lead-deps-app.txt
+    make_tasks deps "$api_repo":lead-deps-api.txt "$app_repo":lead-deps-app.txt
     approve_and_apply
     for layer in 1 2; do
       change="$(cat "$case_dir/change-$layer.id")"
@@ -275,13 +279,13 @@ case "$case_name" in
     done
     api_number="$(json "$case_dir/publish-1.json" 'print(v["url"].rsplit("/",1)[-1])')"
     app_change="$(cat "$case_dir/change-2.id")"
-    app_head="$(git --git-dir="$case_dir/app.git" rev-parse "refs/heads/loom/ws/$workspace/change/$app_change")"
+    app_head="$(git --git-dir="$case_dir/$app_repo.git" rev-parse "refs/heads/loom/ws/$workspace/change/$app_change")"
     for _ in $(seq 1 45); do
       curl -fsS "$AFT_FAKE_GH_BASE/__statuses?sha=$app_head" > "$case_dir/statuses-pending.json"
       json "$case_dir/statuses-pending.json" 'sys.exit(0 if any(x["context"]=="loom/dependencies" and x["state"]=="pending" for x in v) else 1)' && break
       sleep 2
     done
-    json "$case_dir/statuses-pending.json" 'p=[x for x in v if x["context"]=="loom/dependencies"]; assert p and p[-1]["state"]=="pending" and ("owner/api#"+sys.argv[2]) in p[-1]["description"] and p[-1]["repo"]=="owner/app", v' "$api_number"
+    json "$case_dir/statuses-pending.json" 'p=[x for x in v if x["context"]=="loom/dependencies"]; assert p and p[-1]["state"]=="pending" and ("owner/"+sys.argv[3]+"#"+sys.argv[2]) in p[-1]["description"] and p[-1]["repo"]=="owner/"+sys.argv[4], v' "$api_number" "$api_repo" "$app_repo"
     hold_seconds=6
     for _ in $(seq 1 "$hold_seconds"); do
       curl -fsS "$AFT_FAKE_GH_BASE/__statuses?sha=$app_head" > "$case_dir/statuses-hold.json"
@@ -289,9 +293,9 @@ case "$case_name" in
       sleep 1
     done
     api_change="$(cat "$case_dir/change-1.id")"
-    git -C "$case_dir/api" fetch -q origin "loom/ws/$workspace/change/$api_change"
-    sha="$(git -C "$case_dir/api" rev-parse FETCH_HEAD)"
-    git -C "$case_dir/api" push -q origin FETCH_HEAD:refs/heads/main
+    git -C "$case_dir/$api_repo" fetch -q origin "loom/ws/$workspace/change/$api_change"
+    sha="$(git -C "$case_dir/$api_repo" rev-parse FETCH_HEAD)"
+    git -C "$case_dir/$api_repo" push -q origin FETCH_HEAD:refs/heads/main
     curl -fsS -X POST "$AFT_FAKE_GH_BASE/__merge" -H 'Content-Type: application/json' -d "{\"number\":$api_number,\"sha\":\"$sha\"}" > "$case_dir/api-merge.json"
     grep -q '"state":"closed"' "$case_dir/api-merge.json"
     for _ in $(seq 1 45); do
@@ -300,7 +304,7 @@ case "$case_name" in
       sleep 2
     done
     cat "$case_dir/statuses-final.json"
-    echo "loom/dependencies stayed pending after owner/api#$api_number landed" >&2
+    echo "loom/dependencies stayed pending after owner/$api_repo#$api_number landed" >&2
     exit 1
     ;;
 esac
