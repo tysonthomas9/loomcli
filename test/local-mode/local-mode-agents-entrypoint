@@ -39,7 +39,7 @@ if [ -n "${LOCAL_MODE_AGENTS_REAL:-}" ]; then
   codex login status >/dev/null 2>&1 \
     || echo "WARNING: codex is not logged in; refresh ~/.codex/auth.json on the host" >&2
   claude auth status >/dev/null 2>&1 \
-    || echo "WARNING: Claude is not logged in; refresh the host login (LOCAL_MODE_CLAUDE_AUTH)" >&2
+    || echo "WARNING: Claude is not logged in; set LOCAL_MODE_CLAUDE_TOKEN_FILE (see README)" >&2
 fi
 
 src="${LOOM_LOCAL_MODE_SOURCE_REPO:-/workspace/source-repo}"

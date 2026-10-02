@@ -199,9 +199,21 @@ podman exec $C claude auth status
 The same refresh caveat applies: codex refreshes a ChatGPT login after it
 ages, and the read-only mount refuses the write, so use a recently refreshed
 host login (run `codex` on the host first). On macOS the Claude login lives in
-the Keychain and `~/.claude/.credentials.json` may be stale; use a long-lived
-`claude setup-token` login there, or point `LOCAL_MODE_CLAUDE_AUTH` at another
-file.
+the Keychain and `~/.claude/.credentials.json` is often stale. Use a
+long-lived token instead:
+
+1. On the host, run `claude setup-token` and finish the browser sign-in.
+2. Save the printed token, and nothing else, to `~/.config/loom/claude-token`
+   in an editor (not via `echo`, which keeps it in shell history), then
+   `chmod 600 ~/.config/loom/claude-token`.
+3. Start the stack with
+   `LOCAL_MODE_CLAUDE_TOKEN_FILE=$HOME/.config/loom/claude-token` added to the
+   `make local-mode-agents-up` line above.
+
+The file is mounted read-only at `/run/secrets/claude-token`. The image's
+`claude` wrapper reads it into `CLAUDE_CODE_OAUTH_TOKEN` for each claude
+process only; serve, terminal shells and logs never see it. With it unset,
+the `.credentials.json` bind is used as before.
 
 Codex variant knobs:
 

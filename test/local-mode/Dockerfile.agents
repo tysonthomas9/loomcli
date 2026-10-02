@@ -35,13 +35,19 @@ RUN npm install -g --prefix /opt/harnesses @openai/codex@0.157.1 @anthropic-ai/c
 FROM ${LOOM_BASE_IMAGE}
 COPY --from=docker.io/library/node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=harnesses /opt/harnesses /opt/harnesses
+# claude is a wrapper: in real mode a `claude setup-token` token, mounted
+# read-only at /run/secrets/claude-token, reaches only the claude process.
+RUN ln -s /opt/harnesses/bin/codex /usr/local/bin/codex \
+    && printf '%s\n' '#!/bin/sh' \
+       '[ -s /run/secrets/claude-token ] && CLAUDE_CODE_OAUTH_TOKEN=$(cat /run/secrets/claude-token) && export CLAUDE_CODE_OAUTH_TOKEN' \
+       'exec /opt/harnesses/bin/claude "$@"' > /usr/local/bin/claude \
+    && chmod +x /usr/local/bin/claude
 COPY --from=opencode /opencode /usr/local/bin/opencode
 COPY tests/aft/fixtures/fake-model/server.mjs /opt/fake-model/server.mjs
 COPY scripts/seed-slack-clone.sh /opt/fixtures/scripts/seed-slack-clone.sh
 COPY tests/fixtures/slack-clone /opt/fixtures/tests/fixtures/slack-clone
 COPY test/local-mode/local-mode-agents-entrypoint /usr/local/bin/local-mode-agents-entrypoint
-ENV PATH=/opt/harnesses/bin:$PATH \
-    LOOM_OPENCODE_BIN=/usr/local/bin/opencode \
+ENV LOOM_OPENCODE_BIN=/usr/local/bin/opencode \
     OPENCODE_DISABLE_MODELS_FETCH=1 \
     FAKE_MODEL_PORT=4010
 ENTRYPOINT ["/usr/local/bin/local-mode-agents-entrypoint"]

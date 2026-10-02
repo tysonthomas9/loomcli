@@ -21,3 +21,5 @@ services:
       - ${LOCAL_MODE_OPENCODE_AUTH:-${HOME}/.local/share/opencode/auth.json}:/root/.loom/agents-opencode/data/opencode/auth.json:ro
       - ${LOCAL_MODE_CODEX_AUTH:-${HOME}/.codex/auth.json}:/root/.loom/agents-codex/auth.json:ro
       - ${LOCAL_MODE_CLAUDE_AUTH:-${HOME}/.claude/.credentials.json}:/root/.loom/agents-claude/.credentials.json:ro
+      # Optional `claude setup-token` token; /dev/null (empty) when unset.
+      - ${LOCAL_MODE_CLAUDE_TOKEN_FILE:-/dev/null}:/run/secrets/claude-token:ro
