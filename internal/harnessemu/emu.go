@@ -346,27 +346,33 @@ func (s *Server) runTool(ss *session, name, args string) (string, bool) {
 			return "invalid tool arguments: " + err.Error(), true
 		}
 	}
+	env, _ := cfg["environment"].(map[string]any)
+	return callMCP(argv, env, m[2], toolArgs), true
+}
+
+// callMCP runs tool on the stdio MCP server argv started with env, and
+// returns its output (its structured content, else its text) or the failure.
+func callMCP(argv []string, env map[string]any, tool string, args map[string]any) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	c := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // G204: the command Loom registered for this location.
 	c.Env = os.Environ()
-	env, _ := cfg["environment"].(map[string]any)
 	for k, v := range env {
 		c.Env = append(c.Env, fmt.Sprintf("%s=%v", k, v))
 	}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "loom-harness-emu", Version: Version}, nil).
 		Connect(ctx, &mcp.CommandTransport{Command: c}, nil)
 	if err != nil {
-		return err.Error(), true
+		return err.Error()
 	}
-	defer cs.Close()
-	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: m[2], Arguments: toolArgs})
+	defer func() { _ = cs.Close() }()
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
 	if err != nil {
-		return err.Error(), true
+		return err.Error()
 	}
 	if res.StructuredContent != nil {
 		out, _ := json.Marshal(res.StructuredContent)
-		return string(out), true
+		return string(out)
 	}
 	var out strings.Builder
 	for _, part := range res.Content {
@@ -374,7 +380,7 @@ func (s *Server) runTool(ss *session, name, args string) (string, bool) {
 			out.WriteString(tc.Text)
 		}
 	}
-	return out.String(), true
+	return out.String()
 }
 
 // play streams turn r of session sid. Every change happens under the lock
