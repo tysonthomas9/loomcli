@@ -130,6 +130,25 @@ const Workspace = "WS"
 // serve's output.
 func (s Sandbox) Serve(t *testing.T, loom string) string {
 	t.Helper()
+	return s.StartServer(t, loom).URL
+}
+
+// Server is a `loom serve` child that a test can stop and start again on
+// the same port, fleet-db and data.
+type Server struct {
+	URL  string
+	t    *testing.T
+	cmd  *exec.Cmd // the current child; its ProcessState is set once reaped
+	args []string
+	dir  string
+	env  []string
+	logs *syncBuffer
+}
+
+// StartServer is Serve returning the Server. Its cleanup, registered before
+// the first health wait, stops and reaps the child.
+func (s Sandbox) StartServer(t *testing.T, loom string) *Server {
+	t.Helper()
 	ctx := context.Background()
 	fleet, err := bootstrap.StartEmbedded(ctx, filepath.Join(s.Dir, "fleet"), slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -150,33 +169,56 @@ func (s Sandbox) Serve(t *testing.T, loom string) string {
 	}
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
-	base := "http://127.0.0.1:" + strconv.Itoa(port)
-	serve := exec.Command(loom, "serve", "--no-daemon", "--bind", "127.0.0.1", "--port", strconv.Itoa(port)) //nolint:gosec // G204: the loom binary this test built.
-	logs := &syncBuffer{}
-	serve.Dir, serve.Stdout, serve.Stderr = s.Repo, logs, logs
-	serve.Env = append(s.Env(), "LOOM_OPENCODE_BIN="+OpenCodeBin(), "LOOM_CONFIG_DIR="+s.Dir+"/loom",
-		"LOOM_WORKSPACE="+Workspace, "LOOM_FLEET_DB_URL="+fleet.URL(), "LOOM_FLEET_DB_ACTOR=loom-test",
-		"LOOM_DRIVER_EXECUTOR=0", "LOOM_ISSUE_BRIDGE_DISABLED=1", "LOOM_DISABLE_H2C=1")
-	if err := serve.Start(); err != nil {
-		t.Fatal(err)
-	}
+	v := &Server{URL: "http://127.0.0.1:" + strconv.Itoa(port), t: t, dir: s.Repo, logs: &syncBuffer{},
+		args: []string{loom, "serve", "--no-daemon", "--bind", "127.0.0.1", "--port", strconv.Itoa(port)},
+		env: append(s.Env(), "LOOM_OPENCODE_BIN="+OpenCodeBin(), "LOOM_CONFIG_DIR="+s.Dir+"/loom",
+			"LOOM_WORKSPACE="+Workspace, "LOOM_FLEET_DB_URL="+fleet.URL(), "LOOM_FLEET_DB_ACTOR=loom-test",
+			"LOOM_DRIVER_EXECUTOR=0", "LOOM_ISSUE_BRIDGE_DISABLED=1", "LOOM_DISABLE_H2C=1")}
 	t.Cleanup(func() {
-		_ = serve.Process.Signal(syscall.SIGTERM)
-		_ = serve.Wait()
+		v.Stop(syscall.SIGTERM)
 		if t.Failed() {
-			t.Logf("loom serve output:\n%s", logs.String())
+			t.Logf("loom serve output:\n%s", v.logs.String())
 		}
 	})
+	v.Start()
+	return v
+}
+
+// Start starts a new serve child and waits until it is healthy.
+func (v *Server) Start() {
+	v.t.Helper()
+	v.cmd = exec.Command(v.args[0], v.args[1:]...) //nolint:gosec // G204: the loom binary this test built.
+	v.cmd.Dir, v.cmd.Env, v.cmd.Stdout, v.cmd.Stderr = v.dir, v.env, v.logs, v.logs
+	if err := v.cmd.Start(); err != nil {
+		v.t.Fatal(err)
+	}
 	for end := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
-		if resp, err := http.Get(base + "/health"); err == nil { //nolint:gosec,noctx // G107: serve's own loopback URL.
+		if resp, err := http.Get(v.URL + "/health"); err == nil { //nolint:gosec,noctx // G107: serve's own loopback URL.
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				return base
+				return
 			}
 		}
 		if time.Now().After(end) {
-			t.Fatalf("loom serve never became healthy:\n%s", logs.String())
+			v.t.Fatalf("loom serve never became healthy:\n%s", v.logs.String())
 		}
+	}
+}
+
+// Stop sends sig to the running child and reaps it, killing it after 10 s;
+// it does nothing when no child runs.
+func (v *Server) Stop(sig syscall.Signal) {
+	if v.cmd == nil || v.cmd.Process == nil || v.cmd.ProcessState != nil {
+		return
+	}
+	_ = v.cmd.Process.Signal(sig)
+	done := make(chan struct{})
+	go func() { _ = v.cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		_ = v.cmd.Process.Kill()
+		<-done
 	}
 }
 
