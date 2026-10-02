@@ -39,6 +39,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (AgentInfo, err
 	if req.RequestID == "" {
 		return AgentInfo{}, invalid("Create needs a RequestID")
 	}
+	if err := s.waitReady(ctx); err != nil {
+		return AgentInfo{}, err
+	}
 	if req.Actor.Kind == "" {
 		req.Actor = ActorRef{Kind: "user", ID: "local"}
 	}
@@ -332,6 +335,7 @@ func (s *Service) owned(ctx context.Context, agentID, harness string, ref loomha
 	if err := s.store.RecordNativeSession(ctx, n); err != nil {
 		return err
 	}
+	s.markResumed(harness, ref) // Open installed its policy
 	return s.store.ClearPurgePending(ctx, n)
 }
 

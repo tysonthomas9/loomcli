@@ -708,7 +708,7 @@ func TestReplayOverCapFailsClosed(t *testing.T) {
 		t.Fatalf("an over-cap replay saved %d rows", n-before)
 	}
 	quiet(t, sub)
-	if err := s.backfill(ctx, "opencode"); err != nil {
+	if _, err := s.backfill(ctx, "opencode"); err != nil {
 		t.Fatalf("backfill = %v; want the over-cap agent skipped", err)
 	}
 	if r := deref(s.get(t, a.AgentID).AttentionReason); r != AttentionHistoryTooLarge {
@@ -721,7 +721,7 @@ func TestReplayOverCapFailsClosed(t *testing.T) {
 		t.Fatalf("open asks after an over-cap replay = %v", got)
 	}
 	replayCap = capped
-	if err := s.backfill(ctx, "opencode"); err != nil {
+	if _, err := s.backfill(ctx, "opencode"); err != nil {
 		t.Fatal(err)
 	}
 	if ag := s.get(t, a.AgentID); ag.AttentionReason != nil || len(askIDs(t, s, a.AgentID)) != 0 {

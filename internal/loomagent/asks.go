@@ -52,7 +52,7 @@ func (s *Service) openAsks(agentID string) []Ask {
 // passed as given, never narrowed: a harness that cannot keep allow_always
 // fails the reply, Respond returns that error and the ask stays open.
 func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
-	defer s.lock(req.AgentID)()
+	defer s.lockReady(ctx, req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
 	if err != nil {
 		return err

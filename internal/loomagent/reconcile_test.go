@@ -2,11 +2,13 @@ package loomagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
@@ -17,10 +19,13 @@ import (
 // the OpenCode adapter (1.4), a session refuses Reply with ErrQuarantined
 // until this client opened or resumed it. With move set, Resume returns the
 // session under a new NativeID ("moved-" prefix) that maps back to the
-// wrapped one, as a recovery that changes the native ref would.
+// wrapped one, as a recovery that changes the native ref would. A history
+// read waits for block, if set, and fails for session failID.
 type restarted struct {
 	loomharness.Harness
 	move      bool
+	block     chan struct{}
+	failID    string
 	mu        sync.Mutex
 	installed map[loomharness.NativeRef]bool // by the wrapped ref
 	resumes   int
@@ -87,6 +92,12 @@ func (x restartedSession) Reply(ctx context.Context, askID string, r loomharness
 }
 
 func (x restartedSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
+	if x.r.block != nil {
+		<-x.r.block
+	}
+	if x.r.failID != "" && x.r.inner(x.ref).NativeID == x.r.failID {
+		return loomharness.MessagePage{}, errors.New("history read failed")
+	}
 	page, err := x.Session.Messages(ctx, after, limit)
 	for i := range page.Events {
 		page.Events[i].Session = x.ref
@@ -275,5 +286,97 @@ func TestReconcileFinishesDeleteAndFlagsMissingSession(t *testing.T) {
 	}
 	if r := deref(s.get(t, gone.AgentID).AttentionReason); r != AttentionSessionMissing {
 		t.Fatalf("Attention %q; want session_missing", r)
+	}
+}
+
+// TestReconcileGatesWritesUntilRecovered: with RecoverFirst, a Respond that
+// arrives while start-up recovery is still reading history waits for it,
+// then finds the rebuilt ask and succeeds; an idle session is resumed too.
+func TestReconcileGatesWritesUntilRecovered(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e := newCreateEnv(t)
+	a := waitingOnAsk(t, e)
+	idle, _ := newLead(t, e, e.service(ServiceConfig{}), "idle")
+	s := e.service(ServiceConfig{RecoverFirst: true})
+	w := newRestarted(e.h, false)
+	w.block = make(chan struct{})
+	s.harnesses["opencode"] = w
+	go s.RunDispatcher(ctx)
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("Respond returned %v before recovery", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(w.block)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Respond after recovery = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Respond never returned")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	ref := loomharness.NativeRef{Root: deref(idle.HarnessSessionRoot), NativeID: deref(idle.HarnessSessionID)}
+	if w.resumes != 2 || !w.installed[ref] {
+		t.Fatalf("resumes %d, idle session installed %v; want both sessions resumed", w.resumes, w.installed[ref])
+	}
+}
+
+// TestReconcileOneAgentFailureDoesNotBlockOthers: A's history read fails;
+// B's turn, which ended while Loom was down, is still backfilled and B
+// goes idle. Reconcile reports A's failure and leaves A as it was.
+func TestReconcileOneAgentFailureDoesNotBlockOthers(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	a, _ := newLead(t, e, e.service(ServiceConfig{}), "a")
+	b := waitingOnAsk(t, e)
+	ref := loomharness.NativeRef{Root: deref(b.HarnessSessionRoot), NativeID: deref(b.HarnessSessionID)}
+	if err := e.h.Session(ref).Reply(ctx, "a1", loomharness.Reply{Allow: true}); err != nil {
+		t.Fatal(err) // B's turn ends while Loom is down
+	}
+	s := e.service(ServiceConfig{})
+	w := newRestarted(e.h, false)
+	w.failID = deref(a.HarnessSessionID)
+	s.harnesses["opencode"] = w
+	if err := s.Reconcile(ctx, "opencode"); err == nil || !strings.Contains(err.Error(), a.AgentID) {
+		t.Fatalf("Reconcile = %v; want A's failure", err)
+	}
+	if st := s.get(t, b.AgentID).State; st != StateIdle {
+		t.Fatalf("B is %s; want idle", st)
+	}
+	if ag := s.get(t, a.AgentID); ag.State != StateIdle || ag.AttentionReason != nil {
+		t.Fatalf("A is %s with Attention %q; want it unchanged", ag.State, deref(ag.AttentionReason))
+	}
+}
+
+// TestReconcileResumesAgainAfterHarnessRestart: each harness restart under
+// one serve resumes the live session again (its process and rules are
+// new), while a feed.gap Reconcile resumes nothing.
+func TestReconcileResumesAgainAfterHarnessRestart(t *testing.T) {
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	a, _ := newLead(t, e, e.service(ServiceConfig{}), "alpha")
+	s := e.service(ServiceConfig{})
+	w := newRestarted(e.h, false)
+	s.harnesses["opencode"] = w
+	stop := startFeed(s, e)
+	defer stop()
+	eventually(t, "the start-up resume", func() bool { return w.resumeCount() == 1 })
+	for n := 2; n <= 3; n++ {
+		_ = fh.Restart(context.Background())
+		eventually(t, fmt.Sprintf("resume %d", n), func() bool { return w.resumeCount() == n })
+	}
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Delta: "x", Gap: true}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user)) // its hand-over resumes once
+	eventually(t, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+	if n := w.resumeCount(); n != 4 {
+		t.Fatalf("resumes %d; want 4: the gap resumed again", n)
 	}
 }

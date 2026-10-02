@@ -36,6 +36,15 @@ var feedRetry, feedRetryMax = 200 * time.Millisecond, 30 * time.Second
 // errFeedClosed is a feed that ended while ctx was still live.
 var errFeedClosed = errors.New("loomagent: the harness feed closed")
 
+// forgetResumed drops harness's resumed sessions, so the next Reconcile
+// resumes them again; RunFeed calls it when the feed ended or the harness
+// was unavailable, as after a harness restart, but not on a feed.gap.
+func (s *Service) forgetResumed(harness string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.resumed, harness)
+}
+
 // RunFeed ingests the named harness's live feed until ctx ends (§5.2): each
 // completed native event of an agent's session is saved in agent_events and
 // then applied to its slots and turn. After every (re)connect and on each
@@ -50,6 +59,9 @@ func (s *Service) RunFeed(ctx context.Context, harness string) {
 	wait, last := feedRetry, ""
 	for h := s.harnesses[harness]; h != nil && ctx.Err() == nil; {
 		read, err := s.readFeed(ctx, harness, h)
+		if errors.Is(err, errFeedClosed) || errors.Is(err, loomharness.ErrUnavailable) {
+			s.forgetResumed(harness) // the harness may have restarted: Resume its sessions again
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -105,28 +117,32 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 // backfill replays the native history of every live agent's current session.
 // A session the harness no longer has shows Attention session_missing, and
 // one whose history is over replayCap history_too_large; both are skipped.
-func (s *Service) backfill(ctx context.Context, harness string) error {
+// Any other failure skips only that agent: the others are still replayed,
+// and failed names the agents whose replay failed, with err joining why.
+func (s *Service) backfill(ctx context.Context, harness string) (failed map[string]bool, err error) {
 	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Harness: harness})
 	if err != nil {
-		return err
+		return nil, err
 	}
+	failed = map[string]bool{}
 	for _, a := range agents {
 		if a.HarnessSessionID == nil {
 			continue
 		}
-		err := s.replay(ctx, harness, a)
+		rerr := s.replay(ctx, harness, a)
 		switch {
-		case errors.Is(err, errHistoryTooLarge):
-			slog.Warn("loomagent: native history not replayed", "agent", a.AgentID, "error", err)
-			err = s.flag(ctx, a.AgentID, AttentionHistoryTooLarge)
-		case errors.Is(err, loomharness.ErrSessionNotFound):
-			err = s.flag(ctx, a.AgentID, AttentionSessionMissing)
+		case errors.Is(rerr, errHistoryTooLarge):
+			slog.Warn("loomagent: native history not replayed", "agent", a.AgentID, "error", rerr)
+			rerr = s.flag(ctx, a.AgentID, AttentionHistoryTooLarge)
+		case errors.Is(rerr, loomharness.ErrSessionNotFound):
+			rerr = s.flag(ctx, a.AgentID, AttentionSessionMissing)
 		}
-		if err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
-			return err
+		if rerr != nil {
+			failed[a.AgentID] = true
+			err = errors.Join(err, fmt.Errorf("%s: %w", a.AgentID, rerr))
 		}
 	}
-	return nil
+	return failed, err
 }
 
 var errHistoryTooLarge = errors.New("loomagent: the native history is over the replay cap")

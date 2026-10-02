@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
+	"slices"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -22,10 +24,11 @@ const (
 // order it:
 //  1. finishes rows left creating (recording the returned NativeRef before
 //     agent.created) and Deletes left half done;
-//  2. resumes, once per process, each session with a turn running when Loom
-//     went down: Resume installs the current policy (an OpenCode session
-//     refuses Prompt and Reply until then), recovers the interrupted turn,
-//     and a new NativeRef it returns is recorded before it is used;
+//  2. resumes each live session this process has not opened or resumed
+//     since it started or the harness restarted: Resume installs the
+//     current policy (an OpenCode session refuses Prompt and Reply until
+//     then), recovers an interrupted turn, and a new NativeRef it returns is
+//     recorded before it is used;
 //  3. backfills every session's native history: missed events are saved
 //     once, open asks are rebuilt and stale ones saved as ask.lost, and a
 //     turn that ended while Loom was down ends (a single task finishes once);
@@ -35,9 +38,10 @@ const (
 //     then hands the next one over.
 //
 // RunFeed sends subscribers feed.gap before each pass, so they catch up.
-// A failure on one agent shows as its Attention and does not stop the
-// others; only a failed backfill is returned, and RunFeed retries the pass.
-// A repeat changes nothing.
+// A failure on one agent shows as its Attention, or for a failed history
+// read leaves it as it was, and does not stop the others; the failed
+// backfills are returned, and RunFeed retries the pass. A repeat changes
+// nothing.
 func (s *Service) Reconcile(ctx context.Context, harness string) error {
 	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Harness: harness,
 		IncludeArchived: true})
@@ -47,25 +51,37 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 	for _, a := range agents {
 		switch {
 		case a.DeleteRequested:
-			s.failed(ctx, a.AgentID, AttentionDeleteIncomplete, s.Delete(ctx, DeleteRequest{AgentID: a.AgentID}))
+			s.failed(ctx, a.AgentID, AttentionDeleteIncomplete, s.delete(ctx, DeleteRequest{AgentID: a.AgentID}))
 		case a.State == StateCreating:
 			_, err := s.finishCreate(ctx, a.AgentID) // clears create_incomplete when done
 			s.failed(ctx, a.AgentID, AttentionCreateIncomplete, err)
-		case a.RunningTurnID != nil:
-			if err := s.resumeTurn(ctx, a.AgentID); err != nil {
-				slog.Warn("loomagent: reconcile could not resume a running session", "agent", a.AgentID, "error", err)
+		case a.State != StateArchived:
+			if err := s.resumeLive(ctx, a.AgentID); err != nil {
+				slog.Warn("loomagent: reconcile could not resume a session", "agent", a.AgentID, "error", err)
 			}
 		}
 	}
-	if err := s.backfill(ctx, harness); err != nil {
-		return err
-	}
+	failed, err := s.backfill(ctx, harness)
 	for _, a := range agents {
-		if !a.DeleteRequested {
+		if !a.DeleteRequested && !failed[a.AgentID] && failed != nil {
 			s.failed(ctx, a.AgentID, AttentionHarnessUnavailable, s.settle(ctx, a.AgentID))
 		}
 	}
-	return nil
+	return err
+}
+
+// recoverAtStart reconciles every wired harness once, then opens the write
+// gate; a failure shows on the agents it hit and does not keep it shut.
+func (s *Service) recoverAtStart(ctx context.Context) {
+	if s.ready == nil {
+		return
+	}
+	defer s.recovered()
+	for _, name := range slices.Sorted(maps.Keys(s.harnesses)) {
+		if err := s.Reconcile(ctx, name); err != nil {
+			slog.Warn("loomagent: start-up reconcile", "harness", name, "error", err)
+		}
+	}
 }
 
 // failed logs err and shows reason as agentID's Attention unless it
@@ -80,16 +96,16 @@ func (s *Service) failed(ctx context.Context, agentID, reason string, err error)
 	}
 }
 
-// resumeTurn resumes agentID's current session if a turn runs on it and
-// this process has not resumed it yet.
-func (s *Service) resumeTurn(ctx context.Context, agentID string) error {
+// resumeLive resumes agentID's current session if it is live and this
+// process has not opened or resumed it since the harness last restarted.
+func (s *Service) resumeLive(ctx context.Context, agentID string) error {
 	defer s.lock(agentID)()
 	a, err := s.live(ctx, agentID)
-	if err != nil || a.RunningTurnID == nil || a.HarnessSessionID == nil {
+	if err != nil || a.HarnessSessionID == nil || a.State == StateArchived || a.State == StateCreating {
 		return err
 	}
 	s.mu.Lock()
-	done := s.resumed[loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID}]
+	done := s.resumed[a.Harness][loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID}]
 	s.mu.Unlock()
 	if done {
 		return nil

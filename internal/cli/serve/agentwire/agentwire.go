@@ -89,8 +89,10 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 	a.newSvc = func(ws string) (*loomagent.Service, func()) {
 		var svc *loomagent.Service
 		feed := sync.OnceFunc(func() { a.run(func(ctx context.Context) { svc.RunFeed(ctx, "opencode") }) })
-		svc = loomagent.New(serviceConfig(st, ws, wt, cfg.Skills,
-			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}}))
+		c := serviceConfig(st, ws, wt, cfg.Skills,
+			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}})
+		c.RecoverFirst = true // writes wait for the dispatcher's start-up Reconcile
+		svc = loomagent.New(c)
 		return svc, feed
 	}
 	a.handler = agentsv1.New(a.service, nil).WithTokens(tokens)

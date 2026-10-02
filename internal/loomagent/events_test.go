@@ -93,7 +93,7 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 	}
 	eventually(t, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 1 })
 	idleRows := len(rows(t, s, a.AgentID, 0))
-	if err := s.backfill(ctx, "opencode"); err != nil { // a repeat of the whole native history
+	if _, err := s.backfill(ctx, "opencode"); err != nil { // a repeat of the whole native history
 		t.Fatal(err)
 	}
 	if again := len(rows(t, s, a.AgentID, 0)); again != idleRows {
@@ -199,7 +199,7 @@ func TestOpenCodeWatchReplayAfterRestart(t *testing.T) {
 		t.Fatal("the gap's ask.opened or the down-time ask.resolved is missing")
 	}
 	before := len(rows(t, s2, a.AgentID, 0))
-	_ = s2.backfill(ctx, "opencode")
+	_, _ = s2.backfill(ctx, "opencode")
 	if after := len(rows(t, s2, a.AgentID, 0)); after != before {
 		t.Fatalf("a repeat backfill added %d rows", after-before)
 	}

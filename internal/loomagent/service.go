@@ -85,6 +85,10 @@ type ServiceConfig struct {
 	// same message always gets the same key, so HasInput can find it after a
 	// crash. nil uses OpenCode's msg_ form.
 	InputKey func(harness, agentID, requestID string) string
+	// RecoverFirst holds every write and the dispatcher until RunDispatcher's
+	// first Reconcile of each wired harness has finished (a serve start,
+	// design v2 §4.14).
+	RecoverFirst bool
 }
 
 // Backend is a workspace default harness and model.
@@ -113,9 +117,13 @@ type Service struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 	asks  map[string]map[string]Ask // open asks by agent and ask ID, under mu
-	// resumed holds the sessions this process resumed, under mu: Reconcile
-	// resumes each running session once, so its policy is installed here.
-	resumed map[loomharness.NativeRef]bool
+	// resumed holds, by harness, the sessions this process opened or
+	// resumed, under mu: Reconcile resumes each live session once, so its
+	// policy is installed here, and again after its harness restarts.
+	resumed map[string]map[loomharness.NativeRef]bool
+	// ready closes when start-up recovery is done (nil: no gate); recovered closes it.
+	ready     chan struct{}
+	recovered func()
 }
 
 // New returns a Service for cfg.
@@ -125,7 +133,11 @@ func New(cfg ServiceConfig) *Service {
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
 		workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey,
-		locks:    map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[loomharness.NativeRef]bool{}}
+		locks:    map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
+	if cfg.RecoverFirst {
+		s.ready = make(chan struct{})
+		s.recovered = sync.OnceFunc(func() { close(s.ready) })
+	}
 	if s.presets == nil {
 		s.presets = BuiltinPresets{}
 	}
@@ -159,6 +171,37 @@ func New(cfg ServiceConfig) *Service {
 		s.prepare = func(context.Context, Target, loomstore.Agent) error { return nil }
 	}
 	return s
+}
+
+// waitReady holds a write until start-up recovery is done.
+func (s *Service) waitReady(ctx context.Context) error {
+	if s.ready == nil {
+		return nil
+	}
+	select {
+	case <-s.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// lockReady waits for start-up recovery, then takes agentID's lock. If ctx
+// ends first it still locks, and the caller's next store read fails with
+// ctx's error.
+func (s *Service) lockReady(ctx context.Context, agentID string) func() {
+	_ = s.waitReady(ctx)
+	return s.lock(agentID)
+}
+
+// markResumed records that this process installed ref's policy on harness.
+func (s *Service) markResumed(harness string, ref loomharness.NativeRef) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.resumed[harness] == nil {
+		s.resumed[harness] = map[loomharness.NativeRef]bool{}
+	}
+	s.resumed[harness][ref] = true
 }
 
 // lock takes agentID's lock, which orders that agent's writes, and returns its unlock.

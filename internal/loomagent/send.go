@@ -83,7 +83,7 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 			return SendResult{}, &Error{Code: CodeHarnessUnavailable, Message: err.Error()}
 		}
 	}
-	defer s.lock(req.AgentID)()
+	defer s.lockReady(ctx, req.AgentID)()
 	if a, err = s.live(ctx, req.AgentID); err != nil {
 		return SendResult{}, err
 	}

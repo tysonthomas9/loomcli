@@ -33,7 +33,7 @@ type UpdateRequest struct {
 // bumps the spec version; a retry with the last applied RequestID returns the
 // current agent. A single task that is not finished may change only its name.
 func (s *Service) Update(ctx context.Context, req UpdateRequest) (AgentInfo, error) {
-	defer s.lock(req.AgentID)()
+	defer s.lockReady(ctx, req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
 	if err != nil {
 		return AgentInfo{}, err

@@ -30,7 +30,7 @@ func (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {
 	if req.Reason != ArchiveDone && req.Reason != ArchiveCancelled {
 		return invalid("archive reason "+req.Reason, ArchiveDone, ArchiveCancelled)
 	}
-	defer s.lock(req.AgentID)()
+	defer s.lockReady(ctx, req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
 	if err != nil {
 		return err
@@ -92,7 +92,7 @@ func (s *Service) finishArchive(ctx context.Context, a loomstore.Agent, reason s
 // Unarchive returns a persistent agent to idle and a single task to finished,
 // canceling the R29 clock. History already purged fails with history_expired.
 func (s *Service) Unarchive(ctx context.Context, req ArchiveRequest) error {
-	defer s.lock(req.AgentID)()
+	defer s.lockReady(ctx, req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
 	if err != nil {
 		return err
@@ -125,6 +125,14 @@ type DeleteRequest struct {
 // and tombstones the row (design v2 §4.8). Each step is safe to repeat; a
 // failure leaves the row stopping with its delete flag for Reconcile.
 func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
+	if err := s.waitReady(ctx); err != nil {
+		return err
+	}
+	return s.delete(ctx, req)
+}
+
+// delete is Delete without the start-up gate; Reconcile finishes a Delete with it.
+func (s *Service) delete(ctx context.Context, req DeleteRequest) error {
 	defer s.lock(req.AgentID)()
 	a, err := s.agent(ctx, req.AgentID)
 	if err != nil || a.DeletedAt != nil {
@@ -186,7 +194,7 @@ func (s *Service) deleteChildren(ctx context.Context, agentID string, cascade bo
 	}
 	for _, c := range children {
 		if cascade {
-			if err := s.Delete(ctx, DeleteRequest{AgentID: c.AgentID, Cascade: true}); err != nil {
+			if err := s.delete(ctx, DeleteRequest{AgentID: c.AgentID, Cascade: true}); err != nil {
 				return err
 			}
 		}

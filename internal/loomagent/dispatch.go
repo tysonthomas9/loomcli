@@ -35,7 +35,7 @@ func defaultInputKey(_, agentID, requestID string) string {
 // delivered, not found puts it back in line, unknown raises Attention
 // delivery_unknown and sends nothing.
 func (s *Service) Dispatch(ctx context.Context, agentID string) error {
-	defer s.lock(agentID)()
+	defer s.lockReady(ctx, agentID)()
 	a, err := s.live(ctx, agentID)
 	if err != nil {
 		return err
@@ -277,11 +277,13 @@ func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomha
 	return err
 }
 
-// RunDispatcher wakes the dispatcher on agent.idle until ctx ends. It first
-// retries purge-pending native sessions and dispatches every agent with a
-// pending slot (a restart), and does so again whenever its subscription lags
-// and is replaced.
+// RunDispatcher wakes the dispatcher on agent.idle until ctx ends. With
+// RecoverFirst it first reconciles every wired harness once and then opens
+// the write gate. It then retries purge-pending native sessions and
+// dispatches every agent with a pending slot (a restart), and does so again
+// whenever its subscription lags and is replaced.
 func (s *Service) RunDispatcher(ctx context.Context) {
+	s.recoverAtStart(ctx)
 	for ctx.Err() == nil {
 		sub := s.Bus.Subscribe()
 		_ = s.PurgeLeftovers(ctx)
