@@ -103,6 +103,7 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		return svc, feed
 	}
 	a.handler = agentsv1.New(a.service, nil).WithTokens(tokens)
+	a.run(a.runIdle)
 	known, _, err := st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true})
 	if err != nil {
 		a.Stop()
