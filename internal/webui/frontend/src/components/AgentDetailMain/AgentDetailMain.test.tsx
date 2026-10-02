@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,7 @@ import { AgentDetailMain } from "./AgentDetailMain";
 
 const mocks = vi.hoisted(() => ({
   useAgentStoreInstance: vi.fn(),
+  terminalMounted: vi.fn(),
 }));
 
 vi.mock("@/hooks", () => ({
@@ -20,7 +21,10 @@ vi.mock("@/hooks", () => ({
 }));
 
 vi.mock("@/components/TerminalView", () => ({
-  TerminalView: () => <div data-testid="terminal-view" />,
+  TerminalView: () => {
+    mocks.terminalMounted();
+    return <div data-testid="terminal-view" />;
+  },
 }));
 
 function completedWorkerAgent(): LoomAgentStatus {
@@ -308,6 +312,36 @@ describe("AgentDetailMain", () => {
     expect(screen.getByText("Running under the daemon")).toBeInTheDocument();
     expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
     expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
+  });
+
+  it("never mounts the terminal for a stopped worker before the agent list loads", async () => {
+    const store = createAgentStore();
+    mocks.useAgentStoreInstance.mockReturnValue(store);
+    mocks.terminalMounted.mockClear();
+    render(<AgentDetailMain agentName="local-planner" />);
+    expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
+
+    act(() => {
+      store.setState({
+        lastUpdated: Date.now(),
+        agents: [
+          {
+            name: "local-planner",
+            branch: "local-planner",
+            status: "idle",
+            ahead: 0,
+            behind: 0,
+            workspace: "LOCALMODE",
+            role: "plan",
+            desired_state: "stopped",
+            state: "stopped",
+          },
+        ],
+      });
+    });
+
+    expect(await screen.findByText("Agent is stopped")).toBeInTheDocument();
+    expect(mocks.terminalMounted).not.toHaveBeenCalled();
   });
 
   it("keeps the terminal for an idle worker the daemon does not supervise", () => {

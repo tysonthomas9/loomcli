@@ -78,6 +78,10 @@ export function AgentDetailMain({
 }: AgentDetailMainProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
+  // Before the first agent list arrives the agent's state is unknown, so the
+  // terminal waits: mounting it would ask the server for a session it may
+  // refuse (a stopped or daemon-run worker).
+  const agentsLoaded = useStore(agentStore, (s) => s.lastUpdated != null);
 
   const agent = useMemo<LoomAgentStatus | undefined>(
     () => agents.find((a) => a.name === agentName),
@@ -149,6 +153,8 @@ export function AgentDetailMain({
               "This agent does not have a live terminal session. Start the agent before attaching to its PTY."
             }
           />
+        ) : agent == null && !agentsLoaded ? (
+          <LoadingSkeleton.Terminal />
         ) : (
           <Suspense fallback={<LoadingSkeleton.Terminal />}>
             <TerminalView
