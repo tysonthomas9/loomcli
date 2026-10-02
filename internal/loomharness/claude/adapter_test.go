@@ -709,7 +709,7 @@ func TestClaudeUsageSumsTurnSteps(t *testing.T) {
 		m.frame([]byte(fmt.Sprintf(`{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":%d}}}`, out)))
 	}
 	usage := func() loomharness.Event {
-		for _, e := range m.frame([]byte(`{"type":"result","subtype":"success","total_cost_usd":9,"usage":{"input_tokens":999,"output_tokens":999}}`)) {
+		for _, e := range m.frame([]byte(`{"type":"result","subtype":"success","usage":{"input_tokens":999,"output_tokens":999}}`)) {
 			if e.Type == loomharness.EventUsage {
 				return e
 			}
@@ -726,5 +726,56 @@ func TestClaudeUsageSumsTurnSteps(t *testing.T) {
 	step("msg_3", 1, 0, 0, 2)
 	if u2 := usage(); u2.Usage != (loomharness.Usage{InputTokens: 1, OutputTokens: 2}) || u2.ItemID == u.ItemID {
 		t.Fatalf("second turn usage = %+v (item %q)", u2.Usage, u2.ItemID)
+	}
+}
+
+// TestClaudeCostIsPerTurnDelta: total_cost_usd is the process's running
+// total, so each turn's usage costs its rise since the last result, and a
+// process that exited starts again from its full value.
+func TestClaudeCostIsPerTurnDelta(t *testing.T) {
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	cost := func(total float64) float64 {
+		for _, e := range m.frame([]byte(fmt.Sprintf(`{"type":"result","subtype":"success","total_cost_usd":%v}`, total))) {
+			if e.Type == loomharness.EventUsage {
+				return e.Usage.CostUSD
+			}
+		}
+		t.Fatal("no usage")
+		return 0
+	}
+	if a, b := cost(0.25), cost(0.75); a != 0.25 || b != 0.5 {
+		t.Fatalf("turn costs %v, %v; want 0.25, 0.5", a, b)
+	}
+	m.exited()
+	if c := cost(1); c != 1 {
+		t.Fatalf("after an exit the cost is %v, want the full 1", c)
+	}
+}
+
+// TestClaudeCostAfterRelaunch: a relaunch (Close, then a Prompt resumes the
+// session in a new process) restarts the running total, so the first turn
+// after it costs its full value and the next its rise.
+func TestClaudeCostAfterRelaunch(t *testing.T) {
+	a, feed, f := newAdapter(t)
+	_, s := open(t, a, f, "agent-cost")
+	turnCost := func() float64 {
+		prompt(t, s, "go")
+		for _, e := range until(t, feed, loomharness.EventTurnCompleted) {
+			if e.Type == loomharness.EventUsage {
+				return e.Usage.CostUSD
+			}
+		}
+		t.Fatal("no usage")
+		return 0
+	}
+	got := []float64{turnCost()} // one process: total 0.25
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Relaunched: totals 0.25, then 0.5. The first is no drop from the last
+	// total, so only the relaunch reset gives it its full value.
+	got = append(got, turnCost(), turnCost())
+	if want := []float64{0.25, 0.25, 0.25}; !slices.Equal(got, want) {
+		t.Fatalf("turn costs %v, want %v", got, want)
 	}
 }

@@ -134,6 +134,13 @@ func (p *Process) Busy() bool {
 	return p.busy
 }
 
+// Running reports whether the process is started.
+func (p *Process) Running() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cmd != nil
+}
+
 // Prompt sends one user message, keyed by key (echoed as its uuid), and
 // launches the process first if none runs. It returns ErrBusy during a turn.
 func (p *Process) Prompt(ctx context.Context, key, text string) error {

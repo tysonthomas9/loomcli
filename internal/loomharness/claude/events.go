@@ -28,6 +28,7 @@ type mapper struct {
 	cancelled       bool            // Loom interrupted the running turn
 	lastInterrupted bool
 	usage           loomharness.Usage // the running turn's steps so far
+	cost            float64           // the running process's last total_cost_usd
 }
 
 func newMapper(ref loomharness.NativeRef) *mapper {
@@ -51,6 +52,7 @@ type wireFrame struct {
 	ResumeReason     string   `json:"resume_reason"`
 	TaskType         string   `json:"task_type"`
 	TaskID           string   `json:"task_id"`
+	TotalCostUSD     float64  `json:"total_cost_usd"` // result: the process's running total
 	Event            struct {
 		Type    string `json:"type"`
 		Index   int    `json:"index"`
@@ -117,7 +119,7 @@ func (m *mapper) frame(raw []byte) []loomharness.Event {
 	case f.Type == "system" && f.Subtype == "task_started" && f.TaskType == "local_agent":
 		emit(loomharness.Event{Type: loomharness.EventSubagentStarted, ItemID: f.TaskID})
 	case f.Type == "result":
-		m.result(f.Subtype, emit)
+		m.result(f.Subtype, f.TotalCostUSD, emit)
 	}
 	return out
 }
@@ -203,10 +205,14 @@ func (m *mapper) assistant(msg string, blocks []block, emit func(loomharness.Eve
 }
 
 // result ends the turn: completed on success, cancelled when Loom
-// interrupted it, else failed. Its usage is the sum of the turn's steps:
-// the result's own usage and cost are not used, as they may be running
-// totals.
-func (m *mapper) result(subtype string, emit func(loomharness.Event)) {
+// interrupted it, else failed. Its usage is the sum of the turn's steps (the
+// result's own usage may be a running total), and its cost is the rise in
+// the process's running total_cost_usd since the last result.
+func (m *mapper) result(subtype string, total float64, emit func(loomharness.Event)) {
+	if total < m.cost { // a new process we did not see start
+		m.cost = 0
+	}
+	m.usage.CostUSD, m.cost = total-m.cost, total
 	emit(loomharness.Event{Type: loomharness.EventUsage, ItemID: m.turnID + "/usage", Usage: m.usage})
 	m.usage = loomharness.Usage{}
 	stop := "failed"
@@ -237,7 +243,7 @@ func (m *mapper) item(msg string, index int, b block) (kind, id string) {
 // exited ends the turn state when the process died; events in between are
 // lost, so it emits feed.gap.
 func (m *mapper) exited() loomharness.Event {
-	m.turnID, m.cancelled, m.msgID, m.handed = "", false, "", ""
+	m.turnID, m.cancelled, m.msgID, m.handed, m.cost = "", false, "", "", 0
 	m.seq++
 	return loomharness.Event{Type: loomharness.EventFeedGap, Session: m.ref, Seq: m.seq, Time: time.Now()}
 }

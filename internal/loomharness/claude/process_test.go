@@ -101,7 +101,8 @@ func fakeClaude() {
 				continue
 			}
 			fakeTurn(out, fmt.Sprintf("msg_%d", n), in.UUID, in.Message.Content)
-			_ = out.Encode(map[string]any{"type": "result", "subtype": "success", "session_id": id})
+			// total_cost_usd is this process's running total, as Claude's.
+			_ = out.Encode(map[string]any{"type": "result", "subtype": "success", "session_id": id, "total_cost_usd": 0.25 * float64(n)})
 		case "control_request":
 			_ = out.Encode(map[string]any{"type": "control_response",
 				"response": map[string]any{"subtype": "success", "request_id": in.RequestID}})
