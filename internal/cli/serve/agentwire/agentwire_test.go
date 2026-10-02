@@ -9,19 +9,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/loomstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-// TestStartServesOneWorkspace starts the Agent API with no agents: the
-// preset files are written, the routes serve its workspace only, OpenCode is
-// never run, and Stop returns.
-func TestStartServesOneWorkspace(t *testing.T) {
+// TestStartServesEachWorkspace starts the Agent API with no agents: the
+// preset files are written, every workspace gets its own service, OpenCode
+// is never run, and Stop returns.
+func TestStartServesEachWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	bin, ran := filepath.Join(dir, "opencode"), filepath.Join(dir, "ran")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\ntouch "+ran+"\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	api, err := Start(context.Background(), Config{WorkspaceID: "ws", Dir: dir, OpenCodeBin: bin})
+	api, err := Start(context.Background(), Config{Dir: dir, OpenCodeBin: bin})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,12 +41,15 @@ func TestStartServesOneWorkspace(t *testing.T) {
 			next.ServeHTTP(w, r.WithContext(middleware.WithWorkspace(r.Context(), r.PathValue("ws"))))
 		})
 	}, nil)
-	for ws, want := range map[string]int{"ws": http.StatusOK, "other": http.StatusNotFound} {
+	for _, ws := range []string{"ws", "ws2", "ws"} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/workspaces/"+ws+"/v1/agents", nil))
-		if rec.Code != want {
-			t.Errorf("GET %s agents = %d %s; want %d", ws, rec.Code, rec.Body, want)
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s agents = %d %s", ws, rec.Code, rec.Body)
 		}
+	}
+	if len(api.services) != 2 || api.services["ws"] == api.services["ws2"] {
+		t.Errorf("services = %v; want one per workspace", api.services)
 	}
 	time.Sleep(500 * time.Millisecond) // longer than the first feed retry
 	api.Stop()
@@ -55,8 +59,46 @@ func TestStartServesOneWorkspace(t *testing.T) {
 	}
 }
 
-func TestStartNeedsWorkspaceAndDir(t *testing.T) {
-	if _, err := Start(context.Background(), Config{Dir: t.TempDir()}); err == nil {
-		t.Fatal("Start without a workspace succeeded")
+func TestStartNeedsDir(t *testing.T) {
+	if _, err := Start(context.Background(), Config{}); err == nil {
+		t.Fatal("Start without a data dir succeeded")
+	}
+}
+
+// TestStartResumesWorkspacesWithAgents: a workspace that already has an
+// OpenCode agent gets its service and feed at boot, before any request.
+func TestStartResumesWorkspacesWithAgents(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, err := loomstore.Open(ctx, filepath.Join(dir, "agents.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.InsertAgent(ctx, loomstore.Agent{AgentID: "a1", WorkspaceID: "ws2", Name: "a1", ProfileKey: "a1",
+		Preset: "lead", PresetVersion: "1", Mode: "persistent", InteractionMode: "interactive", RoleKind: "interactive",
+		SpecJSON: "{}", SpecVersion: 1, OwnerKind: "user", OwnerID: "u", CreatedByKind: "user", CreatedByID: "u",
+		CreateRequestID: "r1", Repo: "/repo", Harness: "opencode", State: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	bin, ran := filepath.Join(dir, "opencode"), filepath.Join(dir, "ran")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\ntouch "+ran+"\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	api, err := Start(ctx, Config{Dir: dir, OpenCodeBin: bin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Stop()
+	if len(api.services) != 1 || api.services["ws2"] == nil {
+		t.Fatalf("services = %v; want ws2", api.services)
+	}
+	for end := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(ran); err == nil {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatal("the feed of a workspace with OpenCode agents never reached OpenCode")
+		}
 	}
 }

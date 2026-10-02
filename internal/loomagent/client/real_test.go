@@ -25,8 +25,10 @@ import (
 )
 
 // TestRealServeAgentAPI runs the Agent API as serve wires it, on the real
-// OpenCode build in a /tmp sandbox with a fake model: Create, Send and the
-// event stream reach idle with no bridge token. LOOM_REAL_OPENCODE=1 runs it.
+// OpenCode build in a /tmp sandbox with a fake model: in each of two
+// workspaces, Create, Send and the event stream reach idle with no bridge
+// token, and neither workspace sees the other's agent. LOOM_REAL_OPENCODE=1
+// runs it.
 func TestRealServeAgentAPI(t *testing.T) {
 	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
 		t.Skip("set LOOM_REAL_OPENCODE=1 to run against the real OpenCode build")
@@ -58,7 +60,7 @@ func TestRealServeAgentAPI(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	api, err := agentwire.Start(ctx, agentwire.Config{WorkspaceID: "ws", Dir: filepath.Join(sbx, "loom"),
+	api, err := agentwire.Start(ctx, agentwire.Config{Dir: filepath.Join(sbx, "loom"),
 		OpenCodeBin: bin, OpenCodeEnv: env})
 	if err != nil {
 		t.Fatal(err)
@@ -83,34 +85,46 @@ func TestRealServeAgentAPI(t *testing.T) {
 	api.Register(mux, ws, tokens.Validate)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	c := newClient(srv, "ws", "alice")
-
-	a, err := c.Create(ctx, "r1", agentsv1.CreateBody{Preset: "pr-review-interactive", Name: "rev", Repo: repo,
-		BaseRef: strings.TrimSpace(string(head)), Overrides: agentsv1.Overrides{Harness: "opencode"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	eventually(t, "idle after create", func() bool {
-		got, err := c.Get(ctx, a.AgentID)
-		return err == nil && got.State == loomagent.StateIdle
-	})
-	streamCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	stream, err := c.Subscribe(streamCtx, SubscribeRequest{Agents: []string{a.AgentID}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = stream.Close() }()
-	if _, err := c.Send(ctx, "s1", a.AgentID, "hello"); err != nil {
-		t.Fatal(err)
-	}
-	for {
-		e, err := stream.Next()
+	ids := map[string]string{}
+	for _, ws := range []string{"ws", "ws2"} {
+		c := newClient(srv, ws, "alice")
+		a, err := c.Create(ctx, "r1", agentsv1.CreateBody{Preset: "pr-review-interactive", Name: "rev", Repo: repo,
+			BaseRef: strings.TrimSpace(string(head)), Overrides: agentsv1.Overrides{Harness: "opencode"}})
 		if err != nil {
-			t.Fatalf("stream ended before idle: %v", err)
+			t.Fatalf("%s Create: %v", ws, err)
 		}
-		if e.Kind == loomagent.EventIdle {
-			break
+		ids[ws] = a.AgentID
+		eventually(t, ws+" idle after create", func() bool {
+			got, err := c.Get(ctx, a.AgentID)
+			return err == nil && got.State == loomagent.StateIdle
+		})
+		streamCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		stream, err := c.Subscribe(streamCtx, SubscribeRequest{Agents: []string{a.AgentID}})
+		if err != nil {
+			cancel()
+			t.Fatalf("%s Subscribe: %v", ws, err)
+		}
+		if _, err := c.Send(ctx, "s1", a.AgentID, "hello"); err != nil {
+			t.Fatalf("%s Send: %v", ws, err)
+		}
+		for {
+			e, err := stream.Next()
+			if err != nil {
+				t.Fatalf("%s stream ended before idle: %v", ws, err)
+			}
+			if e.Kind == loomagent.EventIdle {
+				break
+			}
+		}
+		_ = stream.Close()
+		cancel()
+	}
+	if ids["ws"] == ids["ws2"] {
+		t.Fatalf("both workspaces got agent %s", ids["ws"])
+	}
+	for ws, other := range map[string]string{"ws": "ws2", "ws2": "ws"} {
+		if _, err := newClient(srv, ws, "alice").Get(ctx, ids[other]); code(err) != loomagent.CodeAgentNotFound {
+			t.Errorf("%s Get of %s's agent = %v; want agent_not_found", ws, other, err)
 		}
 	}
 }

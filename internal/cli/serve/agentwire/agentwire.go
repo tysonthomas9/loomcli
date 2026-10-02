@@ -26,31 +26,37 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-// Config says where the Agent API keeps its state and which workspace it serves.
+// Config says where the Agent API keeps its state.
 type Config struct {
-	WorkspaceID string      // the one workspace the Agent API serves
 	Dir         string      // Loom's data dir (~/.loom): agents.db and worktrees/
 	OpenCodeBin string      // the pinned OpenCode build
 	OpenCodeEnv []string    // nil is the user's own environment (R1)
 	Skills      store.Store // FleetDB skills staged into worktrees; nil stages none
 }
 
-// API is a running Agent API.
+// API is a running Agent API: one service per workspace on a shared
+// registry, worktree root and OpenCode adapter.
 type API struct {
 	handler  *agentsv1.Handler
 	store    *loomstore.Store
 	opencode *opencode.Adapter
+	ctx      context.Context
 	cancel   context.CancelFunc
-	mu       sync.Mutex // orders run against Stop
+	newSvc   func(ws string) (*loomagent.Service, func())
+
+	mu       sync.Mutex // guards services and orders run against Stop
+	services map[string]*loomagent.Service
 	wg       sync.WaitGroup
 }
 
-// Start opens the registry, wires the OpenCode harness and starts the
-// service's dispatcher; the OpenCode feed starts on first use. No bridge is
-// wired yet (2.2a), so presets with bridge tools fail closed at launch.
+// Start opens the registry and wires the OpenCode harness. Each workspace's
+// service starts on its first request, or at once for a workspace that
+// already has agents, so their pending messages and purges resume. OpenCode
+// is reached on first use. No bridge is wired yet (2.2a), so presets with
+// bridge tools fail closed at launch.
 func Start(ctx context.Context, cfg Config) (*API, error) {
-	if cfg.WorkspaceID == "" || cfg.Dir == "" {
-		return nil, errors.New("agentwire: a workspace and a data dir are required")
+	if cfg.Dir == "" {
+		return nil, errors.New("agentwire: a data dir is required")
 	}
 	root := filepath.Join(cfg.Dir, "worktrees")
 	if err := os.MkdirAll(root, 0o750); err != nil {
@@ -73,36 +79,58 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		return nil, fmt.Errorf("agentwire: %w", err)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	a := &API{store: st, opencode: oc, cancel: cancel}
-	var svc *loomagent.Service
-	feed := sync.OnceFunc(func() { a.run(ctx, func(ctx context.Context) { svc.RunFeed(ctx, "opencode") }) })
-	svc = loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: cfg.WorkspaceID,
-		Workspace: agentworktree.Port{W: wt}, PrepareWorktree: prepareWorktree(cfg.Skills, cfg.WorkspaceID),
-		Harnesses: map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}}})
-	a.handler = agentsv1.New(func(ws string) *loomagent.Service {
-		if ws == cfg.WorkspaceID {
-			return svc
-		}
-		return nil
-	}, nil)
-	a.run(ctx, svc.RunDispatcher)
-	// OpenCode is reached on first use (design v2 §8.1.4): the feed starts
-	// now only when OpenCode agents are already recorded, else on the first Open.
-	if known, _, err := st.ListAgents(ctx, loomstore.AgentFilter{Harness: "opencode", IncludeArchived: true, Limit: 1}); err != nil || len(known) > 0 {
-		feed()
+	a := &API{store: st, opencode: oc, ctx: ctx, cancel: cancel, services: map[string]*loomagent.Service{}}
+	a.newSvc = func(ws string) (*loomagent.Service, func()) {
+		var svc *loomagent.Service
+		feed := sync.OnceFunc(func() { a.run(func(ctx context.Context) { svc.RunFeed(ctx, "opencode") }) })
+		svc = loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: ws,
+			Workspace: agentworktree.Port{W: wt}, PrepareWorktree: prepareWorktree(cfg.Skills, ws),
+			Harnesses: map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}}})
+		return svc, feed
+	}
+	a.handler = agentsv1.New(a.service, nil)
+	known, _, err := st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true})
+	if err != nil {
+		a.Stop()
+		return nil, fmt.Errorf("agentwire: %w", err)
+	}
+	for _, ag := range known {
+		a.service(ag.WorkspaceID)
 	}
 	return a, nil
 }
 
+// service returns ws's service, starting it with its dispatcher on first
+// use. The workspace middleware has already checked that ws exists. Its
+// OpenCode feed starts now only when ws has OpenCode agents, else on the
+// first Open (design v2 §8.1.4).
+func (a *API) service(ws string) *loomagent.Service {
+	a.mu.Lock()
+	svc, ok := a.services[ws]
+	if ok || a.ctx.Err() != nil {
+		a.mu.Unlock()
+		return svc
+	}
+	svc, feed := a.newSvc(ws)
+	a.services[ws] = svc
+	a.mu.Unlock()
+	a.run(svc.RunDispatcher)
+	if oc, _, err := a.store.ListAgents(a.ctx, loomstore.AgentFilter{WorkspaceID: ws, Harness: "opencode",
+		IncludeArchived: true, IncludeDeleted: true, Limit: 1}); err != nil || len(oc) > 0 {
+		feed()
+	}
+	return svc
+}
+
 // run runs fn until Stop.
-func (a *API) run(ctx context.Context, fn func(context.Context)) {
+func (a *API) run(fn func(context.Context)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if ctx.Err() != nil {
+	if a.ctx.Err() != nil {
 		return
 	}
 	a.wg.Add(1)
-	go func() { defer a.wg.Done(); fn(ctx) }()
+	go func() { defer a.wg.Done(); fn(a.ctx) }()
 }
 
 // lazyFeed starts the harness feed before the first session Open, so a

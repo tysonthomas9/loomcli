@@ -252,18 +252,15 @@ func runServe(cmd *cobra.Command, args []string) {
 	awaitShutdown(cmd, stop, webuiErr, cancel)
 }
 
-// startAgentAPI starts the Agent API for the serve's workspace beside the v5
-// routes, or returns nil when it can't; serve then runs without it.
+// startAgentAPI starts the Agent API beside the v5 routes, or returns nil
+// when it can't; serve then runs without it.
 func startAgentAPI(ctx context.Context, cfg webui.ServerConfig) *agentwire.API {
-	if cfg.InitialWorkspaceID == "" {
-		return nil
-	}
 	bin := os.Getenv("LOOM_OPENCODE_BIN")
 	if bin == "" {
 		bin = filepath.Join(bootstrap.LoomDir(), "harness/opencode/2.0.19/opencode")
 	}
-	api, err := agentwire.Start(ctx, agentwire.Config{WorkspaceID: cfg.InitialWorkspaceID,
-		Dir: bootstrap.LoomDir(), OpenCodeBin: bin, Skills: cfg.Store})
+	api, err := agentwire.Start(ctx, agentwire.Config{Dir: bootstrap.LoomDir(),
+		OpenCodeBin: bin, Skills: cfg.Store})
 	if err != nil {
 		slog.Warn("Agent API not started", "error", err)
 		return nil
