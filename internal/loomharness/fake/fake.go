@@ -18,13 +18,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
 
-// Step is one scripted step of a turn. Set exactly one of Delta, Ask or Crash.
+// Step is one scripted step of a turn. Set exactly one of Delta, Ask, Crash or Usage.
 type Step struct {
-	Delta    string // emits a delta on the turn's message item
-	Ask      string // opens an ask with this ID; the turn waits for Reply
-	Question bool   // the Ask is a question, not an approval
-	Crash    bool   // the harness process dies here, mid-turn
-	Gap      bool   // the live Feed misses this step's event (it gets feed.gap); Messages still has it
+	Delta    string             // emits a delta on the turn's message item
+	Ask      string             // opens an ask with this ID; the turn waits for Reply
+	Question bool               // the Ask is a question, not an approval
+	Crash    bool               // the harness process dies here, mid-turn
+	Gap      bool               // the live Feed misses this step's event (it gets feed.gap); Messages still has it
+	Usage    *loomharness.Usage // emits a usage event with these counts
 }
 
 // Turn is one scripted turn.
@@ -272,6 +273,8 @@ func (h *Harness) run(s *session) {
 			}
 			h.emit(s, loomharness.Event{Type: loomharness.EventAskOpened, AskID: st.Ask, ItemKind: kind}, !st.Gap)
 			return
+		case st.Usage != nil:
+			h.emit(s, loomharness.Event{Type: loomharness.EventUsage, Usage: *st.Usage}, !st.Gap)
 		default:
 			h.emit(s, loomharness.Event{Type: loomharness.EventDelta, ItemID: s.turnID + "/msg", ItemKind: "message", Text: st.Delta}, !st.Gap)
 		}

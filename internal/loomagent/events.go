@@ -206,7 +206,7 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 // running as its running turn (an input key until turn.started names it).
 type fold struct {
 	running   string
-	turn      string // the turn a turn.started named for running's input
+	turn      string // the turn a turn.started (or, with no turn.started, as in codex history, its message.delivered) named for running's input
 	delivered bool   // running's input was delivered
 	ended     *loomharness.Event
 	asks      map[string]*Ask // the history's open asks
@@ -217,6 +217,9 @@ func (f *fold) add(e loomharness.Event) int {
 	switch e.Type {
 	case loomharness.EventMessageDelivered:
 		f.delivered = f.delivered || (f.running != "" && e.InputKey == f.running)
+		if f.delivered && f.turn == "" && e.InputKey == f.running {
+			f.turn = e.TurnID
+		}
 	case loomharness.EventTurnStarted:
 		if f.running != "" && e.InputKey == f.running && e.TurnID != "" {
 			f.turn = e.TurnID
@@ -396,15 +399,22 @@ func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 	if key == "" {
 		key = "seq:" + strconv.FormatInt(e.Seq, 10)
 	}
+	u := e.Usage // a usage step's own counts; a row without them reads as zero
 	b, _ := json.Marshal(struct {
-		Session    string `json:"session"`
-		ItemID     string `json:"itemId,omitempty"`
-		ItemKind   string `json:"itemKind,omitempty"`
-		InputKey   string `json:"inputKey,omitempty"`
-		AskID      string `json:"askId,omitempty"`
-		Text       string `json:"text,omitempty"`
-		StopReason string `json:"stopReason,omitempty"`
-	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.StopReason})
+		Session          string  `json:"session"`
+		ItemID           string  `json:"itemId,omitempty"`
+		ItemKind         string  `json:"itemKind,omitempty"`
+		InputKey         string  `json:"inputKey,omitempty"`
+		AskID            string  `json:"askId,omitempty"`
+		Text             string  `json:"text,omitempty"`
+		StopReason       string  `json:"stopReason,omitempty"`
+		InputTokens      int64   `json:"inputTokens,omitempty"`
+		OutputTokens     int64   `json:"outputTokens,omitempty"`
+		CacheReadTokens  int64   `json:"cacheReadTokens,omitempty"`
+		CacheWriteTokens int64   `json:"cacheWriteTokens,omitempty"`
+		CostUSD          float64 `json:"costUsd,omitempty"`
+	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.StopReason,
+		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSD})
 	return loomstore.Event{AgentID: agentID, Kind: kind, TurnID: e.TurnID, Payload: b,
 		EventID: kind + ":" + e.Session.Root + ":" + e.Session.NativeID + ":" + key}
 }

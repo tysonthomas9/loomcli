@@ -329,3 +329,45 @@ func TestOpenCodeEventsBackfillBacksOffOnClosedFeed(t *testing.T) {
 		}
 	}
 }
+
+// TestUsageRowCarriesStepTokens: a harness usage event is saved with its
+// step's counts under the payload keys loom usage sums; a turn's other rows
+// carry none.
+func TestUsageRowCarriesStepTokens(t *testing.T) {
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := startFeed(s, e)
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{
+		{Usage: &loomharness.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 30, CacheWriteTokens: 40, CostUSD: 0.25}},
+		{Delta: "hi"},
+		{Usage: &loomharness.Usage{InputTokens: 1, OutputTokens: 2}},
+	}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	eventually(t, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 1 })
+	type tokens struct { // the keys 2.8's reader (cli/cleanup usageTokens) sums
+		In    int64   `json:"inputTokens"`
+		Out   int64   `json:"outputTokens"`
+		Read  int64   `json:"cacheReadTokens"`
+		Write int64   `json:"cacheWriteTokens"`
+		Cost  float64 `json:"costUsd"`
+	}
+	var got []tokens
+	for _, r := range rows(t, s, a.AgentID, 0) {
+		var u tokens
+		if err := json.Unmarshal(r.Payload, &u); err != nil {
+			t.Fatal(err)
+		}
+		if r.Kind == string(loomharness.EventUsage) {
+			got = append(got, u)
+		} else if u != (tokens{}) {
+			t.Errorf("%s row has tokens %+v", r.Kind, u)
+		}
+	}
+	want := []tokens{{10, 20, 30, 40, 0.25}, {1, 2, 0, 0, 0}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("usage rows %+v, want %+v", got, want)
+	}
+}

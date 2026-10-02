@@ -181,6 +181,14 @@ type Event struct {
 	AskID      string
 	Text       string
 	StopReason string // completed | cancelled | failed, for turn.completed
+	Usage      Usage  // for usage: this step's own counts, never a running total
+}
+
+// Usage is one step's token counts, and its cost where the harness reports one.
+// Input excludes cached input; Output includes reasoning.
+type Usage struct {
+	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens int64
+	CostUSD                                                      float64
 }
 
 // Errors adapters return. Wrap them with fmt.Errorf("...: %w", err).

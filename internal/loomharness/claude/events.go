@@ -27,6 +27,7 @@ type mapper struct {
 	handed          string          // the prompted key no turn has started for yet
 	cancelled       bool            // Loom interrupted the running turn
 	lastInterrupted bool
+	usage           loomharness.Usage // the running turn's steps so far
 }
 
 func newMapper(ref loomharness.NativeRef) *mapper {
@@ -51,10 +52,14 @@ type wireFrame struct {
 	TaskType         string   `json:"task_type"`
 	TaskID           string   `json:"task_id"`
 	Event            struct {
-		Type         string              `json:"type"`
-		Index        int                 `json:"index"`
-		Message      struct{ ID string } `json:"message"`
-		ContentBlock block               `json:"content_block"`
+		Type    string `json:"type"`
+		Index   int    `json:"index"`
+		Message struct {
+			ID    string
+			Usage wireUsage `json:"usage"`
+		} `json:"message"` // message_start
+		Usage        wireUsage `json:"usage"` // message_delta
+		ContentBlock block     `json:"content_block"`
 		Delta        struct {
 			Type     string `json:"type"`
 			Text     string `json:"text"`
@@ -65,6 +70,15 @@ type wireFrame struct {
 		ID      string          `json:"id"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
+}
+
+// wireUsage is a model step's API usage. message_start gives its input and
+// cache counts; message_delta its final output count.
+type wireUsage struct {
+	Input      int64 `json:"input_tokens"`
+	Output     int64 `json:"output_tokens"`
+	CacheRead  int64 `json:"cache_read_input_tokens"`
+	CacheWrite int64 `json:"cache_creation_input_tokens"`
 }
 
 func (m *mapper) frame(raw []byte) []loomharness.Event {
@@ -142,6 +156,12 @@ func (m *mapper) stream(f wireFrame, emit func(loomharness.Event)) {
 	switch ev.Type {
 	case "message_start":
 		m.msgID = ev.Message.ID
+		u := ev.Message.Usage
+		m.usage.InputTokens += u.Input
+		m.usage.CacheReadTokens += u.CacheRead
+		m.usage.CacheWriteTokens += u.CacheWrite
+	case "message_delta":
+		m.usage.OutputTokens += ev.Usage.Output
 	case "content_block_start":
 		m.open = ev.Index
 		if kind, id := m.item(m.msgID, ev.Index, ev.ContentBlock); id != "" {
@@ -183,9 +203,12 @@ func (m *mapper) assistant(msg string, blocks []block, emit func(loomharness.Eve
 }
 
 // result ends the turn: completed on success, cancelled when Loom
-// interrupted it, else failed.
+// interrupted it, else failed. Its usage is the sum of the turn's steps:
+// the result's own usage and cost are not used, as they may be running
+// totals.
 func (m *mapper) result(subtype string, emit func(loomharness.Event)) {
-	emit(loomharness.Event{Type: loomharness.EventUsage})
+	emit(loomharness.Event{Type: loomharness.EventUsage, ItemID: m.turnID + "/usage", Usage: m.usage})
+	m.usage = loomharness.Usage{}
 	stop := "failed"
 	switch {
 	case subtype == "success":

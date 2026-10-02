@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -694,5 +695,36 @@ func TestClaudeSelfStartedTurnHasNoInputKey(t *testing.T) {
 	}
 	if e := start(); e.InputKey != "" {
 		t.Fatalf("the key bound a second turn: %q", e.InputKey)
+	}
+}
+
+// TestClaudeUsageSumsTurnSteps: a turn's usage is the sum of its steps'
+// stream usage (input and cache from message_start, output from
+// message_delta), not the result's own counts, and the next turn starts at
+// zero.
+func TestClaudeUsageSumsTurnSteps(t *testing.T) {
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	step := func(id string, in, read, write, out int) {
+		m.frame([]byte(fmt.Sprintf(`{"type":"stream_event","event":{"type":"message_start","message":{"id":%q,"usage":{"input_tokens":%d,"cache_read_input_tokens":%d,"cache_creation_input_tokens":%d,"output_tokens":1}}}}`, id, in, read, write)))
+		m.frame([]byte(fmt.Sprintf(`{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":%d}}}`, out)))
+	}
+	usage := func() loomharness.Event {
+		for _, e := range m.frame([]byte(`{"type":"result","subtype":"success","total_cost_usd":9,"usage":{"input_tokens":999,"output_tokens":999}}`)) {
+			if e.Type == loomharness.EventUsage {
+				return e
+			}
+		}
+		t.Fatal("no usage")
+		return loomharness.Event{}
+	}
+	step("msg_1", 10, 100, 5, 20)
+	step("msg_2", 3, 200, 0, 7)
+	u := usage()
+	if want := (loomharness.Usage{InputTokens: 13, OutputTokens: 27, CacheReadTokens: 300, CacheWriteTokens: 5}); u.Usage != want || u.ItemID != u.TurnID+"/usage" {
+		t.Fatalf("usage = %+v (item %q), want %+v", u.Usage, u.ItemID, want)
+	}
+	step("msg_3", 1, 0, 0, 2)
+	if u2 := usage(); u2.Usage != (loomharness.Usage{InputTokens: 1, OutputTokens: 2}) || u2.ItemID == u.ItemID {
+		t.Fatalf("second turn usage = %+v (item %q)", u2.Usage, u2.ItemID)
 	}
 }

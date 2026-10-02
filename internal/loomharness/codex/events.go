@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -51,8 +52,7 @@ func live(root string, m Message) (loomharness.Event, bool) {
 		if json.Unmarshal(m.Params, &p) != nil {
 			return e, false
 		}
-		e.Type, e.TurnID = loomharness.EventUsage, p.TurnId
-		return e, true
+		return usage(e, p), true
 	case "serverRequest/resolved":
 		var p protocol.ServerRequestResolvedNotification
 		if json.Unmarshal(m.Params, &p) != nil {
@@ -62,6 +62,17 @@ func live(root string, m Message) (loomharness.Event, bool) {
 		return e, true
 	}
 	return askOpened(e, m)
+}
+
+// usage maps a step's token usage. Last is the step's own; Total is the
+// thread's running sum, which only names the step: it grows with every step.
+func usage(e loomharness.Event, p protocol.ThreadTokenUsageUpdatedNotification) loomharness.Event {
+	l := p.TokenUsage.Last
+	e.Type, e.TurnID = loomharness.EventUsage, p.TurnId
+	e.ItemID = p.TurnId + "/usage/" + strconv.FormatInt(p.TokenUsage.Total.TotalTokens, 10)
+	e.Usage = loomharness.Usage{InputTokens: l.InputTokens - l.CachedInputTokens, OutputTokens: l.OutputTokens,
+		CacheReadTokens: l.CachedInputTokens, CacheWriteTokens: l.CacheWriteInputTokens}
+	return e
 }
 
 // askOpened maps a server request that is an ask: a question when it asks

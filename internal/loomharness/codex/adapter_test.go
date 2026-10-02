@@ -423,10 +423,11 @@ type brief struct {
 	Type                          loomharness.EventType
 	Thread, Turn, Item, Kind, Key string
 	Ask, Text, Stop               string
+	Usage                         loomharness.Usage
 }
 
 func briefOf(e loomharness.Event) brief {
-	return brief{e.Type, e.Session.NativeID, e.TurnID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.StopReason}
+	return brief{e.Type, e.Session.NativeID, e.TurnID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.StopReason, e.Usage}
 }
 
 const (
@@ -455,11 +456,13 @@ func TestCodexRecordedFrames(t *testing.T) {
 		{Type: loomharness.EventAskOpened, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "approval", Ask: "0"},
 		{Type: loomharness.EventAskResolved, Thread: thread, Ask: "0"},
 		{Type: loomharness.EventItemCompleted, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "tool"},
-		{Type: loomharness.EventUsage, Thread: thread, Turn: turn},
+		// Each usage is the step's own (last), not the thread's total, which
+		// is 2+2 by the second step.
+		{Type: loomharness.EventUsage, Thread: thread, Turn: turn, Item: turn + "/usage/2", Usage: loomharness.Usage{InputTokens: 1, OutputTokens: 1}},
 		{Type: loomharness.EventItemStarted, Thread: thread, Turn: turn, Item: "msg1", Kind: "message"},
 		{Type: loomharness.EventDelta, Thread: thread, Turn: turn, Item: "msg1", Kind: "message", Text: "finished"},
 		{Type: loomharness.EventItemCompleted, Thread: thread, Turn: turn, Item: "msg1", Kind: "message", Text: "finished"},
-		{Type: loomharness.EventUsage, Thread: thread, Turn: turn},
+		{Type: loomharness.EventUsage, Thread: thread, Turn: turn, Item: turn + "/usage/4", Usage: loomharness.Usage{InputTokens: 1, OutputTokens: 1}},
 		{Type: loomharness.EventTurnCompleted, Thread: thread, Turn: turn, Stop: "completed"},
 	}
 	for i, w := range want {

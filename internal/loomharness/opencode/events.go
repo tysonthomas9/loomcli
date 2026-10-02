@@ -227,16 +227,18 @@ type wireEvent struct {
 		Seq         int64  `json:"seq"`
 	} `json:"durable"`
 	Data struct {
-		SessionID          string `json:"sessionID"`
-		ParentID           string `json:"parentID"`
-		Reason             string `json:"reason"`
-		AssistantMessageID string `json:"assistantMessageID"`
-		Ordinal            int    `json:"ordinal"`
-		ID                 string `json:"id"`
-		InboxID            string `json:"inboxID"`
-		RequestID          string `json:"requestID"`
-		Text               string `json:"text"`
-		Delta              string `json:"delta"`
+		SessionID          string  `json:"sessionID"`
+		ParentID           string  `json:"parentID"`
+		Reason             string  `json:"reason"`
+		AssistantMessageID string  `json:"assistantMessageID"`
+		Ordinal            int     `json:"ordinal"`
+		ID                 string  `json:"id"`
+		InboxID            string  `json:"inboxID"`
+		RequestID          string  `json:"requestID"`
+		Text               string  `json:"text"`
+		Delta              string  `json:"delta"`
+		Cost               float64 `json:"cost"`   // session.step.ended
+		Tokens             tokens  `json:"tokens"` // session.step.ended
 		Metadata           struct {
 			Notice string `json:"notice"`
 		} `json:"metadata"`
@@ -245,6 +247,24 @@ type wireEvent struct {
 			SessionID string `json:"sessionID"`
 		} `json:"form"` // form.created
 	} `json:"data"`
+}
+
+// tokens is OpenCode's per-step TokenUsageInfo, on session.step.ended and
+// on the assistant message the step ended.
+type tokens struct {
+	Input     int64 `json:"input"`
+	Output    int64 `json:"output"`
+	Reasoning int64 `json:"reasoning"`
+	Cache     struct {
+		Read  int64 `json:"read"`
+		Write int64 `json:"write"`
+	} `json:"cache"`
+}
+
+// usage is the step's usage; OpenCode counts reasoning apart from output.
+func (t tokens) usage(cost float64) loomharness.Usage {
+	return loomharness.Usage{InputTokens: t.Input, OutputTokens: t.Output + t.Reasoning,
+		CacheReadTokens: t.Cache.Read, CacheWriteTokens: t.Cache.Write, CostUSD: cost}
 }
 
 func (m *mapper) mapEvent(raw []byte) (loomharness.Event, bool) {
@@ -299,7 +319,7 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 	case "session.tool.success", "session.tool.failed":
 		e.Type, e.ItemKind, e.ItemID = loomharness.EventItemCompleted, "tool", toolItem(d.AssistantMessageID, d.ID)
 	case "session.step.ended":
-		e.Type, e.ItemID = loomharness.EventUsage, d.AssistantMessageID
+		e.Type, e.ItemID, e.Usage = loomharness.EventUsage, d.AssistantMessageID, d.Tokens.usage(d.Cost)
 	case "session.execution.interrupted":
 		if d.Reason == "shutdown" {
 			return false // the turn goes on after the restart

@@ -738,6 +738,8 @@ type message struct {
 	Outcome  string          `json:"outcome"`
 	Finish   string          `json:"finish"` // assistant: set when its step ended
 	Error    json.RawMessage `json:"error"`  // assistant: set when its step failed
+	Cost     float64         `json:"cost"`   // assistant: its step's cost
+	Tokens   tokens          `json:"tokens"` // assistant: its step's tokens
 	Metadata struct {
 		Notice string `json:"notice"`
 	} `json:"metadata"`
@@ -843,7 +845,7 @@ func (m message) events(ref loomharness.NativeRef) []loomharness.Event {
 		}
 		if m.usage() {
 			u := e
-			u.Type, u.ItemID = loomharness.EventUsage, m.ID
+			u.Type, u.ItemID, u.Usage = loomharness.EventUsage, m.ID, m.Tokens.usage(m.Cost)
 			out = append(out, u)
 		}
 		return out
