@@ -74,6 +74,9 @@ func (backend GitHubStackBackend) MergeUpTo(ctx context.Context, request StackRe
 	if err := requireMergeAuthority(ctx, request, target); err != nil {
 		return err
 	}
+	if err := requireDependenciesLanded(ctx, backend.Store, request, target); err != nil {
+		return err
+	}
 	if request.forge == nil {
 		token := request.token
 		if token == "" {

@@ -44,6 +44,7 @@ What would you like to do?
 - For epics, use `loom data create --title "<title>" --type epic --priority 2`.
 - For child work, include `--parent <epic-id>`; for repo-scoped work, include `--source-repo <repo-id>`.
 - Add context with `--description`, `--design`, `--notes`, `--label`, and `--depends-on` when the user provides it.
+- For a feature that spans repos, create one task per repo as backward-compatible steps: the callee repo's task first, and each caller task `--depends-on` it. Loom's `loom/dependencies` check keeps a caller's PR pending until its predecessor has landed, and Loom merges one repo at a time in that order. There is no atomic cross-repo merge: if a step would break callers on its own, tell the user the feature cannot be split safely before creating the tasks.
 - Show the create output, then run `loom data show <created-id>` if the user wants to review the full record.
 
 **3. Triage Backlog**
