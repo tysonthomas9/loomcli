@@ -6,47 +6,13 @@ import (
 	"strings"
 
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
+	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
-// Stack-listing section markers in a PR body. The reconciler owns the content
-// between them and preserves everything outside (human-edited description).
-const (
-	stackMarkStart = "<!-- loom-stack:start -->"
-	stackMarkEnd   = "<!-- loom-stack:end -->"
-)
-
-// renderStackListing renders the stack as a checklist for a PR body, marking the
-// current unit. Only units with a live PR are listed (merged/empty are omitted).
-func renderStackListing(ordered []sl.Node, live map[string]PR, current string, id sl.StackID) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "📚 **Loom stack** `%s`\n", id)
-	for _, n := range ordered {
-		pr, ok := live[n.TaskID]
-		if !ok {
-			continue
-		}
-		marker := "-"
-		if n.TaskID == current {
-			marker = "- 👉"
-		}
-		fmt.Fprintf(&b, "%s #%d `%s`\n", marker, pr.Number, n.OutputBranch)
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-// withStackSection returns body with the loom-stack section set to listing,
-// replacing an existing section in place or appending one, preserving the rest.
-func withStackSection(body, listing string) string {
-	section := stackMarkStart + "\n" + listing + "\n" + stackMarkEnd
-	si := strings.Index(body, stackMarkStart)
-	ei := strings.Index(body, stackMarkEnd)
-	if si >= 0 && ei > si {
-		return body[:si] + section + body[ei+len(stackMarkEnd):]
-	}
-	if strings.TrimSpace(body) == "" {
-		return section
-	}
-	return body + "\n\n" + section
+// Reconciler reads live PR health for a legacy stackstore stack.
+type Reconciler struct {
+	Store stackstore.Store
+	Forge Forge
 }
 
 // StatusRow is one unit's row in a status report, enriched with live PR health

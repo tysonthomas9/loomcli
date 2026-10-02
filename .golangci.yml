@@ -377,10 +377,8 @@ linters:
         linters: [funlen, cyclop, gocognit]
       - path: "internal/webui/sse\\.go"
         linters: [gocognit]
-      # stack-aware PR publisher + epic-stack feature — pre-existing complexity,
+      # epic-stack feature — pre-existing complexity,
       # cleanup tracked with the feature (introduced before the TS-leaf work).
-      - path: "internal/stackpublish/reconciler\\.go"
-        linters: [funlen, cyclop, gocognit]
       - path: "internal/cli/epic/epic_stack\\.go"
         linters: [funlen, cyclop, gocognit]
       - path: "internal/cli/epic/run\\.go"

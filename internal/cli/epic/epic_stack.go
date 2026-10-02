@@ -18,7 +18,7 @@ import (
 
 // epicStackID is the deterministic stack id for an epic. The publisher
 // (Stage 4) and `loom stack` use the same "<kind>:<value>" convention, so a
-// re-run, a manual `loom stack publish`, and the post-drain reconcile all
+// re-run and the post-drain reconcile both
 // converge on one stack record.
 func epicStackID(epicID string) sl.StackID {
 	return sl.StackID("epic:" + strings.TrimSpace(epicID))
