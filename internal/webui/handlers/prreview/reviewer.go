@@ -253,7 +253,7 @@ func (m *Module) fetchPullRequestHead(w http.ResponseWriter, r *http.Request, ws
 
 type reviewerCheckoutFunc func(
 	ctx context.Context,
-	repoPath, targetPath, remoteName string,
+	repoPath, targetPath, remoteName, workspace string,
 	prNumber int,
 	headSHA string,
 ) (string, error)
@@ -303,7 +303,7 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 		checkoutPRHead = localworkspace.EnsureDetachedGitWorktreeAtPRHead
 	}
 	checkedOutSHA, err := checkoutPRHead(
-		spec.ctx, spec.repoPath, target, spec.remote, spec.params.number, spec.headSHA,
+		spec.ctx, spec.repoPath, target, spec.remote, spec.ws, spec.params.number, spec.headSHA,
 	)
 	var changed *localworkspace.PRHeadChangedError
 	if errors.As(err, &changed) {

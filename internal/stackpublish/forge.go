@@ -38,11 +38,6 @@ type Forge interface {
 	UpdatePRBase(ctx context.Context, owner, repo string, number int, base string) error
 	// ClosePR closes a PR (optionally posting a comment first). Branches are kept (decision 2).
 	ClosePR(ctx context.Context, owner, repo string, number int, comment string) error
-	// PushBranches atomically pushes the given local branches from repoPath to
-	// origin. Each push carries an explicit expected remote SHA so the lease is
-	// asserted against the actual remote (not stale remote-tracking state); an
-	// empty ExpectedSHA means a new branch (create, no lease).
-	PushBranches(ctx context.Context, repoPath string, pushes []BranchPush) error
 	// QueuedPRNumbers returns the set of open PR numbers currently in the repo's
 	// GitHub merge queue (whose base branch is therefore immutable). Used by the
 	// reconciler's pre-flight to abort a reorder before any mutation.
@@ -52,13 +47,6 @@ type Forge interface {
 	PRStatuses(ctx context.Context, owner, repo, headPrefix string) (map[string]PRStatus, error)
 	// UpdatePRBody sets a PR's description (used to write the stack listing).
 	UpdatePRBody(ctx context.Context, owner, repo string, number int, body string) error
-}
-
-// BranchPush is one branch to push, with the SHA the remote ref is expected to
-// be at (for `--force-with-lease=<ref>:<sha>`). Empty ExpectedSHA = new branch.
-type BranchPush struct {
-	Branch      string
-	ExpectedSHA string
 }
 
 // PRStatus is the read-only health of a PR, for the tasks/PR-page display.

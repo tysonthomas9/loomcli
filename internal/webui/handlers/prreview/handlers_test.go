@@ -1712,7 +1712,7 @@ func TestEnsureReviewerRejectsChangedFetchedTip(t *testing.T) {
 	h.github.setHead("ABC123")
 
 	checkoutCalled := false
-	h.module.checkoutReviewerPRHead = func(_ context.Context, _, _ string, _ string, _ int, headSHA string) (string, error) {
+	h.module.checkoutReviewerPRHead = func(_ context.Context, _, _, _, _ string, _ int, headSHA string) (string, error) {
 		checkoutCalled = true
 		if headSHA != "ABC123" {
 			t.Fatalf("checkout head sha = %q, want ABC123", headSHA)
@@ -1761,7 +1761,7 @@ func TestEnsureReviewerRejectsMissingRecordedCheckout(t *testing.T) {
 	h.rememberLocalPaths(t, workspacePath, "hello", repoPath)
 
 	checkoutCalled := false
-	h.module.checkoutReviewerPRHead = func(context.Context, string, string, string, int, string) (string, error) {
+	h.module.checkoutReviewerPRHead = func(context.Context, string, string, string, string, int, string) (string, error) {
 		checkoutCalled = true
 		return "", nil
 	}

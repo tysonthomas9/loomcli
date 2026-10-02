@@ -26,14 +26,14 @@ import (
 
 var stackCmd = &cobra.Command{
 	Use:     "stack",
-	Short:   "Manage stack lineage and publish stacked pull requests",
+	Short:   "Manage stack lineage",
 	GroupID: "workspace",
 }
 
 func init() {
 	stackCmd.AddCommand(
 		initCmd(), listCmd(), showCmd(), statusCmd(), validateCmd(),
-		addCmd(), moveCmd(), setBaseCmd(), removeCmd(), publishCmd(), restackCmd(),
+		addCmd(), moveCmd(), setBaseCmd(), removeCmd(),
 	)
 	cli.RegisterCommand(stackCmd)
 }
@@ -425,122 +425,6 @@ func removeCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&stackID, "stack", "", "stack id (required)")
 	_ = c.MarkFlagRequired("stack")
-	return c
-}
-
-func restackCmd() *cobra.Command {
-	var repoPath string
-	var headless, jsonOut bool
-	c := &cobra.Command{
-		Use:   "restack <stack-id>",
-		Short: "Rebase descendants of merged units onto the live base, resolving conflicts with an agent",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtx(args[0])
-			if err != nil {
-				return err
-			}
-			stack, err := st.GetStack(cmd.Context(), ws, id)
-			if err != nil {
-				return err
-			}
-			path, err := resolveRepoPath(ws, stack.RepoName, repoPath)
-			if err != nil {
-				return err
-			}
-			token := resolveGitHubToken(cmd.Context())
-			if token == "" {
-				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
-			}
-			rec := &stackpublish.Reconciler{Store: st, Forge: stackpublish.NewConfiguredGitHubForge(token)}
-			report, err := rec.Restack(cmd.Context(), ws, id, path, newResolver(headless))
-			if err != nil {
-				return err
-			}
-			if jsonOut {
-				return cmdstore.WriteJSON(report)
-			}
-			fmt.Printf("restacked: rebased=%d resolved=%d\n", len(report.Rebased), len(report.Resolved))
-			return nil
-		},
-	}
-	c.Flags().StringVar(&repoPath, "repo-path", "", "local checkout to rebase in (default: from loom state)")
-	c.Flags().BoolVar(&headless, "headless", false, "resolve conflicts with a non-interactive (headless) agent")
-	c.Flags().BoolVar(&jsonOut, "json", false, "JSON output")
-	return c
-}
-
-//nolint:funlen // Cobra command construction includes option wiring, publish execution, and output formatting.
-func publishCmd() *cobra.Command {
-	var repoPath string
-	var dryRun, jsonOut, autoRebase, headless bool
-	c := &cobra.Command{
-		Use:   "publish <stack-id>",
-		Short: "Publish the stack as stacked pull requests",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtx(args[0])
-			if err != nil {
-				return err
-			}
-			stack, err := st.GetStack(cmd.Context(), ws, id)
-			if err != nil {
-				return err
-			}
-			path, err := resolveRepoPath(ws, stack.RepoName, repoPath)
-			if err != nil {
-				return err
-			}
-			token := resolveGitHubToken(cmd.Context())
-			if token == "" && !dryRun {
-				return errors.New("no GitHub token (set GITHUB_TOKEN/GH_TOKEN or run `gh auth login`)")
-			}
-			rec := &stackpublish.Reconciler{
-				Store: st,
-				Forge: stackpublish.NewConfiguredGitHubForge(token),
-			}
-			opts := stackpublish.Options{DryRun: dryRun}
-			// Seed PR titles/bodies from issue metadata when available; the
-			// reconciler falls back to the owned commit's subject otherwise.
-			opts.PRMetaFor = func(ctx context.Context, taskID string) (stackpublish.PRMeta, bool) {
-				d, derr := cli.DefaultIssueBackend().Get(ctx, taskID)
-				if derr != nil || d == nil {
-					return stackpublish.PRMeta{}, false
-				}
-				return stackpublish.PRMeta{
-					Title:              d.Title,
-					Summary:            d.Description,
-					AcceptanceCriteria: d.AcceptanceCriteria,
-				}, true
-			}
-			if autoRebase {
-				opts.Resolver = newResolver(headless)
-			}
-			report, err := rec.Publish(cmd.Context(), ws, id, path, opts)
-			if err != nil {
-				return err
-			}
-			if jsonOut {
-				return cmdstore.WriteJSON(report)
-			}
-			verb := "published"
-			if dryRun {
-				verb = "plan"
-			}
-			fmt.Printf("%s: created=%d reparented=%d skipped=%d closed=%d merged=%d empty=%d\n",
-				verb, len(report.Created), len(report.Reparented), len(report.Skipped),
-				len(report.Closed), len(report.Merged), len(report.Empty))
-			for task, url := range report.PRURLs {
-				fmt.Printf("  %s  %s\n", task, url)
-			}
-			return nil
-		},
-	}
-	c.Flags().StringVar(&repoPath, "repo-path", "", "local checkout to push from (default: from loom state)")
-	c.Flags().BoolVar(&dryRun, "dry-run", false, "compute the plan without mutating GitHub")
-	c.Flags().BoolVar(&autoRebase, "auto-rebase", false, "rebase descendants of merged units onto the live base (agent resolves conflicts) instead of failing closed")
-	c.Flags().BoolVar(&headless, "headless", false, "with --auto-rebase, resolve conflicts headlessly (non-interactive)")
-	c.Flags().BoolVar(&jsonOut, "json", false, "JSON output")
 	return c
 }
 

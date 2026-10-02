@@ -549,32 +549,3 @@ func mergeableToStatus(m string) string {
 		return "unknown"
 	}
 }
-
-// credHelper supplies the token to git over stdin-free env, never argv.
-//
-//nolint:gosec // G101: a git credential-helper script template that reads an env var, not a hardcoded credential.
-const credHelper = `!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f`
-
-func (g *GitHubForge) PushBranches(ctx context.Context, repoPath string, pushes []BranchPush) error {
-	if len(pushes) == 0 {
-		return nil
-	}
-	args := []string{
-		"-c", "credential.helper=",
-		"-c", "credential.helper=" + credHelper,
-		"push", "--atomic", "origin",
-	}
-	for _, p := range pushes {
-		args = append(args, "refs/heads/"+p.Branch+":refs/heads/"+p.Branch)
-	}
-	for _, p := range pushes {
-		if p.ExpectedSHA != "" {
-			// Explicit lease: assert the remote ref is exactly where we last left
-			// it, robust to stale remote-tracking state (unlike a bare lease).
-			args = append(args, "--force-with-lease=refs/heads/"+p.Branch+":"+p.ExpectedSHA)
-		}
-	}
-	env := append(envWith(), "LOOM_PR_GIT_PASSWORD="+g.token, "GIT_TERMINAL_PROMPT=0")
-	_, err := runGit(ctx, repoPath, env, args...)
-	return err
-}

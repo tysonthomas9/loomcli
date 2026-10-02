@@ -152,6 +152,16 @@ func runRefProbe(dir string, args ...string) error {
 	return err
 }
 
+// Version returns the output of git --version.
+func Version() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "--version") //nolint:gosec // Fixed argv.
+	cmd.Env = cleanEnv(os.Environ())
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 type configEntry struct{ key, value string }
 
 func readConfig(scope, path string) ([]configEntry, error) {

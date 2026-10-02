@@ -458,7 +458,7 @@ try {
   const token = fs.readFileSync(input.tokenPath, "utf8").trim();
   let pushError = "";
   try {
-  git(["push", "--force", input.proxyURL, captureSha + ":" + input.ref], {
+  git(["push", input.proxyURL, captureSha + ":" + input.ref], {
       GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "credential.helper",
       GIT_CONFIG_VALUE_0: "", GIT_CONFIG_KEY_1: "http.extraHeader",
       GIT_CONFIG_VALUE_1: "Authorization: Bearer " + token,

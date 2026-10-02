@@ -123,6 +123,8 @@ func finishReset(path, targetBranch string) error {
 	if err := GitReset(path, "origin/"+targetBranch); err != nil {
 		return fmt.Errorf("resetting: %w", err)
 	}
+	// P4.11 AC deviation: allowlisted raw writer for the P1.5 capture-first
+	// reset until Reset moves into loomgit (design §2.4 follow-up).
 	if _, err := cli.RunGitCommand(path, "clean", "-fdx"); err != nil {
 		return fmt.Errorf("cleaning: %w", err)
 	}
