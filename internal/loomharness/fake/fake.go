@@ -10,6 +10,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -50,6 +51,7 @@ type Harness struct {
 	sessions map[loomharness.NativeRef]*session
 	scripts  map[string][]Turn
 	feeds    map[*feed]bool
+	install  error // set by FailInstall: Resume fails before installing rules
 }
 
 type session struct {
@@ -68,6 +70,8 @@ type session struct {
 	crashed       bool // a turn was running when the harness died; Resume first
 	closed        bool // Close stopped the runtime; history stays, Resume reopens
 	lastInterrupt bool
+	rules         []loomharness.PermissionRule   // the installed policy
+	turnRules     [][]loomharness.PermissionRule // the policy each run of a turn used
 }
 
 var (
@@ -112,13 +116,36 @@ func (h *Harness) Open(_ context.Context, spec loomharness.OpenSpec) (loomharnes
 		return loomharness.NativeRef{}, loomharness.ErrUnavailable
 	}
 	if ref, ok := h.byKey[spec.Key]; ok {
+		if s, ok := h.sessions[ref]; ok { // a repeat installs the current rules
+			s.rules = slices.Clone(spec.Rules)
+		}
 		return ref, nil
 	}
 	h.nextID++
 	ref := loomharness.NativeRef{Root: spec.Launch.Root, NativeID: "fake_ses_" + strconv.Itoa(h.nextID)}
 	h.byKey[spec.Key] = ref
-	h.sessions[ref] = &session{ref: ref, key: spec.Key, model: spec.Model, dir: spec.Dir, inputs: map[string]loomharness.Landed{}}
+	h.sessions[ref] = &session{ref: ref, key: spec.Key, model: spec.Model, dir: spec.Dir, inputs: map[string]loomharness.Landed{},
+		rules: slices.Clone(spec.Rules)}
 	return ref, nil
+}
+
+// FailInstall makes every Resume fail to install its rules with err; nil
+// restores installs.
+func (h *Harness) FailInstall(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.install = err
+}
+
+// Rules returns the policy installed on ref, and the policy each run of a
+// turn on ref used, oldest first.
+func (h *Harness) Rules(ref loomharness.NativeRef) (installed []loomharness.PermissionRule, turns [][]loomharness.PermissionRule) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if s, ok := h.sessions[ref]; ok {
+		return slices.Clone(s.rules), slices.Clone(s.turnRules)
+	}
+	return nil, nil
 }
 
 func (h *Harness) Session(ref loomharness.NativeRef) loomharness.Session {
@@ -203,6 +230,7 @@ func (h *Harness) emit(s *session, e loomharness.Event, live bool) {
 
 // run plays the current turn's steps until it ends, waits on an ask or crashes.
 func (h *Harness) run(s *session) {
+	s.turnRules = append(s.turnRules, slices.Clone(s.rules))
 	for s.step < len(s.turn.Steps) {
 		st := s.turn.Steps[s.step]
 		s.step++
@@ -272,9 +300,10 @@ type sessionHandle struct {
 }
 
 // Resume recovers the session under the same root and reopens a closed one.
-// A turn cut off by a crash or Close loses its open ask (R20), then either
-// continues (Turn.ResumeContinues) or ends cancelled.
-func (x *sessionHandle) Resume(_ context.Context, l loomharness.Launch) (loomharness.NativeRef, error) {
+// It installs rules first; with FailInstall set it fails and nothing changes
+// or runs. A turn cut off by a crash or Close loses its open ask (R20), then
+// either continues (Turn.ResumeContinues) under the new rules or ends cancelled.
+func (x *sessionHandle) Resume(_ context.Context, l loomharness.Launch, rules []loomharness.PermissionRule) (loomharness.NativeRef, error) {
 	x.h.mu.Lock()
 	defer x.h.mu.Unlock()
 	s, err := x.h.lookup(x.ref)
@@ -284,6 +313,10 @@ func (x *sessionHandle) Resume(_ context.Context, l loomharness.Launch) (loomhar
 	if l.Root != s.ref.Root {
 		return loomharness.NativeRef{}, fmt.Errorf("fake %s not under root %q: %w", s.ref.NativeID, l.Root, loomharness.ErrSessionNotFound)
 	}
+	if x.h.install != nil {
+		return loomharness.NativeRef{}, fmt.Errorf("fake %s: install permissions: %w", s.ref.NativeID, x.h.install)
+	}
+	s.rules = slices.Clone(rules)
 	s.closed = false
 	if s.crashed {
 		s.crashed = false

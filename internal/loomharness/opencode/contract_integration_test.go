@@ -77,8 +77,11 @@ func TestContract(t *testing.T) {
 		if err := a.Purge(context.Background(), owned); err != nil {
 			t.Errorf("cleanup purge: %v", err)
 		}
-		pid := serverPID(a)
+		pid, start := serverPID(a), time.Now()
 		a.Stop()
+		if took := time.Since(start); took >= stopGrace {
+			t.Errorf("Stop took %s: the server ignored its stdin closing and was killed", took)
+		}
 		if alive(pid) || len(a.owned()) != 0 {
 			t.Errorf("owned tree still running after Stop: server %v, owned %v", alive(pid), a.owned())
 		}
@@ -283,7 +286,7 @@ func TestContract(t *testing.T) {
 		if _, pw2 := a.endpoint(); serverPID(a) == pid || alive(pid) || pw2 == pw || len(pw2) < 40 {
 			t.Fatalf("restart: pid %d -> %d (old alive %v), new per-boot password %v", pid, serverPID(a), alive(pid), pw2 != pw && len(pw2) >= 40)
 		}
-		got, err := s.Resume(ctx, spec.Launch)
+		got, err := s.Resume(ctx, spec.Launch, spec.Rules)
 		if err != nil || got != ref {
 			t.Fatalf("Resume = %v, %v; want %v", got, err, ref)
 		}
@@ -344,7 +347,7 @@ func TestContract(t *testing.T) {
 			t.Fatal(err)
 		}
 		waitFor(t, "restart after crash", func() bool { p := serverPID(a); return p != 0 && p != pid })
-		if got, err := s.Resume(ctx, spec.Launch); err != nil || got != ref {
+		if got, err := s.Resume(ctx, spec.Launch, spec.Rules); err != nil || got != ref {
 			t.Fatalf("Resume after crash = %v, %v", got, err)
 		}
 		// R-D evidence: plain serve keeps the session but does not resume the
@@ -425,7 +428,7 @@ func TestContract(t *testing.T) {
 			Rules: []loomharness.PermissionRule{{Action: "agent_create", Resource: "*", Effect: "deny"}}}); !isCode(err, "bad_request") {
 			t.Fatalf("unmappable rule Open = %v; want bad_request", err)
 		}
-		if _, err := a.Session(loomharness.NativeRef{NativeID: SessionID("policy-unmappable")}).Resume(ctx, spec.Launch); !isCode(err, "session_missing") {
+		if _, err := a.Session(loomharness.NativeRef{NativeID: SessionID("policy-unmappable")}).Resume(ctx, spec.Launch, spec.Rules); !isCode(err, "session_missing") {
 			t.Fatalf("unmappable rule created a session: %v", err)
 		}
 	})
@@ -471,10 +474,10 @@ func TestContract(t *testing.T) {
 		if err := a.Purge(ctx, owned); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.Resume(ctx, spec.Launch); !isCode(err, "session_missing") {
+		if _, err := s.Resume(ctx, spec.Launch, spec.Rules); !isCode(err, "session_missing") {
 			t.Fatalf("Resume after Purge = %v; want session_missing", err)
 		}
-		if _, err := a.Session(sibling).Resume(ctx, spec.Launch); err != nil {
+		if _, err := a.Session(sibling).Resume(ctx, spec.Launch, spec.Rules); err != nil {
 			t.Fatalf("sibling after Purge: %v", err)
 		}
 		if err := a.Purge(ctx, owned); err != nil {
@@ -535,7 +538,7 @@ func readAll(t *testing.T, files []string) map[string]string {
 	return out
 }
 
-// loomServes lists running plain `serve` processes of bin (not --service).
+// loomServes lists running `serve --stdio` processes of bin, as Loom starts them.
 func loomServes(t *testing.T, bin string) []int {
 	t.Helper()
 	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
@@ -544,7 +547,7 @@ func loomServes(t *testing.T, bin string) []int {
 	}
 	var pids []int
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.Contains(line, bin+" serve --hostname") && !strings.Contains(line, "--service") {
+		if strings.Contains(line, bin+" serve --stdio --hostname") {
 			var pid int
 			_, _ = fmt.Sscan(line, &pid)
 			pids = append(pids, pid)
@@ -554,25 +557,37 @@ func loomServes(t *testing.T, bin string) []int {
 	return pids
 }
 
-// contractEnv is the sandbox environment: OpenCode's HOME, TMPDIR and XDG
-// roots under sbx, no provider keys, and no models.dev fetch.
-func contractEnv(sbx string) []string {
+// contractEnv is the sandbox environment a real test server starts from:
+// sandboxEnv, no models.dev fetch, and extra (synthetic test secrets only).
+func contractEnv(sbx string, extra ...string) []string {
+	return append(append(sandboxEnv(sbx), "OPENCODE_DISABLE_MODELS_FETCH=1"), extra...)
+}
+
+// hostNames is all a test server takes from the host environment: what a
+// shell needs to run, never a credential, token or provider key.
+var hostNames = []string{"PATH", "SHELL", "LANG", "USER", "LOGNAME"}
+
+// hostEnv selects hostNames from the host environment.
+func hostEnv() []string {
 	var env []string
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		if strings.HasPrefix(k, "OPENCODE_") || strings.HasPrefix(k, "XDG_") || strings.HasSuffix(k, "_API_KEY") || k == "HOME" || k == "TMPDIR" {
-			continue
+	for _, k := range hostNames {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
 		}
-		env = append(env, kv)
 	}
-	return append(env,
+	return env
+}
+
+// sandboxEnv is an explicitly selected environment: hostEnv, plus
+// OpenCode's HOME, TMPDIR and XDG roots under sbx.
+func sandboxEnv(sbx string) []string {
+	return append(hostEnv(),
 		"HOME="+filepath.Join(sbx, "home"),
 		"TMPDIR="+filepath.Join(sbx, "tmp")+"/",
 		"XDG_DATA_HOME="+filepath.Join(sbx, "data"),
 		"XDG_CONFIG_HOME="+filepath.Join(sbx, "config"),
 		"XDG_STATE_HOME="+filepath.Join(sbx, "state"),
 		"XDG_CACHE_HOME="+filepath.Join(sbx, "cache"),
-		"OPENCODE_DISABLE_MODELS_FETCH=1",
 	)
 }
 

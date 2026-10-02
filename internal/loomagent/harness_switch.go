@@ -90,8 +90,9 @@ func (s *Service) switchTarget(ctx context.Context, a loomstore.Agent, req Updat
 	if !ok {
 		return nil, cfg, "", &Error{Code: CodeHarnessUnavailable, Message: req.Harness + " is not available"}
 	}
-	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
-		return nil, cfg, "", fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
+	cfg, err := loadConfig(a)
+	if err != nil {
+		return nil, cfg, "", err
 	}
 	if len(cfg.Preset.Harnesses) > 0 && !slices.Contains(cfg.Preset.Harnesses, req.Harness) {
 		return nil, cfg, "", invalid(fmt.Sprintf("harness %q not allowed for %s", req.Harness, cfg.Preset.Name), cfg.Preset.Harnesses...)
@@ -133,8 +134,10 @@ func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 	return s.setState(ctx, a, to)
 }
 
-// resume recovers a's current session before a hand-over. A different
-// returned ref is recorded as another owned session and becomes current;
+// resume recovers a's current session before a hand-over, installing the
+// policy compiled from the current bridge registration; a registration or
+// install failure stops it before anything runs. A different returned ref
+// is recorded as another owned session and becomes current;
 // every earlier ref stays owned. It is safe to repeat; current then returns
 // the resumed session.
 func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
@@ -142,18 +145,19 @@ func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agen
 	if err != nil || sess == nil {
 		return a, err
 	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
-		return a, fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
+	cfg, err := loadConfig(a)
+	if err != nil {
+		return a, err
 	}
-	if _, err := s.policy(ctx, cfg); err != nil { // fail before resuming a turn without the bridge
+	rules, err := s.policy(ctx, cfg)
+	if err != nil {
 		return a, err
 	}
 	l, err := s.launch(ctx, a, a.Harness)
 	if err != nil {
 		return a, err
 	}
-	got, err := sess.Resume(ctx, l)
+	got, err := sess.Resume(ctx, l, rules)
 	if err != nil {
 		return a, harnessErr(err)
 	}

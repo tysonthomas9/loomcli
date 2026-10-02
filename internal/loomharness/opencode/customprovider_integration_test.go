@@ -159,7 +159,7 @@ func startFakeModelFixture(t *testing.T) string {
 		t.Fatalf("node is required for the fake-model fixture: %v", err)
 	}
 	cmd := exec.Command(node, "../../../tests/aft/fixtures/fake-model/server.mjs")
-	cmd.Env = append(os.Environ(), "FAKE_MODEL_PORT=0")
+	cmd.Env = append(hostEnv(), "FAKE_MODEL_PORT=0")
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

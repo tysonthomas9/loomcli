@@ -27,21 +27,27 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	if provider, model, ok := strings.Cut(spec.Model, "/"); ok {
 		body["model"] = map[string]string{"providerID": provider, "id": model}
 	}
-	if len(spec.Rules) > 0 {
-		rules, err := nativeRules(spec.Rules)
-		if err != nil {
-			return loomharness.NativeRef{}, err
-		}
+	rules, err := nativeRules(spec.Rules)
+	if err != nil {
+		return loomharness.NativeRef{}, err
+	}
+	if len(rules) > 0 {
 		body["permissions"] = rules
 	}
-	err := c.call(ctx, "POST", "/api/session", body, nil)
+	s := c.Session(ref)
+	err = c.call(ctx, "POST", "/api/session", body, nil)
 	if isCode(err, "input_id_conflict") {
-		err = c.call(ctx, "GET", "/api/session/"+ref.NativeID, nil, nil)
+		err = nil
+	}
+	// A repeat may find the session holding older rules, and b30c4d0 answers
+	// a repeat POST with success and ignores its body, so always install.
+	if err == nil {
+		err = s.install(ctx, rules)
 	}
 	if err != nil {
 		return loomharness.NativeRef{}, err
 	}
-	return ref, c.Session(ref).isolate(ctx)
+	return ref, s.isolate(ctx)
 }
 
 // nativeActions maps Loom's permission actions to the actions OpenCode
@@ -59,7 +65,7 @@ var nativeActions = map[string][]string{
 // (both evaluate last match wins). A rule with no OpenCode action fails the
 // whole Open: it is never dropped or widened.
 func nativeRules(rules []loomharness.PermissionRule) ([]map[string]string, error) {
-	var out []map[string]string
+	out := []map[string]string{}
 	for _, r := range rules {
 		actions, ok := nativeActions[r.Action]
 		if !ok {
@@ -96,32 +102,58 @@ func (s *Session) path(suffix string) string {
 	return "/api/session/" + url.PathEscape(s.ref.NativeID) + suffix
 }
 
-// Resume checks that the recorded session still exists and returns its ref.
-func (s *Session) Resume(ctx context.Context, l loomharness.Launch) (loomharness.NativeRef, error) {
+// Resume checks that the recorded session still exists, installs rules as
+// its whole policy and returns its ref. OpenCode never starts a turn on its
+// own, so nothing runs before the install; it fails closed.
+func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loomharness.PermissionRule) (loomharness.NativeRef, error) {
+	native, err := nativeRules(rules)
+	if err != nil {
+		return loomharness.NativeRef{}, err
+	}
 	if err := s.c.call(ctx, "GET", s.path(""), nil, nil); err != nil {
 		return loomharness.NativeRef{}, err
 	}
+	if err := s.install(ctx, native); err != nil {
+		return loomharness.NativeRef{}, err
+	}
 	return loomharness.NativeRef{Root: l.Root, NativeID: s.ref.NativeID}, s.isolate(ctx)
+}
+
+// install replaces the session's permission rules with rules (b30c4d0:
+// PATCH /api/session/:id, protocol/src/groups/session.ts:358-364). OpenCode
+// stores them on the session row before the PATCH returns
+// (session/projector.ts:584-590, committed with the event in bus.ts:380-402)
+// and re-reads that row at every permission check (permission.ts:158-175),
+// so they also survive a server restart.
+func (s *Session) install(ctx context.Context, rules []map[string]string) error {
+	if err := s.c.call(ctx, "PATCH", s.path(""), map[string]any{"permissions": rules}, nil); err != nil {
+		return fmt.Errorf("opencode: install session permissions: %w", err)
+	}
+	return nil
 }
 
 // isolate sets the environment OpenCode gives this session's shell commands,
 // which otherwise is the server's own, per-boot password included
 // (packages/core/src/shell.ts:259-271 at b30c4d0). OpenCode keeps it in
 // memory only, so every prompt sets it again in case the server restarted.
+// Callers fail closed: no prompt is sent unless this succeeds.
 func (s *Session) isolate(ctx context.Context) error {
 	if s.c.shellEnv == nil {
 		return nil
 	}
 	env, err := s.c.shellEnv()
 	if err != nil {
-		return err
+		return fmt.Errorf("opencode: set session environment: %w", err)
 	}
 	vars := make(map[string]string, len(env))
 	for _, kv := range env {
 		k, v, _ := strings.Cut(kv, "=")
 		vars[k] = v
 	}
-	return s.c.call(ctx, "PUT", s.path("/environment"), map[string]any{"variables": vars}, nil)
+	if err := s.c.call(ctx, "PUT", s.path("/environment"), map[string]any{"variables": vars}, nil); err != nil {
+		return fmt.Errorf("opencode: set session environment: %w", err)
+	}
+	return nil
 }
 
 // Prompt queues in.Text under the native id in.Key; the first write of an id wins.

@@ -46,18 +46,18 @@ func TestContractNestedEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The parent (loom serve) environment, as the adapter inherits it.
+	// The parent (loom serve) environment: scrubbed, plus synthetic tokens.
 	tokens := map[string]string{"GITHUB_TOKEN": "ghp_nested", "GH_TOKEN": "gho_nested",
 		"GH_ENTERPRISE_TOKEN": "ghe_nested", "GITHUB_TOKEN_FILE": filepath.Join(sbx, "token"),
 		"LOOM_PR_GIT_PASSWORD": "pr_nested"}
+	parentEnv := contractEnv(sbx, "LOOM_NESTED_MARKER=kept")
 	for k, v := range tokens {
-		t.Setenv(k, v)
+		parentEnv = append(parentEnv, k+"="+v)
 	}
-	t.Setenv("LOOM_NESTED_MARKER", "kept")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	a := New(Config{Bin: bin, Env: contractEnv(sbx)})
+	a := New(Config{Bin: bin, Env: parentEnv})
 	var owned []loomharness.NativeRef
 	t.Cleanup(func() {
 		if err := a.Purge(context.Background(), owned); err != nil {
@@ -84,7 +84,7 @@ func TestContractNestedEnv(t *testing.T) {
 			}
 		}
 		dump := filepath.Join(sbx, fmt.Sprintf("nested-env-%d.txt", i))
-		b, _ := json.Marshal(map[string]any{"steps": []map[string]any{{"bash": "env > " + dump}, {"text": "done"}}})
+		b, _ := json.Marshal(map[string]any{"steps": []map[string]any{presenceStep(dump), {"text": "done"}}})
 		resp, err := http.Post(fixture+"/__script", "application/json", strings.NewReader(string(b)))
 		if err != nil || resp.StatusCode != http.StatusOK {
 			t.Fatalf("script: %v %v", resp, err)
@@ -93,20 +93,15 @@ func TestContractNestedEnv(t *testing.T) {
 		if err := a.Session(ref).Prompt(ctx, loomharness.Input{Key: PromptID("nested-1", dump), Text: "dump env"}); err != nil {
 			t.Fatal(err)
 		}
-		var env string
-		waitFor(t, "grandchild env dump", func() bool {
-			out, err := os.ReadFile(dump)
-			env = string(out)
-			return err == nil && strings.Contains(env, "LOOM_NESTED_MARKER=kept")
-		})
-		for k, v := range tokens {
-			if strings.Contains(env, k+"=") || strings.Contains(env, v) {
+		set := readPresence(t, dump)
+		for k := range tokens {
+			if set[k] {
 				t.Errorf("restart=%v: grandchild shell saw %s", restart, k)
 			}
 		}
 		// OpenCode hands shell commands the server's own environment unless
 		// the session has one; the adapter sets it without the password.
-		if _, pw := a.endpoint(); strings.Contains(env, "OPENCODE_SERVER_PASSWORD=") || strings.Contains(env, pw) {
+		if set["OPENCODE_SERVER_PASSWORD"] || set["OPENCODE_PASSWORD"] {
 			t.Errorf("restart=%v: grandchild shell saw the server password", restart)
 		}
 	}

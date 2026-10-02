@@ -234,9 +234,9 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 	if err != nil || a.CreateStep >= stepDone {
 		return a, err
 	}
-	var cfg Config
-	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
-		return a, fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
+	cfg, err := loadConfig(a)
+	if err != nil {
+		return a, err
 	}
 	if a.CreateStep < stepRow {
 		return a, fmt.Errorf("loomagent: %s was not fully inserted; retry its Create", a.AgentID)
@@ -318,6 +318,19 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 	createCrash("recorded")
 	return ref, s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: a.AgentID, Harness: a.Harness,
 		NativeRoot: ref.Root, NativeID: ref.NativeID})
+}
+
+// loadConfig decodes a's stored Config. Its saved Rules are kept as saved:
+// rows written before R-G may hold bridge-generated gh/git-push denies, but
+// that shape records no provenance to tell them from a preset's or user's
+// own, so none is dropped. Current Configs store only preset and override
+// rules, and policy adds the bridge denies from the current registration.
+func loadConfig(a loomstore.Agent) (Config, error) {
+	var cfg Config
+	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
+		return cfg, fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
+	}
+	return cfg, nil
 }
 
 // policy returns cfg's permission rules compiled with the host's current

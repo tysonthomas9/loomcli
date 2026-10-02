@@ -27,7 +27,7 @@ func (s *stub) Purge(_ context.Context, owned []NativeRef) error {
 	return nil
 }
 func (*stub) Restart(context.Context) error { return nil }
-func (s *stub) Resume(_ context.Context, l Launch) (NativeRef, error) {
+func (s *stub) Resume(_ context.Context, l Launch, _ []PermissionRule) (NativeRef, error) {
 	return NativeRef{Root: l.Root, NativeID: s.ref.NativeID}, nil
 }
 func (*stub) Prompt(context.Context, Input) error              { return ErrBusy }
@@ -56,7 +56,7 @@ func TestPortStubSatisfiesInterfaces(t *testing.T) {
 		t.Fatalf("Open = %v, %v", ref, err)
 	}
 	s := h.Session(ref)
-	if got, err := s.Resume(ctx, Launch{Root: "/p/a"}); err != nil || got != ref {
+	if got, err := s.Resume(ctx, Launch{Root: "/p/a"}, nil); err != nil || got != ref {
 		t.Fatalf("Resume = %v, %v; want %v", got, err, ref)
 	}
 	if got, _ := s.HasInput(ctx, "k"); got != LandedUnknown {

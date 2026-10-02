@@ -2,9 +2,12 @@ package opencode
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -21,8 +24,10 @@ import (
 
 // TestMain lets the test binary play `opencode` for the supervisor tests:
 // LOOM_FAKE_OPENCODE=serve answers --version and serves /api/info and
-// /api/model like plain `opencode serve`, checking OPENCODE_SERVER_PASSWORD;
-// =exit fails every serve, and --service is refused. serve,
+// /api/model like `opencode serve --stdio`, checking OPENCODE_SERVER_PASSWORD,
+// announcing {"url"} on stdout and exiting when stdin closes; =badurl
+// announces another listener; =exit fails every serve, and serve without
+// --stdio or with --service is refused. serve,
 // exit-child and hang first start a detached grandchild (=sleep), as
 // OpenCode does for shell commands, and record its pid in children.
 func TestMain(m *testing.M) {
@@ -43,7 +48,7 @@ func fakeOpenCode(mode string) int {
 		time.Sleep(time.Hour)
 		return 0
 	}
-	if mode == "exit" || slices.Contains(args, "--service") {
+	if mode == "exit" || slices.Contains(args, "--service") || !slices.Contains(args, "--stdio") {
 		return 1
 	}
 	state := os.Getenv("XDG_STATE_HOME")
@@ -58,8 +63,8 @@ func fakeOpenCode(mode string) int {
 	_ = os.WriteFile(filepath.Join(state, "config-content"), []byte(os.Getenv("OPENCODE_CONFIG_CONTENT")), 0o600)
 	var tokens []string
 	for _, k := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"} {
-		if v, ok := os.LookupEnv(k); ok {
-			tokens = append(tokens, k+"="+v)
+		if _, ok := os.LookupEnv(k); ok {
+			tokens = append(tokens, k) // names only: test output never carries values
 		}
 	}
 	_ = os.WriteFile(filepath.Join(state, "github-tokens"), []byte(strings.Join(tokens, "\n")), 0o600)
@@ -68,7 +73,7 @@ func fakeOpenCode(mode string) int {
 		return 1
 	}
 	pw := os.Getenv("OPENCODE_SERVER_PASSWORD")
-	_ = os.WriteFile(filepath.Join(state, "passwords"), []byte(pw+"\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(state, "password-sha256"), []byte(sha(pw)), 0o600) // never the value
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, r *http.Request) {
 		if _, got, _ := r.BasicAuth(); got != pw {
@@ -81,9 +86,21 @@ func fakeOpenCode(mode string) int {
 		_, _ = w.Write([]byte(`{"data":[{"id":"m","providerID":"fake","name":"M"}]}`))
 	})
 	go func() { _ = http.Serve(l, mux) }() //nolint:gosec // G114: test-only fake server.
+	url := "http://" + l.Addr().String()
+	if mode == "badurl" {
+		url = "http://127.0.0.1:1"
+	}
+	b, _ := json.Marshal(map[string]string{"url": url})
+	fmt.Println(string(b))
+	stdin := make(chan struct{})
+	go func() { _, _ = io.Copy(io.Discard, os.Stdin); close(stdin) }()
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM)
-	<-sig
+	select {
+	case <-sig:
+	case <-stdin:
+		_ = os.WriteFile(filepath.Join(state, "stdin-closed"), nil, 0o600)
+	}
 	return 0
 }
 
@@ -125,6 +142,8 @@ func liveCount(pids []int) int {
 	return n
 }
 
+func sha(s string) string { h := sha256.Sum256([]byte(s)); return hex.EncodeToString(h[:]) }
+
 func fakeAdapter(t *testing.T, mode, version string, presets ...loomharness.PresetConfig) (*Adapter, string) {
 	t.Helper()
 	return fakeAdapterEnv(t, mode, version, nil, presets...)
@@ -133,7 +152,7 @@ func fakeAdapter(t *testing.T, mode, version string, presets ...loomharness.Pres
 func fakeAdapterEnv(t *testing.T, mode, version string, extra []string, presets ...loomharness.PresetConfig) (*Adapter, string) {
 	t.Helper()
 	state := t.TempDir()
-	a := New(Config{Bin: os.Args[0], Presets: presets, Env: append(append(os.Environ(), extra...),
+	a := New(Config{Bin: os.Args[0], Presets: presets, Env: append(append(hostEnv(), extra...),
 		"LOOM_FAKE_OPENCODE="+mode,
 		"LOOM_FAKE_OPENCODE_VERSION="+version,
 		"XDG_STATE_HOME="+state,
@@ -192,9 +211,9 @@ func TestAdapterLifecycle(t *testing.T) {
 	}
 	pid := serverPID(a)
 	base, pw := a.endpoint()
-	served, _ := os.ReadFile(filepath.Join(state, "passwords"))
-	if !strings.HasPrefix(base, "http://127.0.0.1:") || len(pw) < 40 || string(served) != pw+"\n" {
-		t.Fatalf("endpoint = %s; per-boot password set through OPENCODE_SERVER_PASSWORD: %v", base, string(served) == pw+"\n")
+	served, _ := os.ReadFile(filepath.Join(state, "password-sha256"))
+	if !strings.HasPrefix(base, "http://127.0.0.1:") || len(pw) < 40 || string(served) != sha(pw) {
+		t.Fatalf("endpoint = %s; per-boot password set through OPENCODE_SERVER_PASSWORD: %v", base, string(served) == sha(pw))
 	}
 
 	b, err := os.ReadFile(filepath.Join(state, "config-content"))
@@ -346,4 +365,29 @@ func TestAdapterReapsFailedAndCancelledStarts(t *testing.T) {
 	if got := children(t, state); len(got) != 1 || liveCount(got) != 0 || len(b.owned()) != 0 {
 		t.Fatalf("cancelled start left children %v (owned %v)", got, b.owned())
 	}
+}
+
+// TestAdapterStdioLifecycle: Loom holds the server's stdin, Stop closes it
+// for a clean exit, and a {"url"} line naming any listener but the owned one
+// fails the start without leaving a survivor.
+func TestAdapterStdioLifecycle(t *testing.T) {
+	ctx := context.Background()
+	a, state := fakeAdapter(t, "serve", "opencode v2.0.19")
+	if _, err := a.Models(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pid, kids := serverPID(a), children(t, state)
+	a.Stop()
+	if _, err := os.Stat(filepath.Join(state, "stdin-closed")); err != nil || alive(pid) || liveCount(kids) != 0 {
+		t.Fatalf("Stop: stdin close seen %v, server alive %v, %d tools left", err == nil, alive(pid), liveCount(kids))
+	}
+
+	bad, badState := fakeAdapter(t, "badurl", "opencode v2.0.19")
+	if _, err := bad.Models(ctx); !errors.Is(err, loomharness.ErrUnavailable) || !strings.Contains(err.Error(), "owned listener") {
+		t.Fatalf("Models with a foreign url = %v; want an owned-listener error", err)
+	}
+	if serverPID(bad) != 0 {
+		t.Fatal("server with a foreign url kept as the owned one")
+	}
+	waitFor(t, "foreign-url start reaped", func() bool { return liveCount(children(t, badState)) == 0 })
 }
