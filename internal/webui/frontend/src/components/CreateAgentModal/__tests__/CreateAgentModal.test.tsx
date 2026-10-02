@@ -28,6 +28,7 @@ const mockUseInteractivePrompts = vi.fn();
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
   useCreateLead: () => mockCreateLead,
+  useLeadHarnesses: () => [],
   useInteractivePrompts: () => mockUseInteractivePrompts(),
 }));
 

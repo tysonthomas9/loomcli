@@ -281,3 +281,48 @@ tests:
           assert any('"agents":[]' in "".join(t.split()) for t in results), f"the model never got agent_list's result: {results}"
           PY
         intent: "Check that the model received the bridge's agent list"
+
+  - name: a lead on an unavailable harness is refused clearly and leaves its name free, and the New lead modal defaults to an available harness
+    intent: An operator who asks for a codex lead on a server without codex gets a clear refusal, can retry the same name on OpenCode, and the modal never offers codex for a lead
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-nocodex-1-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-nocodex-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: codex } }
+          status: 503
+          assert:
+            - path: code
+              equals: harness_unavailable
+            - path: error
+              equals: "codex is not available on this server; use opencode"
+        intent: "Check that a codex lead is refused with a message naming the harness to use"
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-nocodex-2-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-nocodex-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          assert:
+            - path: harness
+              equals: opencode
+        intent: "Check that a retry with the same name on OpenCode is created, not refused as a taken name"
+      - open: /ws/E2E-AGV1-LEAD/agents
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - wait:
+          fn: >-
+            (() => { const s = document.querySelector('[data-testid=create-agent-backend]');
+              return !!s && s.value === 'opencode' && Array.from(s.options).every((o) => o.value !== 'codex'); })()
+        intent: "Wait until the lead's backend defaults to opencode with no codex option"
+      - fill: { testid: create-agent-name, value: "agv1-default-${RUN_ID:-local}" }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/E2E-AGV1-LEAD/chat/" }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat labels the new lead's harness as opencode"

@@ -85,7 +85,7 @@ func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstor
 	case errors.Is(err, loomstore.ErrSpecChanged):
 		return a, &Error{Code: CodeSpecVersionMismatch, Message: "the agent changed meanwhile"}
 	case err != nil && strings.Contains(err.Error(), "agents.name"):
-		return a, &Error{Code: CodeAgentNameTaken, Message: to.Name}
+		return a, nameTaken(to.Name)
 	case err != nil:
 		return a, err
 	}

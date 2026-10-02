@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -115,7 +116,7 @@ func (s *Service) checkCreate(ctx context.Context, req CreateRequest) (Preset, s
 		return p, name, parent, err
 	}
 	if len(taken) > 0 {
-		return p, name, parent, &Error{Code: CodeAgentNameTaken, Message: name}
+		return p, name, parent, nameTaken(name)
 	}
 	if _, err := s.repoPath(ctx, req.Repo); err != nil {
 		return p, name, parent, err
@@ -145,6 +146,9 @@ func (s *Service) insertCreate(ctx context.Context, req CreateRequest) (loomstor
 	if err != nil {
 		return loomstore.Agent{}, err
 	}
+	if _, ok := s.harnesses[cfg.Harness]; !ok {
+		return loomstore.Agent{}, s.unavailable(cfg.Harness)
+	}
 	if _, err := s.policy(ctx, cfg); err != nil {
 		return loomstore.Agent{}, err
 	}
@@ -155,11 +159,26 @@ func (s *Service) insertCreate(ctx context.Context, req CreateRequest) (loomstor
 	a := s.newRow(p, name, parent, req, cfg, string(spec))
 	if err := s.store.InsertAgent(ctx, a); err != nil {
 		if strings.Contains(err.Error(), "agents.name") {
-			return a, &Error{Code: CodeAgentNameTaken, Message: name}
+			return a, nameTaken(name)
 		}
 		return a, err
 	}
 	return a, nil
+}
+
+// Wired lists the harnesses this service runs, sorted.
+func (s *Service) Wired() []string { return slices.Sorted(maps.Keys(s.harnesses)) }
+
+// unavailable is harness_unavailable for a harness this service does not run.
+func (s *Service) unavailable(harness string) error {
+	wired := s.Wired()
+	return &Error{Code: CodeHarnessUnavailable, Allowed: wired,
+		Message: fmt.Sprintf("%s is not available on this server; use %s", harness, strings.Join(wired, " or "))}
+}
+
+// nameTaken is agent_name_taken for name.
+func nameTaken(name string) error {
+	return &Error{Code: CodeAgentNameTaken, Message: fmt.Sprintf("an agent named %q already exists", name)}
 }
 
 // newRow builds the creating row for req with its resolved Config.
@@ -337,7 +356,7 @@ func (s *Service) hasBridgeTools(ctx context.Context, preset string) bool {
 func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config) (loomharness.NativeRef, error) {
 	h, ok := s.harnesses[a.Harness]
 	if !ok {
-		return loomharness.NativeRef{}, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"}
+		return loomharness.NativeRef{}, s.unavailable(a.Harness)
 	}
 	rules, err := s.policy(ctx, cfg)
 	if err != nil {

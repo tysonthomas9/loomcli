@@ -13,6 +13,7 @@ const mockCreateAgent = vi.fn();
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
   useCreateLead: () => mockCreateLead,
+  useLeadHarnesses: () => ["opencode"],
   useInteractivePrompts: () => ({
     prompts: [
       { id: "lead", label: "Lead" },
@@ -49,7 +50,7 @@ describe("CreateAgentModal", () => {
     });
   });
 
-  it("creates the Lead card through the Agent API and hands back the agent", async () => {
+  it("creates the Lead card through the Agent API on a harness the server runs", async () => {
     const onSuccess = vi.fn();
     const onLeadCreated = vi.fn();
 
@@ -70,6 +71,8 @@ describe("CreateAgentModal", () => {
     });
     fireEvent.click(screen.getByTestId("create-agent-template-lead"));
     expect(screen.queryByText(/^Lead agent$/i)).not.toBeInTheDocument();
+    // The workspace default is codex, which this server cannot run a lead on.
+    expect(screen.getByTestId("create-agent-backend")).toHaveValue("opencode");
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
 
     await waitFor(() => expect(onLeadCreated).toHaveBeenCalledWith(leadAgent));
@@ -78,7 +81,7 @@ describe("CreateAgentModal", () => {
       name: "lead-nova",
       repo: "/tmp/hello-world",
       base_ref: "main",
-      overrides: { harness: "codex" },
+      overrides: { harness: "opencode" },
     });
     expect(mockCreateAgent).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();

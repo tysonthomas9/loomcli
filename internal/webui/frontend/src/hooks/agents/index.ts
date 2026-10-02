@@ -11,6 +11,7 @@ export type {
 export {
   useCreateLead,
   useCreateWorkspaceAgent,
+  useLeadHarnesses,
 } from "./useCreateWorkspaceAgent";
 
 export { useInteractivePrompts } from "./useInteractivePrompts";

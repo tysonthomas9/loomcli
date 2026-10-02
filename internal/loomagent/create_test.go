@@ -791,3 +791,25 @@ func TestCreateRefusesSharedBridgeFolder(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateUnwiredHarnessLeavesNoAgent: a harness this server does not run
+// is refused before the row is saved, with a message naming the ones it runs,
+// so a retry on a wired harness can reuse the name.
+func TestCreateUnwiredHarnessLeavesNoAgent(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	req := leadReq("r1")
+	req.Overrides.Harness = "codex"
+	_, err := s.Create(ctx, req)
+	if got := wantCode(t, err, CodeHarnessUnavailable); got.Message != "codex is not available on this server; use opencode" {
+		t.Fatalf("message = %q", got.Message)
+	}
+	if _, err := s.Create(ctx, leadReq("r2")); err != nil {
+		t.Fatalf("retry on opencode = %v", err)
+	}
+	_, err = s.Create(ctx, leadReq("r3"))
+	if got := wantCode(t, err, CodeAgentNameTaken); got.Message != `an agent named "alpha" already exists` {
+		t.Fatalf("message = %q", got.Message)
+	}
+}

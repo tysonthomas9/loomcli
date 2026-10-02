@@ -245,18 +245,18 @@ func listEvents(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (i
 	return http.StatusOK, eventPageOut(page), err
 }
 
-func (h *Handler) listPresets(_ http.ResponseWriter, r *http.Request, _ *loomagent.Service) (int, any, error) {
+func (h *Handler) listPresets(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
 	ps, err := h.presets.List(r.Context())
 	out := []Preset{}
 	for _, p := range ps {
-		out = append(out, presetOut(p))
+		out = append(out, presetOut(p, s.Wired()))
 	}
 	return http.StatusOK, PresetList{Presets: out}, err
 }
 
-func (h *Handler) getPreset(_ http.ResponseWriter, r *http.Request, _ *loomagent.Service) (int, any, error) {
+func (h *Handler) getPreset(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
 	p, err := h.presets.Get(r.Context(), r.PathValue("name"))
-	return http.StatusOK, presetOut(p), err
+	return http.StatusOK, presetOut(p, s.Wired()), err
 }
 
 func intParam(v string) (int64, error) {

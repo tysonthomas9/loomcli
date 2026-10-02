@@ -11,6 +11,7 @@ import {
   useCreateLead,
   useCreateWorkspaceAgent,
   useInteractivePrompts,
+  useLeadHarnesses,
 } from "@/hooks/agents";
 import { useBackends } from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
@@ -170,6 +171,7 @@ export function CreateAgentModal({
   const createAgent = useCreateWorkspaceAgent(workspaceId);
   const createLead = useCreateLead(workspaceId);
   const { backends } = useBackends();
+  const leadHarnesses = useLeadHarnesses(workspaceId);
   const { prompts: fetchedInteractivePrompts, error: promptLoadError } =
     useInteractivePrompts(workspaceId);
 
@@ -232,13 +234,24 @@ export function CreateAgentModal({
       prev.includes(repo) ? prev.filter((r) => r !== repo) : [...prev, repo],
     );
 
+  const isLead =
+    selectedKind === "interactive" &&
+    (selectedBuiltinPromptID === "lead" ||
+      selectedBuiltinPromptID === CUSTOM_PROMPT_ID);
+  // A lead runs only on a harness this server has; until that list loads,
+  // the chosen backend stands and the server explains a refusal.
+  const leadOnly = isLead && leadHarnesses.length > 0;
+  const harness =
+    leadOnly && !leadHarnesses.includes(backend) ? leadHarnesses[0] : backend;
+
   const backendOptions = useMemo(() => {
+    if (leadOnly) return leadHarnesses.map((h) => ({ value: h, label: h }));
     const opts = backends.map((b) => ({ value: b.name, label: b.displayName }));
     if (backend && !opts.some((o) => o.value === backend)) {
       opts.unshift({ value: backend, label: backend });
     }
     return opts.length > 0 ? opts : [{ value: backend, label: backend }];
-  }, [backend, backends]);
+  }, [backend, backends, leadOnly, leadHarnesses]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -311,11 +324,7 @@ export function CreateAgentModal({
     try {
       // Lead and Custom prompt (a lead with a persona override) go through
       // the Agent API and open its chat; the other templates are unchanged.
-      if (
-        selectedKind === "interactive" &&
-        (selectedBuiltinPromptID === "lead" ||
-          selectedBuiltinPromptID === CUSTOM_PROMPT_ID)
-      ) {
+      if (isLead) {
         const repo = repos.find((r) => r.name === selectedRepos[0]);
         if (!repo) {
           setError("Pick a repo for the lead to work in.");
@@ -327,7 +336,7 @@ export function CreateAgentModal({
           name: trimmedName,
           repo: repo.path, // the Agent API takes the clone path, not the name
           ...(baseRef ? { base_ref: baseRef } : {}),
-          ...(trimmedBackend ? { overrides: { harness: trimmedBackend } } : {}),
+          ...(harness ? { overrides: { harness } } : {}),
           ...(selectedBuiltinPromptID === CUSTOM_PROMPT_ID
             ? { persona: { text: customPrompt.trim() } }
             : {}),
@@ -563,7 +572,7 @@ export function CreateAgentModal({
               <select
                 id="agent-backend"
                 className={styles.select}
-                value={backend}
+                value={harness}
                 onChange={(event) => setBackend(event.target.value)}
                 disabled={isSubmitting}
                 data-testid="create-agent-backend"

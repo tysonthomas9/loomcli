@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -45,7 +47,8 @@ func newServer(t *testing.T, identity *middleware.UserIdentity) *httptest.Server
 			t.Fatal(err)
 		}
 	}
-	svc := loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: "ws"})
+	svc := loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: "ws",
+		Harnesses: map[string]loomharness.Harness{"opencode": fake.New()}})
 	mux := http.NewServeMux()
 	ws := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,8 +192,8 @@ func TestAgentRESTRoutes(t *testing.T) {
 		t.Fatalf("presets = %d %v", status, out)
 	}
 	status, out = call(t, srv, "GET", "ws/v1/presets/lead", "", "")
-	if status != 200 || out["name"] != "lead" {
-		t.Fatalf("preset = %d %v", status, out)
+	if hs, _ := out["harnesses"].([]any); status != 200 || out["name"] != "lead" || !reflect.DeepEqual(hs, []any{"opencode"}) {
+		t.Fatalf("preset = %d %v, want only the wired opencode harness", status, out)
 	}
 	status, out = call(t, srv, "GET", "ws/v1/presets/nope", "", "")
 	want(t, "unknown preset", status, out, 404, "preset_not_found")

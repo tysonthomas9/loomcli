@@ -2,6 +2,7 @@ package agentsv1
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -264,9 +265,11 @@ type Preset struct {
 	Overridable    []string         `json:"overridable"`
 }
 
-func presetOut(p loomagent.Preset) Preset {
+// presetOut lists only the preset's harnesses this server runs (wired).
+func presetOut(p loomagent.Preset, wired []string) Preset {
+	harnesses := slices.DeleteFunc(slices.Clone(p.Harnesses), func(h string) bool { return !slices.Contains(wired, h) })
 	out := Preset{Name: p.Name, Version: p.Version, Mode: p.Mode, RoleKind: p.RoleKind, OwnerKind: p.OwnerKind,
-		ExternalKeyFmt: p.ExternalKeyFmt, Persona: p.Persona, Harnesses: p.Harnesses, Rules: []PermissionRule{},
+		ExternalKeyFmt: p.ExternalKeyFmt, Persona: p.Persona, Harnesses: harnesses, Rules: []PermissionRule{},
 		Tools: p.Tools, Subagents: p.Subagents, Overridable: p.Overridable}
 	for _, r := range p.Rules {
 		out.Rules = append(out.Rules, PermissionRule{r.Action, r.Resource, r.Effect})
