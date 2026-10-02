@@ -201,24 +201,32 @@ if [[ -z "${LOOM_SDK_ROOT:-}" && -f "$REPO_ROOT/sdk/package.json" ]]; then
 fi
 # Run from E2E workspace so the Loom API server discovers the isolated project.
 cd "$E2E_WORKSPACE"
-"$LOOM_BIN" serve \
-    --port "${PORT}" \
-    --frontend-url "http://127.0.0.1:${FRONTEND_PORT}" \
-    --frontend-url "http://localhost:${FRONTEND_PORT}" &
-LOOM_PID=$!
+# A test restarts loom serve by creating RESTART_MARKER and stopping the pid
+# in SERVE_PID_FILE; the wait at the end starts serve again on the same state.
+RESTART_MARKER="$E2E_WORKSPACE/.restart-serve"
+SERVE_PID_FILE="$E2E_WORKSPACE/.serve.pid"
+start_loom_serve() {
+    "$LOOM_BIN" serve \
+        --port "${PORT}" \
+        --frontend-url "http://127.0.0.1:${FRONTEND_PORT}" \
+        --frontend-url "http://localhost:${FRONTEND_PORT}" &
+    LOOM_PID=$!
+    echo "$LOOM_PID" > "$SERVE_PID_FILE"
 
-# Wait for loom serve to become ready.
-echo "[e2e] Waiting for loom serve on :${PORT}..."
-for i in $(seq 1 20); do
-    if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
-        break
+    # Wait for loom serve to become ready.
+    echo "[e2e] Waiting for loom serve on :${PORT}..."
+    for i in $(seq 1 20); do
+        if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.5
+    done
+    if ! curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+        echo "[e2e] ERROR: loom serve did not become ready on :${PORT}"
+        exit 1
     fi
-    sleep 0.5
-done
-if ! curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
-    echo "[e2e] ERROR: loom serve did not become ready on :${PORT}"
-    exit 1
-fi
+}
+start_loom_serve
 
 # Register the primary workspace through the live API. This guarantees the
 # FleetDB-backed server, workspace registry, and active workspace state all see
@@ -298,9 +306,17 @@ echo "[e2e] E2E server stack ready (api :${PORT}, frontend :${FRONTEND_PORT})"
 # Keep the script attached to loom serve's lifetime. Playwright sends SIGTERM
 # to the script on shutdown, which fires the cleanup trap. `wait` is used
 # instead of `wait -n` for bash 3.2 compatibility (macOS system bash).
-wait "$LOOM_PID"
+while true; do
+    serve_status=0
+    wait "$LOOM_PID" || serve_status=$?
+    [[ -f "$RESTART_MARKER" ]] || break
+    rm -f "$RESTART_MARKER"
+    echo "[e2e] Restarting loom serve (test request)..."
+    start_loom_serve
+done
 # If loom serve exited on its own, make sure preview is also torn down.
 if [[ -n "${PREVIEW_PID}" ]]; then
     kill "$PREVIEW_PID" 2>/dev/null || true
     wait "$PREVIEW_PID" 2>/dev/null || true
 fi
+exit "$serve_status"
