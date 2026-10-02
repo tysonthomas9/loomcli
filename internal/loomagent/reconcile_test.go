@@ -273,6 +273,51 @@ func TestReconcileInterruptedTurnsAndHandedMessages(t *testing.T) {
 	}
 }
 
+// afterRead is a harness that calls then after each history read.
+type afterRead struct {
+	loomharness.Harness
+	then func()
+}
+
+func (h afterRead) Session(ref loomharness.NativeRef) loomharness.Session {
+	return afterReadSession{h.Harness.Session(ref), h.then}
+}
+
+type afterReadSession struct {
+	loomharness.Session
+	then func()
+}
+
+func (x afterReadSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
+	page, err := x.Session.Messages(ctx, after, limit)
+	x.then()
+	return page, err
+}
+
+// TestReconcileTurnEndedAfterBackfill: a turn handed over and ended natively
+// after the backfill read the history, and before settle, is not ended as
+// lost: its native end is applied by the next backfill, so agent.idle names
+// the native turn and follows its agent.turn_completed.
+func TestReconcileTurnEndedAfterBackfill(t *testing.T) {
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	a, _ := newLead(t, e, s, "alpha")
+	var once sync.Once
+	s.harnesses["opencode"] = afterRead{e.h, func() {
+		once.Do(func() { mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user)) }) // the fake runs the whole turn
+	}}
+	reconcile(t, s)
+	if got := s.get(t, a.AgentID); got.RunningTurnID == nil || len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) != 0 {
+		t.Fatalf("Reconcile ended the natively ended turn as lost: state %s", got.State)
+	}
+	reconcile(t, s)
+	all := rows(t, s, a.AgentID, 0)
+	tc, idle := kinds(all, EventTurnCompleted), kinds(all, EventIdle)
+	if len(tc) != 1 || len(idle) != 1 || idle[0].TurnID != tc[0].TurnID || idle[0].Seq < tc[0].Seq {
+		t.Fatalf("turn_completed %v idle %v; want one each, idle after and naming the native turn", ids(tc), ids(idle))
+	}
+}
+
 // TestReconcileFinishesDeleteAndFlagsMissingSession: a Delete left
 // half done is finished; a session the harness lost shows session_missing.
 func TestReconcileFinishesDeleteAndFlagsMissingSession(t *testing.T) {

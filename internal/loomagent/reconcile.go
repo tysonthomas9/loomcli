@@ -151,7 +151,29 @@ func (s *Service) settle(ctx context.Context, agentID string) error {
 	if st.Running {
 		return nil
 	}
+	if ended, err := endedNatively(ctx, sess, *a.RunningTurnID); err != nil || ended {
+		return harnessErr(err) // it ended after the backfill read: the feed or the next backfill applies its end
+	}
 	return s.endLostTurn(ctx, a, sess)
+}
+
+// endedNatively reports whether sess's history, read after its Status showed
+// no turn running, has the end of running (a turn ID, or an input key until
+// turn.started names the turn).
+func endedNatively(ctx context.Context, sess loomharness.Session, running string) (bool, error) {
+	f := fold{running: running, asks: map[string]*Ask{}}
+	for after := ""; ; {
+		page, err := sess.Messages(ctx, after, 100)
+		if err != nil {
+			return false, err
+		}
+		for _, e := range page.Events {
+			f.add(e)
+		}
+		if after = page.Next; after == "" {
+			return f.ended != nil, nil
+		}
+	}
 }
 
 // endLostTurn ends a's running turn, which the harness no longer runs and
