@@ -869,7 +869,7 @@ tests:
           path: "/api/workspaces/E2E-WS-TASK/issues/${var:tsk20tIssueId}"
           body:
             status: "closed"
-        intent: "The Task Runner's result closes the task, as the coder's loom data close does"
+        intent: "The test harness closes the completed task through the issues API, standing in for the coder's loom data close"
       - run: |
           set -e
           run="${RUN_ID:-local}"
