@@ -44,24 +44,35 @@ func requireMergeAuthority(ctx context.Context, request StackRequest, target str
 // no layer up to target merges until every predecessor change in another
 // repository has landed on its trunk.
 func requireDependenciesLanded(ctx context.Context, store Store, request StackRequest, target string) error {
-	deps, ok := store.(landing.DependencyStore)
-	if !ok {
-		return errors.New("store cannot read cross-repo dependencies")
-	}
 	predecessors := request.Predecessors
 	if predecessors == nil {
 		predecessors = IssuePredecessors
 	}
-	for _, change := range request.Changes {
-		status, found, err := landing.CrossRepoDependencies(ctx, deps, request.Workspace, change, predecessors)
+	changes := request.Changes
+	for index, change := range changes {
+		if change == target {
+			changes = changes[:index+1]
+			break
+		}
+	}
+	return requireChangesLanded(ctx, store, request.Workspace, changes, predecessors)
+}
+
+// mergePredecessors is what Reconcile re-reads when it dispatches a merge.
+var mergePredecessors landing.Predecessors = IssuePredecessors
+
+func requireChangesLanded(ctx context.Context, store Store, workspace string, changes []string, predecessors landing.Predecessors) error {
+	deps, ok := store.(landing.DependencyStore)
+	if !ok {
+		return errors.New("store cannot read cross-repo dependencies")
+	}
+	for _, change := range changes {
+		status, found, err := landing.CrossRepoDependencies(ctx, deps, workspace, change, predecessors)
 		if err != nil {
 			return err
 		}
 		if found && status.State != "success" {
 			return loomgit.NewError(loomgit.MergeBlocked, status.Description, nil)
-		}
-		if change == target {
-			break
 		}
 	}
 	return nil

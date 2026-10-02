@@ -244,9 +244,9 @@ func postDependencyStatus(ctx context.Context, store Store, deps dependencyJourn
 			failures = append(failures, fmt.Errorf("post loom/dependencies on %s@%s: %w", publication.Slug, sha, err))
 			continue
 		}
-		if app > 0 {
-			failures = append(failures, deps.RecordDependencyApp(ctx, publication.Slug, app))
-		}
+		// 0 (a commit status) replaces an app recorded earlier, so a pin to
+		// that app no longer reads as enforced.
+		failures = append(failures, deps.RecordDependencyApp(ctx, publication.Slug, app))
 		failures = append(failures, deps.RecordDependencyPost(ctx, publication.Workspace, publication.Change, sha, status.State, status.Description))
 	}
 	return failures

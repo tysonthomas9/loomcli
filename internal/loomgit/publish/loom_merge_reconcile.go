@@ -102,6 +102,9 @@ func reconcileLoomDispatch(ctx context.Context, store *journal.SQLite, forge loo
 	if merge.ProviderRequestID != "" {
 		return pollLoomMerge(ctx, store, forge, merge, publication, owner, repo)
 	}
+	if err := requireChangesLanded(ctx, store, merge.Workspace, []string{publication.Change}, mergePredecessors); err != nil {
+		return blockConfirmedError(ctx, store, merge, err)
+	}
 	ready, err := loomMergeHealth(ctx, forge, publication, pr, owner, repo)
 	if err != nil {
 		return blockConfirmedError(ctx, store, merge, err)
