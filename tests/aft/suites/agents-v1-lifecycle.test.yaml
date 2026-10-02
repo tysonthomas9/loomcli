@@ -165,3 +165,70 @@ tests:
             - path: code
               equals: history_expired
         intent: "Check that ListEvents reports history_expired"
+
+  - name: a failed native purge shows an incomplete expiry until the retry succeeds
+    intent: While OpenCode is unavailable the sweep's native delete fails, the chat shows History expiry incomplete and the history is kept; once OpenCode is back the next sweep purges it and the marker goes
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LIFE/v1/agents
+          headers: { Idempotency-Key: "agv1-incomplete-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-incomplete-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-life-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1IncompleteId
+        intent: "Create an OpenCode lead, which opens its native session"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1IncompleteId}/archive"
+          headers: { Idempotency-Key: "agv1-incomplete-archive-${RUN_ID:-local}" }
+          body: { reason: done }
+        intent: "Archive the lead, which starts its retention clock"
+      - run: |
+          set -e
+          # A real outage, through OpenCode's own registration: an older
+          # service (pid 1 is always alive) is registered in AFT's sandbox,
+          # which Loom refuses and never replaces (R22), and the AFT service
+          # is stopped. Loom's native delete then fails.
+          svc="$AFT_OPENCODE_SERVICE"
+          cp "$svc" "$AFT_WORK_DIR/agv1-opencode-service.json"
+          pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$svc")"
+          printf '{"id":"aft-old","version":"1.0.0","url":"http://127.0.0.1:9","pid":1,"password":"x"}' > "$svc"
+          kill "$pid"
+        intent: "Make OpenCode unavailable by registering an older service Loom refuses and stopping the AFT service"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1IncompleteId")"
+          for _ in $(seq 1 50); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE/v1/agents/$id" |
+              python3 -c 'import json,sys; a=json.load(sys.stdin); sys.exit(0 if a.get("history_purge_failed_at") and not a.get("history_purged_at") else 1)' && exit 0
+            sleep 2
+          done
+          echo "the sweep did not record a failed purge" >&2
+          exit 1
+        intent: "Wait until serve's sweep records the failed native purge"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LIFE/chat/$(cat "$AFT_WORK_DIR/agv1IncompleteId")"
+        intent: "Open the lead's chat"
+      - wait:
+          fn: >-
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('History expiry incomplete')
+        intent: "Wait until the chat header shows History expiry incomplete"
+      - run: |
+          set -e
+          cp "$AFT_WORK_DIR/agv1-opencode-service.json" "$AFT_OPENCODE_SERVICE"
+          id="$(cat "$AFT_WORK_DIR/agv1IncompleteId")"
+          for _ in $(seq 1 50); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE/v1/agents/$id" |
+              python3 -c 'import json,sys; a=json.load(sys.stdin); sys.exit(0 if a.get("history_purged_at") and not a.get("history_purge_failed_at") else 1)' && exit 0
+            sleep 2
+          done
+          echo "the retry did not purge the history" >&2
+          exit 1
+        intent: "Restore the registration (the stopped service; Loom starts a new one) and wait until a later sweep purges the history"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const h = document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '';
+              return h.includes('archived') && !h.includes('History expiry incomplete'); })()
+        intent: "Wait until the reloaded chat shows the lead archived with no incomplete-expiry marker"
