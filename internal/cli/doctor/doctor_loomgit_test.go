@@ -58,3 +58,30 @@ func TestDoctorReportsMissingProviderRef(t *testing.T) {
 		t.Fatalf("doctor omitted provider finding: %+v", result)
 	}
 }
+
+func TestDoctorWarnsWhenDependencyStatusNotSynced(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	path := filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	schema := `CREATE TABLE workspace_repos(workspace TEXT,repo TEXT,trunk TEXT,workspace_branch TEXT,base_sha TEXT);
+	CREATE TABLE working_areas(workspace TEXT,lead TEXT,repo TEXT,path TEXT,branch TEXT,base_sha TEXT,mode TEXT);
+	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER);
+	CREATE TABLE change_publications(workspace TEXT,change_id TEXT,repo TEXT,branch TEXT,trunk TEXT,slug TEXT,head_sha TEXT,phase TEXT,pr_number INTEGER,pr_url TEXT);
+	CREATE TABLE dependency_checks(workspace TEXT,change_id TEXT,repo TEXT,state TEXT,reason TEXT,synced INTEGER);
+	CREATE TABLE dependency_enforcement(repo TEXT,branch TEXT,state TEXT,reason TEXT);
+	INSERT INTO dependency_checks VALUES ('W','C2','owner/repo2','pending','Waiting for owner/repo1#1 to land',0);`
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	result := checkLoomGitInventory(context.Background(), false)
+	if result.Status != StatusWarn || !strings.Contains(result.Detail, "dependency status not synced") {
+		t.Fatalf("doctor hid an unsynced dependency status: %+v", result)
+	}
+}
