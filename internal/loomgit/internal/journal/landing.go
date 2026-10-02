@@ -75,6 +75,9 @@ func createDependencyChecks(db *sql.DB) error {
 		state TEXT NOT NULL, reason TEXT NOT NULL,
 		PRIMARY KEY(workspace, change_id, sha)
 	);
+	CREATE TABLE IF NOT EXISTS dependency_apps (
+		repo TEXT NOT NULL PRIMARY KEY, app_id INTEGER NOT NULL
+	);
 	CREATE TABLE IF NOT EXISTS dependency_enforcement (
 		repo TEXT NOT NULL, branch TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL,
 		PRIMARY KEY(repo, branch)
@@ -296,6 +299,23 @@ func (s *SQLite) RecordDependencyPost(ctx context.Context, workspace, change, sh
 		ON CONFLICT(workspace,change_id,sha) DO UPDATE SET state=excluded.state,reason=excluded.reason`,
 		workspace, change, sha, state, reason)
 	return err
+}
+
+// RecordDependencyApp remembers the GitHub App Loom posts loom/dependencies as in a repository.
+func (s *SQLite) RecordDependencyApp(ctx context.Context, repo string, app int64) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO dependency_apps(repo,app_id) VALUES (?,?)
+		ON CONFLICT(repo) DO UPDATE SET app_id=excluded.app_id`, repo, app)
+	return err
+}
+
+// DependencyApp returns the app Loom posts as in a repository, or 0 when unknown.
+func (s *SQLite) DependencyApp(ctx context.Context, repo string) (int64, error) {
+	var app int64
+	err := s.db.QueryRowContext(ctx, `SELECT app_id FROM dependency_apps WHERE repo=?`, repo).Scan(&app)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return app, err
 }
 
 func (s *SQLite) RecordDependencyEnforcement(ctx context.Context, enforcement DependencyEnforcement) error {

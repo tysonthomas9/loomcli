@@ -89,3 +89,20 @@ func TestNativeMergeWaitsForCrossRepoPredecessorOfAnyMergedLayer(t *testing.T) {
 		t.Fatalf("layer below the dependent was held: %v", err)
 	}
 }
+
+func TestMergeWaitsForPredecessorTaskWithNoRecordedChange(t *testing.T) {
+	item, forge, request := loomMergeFixture(t)
+	if _, err := item.store.DriverChange(context.Background(), "W", "T2", "app", "A"); err != nil {
+		t.Fatal(err)
+	}
+	request.Predecessors = func(_ context.Context, _, task string) ([]string, error) {
+		if task == "T2" {
+			return []string{"T9"}, nil
+		}
+		return nil, nil
+	}
+	blockedOn(t, (LoomStackBackend{Store: item.store}).MergeUpTo(context.Background(), request, "A"), "task T9")
+	if forge.merged != 0 {
+		t.Fatal("merged before an unmapped predecessor recorded a change")
+	}
+}
