@@ -258,6 +258,25 @@ func (s *SQLite) RevisionApplied(ctx context.Context, workspace, change string, 
 	return count > 0, err
 }
 
+// ApprovalLeads lists the leads an approving verdict on this revision targets.
+func (s *SQLite) ApprovalLeads(ctx context.Context, workspace, change string, revision int) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT lead FROM approval_follow
+		WHERE workspace=? AND change_id=? AND revision=? ORDER BY lead`, workspace, change, revision)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var leads []string
+	for rows.Next() {
+		var lead string
+		if err := rows.Scan(&lead); err != nil {
+			return nil, err
+		}
+		leads = append(leads, lead)
+	}
+	return leads, rows.Err()
+}
+
 func (s *SQLite) SetApprovalFollow(ctx context.Context, approval PendingApproval, status string, paths []string) error {
 	data, err := json.Marshal(paths)
 	if err != nil {

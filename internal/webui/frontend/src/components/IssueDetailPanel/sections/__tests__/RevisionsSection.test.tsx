@@ -25,6 +25,8 @@ const revision = {
   head_sha: "a".repeat(40),
   outcome: "completed",
   incomplete: false,
+  applied: false,
+  needs_working_area: false,
 };
 
 describe("RevisionsSection", () => {
@@ -154,6 +156,26 @@ describe("RevisionsSection", () => {
         "reject",
         "",
         undefined,
+      ),
+    );
+  });
+
+  it("offers Apply after a reload for an approved revision waiting for a working area", async () => {
+    getTaskRevisions.mockResolvedValue([
+      { ...revision, verdict: "approve", needs_working_area: true },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    expect(
+      await screen.findByText(
+        "Approved: Apply to create the lead working area",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(applyRevision).toHaveBeenCalledWith(
+        "W",
+        expect.objectContaining({ change_id: "C", number: 2 }),
+        "lead-a",
       ),
     );
   });

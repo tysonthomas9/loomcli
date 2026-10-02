@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,10 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
 
 // The revision list reports applied state from the applied log, so a reload
@@ -56,7 +59,8 @@ func TestTaskRevisionsReportAppliedStateFromAppliedLog(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
-	applied := func() bool {
+	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", handleVerdict)
+	state := func() (bool, bool) {
 		t.Helper()
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/workspaces/W/issues/T/revisions", nil))
@@ -67,13 +71,32 @@ func TestTaskRevisionsReportAppliedStateFromAppliedLog(t *testing.T) {
 			t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
 		}
 		value, ok := body.Data[0]["applied"].(bool)
-		if !ok {
-			t.Fatalf("applied field missing: %s", rec.Body.String())
+		needs, needsOK := body.Data[0]["needs_working_area"].(bool)
+		if !ok || !needsOK {
+			t.Fatalf("applied or needs_working_area missing: %s", rec.Body.String())
 		}
-		return value
+		return value, needs
 	}
-	if applied() {
-		t.Fatal("fresh revision reported applied")
+	applied := func() bool { t.Helper(); a, _ := state(); return a }
+	needsArea := func() bool { t.Helper(); _, n := state(); return n }
+	if applied() || needsArea() {
+		t.Fatal("fresh revision reported applied or waiting for a working area")
+	}
+	// Approve with no lead working area: the verdict waits for one, and the
+	// list says so on every reload.
+	previousArea := hasWorkingArea
+	hasWorkingArea = func(context.Context, *review.Local, string, string) (bool, error) { return false, nil }
+	t.Cleanup(func() { hasWorkingArea = previousArea })
+	verdictBody, _ := json.Marshal(map[string]any{"head_sha": revision.HeadSHA, "verdict": "approve",
+		"actor": map[string]string{"kind": "human", "id": "user"}})
+	post := httptest.NewRecorder()
+	mux.ServeHTTP(post, httptest.NewRequest("POST", "/api/workspaces/W/changes/"+revision.Change+"/revisions/"+
+		strconv.Itoa(revision.Number)+"/verdict", bytes.NewReader(verdictBody)))
+	if post.Code != 200 || !strings.Contains(post.Body.String(), "approved_waiting_for_working_area") {
+		t.Fatalf("verdict: %d %s", post.Code, post.Body.String())
+	}
+	if !needsArea() {
+		t.Fatal("approved revision without a working area not reported as needing one")
 	}
 	db, err := sql.Open("sqlite", storePath)
 	if err != nil {
@@ -88,12 +111,16 @@ func TestTaskRevisionsReportAppliedStateFromAppliedLog(t *testing.T) {
 	}
 	run(`INSERT INTO applied_layers (request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,phase)
 		VALUES ('req-1','W','lead',?,?,?,?,'[]','[]','done')`, revision.Change, revision.Number, base, revision.HeadSHA)
-	if !applied() {
-		t.Fatal("revision with a done applied layer not reported applied")
+	if a, n := state(); !a || n {
+		t.Fatalf("revision with a done applied layer: applied=%t needs_working_area=%t", a, n)
 	}
 	// loom unapply rebuilds the area and marks the change's layers unapplied.
 	run(`UPDATE applied_layers SET phase='unapplied' WHERE request_id='req-1'`)
 	if applied() {
 		t.Fatal("unapplied revision still reported applied")
+	}
+	run(`INSERT INTO working_areas (workspace,lead,repo,path,branch,base_sha,mode) VALUES ('W','lead','repo','/x','b',?,'interactive')`, base)
+	if needsArea() {
+		t.Fatal("revision reported as needing a working area after the lead has one")
 	}
 }
