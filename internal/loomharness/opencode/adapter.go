@@ -29,6 +29,11 @@ type Config struct {
 	// <root>/<repo>/<key>). Loom keeps its presets in Worktrees/.opencode/agent,
 	// where every OpenCode service finds them for sessions below it.
 	Worktrees string
+	// Bridge is the `loom agent mcp-bridge` command. It is registered once as
+	// the "loom" MCP server in Worktrees/.opencode/opencode.json; OpenCode
+	// starts it in each session's directory, where it finds that agent's
+	// settings (bridgeEnv). nil registers none.
+	Bridge []string
 }
 
 // Supervisor timings; variables so tests can shorten them.
@@ -431,7 +436,8 @@ var presetName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // loom-<name>.md per preset (frontmatter mode primary, body the persona;
 // config/plugin/agent.ts:98-120) and no other loom-*.md. Other files in the
 // directory are never touched. Files are replaced atomically and only when
-// their content changes, so services reload only on a real change.
+// their content changes, so services reload only on a real change. With a
+// Bridge, <Worktrees>/.opencode/opencode.json registers it as MCP server "loom".
 func (a *Adapter) syncPresets() error {
 	if len(a.cfg.Presets) == 0 && a.presets == "" {
 		return nil
@@ -462,26 +468,57 @@ func (a *Adapter) syncPresets() error {
 		}
 	}
 	for name, content := range want {
-		file := filepath.Join(dir, name)
-		if old, err := os.ReadFile(file); err == nil && bytes.Equal(old, content) { //nolint:gosec // G304: Loom's own preset file under the configured worktrees root.
-			continue
-		}
-		tmp, err := os.CreateTemp(dir, ".loom-preset-*")
-		if err != nil {
-			return fmt.Errorf("opencode presets: %w", err)
-		}
-		_, werr := tmp.Write(content)
-		cerr := tmp.Close()
-		if err := errors.Join(werr, cerr); err != nil {
-			_ = os.Remove(tmp.Name())
-			return fmt.Errorf("opencode presets: %w", err)
-		}
-		if err := os.Rename(tmp.Name(), file); err != nil {
-			_ = os.Remove(tmp.Name())
+		if err := replaceFile(filepath.Join(dir, name), content); err != nil {
 			return fmt.Errorf("opencode presets: %w", err)
 		}
 	}
+	if len(a.cfg.Bridge) == 0 {
+		return nil
+	}
+	cfg, err := json.Marshal(map[string]any{"mcp": map[string]any{"loom": map[string]any{
+		"type": "local", "command": a.cfg.Bridge}}})
+	if err == nil {
+		err = replaceFile(filepath.Join(a.presets, ".opencode", "opencode.json"), cfg)
+	}
+	if err != nil {
+		return fmt.Errorf("opencode bridge: %w", err)
+	}
 	return nil
+}
+
+// replaceFile atomically replaces file with content (mode 0600), only when
+// its content changes, so services reload only on a real change.
+func replaceFile(file string, content []byte) error {
+	if old, err := os.ReadFile(file); err == nil && bytes.Equal(old, content) { //nolint:gosec // G304: Loom's own file under the configured worktrees root.
+		return nil
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(file), ".loom-preset-*")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(content)
+	cerr := tmp.Close()
+	if err := errors.Join(werr, cerr); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), file); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return nil
+}
+
+// bridgeEnv writes the agent's bridge settings (its Launch.Env) beside its
+// worktree dir, where the bridge OpenCode starts in dir reads them
+// (agentmcp.EnvFile; the same name).
+func bridgeEnv(dir string, env map[string]string) error {
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	dir = filepath.Clean(dir)
+	return replaceFile(filepath.Join(filepath.Dir(dir), "."+filepath.Base(dir)+".loom-bridge.json"), raw)
 }
 
 // answers reports whether the server at base is up and is process pid.

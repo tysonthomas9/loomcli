@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -259,8 +260,14 @@ func startAgentAPI(ctx context.Context, cfg webui.ServerConfig) *agentwire.API {
 	if bin == "" {
 		bin = filepath.Join(bootstrap.LoomDir(), "harness/opencode/2.0.19/opencode")
 	}
+	// The bridges call back on loopback unless serve binds one address only.
+	// A fallback port (the configured one was taken) is not seen here.
+	host := cfg.BindAddress
+	if ip := net.ParseIP(host); host == "" || ip != nil && ip.IsUnspecified() {
+		host = "127.0.0.1"
+	}
 	api, err := agentwire.Start(ctx, agentwire.Config{Dir: bootstrap.LoomDir(),
-		OpenCodeBin: bin, Skills: cfg.Store})
+		OpenCodeBin: bin, Skills: cfg.Store, APIBase: "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Port))})
 	if err != nil {
 		slog.Warn("Agent API not started", "error", err)
 		return nil

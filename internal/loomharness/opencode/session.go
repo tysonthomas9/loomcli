@@ -25,6 +25,9 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		"location": map[string]string{"directory": spec.Dir},
 		"metadata": spec.Metadata,
 	}
+	if err := c.bridge(ctx, spec.Dir, spec.Launch.Env); err != nil {
+		return loomharness.NativeRef{}, err
+	}
 	if spec.Preset.Name != "" {
 		agent := "loom-" + spec.Preset.Name
 		if err := c.hasAgent(ctx, agent, spec.Dir); err != nil {
@@ -105,6 +108,45 @@ func (c *Client) discard(ref loomharness.NativeRef, cause error) (loomharness.Na
 		return ref, errors.Join(cause, fmt.Errorf("opencode: remove the session a failed Open created: %w", err))
 	}
 	return loomharness.NativeRef{}, cause
+}
+
+// bridge writes the agent's bridge settings (env) beside dir, before
+// OpenCode first loads dir, then waits until OpenCode has connected the
+// "loom" MCP server for dir, so the agent's first turn has its tools. An
+// agent with no settings has no bridge.
+func (c *Client) bridge(ctx context.Context, dir string, env map[string]string) error {
+	if len(env) == 0 {
+		return nil
+	}
+	if err := bridgeEnv(dir, env); err != nil {
+		return fmt.Errorf("opencode bridge: %w", err)
+	}
+	for deadline := time.Now().Add(agentWait); ; {
+		var r struct {
+			Data []struct {
+				Name   string `json:"name"`
+				Status struct {
+					Status string `json:"status"`
+				} `json:"status"`
+			} `json:"data"`
+		}
+		if err := c.call(ctx, "GET", "/api/mcp?location[directory]="+url.QueryEscape(dir), nil, &r); err != nil {
+			return err
+		}
+		for _, m := range r.Data {
+			if m.Name == "loom" && m.Status.Status == "connected" {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("opencode bridge for %s not connected after %s (%+v): %w", dir, agentWait, r.Data, loomharness.ErrUnavailable)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // hasAgent fails closed unless the running service offers agent for dir.
@@ -242,6 +284,9 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 		} `json:"data"`
 	}
 	if err := s.c.call(ctx, "GET", s.path(""), nil, &info); err != nil {
+		return loomharness.NativeRef{}, err
+	}
+	if err := s.c.bridge(ctx, info.Data.Location.Directory, l.Env); err != nil {
 		return loomharness.NativeRef{}, err
 	}
 	if agent := info.Data.Agent; strings.HasPrefix(agent, "loom-") {
