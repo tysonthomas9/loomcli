@@ -3814,6 +3814,12 @@ type GetIssueEventsParams struct {
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
 }
 
+// ListTaskRevisionsParams defines parameters for ListTaskRevisions.
+type ListTaskRevisionsParams struct {
+	// Lead Report applied and needs_working_area for this lead. Without it, applied means applied in any lead and needs_working_area means some approved target lead still lacks a working area.
+	Lead *string `form:"lead,omitempty" json:"lead,omitempty"`
+}
+
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.
 type SaveIssueTabsJSONBody struct {
 	ActiveTabId string     `json:"active_tab_id"`

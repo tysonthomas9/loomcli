@@ -249,12 +249,14 @@ func (s *SQLite) PredecessorApplied(ctx context.Context, workspace, lead, change
 	return count > 0, err
 }
 
-// RevisionApplied reports whether any lead in the workspace currently has this
-// exact change revision applied. Unapply moves the layer out of 'done'.
-func (s *SQLite) RevisionApplied(ctx context.Context, workspace, change string, revision int) (bool, error) {
+// RevisionApplied reports whether lead currently has this exact change
+// revision applied; an empty lead matches any lead in the workspace. Unapply
+// moves the layer out of 'done'.
+func (s *SQLite) RevisionApplied(ctx context.Context, workspace, lead, change string, revision int) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM applied_layers WHERE workspace=?
-		AND change_id=? AND revision=? AND phase='done'`, workspace, change, revision).Scan(&count)
+		AND (?='' OR lead=?) AND change_id=? AND revision=? AND phase='done'`,
+		workspace, lead, lead, change, revision).Scan(&count)
 	return count > 0, err
 }
 

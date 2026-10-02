@@ -7699,7 +7699,10 @@ export interface operations {
   };
   listTaskRevisions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Report applied and needs_working_area for this lead. Without it, applied means applied in any lead and needs_working_area means some approved target lead still lacks a working area. */
+        lead?: string;
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */

@@ -180,6 +180,34 @@ describe("RevisionsSection", () => {
     );
   });
 
+  it("shows applied and Apply for the displayed lead only", async () => {
+    getTaskRevisions.mockImplementation(
+      async (_ws: string, _task: string, lead?: string) => [
+        lead === "lead-a"
+          ? { ...revision, verdict: "approve", applied: true }
+          : { ...revision, verdict: "approve", needs_working_area: true },
+      ],
+    );
+    const viewB = render(
+      <RevisionsSection workspaceId="W" taskId="T" lead="lead-b" />,
+    );
+    expect(
+      await screen.findByText(
+        "Approved: Apply to create the lead working area",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Applied")).not.toBeInTheDocument();
+    expect(getTaskRevisions).toHaveBeenCalledWith("W", "T", "lead-b");
+    viewB.unmount();
+
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    expect(await screen.findByText("Applied")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Apply" }),
+    ).not.toBeInTheDocument();
+    expect(getTaskRevisions).toHaveBeenCalledWith("W", "T", "lead-a");
+  });
+
   it("shows Applied from the server after a reload and clears it after unapply", async () => {
     getTaskRevisions.mockResolvedValue([
       { ...revision, verdict: "approve", applied: true },
