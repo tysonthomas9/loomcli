@@ -209,6 +209,9 @@ func checkNativePrefix(ctx context.Context, store nativeMergeStore, forge native
 	if len(merge.Changes) == 0 || merge.Changes[len(merge.Changes)-1] != merge.Target {
 		return loomgit.NewError(loomgit.Stale, "native merge target differs from prefix", nil)
 	}
+	if err := requireChangesLanded(ctx, store, merge.Workspace, merge.Changes, mergePredecessors); err != nil {
+		return err
+	}
 	for _, change := range merge.Changes {
 		publication, found, err := store.Publication(ctx, merge.Workspace, change)
 		if err != nil {

@@ -363,6 +363,23 @@ func TestDependencyEnforcementUsesAppLoomPostsAs(t *testing.T) {
 	}
 }
 
+func TestDependencyEnforcementForgetsAppAfterCommitStatusFallback(t *testing.T) {
+	fixture := newCrossRepoFixture(t)
+	fixture.forge.app = 4242
+	if err := fixture.reconcile(t); err != nil {
+		t.Fatal(err)
+	}
+	fixture.land(t)
+	fixture.forge.app = 0
+	if err := fixture.reconcile(t); err != nil {
+		t.Fatal(err)
+	}
+	app, err := fixture.store.DependencyApp(context.Background(), "owner/repo2")
+	if err != nil || app != 0 || fixture.forge.askedApp != 0 {
+		t.Fatalf("after commit-status fallback recorded app = %d, %v; enforcement asked for %d", app, err, fixture.forge.askedApp)
+	}
+}
+
 func dependencyCheck(t *testing.T, fixture *crossRepoFixture, change string) journal.DependencyCheck {
 	t.Helper()
 	checks, _, err := fixture.store.DependencyChecks(context.Background())
