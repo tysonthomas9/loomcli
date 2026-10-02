@@ -20,7 +20,7 @@ concurrency:
 jobs:
   aft:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45 # a cold OpenCode build adds several minutes
     env:
       AFT_DIR: ${{ github.workspace }}/.aft
       FLEET_DB_REPO: ${{ github.workspace }}/.fleet-db
@@ -95,6 +95,43 @@ jobs:
 
       - name: Build frontend
         run: cd internal/webui/frontend && npm ci && npm run build
+
+      # Real OpenCode for the agents-v1 suites and their canary: the pinned build
+      # (R22: 2.0.19, sst/opencode v2 at b30c4d0), built as in its BUILD-INFO.
+      # run-aft.sh drives it with the scripted fake model; no paid model runs.
+      - name: Cache pinned OpenCode
+        id: opencode-cache
+        uses: actions/cache@v4
+        with:
+          path: .opencode-bin
+          key: opencode-2.0.19-b30c4d0-${{ runner.os }}-${{ runner.arch }}
+
+      - if: steps.opencode-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: sst/opencode
+          ref: b30c4d00d15ed20d15a19e5c07534514bc2ee0fe
+          path: .opencode
+
+      - if: steps.opencode-cache.outputs.cache-hit != 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Build pinned OpenCode
+        if: steps.opencode-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          cd .opencode && bun install --frozen-lockfile
+          cd packages/cli && OPENCODE_CHANNEL=latest OPENCODE_VERSION=2.0.19 bun run script/build.ts --single --skip-install
+          mkdir -p "$GITHUB_WORKSPACE/.opencode-bin"
+          cp dist/cli-linux-x64/bin/opencode "$GITHUB_WORKSPACE/.opencode-bin/opencode"
+
+      - name: Use pinned OpenCode
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/.opencode-bin/opencode" --version | grep -F 2.0.19
+          echo "LOOM_OPENCODE_BIN=$GITHUB_WORKSPACE/.opencode-bin/opencode" >> "$GITHUB_ENV"
 
       - name: Run aft suites (deterministic)
         if: inputs.mode != 'strict'

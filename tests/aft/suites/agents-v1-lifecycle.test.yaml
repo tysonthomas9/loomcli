@@ -1,0 +1,158 @@
+# Agent API lifecycle of an OpenCode lead on the real OpenCode build, with the
+# model scripted by 2.0d's fake model (see agents-v1-lead).
+suite: agents-v1-lifecycle
+classification: { area: agents, feature: agent-api-lifecycle, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-life-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 lifecycle ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-life","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+teardown: |
+  set +e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE" >/dev/null
+
+tests:
+  - name: an archived OpenCode lead refuses messages until it is unarchived
+    intent: The chat shows an archived lead's state and refuses a send; after unarchive the lead is idle and replies again
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LIFE/v1/agents
+          headers: { Idempotency-Key: "agv1-archive-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-archive-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-life-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1ArchiveId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-BEFORE-ARCHIVE"},{"text":"AGV1-AFTER-UNARCHIVE"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LIFE/chat/$(cat "$AFT_WORK_DIR/agv1ArchiveId")"
+        intent: "Script two replies and open the lead's chat"
+      - fill: { label: Message, value: "before archive" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-BEFORE-ARCHIVE') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 90000
+        intent: "Wait until the first reply arrives and the lead is idle"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ArchiveId}/archive"
+          headers: { Idempotency-Key: "agv1-archive-1-${RUN_ID:-local}" }
+          body: { reason: done }
+        intent: "Archive the idle lead"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('archived')
+        intent: "Wait until the chat shows the lead as archived"
+      - fill: { label: Message, value: "while archived" }
+      - press: Enter
+      - wait: { selector: "section[aria-label='Agent chat'] [role=alert]" }
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ArchiveId}/messages"
+          headers: { Idempotency-Key: "agv1-archived-send-${RUN_ID:-local}" }
+          body: { text: "while archived" }
+          status: 409
+          assert:
+            - path: code
+              equals: agent_archived
+        intent: "Check that a send to the archived lead fails with agent_archived"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ArchiveId}/unarchive"
+          headers: { Idempotency-Key: "agv1-unarchive-1-${RUN_ID:-local}" }
+        intent: "Unarchive the lead"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle') &&
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-BEFORE-ARCHIVE')
+        intent: "Wait until the unarchived lead is idle with its history intact"
+      - fill: { label: Message, value: "after unarchive" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-AFTER-UNARCHIVE')
+        budget: 90000
+        intent: "Wait until the unarchived lead replies"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-archive-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-archive-requests.json" <<'PY'
+          import json, sys
+          body = json.dumps(json.load(open(sys.argv[1]))["requests"])
+          assert "after unarchive" in body, "the message after unarchive never reached the model"
+          assert "while archived" not in body, "a message sent while archived reached the model"
+          PY
+        intent: "Check that only the messages sent while unarchived reached the model"
+
+  - name: an archived lead whose history expired cannot be unarchived
+    intent: Once the R29 sweep purges an archived lead's history, Unarchive and ListEvents report history_expired
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LIFE/v1/agents
+          headers: { Idempotency-Key: "agv1-expiry-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-expiry-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-life-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1ExpiryId
+        intent: "Create an OpenCode lead through the Agent API"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}/archive"
+          headers: { Idempotency-Key: "agv1-expiry-archive-${RUN_ID:-local}" }
+          body: { reason: done }
+        intent: "Archive the lead"
+      - run: |
+          set -e
+          # Stand-in for the R29 sweep, which serve does not run yet (2.1c): the
+          # same writes loomstore.MarkHistoryPurged makes, on AFT's own agents.db.
+          python3 - "$AFT_LOOM_CONFIG_DIR/agents.db" "$(cat "$AFT_WORK_DIR/agv1ExpiryId")" <<'PY'
+          import datetime, sqlite3, sys
+          now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f000Z")
+          db = sqlite3.connect(sys.argv[1], timeout=10)
+          with db:
+              n = db.execute("UPDATE agents SET history_purged_at = ?, updated_at = ? WHERE agent_id = ? AND archived_at IS NOT NULL",
+                             (now, now, sys.argv[2])).rowcount
+              assert n == 1, "the archived lead was not found"
+              db.execute("DELETE FROM agent_events WHERE agent_id = ?", (sys.argv[2],))
+          PY
+        intent: "Mark the archived lead's history purged as the retention sweep would"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}/unarchive"
+          headers: { Idempotency-Key: "agv1-expiry-unarchive-${RUN_ID:-local}" }
+          status: 410
+          assert:
+            - path: code
+              equals: history_expired
+        intent: "Check that Unarchive reports history_expired"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}/events"
+          status: 410
+          assert:
+            - path: code
+              equals: history_expired
+        intent: "Check that ListEvents reports history_expired"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}"
+          assert:
+            - path: state
+              equals: archived
+        intent: "Check that the lead stays archived"
