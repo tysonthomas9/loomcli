@@ -75,7 +75,7 @@ var _ loomharness.Harness = (*Adapter)(nil)
 // New returns an adapter; nothing starts until the first call.
 func New(cfg Config) *Adapter {
 	a := &Adapter{Client: NewClient("", ""), cfg: cfg, tree: map[int]string{}}
-	a.ready = a.ensure
+	a.ready, a.shellEnv = a.ensure, a.env
 	return a
 }
 
@@ -386,8 +386,8 @@ func descendants(procs map[int]process, roots []int) []int {
 
 // githubTokens never reach the server, nor the processes it starts: agents
 // publish through Loom (R32). Inherited OpenCode passwords are dropped too;
-// spawn sets its own.
-var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE"}
+// spawn sets its own, and sessions get env without it (see Session.isolate).
+var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE", "LOOM_PR_GIT_PASSWORD"}
 
 // env is the configured environment without GitHub tokens, plus the Loom
 // presets merged into OPENCODE_CONFIG_CONTENT, which OpenCode applies over the

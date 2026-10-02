@@ -30,6 +30,10 @@ func (s *Service) switchHarness(ctx context.Context, a loomstore.Agent, req Upda
 	if err != nil {
 		return AgentInfo{}, err
 	}
+	rules, err := s.policy(ctx, cfg)
+	if err != nil {
+		return AgentInfo{}, err
+	}
 	a, err = s.stopTurn(ctx, a)
 	if err != nil {
 		return AgentInfo{}, err
@@ -47,7 +51,7 @@ func (s *Service) switchHarness(ctx context.Context, a loomstore.Agent, req Upda
 		return failed(err)
 	}
 	ref, err := h.Open(ctx, loomharness.OpenSpec{Key: a.AgentID + "@" + strconv.FormatInt(a.SpecVersion+1, 10),
-		Launch: launch, Preset: cfg.Open, Dir: deref(a.WorktreePath), Model: model, Rules: cfg.Rules,
+		Launch: launch, Preset: cfg.Open, Dir: deref(a.WorktreePath), Model: model, Rules: rules,
 		Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
 		return failed(harnessErr(err))
@@ -136,6 +140,13 @@ func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
 	sess, ref, err := s.current(ctx, a)
 	if err != nil || sess == nil {
+		return a, err
+	}
+	var cfg Config
+	if err := json.Unmarshal([]byte(a.SpecJSON), &cfg); err != nil {
+		return a, fmt.Errorf("loomagent: %s spec: %w", a.AgentID, err)
+	}
+	if _, err := s.policy(ctx, cfg); err != nil { // fail before resuming a turn without the bridge
 		return a, err
 	}
 	l, err := s.launch(ctx, a, a.Harness)

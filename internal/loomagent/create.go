@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -135,9 +136,12 @@ func (s *Service) insertCreate(ctx context.Context, req CreateRequest) (loomstor
 	if err != nil {
 		return loomstore.Agent{}, err
 	}
-	req.Bridge = s.bridge(ctx, p) // host registration only, never the request's
+	req.Bridge = BridgeCaps{} // never the request's; policy adds the host's at each launch
 	cfg, err := Resolve(p, req, req.Overrides.Harness, models)
 	if err != nil {
+		return loomstore.Agent{}, err
+	}
+	if _, err := s.policy(ctx, cfg); err != nil {
 		return loomstore.Agent{}, err
 	}
 	spec, err := json.Marshal(cfg)
@@ -248,10 +252,11 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 		if err != nil {
 			return a, err
 		}
-		if err := s.store.SetCreateStep(ctx, a.AgentID, stepSession, nil, nil, &ref.NativeID); err != nil {
+		createCrash("session")
+		if err := s.store.SetCreateStep(ctx, a.AgentID, stepSession, nil, &ref.NativeID, &ref.Root); err != nil {
 			return a, err
 		}
-		a.HarnessSessionID, a.CreateStep = &ref.NativeID, stepSession
+		a.HarnessSessionID, a.HarnessSessionRoot, a.CreateStep = &ref.NativeID, &ref.Root, stepSession
 	}
 	createCrash("created")
 	if a.State == StateCreating {
@@ -294,6 +299,10 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 	if !ok {
 		return loomharness.NativeRef{}, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"}
 	}
+	rules, err := s.policy(ctx, cfg)
+	if err != nil {
+		return loomharness.NativeRef{}, err
+	}
 	if err := s.prepare(ctx, s.target, a); err != nil {
 		return loomharness.NativeRef{}, err
 	}
@@ -302,13 +311,29 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 		return loomharness.NativeRef{}, err
 	}
 	ref, err := h.Open(ctx, loomharness.OpenSpec{Key: a.AgentID, Launch: launch, Preset: cfg.Open,
-		Dir: deref(a.WorktreePath), Model: cfg.Model, Rules: cfg.Rules, Metadata: map[string]string{"agent_id": a.AgentID}})
+		Dir: deref(a.WorktreePath), Model: cfg.Model, Rules: rules, Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
 		return ref, harnessErr(err)
 	}
 	createCrash("recorded")
 	return ref, s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: a.AgentID, Harness: a.Harness,
 		NativeRoot: ref.Root, NativeID: ref.NativeID})
+}
+
+// policy returns cfg's permission rules compiled with the host's current
+// bridge registration for cfg's preset. Stored capabilities are never read.
+// A registration error (required wiring absent, or a bridge outage) stops
+// the launch: nothing is loosened and no other credentials are tried.
+func (s *Service) policy(ctx context.Context, cfg Config) ([]loomharness.PermissionRule, error) {
+	caps, err := s.bridge(ctx, cfg.Preset)
+	if err != nil {
+		return nil, fmt.Errorf("loomagent: %s bridge registration: %w", cfg.Preset.Name, err)
+	}
+	rules := slices.Clone(cfg.Rules)
+	if caps.HasGitHubRead && caps.HasPublish {
+		rules = append(rules, publishDenies...)
+	}
+	return rules, nil
 }
 
 // opt is v, or nil when v is empty.

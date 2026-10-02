@@ -27,6 +27,7 @@ type Client struct {
 	password string
 	http     *http.Client
 	ready    func(context.Context) error // starts a supervised server on first use; nil for a fixed one
+	shellEnv func() ([]string, error)    // environment for session shell commands; nil leaves OpenCode's default
 }
 
 // NewClient returns a client for the server at base with the per-boot password.
