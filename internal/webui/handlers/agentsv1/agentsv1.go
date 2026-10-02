@@ -185,8 +185,8 @@ func send(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, an
 		return 0, nil, err
 	}
 	res, err := s.Send(r.Context(), loomagent.SendRequest{Envelope: loomagent.Envelope{RequestID: id},
-		AgentID: r.PathValue("id"), Text: body.Text, Source: "user_chat", Actor: actor(r)})
-	return http.StatusAccepted, SendResult{res.MessageID, res.State, res.Replaced, res.TurnID}, err
+		AgentID: r.PathValue("id"), Text: body.Text, Source: "user_chat", Delivery: body.Delivery, Actor: actor(r)})
+	return http.StatusAccepted, SendResult{res.MessageID, res.State, res.Replaced, res.TurnID, res.Interrupted}, err
 }
 
 func withdraw(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {

@@ -93,6 +93,8 @@ type ArchiveBody struct {
 // SendBody is the POST /agents/{id}/messages body.
 type SendBody struct {
 	Text string `json:"text"`
+	// Delivery is queue (default) or interrupt; interrupt with no text is Stop.
+	Delivery string `json:"delivery,omitempty"`
 }
 
 // RespondBody answers an ask: decision for an approval, answer for a question.
@@ -228,6 +230,8 @@ type SendResult struct {
 	State     string `json:"state"`
 	Replaced  bool   `json:"replaced"`
 	TurnID    string `json:"turn_id,omitempty"`
+	// Interrupted is set only for delivery interrupt: whether a running turn was stopped.
+	Interrupted *bool `json:"interrupted,omitempty"`
 }
 
 // WithdrawResult is withdrawn, nothing_waiting or already_handed.

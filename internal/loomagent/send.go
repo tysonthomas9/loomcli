@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -14,12 +15,24 @@ import (
 // EventWaiting is published when Send fills or edits a sender's slot.
 const EventWaiting = "message.waiting" // Reason: the sender
 
+// Send delivery modes (design v2 §4.9). The default is queue.
+const (
+	DeliveryQueue     = "queue"
+	DeliveryInterrupt = "interrupt"
+)
+
+// StateNoOp is the Send state of an interrupt with no message while no turn runs.
+const StateNoOp = "no_op"
+
 // SendRequest is the Send input (design v2 §4.9). Phase 1 adds no text cap.
 type SendRequest struct {
 	Envelope
 	AgentID string
 	Text    string
 	Source  string // user_chat | agent | system
+	// Delivery is queue (default) or interrupt: stop the running turn, and
+	// hand a message it carries over first when that turn ends.
+	Delivery string
 	// Actor is the sender, set by the entry point. Empty means the local user.
 	Actor ActorRef `json:"-"`
 }
@@ -30,6 +43,8 @@ type SendResult struct {
 	State     string `json:"state"`            // handed if the dispatcher handed it over at once, else waiting
 	Replaced  bool   `json:"replaced"`         // this Send replaced the sender's waiting text
 	TurnID    string `json:"turnId,omitempty"` // set by the dispatcher when a turn starts at once
+	// Interrupted is set only for Delivery interrupt: whether a running turn was stopped.
+	Interrupted *bool `json:"interrupted,omitempty"`
 }
 
 // Send stores text in the sender's one slot (design v2 §4.9, §8.1.8): it
@@ -40,9 +55,18 @@ type SendResult struct {
 // deadline in that same transaction. Send never calls the harness itself:
 // it then runs the dispatcher (§8.1.1) under the same lock, which hands the
 // oldest waiting slot over if no turn runs.
+//
+// Delivery interrupt (Stop) first interrupts the running turn through the
+// interrupt hook; its message then fills or replaces the sender's slot,
+// marked to be handed over first when the interrupted turn ends. With no
+// turn running it is a queue Send, and with no message it stores only its
+// receipt (state no_op when no turn ran).
 func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error) {
 	if req.RequestID == "" {
 		return SendResult{}, invalid("Send needs a RequestID")
+	}
+	if req.Delivery != "" && req.Delivery != DeliveryQueue && req.Delivery != DeliveryInterrupt {
+		return SendResult{}, invalid("Send delivery must be queue or interrupt", DeliveryQueue, DeliveryInterrupt)
 	}
 	if req.Actor.Kind == "" {
 		req.Actor = ActorRef{Kind: "user", ID: "local"}
@@ -67,12 +91,20 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 		return SendResult{}, err
 	}
 	sender := senderOf(req.Actor)
+	var interrupted *bool
+	if req.Delivery == DeliveryInterrupt {
+		running := a.RunningTurnID != nil
+		interrupted = &running
+		if r, ok, err := s.interruptTurn(ctx, a, req, sender); ok || err != nil {
+			return r, err
+		}
+	}
 	reopen := a.State == StateFinished
 	rec, retry, err := s.store.Send(ctx, loomstore.SlotSend{AgentID: a.AgentID, Sender: sender,
-		RequestID: req.RequestID, Body: req.Text, Source: req.Source, Reopen: reopen,
+		RequestID: req.RequestID, Body: req.Text, Source: req.Source, Reopen: reopen, First: interrupted != nil && *interrupted,
 		Result: func(replaced bool) (string, error) {
 			b, err := json.Marshal(SendResult{MessageID: messageID(a.AgentID, sender, req.RequestID),
-				State: loomstore.SlotWaiting, Replaced: replaced})
+				State: loomstore.SlotWaiting, Replaced: replaced, Interrupted: interrupted})
 			return string(b), err
 		}})
 	switch {
@@ -82,6 +114,49 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 		return decodeResult(rec)
 	}
 	return s.accepted(ctx, a, rec, sender, reopen)
+}
+
+// interruptTurn runs the interrupt step of a Send with Delivery interrupt,
+// under the agent lock. It returns done when the Send is complete: a retry
+// that raced the first, or an interrupt with no message, whose receipt it
+// stores. A message whose sender's slot is still handed is refused before
+// anything is interrupted, so a refused Send changes nothing.
+func (s *Service) interruptTurn(ctx context.Context, a loomstore.Agent, req SendRequest, sender string) (SendResult, bool, error) {
+	if r, ok, err := s.receipt(ctx, req); ok || err != nil {
+		return r, true, err
+	}
+	running := a.RunningTurnID != nil
+	if running && req.Text != "" {
+		slots, err := s.store.Slots(ctx, a.AgentID)
+		if err != nil {
+			return SendResult{}, true, err
+		}
+		if slices.ContainsFunc(slots, func(sl loomstore.Slot) bool { return sl.Sender == sender && sl.State == loomstore.SlotHanded }) {
+			return SendResult{}, true, sendErr(a.AgentID, loomstore.ErrSlotBusy)
+		}
+	}
+	if running {
+		stop := s.interrupt
+		if stop == nil {
+			stop = s.sessionInterrupt
+		}
+		if err := stop(ctx, a); err != nil {
+			return SendResult{}, true, harnessErr(err)
+		}
+	}
+	if req.Text != "" {
+		return SendResult{}, false, nil
+	}
+	res := SendResult{Interrupted: &running}
+	if !running {
+		res.State = StateNoOp
+	}
+	b, err := json.Marshal(res)
+	if err != nil {
+		return SendResult{}, true, err
+	}
+	_, err = s.store.SaveReceipt(ctx, loomstore.Receipt{AgentID: a.AgentID, RequestID: req.RequestID, Sender: sender, ResultJSON: string(b)})
+	return res, true, err
 }
 
 // accepted publishes an accepted Send's changes, then runs the dispatcher,
@@ -161,4 +236,16 @@ func senderOf(a ActorRef) string { return a.Kind + ":" + a.ID }
 func messageID(agentID, sender, requestID string) string {
 	sum := sha256.Sum256([]byte(agentID + "\x00" + sender + "\x00" + requestID))
 	return "msg_" + hex.EncodeToString(sum[:13])
+}
+
+// sessionInterrupt is Send's interrupt when no Interrupt hook is set: the
+// current session's own Interrupt, the same call on every harness. With no
+// session wired there is nothing to interrupt.
+func (s *Service) sessionInterrupt(ctx context.Context, a loomstore.Agent) error {
+	sess, _, err := s.current(ctx, a)
+	if err != nil || sess == nil {
+		return err
+	}
+	_, err = sess.Interrupt(ctx)
+	return err
 }

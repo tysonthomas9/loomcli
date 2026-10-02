@@ -128,11 +128,17 @@ export interface EventPage {
   more: boolean;
 }
 
+/** queue (default) or interrupt: stop the running turn; text, if any, goes first. */
+export type Delivery = "queue" | "interrupt";
+
 export interface SendResult {
   message_id: string;
+  /** handed | waiting | no_op (an interrupt with no text while no turn runs) */
   state: string;
   replaced: boolean;
   turn_id?: string;
+  /** Set only for delivery interrupt: whether a running turn was stopped. */
+  interrupted?: boolean;
 }
 
 export interface WithdrawResult {

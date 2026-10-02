@@ -7,6 +7,7 @@ import type {
   Agent,
   AgentList,
   CreateAgentBody,
+  Delivery,
   EventPage,
   Preset,
   RespondBody,
@@ -95,13 +96,19 @@ export const archiveAgent = (
 export const unarchiveAgent = (ws: string, id: string, requestId: string) =>
   post<void>(agentPath(ws, id, "/unarchive"), undefined, idem(requestId));
 
+/** Stop is sendMessage(ws, id, "", requestId, "interrupt"). */
 export const sendMessage = (
   ws: string,
   id: string,
   text: string,
   requestId: string,
+  delivery?: Delivery,
 ) =>
-  post<SendResult>(agentPath(ws, id, "/messages"), { text }, idem(requestId));
+  post<SendResult>(
+    agentPath(ws, id, "/messages"),
+    delivery ? { text, delivery } : { text },
+    idem(requestId),
+  );
 
 export const withdrawMessage = (ws: string, id: string, requestId: string) =>
   del<WithdrawResult>(agentPath(ws, id, "/messages/waiting"), idem(requestId));

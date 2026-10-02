@@ -125,6 +125,13 @@ func (c *Client) Send(ctx context.Context, requestID, agentID, text string) (r a
 	return r, c.do(ctx, http.MethodPost, agent(agentID)+"/messages", nil, requestID, agentsv1.SendBody{Text: text}, &r)
 }
 
+// Interrupt sends with delivery interrupt: it stops the running turn, and
+// text, if any, is handed over first when that turn ends. Empty text is Stop.
+func (c *Client) Interrupt(ctx context.Context, requestID, agentID, text string) (r agentsv1.SendResult, err error) {
+	return r, c.do(ctx, http.MethodPost, agent(agentID)+"/messages", nil, requestID,
+		agentsv1.SendBody{Text: text, Delivery: loomagent.DeliveryInterrupt}, &r)
+}
+
 // Withdraw clears the authenticated caller's waiting message.
 func (c *Client) Withdraw(ctx context.Context, requestID, agentID string) (r agentsv1.WithdrawResult, err error) {
 	return r, c.do(ctx, http.MethodDelete, agent(agentID)+"/messages/waiting", nil, requestID, nil, &r)
