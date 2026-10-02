@@ -91,7 +91,8 @@ func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstor
 	}
 	from := a.Harness
 	a.Name, a.SpecJSON, a.Harness, a.Model = to.Name, to.SpecJSON, to.Harness, to.Model
-	a.HarnessSessionID, a.LastRequestID, a.SpecVersion = to.HarnessSessionID, to.LastRequestID, to.SpecVersion
+	a.HarnessSessionID, a.HarnessSessionRoot = to.HarnessSessionID, to.HarnessSessionRoot
+	a.LastRequestID, a.SpecVersion = to.LastRequestID, to.SpecVersion
 	return a, s.appendEvent(ctx, a.AgentID, kind, kind+":v"+strconv.FormatInt(a.SpecVersion, 10),
 		map[string]any{"name": a.Name, "model": deref(a.Model), "from_harness": from, "harness": a.Harness,
 			"spec_version": a.SpecVersion})
@@ -134,7 +135,9 @@ func (s *Service) setModel(ctx context.Context, a loomstore.Agent, model string)
 }
 
 // current returns a's current native session and ref, or nil when a has
-// none or its harness is not wired.
+// none or its harness is not wired. The ref is the recorded row matching the
+// row's session id and root; with no root saved (Create), the oldest
+// recorded row with that id.
 func (s *Service) current(ctx context.Context, a loomstore.Agent) (loomharness.Session, loomharness.NativeRef, error) {
 	h, ok := s.harnesses[a.Harness]
 	if !ok || a.HarnessSessionID == nil {
@@ -145,7 +148,8 @@ func (s *Service) current(ctx context.Context, a loomstore.Agent) (loomharness.S
 		return nil, loomharness.NativeRef{}, err
 	}
 	for _, n := range owned {
-		if n.Harness == a.Harness && n.NativeID == *a.HarnessSessionID {
+		if n.Harness == a.Harness && n.NativeID == *a.HarnessSessionID &&
+			(a.HarnessSessionRoot == nil || n.NativeRoot == *a.HarnessSessionRoot) {
 			ref := loomharness.NativeRef{Root: n.NativeRoot, NativeID: n.NativeID}
 			return h.Session(ref), ref, nil
 		}

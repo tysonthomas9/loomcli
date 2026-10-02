@@ -21,7 +21,7 @@ type AgentInfo struct {
 }
 
 func info(a loomstore.Agent) AgentInfo {
-	a.HarnessSessionID = nil
+	a.HarnessSessionID, a.HarnessSessionRoot = nil, nil
 	return AgentInfo{Agent: a, Compute: "local"}
 }
 

@@ -366,7 +366,7 @@ func TestHarnessResumeRecordsReplacementNativeRef(t *testing.T) {
 	e := newSwitchEnv(t, StateIdle)
 	e.s.harnesses["fa"] = movedHarness{e.fa, to}
 	for range 2 { // replay-safe
-		a, _, err := e.s.resume(ctx, e.s.get(t, "a1"))
+		a, err := e.s.resume(ctx, e.s.get(t, "a1"))
 		if err != nil || *a.HarnessSessionID != to.NativeID {
 			t.Fatalf("resume = %v, %v", a.HarnessSessionID, err)
 		}
@@ -375,5 +375,36 @@ func TestHarnessResumeRecordsReplacementNativeRef(t *testing.T) {
 	if len(owned) != 2 || owned[0].NativeID != e.old.NativeID || owned[1].NativeID != to.NativeID ||
 		e.s.get(t, "a1").SpecVersion != 1 {
 		t.Fatalf("owned = %+v", owned)
+	}
+}
+
+// TestHarnessResumeChangedRootSameID reproduces the batch-7 probe: Resume
+// returns the same NativeID under a new root, which must become current,
+// survive a retry and a reload, and keep the old ref owned.
+func TestHarnessResumeChangedRootSameID(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateIdle)
+	to := loomharness.NativeRef{Root: "/root/replaced", NativeID: e.old.NativeID}
+	e.s.harnesses["fa"] = movedHarness{e.fa, to}
+	for range 2 { // replay-safe
+		if _, err := e.s.resume(ctx, e.s.get(t, "a1")); err != nil {
+			t.Fatal(err)
+		}
+		if _, ref, err := e.s.current(ctx, e.s.get(t, "a1")); err != nil || ref != to {
+			t.Fatalf("current = %+v, %v; want %+v", ref, err, to)
+		}
+	}
+	e.s.harnesses["fa"] = movedHarness{e.fa, e.old} // and back to the older recorded root
+	if _, err := e.s.resume(ctx, e.s.get(t, "a1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ref, err := e.s.current(ctx, e.s.get(t, "a1")); err != nil || ref != e.old {
+		t.Fatalf("current = %+v, %v; want %+v", ref, err, e.old)
+	}
+	if owned := e.owned(t); len(owned) != 2 || e.s.get(t, "a1").SpecVersion != 1 {
+		t.Fatalf("owned = %+v", owned)
+	}
+	if got, err := e.s.Get(ctx, "a1"); err != nil || got.HarnessSessionRoot != nil {
+		t.Fatalf("Get exposes the session root: %v, %v", got.HarnessSessionRoot, err)
 	}
 }

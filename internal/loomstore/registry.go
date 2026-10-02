@@ -23,7 +23,7 @@ type Agent struct {
 	Repo                                                          string
 	BaseRef, WorktreePath, Branch                                 *string
 	Harness                                                       string
-	HarnessSessionID                                              *string
+	HarnessSessionID, HarnessSessionRoot                          *string
 	Host                                                          string
 	Model                                                         *string
 	State                                                         string
@@ -45,7 +45,7 @@ const agentCols = `agent_id, workspace_id, name, profile_key, preset, preset_ver
  harness_session_id, host, model, state, state_reason, waiting_on, attempt, outcome,
  archive_reason, attention_reason, running_turn_id, create_step, delete_requested,
  delete_result_json, last_active_at, created_at, updated_at, archived_at, finished_at,
- history_purged_at, deleted_at`
+ history_purged_at, deleted_at, harness_session_root`
 
 // fields lists a's fields in agentCols order; used both to bind and to scan.
 func (a *Agent) fields() []any {
@@ -57,7 +57,7 @@ func (a *Agent) fields() []any {
 		&a.Host, &a.Model, &a.State, &a.StateReason, &a.WaitingOn, &a.Attempt, &a.Outcome,
 		&a.ArchiveReason, &a.AttentionReason, &a.RunningTurnID, &a.CreateStep,
 		&a.DeleteRequested, &a.DeleteResultJSON, &a.LastActiveAt, &a.CreatedAt, &a.UpdatedAt,
-		&a.ArchivedAt, &a.FinishedAt, &a.HistoryPurgedAt, &a.DeletedAt}
+		&a.ArchivedAt, &a.FinishedAt, &a.HistoryPurgedAt, &a.DeletedAt, &a.HarnessSessionRoot}
 }
 
 var (
@@ -347,15 +347,16 @@ func (s *Store) Tombstone(ctx context.Context, agentID string, now time.Time) er
 // selected harness and its current native session, and the last applied
 // Update RequestID.
 type AgentSpec struct {
-	Name, SpecJSON, Harness                string
-	Model, HarnessSessionID, LastRequestID *string
-	SpecVersion                            int64
+	Name, SpecJSON, Harness                                    string
+	Model, HarnessSessionID, HarnessSessionRoot, LastRequestID *string
+	SpecVersion                                                int64
 }
 
 // SpecOf returns a's spec columns.
 func (a Agent) SpecOf() AgentSpec {
 	return AgentSpec{Name: a.Name, SpecJSON: a.SpecJSON, Harness: a.Harness, Model: a.Model,
-		HarnessSessionID: a.HarnessSessionID, LastRequestID: a.LastRequestID, SpecVersion: a.SpecVersion}
+		HarnessSessionID: a.HarnessSessionID, HarnessSessionRoot: a.HarnessSessionRoot, LastRequestID: a.LastRequestID,
+		SpecVersion: a.SpecVersion}
 }
 
 // ErrSpecChanged means the agent's spec_version no longer equals the expected one.
@@ -366,9 +367,9 @@ var ErrSpecChanged = errors.New("loomstore: agent spec version changed")
 // otherwise it returns ErrSpecChanged.
 func (s *Store) CompareAndSetSpec(ctx context.Context, agentID string, fromVersion int64, to AgentSpec) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE agents SET name = ?, spec_json = ?, harness = ?, model = ?,
-		harness_session_id = ?, last_request_id = ?, spec_version = ?, updated_at = ?
+		harness_session_id = ?, harness_session_root = ?, last_request_id = ?, spec_version = ?, updated_at = ?
 		WHERE agent_id = ? AND deleted_at IS NULL AND spec_version = ?`,
-		to.Name, to.SpecJSON, to.Harness, to.Model, to.HarnessSessionID, to.LastRequestID, to.SpecVersion,
+		to.Name, to.SpecJSON, to.Harness, to.Model, to.HarnessSessionID, to.HarnessSessionRoot, to.LastRequestID, to.SpecVersion,
 		Stamp(time.Now()), agentID, fromVersion)
 	if err != nil {
 		return err
@@ -377,4 +378,31 @@ func (s *Store) CompareAndSetSpec(ctx context.Context, agentID string, fromVersi
 		return ErrSpecChanged
 	}
 	return nil
+}
+
+// FindCreated returns the agent a Create made in workspaceID: the live agent
+// with externalKey when one is given, else the agent whose Create RequestID
+// is requestID. It returns ErrNotFound when there is none.
+func (s *Store) FindCreated(ctx context.Context, workspaceID, externalKey, requestID string) (Agent, error) {
+	where, arg := "create_request_id = ?", requestID
+	if externalKey != "" {
+		where, arg = "external_key = ? AND deleted_at IS NULL", externalKey
+	}
+	var a Agent
+	err := s.db.QueryRowContext(ctx, "SELECT "+agentCols+" FROM agents WHERE workspace_id = ? AND "+where, //nolint:gosec // G202: constant column list and placeholders only.
+		workspaceID, arg).Scan(a.fields()...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return a, ErrNotFound
+	}
+	return a, err
+}
+
+// SetCreateStep records that Create finished step on agentID, with the
+// columns that step filled; a nil column is kept.
+func (s *Store) SetCreateStep(ctx context.Context, agentID string, step int64, worktreePath, branch, sessionID *string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET create_step = MAX(create_step, ?),
+		worktree_path = COALESCE(?, worktree_path), branch = COALESCE(?, branch),
+		harness_session_id = COALESCE(?, harness_session_id), updated_at = ? WHERE agent_id = ?`,
+		step, worktreePath, branch, sessionID, Stamp(time.Now()), agentID)
+	return err
 }

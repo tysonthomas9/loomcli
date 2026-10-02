@@ -102,10 +102,16 @@ type CreateRequest struct {
 	BaseRef      string
 	ExternalKey  string
 	FirstMessage string
+	// Actor is the caller, set by the entry point; the owner when the preset
+	// is user-owned. Empty means the local user.
+	Actor ActorRef `json:"-"`
 	// Bridge is set only by Loom's host-owned bridge wiring, never from a
 	// request body or any model or agent input.
 	Bridge BridgeCaps `json:"-"`
 }
+
+// ActorRef is who calls: Kind is user, agent or system.
+type ActorRef struct{ Kind, ID string }
 
 // BridgeCaps are the agent's Loom bridge capabilities that replace gh and git push.
 type BridgeCaps struct {

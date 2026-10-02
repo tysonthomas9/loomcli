@@ -66,7 +66,20 @@ type ServiceConfig struct {
 	Harnesses map[string]loomharness.Harness
 	// Launch returns a's opaque launch input on harness; nil launches with none.
 	Launch func(ctx context.Context, a loomstore.Agent, harness string) (loomharness.Launch, error)
+	// WorkspaceID is the workspace this service creates agents in.
+	WorkspaceID string
+	// Presets defaults to BuiltinPresets.
+	Presets Presets
+	// DefaultBackend reads the workspace default harness and model
+	// (/config/backend); nil has none.
+	DefaultBackend func(ctx context.Context) (Backend, error)
+	// Bridge returns the capabilities the host bridge registers for a preset;
+	// nil registers none. Create never takes them from the request.
+	Bridge func(ctx context.Context, p Preset) BridgeCaps
 }
+
+// Backend is a workspace default harness and model.
+type Backend struct{ Harness, Model string }
 
 // Service is the Agent API service: it owns agent state changes and their
 // live events.
@@ -82,6 +95,10 @@ type Service struct {
 	purge       func(context.Context, loomstore.Agent, []loomstore.NativeSession) error
 	harnesses   map[string]loomharness.Harness
 	launch      func(context.Context, loomstore.Agent, string) (loomharness.Launch, error)
+	workspaceID string
+	presets     Presets
+	backend     func(context.Context) (Backend, error)
+	bridge      func(context.Context, Preset) BridgeCaps
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -92,7 +109,17 @@ func New(cfg ServiceConfig) *Service {
 	s := &Service{Bus: NewBus(), store: cfg.Store, events: cfg.Events, workspace: cfg.Workspace,
 		resolveRepo: cfg.ResolveRepo, prepare: cfg.PrepareWorktree, target: cfg.Target,
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
+		workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		locks: map[string]*sync.Mutex{}}
+	if s.presets == nil {
+		s.presets = BuiltinPresets{}
+	}
+	if s.backend == nil {
+		s.backend = func(context.Context) (Backend, error) { return Backend{}, nil }
+	}
+	if s.bridge == nil {
+		s.bridge = func(context.Context, Preset) BridgeCaps { return BridgeCaps{} }
+	}
 	if s.target == "" {
 		s.target = TargetLocal
 	}
