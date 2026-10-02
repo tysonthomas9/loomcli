@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,8 +81,8 @@ func beginNativeMerge(ctx context.Context, store Store, request StackRequest, ta
 		return loomgit.NewError(loomgit.Stale, "merge target is not in stack", nil)
 	}
 	merge := journal.NativeMerge{Workspace: request.Workspace, StackID: request.StackID, Target: target, Changes: request.Changes[:index+1]}
-	if _, ok := request.MergeAuthority.(whenGreenMerge); ok {
-		merge.Authority = leadMergeAuthority
+	if policy, ok := request.MergeAuthority.(whenGreenMerge); ok {
+		merge.Authority, merge.SetBy = leadMergeAuthority, policy.SetBy
 	}
 	return mergeStore.BeginNativeMerge(ctx, merge)
 }
@@ -158,6 +159,9 @@ func reconcileNativeMerge(ctx context.Context, store nativeMergeStore, forge nat
 			}
 			if policy.Value != "when_green" {
 				return store.BlockNativeMerge(ctx, merge, "cancelled: lead_may_merge is off")
+			}
+			if green, err := nativeLeadPrefixGreen(ctx, store, forge, merge, parts); err != nil || !green {
+				return err
 			}
 		}
 		return submitNativeMerge(ctx, store, forge, merge, publication, parts)
@@ -312,5 +316,38 @@ func pollNativeMerge(ctx context.Context, store nativeMergeStore, forge nativeMe
 			return nil
 		}
 	}
+	if merge.Authority == leadMergeAuthority {
+		slog.Info("merged by lead under setting set by "+merge.SetBy, "workspace", merge.Workspace, "stack", merge.StackID, "target", merge.Target)
+	}
 	return store.AdvanceNativeMerge(ctx, merge, "done", merge.Head)
+}
+
+// nativeLeadPrefixGreen re-reads the provider just before a lead-policy merge is
+// submitted: every layer must still pass its required checks and reviews.
+func nativeLeadPrefixGreen(ctx context.Context, store nativeMergeStore, forge nativeMergeForge,
+	merge journal.NativeMerge, parts []string) (bool, error) {
+	statusForge, ok := forge.(interface {
+		PRStatuses(context.Context, string, string, string) (map[string]stackpublish.PRStatus, error)
+	})
+	if !ok {
+		return false, loomgit.NewError(loomgit.AttentionRequired, "provider cannot report required checks", nil)
+	}
+	for _, change := range merge.Changes {
+		publication, found, err := store.Publication(ctx, merge.Workspace, change)
+		if err != nil || !found {
+			return false, errors.Join(err, loomgit.NewError(loomgit.MergeBlocked, "native stack publication is incomplete", nil))
+		}
+		statuses, err := statusForge.PRStatuses(ctx, parts[0], parts[1], publication.Branch)
+		if err != nil {
+			return false, err
+		}
+		status, found := statuses[publication.Branch]
+		if found && status.Number == publication.PRNumber && status.Review == "changes_requested" {
+			return false, loomgit.NewError(loomgit.MergeBlocked, "changes requested on "+change, nil)
+		}
+		if !found || status.Number != publication.PRNumber || !greenStatus(status) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
