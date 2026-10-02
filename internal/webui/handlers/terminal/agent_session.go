@@ -290,6 +290,11 @@ func agentTerminalLaunchAllowed(agent *domain.Agent, kind domain.RoleKind) bool 
 	if kind == domain.RoleKindInteractive {
 		return true
 	}
+	// The daemon owns an auto worker's runs; a terminal launch would start a
+	// duplicate single-task run that can double-claim work.
+	if agent.Auto {
+		return false
+	}
 	return agent.State != domain.AgentStateStopped && agent.DesiredState != domain.AgentDesiredStopped
 }
 

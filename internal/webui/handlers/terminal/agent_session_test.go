@@ -878,6 +878,50 @@ func TestEnsureAgentTerminalSessionRejectsActiveEphemeralWorkerWithoutRelaunch(t
 	}
 }
 
+func TestEnsureAgentTerminalSessionRejectsDaemonSupervisedWorkerWithoutLaunch(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	svc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now(),
+	)
+
+	// A working auto worker: the daemon owns its runs, so opening its terminal
+	// must not spawn a second `loom task --auto --daemon-mode` run.
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "local-coder",
+		RoleName:     "task",
+		Auto:         true,
+		DesiredState: domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	active := domain.AgentStateActive
+	if _, err := st.Agents().Update(ctx, "E2E", "local-coder", store.AgentUpdate{
+		State: &active,
+	}); err != nil {
+		t.Fatalf("activate agent: %v", err)
+	}
+
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "local-coder")
+	var svcErr *service.ServiceError
+	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
+	}
+	tabs, err := svc.ListTabs(ctx, "E2E")
+	if err != nil {
+		t.Fatalf("list tabs: %v", err)
+	}
+	if len(tabs) != 0 {
+		t.Fatalf("tab count = %d, want no launch tab for a daemon-supervised worker", len(tabs))
+	}
+}
+
 func TestEnsureAgentTerminalSessionAllowsStoppedCustomInteractiveRole(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
