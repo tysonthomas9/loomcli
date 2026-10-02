@@ -4774,10 +4774,12 @@ components:
               state: {type: string}
     MergeActor:
       type: object
-      required: [kind, id]
+      required: [kind]
       properties:
         kind: {type: string, enum: [human, lead, agent]}
-        id: {type: string}
+        id:
+          type: string
+          description: Omitted for a human in the local UI; the server uses its OS user (advisory, D28).
     MergeRequestView:
       type: object
       required: [id, stack_id, target, lead, status, requested_kind, requested_by, expires_at, layers]

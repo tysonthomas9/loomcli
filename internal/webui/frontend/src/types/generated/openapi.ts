@@ -2500,7 +2500,8 @@ export interface components {
     MergeActor: {
       /** @enum {string} */
       kind: "human" | "lead" | "agent";
-      id: string;
+      /** @description Omitted for a human in the local UI; the server uses its OS user (advisory, D28). */
+      id?: string;
     };
     MergeRequestView: {
       id: string;

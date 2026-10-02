@@ -236,7 +236,7 @@ describe("git API functions", () => {
           stack_id: "feature",
           target: "C",
           heads: ["a", "b", "c", "d"],
-          actor: { kind: "human", id: "local-user" },
+          actor: { kind: "human" },
         },
       );
     });
@@ -251,7 +251,7 @@ describe("git API functions", () => {
       );
       expect(mockPost).toHaveBeenCalledWith(
         "/api/workspaces/W/agents/L/git/merge-requests/R1/confirm",
-        { actor: { kind: "human", id: "local-user" } },
+        { actor: { kind: "human" } },
       );
     });
   });

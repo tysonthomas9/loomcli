@@ -45,10 +45,13 @@ func (authority confirmedHumanMerge) AuthorizeMerge(ctx context.Context, request
 	if recorded.Status != "confirmed" || recorded.ConfirmedBy == "" || recorded.StackID != request.StackID || recorded.Target != target {
 		return errors.New("merge request is not confirmed by a human")
 	}
-	if len(recorded.Heads) != len(request.Changes) {
-		return errors.New("confirmation must include every stack head")
+	if len(recorded.Heads) == 0 || len(recorded.Heads) > len(request.Changes) {
+		return errors.New("confirmation must include every head through the target")
 	}
-	for index, change := range request.Changes {
+	for index, change := range recorded.Changes {
+		if request.Changes[index] != change {
+			return loomgit.NewError(loomgit.Stale, "confirmed stack layers changed", nil)
+		}
 		publication, found, err := authority.Store.Publication(ctx, request.Workspace, change)
 		if err != nil {
 			return err
@@ -80,11 +83,11 @@ func mergeStackConfirmed(ctx context.Context, store *journal.SQLite, workspace, 
 	if err != nil {
 		return MergeStackView{}, err
 	}
-	if len(heads) != len(request.Heads) {
+	if len(heads) < len(request.Heads) {
 		return MergeStackView{}, loomgit.NewError(loomgit.MergeNotAuthorized, "confirm every stack head", nil)
 	}
-	for index, head := range heads {
-		if head != request.Heads[index] {
+	for index, head := range request.Heads {
+		if heads[index] != head {
 			if err := store.DecideMergeRequest(ctx, workspace, request.ID, "stale", actor.ID, mergeRequestNow().UnixNano()); err != nil {
 				return MergeStackView{}, err
 			}
@@ -109,7 +112,7 @@ func mergeStackRecorded(ctx context.Context, store *journal.SQLite, confirmed jo
 	if err != nil {
 		return view, err
 	}
-	if !sameMergeHeads(view, confirmed.Heads) {
+	if !sameMergeHeads(view, confirmed.Changes, confirmed.Heads) {
 		return view, loomgit.NewError(loomgit.Stale, "confirmed stack head changed", nil)
 	}
 	request, err := mergeEntryRequest(ctx, store, workspace, lead, stackID, view, forge)

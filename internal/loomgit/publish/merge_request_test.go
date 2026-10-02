@@ -63,7 +63,7 @@ func TestLeadMergeRequestMergesOnlyAfterHumanConfirms(t *testing.T) {
 			item, heads := leadMergeFixture(t, backend)
 			ctx := context.Background()
 			request, err := RequestMergeLocal(ctx, "W", "L", "feature", "C", leadL)
-			if err != nil || request.Status != "pending" || request.RequestedBy != "L" || len(request.Layers) != 4 {
+			if err != nil || request.Status != "pending" || request.RequestedBy != "L" || len(request.Layers) != 3 {
 				t.Fatalf("request=%+v err=%v", request, err)
 			}
 			for index, layer := range request.Layers {
@@ -89,7 +89,7 @@ func TestLeadMergeRequestMergesOnlyAfterHumanConfirms(t *testing.T) {
 			if err != nil || len(listed) != 1 || listed[0].Status != "confirmed" || listed[0].ConfirmedBy != "Tyson" {
 				t.Fatalf("listed=%+v err=%v", listed, err)
 			}
-			want := "requested by lead L, confirmed by Tyson: A@" + heads[0] + " B@" + heads[1] + " C@" + heads[2] + " D@" + heads[3]
+			want := "requested by lead L, confirmed by Tyson: A@" + heads[0] + " B@" + heads[1] + " C@" + heads[2]
 			if listed[0].Audit != want {
 				t.Fatalf("audit=%q want %q", listed[0].Audit, want)
 			}
@@ -138,6 +138,34 @@ func TestLeadMergeRequestGoesStaleWhenHeadMoves(t *testing.T) {
 	_, err = ConfirmMergeRequestLocal(ctx, "W", "L", request.ID, tyson)
 	requireCode(t, err, loomgit.Stale, "request the merge again")
 	requireNoMerge(t, item)
+}
+
+func TestLeadMergeRequestGoesStaleWhenOnlyProviderHeadMoves(t *testing.T) {
+	for _, backend := range []string{"loom", "native"} {
+		t.Run(backend, func(t *testing.T) {
+			item, forge, _ := fourLayerMergeEntryFixture(t, backend)
+			var mergeForge Forge = forge
+			if backend == "native" {
+				mergeForge = &fakeMergeForge{fakeForge: forge.fakeForge, prs: forge.prs}
+			}
+			oldProvider := localPublishProvider
+			localPublishProvider = func() (Forge, string, string) { return mergeForge, "fixture-token", "owner/repo" }
+			t.Cleanup(func() { localPublishProvider = oldProvider })
+			ctx := context.Background()
+			request, err := RequestMergeLocal(ctx, "W", "L", "feature", "C", leadL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			forge.prs[1].HeadSHA = strings.Repeat("f", 40)
+			_, err = ConfirmMergeRequestLocal(ctx, "W", "L", request.ID, tyson)
+			requireCode(t, err, loomgit.Stale, "request the merge again")
+			requireNoMerge(t, item)
+			recorded, err := item.store.MergeRequest(ctx, "W", request.ID)
+			if err != nil || recorded.Status != "stale" {
+				t.Fatalf("recorded=%+v err=%v", recorded, err)
+			}
+		})
+	}
 }
 
 func TestLeadMergeRequestExpiresAfterThirtyMinutes(t *testing.T) {

@@ -116,6 +116,9 @@ func requestMerge(ctx context.Context, store *journal.SQLite, workspace, lead, s
 	for _, layer := range view.Layers {
 		request.Changes = append(request.Changes, layer.Change)
 		request.Heads = append(request.Heads, layer.Head)
+		if layer.Change == target {
+			break
+		}
 	}
 	return request, store.CreateMergeRequest(ctx, request)
 }
@@ -133,7 +136,7 @@ func confirmMergeRequest(ctx context.Context, store *journal.SQLite, workspace, 
 		return MergeStackView{}, loomgit.NewError(loomgit.MergeNotAuthorized, "a merge request can only be confirmed by a human", nil)
 	}
 	if request.Status == "pending" {
-		if request, err = decidePendingMergeRequest(ctx, store, request, confirmer); err != nil {
+		if request, err = decidePendingMergeRequest(ctx, store, request, confirmer, forge); err != nil {
 			return MergeStackView{}, err
 		}
 	}
@@ -147,7 +150,7 @@ func confirmMergeRequest(ctx context.Context, store *journal.SQLite, workspace, 
 	}
 }
 
-func decidePendingMergeRequest(ctx context.Context, store *journal.SQLite, request journal.MergeRequest, confirmer MergeActor) (journal.MergeRequest, error) {
+func decidePendingMergeRequest(ctx context.Context, store *journal.SQLite, request journal.MergeRequest, confirmer MergeActor, forge Forge) (journal.MergeRequest, error) {
 	request, err := expireMergeRequest(ctx, store, request)
 	if err != nil || request.Status != "pending" {
 		return request, err
@@ -157,7 +160,11 @@ func decidePendingMergeRequest(ctx context.Context, store *journal.SQLite, reque
 	if err != nil && !isStaleError(err) {
 		return request, err
 	}
-	if err != nil || !sameMergeHeads(view, request.Heads) {
+	if err != nil || !sameMergeHeads(view, request.Changes, request.Heads) {
+		status = "stale"
+	} else if moved, err := providerHeadsMoved(ctx, store, request, forge); err != nil {
+		return request, err
+	} else if moved {
 		status = "stale"
 	}
 	err = store.DecideMergeRequest(ctx, request.Workspace, request.ID, status, confirmer.ID, mergeRequestNow().UnixNano())
@@ -183,16 +190,60 @@ func isStaleError(err error) bool {
 	return errors.As(err, &coded) && (coded.Kind == loomgit.Stale || coded.Kind == loomgit.StackNotLinear)
 }
 
-func sameMergeHeads(view MergeStackView, heads []string) bool {
-	if len(view.Layers) != len(heads) {
+// sameMergeHeads reports whether the view still starts with the pinned layers.
+func sameMergeHeads(view MergeStackView, changes, heads []string) bool {
+	if len(view.Layers) < len(heads) || len(changes) != len(heads) {
 		return false
 	}
-	for index, layer := range view.Layers {
-		if layer.Head != heads[index] {
+	for index, head := range heads {
+		if view.Layers[index].Change != changes[index] || view.Layers[index].Head != head {
 			return false
 		}
 	}
 	return true
+}
+
+// providerHeadsMoved reports whether any pinned layer's open PR on the provider
+// no longer points at the pinned SHA; a missing open PR counts as moved.
+func providerHeadsMoved(ctx context.Context, store *journal.SQLite, request journal.MergeRequest, forge Forge) (bool, error) {
+	forge = mergeRequestForge(ctx, forge)
+	if forge == nil {
+		return false, errors.New("GitHub host credential unavailable")
+	}
+	for index, change := range request.Changes {
+		publication, found, err := store.Publication(ctx, request.Workspace, change)
+		if err != nil || !found {
+			return true, err
+		}
+		owner, repo, _ := strings.Cut(publication.Slug, "/")
+		prs, err := forge.ListStackPRs(ctx, owner, repo, publication.Branch)
+		if err != nil {
+			return false, err
+		}
+		open := false
+		for _, pr := range prs {
+			if pr.Head == publication.Branch && pr.State == "open" && !pr.Merged {
+				open = true
+				if pr.HeadSHA != request.Heads[index] {
+					return true, nil
+				}
+			}
+		}
+		if !open {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func mergeRequestForge(ctx context.Context, forge Forge) Forge {
+	if forge != nil {
+		return forge
+	}
+	if token := githubtoken.GitHub(ctx); token != "" {
+		return stackpublish.NewConfiguredGitHubForge(token)
+	}
+	return nil
 }
 
 func mergeRequestView(ctx context.Context, store *journal.SQLite, request journal.MergeRequest, forge Forge) MergeRequestView {
@@ -225,12 +276,7 @@ func mergeRequestView(ctx context.Context, store *journal.SQLite, request journa
 // mergeRequestStatuses reads check and review status for the card; it is display only.
 func mergeRequestStatuses(ctx context.Context, forge Forge, slug string) map[string]stackpublish.PRStatus {
 	owner, repo, _ := strings.Cut(slug, "/")
-	if forge == nil {
-		if token := githubtoken.GitHub(ctx); token != "" {
-			forge = stackpublish.NewConfiguredGitHubForge(token)
-		}
-	}
-	reader, ok := forge.(prStatusForge)
+	reader, ok := mergeRequestForge(ctx, forge).(prStatusForge)
 	if !ok || repo == "" {
 		return nil
 	}

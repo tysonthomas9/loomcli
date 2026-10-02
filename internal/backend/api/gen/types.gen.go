@@ -2414,7 +2414,8 @@ type JourneySpan struct {
 
 // MergeActor defines model for MergeActor.
 type MergeActor struct {
-	Id   string         `json:"id"`
+	// Id Omitted for a human in the local UI; the server uses its OS user (advisory, D28).
+	Id   *string        `json:"id,omitempty"`
 	Kind MergeActorKind `json:"kind"`
 }
 

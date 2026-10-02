@@ -59,8 +59,8 @@ export interface MergeStackView {
   }>;
 }
 
-// Local mode trusts the reported identity, so human-only is advisory (D28).
-const LOCAL_HUMAN = { kind: "human", id: "local-user" } as const;
+// The local server names the human as its OS user; human-only is advisory (D28).
+const LOCAL_HUMAN = { kind: "human" } as const;
 
 export async function gitMergePreview(
   workspaceId: string,
