@@ -8,12 +8,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -21,62 +18,28 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 	"github.com/tysonthomas9/loomcli/internal/loomagent/client"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
+	"github.com/tysonthomas9/loomcli/internal/testutil/realloom"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsv1"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-// TestRealOpenCodeLeadCreatesChildren runs serve's Agent API wiring on the
-// real OpenCode build in an owned /tmp sandbox with a fake model, and a
-// freshly built `loom agent mcp-bridge`. In one busy turn the lead calls
-// agent_create for child one, retries that exact call, and creates child
-// two: the retry returns the same child, so there are two children. Each
-// child's attempt ends while the lead is still busy, and the lead gets two
-// distinct task_completed records, one per child, both delivered to it.
-// The tools are listed for the lead and not for its task children.
+// TestRealOpenCodeLeadCreatesChildren runs serve's Agent API wiring
+// (agentwire) in process on the real OpenCode build, with a fake model and a
+// freshly built `loom agent mcp-bridge`; see leadCreatesChildren.
 // LOOM_REAL_OPENCODE=1 runs it.
 func TestRealOpenCodeLeadCreatesChildren(t *testing.T) {
-	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
-		t.Skip("set LOOM_REAL_OPENCODE=1 to run against the real OpenCode build")
-	}
-	bin := os.Getenv("LOOM_OPENCODE_BIN")
-	if bin == "" {
-		home, _ := os.UserHomeDir()
-		bin = filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode")
-	}
-	sbx := sandbox(t)
-	loom := filepath.Join(sbx, "loom-bin")
-	if out, err := exec.Command("go", "build", "-o", loom, "github.com/tysonthomas9/loomcli/cmd/loom").CombinedOutput(); err != nil {
-		t.Fatalf("build loom: %v %s", err, out)
-	}
-	model := &leadModel{childDone: make(chan struct{}, 8)}
-	ms := httptest.NewServer(model)
-	t.Cleanup(ms.Close)
-	write(t, filepath.Join(sbx, "config/opencode/opencode.json"), fmt.Sprintf(`{"provider":{"fake":{"name":"Fake",
-		"npm":"@ai-sdk/openai-compatible","options":{"baseURL":%q,"apiKey":"x"},
-		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}}}}},"model":"fake/m","small_model":"fake/m"}`, ms.URL+"/v1"))
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + sbx + "/home", "TMPDIR=" + sbx + "/tmp/",
-		"XDG_DATA_HOME=" + sbx + "/data", "XDG_CONFIG_HOME=" + sbx + "/config",
-		"XDG_STATE_HOME=" + sbx + "/state", "XDG_CACHE_HOME=" + sbx + "/cache", "OPENCODE_DISABLE_MODELS_FETCH=1"}
-	repo := filepath.Join(sbx, "repo")
-	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"-c", "user.name=t", "-c", "user.email=t@t",
-		"commit", "-q", "--allow-empty", "-m", "init"}} {
-		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
-	head, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	realloom.Skip(t)
+	model := newLeadModel(t)
+	sbx := realloom.NewSandbox(t, model.URL)
+	loom := sbx.BuildLoom(t)
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	api, err := agentwire.Start(ctx, agentwire.Config{Dir: filepath.Join(sbx, "loom"), OpenCodeBin: bin,
-		OpenCodeEnv: env, APIBase: "http://" + l.Addr().String(), LoomBin: loom})
+	api, err := agentwire.Start(ctx, agentwire.Config{Dir: filepath.Join(sbx.Dir, "loom"), OpenCodeBin: realloom.OpenCodeBin(),
+		OpenCodeEnv: sbx.Env(), APIBase: "http://" + l.Addr().String(), LoomBin: loom})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,31 +55,51 @@ func TestRealOpenCodeLeadCreatesChildren(t *testing.T) {
 	srv.Listener = l
 	srv.Start()
 	t.Cleanup(srv.Close)
+	leadCreatesChildren(ctx, t, client.New(client.Config{BaseURL: srv.URL, Workspace: "ws"}), sbx, model)
+}
 
-	user := client.New(client.Config{BaseURL: srv.URL, Workspace: "ws"})
-	lead, err := user.Create(ctx, "lead-1", agentsv1.CreateBody{Preset: "lead", Name: "lead", Repo: repo,
-		BaseRef: strings.TrimSpace(string(head)), Overrides: agentsv1.Overrides{Harness: "opencode"}})
+// TestRealServeLeadCreatesChildren is the same on a real `loom serve`
+// process with an owned fleet-db: creating a lead works, and its bridge
+// reaches serve. LOOM_REAL_OPENCODE=1 runs it.
+func TestRealServeLeadCreatesChildren(t *testing.T) {
+	realloom.Skip(t)
+	model := newLeadModel(t)
+	sbx := realloom.NewSandbox(t, model.URL)
+	base := sbx.Serve(t, sbx.BuildLoom(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	leadCreatesChildren(ctx, t, client.New(client.Config{BaseURL: base, Workspace: realloom.Workspace}), sbx, model)
+}
+
+// leadCreatesChildren: in one busy turn the lead calls agent_create for
+// child one, retries that exact call, and creates child two: the retry
+// returns the same child, so there are two children. Each child's attempt
+// ends while the lead is still busy, and the lead gets two distinct
+// task_completed records, one per child, both delivered to it. The tools
+// are listed for the lead and not for its task children.
+func leadCreatesChildren(ctx context.Context, t *testing.T, user *client.Client, sbx realloom.Sandbox, model *leadModel) {
+	t.Helper()
+	lead, err := user.Create(ctx, "lead-1", agentsv1.CreateBody{Preset: "lead", Name: "lead", Repo: sbx.Repo,
+		BaseRef: sbx.Head, Overrides: agentsv1.Overrides{Harness: "opencode"}})
 	if err != nil {
 		t.Fatalf("Create lead: %v", err)
 	}
-	wait(t, ctx, "lead idle", func() bool {
+	wait(ctx, t, "lead idle", func() bool {
 		a, err := user.Get(ctx, lead.AgentID)
 		return err == nil && a.State == loomagent.StateIdle
 	})
 	if _, err := user.Send(ctx, "go-1", lead.AgentID, "split the work"); err != nil {
 		t.Fatal(err)
 	}
-
-	var kids []agentsv1.Agent
-	wait(t, ctx, "two task_completed records", func() bool {
+	wait(ctx, t, "two task_completed records", func() bool {
 		p, err := user.ListEvents(ctx, loomstore.EventQuery{AgentID: lead.AgentID, Kinds: []string{loomagent.KindTaskCompleted}})
 		return err == nil && len(p.Events) >= 2
 	})
-	l2, err := user.List(ctx, loomstore.AgentFilter{Parent: lead.AgentID})
+	l, err := user.List(ctx, loomstore.AgentFilter{Parent: lead.AgentID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	kids = l2.Agents
+	kids := l.Agents
 	if len(kids) != 2 {
 		t.Fatalf("lead has %d children; want 2 (the retried create returns the same child)", len(kids))
 	}
@@ -136,7 +119,7 @@ func TestRealOpenCodeLeadCreatesChildren(t *testing.T) {
 		if k.ParentAgentID == nil || *k.ParentAgentID != lead.AgentID || k.Preset != "task" {
 			t.Errorf("child %s: parent %v preset %s", k.AgentID, k.ParentAgentID, k.Preset)
 		}
-		wait(t, ctx, "lead reads "+key, func() bool { return model.leadSaw(key) })
+		wait(ctx, t, "lead reads "+key, func() bool { return model.leadSaw(key) })
 	}
 	if len(p.Events) != 2 {
 		t.Errorf("lead has %d task_completed records; want 2", len(p.Events))
@@ -154,6 +137,7 @@ func TestRealOpenCodeLeadCreatesChildren(t *testing.T) {
 // for both children to finish before ending its turn; to a task child it
 // answers done.
 type leadModel struct {
+	*httptest.Server
 	childDone chan struct{}
 
 	mu           sync.Mutex
@@ -162,6 +146,13 @@ type leadModel struct {
 	childrenSeen int
 	doneInTurn   bool
 	taskSawTools bool
+}
+
+func newLeadModel(t *testing.T) *leadModel {
+	m := &leadModel{childDone: make(chan struct{}, 8)}
+	m.Server = httptest.NewServer(m)
+	t.Cleanup(m.Close)
+	return m
 }
 
 func (m *leadModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -256,52 +247,7 @@ func stream(w http.ResponseWriter, delta, finish string) {
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 }
 
-// sandbox is an owned /tmp dir for one OpenCode user, with a service config
-// on a free loopback port. Cleanup stops the service registered there and
-// removes the dir.
-func sandbox(t *testing.T) string {
-	t.Helper()
-	sbx, err := os.MkdirTemp("/tmp", "agentmcp-real-")
-	if err == nil {
-		sbx, err = filepath.EvalSymlinks(sbx) // OpenCode reports resolved paths
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		var reg struct{ PID int }
-		if b, err := os.ReadFile(filepath.Join(sbx, "state/opencode/service.json")); err == nil && json.Unmarshal(b, &reg) == nil && reg.PID > 0 {
-			_ = syscall.Kill(reg.PID, syscall.SIGTERM)
-			for end := time.Now().Add(10 * time.Second); syscall.Kill(reg.PID, 0) == nil && time.Now().Before(end); {
-				time.Sleep(50 * time.Millisecond)
-			}
-			_ = syscall.Kill(reg.PID, syscall.SIGKILL)
-		}
-		_ = os.RemoveAll(sbx)
-	})
-	for _, d := range []string{"home", "tmp", "config/opencode", "repo"} {
-		if err := os.MkdirAll(filepath.Join(sbx, d), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
-	write(t, filepath.Join(sbx, "config/opencode/service.json"), fmt.Sprintf(`{"port":%d}`, port))
-	return sbx
-}
-
-func write(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func wait(t *testing.T, ctx context.Context, what string, ok func() bool) {
+func wait(ctx context.Context, t *testing.T, what string, ok func() bool) {
 	t.Helper()
 	for !ok() {
 		select {

@@ -111,10 +111,10 @@ func (c *Client) discard(ref loomharness.NativeRef, cause error) (loomharness.Na
 	return loomharness.NativeRef{}, cause
 }
 
-// bridge writes the agent's bridge settings (env) beside dir, before
-// OpenCode first loads dir, then waits until OpenCode has connected the
-// "loom" MCP server for dir, so the agent's first turn has its tools. An
-// agent with no settings has no bridge.
+// bridge writes the agent's bridge settings (env) for dir, before OpenCode
+// first loads dir, then waits until OpenCode has connected the "loom" MCP
+// server for dir and its tool catalog has settled, so the agent's first turn
+// has its tools. An agent with no settings has no bridge.
 func (c *Client) bridge(ctx context.Context, dir string, env map[string]string) error {
 	if len(env) == 0 {
 		return nil
@@ -136,7 +136,7 @@ func (c *Client) bridge(ctx context.Context, dir string, env map[string]string) 
 		}
 		for _, m := range r.Data {
 			if m.Name == "loom" && m.Status.Status == "connected" {
-				return nil
+				return settle(ctx)
 			}
 		}
 		if time.Now().After(deadline) {
@@ -147,6 +147,24 @@ func (c *Client) bridge(ctx context.Context, dir string, env map[string]string) 
 			return ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 		}
+	}
+}
+
+// catalogSettle is how long after the bridge reports connected OpenCode's
+// session tool catalog takes to list its tools. Connecting publishes
+// ToolsChanged, and the location's tool registry reloads from it after a
+// 100 ms debounce (b30c4d0 core/src/tool/mcp.ts:132-141); a turn selects its
+// tools from that registry (session/context.ts:127-133), which no API
+// exposes. Five debounces cover the reload.
+var catalogSettle = 500 * time.Millisecond
+
+// settle waits out catalogSettle, so a first turn sent now lists the tools.
+func settle(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(catalogSettle):
+		return nil
 	}
 }
 

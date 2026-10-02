@@ -23,7 +23,8 @@ from the settings file Loom keeps in the private git dir of the agent's
 worktree (the working directory). Every tool acts as the agent the token
 names. With no settings, or a token the Agent API refuses, it exits with an
 error and serves nothing.`,
-	Args: cobra.NoArgs,
+	Args:         cobra.NoArgs,
+	SilenceUsage: true, // a refused start prints its reason, not the usage
 	// stdout is the MCP channel: skip the root setup, which can log or reach
 	// a backend.
 	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
