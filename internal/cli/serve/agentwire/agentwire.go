@@ -83,9 +83,8 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 	a.newSvc = func(ws string) (*loomagent.Service, func()) {
 		var svc *loomagent.Service
 		feed := sync.OnceFunc(func() { a.run(func(ctx context.Context) { svc.RunFeed(ctx, "opencode") }) })
-		svc = loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: ws,
-			Workspace: agentworktree.Port{W: wt}, PrepareWorktree: prepareWorktree(cfg.Skills, ws),
-			Harnesses: map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}}})
+		svc = loomagent.New(serviceConfig(st, ws, wt, cfg.Skills,
+			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}}))
 		return svc, feed
 	}
 	a.handler = agentsv1.New(a.service, nil)
@@ -160,6 +159,15 @@ func (a *API) Stop() {
 	a.wg.Wait()
 	a.opencode.Stop()
 	_ = a.store.Close()
+}
+
+// serviceConfig wires ws's service on harnesses. Interrupt is left to its
+// default, the current session's own Interrupt, so Send(interrupt), Archive
+// cancelled and a harness switch all stop a running turn the same way.
+func serviceConfig(st *loomstore.Store, ws string, wt *agentworktree.Worktrees, skills store.Store,
+	harnesses map[string]loomharness.Harness) loomagent.ServiceConfig {
+	return loomagent.ServiceConfig{Store: st, WorkspaceID: ws, Workspace: agentworktree.Port{W: wt},
+		PrepareWorktree: prepareWorktree(skills, ws), Harnesses: harnesses}
 }
 
 // harnessPresets renders presets as the harness preset files.

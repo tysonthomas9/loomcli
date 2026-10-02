@@ -58,7 +58,8 @@ type ServiceConfig struct {
 	ResolveRepo     ResolveRepo
 	PrepareWorktree PrepareWorktree
 	Target          Target
-	// Interrupt stops a's running turn; nil when no harness is wired.
+	// Interrupt stops a's running turn; nil uses the current session's own
+	// Interrupt, the same call on every harness.
 	Interrupt func(ctx context.Context, a loomstore.Agent) error
 	// Purge removes exactly the native sessions a owns (2.1c's R29 hook); nil
 	// until 2.1c wires it. A failure leaves the Delete pending for Reconcile.
@@ -127,6 +128,9 @@ func New(cfg ServiceConfig) *Service {
 		locks:    map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[loomharness.NativeRef]bool{}}
 	if s.presets == nil {
 		s.presets = BuiltinPresets{}
+	}
+	if s.interrupt == nil {
+		s.interrupt = s.sessionInterrupt
 	}
 	if s.backend == nil {
 		s.backend = func(context.Context) (Backend, error) { return Backend{}, nil }

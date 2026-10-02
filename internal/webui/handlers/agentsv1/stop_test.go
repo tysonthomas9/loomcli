@@ -13,7 +13,7 @@ func TestAgentSendInterruptRoute(t *testing.T) {
 		t.Fatalf("queue send = %d %v; want no interrupted", status, out)
 	}
 	status, out = call(t, srv, "POST", "ws/v1/agents/b1/messages", "st1", `{"delivery":"interrupt"}`)
-	if status != 202 || out["interrupted"] != true || out["message_id"] != "" {
+	if status != 202 || out["interrupted"] != true || out["message_id"] != "" || out["state"] != "active" {
 		t.Fatalf("stop = %d %v", status, out)
 	}
 	literal(t, "stop", out, []string{"interrupted", "state"}, []string{"Interrupted"})

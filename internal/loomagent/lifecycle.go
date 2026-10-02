@@ -228,7 +228,7 @@ func (s *Service) stop(ctx context.Context, a loomstore.Agent) (loomstore.Agent,
 			return a, err
 		}
 	}
-	if a.RunningTurnID != nil && s.interrupt != nil {
+	if a.RunningTurnID != nil {
 		if err := s.interrupt(ctx, a); err != nil {
 			return a, err
 		}

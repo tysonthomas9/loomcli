@@ -116,10 +116,8 @@ func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 	if a.State != StateActive && a.State != StateWaiting {
 		return a, nil
 	}
-	if s.interrupt != nil {
-		if err := s.interrupt(ctx, a); err != nil {
-			return a, harnessErr(err)
-		}
+	if err := s.interrupt(ctx, a); err != nil {
+		return a, harnessErr(err)
 	}
 	if err := s.loseOpen(ctx, a, nil); err != nil {
 		return a, err

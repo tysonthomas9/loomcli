@@ -60,7 +60,7 @@ type SendResult struct {
 // interrupt hook; its message then fills or replaces the sender's slot,
 // marked to be handed over first when the interrupted turn ends. With no
 // turn running it is a queue Send, and with no message it stores only its
-// receipt (state no_op when no turn ran).
+// receipt (state no_op when no turn ran, else the agent's state).
 func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error) {
 	if req.RequestID == "" {
 		return SendResult{}, invalid("Send needs a RequestID")
@@ -136,18 +136,16 @@ func (s *Service) interruptTurn(ctx context.Context, a loomstore.Agent, req Send
 		}
 	}
 	if running {
-		stop := s.interrupt
-		if stop == nil {
-			stop = s.sessionInterrupt
-		}
-		if err := stop(ctx, a); err != nil {
+		if err := s.interrupt(ctx, a); err != nil {
 			return SendResult{}, true, harnessErr(err)
 		}
 	}
 	if req.Text != "" {
 		return SendResult{}, false, nil
 	}
-	res := SendResult{Interrupted: &running}
+	// With a turn running the design names no Send state for a bare stop:
+	// report the agent's state, which stays until the turn ends.
+	res := SendResult{State: a.State, Interrupted: &running}
 	if !running {
 		res.State = StateNoOp
 	}
@@ -238,9 +236,9 @@ func messageID(agentID, sender, requestID string) string {
 	return "msg_" + hex.EncodeToString(sum[:13])
 }
 
-// sessionInterrupt is Send's interrupt when no Interrupt hook is set: the
-// current session's own Interrupt, the same call on every harness. With no
-// session wired there is nothing to interrupt.
+// sessionInterrupt is the default Interrupt hook (Send, Archive cancelled,
+// harness switch): the current session's own Interrupt, the same call on
+// every harness. With no session wired there is nothing to interrupt.
 func (s *Service) sessionInterrupt(ctx context.Context, a loomstore.Agent) error {
 	sess, _, err := s.current(ctx, a)
 	if err != nil || sess == nil {

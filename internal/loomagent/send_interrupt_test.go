@@ -45,9 +45,10 @@ func TestSendInterrupt(t *testing.T) {
 	mustSendMsg(t, s, sendReq(a.AgentID, "x1", "from the system", ActorRef{Kind: "system", ID: "x"}))
 
 	// Stop with no message: t1 ends, the waiting slots stay, oldest first.
+	before := s.get(t, a.AgentID).State
 	stop := mustSendMsg(t, s, interruptReq(a.AgentID, "stop1", "", user))
-	if stop.Interrupted == nil || !*stop.Interrupted || stop.State != "" || stop.MessageID != "" {
-		t.Fatalf("stop = %+v; want interrupted, no message", stop)
+	if stop.Interrupted == nil || !*stop.Interrupted || stop.State != before || stop.MessageID != "" {
+		t.Fatalf("stop = %+v; want interrupted, no message, state %s", stop, before)
 	}
 	handed("u1", "c1")
 	if w := waiting(t, s, a.AgentID); !slices.Equal(w, []string{"system:x=from the system"}) {
