@@ -5,7 +5,9 @@
 # Adds, on top of the default local-mode image, the pinned OpenCode build
 # (R22: 2.0.19, sst/opencode v2 at b30c4d0, built as in aft.yml) and the 2.0d
 # scripted fake model, so a Lead can run without real provider auth. The
-# workspace's source repo is the 2.0f Slack-clone fixture.
+# workspace's source repo is the 2.0f Slack-clone fixture. It also carries the
+# R21 pinned codex and Claude Code CLIs for real mode (2.0q2); their auth is
+# only ever a read-only runtime mount, never part of the image.
 
 ARG LOOM_BASE_IMAGE=loomcli-local-mode-loom:latest
 
@@ -24,14 +26,22 @@ RUN git init -q && git remote add origin https://github.com/sst/opencode \
     && /opencode --version | grep -F 2.0.19 \
     && cd / && rm -rf /src /root/.bun/install/cache
 
+FROM docker.io/library/node:24-bookworm-slim AS harnesses
+RUN npm install -g --prefix /opt/harnesses @openai/codex@0.157.1 @anthropic-ai/claude-code@2.1.285 \
+    && /opt/harnesses/bin/codex --version | grep -F 0.157.1 \
+    && /opt/harnesses/bin/claude --version | grep -F 2.1.285 \
+    && rm -rf /root/.npm
+
 FROM ${LOOM_BASE_IMAGE}
 COPY --from=docker.io/library/node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=harnesses /opt/harnesses /opt/harnesses
 COPY --from=opencode /opencode /usr/local/bin/opencode
 COPY tests/aft/fixtures/fake-model/server.mjs /opt/fake-model/server.mjs
 COPY scripts/seed-slack-clone.sh /opt/fixtures/scripts/seed-slack-clone.sh
 COPY tests/fixtures/slack-clone /opt/fixtures/tests/fixtures/slack-clone
 COPY test/local-mode/local-mode-agents-entrypoint /usr/local/bin/local-mode-agents-entrypoint
-ENV LOOM_OPENCODE_BIN=/usr/local/bin/opencode \
+ENV PATH=/opt/harnesses/bin:$PATH \
+    LOOM_OPENCODE_BIN=/usr/local/bin/opencode \
     OPENCODE_DISABLE_MODELS_FETCH=1 \
     FAKE_MODEL_PORT=4010
 ENTRYPOINT ["/usr/local/bin/local-mode-agents-entrypoint"]

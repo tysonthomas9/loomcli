@@ -1,11 +1,11 @@
 # Real-model mode for the Agent API stack (LOCAL_MODE_AGENTS_REAL=1 make
 # local-mode-agents-up): serve's OpenCode uses the providers in the host's
-# OpenCode auth.json, mounted read-only, instead of the fake model.
+# OpenCode auth.json, mounted read-only, instead of the fake model, and the
+# image's pinned codex and claude use the host's codex and Claude logins.
 #
 # One pattern per harness: each host credential file gets one read-only bind
 # here, at the path that harness reads, with a LOCAL_MODE_<HARNESS>_AUTH knob.
-# Never copy it, never log in inside the container. Only OpenCode exists now;
-# Codex (~/.codex/auth.json) and Claude follow the same shape when added.
+# Never copy it, never log in inside the container.
 
 services:
   loom-local:
@@ -13,5 +13,11 @@ services:
       LOCAL_MODE_AGENTS_REAL: "1"
       LOCAL_MODE_AGENTS_MODEL: "${LOCAL_MODE_AGENTS_MODEL:-}"
       OPENCODE_DISABLE_MODELS_FETCH: ""
+      # codex's and Claude's writable roots live on the loom-data volume, so
+      # down -v removes them; only the auth file inside each is a host bind.
+      CODEX_HOME: /root/.loom/agents-codex
+      CLAUDE_CONFIG_DIR: /root/.loom/agents-claude
     volumes:
       - ${LOCAL_MODE_OPENCODE_AUTH:-${HOME}/.local/share/opencode/auth.json}:/root/.loom/agents-opencode/data/opencode/auth.json:ro
+      - ${LOCAL_MODE_CODEX_AUTH:-${HOME}/.codex/auth.json}:/root/.loom/agents-codex/auth.json:ro
+      - ${LOCAL_MODE_CLAUDE_AUTH:-${HOME}/.claude/.credentials.json}:/root/.loom/agents-claude/.credentials.json:ro

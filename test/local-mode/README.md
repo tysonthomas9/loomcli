@@ -180,6 +180,29 @@ file is read-only there. Prefer an API-key provider, or an OAuth login whose
 access token has not expired: refreshing a stale OAuth token in the container
 can invalidate the host's login.
 
+The agents image also carries the R21 pinned `codex` 0.157.1 and `claude`
+2.1.285 on `PATH`. Real mode mounts the host's codex `~/.codex/auth.json`
+(`LOCAL_MODE_CODEX_AUTH`) and Claude `~/.claude/.credentials.json`
+(`LOCAL_MODE_CLAUDE_AUTH`) READ-ONLY inside `CODEX_HOME=/root/.loom/agents-codex`
+and `CLAUDE_CONFIG_DIR=/root/.loom/agents-claude`. Both roots, with everything
+else the CLIs write (config, sessions, caches), live on the `loom-data` volume,
+so `make local-mode-agents-down` removes them. A terminal-tab `codex` or
+`claude` uses your logins. All three files must exist on the host. At start
+the entrypoint prints a WARNING for a login that fails its CLI's own status
+check; check by hand the same way, never by reading the file:
+
+```sh
+podman exec $C codex login status
+podman exec $C claude auth status
+```
+
+The same refresh caveat applies: codex refreshes a ChatGPT login after it
+ages, and the read-only mount refuses the write, so use a recently refreshed
+host login (run `codex` on the host first). On macOS the Claude login lives in
+the Keychain and `~/.claude/.credentials.json` may be stale; use a long-lived
+`claude setup-token` login there, or point `LOCAL_MODE_CLAUDE_AUTH` at another
+file.
+
 Codex variant knobs:
 
 The Codex image installs the current npm `latest` release by default. Set

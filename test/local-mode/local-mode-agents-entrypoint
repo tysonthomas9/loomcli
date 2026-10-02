@@ -34,6 +34,12 @@ if [ -n "${LOCAL_MODE_AGENTS_REAL:-}" ]; then
   node -e 'new (require("node:sqlite").DatabaseSync)(process.argv[1])
     .prepare("DELETE FROM migration WHERE id LIKE ?").run(process.argv[2])' \
     "$XDG_DATA_HOME/opencode/opencode.db" '%_import_legacy_credentials'
+  # Check the read-only codex and Claude logins only through each CLI's own
+  # status command; its output is never shown, only a pass or a warning.
+  codex login status >/dev/null 2>&1 \
+    || echo "WARNING: codex is not logged in; refresh ~/.codex/auth.json on the host" >&2
+  claude auth status >/dev/null 2>&1 \
+    || echo "WARNING: Claude is not logged in; refresh the host login (LOCAL_MODE_CLAUDE_AUTH)" >&2
 fi
 
 src="${LOOM_LOCAL_MODE_SOURCE_REPO:-/workspace/source-repo}"
