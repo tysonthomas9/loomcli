@@ -1,0 +1,174 @@
+# Seamless resume (design v2 §4.15) of OpenCode agents on the real OpenCode
+# build, with the model scripted by 2.0d's fake model (see agents-v1-lead).
+# The presets carry no bridge tools, so the suite runs without the host
+# bridge. A loom serve restart is proven by 2.1d's Go test; here the shared
+# OpenCode server stops as the idle timer's restart stops it.
+suite: agents-v1-resume
+classification: { area: agents, feature: agent-api-resume, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-RESUME" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-resume-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 resume ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-resume","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+teardown: |
+  set +e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-RESUME" >/dev/null
+
+tests:
+  - name: an idle OpenCode agent carries on after its OpenCode server restarts
+    intent: After the shared OpenCode server stops while the agent is idle, the chat reloads its full history with the agent idle and no error, and the next message gets a reply from the same session within seconds
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-RESUME/v1/agents
+          headers: { Idempotency-Key: "agv1-resume-idle-${RUN_ID:-local}" }
+          body: { preset: pr-review-interactive, name: "agv1-resume-idle-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-resume-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1ResumeIdleId
+        intent: "Create a tool-free persistent OpenCode agent through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-RESUME-BEFORE"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-RESUME/chat/$(cat "$AFT_WORK_DIR/agv1ResumeIdleId")"
+        intent: "Script the first reply and open the agent's chat"
+      - fill: { label: Message, value: "before the restart" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-RESUME-BEFORE') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 90000
+        intent: "Wait until the first reply arrives and the agent is idle"
+      - run: |
+          set -e
+          pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$AFT_OPENCODE_SERVICE")"
+          echo "$pid" > "$AFT_WORK_DIR/agv1-resume-idle-pid"
+          kill "$pid"
+          for i in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+          ! kill -0 "$pid" 2>/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-RESUME-AFTER"}]}' >/dev/null
+        intent: "Stop the OpenCode server Loom started, as the idle restart does, and script the next reply"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              const h = document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '';
+              return t.includes('before the restart') && t.includes('AGV1-RESUME-BEFORE') && h.includes('idle') &&
+                !document.querySelector('section[aria-label="Agent chat"] [role=alert]'); })()
+        intent: "Wait until the reloaded chat shows the full history, the agent idle and no error"
+      - fill: { label: Message, value: "after the restart" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-RESUME-AFTER') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle') &&
+            !document.querySelector('section[aria-label="Agent chat"] [role=alert]')
+        budget: 15000
+        intent: "Wait until the reply arrives with the agent idle again and no error"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-RESUME/v1/agents/${var:agv1ResumeIdleId}"
+          assert:
+            - path: state
+              equals: idle
+        intent: "Check that the agent is idle"
+      - run: |
+          set -e
+          old="$(cat "$AFT_WORK_DIR/agv1-resume-idle-pid")"
+          new="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$AFT_OPENCODE_SERVICE")"
+          [ -n "$new" ] && [ "$new" != "$old" ] && kill -0 "$new"
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-resume-idle-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-resume-idle-requests.json" <<'PY'
+          import json, sys
+          reqs = [json.dumps(r) for r in json.load(open(sys.argv[1]))["requests"]]
+          last = [r for r in reqs if "after the restart" in r]
+          assert len(last) == 1, f"the message after the restart reached the model {len(last)} times"
+          assert "before the restart" in last[0] and "AGV1-RESUME-BEFORE" in last[0], "the resumed session lost its history"
+          PY
+        intent: "Check that a new OpenCode server answered once, with the session's full history"
+
+  - name: a message waiting across an OpenCode restart is delivered once
+    intent: A message waiting behind a running turn when the OpenCode server dies is delivered exactly once after the restart and gets its reply, with the history intact and no error
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-RESUME/v1/agents
+          headers: { Idempotency-Key: "agv1-resume-wait-${RUN_ID:-local}" }
+          body: { preset: daemon-worker, name: "agv1-resume-wait-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-resume-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1ResumeWaitId
+        intent: "Create a tool-free OpenCode worker through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"bash":"sleep 120"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-RESUME/chat/$(cat "$AFT_WORK_DIR/agv1ResumeWaitId")"
+        intent: "Script a long shell call and open the worker's chat"
+      - fill: { label: Message, value: "start a long turn" }
+      - press: Enter
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+        budget: 60000
+        intent: "Wait until the turn runs and the composer offers Stop"
+      - fill: { label: Message, value: "waiting across the restart" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('Waiting') && t.includes('waiting across the restart'); })()
+        intent: "Wait until the message shows in the waiting bubble"
+      - run: |
+          set -e
+          pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$AFT_OPENCODE_SERVICE")"
+          kill "$pid"
+          for i in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+          ! kill -0 "$pid" 2>/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-RESUME-CONTINUED"},{"text":"AGV1-RESUME-PENDING"}]}' >/dev/null
+        intent: "Stop the OpenCode server mid-turn, then script the recovered turn's reply and the waiting message's reply"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              const h = document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '';
+              const w = t.indexOf('waiting across the restart');
+              return t.indexOf('AGV1-RESUME-CONTINUED') >= 0 && w >= 0 && t.indexOf('AGV1-RESUME-PENDING') > w &&
+                !t.includes('Waiting') && !h.includes('active'); })()
+        budget: 90000
+        intent: "Wait until the recovered turn ends, then the waiting message is delivered, its reply follows it and the worker is no longer active"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              const w = t.indexOf('waiting across the restart');
+              return t.includes('start a long turn') && t.includes('AGV1-RESUME-CONTINUED') && w >= 0 &&
+                t.indexOf('AGV1-RESUME-PENDING') > w && !t.includes('Waiting') &&
+                !document.querySelector('section[aria-label="Agent chat"] [role=alert]'); })()
+        intent: "Wait until the reloaded chat shows the full history, nothing waiting and no error"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-resume-wait-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-resume-wait-requests.json" <<'PY'
+          import json, sys
+          reqs = json.load(open(sys.argv[1]))["requests"]
+          def users(r):
+              return [json.dumps(m.get("content")) for m in r.get("messages", []) if m.get("role") == "user"]
+          sent = [r for r in reqs if users(r) and "waiting across the restart" in users(r)[-1]]
+          assert len(sent) == 1, f"the waiting message started {len(sent)} model requests; want 1"
+          assert sum("waiting across the restart" in u for u in users(sent[0])) == 1, "the waiting message was delivered twice"
+          assert "start a long turn" in json.dumps(sent[0]), "the resumed session lost its history"
+          PY
+        intent: "Check that the waiting message reached the model once, with the session's history"
