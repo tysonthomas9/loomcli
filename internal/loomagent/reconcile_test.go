@@ -363,8 +363,9 @@ func TestRespondResumesLazily(t *testing.T) {
 }
 
 // TestReconcileOneAgentFailureDoesNotBlockOthers: A's history read fails;
-// B's turn, which ended while Loom was down, is still backfilled and B
-// goes idle. Reconcile reports A's failure and leaves A as it was.
+// B's turn, which ended while Loom was down, is still backfilled (its native
+// turn end is saved once) and B goes idle. Reconcile reports A's failure
+// and leaves A as it was.
 func TestReconcileOneAgentFailureDoesNotBlockOthers(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -383,6 +384,9 @@ func TestReconcileOneAgentFailureDoesNotBlockOthers(t *testing.T) {
 	}
 	if st := s.get(t, b.AgentID).State; st != StateIdle {
 		t.Fatalf("B is %s; want idle", st)
+	}
+	if n := e.events(t, b.AgentID, EventTurnCompleted); n != 1 {
+		t.Fatalf("B has %d saved turn ends; want 1 backfilled from its native history", n)
 	}
 	if ag := s.get(t, a.AgentID); ag.State != StateIdle || ag.AttentionReason != nil {
 		t.Fatalf("A is %s with Attention %q; want it unchanged", ag.State, deref(ag.AttentionReason))
