@@ -37,12 +37,18 @@ type Store interface {
 }
 
 // errPublicationMismatch marks a published change whose owned PR no longer
-// matches it, and errTrunkUnavailable one whose repository trunk could not be
-// fetched. Only those changes wait; reconcile continues for the rest.
+// matches it, errPRMissing one whose PR the provider no longer has, and
+// errTrunkUnavailable one whose repository trunk could not be fetched. Only
+// those changes wait; reconcile continues for the rest.
 var (
 	errPublicationMismatch = errors.New("publication mismatch")
+	errPRMissing           = errors.New("published PR not found on provider")
 	errTrunkUnavailable    = errors.New("trunk unavailable")
 )
+
+func needsAttention(err error) bool {
+	return errors.Is(err, errPublicationMismatch) || errors.Is(err, errPRMissing) || errors.Is(err, errTrunkUnavailable)
+}
 
 type Dependent struct {
 	Task, Repo string
@@ -144,7 +150,7 @@ func ReconcileWithOptions(ctx context.Context, store Store, forge Forge, options
 		if err == nil {
 			err = reconcilePublication(ctx, store, forge, item, publications, options)
 		}
-		if errors.Is(err, errPublicationMismatch) || errors.Is(err, errTrunkUnavailable) {
+		if needsAttention(err) {
 			err = recordAttention(ctx, store, item.publication, err)
 		} else if err == nil {
 			err = clearAttention(ctx, store, item.publication)
@@ -314,6 +320,9 @@ func ownedPull(ctx context.Context, forge Forge, publication journal.Publication
 		return stackpublish.PR{}, err
 	}
 	pull, err := forge.PullByNumber(ctx, owner, repo, publication.PRNumber)
+	if errors.Is(err, stackpublish.ErrNotFound) {
+		return stackpublish.PR{}, fmt.Errorf("%w: owned PR %d for change %s", errPRMissing, publication.PRNumber, publication.Change)
+	}
 	if err != nil {
 		return stackpublish.PR{}, err
 	}

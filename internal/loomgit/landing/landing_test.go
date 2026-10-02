@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -19,10 +20,14 @@ import (
 type fakeForge struct {
 	pull       stackpublish.PR
 	pulls      map[int]stackpublish.PR
+	errs       map[int]error
 	associated map[string][]stackpublish.PR
 }
 
 func (forge *fakeForge) PullByNumber(_ context.Context, _, _ string, number int) (stackpublish.PR, error) {
+	if err := forge.errs[number]; err != nil {
+		return stackpublish.PR{}, err
+	}
 	if forge.pulls != nil {
 		return forge.pulls[number], nil
 	}
@@ -531,5 +536,49 @@ func TestLayerOnMismatchedPRNeedsAttentionOnce(t *testing.T) {
 	}
 	if count := strings.Count(logs.String(), "landing needs attention"); count != 2 {
 		t.Fatalf("attention logged %d times over 3 passes:\n%s", count, logs.String())
+	}
+}
+
+func TestMissingPublishedPRDoesNotStallOtherWorkspaces(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	fixture.publishAs(t, "W1", "A", 9)
+	fixture.publishAs(t, "W2", "B", 5)
+	// PR 9 was deleted on the provider; PR 5 merged normally.
+	missing := fmt.Errorf("github GET /repos/owner/repo/pulls/9: 404: Not Found: %w", stackpublish.ErrNotFound)
+	fixture.forge.errs = map[int]error{9: missing}
+	fixture.forge.pulls = map[int]stackpublish.PR{5: {Number: 5, Head: "loom/ws/W2/change/B", HeadSHA: fixture.initial,
+		Base: "main", State: "closed", Merged: true, MergeCommitSHA: fixture.initial}}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	for range 3 {
+		if err := Reconcile(ctx, fixture.store, fixture.forge); err != nil {
+			t.Fatalf("one workspace's missing PR failed the pass: %v", err)
+		}
+	}
+	status, err := fixture.store.LandingStatus(ctx, "W2", "B")
+	if err != nil || status.State != "landed" {
+		t.Fatalf("healthy workspace landing = %+v, %v", status, err)
+	}
+	attentions, err := fixture.store.LandingAttentions(ctx)
+	if err != nil || len(attentions) != 1 || attentions[0].Workspace != "W1" || attentions[0].Change != "A" ||
+		attentions[0].Reason != "published PR not found on provider: owned PR 9 for change A" {
+		t.Fatalf("missing PR attention = %+v, %v", attentions, err)
+	}
+	if count := strings.Count(logs.String(), "landing needs attention"); count != 1 {
+		t.Fatalf("missing PR logged %d times over 3 passes:\n%s", count, logs.String())
+	}
+	if status, err := fixture.store.LandingStatus(ctx, "W1", "A"); err != nil || status.State != "published" {
+		t.Fatalf("missing PR landing = %+v, %v", status, err)
+	}
+	fixture.forge.errs = nil
+	fixture.forge.pulls[9] = stackpublish.PR{Number: 9, Head: "loom/ws/W1/change/A", HeadSHA: fixture.initial, Base: "main", State: "open"}
+	if err := Reconcile(ctx, fixture.store, fixture.forge); err != nil {
+		t.Fatal(err)
+	}
+	if attentions, err := fixture.store.LandingAttentions(ctx); err != nil || len(attentions) != 0 {
+		t.Fatalf("restored PR attention = %+v, %v", attentions, err)
 	}
 }
