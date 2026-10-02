@@ -200,7 +200,7 @@ func Execute() error {
 	// so leaving the provider alive until the process actually exits is
 	// the right call.
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM) //nolint:norawsignal // root's own trace-flush handler
 	go func() {
 		s, ok := <-sigCh
 		if !ok {

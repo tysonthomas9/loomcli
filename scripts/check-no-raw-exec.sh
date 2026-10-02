@@ -42,8 +42,17 @@ done < <(find "$REPO_ROOT" \
        ! -name '*_integration_test.go' \
        -print0 \))
 
+# Raw signal.Notify/NotifyContext in loom CLI code bypasses the hand-off to the
+# root trace-flush handler, which then re-raises the signal and kills the
+# command mid-shutdown. Use cmdstore.Notify/NotifyContext/SignalContext.
+while IFS= read -r match; do
+    output+="${match} (use cmdstore.Notify/NotifyContext, or //nolint:norawsignal)"$'\n'
+    violations=$((violations + 1))
+done < <(grep -rnE 'signal\.Notify(Context)?\(' --include='*.go' internal/cli \
+    | grep -v '_test\.go:' | grep -v '^internal/cli/cmdstore/signals\.go:' | grep -v '//nolint:norawsignal' || true)
+
 if [ "$violations" -gt 0 ]; then
-    echo "exec.Command violations in unit tests ($violations found):" >&2
+    echo "exec.Command / raw signal.Notify violations ($violations found):" >&2
     printf '%s' "$output" >&2
     echo "" >&2
     echo "Fix: use a DI interface, or add //nolint:norawexec to exempt." >&2

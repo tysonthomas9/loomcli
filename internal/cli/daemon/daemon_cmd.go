@@ -180,7 +180,7 @@ func setupSignalHandler() chan struct{} {
 	cmdstore.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	dumpChan := make(chan os.Signal, 1)
-	signal.Notify(dumpChan, syscall.SIGUSR1)
+	signal.Notify(dumpChan, syscall.SIGUSR1) //nolint:norawsignal // SIGUSR1 is not handled by root
 
 	go func() {
 		sig := <-sigChan
