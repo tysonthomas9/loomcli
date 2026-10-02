@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 )
 
 type LandingStatus struct {
@@ -67,7 +68,7 @@ func ensureLandedRule(db *sql.DB) error {
 func createDependencyChecks(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS dependency_checks (
 		workspace TEXT NOT NULL, change_id TEXT NOT NULL, repo TEXT NOT NULL,
-		state TEXT NOT NULL, reason TEXT NOT NULL,
+		state TEXT NOT NULL, reason TEXT NOT NULL, synced INTEGER NOT NULL DEFAULT 1,
 		PRIMARY KEY(workspace, change_id)
 	);
 	CREATE TABLE IF NOT EXISTS dependency_posts (
@@ -82,7 +83,14 @@ func createDependencyChecks(db *sql.DB) error {
 		repo TEXT NOT NULL, branch TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL,
 		PRIMARY KEY(repo, branch)
 	)`)
-	return err
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE dependency_checks ADD COLUMN synced INTEGER NOT NULL DEFAULT 1`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	return nil
 }
 
 func (s *SQLite) MarkMerged(ctx context.Context, workspace, change string) error {
@@ -251,6 +259,8 @@ func (s *SQLite) RestackOffers(ctx context.Context, workspace, change string) ([
 // task depends on changes in other repositories.
 type DependencyCheck struct {
 	Workspace, Change, Repo, State, Reason string
+	// Synced is false while the provider may still show an older result.
+	Synced bool
 }
 
 // DependencyEnforcement records whether a repository requires loom/dependencies.
@@ -274,6 +284,12 @@ func (s *SQLite) TaskChanges(ctx context.Context, workspace, task string) (map[s
 		changes[repo] = change
 	}
 	return changes, rows.Err()
+}
+
+// MarkDependencySynced records whether the provider shows the latest result.
+func (s *SQLite) MarkDependencySynced(ctx context.Context, workspace, change string, synced bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE dependency_checks SET synced=? WHERE workspace=? AND change_id=?`, synced, workspace, change)
+	return err
 }
 
 func (s *SQLite) RecordDependencyCheck(ctx context.Context, check DependencyCheck) error {
@@ -335,14 +351,14 @@ func (s *SQLite) DependencyChecks(ctx context.Context) ([]DependencyCheck, []Dep
 	} else if err != nil {
 		return nil, nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,state,reason FROM dependency_checks ORDER BY workspace,change_id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,state,reason,synced FROM dependency_checks ORDER BY workspace,change_id`)
 	if err != nil {
 		return nil, nil, err
 	}
 	var checks []DependencyCheck
 	for rows.Next() {
 		var check DependencyCheck
-		if err := rows.Scan(&check.Workspace, &check.Change, &check.Repo, &check.State, &check.Reason); err != nil {
+		if err := rows.Scan(&check.Workspace, &check.Change, &check.Repo, &check.State, &check.Reason, &check.Synced); err != nil {
 			_ = rows.Close()
 			return nil, nil, err
 		}

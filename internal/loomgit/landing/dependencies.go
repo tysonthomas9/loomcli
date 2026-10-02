@@ -121,6 +121,7 @@ type dependencyJournal interface {
 	DependencyStore
 	DependencyChecks(context.Context) ([]journal.DependencyCheck, []journal.DependencyEnforcement, error)
 	RecordDependencyCheck(context.Context, journal.DependencyCheck) error
+	MarkDependencySynced(context.Context, string, string, bool) error
 	DependencyPosted(context.Context, string, string, string, string, string) (bool, error)
 	RecordDependencyPost(context.Context, string, string, string, string, string) error
 	RecordDependencyEnforcement(context.Context, journal.DependencyEnforcement) error
@@ -156,22 +157,14 @@ func reconcileDependencies(ctx context.Context, store Store, forge Forge, public
 		case "landed", "merged", "closed", "dependency_abandoned":
 			continue
 		}
-		status, found, err := CrossRepoDependencies(ctx, deps, publication.Workspace, publication.Change, predecessors)
+		evaluated, synced, err := syncDependency(ctx, store, deps, poster, publication, predecessors, checked)
+		failures = append(failures, synced)
 		if err != nil {
-			failures = append(failures, fmt.Errorf("evaluate dependencies for %s: %w", publication.Change, err))
-			continue
-		}
-		if !found {
-			if !checked[publication.Workspace+"\x00"+publication.Change] {
-				continue
-			}
-			status = stackpublish.DependencyStatus{State: "success", Description: "No cross-repo predecessors"}
-		}
-		if err := deps.RecordDependencyCheck(ctx, journal.DependencyCheck{Workspace: publication.Workspace,
-			Change: publication.Change, Repo: publication.Slug, State: status.State, Reason: status.Description}); err != nil {
 			return err
 		}
-		failures = append(failures, postDependencyStatus(ctx, store, deps, poster, publication, status)...)
+		if !evaluated {
+			continue
+		}
 		trunk := targetTrunk(publication, publications)
 		if key := publication.Slug + "\x00" + trunk; !enforcement[key] {
 			enforcement[key] = true
@@ -181,6 +174,35 @@ func reconcileDependencies(ctx context.Context, store Store, forge Forge, public
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// syncDependency evaluates and posts loom/dependencies for one publication.
+// evaluated reports whether it carries the check; failure is retried by the
+// next pass; err stops it. A change whose result may not match the provider is
+// marked not synced.
+func syncDependency(ctx context.Context, store Store, deps dependencyJournal, poster DependencyForge, publication journal.Publication,
+	predecessors Predecessors, checked map[string]bool) (evaluated bool, failure, err error) {
+	key := publication.Workspace + "\x00" + publication.Change
+	status, found, err := CrossRepoDependencies(ctx, deps, publication.Workspace, publication.Change, predecessors)
+	if err != nil {
+		failure = fmt.Errorf("evaluate dependencies for %s: %w", publication.Change, err)
+		if checked[key] {
+			failure = errors.Join(failure, deps.MarkDependencySynced(ctx, publication.Workspace, publication.Change, false))
+		}
+		return false, failure, nil
+	}
+	if !found {
+		if !checked[key] {
+			return false, nil, nil
+		}
+		status = stackpublish.DependencyStatus{State: "success", Description: "No cross-repo predecessors"}
+	}
+	if err := deps.RecordDependencyCheck(ctx, journal.DependencyCheck{Workspace: publication.Workspace,
+		Change: publication.Change, Repo: publication.Slug, State: status.State, Reason: status.Description}); err != nil {
+		return false, nil, err
+	}
+	posted := errors.Join(postDependencyStatus(ctx, store, deps, poster, publication, status)...)
+	return true, errors.Join(posted, deps.MarkDependencySynced(ctx, publication.Workspace, publication.Change, posted == nil)), nil
 }
 
 // checkedChanges lists changes that already carry loom/dependencies, so one

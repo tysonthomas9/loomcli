@@ -34,7 +34,7 @@ func checkLoomGitInventory(ctx context.Context, integrity bool) CheckResult {
 			line += "; next: " + entry.NextAction
 		}
 		details = append(details, line)
-		if entry.State == "integrity_missing" || entry.State == "integrity_unverified" || entry.State == "missing_checkout" || entry.State == "unowned" || entry.Drift == "diverged" {
+		if entry.State == "integrity_missing" || entry.State == "integrity_unverified" || entry.State == "missing_checkout" || entry.State == "unowned" || entry.State == "not_synced" || entry.Drift == "diverged" {
 			result.Status = StatusWarn
 		}
 	}

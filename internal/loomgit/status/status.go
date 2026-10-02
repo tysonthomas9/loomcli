@@ -261,6 +261,10 @@ func appendDependencyChecks(ctx context.Context, store *journal.SQLite, out *Sna
 	}
 	for _, check := range checks {
 		item := Entry{Kind: "dependency", Workspace: check.Workspace, Repo: check.Repo, ID: check.Change, State: check.State, Reason: check.Reason}
+		if !check.Synced {
+			item.State, item.Reason = "not_synced", "dependency status not synced: the provider may show an older result; Loom now computes: "+check.State+": "+check.Reason
+			item.NextAction = "Reconcile retries posting loom/dependencies; Loom's own merges re-check dependencies live"
+		}
 		if state := unenforced[check.Repo]; state != "" {
 			item.Enforcement = "unenforced"
 			item.Reason += "; cross-repo order is " + strings.ReplaceAll(state, "_", " ") + " on " + check.Repo

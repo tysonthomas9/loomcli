@@ -362,3 +362,69 @@ func TestDependencyEnforcementUsesAppLoomPostsAs(t *testing.T) {
 		t.Fatalf("recorded app = %d, %v; enforcement asked for %d", app, err, fixture.forge.askedApp)
 	}
 }
+
+func dependencyCheck(t *testing.T, fixture *crossRepoFixture, change string) journal.DependencyCheck {
+	t.Helper()
+	checks, _, err := fixture.store.DependencyChecks(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range checks {
+		if check.Change == change {
+			return check
+		}
+	}
+	t.Fatalf("no dependency check for %s: %+v", change, checks)
+	return journal.DependencyCheck{}
+}
+
+func TestDependencyFailedPendingPostMarksNotSyncedUntilRetried(t *testing.T) {
+	fixture := newCrossRepoFixture(t)
+	fixture.land(t)
+	if err := fixture.reconcile(t); err != nil {
+		t.Fatal(err)
+	}
+	if check := dependencyCheck(t, fixture, "C2"); check.State != "success" || !check.Synced {
+		t.Fatalf("initial check = %+v", check)
+	}
+	if _, err := fixture.store.DriverChange(context.Background(), "W", "T3", "repo1", "C3"); err != nil {
+		t.Fatal(err)
+	}
+	fixture.predecessors = func(_ context.Context, _, task string) ([]string, error) {
+		if task == "T2" {
+			return []string{"T1", "T3"}, nil
+		}
+		return nil, nil
+	}
+	fixture.forge.failPosts = 1
+	if err := fixture.reconcile(t); err == nil {
+		t.Fatal("failed pending post was not reported")
+	}
+	if check := dependencyCheck(t, fixture, "C2"); check.State != "pending" || check.Synced {
+		t.Fatalf("provider keeps the old success but check is not marked unsynced: %+v", check)
+	}
+	if err := fixture.reconcile(t); err != nil {
+		t.Fatal(err)
+	}
+	if status := fixture.forge.last(t, fixture.head2); status.State != "pending" {
+		t.Fatalf("retried post = %+v", status)
+	}
+	if check := dependencyCheck(t, fixture, "C2"); !check.Synced {
+		t.Fatalf("check still unsynced after a successful retry: %+v", check)
+	}
+}
+
+func TestDependencyEvaluationFailureMarksNotSynced(t *testing.T) {
+	fixture := newCrossRepoFixture(t)
+	fixture.land(t)
+	if err := fixture.reconcile(t); err != nil {
+		t.Fatal(err)
+	}
+	fixture.predecessorErr = errors.New("issue backend unavailable")
+	if err := fixture.reconcile(t); err == nil {
+		t.Fatal("evaluation failure was not reported")
+	}
+	if check := dependencyCheck(t, fixture, "C2"); check.Synced {
+		t.Fatalf("check stays synced while dependencies cannot be read: %+v", check)
+	}
+}

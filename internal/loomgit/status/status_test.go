@@ -359,6 +359,13 @@ func TestScanShowsUnenforcedCrossRepoDelivery(t *testing.T) {
 		State: "pending", Reason: "Waiting for owner/repo1#1 to land"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.RecordDependencyCheck(ctx, journal.DependencyCheck{Workspace: "W", Change: "C5", Repo: "owner/repo5",
+		State: "pending", Reason: "Waiting for owner/repo1#1 to land"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkDependencySynced(ctx, "W", "C5", false); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -379,6 +386,13 @@ func TestScanShowsUnenforcedCrossRepoDelivery(t *testing.T) {
 	}
 	if repo4 := found["dependency_enforcement:owner/repo4"]; repo4.State != "wrong_app" || repo4.NextAction == "" {
 		t.Fatalf("repo4 enforcement = %+v", repo4)
+	}
+	if change5 := found["dependency:owner/repo5"]; change5.State != "not_synced" ||
+		!strings.Contains(change5.Reason, "dependency status not synced") || !strings.Contains(change5.Reason, "owner/repo1#1") {
+		t.Fatalf("unsynced dependency status = %+v", change5)
+	}
+	if change.State != "pending" {
+		t.Fatalf("synced dependency shown as %+v", change)
 	}
 	if change4 := found["dependency:owner/repo4"]; change4.Enforcement != "unenforced" {
 		t.Fatalf("delivery on a repo pinned to another app not flagged: %+v", change4)
