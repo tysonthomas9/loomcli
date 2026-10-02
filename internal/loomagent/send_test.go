@@ -85,7 +85,7 @@ func serviceAt(t *testing.T, path string, agents ...loomstore.Agent) *Service {
 			t.Fatal(err)
 		}
 	}
-	return New(ServiceConfig{Store: st, Events: NewEventLog(st)})
+	return New(ServiceConfig{Store: st, Events: NewEventLog(st), WorkspaceID: "ws"})
 }
 
 // TestSendBusyReplacesOnlySendersBody: a busy agent keeps one waiting

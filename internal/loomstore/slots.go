@@ -211,11 +211,12 @@ func (s *Store) Requeue(ctx context.Context, agentID, sender, requestID string) 
 	return nil
 }
 
-// PendingAgents lists the live agents with a waiting or handed slot, for the
-// dispatcher's sweep at start.
-func (s *Store) PendingAgents(ctx context.Context) ([]string, error) {
+// PendingAgents lists workspaceID's live agents with a waiting or handed
+// slot, for the dispatcher's sweep at start.
+func (s *Store) PendingAgents(ctx context.Context, workspaceID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT s.agent_id FROM agent_slots s JOIN agents a USING (agent_id)
-		WHERE s.state IN (?, ?) AND a.deleted_at IS NULL ORDER BY s.agent_id`, SlotWaiting, SlotHanded)
+		WHERE s.state IN (?, ?) AND a.deleted_at IS NULL AND a.workspace_id = ? ORDER BY s.agent_id`,
+		SlotWaiting, SlotHanded, workspaceID)
 	if err != nil {
 		return nil, err
 	}

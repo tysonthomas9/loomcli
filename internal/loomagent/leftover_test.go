@@ -29,7 +29,7 @@ func TestCreateOpenLeftoverPurgedAcrossRestart(t *testing.T) {
 	if _, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r1")); err == nil {
 		t.Fatal("Create succeeded with a failing Open")
 	}
-	pending, err := e.st.PurgePending(ctx)
+	pending, err := e.st.PurgePending(ctx, "ws")
 	if err != nil || len(pending) != 1 {
 		t.Fatalf("purge-pending = %v, %v; want the leftover", pending, err)
 	}
@@ -43,7 +43,7 @@ func TestCreateOpenLeftoverPurgedAcrossRestart(t *testing.T) {
 	s := e.service(ServiceConfig{}) // restart
 	go s.RunDispatcher(ctx)
 	eventually(t, "the leftover purged", func() bool {
-		p, err := e.st.PurgePending(ctx)
+		p, err := e.st.PurgePending(ctx, "ws")
 		return err == nil && len(p) == 0
 	})
 	if exists(fh, ref) {
@@ -79,7 +79,7 @@ func TestHarnessSwitchOpenLeftoverPurged(t *testing.T) {
 	if exists(e.fb, loomharness.NativeRef{Root: owned[1].NativeRoot, NativeID: owned[1].NativeID}) {
 		t.Fatal("the leftover was not purged")
 	}
-	if p, _ := e.s.store.PurgePending(ctx); len(p) != 0 {
+	if p, _ := e.s.store.PurgePending(ctx, "ws"); len(p) != 0 {
 		t.Fatalf("purge-pending = %v after a successful purge", p)
 	}
 	if a := e.s.get(t, "a1"); a.Harness != "fa" {
@@ -122,7 +122,7 @@ func TestCreateOpenLeftoverSweepRacesReopen(t *testing.T) {
 	if !exists(fh, ref) {
 		t.Fatal("the sweep purged the agent's working session")
 	}
-	if p, _ := e.st.PurgePending(ctx); len(p) != 0 {
+	if p, _ := e.st.PurgePending(ctx, "ws"); len(p) != 0 {
 		t.Fatalf("purge-pending = %v", p)
 	}
 }

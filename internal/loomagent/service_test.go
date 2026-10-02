@@ -23,7 +23,7 @@ func newService(t *testing.T, cfg ServiceConfig, agents ...loomstore.Agent) *Ser
 			t.Fatal(err)
 		}
 	}
-	cfg.Store, cfg.Events = st, NewEventLog(st)
+	cfg.Store, cfg.Events, cfg.WorkspaceID = st, NewEventLog(st), "ws"
 	return New(cfg)
 }
 
@@ -276,5 +276,23 @@ func TestBusSlowSubscriberLagged(t *testing.T) {
 	b.Unsubscribe(other)
 	if _, ok := <-other.C; ok || other.Err() != nil {
 		t.Fatalf("unsubscribed: ok=%v err=%v", ok, other.Err())
+	}
+}
+
+// TestOtherWorkspaceAgentNotFound: a service never reads or changes an agent
+// of another workspace, even by its AgentID.
+func TestOtherWorkspaceAgentNotFound(t *testing.T) {
+	ctx := context.Background()
+	b := svcAgent("b1", "persistent", StateIdle)
+	b.WorkspaceID = "ws2"
+	s := newService(t, ServiceConfig{}, b)
+	_, getErr := s.Get(ctx, "b1")
+	_, listErr := s.ListEvents(ctx, loomstore.EventQuery{AgentID: "b1"})
+	_, subErr := s.Subscribe(ctx, SubscribeRequest{AgentIDs: []string{"b1"}, Cursors: map[string]int64{"b1": 0}})
+	archErr := s.Archive(ctx, ArchiveRequest{AgentID: "b1"})
+	for what, err := range map[string]error{"Get": getErr, "ListEvents": listErr, "Subscribe": subErr, "Archive": archErr} {
+		if !isCode(err, CodeAgentNotFound) {
+			t.Errorf("%s = %v; want agent_not_found", what, err)
+		}
 	}
 }

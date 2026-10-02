@@ -372,12 +372,12 @@ var sweepPause = func() {}
 // around Open, and only if the mark is still there: a re-Open that returned
 // the same session as a working one cleared it.
 func (s *Service) PurgeLeftovers(ctx context.Context) error {
-	pending, err := s.store.PurgePending(ctx)
+	pending, err := s.store.PurgePending(ctx, s.workspaceID)
 	sweepPause()
 	for _, n := range pending {
 		err = errors.Join(err, func() error {
 			defer s.lock(n.AgentID)()
-			now, err := s.store.PurgePending(ctx)
+			now, err := s.store.PurgePending(ctx, s.workspaceID)
 			if err != nil || !slices.Contains(now, n) {
 				return err
 			}

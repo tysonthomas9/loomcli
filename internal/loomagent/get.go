@@ -46,10 +46,11 @@ func (s *Service) Get(ctx context.Context, agentID string) (AgentInfo, error) {
 	return out, nil
 }
 
-// agent reads agentID's row, mapping a missing row to agent_not_found.
+// agent reads agentID's row, mapping a missing row, or another workspace's
+// agent, to agent_not_found.
 func (s *Service) agent(ctx context.Context, agentID string) (loomstore.Agent, error) {
 	a, err := s.store.GetAgent(ctx, agentID)
-	if errors.Is(err, loomstore.ErrNotFound) {
+	if errors.Is(err, loomstore.ErrNotFound) || (err == nil && a.WorkspaceID != s.workspaceID) {
 		return a, &Error{Code: CodeAgentNotFound, Message: agentID}
 	}
 	return a, err

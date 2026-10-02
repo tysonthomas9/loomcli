@@ -285,7 +285,7 @@ func (s *Service) RunDispatcher(ctx context.Context) {
 	for ctx.Err() == nil {
 		sub := s.Bus.Subscribe()
 		_ = s.PurgeLeftovers(ctx)
-		if ids, err := s.store.PendingAgents(ctx); err == nil {
+		if ids, err := s.store.PendingAgents(ctx, s.workspaceID); err == nil {
 			for _, id := range ids {
 				_ = s.dispatchWake(ctx, id)
 			}

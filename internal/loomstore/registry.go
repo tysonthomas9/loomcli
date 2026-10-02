@@ -147,10 +147,12 @@ func (s *Store) ClearPurgePending(ctx context.Context, n NativeSession) error {
 	return err
 }
 
-// PurgePending lists the purge-pending native sessions with their owners.
-func (s *Store) PurgePending(ctx context.Context) ([]NativeSession, error) {
+// PurgePending lists the purge-pending native sessions of workspaceID's
+// agents with their owners.
+func (s *Store) PurgePending(ctx context.Context, workspaceID string) ([]NativeSession, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT n.agent_id, n.harness, n.native_root, n.native_id, n.recorded_at
-		FROM native_purge_pending p JOIN agent_native_sessions n USING (harness, native_root, native_id) ORDER BY n.recorded_at`)
+		FROM native_purge_pending p JOIN agent_native_sessions n USING (harness, native_root, native_id)
+		JOIN agents a ON a.agent_id = n.agent_id WHERE a.workspace_id = ? ORDER BY n.recorded_at`, workspaceID)
 	if err != nil {
 		return nil, err
 	}

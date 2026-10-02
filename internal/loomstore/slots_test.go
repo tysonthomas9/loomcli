@@ -380,8 +380,11 @@ func TestSlotHandedRequeueReceiptAndFinish(t *testing.T) {
 	s, _ := newSlotStore(t)
 	mustSend(t, s, send("user:u", "r1", "one"))
 	mustSend(t, s, send("agent:c", "r2", "two"))
-	if ids, _ := s.PendingAgents(ctx); len(ids) != 1 || ids[0] != "a1" {
+	if ids, _ := s.PendingAgents(ctx, "ws"); len(ids) != 1 || ids[0] != "a1" {
 		t.Fatalf("pending = %v", ids)
+	}
+	if ids, _ := s.PendingAgents(ctx, "other"); len(ids) != 0 {
+		t.Fatalf("pending in another workspace = %v", ids)
 	}
 	sl, err := s.HandNext(ctx, "a1", nativeKey)
 	if err != nil || sl.RequestID != "r1" {
@@ -410,7 +413,7 @@ func TestSlotHandedRequeueReceiptAndFinish(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if ids, _ := s.PendingAgents(ctx); len(ids) != 0 {
+	if ids, _ := s.PendingAgents(ctx, "ws"); len(ids) != 0 {
 		t.Fatalf("pending after delivery = %v", ids)
 	}
 

@@ -405,3 +405,28 @@ func TestRedactionCoversMetadataPathAndSignature(t *testing.T) {
 		t.Fatalf("stored payload not JSON: %s", stored)
 	}
 }
+
+// TestPurgePendingIsPerWorkspace lists only the workspace's own sessions.
+func TestPurgePendingIsPerWorkspace(t *testing.T) {
+	ctx := context.Background()
+	s := openAt(t, filepath.Join(t.TempDir(), "loom.db"))
+	b := agent("b1", "interactive")
+	b.WorkspaceID = "ws2"
+	for _, a := range []Agent{agent("a1", "interactive"), b} {
+		n := NativeSession{AgentID: a.AgentID, Harness: "opencode", NativeRoot: "", NativeID: "ses_" + a.AgentID}
+		if err := s.InsertAgent(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordNativeSession(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordPurgePending(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for ws, want := range map[string]string{"ws": "a1", "ws2": "b1"} {
+		if p, err := s.PurgePending(ctx, ws); err != nil || len(p) != 1 || p[0].AgentID != want {
+			t.Errorf("PurgePending(%s) = %+v, %v; want only %s", ws, p, err, want)
+		}
+	}
+}
