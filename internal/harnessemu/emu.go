@@ -28,6 +28,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 // Version is what the emulator reports: the pinned OpenCode build.
@@ -384,12 +386,15 @@ func (s *Server) Handler() http.Handler {
 		defer func() { s.mu.Lock(); delete(s.subs, ch); s.mu.Unlock() }()
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
-		w.(http.Flusher).Flush()
+		sw, err := realtime.NewWriter(w)
+		if err != nil {
+			return
+		}
+		_ = sw.WriteComment("ok") // flushes the headers
 		for {
 			select {
 			case b := <-ch:
-				_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
-				w.(http.Flusher).Flush()
+				_ = sw.WriteEventNoID("message", string(b)) // "message" is SSE's default event type
 			case <-r.Context().Done():
 				return
 			case <-s.quit:
