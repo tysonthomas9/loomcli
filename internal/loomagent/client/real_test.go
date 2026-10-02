@@ -33,31 +33,9 @@ func TestRealServeAgentAPI(t *testing.T) {
 	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
 		t.Skip("set LOOM_REAL_OPENCODE=1 to run against the real OpenCode build")
 	}
-	bin := os.Getenv("LOOM_OPENCODE_BIN")
-	if bin == "" {
-		home, _ := os.UserHomeDir()
-		bin = filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode")
-	}
-	sbx := realSandbox(t)
 	model := httptest.NewServer(http.HandlerFunc(fakeModel))
 	t.Cleanup(model.Close)
-	writeFile(t, filepath.Join(sbx, "config/opencode/opencode.json"), fmt.Sprintf(`{"provider":{"fake":{"name":"Fake",
-		"npm":"@ai-sdk/openai-compatible","options":{"baseURL":%q,"apiKey":"x"},
-		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}}}}},"model":"fake/m"}`, model.URL+"/v1"))
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + sbx + "/home", "TMPDIR=" + sbx + "/tmp/",
-		"XDG_DATA_HOME=" + sbx + "/data", "XDG_CONFIG_HOME=" + sbx + "/config",
-		"XDG_STATE_HOME=" + sbx + "/state", "XDG_CACHE_HOME=" + sbx + "/cache", "OPENCODE_DISABLE_MODELS_FETCH=1"}
-	repo := filepath.Join(sbx, "repo")
-	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"-c", "user.name=t", "-c", "user.email=t@t",
-		"commit", "-q", "--allow-empty", "-m", "init"}} {
-		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v %s", args, err, out)
-		}
-	}
-	head, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
+	bin, sbx, env, repo, head := realOpenCode(t, model.URL)
 
 	ctx := context.Background()
 	api, err := agentwire.Start(ctx, agentwire.Config{Dir: filepath.Join(sbx, "loom"),
@@ -89,7 +67,7 @@ func TestRealServeAgentAPI(t *testing.T) {
 	for _, ws := range []string{"ws", "ws2"} {
 		c := newClient(srv, ws, "alice")
 		a, err := c.Create(ctx, "r1", agentsv1.CreateBody{Preset: "pr-review-interactive", Name: "rev", Repo: repo,
-			BaseRef: strings.TrimSpace(string(head)), Overrides: agentsv1.Overrides{Harness: "opencode"}})
+			BaseRef: head, Overrides: agentsv1.Overrides{Harness: "opencode"}})
 		if err != nil {
 			t.Fatalf("%s Create: %v", ws, err)
 		}
@@ -127,6 +105,38 @@ func TestRealServeAgentAPI(t *testing.T) {
 			t.Errorf("%s Get of %s's agent = %v; want agent_not_found", ws, other, err)
 		}
 	}
+}
+
+// realOpenCode sets up the pinned OpenCode build in a realSandbox with the
+// model at modelURL as its only provider, and a git repo with one commit. It
+// returns the build, the sandbox, OpenCode's environment, the repo and its
+// head.
+func realOpenCode(t *testing.T, modelURL string) (bin, sbx string, env []string, repo, head string) {
+	t.Helper()
+	bin = os.Getenv("LOOM_OPENCODE_BIN")
+	if bin == "" {
+		home, _ := os.UserHomeDir()
+		bin = filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode")
+	}
+	sbx = realSandbox(t)
+	writeFile(t, filepath.Join(sbx, "config/opencode/opencode.json"), fmt.Sprintf(`{"provider":{"fake":{"name":"Fake",
+		"npm":"@ai-sdk/openai-compatible","options":{"baseURL":%q,"apiKey":"x"},
+		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}}}}},"model":"fake/m"}`, modelURL+"/v1"))
+	env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + sbx + "/home", "TMPDIR=" + sbx + "/tmp/",
+		"XDG_DATA_HOME=" + sbx + "/data", "XDG_CONFIG_HOME=" + sbx + "/config",
+		"XDG_STATE_HOME=" + sbx + "/state", "XDG_CACHE_HOME=" + sbx + "/cache", "OPENCODE_DISABLE_MODELS_FETCH=1"}
+	repo = filepath.Join(sbx, "repo")
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"-c", "user.name=t", "-c", "user.email=t@t",
+		"commit", "-q", "--allow-empty", "-m", "init"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bin, sbx, env, repo, strings.TrimSpace(string(out))
 }
 
 // realSandbox is an owned /tmp dir for one OpenCode user, with a service
