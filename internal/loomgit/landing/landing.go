@@ -235,12 +235,27 @@ func detect(ctx context.Context, store Store, forge Forge, item fetchedPublicati
 	return detectAssociatedCommit(ctx, store, forge, item)
 }
 
-func ownedPull(ctx context.Context, forge Forge, publication journal.Publication) (stackpublish.PR, error) {
-	parts := strings.Split(publication.Slug, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return stackpublish.PR{}, errors.New("published repository slug is invalid")
+// splitSlug splits a slug at its first slash. The repo part may hold more
+// segments: GitLab projects live in nested groups (group/subgroup/project).
+func splitSlug(slug string) (string, string, error) {
+	for _, part := range strings.Split(slug, "/") {
+		if part == "" {
+			return "", "", errors.New("published repository slug is invalid")
+		}
 	}
-	pull, err := forge.PullByNumber(ctx, parts[0], parts[1], publication.PRNumber)
+	owner, repo, ok := strings.Cut(slug, "/")
+	if !ok {
+		return "", "", errors.New("published repository slug is invalid")
+	}
+	return owner, repo, nil
+}
+
+func ownedPull(ctx context.Context, forge Forge, publication journal.Publication) (stackpublish.PR, error) {
+	owner, repo, err := splitSlug(publication.Slug)
+	if err != nil {
+		return stackpublish.PR{}, err
+	}
+	pull, err := forge.PullByNumber(ctx, owner, repo, publication.PRNumber)
 	if err != nil {
 		return stackpublish.PR{}, err
 	}
@@ -252,7 +267,10 @@ func ownedPull(ctx context.Context, forge Forge, publication journal.Publication
 
 func detectAssociatedCommit(ctx context.Context, store Store, forge Forge, item fetchedPublication) error {
 	publication := item.publication
-	parts := strings.Split(publication.Slug, "/")
+	owner, repo, err := splitSlug(publication.Slug)
+	if err != nil {
+		return err
+	}
 	commits, err := item.runner.Run(ctx, "log", "--format=%H", "--fixed-strings", "--grep=Loom-Change-Id: "+publication.Change, item.trunkRef)
 	if err != nil {
 		return err
@@ -265,7 +283,7 @@ func detectAssociatedCommit(ctx context.Context, store Store, forge Forge, item 
 		if !hasChangeID(string(message), publication.Change) {
 			continue
 		}
-		associated, err := forge.PullsForCommit(ctx, parts[0], parts[1], commit)
+		associated, err := forge.PullsForCommit(ctx, owner, repo, commit)
 		if err != nil {
 			return err
 		}
