@@ -289,7 +289,7 @@ describe("AgentDetailMain", () => {
     expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
   });
 
-  it("keeps the terminal for a daemon-supervised worker with live work", () => {
+  it("shows the running-under-daemon state for a working supervised worker", () => {
     const working: LoomAgentStatus = {
       name: "local-coder",
       branch: "local-coder",
@@ -305,8 +305,9 @@ describe("AgentDetailMain", () => {
 
     renderWithAgents([working], working.name);
 
-    expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+    expect(screen.getByText("Running under the daemon")).toBeInTheDocument();
     expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
   });
 
   it("keeps the terminal for an idle worker the daemon does not supervise", () => {
