@@ -174,14 +174,8 @@ func Scan(ctx context.Context, integrity bool) (Snapshot, error) {
 	appendRevisions(ctx, rows, runners, integrity, &out)
 	appendPublications(ctx, rows.Publications, runners, integrity, &out)
 	appendMirrorRefs(ctx, rows.Mirrors, integrity, &out)
-	policies, err := store.LeadMergePolicies(ctx)
-	if err != nil {
+	if err := appendLeadMergePolicies(ctx, store, &out); err != nil {
 		return out, err
-	}
-	for _, policy := range policies {
-		out.Entries = append(out.Entries, Entry{Kind: "policy", Workspace: policy.Workspace, ID: "lead_may_merge",
-			State: "warning", Reason: "lead_may_merge=when_green set by " + policy.SetBy + "; " + journal.LeadMayMergeWarning,
-			NextAction: "require reviews in the provider's branch protection, or turn lead_may_merge off"})
 	}
 	if err := appendDependencyChecks(ctx, store, &out); err != nil {
 		return out, err
@@ -238,6 +232,19 @@ func appendPublications(ctx context.Context, publications []journal.Publication,
 // appendDependencyChecks shows loom/dependencies per change and whether each
 // repository enforces it. A change whose repository does not require the check
 // from the Loom app is flagged: only Loom's own merges keep the order there.
+func appendLeadMergePolicies(ctx context.Context, store *journal.SQLite, out *Snapshot) error {
+	policies, err := store.LeadMergePolicies(ctx)
+	if err != nil {
+		return err
+	}
+	for _, policy := range policies {
+		out.Entries = append(out.Entries, Entry{Kind: "policy", Workspace: policy.Workspace, ID: "lead_may_merge",
+			State: "warning", Reason: "lead_may_merge=when_green set by " + policy.SetBy + "; " + journal.LeadMayMergeWarning,
+			NextAction: "require reviews in the provider's branch protection, or turn lead_may_merge off"})
+	}
+	return nil
+}
+
 func appendDependencyChecks(ctx context.Context, store *journal.SQLite, out *Snapshot) error {
 	checks, enforcement, err := store.DependencyChecks(ctx)
 	if err != nil {
