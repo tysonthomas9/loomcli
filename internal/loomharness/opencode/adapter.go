@@ -2,13 +2,14 @@ package opencode
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,8 +41,10 @@ var (
 // harness_unavailable.
 const maxFailures = 3
 
-// Adapter is the OpenCode harness: it supervises one `opencode serve
-// --service` on a free loopback port and serves the port through Client. The
+// Adapter is the OpenCode harness: it supervises one plain `opencode serve`
+// on a free loopback port with a random per-boot password (R-D) and serves
+// the port through Client. It never uses --service, so the user's own
+// OpenCode service registration and config are never touched. The
 // server starts on first use, restarts with backoff when it exits, and is
 // stopped only by Loom's own Stop or Restart calls.
 //
@@ -175,14 +178,15 @@ func (a *Adapter) fail() {
 	a.retryAt = time.Now().Add(min(restartBackoff<<(a.failures-1), maxBackoff))
 }
 
-// spawn starts `opencode serve --service` and waits until it answers with
-// its own pid. In service mode OpenCode picks the password itself (random per
-// boot unless the user configured one) and records it in service.json.
+// spawn starts `opencode serve` with a fresh password and waits until it
+// answers with its own pid. The password is never logged.
 func (a *Adapter) spawn(ctx context.Context) error {
 	env, err := a.env()
 	if err != nil {
 		return err
 	}
+	password := newPassword()
+	env = append(env, "OPENCODE_SERVER_PASSWORD="+password)
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("opencode: free port: %w: %w", loomharness.ErrUnavailable, err)
@@ -190,7 +194,7 @@ func (a *Adapter) spawn(ctx context.Context) error {
 	base := "http://" + l.Addr().String()
 	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
 	_ = l.Close()
-	cmd := exec.Command(a.cfg.Bin, "serve", "--service", "--hostname", "127.0.0.1", "--port", port) //nolint:gosec // G204: the configured OpenCode binary.
+	cmd := exec.Command(a.cfg.Bin, "serve", "--hostname", "127.0.0.1", "--port", port) //nolint:gosec // G204: the configured OpenCode binary.
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	a.reap() // leftovers of a crashed server: no duplicate survivor
@@ -208,18 +212,17 @@ func (a *Adapter) spawn(ctx context.Context) error {
 		a.reap()
 		return err
 	}
-	file := filepath.Join(stateDir(env), "opencode", "service.json")
 	for deadline := started.Add(startTimeout); ; {
 		select {
 		case <-exited:
 			a.reap()
-			return fmt.Errorf("opencode serve exited during start (another OpenCode service may own %s): %w", file, loomharness.ErrUnavailable)
+			return fmt.Errorf("opencode serve exited during start: %w", loomharness.ErrUnavailable)
 		case <-ctx.Done():
 			return kill(ctx.Err())
 		case <-time.After(100 * time.Millisecond):
 		}
-		if pw, ok := servicePassword(file, cmd.Process.Pid); ok && answers(ctx, base, pw, cmd.Process.Pid) {
-			a.setEndpoint(base, pw)
+		if answers(ctx, base, password, cmd.Process.Pid) {
+			a.setEndpoint(base, password)
 			a.cmd, a.exited = cmd, exited
 			a.record(cmd.Process.Pid)
 			return nil
@@ -228,6 +231,13 @@ func (a *Adapter) spawn(ctx context.Context) error {
 			return kill(fmt.Errorf("opencode serve not ready after %s: %w", startTimeout, loomharness.ErrUnavailable))
 		}
 	}
+}
+
+// newPassword is a random per-boot server password.
+func newPassword() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b) // crypto/rand.Read never fails (Go 1.24+)
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // watch reaps the server and, when it exits on its own, restarts it after
@@ -374,8 +384,10 @@ func descendants(procs map[int]process, roots []int) []int {
 	return out
 }
 
-// githubTokens never reach the server: agents publish through Loom (R32).
-var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN"}
+// githubTokens never reach the server, nor the processes it starts: agents
+// publish through Loom (R32). Inherited OpenCode passwords are dropped too;
+// spawn sets its own.
+var githubTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_TOKEN_FILE"}
 
 // env is the configured environment without GitHub tokens, plus the Loom
 // presets merged into OPENCODE_CONFIG_CONTENT, which OpenCode applies over the
@@ -390,7 +402,7 @@ func (a *Adapter) env() ([]string, error) {
 	for _, kv := range env {
 		k, v, _ := strings.Cut(kv, "=")
 		switch {
-		case slices.Contains(githubTokens, k):
+		case slices.Contains(githubTokens, k), k == "OPENCODE_SERVER_PASSWORD", k == "OPENCODE_PASSWORD":
 		case k == "OPENCODE_CONFIG_CONTENT" && len(a.cfg.Presets) > 0:
 			if err := json.Unmarshal([]byte(v), &content); err != nil {
 				return nil, fmt.Errorf("opencode: merge presets into OPENCODE_CONFIG_CONTENT: %w", err)
@@ -415,40 +427,6 @@ func (a *Adapter) env() ([]string, error) {
 		return nil, err
 	}
 	return append(out, "OPENCODE_CONFIG_CONTENT="+string(b)), nil
-}
-
-// stateDir is OpenCode's XDG state root for env.
-func stateDir(env []string) string {
-	var home, state string // the last value wins, as in exec.Cmd
-	for _, kv := range env {
-		if v, ok := strings.CutPrefix(kv, "XDG_STATE_HOME="); ok {
-			state = v
-		}
-		if v, ok := strings.CutPrefix(kv, "HOME="); ok {
-			home = v
-		}
-	}
-	if state != "" {
-		return state
-	}
-	return filepath.Join(home, ".local", "state")
-}
-
-// servicePassword reads the password a service-mode server with this pid
-// recorded.
-func servicePassword(file string, pid int) (string, bool) {
-	b, err := os.ReadFile(file) //nolint:gosec // G304: OpenCode's own service registration file.
-	if err != nil {
-		return "", false
-	}
-	var s struct {
-		PID      int    `json:"pid"`
-		Password string `json:"password"`
-	}
-	if json.Unmarshal(b, &s) != nil || s.PID != pid || s.Password == "" {
-		return "", false
-	}
-	return s.Password, true
 }
 
 // answers reports whether the server at base is up and is our process.

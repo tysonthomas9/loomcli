@@ -37,6 +37,7 @@ type Spec struct {
 	BaseRef  string // branch or SHA to start from; local or remote-tracking
 	Branch   string // "loom/agent/<id>", or empty for detached
 	Detached bool   // reviewers: detached at BaseRef (a head SHA)
+	Confirm  string // Remove only: the Status fingerprint the user confirmed deleting
 }
 
 // Worktree is an ensured worktree.

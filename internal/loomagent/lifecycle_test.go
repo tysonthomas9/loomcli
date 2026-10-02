@@ -221,7 +221,7 @@ func TestDeleteWorkspacePortFingerprint(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	want := WorkspaceSpec{Key: "a1", Repo: "/repo", BaseRef: "main", Branch: "loom/agent/a1"}
+	want := WorkspaceSpec{Key: "a1", Repo: "/repo", BaseRef: "main", Branch: "loom/agent/a1", Confirm: "f2"}
 	if !slices.Equal(ws.removed, []WorkspaceSpec{want}) || !slices.Equal(purged, []string{"ses_1"}) {
 		t.Fatalf("removed %+v purged %v", ws.removed, purged)
 	}
