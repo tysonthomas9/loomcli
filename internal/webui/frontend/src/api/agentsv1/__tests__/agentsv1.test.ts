@@ -200,6 +200,21 @@ describe("AgentEventStream", () => {
     s.close();
   });
 
+  it("live mode sends no cursors, never pages, and resyncs on connect and feed.gap", async () => {
+    commit("a1", 1, 2);
+    const { s, onEvents, onResync } = open(["a1"], { live: true });
+    await s.connect();
+    const es = lastES();
+    expect(es.url.searchParams.get("after")).toBeNull();
+    es.saved(ev("a1", 3));
+    es.gap();
+    await flush();
+    expect(eventReads()).toHaveLength(0);
+    expect(delivered(onEvents)).toEqual(["a1-e3"]);
+    expect(onResync).toHaveBeenCalledTimes(2);
+    s.close();
+  });
+
   it("after feed.gap pages on the open stream and merges without gaps or duplicates", async () => {
     commit("a1", 1, 2);
     const { s, onEvents, onResync } = open();

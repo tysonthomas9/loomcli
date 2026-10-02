@@ -52,3 +52,5 @@ export { useAgentChat } from "./useAgentChat";
 export type { UseAgentChatReturn } from "./useAgentChat";
 export { ownSender } from "./agentChatModel";
 export type { ChatItem } from "./agentChatModel";
+export { useAgentRoster } from "./useAgentRoster";
+export { childrenByParent } from "./agentRoster";

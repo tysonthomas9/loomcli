@@ -19,6 +19,11 @@ export interface AgentStreamOptions {
   /** Saved kinds to receive; all kinds when omitted or empty. */
   types?: string[];
   deltas?: boolean;
+  /**
+   * Live events only: no cursors and no paging. A reconnect or feed.gap just
+   * calls onResync, whose List is the catch-up (the agent roster).
+   */
+  live?: boolean;
   /** The cache to merge into; a new one when omitted. */
   history?: AgentHistory;
   /** Newly merged saved events, from paging or the stream. */
@@ -104,7 +109,7 @@ export class AgentEventStream {
     const after = agents
       .filter((a) => !this.expired.has(a))
       .map((a) => `${a}:${this.history.lastSeq(a)}`);
-    if (after.length) p.set("after", after.join(","));
+    if (after.length && !this.opts.live) p.set("after", after.join(","));
     if (types) p.set("types", types.join(","));
     if (deltas) p.set("deltas", "true");
     if (token.kind === "token") p.set("token", token.token);
@@ -144,6 +149,7 @@ export class AgentEventStream {
   // history is purged (410) is followed live-only from then on; a stream
   // opened with its cursor fails, and the reconnect leaves the cursor out.
   private page(): Promise<AgentEvent[][]> {
+    if (this.opts.live) return Promise.resolve([]);
     return Promise.all(
       this.opts.agents
         .filter((a) => !this.expired.has(a))
