@@ -4555,7 +4555,10 @@ components:
         Server-issued token (prefix `loomb1.`) bound to one workspace and to
         one agent's bridge or to the daemon. The Agent API derives the caller
         from it alone, never from a header, body field, tool argument or
-        harness metadata. A bad, foreign or other-workspace token is 401.
+        harness metadata. It has no expiry; archiving or deleting the agent
+        revokes it. A bad, foreign, other-workspace, archived or deleted
+        agent's token is 401 on every route, and an agent's token never opens
+        the workspace-wide event stream (401).
 
     BearerAuth:
       type: http

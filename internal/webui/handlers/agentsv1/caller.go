@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
@@ -18,7 +19,8 @@ import (
 // Tokens issues and checks the bridge and daemon tokens (design v2 §6.1).
 // Each agent's bridge and the daemon get a server-issued token bound to one
 // workspace; the API derives the caller from that token alone, never from a
-// header, body field, tool argument or harness metadata.
+// header, body field, tool argument or harness metadata. A token has no
+// expiry: it is revoked by its agent being archived or deleted.
 type Tokens struct{ key []byte }
 
 // NewTokens returns Tokens signed with key.
@@ -27,6 +29,7 @@ func NewTokens(key []byte) *Tokens { return &Tokens{key: key} }
 // LoadTokens reads the server's token key from path, creating a random one
 // (mode 0600) the first time, so issued tokens survive a serve restart.
 func LoadTokens(path string) (*Tokens, error) {
+	path = filepath.Clean(path)
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
@@ -91,18 +94,17 @@ type callerKey struct{}
 
 // caller resolves the request's caller: a bridge or daemon token from the
 // Authorization header, else the verified signed-in user, else the local
-// user. A bridge token must be valid, for this workspace, and name a live
-// agent there.
+// user. A bridge token must be valid, for this workspace, and name an agent
+// there that is neither archived nor deleted.
 func (h *Handler) caller(r *http.Request, s *loomagent.Service) (loomagent.ActorRef, bool) {
-	auth := r.Header.Get("Authorization")
-	if len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") && strings.HasPrefix(auth[7:], tokenPrefix) {
-		c, ws, ok := h.tokens.verify(auth[7:])
+	if tok, ok := bridgeToken(r); ok {
+		c, ws, ok := h.tokens.verify(tok)
 		if !ok || ws != middleware.WorkspaceFromContext(r.Context()) {
 			return c, false
 		}
 		if c.Kind == "agent" {
 			a, err := s.Get(r.Context(), c.ID)
-			return c, err == nil && a.Agent.DeletedAt == nil
+			return c, err == nil && a.Agent.State != loomagent.StateArchived && a.Agent.DeletedAt == nil
 		}
 		return c, true
 	}
@@ -110,6 +112,16 @@ func (h *Handler) caller(r *http.Request, s *loomagent.Service) (loomagent.Actor
 		return loomagent.ActorRef{Kind: "user", ID: id}, true
 	}
 	return loomagent.ActorRef{Kind: "user", ID: "local"}, true
+}
+
+// bridgeToken returns the request's bearer token when it is a bridge or
+// daemon token.
+func bridgeToken(r *http.Request) (string, bool) {
+	auth := r.Header.Get("Authorization")
+	if len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") && strings.HasPrefix(auth[7:], tokenPrefix) {
+		return auth[7:], true
+	}
+	return "", false
 }
 
 // actor is the caller serve resolved from the authenticated request.

@@ -17,7 +17,8 @@ import (
 )
 
 // newBridgeServer serves workspaces "ws" and "ws2" with leads a1 and b1 in
-// ws, each with one busy child (c1 under a1, c2 under b1), and lead x1 in ws2.
+// ws, each with one busy child (c1 under a1, c2 under b1), an archived lead
+// ar1 and a deleted lead dl1 in ws, and lead x1 in ws2.
 func newBridgeServer(t *testing.T) (*httptest.Server, *Tokens) {
 	t.Helper()
 	ctx := context.Background()
@@ -34,8 +35,11 @@ func newBridgeServer(t *testing.T) (*httptest.Server, *Tokens) {
 	}
 	other := testAgent("x1", loomagent.StateIdle)
 	other.WorkspaceID = "ws2"
+	when := "2026-10-01T00:00:00Z"
+	archived, deleted := testAgent("ar1", loomagent.StateArchived), testAgent("dl1", loomagent.StateArchived)
+	archived.ArchivedAt, deleted.ArchivedAt, deleted.DeletedAt = &when, &when, &when
 	for _, a := range []loomstore.Agent{testAgent("a1", loomagent.StateIdle), testAgent("b1", loomagent.StateIdle),
-		child("c1", "a1"), child("c2", "b1"), other} {
+		child("c1", "a1"), child("c2", "b1"), other, archived, deleted} {
 		if err := st.InsertAgent(ctx, a); err != nil {
 			t.Fatal(err)
 		}
@@ -217,4 +221,76 @@ func TestBridgeIdentityKeyPersists(t *testing.T) {
 	if _, err := os.Stat(path + ".new"); !os.IsNotExist(err) {
 		t.Fatalf("temp key left behind: %v", err)
 	}
+}
+
+// TestBridgeIdentityBadTokenEveryRoute: a forged, malformed, tampered,
+// other-workspace, archived or deleted agent's token gets 401 on every Agent
+// API route and on the SSE stream; another lead's valid token gets
+// agent_not_found on every route of a1's child and cannot open the stream.
+// (The one-time token exchange is not an Agent API route; JWT mode never
+// lets a bridge token reach it: middleware TestBridgeIdentityAuthBypass.)
+func TestBridgeIdentityBadTokenEveryRoute(t *testing.T) {
+	srv, tokens := newBridgeServer(t)
+	tok := tokens.Agent("ws", "a1")
+	body, sig, _ := strings.Cut(strings.TrimPrefix(tok, tokenPrefix), ".")
+	bad := map[string]string{
+		"forged":          NewTokens([]byte(strings.Repeat("x", 32))).Agent("ws", "a1"),
+		"tampered":        tok[:len(tok)-2] + "AA",
+		"no signature":    tokenPrefix + body,
+		"empty signature": tokenPrefix + body + ".",
+		"bad base64":      tokenPrefix + "!!!." + sig,
+		"prefix only":     tokenPrefix,
+		"other workspace": tokens.Agent("ws2", "x1"),
+		"archived agent":  tokens.Agent("ws", "ar1"),
+		"deleted agent":   tokens.Agent("ws", "dl1"),
+		"unknown agent":   tokens.Agent("ws", "zz"),
+	}
+	child := [][3]string{
+		{"GET", "ws/v1/agents/c1", ""},
+		{"PATCH", "ws/v1/agents/c1", `{"name":"x"}`},
+		{"DELETE", "ws/v1/agents/c1", ""},
+		{"POST", "ws/v1/agents/c1/archive", ""},
+		{"POST", "ws/v1/agents/c1/unarchive", ""},
+		{"POST", "ws/v1/agents/c1/messages", `{"text":"hi"}`},
+		{"DELETE", "ws/v1/agents/c1/messages/waiting", ""},
+		{"POST", "ws/v1/agents/c1/asks/ask_1", `{"decision":"deny"}`},
+		{"GET", "ws/v1/agents/c1/events", ""},
+	}
+	all := append([][3]string{
+		{"GET", "ws/v1/agents", ""},
+		{"POST", "ws/v1/agents", `{"preset":"task","name":"n","repo":"/repo"}`},
+		{"GET", "ws/v1/presets", ""},
+		{"GET", "ws/v1/presets/task", ""},
+		{"GET", "ws/v1/events?agents=c1", ""},
+	}, child...)
+	for name, b := range bad {
+		for _, rt := range all {
+			status, out := as(t, srv, "Bearer "+b, rt[0], rt[1], rt[2])
+			want(t, name+" "+rt[0]+" "+rt[1], status, out, 401, "")
+		}
+	}
+	other := "Bearer " + tokens.Agent("ws", "b1")
+	for _, rt := range child {
+		status, out := as(t, srv, other, rt[0], rt[1], rt[2])
+		want(t, "other agent "+rt[0]+" "+rt[1], status, out, 404, "agent_not_found")
+	}
+	if w := waiting(t, srv, "c1"); len(w) != 0 {
+		t.Fatalf("a refused token still queued %v", w)
+	}
+	for _, auth := range []string{other, "Bearer " + tok} {
+		status, out := as(t, srv, auth, "GET", "ws/v1/events?agents=c1", "")
+		want(t, "valid agent token on the stream", status, out, 401, "")
+	}
+	status, out := as(t, srv, "Bearer "+tok, "GET", "ws/v1/agents/c1", "")
+	want(t, "a1's token on its own child", status, out, 200, "")
+
+	// Archiving a lead revokes its token at once; unarchiving restores it.
+	status, out = as(t, srv, "", "POST", "ws/v1/agents/b1/archive", `{"reason":"cancelled"}`)
+	want(t, "archive b1", status, out, 204, "")
+	status, out = as(t, srv, other, "GET", "ws/v1/agents", "")
+	want(t, "archived b1's token", status, out, 401, "")
+	status, out = as(t, srv, "", "POST", "ws/v1/agents/b1/unarchive", "")
+	want(t, "unarchive b1", status, out, 204, "")
+	status, out = as(t, srv, other, "GET", "ws/v1/agents/c2", "")
+	want(t, "unarchived b1's token on its child", status, out, 200, "")
 }

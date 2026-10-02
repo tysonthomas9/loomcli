@@ -73,6 +73,14 @@ func (h *Handler) subscribe(ctx context.Context, w http.ResponseWriter, r *http.
 		handler.RespondError(w, http.StatusNotFound, "agent API not available in this workspace")
 		return nil
 	}
+	// The stream is workspace-wide, so an agent bridge, which may see only its
+	// own children, never subscribes; a bad or expired bridge token fails.
+	if _, ok := bridgeToken(r); ok {
+		if c, ok := h.caller(r, s); !ok || c.Kind == "agent" {
+			handler.RespondError(w, http.StatusUnauthorized, "invalid agent token")
+			return nil
+		}
+	}
 	req, err := subscribeRequest(r)
 	for _, id := range req.AgentIDs {
 		if _, ok := req.Cursors[id]; !ok && err == nil {
