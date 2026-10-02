@@ -135,6 +135,7 @@ func TestSetWorkspacePolicyRefusesAgents(t *testing.T) {
 		"lead":           {review.Actor{Kind: "lead", ID: "L"}, nil},
 		"agent name env": {human, []string{"HOME=/home/tyson", "LOOM_AGENT_NAME=lead"}},
 		"task run env":   {human, []string{"LOOM_TASK_RUN_LEASE_TOKEN=secret"}},
+		"orchestrator":   {human, []string{"LOOM_ORCHESTRATOR_SESSION_ID=s1"}},
 	} {
 		_, err := SetWorkspacePolicy(ctx, item.store, "W", "when_green", call.actor, call.env)
 		var coded *loomgit.Error
