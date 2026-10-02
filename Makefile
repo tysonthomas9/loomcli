@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-agents-up local-mode-agents-down local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -13,15 +13,18 @@ LOCAL_MODE_FLEETDB_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-fleet-db:latest
 LOCAL_MODE_LOOM_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom:latest
 LOCAL_MODE_LOOM_CODEX_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-codex:latest
 LOCAL_MODE_LOOM_CLAUDE_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-claude:latest
+LOCAL_MODE_LOOM_AGENTS_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-agents:latest
 LOCAL_MODE_COMPOSE_EXTRA := $(foreach file,$(LOCAL_MODE_COMPOSE_FILES),-f $(file))
 LOCAL_MODE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CODEX_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CLAUDE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.claude.yml $(LOCAL_MODE_COMPOSE_EXTRA)
+LOCAL_MODE_AGENTS_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_DAYTONA_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.daytona.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 export LOCAL_MODE_FLEETDB_IMAGE
 export LOCAL_MODE_LOOM_IMAGE
 export LOCAL_MODE_LOOM_CODEX_IMAGE
 export LOCAL_MODE_LOOM_CLAUDE_IMAGE
+export LOCAL_MODE_LOOM_AGENTS_IMAGE
 LOCAL_MODE_COMPOSE_SELECT = \
 	if [ "$(strip $(LOCAL_MODE_COMPOSE))" != "" ]; then \
 	  compose="$(LOCAL_MODE_COMPOSE)"; \
@@ -297,6 +300,24 @@ local-mode-daytona-up: local-mode-frontend-dist
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+
+# Agent API stack: the default stack plus the pinned OpenCode 2.0.19 build and
+# the scripted fake model, so Leads run in the browser with no provider auth.
+# Builds the default loom image first (the agents image layers on it), and
+# refuses the default project name so it never replaces the dogfood stack.
+local-mode-agents-up: local-mode-frontend-dist
+	@test "$(LOCAL_MODE_COMPOSE_PROJECT)" != loomcli-local-mode || { echo "set LOCAL_MODE_COMPOSE_PROJECT to your own project; loomcli-local-mode is the dogfood stack" >&2; exit 1; }
+	@echo "Starting local-mode Agent API stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/..."
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	$$compose $(LOCAL_MODE_COMPOSE_ARGS) build loom-local; \
+	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+
+local-mode-agents-down:
+	@test "$(LOCAL_MODE_COMPOSE_PROJECT)" != loomcli-local-mode || { echo "set LOCAL_MODE_COMPOSE_PROJECT to your own project; loomcli-local-mode is the dogfood stack" >&2; exit 1; }
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) down -v --remove-orphans
 
 local-mode-down:
 	@set -e; \
@@ -859,6 +880,7 @@ help:
 	@echo "                            Use this, not the live stack on :3011, for anything that writes"
 	@echo "  make local-mode-up      - Run local-mode Podman/Docker stack"
 	@echo "  make local-mode-codex-up - Run local-mode stack with Codex agents"
+	@echo "  make local-mode-agents-up - Run local-mode stack with OpenCode Leads on a fake model"
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"
 	@echo "  make local-mode-codex-verify - Verify Codex local-mode stack"
 	@echo "  make local-mode-skills-verify - Verify the skills vertical e2e (no model)"

@@ -93,6 +93,68 @@ the existing workspace, epic, and seeded issues. That reuse assumes the volumes
 stay in step; remove some but not all of them and startup can fail (see
 Troubleshooting).
 
+Agent API variant (OpenCode Leads on a scripted fake model):
+
+`make local-mode-agents-up` runs the same stack, with `loom-local` built from
+`Dockerfile.agents` on top of the default image. It adds the pinned OpenCode
+2.0.19 build (b30c4d0, built as `aft.yml` does; the first build takes several
+minutes) and the AFT fake model (`tests/aft/fixtures/fake-model`), which
+listens on 127.0.0.1:4010 inside the container. Serve's OpenCode talks only to
+that model, so no provider login is needed. The workspace's `source-repo` is the
+Slack-clone fixture (`scripts/seed-slack-clone.sh`). The default targets and
+images are unchanged.
+
+Always run it as your own project on unclaimed ports. Run `podman ps` and
+`lsof -nP -iTCP -sTCP:LISTEN` first, and never touch another project's stack:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-<you> \
+LOCAL_MODE_FLEETDB_PORT=8680 LOCAL_MODE_API_PORT=8682 LOCAL_MODE_UI_PORT=8683 \
+LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" \
+make local-mode-agents-up
+```
+
+- The Caddy service mounts the frontend dist from the host, and it is built
+  only when it's missing. Run `make build-frontend` after pulling.
+- Under Podman on macOS, run from a path the VM shares (`/Users/...` or
+  `/private/tmp/...`, not `/tmp/...`).
+- From a git worktree, also point `fleet-db` at a fleet-db checkout through
+  `LOCAL_MODE_COMPOSE_FILES` (an override setting `services.fleet-db.build.context`).
+
+UI: `http://127.0.0.1:8683/ws/LOCALMODE/agents`. agent-browser on the host
+reaches the published port directly. Use your own session and close only that
+one (never `close --all`):
+
+```sh
+export AGENT_BROWSER_SESSION=<you>
+agent-browser open http://127.0.0.1:8683/ws/LOCALMODE/agents
+# + Add agent -> Lead -> Name -> AI Backend: OpenCode -> Create Agent
+# opens /ws/LOCALMODE/chat/<agent_id>; send a message there
+agent-browser close
+```
+
+Script the replies before you send. Each agent turn takes the next step; an
+empty queue replies `ok`. A `bash` step runs OpenCode's shell tool, so
+`{"bash":"sleep 120"}` keeps a turn running long enough to test Stop or a
+restart:
+
+```sh
+C=loomcli-local-mode-<you>-loom-local-1
+podman exec $C curl -s -X POST http://127.0.0.1:4010/__script \
+  -d '{"steps":[{"text":"Hello from the fake model"},{"bash":"sleep 120"}]}'
+podman exec $C curl -s http://127.0.0.1:4010/__requests   # requests seen so far
+podman exec $C curl -s -X POST http://127.0.0.1:4010/__reset
+```
+
+OpenCode's data lives on the `loom-data` volume, so `podman restart $C`
+mid-turn resumes the agent with its history. The fake model's queue is lost
+on restart, so re-script it once the restart returns. Tear down only your own
+project; this also removes its volumes:
+
+```sh
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-<you> make local-mode-agents-down
+```
+
 Codex variant knobs:
 
 The Codex image installs the current npm `latest` release by default. Set
