@@ -406,14 +406,14 @@ func (s *Store) Slots(ctx context.Context, agentID string) ([]Slot, error) {
 // HandedText returns the text of the agent's message that was handed over
 // with input key nativeKey, kept on its Send's receipt; ok is false when no
 // receipt records that key (a legacy row, or a key Loom never handed).
-func (s *Store) HandedText(ctx context.Context, agentID, nativeKey string) (text string, ok bool, err error) {
+func (s *Store) HandedText(ctx context.Context, agentID, nativeKey string) (text, sender string, ok bool, err error) {
 	var body sql.NullString
-	err = s.db.QueryRowContext(ctx, `SELECT body FROM agent_send_receipts WHERE agent_id = ? AND native_key = ?
-		ORDER BY created_at DESC LIMIT 1`, agentID, nativeKey).Scan(&body)
+	err = s.db.QueryRowContext(ctx, `SELECT body, sender FROM agent_send_receipts WHERE agent_id = ? AND native_key = ?
+		ORDER BY created_at DESC LIMIT 1`, agentID, nativeKey).Scan(&body, &sender)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+		return "", "", false, nil
 	}
-	return body.String, err == nil && body.Valid, err
+	return body.String, sender, err == nil && body.Valid, err
 }
 
 // GetReceipt returns the receipt of the agent's Send requestID, or ErrNotFound.

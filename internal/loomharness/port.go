@@ -180,6 +180,7 @@ type Event struct {
 	InputKey   string // the input's key, for message.delivered and the turn.started it began
 	AskID      string
 	Text       string
+	Sender     string // the Loom slot sender of a message.delivered; loomagent sets it
 	StopReason string // completed | cancelled | failed, for turn.completed
 	Usage      Usage  // for usage: this step's own counts, never a running total
 }

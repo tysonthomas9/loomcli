@@ -459,8 +459,8 @@ func TestNotifyMergesOnceByKey(t *testing.T) {
 	if _, err := st.Notify(ctx, "a1", "agent:c", "system", []Notice{{Key: "k3", Text: "three"}}, res); !errors.Is(err, ErrSlotBusy) {
 		t.Fatalf("handed = %v", err)
 	}
-	if text, ok, err := st.HandedText(ctx, "a1", "nk"); err != nil || !ok || text != "one\ntwo" {
-		t.Fatalf("handed text = %q, %v, %v", text, ok, err)
+	if text, sender, ok, err := st.HandedText(ctx, "a1", "nk"); err != nil || !ok || text != "one\ntwo" || sender != "agent:c" {
+		t.Fatalf("handed text = %q from %q, %v, %v", text, sender, ok, err)
 	}
 }
 

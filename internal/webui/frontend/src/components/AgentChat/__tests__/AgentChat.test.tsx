@@ -126,10 +126,27 @@ describe("AgentChat", () => {
       event_id: `task_completed:k1:${attempt}`,
     });
     deliver(
+      ev("message.delivered", { text: "make a child", sender: "user:local" }),
       ev("child.created", { child: "k1", name: "kid", preset: "task" }),
       done(0, "first try"),
+      ev("message.delivered", {
+        text: "task_completed:k1:0 …",
+        sender: "agent:k1",
+      }),
       done(1, "second try"),
+      ev("message.delivered", {
+        text: "task_completed:k1:1 …",
+        sender: "agent:k1",
+      }),
+      ev("message.delivered", {
+        text: "from another agent",
+        sender: "agent:x",
+      }),
     );
+    // The child's deliveries show only as their records; other input stays.
+    expect(screen.queryByText(/^task_completed:/)).toBeNull();
+    expect(screen.getByText("make a child")).toBeInTheDocument();
+    expect(screen.getByText("from another agent")).toBeInTheDocument();
     const card = screen.getByTestId("child-card");
     expect(card).toHaveTextContent("Child agentkid");
     expect(card.querySelector("a")).toHaveAttribute("href", "/ws/w1/chat/k1");

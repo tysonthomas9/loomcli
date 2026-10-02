@@ -177,9 +177,20 @@ func TestDeliveredTextAfterSlotMovedOn(t *testing.T) {
 			if err := s.replay(ctx, name, s.get(t, a.AgentID)); err != nil {
 				t.Fatal(err)
 			}
-			got := deliveredTexts(t, listed(t, s, a.AgentID))
+			es := listed(t, s, a.AgentID)
+			got := deliveredTexts(t, es)
 			if len(got) != 2 || got[k1] != "first" || got[k2] != "second" {
 				t.Fatalf("delivered texts = %v; want %s first, %s second", got, k1, k2)
+			}
+			// Each delivery names its slot's sender, so the UI can tell a child's from the user's.
+			for _, r := range kinds(es, string(loomharness.EventMessageDelivered)) {
+				var p struct{ InputKey, Sender string }
+				if err := json.Unmarshal(r.Payload, &p); err != nil {
+					t.Fatal(err)
+				}
+				if want := map[string]string{k1: "user:u", k2: "agent:c1"}[p.InputKey]; p.Sender != want {
+					t.Fatalf("%s sender = %q, want %q", p.InputKey, p.Sender, want)
+				}
 			}
 		})
 	}

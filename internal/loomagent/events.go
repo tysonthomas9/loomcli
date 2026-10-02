@@ -353,8 +353,9 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 	return true, s.HarnessEvent(ctx, id, e)
 }
 
-// withText sets a message.delivered event's Text to the text Loom handed
-// over with its input key, kept on the Send's receipt, so every harness
+// withText sets a message.delivered event's Text and Sender to the text Loom
+// handed over with its input key and its slot's sender, kept on the Send's
+// receipt, so every harness
 // carries it (OpenCode's and Claude's deliveries name only the key) however
 // the sender's slot moved on since. A key Loom has no record of (a legacy
 // receipt) keeps the harness's text, if any.
@@ -362,9 +363,9 @@ func (s *Service) withText(ctx context.Context, agentID string, e loomharness.Ev
 	if e.Type != loomharness.EventMessageDelivered || e.InputKey == "" {
 		return e, nil
 	}
-	text, ok, err := s.store.HandedText(ctx, agentID, e.InputKey)
+	text, sender, ok, err := s.store.HandedText(ctx, agentID, e.InputKey)
 	if ok {
-		e.Text = text
+		e.Text, e.Sender = text, sender
 	}
 	return e, err
 }
@@ -410,6 +411,7 @@ func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 		InputKey         string  `json:"inputKey,omitempty"`
 		AskID            string  `json:"askId,omitempty"`
 		Text             string  `json:"text,omitempty"`
+		Sender           string  `json:"sender,omitempty"`
 		StopReason       string  `json:"stopReason,omitempty"`
 		InputTokens      int64   `json:"inputTokens,omitempty"`
 		OutputTokens     int64   `json:"outputTokens,omitempty"`
@@ -417,7 +419,7 @@ func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 		CacheWriteTokens int64   `json:"cacheWriteTokens,omitempty"`
 		CostUSD          float64 `json:"costUsd,omitempty"`
 		CostTotalUSD     float64 `json:"costTotalUsd,omitempty"`
-	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.StopReason,
+	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.Sender, e.StopReason,
 		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSD, u.CostTotalUSD})
 	return loomstore.Event{AgentID: agentID, Kind: kind, TurnID: e.TurnID, Payload: b,
 		EventID: kind + ":" + e.Session.Root + ":" + e.Session.NativeID + ":" + key}

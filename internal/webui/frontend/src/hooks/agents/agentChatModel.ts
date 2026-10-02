@@ -10,6 +10,8 @@ interface NativePayload {
   itemKind?: string;
   text?: string;
   stopReason?: string;
+  /** A delivery's slot sender, such as user:<id> or agent:<AgentID>. */
+  sender?: string;
 }
 
 export type ChatItem =
@@ -96,7 +98,20 @@ export function chatItems(
   events: readonly AgentEvent[],
   streaming: Streaming,
 ): ChatItem[] {
-  const items = events.map(itemFor).filter((i): i is ChatItem => i !== null);
+  // A child's slot carries only its completion records, which show as
+  // records; its delivery to the lead is not shown again.
+  const kids = new Set(
+    events
+      .filter((e) => e.kind === "child.created")
+      .map((e) => `agent:${(e.payload as { child: string }).child}`),
+  );
+  const items = events
+    .filter(
+      (e) =>
+        e.kind !== "message.delivered" || !kids.has(payload(e).sender ?? ""),
+    )
+    .map(itemFor)
+    .filter((i): i is ChatItem => i !== null);
   for (const [id, text] of streaming)
     items.push({ key: `live:${id}`, kind: "agent", text, streaming: true });
   return items;

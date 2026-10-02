@@ -67,7 +67,8 @@ tests:
             (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
               const card = document.querySelector('[data-testid=child-card]')?.textContent || '';
               return r.length === 1 && /^Attempt 1 /.test(r[0].textContent) && r[0].textContent.includes('AGV1-KIDS-ONE') &&
-                card.includes('opencode') && card.includes('finished'); })()
+                card.includes('opencode') && card.includes('finished') &&
+                !(document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('task_completed:'); })()
         budget: 90000
         intent: "Wait until the child's attempt 1 record shows its summary once and the card shows the child finished"
       - wait:
@@ -144,8 +145,9 @@ tests:
           fn: >-
             (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]')).map((e) => e.textContent || '');
               return r.length === 2 && /^Attempt 1 /.test(r[0]) && /^Attempt 2 /.test(r[1]) &&
-                document.querySelectorAll('[data-testid=child-card]').length === 1; })()
-        intent: "Wait until a reload replays one card and the two records, neither lost nor duplicated"
+                document.querySelectorAll('[data-testid=child-card]').length === 1 &&
+                !(document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('task_completed:'); })()
+        intent: "Wait until a reload replays one card and the two records, neither lost nor duplicated, and no raw task_completed bubble"
       - run: |
           set -e
           kid="$(cat "$AFT_WORK_DIR/kidsKidId")"
@@ -157,4 +159,21 @@ tests:
           # Attempts count from 0 in the record's key.
           grep -q "task_completed:$kid:0" "$AFT_WORK_DIR/kids-requests.json"
           grep -q "task_completed:$kid:1" "$AFT_WORK_DIR/kids-requests.json"
-        intent: "Check that the lead's model received both attempts' records"
+          # Both deliveries are saved on the lead, each naming the child's slot.
+          lead="$(cat "$AFT_WORK_DIR/kidsLeadId")"
+          for i in $(seq 1 120); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents/$lead/events?kind=message.delivered&limit=100" | python3 -c 'import json,sys
+          es = json.load(sys.stdin)["events"]
+          n = sum(1 for e in es if e["kind"] == "message.delivered" and (e.get("payload") or {}).get("sender") == "agent:" + sys.argv[1])
+          sys.exit(0 if n == 2 else 1)' "$kid" && break
+            sleep 0.5
+          done
+          [ "$i" -lt 120 ]
+        intent: "Check that the lead's model received both attempts' records and both deliveries are saved from the child's slot"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return document.querySelectorAll('[data-testid=completion-record]').length === 2 &&
+                t.includes('make a child') && !t.includes('task_completed:'); })()
+        intent: "Wait until, with both records delivered to the lead, the chat shows them only as the two records and no raw task_completed bubble"
