@@ -97,7 +97,8 @@ func fakeClaude() {
 			}
 			if strings.Contains(in.Message.Content, "hang") {
 				running = true
-				_ = out.Encode(map[string]any{"type": "stream_event", "event": map[string]any{"type": "ping"}})
+				_ = out.Encode(map[string]any{"type": "stream_event", "event": map[string]any{"type": "message_start",
+					"message": map[string]any{"id": "msg_hang", "usage": map[string]any{"input_tokens": 4}}}})
 				continue
 			}
 			fakeTurn(out, fmt.Sprintf("msg_%d", n), in.UUID, in.Message.Content)

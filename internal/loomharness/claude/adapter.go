@@ -343,9 +343,9 @@ func (s *Session) onFrame(f Frame) {
 
 func (s *Session) onExit() {
 	s.mu.Lock()
-	e := s.m.exited()
+	events := s.m.exited()
 	s.mu.Unlock()
-	s.a.publish([]loomharness.Event{e})
+	s.a.publish(events)
 }
 
 // Interrupt ends only the running turn; the turn then completes as cancelled.
@@ -417,7 +417,12 @@ func (s *Session) Close(ctx context.Context) error {
 	if proc == nil {
 		return nil
 	}
-	return proc.Close(ctx)
+	err := proc.Close(ctx)
+	s.mu.Lock()
+	events := s.m.flush() // a turn cut off by the Close keeps its usage
+	s.mu.Unlock()
+	s.a.publish(events)
+	return err
 }
 
 // Resume (5.3) must install the current rules before anything runs (R-H);

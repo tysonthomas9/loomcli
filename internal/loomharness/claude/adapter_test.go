@@ -701,7 +701,7 @@ func TestClaudeSelfStartedTurnHasNoInputKey(t *testing.T) {
 // TestClaudeUsageSumsTurnSteps: a turn's usage is the sum of its steps'
 // stream usage (input and cache from message_start, output from
 // message_delta), not the result's own counts, and the next turn starts at
-// zero, as does a turn after a process exit.
+// zero; a process exit emits the cut-off turn's partial usage as its own row.
 func TestClaudeUsageSumsTurnSteps(t *testing.T) {
 	m := newMapper(loomharness.NativeRef{NativeID: "s"})
 	step := func(id string, in, read, write, out int) {
@@ -727,13 +727,24 @@ func TestClaudeUsageSumsTurnSteps(t *testing.T) {
 	if u2 := usage(); u2.Usage != (loomharness.Usage{InputTokens: 1, OutputTokens: 2}) || u2.ItemID == u.ItemID {
 		t.Fatalf("second turn usage = %+v (item %q)", u2.Usage, u2.ItemID)
 	}
-	// A process that exits mid-turn: its partial steps are not carried into
-	// the next turn's row.
+	// A process that exits mid-turn: the exit emits the cut-off turn's own
+	// usage row (no cost), and the next turn's row is only its own steps.
 	step("msg_4", 10, 0, 0, 2)
-	m.exited()
+	ex := m.exited()
+	if len(ex) != 2 || ex[0].Type != loomharness.EventUsage || ex[0].Usage != (loomharness.Usage{InputTokens: 10, OutputTokens: 2}) ||
+		ex[0].ItemID != ex[0].TurnID+"/usage" || ex[0].TurnID == "" || ex[1].Type != loomharness.EventFeedGap {
+		t.Fatalf("exit events = %+v", ex)
+	}
+	if again := m.exited(); len(again) != 1 { // nothing left to count
+		t.Fatalf("a second exit = %+v", again)
+	}
 	step("msg_5", 5, 0, 0, 3)
-	if u3 := usage(); u3.Usage != (loomharness.Usage{InputTokens: 5, OutputTokens: 3}) {
-		t.Fatalf("usage after an exit = %+v, want 5/3", u3.Usage)
+	u3 := usage()
+	if u3.Usage != (loomharness.Usage{InputTokens: 5, OutputTokens: 3}) || u3.ItemID == ex[0].ItemID {
+		t.Fatalf("usage after an exit = %+v (item %q), want 5/3 under a new id", u3.Usage, u3.ItemID)
+	}
+	if in, out := ex[0].Usage.InputTokens+u3.Usage.InputTokens, ex[0].Usage.OutputTokens+u3.Usage.OutputTokens; in != 15 || out != 5 {
+		t.Fatalf("totals %d/%d, want 15/5", in, out)
 	}
 }
 
@@ -786,4 +797,40 @@ func TestClaudeCostAfterRelaunch(t *testing.T) {
 	if want := []float64{0.25, 0.25, 0.25}; !slices.Equal(got, want) {
 		t.Fatalf("turn costs %v, want %v", got, want)
 	}
+}
+
+// TestClaudeCloseKeepsCutOffTurnUsage: a Close during a turn emits that
+// turn's partial usage once; a Close between turns emits no usage.
+func TestClaudeCloseKeepsCutOffTurnUsage(t *testing.T) {
+	a, feed, f := newAdapter(t)
+	_, s := open(t, a, f, "agent-close-usage")
+	ctx := context.Background()
+	prompt(t, s, "hang") // one step started: 4 input tokens, no result
+	started := until(t, feed, loomharness.EventTurnStarted)
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	u := until(t, feed, loomharness.EventUsage)
+	if got := u[len(u)-1]; got.Usage != (loomharness.Usage{InputTokens: 4}) || got.TurnID != started[len(started)-1].TurnID {
+		t.Fatalf("usage at Close = %+v", got)
+	}
+	prompt(t, s, "go")
+	until(t, feed, loomharness.EventTurnCompleted)
+	if err := s.Close(ctx); err != nil { // between turns: nothing to count
+		t.Fatal(err)
+	}
+	prompt(t, s, "go")
+	if n := len(kindsOf(until(t, feed, loomharness.EventTurnCompleted), loomharness.EventUsage)); n != 1 {
+		t.Fatalf("%d usage events in the turn after an idle Close, want only the turn's own", n)
+	}
+}
+
+func kindsOf(es []loomharness.Event, typ loomharness.EventType) []loomharness.Event {
+	var out []loomharness.Event
+	for _, e := range es {
+		if e.Type == typ {
+			out = append(out, e)
+		}
+	}
+	return out
 }

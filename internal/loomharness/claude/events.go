@@ -241,12 +241,26 @@ func (m *mapper) item(msg string, index int, b block) (kind, id string) {
 }
 
 // exited ends the turn state when the process died; events in between are
-// lost, so it emits feed.gap.
-func (m *mapper) exited() loomharness.Event {
+// lost, so it emits feed.gap, after the cut-off turn's partial usage.
+func (m *mapper) exited() []loomharness.Event {
+	out := m.flush()
 	m.turnID, m.cancelled, m.msgID, m.handed, m.cost = "", false, "", "", 0
-	m.usage = loomharness.Usage{} // the cut-off turn's partial steps are dropped, not carried on
 	m.seq++
-	return loomharness.Event{Type: loomharness.EventFeedGap, Session: m.ref, Seq: m.seq, Time: time.Now()}
+	return append(out, loomharness.Event{Type: loomharness.EventFeedGap, Session: m.ref, Seq: m.seq, Time: time.Now()})
+}
+
+// flush emits the usage of a turn cut off before its result (no cost: only
+// the result reports one) under the turn's own usage id, so the turn has
+// one usage row either way; nothing when the turn had no steps.
+func (m *mapper) flush() []loomharness.Event {
+	if m.usage == (loomharness.Usage{}) {
+		return nil
+	}
+	m.seq++
+	e := loomharness.Event{Type: loomharness.EventUsage, Session: m.ref, TurnID: m.turnID, ItemID: m.turnID + "/usage",
+		Seq: m.seq, Time: time.Now(), Usage: m.usage}
+	m.usage = loomharness.Usage{}
+	return []loomharness.Event{e}
 }
 
 func partItem(msg, part string, index int) string {
