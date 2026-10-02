@@ -16,6 +16,7 @@ var envAllowlistExact = map[string]bool{
 	"LANG": true, "LC_ALL": true, "LC_CTYPE": true, "LC_MESSAGES": true,
 	// XDG
 	"XDG_CONFIG_HOME": true, "XDG_DATA_HOME": true, "XDG_RUNTIME_DIR": true,
+	"XDG_STATE_HOME": true, "XDG_CACHE_HOME": true,
 	// Git/SSH
 	"SSH_AUTH_SOCK": true, "GIT_SSH_COMMAND": true, "GIT_TERMINAL_PROMPT": true,
 	"GIT_AUTHOR_NAME": true, "GIT_AUTHOR_EMAIL": true,
