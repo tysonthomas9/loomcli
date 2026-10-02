@@ -21,7 +21,7 @@ func TestBridgeSettingsPrivateAndUnloaded(t *testing.T) {
 	repo, dir := filepath.Join(root, "repo"), filepath.Join(root, "agent1")
 	for _, args := range [][]string{{"init", "-q", repo}, {"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t",
 		"commit", "-q", "--allow-empty", "-m", "init"}, {"-C", repo, "worktree", "add", "-q", "--detach", dir}} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil { //nolint:norawexec // a real git worktree is what EnvFile reads
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}

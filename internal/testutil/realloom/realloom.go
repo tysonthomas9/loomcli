@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -149,18 +148,15 @@ type Server struct {
 // the first health wait, stops and reaps the child.
 func (s Sandbox) StartServer(t *testing.T, loom string) *Server {
 	t.Helper()
-	ctx := context.Background()
-	fleet, err := bootstrap.StartEmbedded(ctx, filepath.Join(s.Dir, "fleet"), slog.New(slog.DiscardHandler))
+	// bootstrap.OpenStore in local mode starts the owned fleet-db.
+	t.Setenv(bootstrap.EnvFleetDBURL, "")
+	t.Setenv(bootstrap.EnvFleetDBActor, "loom-test")
+	fleet, err := bootstrap.OpenStore(context.Background(), filepath.Join(s.Dir, "fleet"), slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = fleet.Stop() })
-	fc, err := fleetdb.New(fleetdb.Config{BaseURL: fleet.URL(), Actor: "loom-test"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = fc.Close() }()
-	if _, err := fc.Workspaces().Create(ctx, store.WorkspaceCreate{Key: Workspace, Name: Workspace}); err != nil {
+	t.Cleanup(func() { _ = fleet.Close() })
+	if _, err := fleet.Store.Workspaces().Create(context.Background(), store.WorkspaceCreate{Key: Workspace, Name: Workspace}); err != nil {
 		t.Fatal(err)
 	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")

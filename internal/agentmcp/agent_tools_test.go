@@ -180,7 +180,7 @@ func worktree(t *testing.T) (repo, dir string) {
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil { //nolint:norawexec // a real git worktree is what EnvFile reads
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
@@ -218,7 +218,7 @@ func TestAgentBridgeSettings(t *testing.T) {
 	if got, err := Load(dir); err != nil || !slices.Equal(got.Tools, leadTools) || got.Token != "tok" || got.Repo != "/repo" {
 		t.Fatalf("Load from file = %+v, %v", got, err)
 	}
-	if out, err := exec.Command("git", "-C", dir, "status", "--porcelain", "--ignored").CombinedOutput(); err != nil || len(out) != 0 {
+	if out, err := exec.Command("git", "-C", dir, "status", "--porcelain", "--ignored").CombinedOutput(); err != nil || len(out) != 0 { //nolint:norawexec // a real git worktree is what EnvFile reads
 		t.Fatalf("git status in the worktree = %q, %v; want the settings invisible to git", out, err)
 	}
 	t.Setenv(EnvToken, "env-tok")
