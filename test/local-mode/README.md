@@ -212,7 +212,10 @@ long-lived token instead:
 
 The file is mounted read-only at `/run/secrets/claude-token`. The image's
 `claude` wrapper reads it into `CLAUDE_CODE_OAUTH_TOKEN` for each claude
-process only; serve, terminal shells and logs never see it. With it unset,
+process only; serve, terminal shells and logs never see it. Because Claude's
+first-run onboarding ignores the token and ends at "Select login method", the
+entrypoint writes `{"hasCompletedOnboarding":true}` to the volume's
+`.claude.json` when a token is mounted and that file does not exist yet. With it unset,
 the `.credentials.json` bind is used as before.
 
 Codex variant knobs:
