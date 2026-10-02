@@ -44,6 +44,13 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 			ev(13, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"user"}`),
 		},
 	}
+	// History as OpenCode holds it after the restart: the turn is still
+	// open (no idle marker), so it keeps its id across the reconnect.
+	st.messages["ses_a"] = []map[string]any{
+		{"id": "msg_in", "type": "user"},
+		{"id": "msg_a1", "type": "assistant", "content": []map[string]any{{"type": "text", "text": "PAST"}}},
+		{"id": "msg_8", "type": "synthetic", "metadata": map[string]string{"notice": "restart"}},
+	}
 	c := fakeServer(t, st)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -53,7 +60,7 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 	}
 	var got []string
 	completed := map[string]int{}
-	for len(got) < 15 {
+	for len(got) < 16 {
 		var e loomharness.Event
 		select {
 		case e = <-f.Events():
@@ -80,6 +87,7 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 		"item.started ses_a msg_in tool msg_a1/tool/call_1   ",
 		"ask.opened ses_a msg_in    per_1 ",
 		"feed.gap       ",
+		"turn.started ses_a msg_in   msg_in  ", // the same turn again, from history (Loom saves it once)
 		"turn.resumed ses_a msg_in  msg_8   ",
 		"item.completed ses_a msg_in tool msg_a1/tool/call_1   ",
 		"ask.resolved ses_a msg_in    per_1 ",
@@ -95,6 +103,58 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 		if n != 1 {
 			t.Errorf("item %s completed %d times", id, n)
 		}
+	}
+}
+
+// A turn that ends while the stream is down leaves no open turn behind: the
+// next message opens its own turn, with its own turn.started and
+// turn.completed, instead of joining the ended one.
+func TestEventsFeedReconnectAfterUnseenTurnEnd(t *testing.T) {
+	st := newStore()
+	st.streams = [][]string{
+		{
+			ev(1, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in"}`),
+			ev(2, "session.text.ended", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","ordinal":0,"text":"one"}`),
+		},
+		{
+			ev(5, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in2"}`),
+			ev(6, "session.execution.succeeded", `{"sessionID":"ses_a"}`),
+		},
+	}
+	st.messages["ses_a"] = []map[string]any{
+		{"id": "msg_in", "type": "user"},
+		{"id": "msg_a1", "type": "assistant", "content": []map[string]any{{"type": "text", "text": "one"}}},
+		{"id": "msg_idle", "type": "idle"},
+		{"id": "msg_in2", "type": "user"},
+	}
+	c := fakeServer(t, st)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var got []string
+	for len(got) < 7 {
+		select {
+		case e := <-f.Events():
+			got = append(got, fmt.Sprintf("%s %s %s %s", e.Type, e.TurnID, e.InputKey, e.StopReason))
+		case <-ctx.Done():
+			t.Fatalf("timed out after %d events:\n%s", len(got), strings.Join(got, "\n"))
+		}
+	}
+	want := []string{
+		"turn.started msg_in msg_in ",
+		"message.delivered msg_in msg_in ",
+		"item.completed msg_in  ",
+		"feed.gap   ",
+		"turn.started msg_in2 msg_in2 ",
+		"message.delivered msg_in2 msg_in2 ",
+		"turn.completed msg_in2  completed",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 

@@ -72,6 +72,9 @@ func (f *feed) run(ctx context.Context, c *Client, body io.ReadCloser) {
 				break
 			}
 		}
+		// A turn may have ended unseen while the stream was down; one still
+		// running gets its id back from history (lookup) on its next event.
+		clear(m.turn)
 		if !f.send(ctx, loomharness.Event{Type: loomharness.EventFeedGap, Time: time.Now()}) {
 			return
 		}
