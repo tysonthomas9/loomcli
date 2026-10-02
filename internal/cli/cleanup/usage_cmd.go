@@ -1,6 +1,7 @@
 package cleanup
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/usage"
@@ -33,8 +35,9 @@ var usageCmd = &cobra.Command{
 	GroupID: "agents",
 	Long: `Display token usage and cost summaries from agent sessions.
 
-Reads usage data from the local .loom/usage.jsonl file and displays
-aggregated token consumption and cost breakdowns by agent and backend.
+Reads usage data from the local .loom/usage.jsonl file and from the
+usage events of Agent API agents, and displays aggregated token
+consumption and cost breakdowns by agent and backend.
 
 FLAGS
   --agent <name>      Filter by agent name
@@ -95,6 +98,16 @@ func runUsage(cmd *cobra.Command, _ []string) {
 		fmt.Fprintf(os.Stderr, "Error reading usage data: %v\n", err)
 		os.Exit(1)
 	}
+	workspace := ""
+	if r, err := cli.NewResolver(); err == nil {
+		workspace = r.Workspace
+	}
+	agentRecords, err := readAgentUsage(context.Background(), bootstrap.LoomDir(), workspace, f)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading agent usage data: %v\n", err)
+		os.Exit(1)
+	}
+	records = joinUsage(records, agentRecords)
 
 	if len(records) == 0 {
 		fmt.Println("No usage data found. Run agents in auto-mode to generate usage data.")
