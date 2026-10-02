@@ -210,15 +210,21 @@ func (s *Service) markResumed(harness string, ref loomharness.NativeRef) {
 
 // lock takes agentID's lock, which orders that agent's writes, and returns its unlock.
 func (s *Service) lock(agentID string) func() {
+	l := s.agentLock(agentID)
+	l.Lock()
+	return l.Unlock
+}
+
+// agentLock returns agentID's lock.
+func (s *Service) agentLock(agentID string) *sync.Mutex {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	l, ok := s.locks[agentID]
 	if !ok {
 		l = &sync.Mutex{}
 		s.locks[agentID] = l
 	}
-	s.mu.Unlock()
-	l.Lock()
-	return l.Unlock
+	return l
 }
 
 // repoPath resolves repo for the service's target.

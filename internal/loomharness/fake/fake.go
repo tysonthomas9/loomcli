@@ -503,7 +503,10 @@ func (x *sessionHandle) Move(_ context.Context, dir string) error {
 	return x.idle(func(s *session) { s.dir = dir }, true)
 }
 
-func (x *sessionHandle) Unload(context.Context) error { return x.idle(func(*session) {}, true) }
+// Unload frees an idle session's runtime as Close does; Resume reopens it.
+func (x *sessionHandle) Unload(context.Context) error {
+	return x.idle(func(s *session) { s.closed = true }, true)
+}
 
 // Close stops the session's runtime and keeps its history. A running turn
 // dies as in a crash. Until Resume, only HasInput, Messages and Status work.
