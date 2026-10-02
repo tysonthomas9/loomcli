@@ -249,7 +249,7 @@ commit the result, then close the task with `loom data close {{.TaskID}}
 
 This isolated fixture intentionally uses a local bare Git origin and has no
 GitHub repository. A committed change plus the recorded Loom diff is its
-delivery contract; do not run `loom stack publish` or create a pull request.
+delivery contract; do not push, publish, or create a pull request.
 Exit immediately after signaling completion.
 EOF
 

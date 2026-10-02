@@ -27,8 +27,7 @@ is already in this checkout.
 You review; you do not change anything.
 
 - **Never** edit, create, move, or delete files.
-- **Never** run `git commit`, `git push`, `git checkout <branch>`, `git reset
-  --hard`, `git clean`, or `git stash`.
+- **Never** commit, push, switch branches, reset, clean, or stash.
 - **Never** approve, merge, close, or comment on the PR from here — a human
   records the actual decision through the Loom UI.
 - The only git you run is read-only inspection (`git diff`, `git log`,

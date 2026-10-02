@@ -65,8 +65,6 @@ func TestGenerateTaskPrompt(t *testing.T) {
 				"--assignee ember", // Reclaiming stale tasks still sets assignee.
 				"Implementation Task",
 				"--design",
-				"loom stack publish <stack-id>",
-				"git branch -f <output-branch> HEAD",
 				"loom plan",
 			},
 		},
@@ -300,7 +298,7 @@ func TestGeneratePlanningPrompt_Workspace(t *testing.T) {
 		"backend",
 		"./services/backend",
 		"Run `loom data` commands from the workspace root",
-		"Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory",
+		"Run git commands (git status, git add, git commit) from the specific repo subdirectory",
 		// Standard planning steps must still be present
 		"Step 1:",
 		"Step 2:",
@@ -336,7 +334,7 @@ func TestGenerateTaskPrompt_Workspace(t *testing.T) {
 		"web",
 		"./web",
 		"Run `loom data` commands from the workspace root",
-		"Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory",
+		"Run git commands (git status, git add, git commit) from the specific repo subdirectory",
 		"Run build/test commands from the specific repo subdirectory",
 		"Changes may span multiple repos",
 		// Standard task steps must still be present
@@ -678,8 +676,6 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"loom data show loomcli-kv6.4 --output json",
 				"already claimed",
 				"JSON `design`",
-				"loom stack publish <stack-id>",
-				"git branch -f <output-branch> HEAD",
 			},
 		},
 		{
@@ -708,36 +704,33 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 	}
 }
 
-func TestTaskPromptsRequireStackedPRDelivery(t *testing.T) {
+// TestAgentPromptAssetsNeverPublish guards that no agent-facing prompt tells an
+// agent to push, publish or open a pull request: only the host publishes.
+func TestAgentPromptAssetsNeverPublish(t *testing.T) {
+	ws := &WorkspaceConfig{Path: "/ws", Repos: []RepoConfig{{Name: "api", Path: "api", DefaultBranch: "main"}}}
 	prompts := map[string]string{
-		"task":       GenerateTaskPrompt("test", nil, "", "claude"),
-		"fleet_task": GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude"),
+		"task":           GenerateTaskPrompt("test", ws, "", "claude"),
+		"fleet_task":     GenerateFleetTaskPrompt("test", "loom-test.1", ws, "claude"),
+		"planning":       GeneratePlanningPrompt("test", ws, ""),
+		"fleet_planning": GenerateFleetPlanningPrompt("test", "loom-test.1", ws),
+		"lead":           GenerateLeadPrompt(),
 	}
-
-	wantParts := []string{
-		"Publish through Loom stacked PR delivery (MANDATORY)",
-		"loom stack init <stack-id>",
-		"loom stack add <task-id>",
-		"loom stack publish <stack-id>",
-		"git branch -f <output-branch> HEAD",
-		"Do not use direct integration or direct branch pushes as the completion path.",
+	assets, err := promptFS.ReadDir("prompts")
+	if err != nil {
+		t.Fatal(err)
 	}
-	notWantParts := []string{
-		"loom push \"test\"",
-		"git push origin HEAD",
-		"Stage and commit: git add -A",
-		"git add -A && git commit",
-	}
-
-	for name, prompt := range prompts {
-		for _, part := range wantParts {
-			if !strings.Contains(prompt, part) {
-				t.Errorf("%s prompt missing expected stacked PR instruction: %q", name, part)
-			}
+	for _, asset := range assets {
+		data, err := promptFS.ReadFile("prompts/" + asset.Name())
+		if err != nil {
+			t.Fatal(err)
 		}
-		for _, part := range notWantParts {
-			if strings.Contains(prompt, part) {
-				t.Errorf("%s prompt should not contain direct publish instruction: %q", name, part)
+		prompts["asset "+asset.Name()] = string(data)
+	}
+	forbidden := []string{"git push", "gh pr create", "gh pr merge", "loom publish", "stack publish", "loom pr ", "loom push"}
+	for name, prompt := range prompts {
+		for _, command := range forbidden {
+			if strings.Contains(strings.ToLower(prompt), command) {
+				t.Errorf("%s mentions %q; agents must never push, publish or open PRs", name, command)
 			}
 		}
 	}
