@@ -175,6 +175,21 @@ func (s *Supervisor) Restart(ctx context.Context, root string) error {
 	return err
 }
 
+// running lists the roots whose app-server runs.
+func (s *Supervisor) running() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var roots []string
+	for root, srv := range s.servers {
+		srv.mu.Lock()
+		if srv.conn != nil {
+			roots = append(roots, root)
+		}
+		srv.mu.Unlock()
+	}
+	return roots
+}
+
 // Stop stops every app-server for good (loom serve shutdown).
 func (s *Supervisor) Stop() {
 	s.mu.Lock()

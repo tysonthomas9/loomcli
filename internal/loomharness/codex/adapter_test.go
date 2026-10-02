@@ -769,3 +769,60 @@ func TestCodexSlowCleanupDoesNotBlockOpen(t *testing.T) {
 		t.Fatalf("failing Open: %+v %v, threads %v; want the zero ref and nothing left", r.ref, r.err, loadStore(root).Threads)
 	}
 }
+
+// TestCodexIdleUnloadAndRestart: Unload leaves an active turn and its open
+// ask alone, and the next Prompt works; Restart replaces every running
+// root's app-server and starts none for a root that was not running.
+func TestCodexIdleUnloadAndRestart(t *testing.T) {
+	f := newFixture(t, "codex-cli 0.157.1")
+	a, ctx := newAdapter(t, f), context.Background()
+	root := a.Root("")
+	saveStore(root, fakeStore{Threads: map[string]fakeThread{"t-1": {Active: true}, "t-2": {}}})
+	conn, err := a.Conn(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	a.asks[root] = map[string]Message{"srv-1": {ThreadID: "t-1"}} // an open ask on the active turn
+	a.mu.Unlock()
+	busy := a.Session(loomharness.NativeRef{Root: root, NativeID: "t-1"})
+	if err := busy.Unload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := busy.Status(ctx); err != nil || !st.Running {
+		t.Fatalf("Unload touched the active turn: %+v %v", st, err)
+	}
+	a.mu.Lock()
+	open := len(a.asks[root])
+	a.mu.Unlock()
+	if open != 1 {
+		t.Fatal("Unload dropped the open ask")
+	}
+	idle := a.Session(loomharness.NativeRef{Root: root, NativeID: "t-2"})
+	if err := idle.Unload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := idle.Prompt(ctx, loomharness.Input{Key: "k", Text: "hi"}); err != nil {
+		t.Fatalf("Prompt after Unload: %v", err)
+	}
+
+	var before, after int
+	_ = conn.Call(ctx, "pid", nil, &before)
+	if err := a.Restart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c, err := a.Conn(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Call(ctx, "pid", nil, &after)
+	if before == 0 || after == before {
+		t.Fatalf("Restart kept the app-server: pid %d, then %d", before, after)
+	}
+	if n := len(f.spawns(t)); n != 4 { // two spawns per start: pid and CODEX_HOME
+		t.Fatalf("spawns %v: Restart started a root that was not running", f.spawns(t))
+	}
+	if err := idle.Prompt(ctx, loomharness.Input{Key: "k2", Text: "again"}); err != nil {
+		t.Fatalf("Prompt after Restart: %v", err)
+	}
+}

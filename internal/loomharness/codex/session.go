@@ -14,7 +14,11 @@ import (
 )
 
 // Session returns the protocol methods for one recorded thread.
-func (a *Adapter) Session(ref loomharness.NativeRef) *Session { return &Session{a: a, ref: ref} }
+func (a *Adapter) Session(ref loomharness.NativeRef) loomharness.Session { return a.session(ref) }
+
+func (a *Adapter) session(ref loomharness.NativeRef) *Session { return &Session{a: a, ref: ref} }
+
+var _ loomharness.Harness = (*Adapter)(nil)
 
 // Session is one codex thread on its recorded root's app-server. It holds
 // no agent state: the running turn is read from codex.
@@ -186,6 +190,31 @@ func (s *Session) turns(ctx context.Context, p protocol.ThreadTurnsListParams) (
 		return protocol.ThreadTurnsListResponse{}, nil
 	}
 	return r, err
+}
+
+// Unload and Close free nothing per thread: the thread lives in its root's
+// shared app-server, where thread/unsubscribe left it loaded and did not
+// lower memory, so the idle timer frees memory with Restart (design §4.15).
+// They never touch a running turn, a waiting message or an open ask.
+func (s *Session) Unload(context.Context) error { return nil }
+
+// Close keeps the thread; see Unload.
+func (s *Session) Close(context.Context) error { return nil }
+
+// Resume (4.2b) must install the rules first; until then it fails and
+// nothing runs.
+func (s *Session) Resume(context.Context, loomharness.Launch, []loomharness.PermissionRule) (loomharness.NativeRef, error) {
+	return loomharness.NativeRef{}, fmt.Errorf("codex: Resume is not available until 4.2b installs rules first: %w", loomharness.ErrUnavailable)
+}
+
+// SetModel is not wired for codex yet.
+func (s *Session) SetModel(context.Context, string) error {
+	return fmt.Errorf("codex: SetModel: %w", errors.ErrUnsupported)
+}
+
+// Move is not wired for codex yet.
+func (s *Session) Move(context.Context, string) error {
+	return fmt.Errorf("codex: Move: %w", errors.ErrUnsupported)
 }
 
 // Reply answers an open ask on this thread with codex's own decision. An

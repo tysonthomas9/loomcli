@@ -79,6 +79,8 @@ func fakeCodex() int {
 			result = os.Getpid()
 		case "exit":
 			return 1
+		case "turn/start":
+			result = map[string]any{}
 		case "ask":
 			method := cmp.Or(p.Method, "item/tool/requestUserInput")
 			params := p.Params

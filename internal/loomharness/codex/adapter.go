@@ -198,7 +198,7 @@ func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 
 // delete deletes one thread on its recorded root; one already gone is fine.
 func (a *Adapter) delete(ctx context.Context, ref loomharness.NativeRef) error {
-	err := a.Session(ref).call(ctx, "thread/delete", protocol.ThreadDeleteParams{ThreadId: ref.NativeID}, nil)
+	err := a.session(ref).call(ctx, "thread/delete", protocol.ThreadDeleteParams{ThreadId: ref.NativeID}, nil)
 	var rpc *RPCError
 	if errors.As(err, &rpc) && strings.HasPrefix(rpc.Message, "no rollout found") {
 		return nil // deleted before
@@ -207,6 +207,17 @@ func (a *Adapter) delete(ctx context.Context, ref loomharness.NativeRef) error {
 		return fmt.Errorf("codex delete %s under %s: %w", ref.NativeID, ref.Root, err)
 	}
 	return nil
+}
+
+// Restart restarts every app-server Loom runs, one root at a time, so the
+// idle timer frees their memory; a root with no running server stays down
+// until its next use. Only servers this supervisor spawned are touched.
+func (a *Adapter) Restart(ctx context.Context) error {
+	var errs []error
+	for _, root := range a.running() {
+		errs = append(errs, a.Supervisor.Restart(ctx, root))
+	}
+	return errors.Join(errs...)
 }
 
 // Models lists the models the inherited root's app-server offers.
