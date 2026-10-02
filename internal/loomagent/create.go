@@ -262,6 +262,9 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 	if a.State == StateCreating {
 		to := a.StateOf()
 		to.State = StateIdle
+		if deref(to.AttentionReason) == AttentionCreateIncomplete {
+			to.AttentionReason = nil
+		}
 		if a, err = s.setState(ctx, a, to); err != nil {
 			return a, err
 		}

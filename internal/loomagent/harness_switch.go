@@ -160,6 +160,9 @@ func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agen
 		NativeRoot: got.Root, NativeID: got.NativeID}); err != nil {
 		return a, err
 	}
+	s.mu.Lock()
+	s.resumed[got] = true
+	s.mu.Unlock()
 	if got == ref {
 		return a, nil
 	}

@@ -39,13 +39,13 @@ var errFeedClosed = errors.New("loomagent: the harness feed closed")
 // RunFeed ingests the named harness's live feed until ctx ends (§5.2): each
 // completed native event of an agent's session is saved in agent_events and
 // then applied to its slots and turn. After every (re)connect and on each
-// feed.gap it backfills every live agent's session from its native history,
-// so events the feed missed, or that came while Loom was down, are saved
-// once (stable EventIDs) and never invented from the live bus. A failed save
-// or history read, or a closed feed, reopens the feed after a backoff; a
-// replay is all or nothing, so the backfill after the reconnect replays a
-// failed one whole. A warning is
-// logged when the failure changes, not on every retry.
+// feed.gap it runs Reconcile, which backfills every live agent's session
+// from its native history, so events the feed missed, or that came while
+// Loom was down, are saved once (stable EventIDs) and never invented from
+// the live bus. A failed save or history read, or a closed feed, reopens the
+// feed after a backoff; a replay is all or nothing, so the backfill after
+// the reconnect replays a failed one whole. A warning is logged when the
+// failure changes, not on every retry.
 func (s *Service) RunFeed(ctx context.Context, harness string) {
 	wait, last := feedRetry, ""
 	for h := s.harnesses[harness]; h != nil && ctx.Err() == nil; {
@@ -78,7 +78,9 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 		return false, errors.Join(err, s.harnessAttention(ctx, harness, true))
 	}
 	defer func() { _ = f.Close() }()
-	if err := s.backfill(ctx, harness); err != nil { // after subscribing, so nothing falls between
+	gap := loomstore.Event{Kind: KindFeedGap, Payload: json.RawMessage(strconv.Quote(harness))}
+	s.events.Notify(gap)
+	if err := s.Reconcile(ctx, harness); err != nil { // after subscribing, so nothing falls between
 		return false, err
 	}
 	if err := s.harnessAttention(ctx, harness, false); err != nil {
@@ -87,8 +89,8 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 	for e := range f.Events() {
 		ok := false
 		if e.Type == loomharness.EventFeedGap {
-			s.events.Notify(loomstore.Event{Kind: KindFeedGap, Payload: json.RawMessage(strconv.Quote(harness))})
-			err = s.backfill(ctx, harness)
+			s.events.Notify(gap)
+			err = s.Reconcile(ctx, harness)
 		} else {
 			ok, err = s.ingest(ctx, harness, e)
 		}
@@ -101,8 +103,8 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 }
 
 // backfill replays the native history of every live agent's current session.
-// A session the harness no longer has is left to Reconcile (session_missing);
-// one whose history is over replayCap shows Attention and is skipped.
+// A session the harness no longer has shows Attention session_missing, and
+// one whose history is over replayCap history_too_large; both are skipped.
 func (s *Service) backfill(ctx context.Context, harness string) error {
 	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Harness: harness})
 	if err != nil {
@@ -113,9 +115,12 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 			continue
 		}
 		err := s.replay(ctx, harness, a)
-		if errors.Is(err, errHistoryTooLarge) {
+		switch {
+		case errors.Is(err, errHistoryTooLarge):
 			slog.Warn("loomagent: native history not replayed", "agent", a.AgentID, "error", err)
-			err = s.flagHistory(ctx, a.AgentID)
+			err = s.flag(ctx, a.AgentID, AttentionHistoryTooLarge)
+		case errors.Is(err, loomharness.ErrSessionNotFound):
+			err = s.flag(ctx, a.AgentID, AttentionSessionMissing)
 		}
 		if err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) {
 			return err
@@ -126,14 +131,14 @@ func (s *Service) backfill(ctx context.Context, harness string) error {
 
 var errHistoryTooLarge = errors.New("loomagent: the native history is over the replay cap")
 
-// flagHistory shows Attention history_too_large on agentID.
-func (s *Service) flagHistory(ctx context.Context, agentID string) error {
+// flag shows Attention reason on agentID unless it already shows one.
+func (s *Service) flag(ctx context.Context, agentID, reason string) error {
 	defer s.lock(agentID)()
 	a, err := s.live(ctx, agentID)
 	if err != nil || a.AttentionReason != nil {
 		return err
 	}
-	_, err = s.raiseAttention(ctx, a, AttentionHistoryTooLarge)
+	_, err = s.raiseAttention(ctx, a, reason)
 	return err
 }
 
@@ -213,7 +218,7 @@ func (f *fold) add(e loomharness.Event) int {
 }
 
 // applyFold applies a committed replay's net effect to agentID: a
-// history_too_large Attention clears; the history's open asks are opened;
+// history_too_large or session_missing Attention clears; the history's open asks are opened;
 // an ask open before that the history no longer has is saved as ask.lost
 // (or just removed if its log shows it answered); then the delivery, turn
 // start and turn end are applied as the live events would be (each a no-op
@@ -226,7 +231,7 @@ func (s *Service) applyFold(ctx context.Context, agentID string, f fold) error {
 	} else if err != nil {
 		return err
 	}
-	if deref(a.AttentionReason) == AttentionHistoryTooLarge {
+	if r := deref(a.AttentionReason); r == AttentionHistoryTooLarge || r == AttentionSessionMissing {
 		if a, err = s.clearAttention(ctx, a); err != nil {
 			return err
 		}
