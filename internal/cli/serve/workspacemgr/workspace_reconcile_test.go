@@ -2,6 +2,7 @@ package workspacemgr
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -266,5 +267,29 @@ func TestP19ProductionDefaultJournalLocation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(config.GetConfigDir(), "loomgit", "store.db")); err != nil {
 		t.Fatalf("default journal location: %v", err)
+	}
+}
+
+func TestReconcileJournalRunsLaterPassesAfterLandingError(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	journalPath := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(journalPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(journalPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previousLanding, previousNative, previousAbandon := landingPass, nativePass, abandonPass
+	t.Cleanup(func() { landingPass, nativePass, abandonPass = previousLanding, previousNative, previousAbandon })
+	var ran []string
+	landingPass = func(context.Context) error { ran = append(ran, "landing"); return errors.New("landing W1/A: broken") }
+	nativePass = func(context.Context) error { ran = append(ran, "native"); return errors.New("native broken") }
+	abandonPass = func(context.Context, store.AgentSessionStore) error { ran = append(ran, "abandon"); return nil }
+	err := ReconcileJournal(context.Background(), memstore.New())
+	if strings.Join(ran, ",") != "landing,native,abandon" {
+		t.Fatalf("passes run = %v", ran)
+	}
+	if err == nil || !strings.Contains(err.Error(), "landing W1/A: broken") || !strings.Contains(err.Error(), "native broken") {
+		t.Fatalf("aggregated error = %v", err)
 	}
 }

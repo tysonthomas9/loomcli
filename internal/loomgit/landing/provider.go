@@ -147,7 +147,10 @@ func layerMerged(ctx context.Context, store Store, forge Forge, publication jour
 		return true, nil
 	}
 	pull, err := ownedPull(ctx, forge, publication)
-	return err == nil && pull.Merged, err
+	if err != nil {
+		return false, fmt.Errorf("blocked by the layer below: %w", err)
+	}
+	return pull.Merged, nil
 }
 
 // nativeShaped reports whether a provider move is GitHub restacking a native

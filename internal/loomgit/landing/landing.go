@@ -37,8 +37,12 @@ type Store interface {
 }
 
 // errPublicationMismatch marks a published change whose owned PR no longer
-// matches it. Only that change needs repair; reconcile continues for the rest.
-var errPublicationMismatch = errors.New("publication mismatch")
+// matches it, and errTrunkUnavailable one whose repository trunk could not be
+// fetched. Only those changes wait; reconcile continues for the rest.
+var (
+	errPublicationMismatch = errors.New("publication mismatch")
+	errTrunkUnavailable    = errors.New("trunk unavailable")
+)
 
 type Dependent struct {
 	Task, Repo string
@@ -75,6 +79,9 @@ type fetchedPublication struct {
 	trunkSHA    string
 	trunkRef    string
 	runner      *gitexec.Runner
+	// err is set when the trunk could not be fetched; landing is not decided
+	// without a fresh trunk.
+	err error
 }
 
 func RunOnce(ctx context.Context) error {
@@ -133,7 +140,16 @@ func ReconcileWithOptions(ctx context.Context, store Store, forge Forge, options
 	// One change's failure must not stall landing for every other workspace.
 	var failures []error
 	for _, item := range fetched {
-		if err := reconcilePublication(ctx, store, forge, item, publications, options); err != nil {
+		err := item.err
+		if err == nil {
+			err = reconcilePublication(ctx, store, forge, item, publications, options)
+		}
+		if errors.Is(err, errPublicationMismatch) || errors.Is(err, errTrunkUnavailable) {
+			err = recordAttention(ctx, store, item.publication, err)
+		} else if err == nil {
+			err = clearAttention(ctx, store, item.publication)
+		}
+		if err != nil {
 			failures = append(failures, fmt.Errorf("landing %s/%s: %w", item.publication.Workspace, item.publication.Change, err))
 		}
 	}
@@ -169,6 +185,26 @@ func reconcilePublication(ctx context.Context, store Store, forge Forge, item fe
 	return nil
 }
 
+// recordAttention keeps a change that needs repair visible in status and
+// doctor, logging only when its reason changes.
+func recordAttention(ctx context.Context, store Store, publication journal.Publication, reason error) error {
+	recorded, err := store.RecordLandingAttention(ctx, publication.Workspace, publication.Change, reason.Error())
+	if err != nil || !recorded {
+		return err
+	}
+	slog.Warn("landing needs attention", "workspace", publication.Workspace, "change", publication.Change,
+		"pr", publication.PRNumber, "err", reason)
+	return nil
+}
+
+func clearAttention(ctx context.Context, store Store, publication journal.Publication) error {
+	cleared, err := store.ClearLandingAttention(ctx, publication.Workspace, publication.Change)
+	if err == nil && cleared {
+		slog.Info("landing attention cleared", "workspace", publication.Workspace, "change", publication.Change, "pr", publication.PRNumber)
+	}
+	return err
+}
+
 func fetchPublications(ctx context.Context, store Store, publications []journal.Publication, includeLanded bool) ([]fetchedPublication, error) {
 	fetched := make([]fetchedPublication, 0, len(publications))
 	byTrunk := make(map[string]fetchedPublication)
@@ -187,26 +223,36 @@ func fetchPublications(ctx context.Context, store Store, publications []journal.
 			fetched = append(fetched, existing)
 			continue
 		}
-		runner, err := gitexec.New(publication.Repo, gitexec.Options{
-			FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"},
-		})
-		if err != nil {
-			return nil, err
-		}
-		if _, err := runner.Run(ctx, "fetch", "origin", trunk); err != nil {
-			return nil, fmt.Errorf("fetch trunk for %s: %w", publication.Change, err)
-		}
-		trunkRef := "origin/" + trunk
-		out, err := runner.Run(ctx, "rev-parse", "--verify", trunkRef+"^{commit}")
-		if err != nil {
-			return nil, fmt.Errorf("resolve fetched trunk for %s: %w", publication.Change, err)
-		}
-		item := fetchedPublication{publication: publication,
-			trunkSHA: strings.TrimSpace(string(out)), trunkRef: trunkRef, runner: runner}
+		item := fetchTrunk(ctx, publication, trunk)
 		byTrunk[key] = item
 		fetched = append(fetched, item)
 	}
 	return fetched, nil
+}
+
+// fetchTrunk fetches one repository trunk. A failure only holds back the
+// changes that land on it.
+func fetchTrunk(ctx context.Context, publication journal.Publication, trunk string) fetchedPublication {
+	item := fetchedPublication{publication: publication}
+	runner, err := gitexec.New(publication.Repo, gitexec.Options{
+		FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"},
+	})
+	if err != nil {
+		item.err = fmt.Errorf("%w: open %s: %w", errTrunkUnavailable, publication.Repo, err)
+		return item
+	}
+	if _, err := runner.Run(ctx, "fetch", "origin", trunk); err != nil {
+		item.err = fmt.Errorf("%w: fetch %s in %s: %w", errTrunkUnavailable, trunk, publication.Repo, err)
+		return item
+	}
+	item.trunkRef = "origin/" + trunk
+	out, err := runner.Run(ctx, "rev-parse", "--verify", item.trunkRef+"^{commit}")
+	if err != nil {
+		item.err = fmt.Errorf("%w: resolve fetched %s in %s: %w", errTrunkUnavailable, trunk, publication.Repo, err)
+		return item
+	}
+	item.trunkSHA, item.runner = strings.TrimSpace(string(out)), runner
+	return item
 }
 
 // targetTrunk follows a stacked PR's predecessors to the bottom layer's trunk,
@@ -225,22 +271,8 @@ func targetTrunk(publication journal.Publication, all []journal.Publication) str
 func detect(ctx context.Context, store Store, forge Forge, item fetchedPublication, publications []journal.Publication) error {
 	publication := item.publication
 	pull, err := ownedPull(ctx, forge, publication)
-	if errors.Is(err, errPublicationMismatch) {
-		// Recorded for status and doctor; logged once per change of reason.
-		if recorded, err2 := store.RecordLandingAttention(ctx, publication.Workspace, publication.Change, err.Error()); err2 != nil || !recorded {
-			return err2
-		}
-		slog.Warn("landing needs attention", "workspace", publication.Workspace, "change", publication.Change,
-			"pr", publication.PRNumber, "err", err)
-		return nil
-	}
 	if err != nil {
 		return err
-	}
-	if cleared, err := store.ClearLandingAttention(ctx, publication.Workspace, publication.Change); err != nil {
-		return err
-	} else if cleared {
-		slog.Info("landing attention cleared", "workspace", publication.Workspace, "change", publication.Change, "pr", publication.PRNumber)
 	}
 	if err := observeProvider(ctx, store, forge, item, pull, publications); err != nil {
 		return err
