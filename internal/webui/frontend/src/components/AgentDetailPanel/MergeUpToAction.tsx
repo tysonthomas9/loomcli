@@ -80,13 +80,15 @@ export function MergeUpToAction({
   return (
     <>
       <MergeRequestCards workspaceId={workspaceId} agentName={agentName} />
-      <button
-        type="button"
-        className={styles.createPrBtn}
-        onClick={() => setOpen(!open)}
-      >
-        Merge stack
-      </button>
+      <div className={styles.mergeStackRow}>
+        <button
+          type="button"
+          className={styles.createPrBtn}
+          onClick={() => setOpen(!open)}
+        >
+          Merge stack
+        </button>
+      </div>
       {open && (
         <div className={styles.prForm}>
           <MergeFields

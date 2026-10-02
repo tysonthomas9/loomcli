@@ -249,6 +249,15 @@ func (s *SQLite) PredecessorApplied(ctx context.Context, workspace, lead, change
 	return count > 0, err
 }
 
+// RevisionApplied reports whether any lead in the workspace currently has this
+// exact change revision applied. Unapply moves the layer out of 'done'.
+func (s *SQLite) RevisionApplied(ctx context.Context, workspace, change string, revision int) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM applied_layers WHERE workspace=?
+		AND change_id=? AND revision=? AND phase='done'`, workspace, change, revision).Scan(&count)
+	return count > 0, err
+}
+
 func (s *SQLite) SetApprovalFollow(ctx context.Context, approval PendingApproval, status string, paths []string) error {
 	data, err := json.Marshal(paths)
 	if err != nil {

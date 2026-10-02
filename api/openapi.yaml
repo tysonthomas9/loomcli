@@ -6392,7 +6392,7 @@ components:
           description: Zero until the captured revision is recorded.
     ReviewRevision:
       type: object
-      required: [change_id, number, head_sha, outcome, incomplete]
+      required: [change_id, number, head_sha, outcome, incomplete, applied]
       properties:
         change_id:
           type: string
@@ -6406,6 +6406,9 @@ components:
           type: boolean
         verdict:
           type: string
+        applied:
+          type: boolean
+          description: True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
     SessionResponse:
       type: object
       description: Session audit record from dto.SessionResponse

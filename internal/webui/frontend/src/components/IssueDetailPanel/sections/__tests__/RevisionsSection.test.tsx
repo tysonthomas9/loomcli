@@ -39,6 +39,12 @@ describe("RevisionsSection", () => {
     submitRevisionVerdict.mockResolvedValue(
       "approved_waiting_for_working_area",
     );
+    getTaskRevisions
+      .mockResolvedValueOnce([revision])
+      .mockResolvedValueOnce([{ ...revision, verdict: "approve" }])
+      .mockResolvedValueOnce([
+        { ...revision, verdict: "approve", applied: true },
+      ]);
     render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
     expect(
@@ -55,7 +61,15 @@ describe("RevisionsSection", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(await screen.findByText("Applied")).toBeInTheDocument();
-    expect(applyRevision).toHaveBeenCalledWith("W", revision, "lead-a");
+    expect(applyRevision).toHaveBeenCalledWith(
+      "W",
+      expect.objectContaining({
+        change_id: revision.change_id,
+        number: revision.number,
+        head_sha: revision.head_sha,
+      }),
+      "lead-a",
+    );
     expect(
       screen.queryByText("Approved: Apply to create the lead working area"),
     ).not.toBeInTheDocument();
@@ -142,6 +156,45 @@ describe("RevisionsSection", () => {
         undefined,
       ),
     );
+  });
+
+  it("shows Applied from the server after a reload and clears it after unapply", async () => {
+    getTaskRevisions.mockResolvedValue([
+      { ...revision, verdict: "approve", applied: true },
+    ]);
+    const first = render(<RevisionsSection workspaceId="W" taskId="T" />);
+    expect(await screen.findByText("Applied")).toBeInTheDocument();
+    first.unmount();
+
+    // `loom unapply` on the CLI, then a page reload: the server says not applied.
+    getTaskRevisions.mockResolvedValue([{ ...revision, verdict: "approve" }]);
+    render(<RevisionsSection workspaceId="W" taskId="T" />);
+    expect(await screen.findByText("approve")).toBeInTheDocument();
+    expect(screen.queryByText("Applied")).not.toBeInTheDocument();
+  });
+
+  it("locks verdict buttons once recorded and offers them for a new derived revision", async () => {
+    getTaskRevisions
+      .mockResolvedValueOnce([revision])
+      .mockResolvedValueOnce([{ ...revision, verdict: "reject" }]);
+    const view = render(<RevisionsSection workspaceId="W" taskId="T" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
+    expect(await screen.findByText("reject")).toBeInTheDocument();
+    for (const name of ["Approve", "Reject", "Override"])
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    view.unmount();
+
+    getTaskRevisions.mockResolvedValue([
+      { ...revision, verdict: "reject" },
+      { ...revision, number: 3, head_sha: "b".repeat(40) },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" />);
+    expect(await screen.findByText("Awaiting review")).toBeInTheDocument();
+    for (const name of ["Approve", "Reject", "Override"]) {
+      const [decided, fresh] = screen.getAllByRole("button", { name });
+      expect(decided).toBeDisabled();
+      expect(fresh).toBeEnabled();
+    }
   });
 
   it("does not offer verdicts for an incomplete revision", async () => {

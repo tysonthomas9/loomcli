@@ -3331,6 +3331,8 @@ export interface components {
       outcome: string;
       incomplete: boolean;
       verdict?: string;
+      /** @description True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply). */
+      applied: boolean;
     };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {
