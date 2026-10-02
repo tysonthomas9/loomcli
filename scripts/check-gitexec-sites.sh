@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Only gitexec runs git (Loom Git design §5 rule 1). Production code anywhere
-# in the repo (all non-test Go files, vendored and generated trees skipped) outside
+# in the repo (non-test Go files; vendored, generated and testdata trees skipped) outside
 # internal/loomgit/internal/gitexec may not call exec.Command("git", ...).
 # The list holds the remaining legacy callers with exact site counts; it may
 # only shrink. Unit tests are covered by check-no-raw-exec.sh.
@@ -18,11 +18,9 @@ internal/localworkspace/localworkspace.go:2
 internal/skillmat/materialize.go:1
 internal/stackpublish/gitutil.go:1'
 
-# The first string literal of the call is "git", whatever the context
-# expression and even when the call spans lines.
-actual=$(grep -rlE --include='*.go' --exclude='*_test.go' "${skip[@]}" 'exec\.Command' . |
-	xargs perl -0777 -ne '$c = () = /exec\.Command(?:Context)?\([^"]{0,300}"git"/g; print "$ARGV:$c\n" if $c' |
-	sed 's#^\./##' | grep -v '^internal/loomgit/internal/gitexec/' | sort || true)
+# Parsed with go/ast (scripts/gitexecsites): any exec.Command/CommandContext
+# whose program argument is the constant "git", however ctx is written.
+actual=$(go run ./scripts/gitexecsites . | grep -v '^internal/loomgit/internal/gitexec/' || true)
 allowed=$(printf '%s\n' "$allowed" | sort)
 
 if [ "$actual" != "$allowed" ]; then
