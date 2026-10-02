@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { ownSender, useAgentChat } from "@/hooks";
+import { ownSender, useAgentChat, useRosterAgent } from "@/hooks";
 import type { ChatItem } from "@/hooks";
 import { AskCard } from "./AskCard";
 import { LongText } from "./LongText";
@@ -14,7 +15,8 @@ export interface AgentChatProps {
 /**
  * One chat view for every harness (design v2 §9.2–§9.3): the transcript, a
  * composer that stays usable while a turn runs, the waiting bubbles with edit
- * and clear, and approval and question cards. The harness shows only as a
+ * and clear, and approval and question cards. A lead's chat shows a card per
+ * child and every completion record (§9.4). The harness shows only as a
  * label.
  */
 export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
@@ -66,7 +68,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
       <ol className={styles.transcript} data-testid="chat-transcript">
         {items.map((item) => (
           <li key={item.key} className={styles[item.kind]}>
-            <Item item={item} />
+            <Item item={item} workspaceId={workspaceId} />
           </li>
         ))}
         {agent?.waiting_messages.map((w) => (
@@ -157,8 +159,45 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   );
 }
 
-function Item({ item }: { item: ChatItem }) {
+/** A child's chat link, with its live state from the sidebar's roster. */
+function ChildLink({ ws, id, name }: { ws: string; id: string; name: string }) {
+  const a = useRosterAgent(id);
+  return (
+    <Link
+      className={styles.childLink}
+      to={`/ws/${encodeURIComponent(ws)}/chat/${encodeURIComponent(id)}`}
+    >
+      <span className={styles.name}>{a?.name ?? name}</span>
+      {a && <span className={styles.label}>{a.harness}</span>}
+      {a && <span className={styles.state}>{a.state}</span>}
+    </Link>
+  );
+}
+
+function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
   switch (item.kind) {
+    case "child":
+      return (
+        <div data-testid="child-card">
+          <div className={styles.note}>Child agent</div>
+          <ChildLink ws={workspaceId} id={item.child} name={item.name} />
+        </div>
+      );
+    case "completion": {
+      const r = item.record;
+      return (
+        <div data-testid="completion-record">
+          <div className={styles.note}>
+            {/* Attempts count from 0; people count from 1. */}
+            Attempt {r.attempt + 1} {r.outcome}
+            {r.branch && ` · ${r.branch}`}
+            {r.head && ` @ ${r.head.slice(0, 8)}`}
+          </div>
+          <ChildLink ws={workspaceId} id={r.child} name={r.child} />
+          {r.summary && <LongText text={r.summary} />}
+        </div>
+      );
+    }
     case "turn_end":
       return <div className={styles.note}>Turn {item.reason}</div>;
     case "tool":

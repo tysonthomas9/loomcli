@@ -3,6 +3,7 @@
  */
 
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -84,7 +85,11 @@ function deliver(...events: AgentEvent[]) {
 
 async function mount(a: Agent) {
   api.getAgent.mockResolvedValue(a);
-  const view = render(<AgentChat workspaceId="w1" agentId="a1" />);
+  const view = render(
+    <MemoryRouter>
+      <AgentChat workspaceId="w1" agentId="a1" />
+    </MemoryRouter>,
+  );
   await screen.findByText(a.name);
   return view;
 }
@@ -107,6 +112,34 @@ beforeEach(() => {
 });
 
 describe("AgentChat", () => {
+  it("shows a child card and each completion attempt as its own record", async () => {
+    await mount(agent());
+    const done = (attempt: number, summary: string) => ({
+      ...ev("task_completed", {
+        child: "k1",
+        attempt,
+        outcome: "succeeded",
+        branch: "loom/k1",
+        head: "0123456789abcdef",
+        summary,
+      }),
+      event_id: `task_completed:k1:${attempt}`,
+    });
+    deliver(
+      ev("child.created", { child: "k1", name: "kid", preset: "task" }),
+      done(0, "first try"),
+      done(1, "second try"),
+    );
+    const card = screen.getByTestId("child-card");
+    expect(card).toHaveTextContent("Child agentkid");
+    expect(card.querySelector("a")).toHaveAttribute("href", "/ws/w1/chat/k1");
+    const records = screen.getAllByTestId("completion-record");
+    expect(records.map((r) => r.textContent)).toEqual([
+      "Attempt 1 succeeded · loom/k1 @ 01234567k1first try",
+      "Attempt 2 succeeded · loom/k1 @ 01234567k1second try",
+    ]);
+  });
+
   it("renders untrusted text as text, never as markup", async () => {
     const { container } = await mount(agent());
     deliver(...fixture());

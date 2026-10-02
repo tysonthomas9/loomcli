@@ -46,9 +46,25 @@
 .waiting,
 .reasoning,
 .tool,
-.turn_end {
+.turn_end,
+.child,
+.completion {
   max-width: 100%;
   min-width: 0;
+}
+
+.child,
+.completion {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+
+.childLink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
 }
 
 .user,

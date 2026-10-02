@@ -17,7 +17,19 @@ export type ChatItem =
   | { key: string; kind: "agent"; text: string; streaming?: boolean }
   | { key: string; kind: "reasoning"; text: string }
   | { key: string; kind: "tool"; text: string }
-  | { key: string; kind: "turn_end"; reason: string };
+  | { key: string; kind: "turn_end"; reason: string }
+  | { key: string; kind: "child"; child: string; name: string }
+  | { key: string; kind: "completion"; record: TaskCompleted };
+
+/** A child attempt's completion record, saved once per attempt (§10.3). */
+export interface TaskCompleted {
+  child: string;
+  attempt: number;
+  outcome: string;
+  branch?: string;
+  head?: string;
+  summary?: string;
+}
 
 function payload(e: AgentEvent): NativePayload {
   return e.payload && typeof e.payload === "object"
@@ -42,6 +54,13 @@ function itemFor(e: AgentEvent): ChatItem | null {
       return p.stopReason && p.stopReason !== "completed"
         ? { key, kind: "turn_end", reason: p.stopReason }
         : null;
+    case "child.created": {
+      const c = e.payload as { child: string; name: string };
+      return { key, kind: "child", child: c.child, name: c.name };
+    }
+    // Keyed task_completed:<child>:<attempt>, so each attempt shows once.
+    case "task_completed":
+      return { key, kind: "completion", record: e.payload as TaskCompleted };
     default:
       return null;
   }

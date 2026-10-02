@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { AgentEventStream, listAgents } from "@/api/agentsv1";
 import type { Agent, ListAgentsQuery } from "@/api/agentsv1";
 import {
@@ -19,6 +25,19 @@ async function listAll(ws: string, q: ListAgentsQuery = {}): Promise<Agent[]> {
   } while (after);
   return out;
 }
+
+// The sidebar's roster, shared so a lead's chat reads its children's live
+// state from the one roster stream rather than opening another.
+let shared: Roster = new Map();
+const listeners = new Set<() => void>();
+const subscribe = (l: () => void) => {
+  listeners.add(l);
+  return () => listeners.delete(l);
+};
+
+/** One agent from the sidebar's live roster, if it is listed. */
+export const useRosterAgent = (id: string): Agent | undefined =>
+  useSyncExternalStore(subscribe, () => shared.get(id));
 
 const message = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -50,6 +69,11 @@ export function useAgentRoster(
   }, [workspaceId]);
 
   useEffect(() => relist(), [relist, openId]);
+
+  useEffect(() => {
+    shared = roster;
+    listeners.forEach((l) => l());
+  }, [roster]);
 
   // The stream reopens only when the set of agents changes.
   const ids = useMemo(() => [...roster.keys()].sort().join(","), [roster]);

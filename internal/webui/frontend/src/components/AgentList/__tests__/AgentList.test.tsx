@@ -40,6 +40,7 @@ vi.mock("@/api/agentsv1", () => ({
   },
 }));
 
+import { useRosterAgent } from "@/hooks";
 import { AgentList } from "../AgentList";
 
 let created = 0;
@@ -119,6 +120,28 @@ describe("AgentList", () => {
       agents: ["kid", "lead", "other"],
       live: true,
     });
+  });
+
+  it("shares the roster with chat child cards over the one stream", async () => {
+    function Card() {
+      return <p data-testid="card">{useRosterAgent("kid")?.state}</p>;
+    }
+    render(
+      <MemoryRouter initialEntries={["/ws/ws1/chat/lead"]}>
+        <AgentList workspaceId="ws1" />
+        <Card />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("card")).toHaveTextContent("active"),
+    );
+    act(() =>
+      stream().opts.onEvents!([
+        ev("kid", "agent.state_changed", { from: "active", to: "finished" }),
+      ]),
+    );
+    expect(screen.getByTestId("card")).toHaveTextContent("finished");
+    expect(api.streams).toHaveLength(1);
   });
 
   it("projects state changes and deletes from the stream", async () => {
