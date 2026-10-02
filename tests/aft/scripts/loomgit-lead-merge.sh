@@ -61,7 +61,7 @@ if [[ "$phase" == setup ]]; then
 fi
 
 if [[ "$phase" == teardown ]]; then
-  loom lead-may-merge off >/dev/null 2>&1 || true
+  LOOM_WORKSPACE="$workspace" loom lead-may-merge off >/dev/null 2>&1 || true
   AFT_WS="$workspace" "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
   curl -s -X DELETE "$api/agents/lead" >/dev/null || true
   curl -s -X DELETE "$api" >/dev/null || true
@@ -77,7 +77,7 @@ make_tasks() {
     -d "{\"title\":\"lead merge epic $case_name $RUN_ID\",\"issue_type\":\"epic\",\"priority\":2}" > "$case_dir/epic.json"
   local epic previous="" layer=0 spec repo file task
   epic="$(json "$case_dir/epic.json" 'print(v["data"]["id"])')"
-  if [[ "$stack" != none ]]; then loom stack init "$stack" --repo "${repos[0]}" --base main >/dev/null; fi
+  if [[ "$stack" != none && "$stack" != deps ]]; then loom stack init "$stack" --repo "${repos[0]}" --base main >/dev/null; fi
   for spec in "$@"; do
     layer=$((layer + 1))
     repo="${spec%%:*}"
@@ -87,7 +87,7 @@ make_tasks() {
       curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$case_dir/task-$layer.json"
     task="$(json "$case_dir/task-$layer.json" 'print(v["data"]["id"])')"
     printf '%s\n' "$task" > "$case_dir/task-$layer.id"
-    if [[ "$stack" != none ]]; then
+    if [[ "$stack" != none && "$stack" != deps ]]; then
       if [[ -n "$previous" ]]; then
         curl -fsS -X POST "$api/issues/$task/dependencies" -H 'Content-Type: application/json' \
           -d "{\"depends_on_id\":\"$previous\",\"dep_type\":\"blocks\"}" >/dev/null
@@ -99,6 +99,12 @@ make_tasks() {
     previous="$task"
   done
   printf '%s\n' "$layer" > "$case_dir/layers"
+  if [[ "$stack" == deps ]]; then
+    # Task 2 is blocked by task 1 before any TaskRun starts: the issue store
+    # refuses new dependencies on running or closed tasks.
+    curl -fsS -X POST "$api/issues/$(cat "$case_dir/task-2.id")/dependencies" -H 'Content-Type: application/json' \
+      -d "{\"depends_on_id\":\"$(cat "$case_dir/task-1.id")\",\"dep_type\":\"blocks\"}" >/dev/null
+  fi
   curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
     -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$case_dir/workflow.json"
   for layer in $(seq 1 "$(cat "$case_dir/layers")"); do
@@ -220,7 +226,9 @@ case "$case_name" in
     two="$(pull_number 2)"
     pr_status "$one" '"checks":"PENDING","merge_state":"BLOCKED"'
     pr_status "$two" '"review":"CHANGES_REQUESTED","merge_state":"BLOCKED"'
-    loom lead-may-merge when_green > "$case_dir/policy.txt" 2> "$case_dir/policy-warning.txt"
+    # LOOM_WORKSPACE: lead-may-merge resolves the active workspace before its
+    # --workspace flag, so the flag alone fails with no active workspace.
+    LOOM_WORKSPACE="$workspace" loom lead-may-merge when_green > "$case_dir/policy.txt" 2> "$case_dir/policy-warning.txt"
     grep -q when_green "$case_dir/policy.txt"
     hold_unmerged 10 "0 0" "required check pending"
     test "$(merge_puts "$one")" = 0
@@ -230,7 +238,7 @@ case "$case_name" in
     test "$(merge_puts "$two")" = 0
     pr_status "$two" '"review":"APPROVED","merge_state":"CLEAN"'
     wait_merged "1 1" "layer two approved"
-    loom lead-may-merge off > "$case_dir/policy-off.txt"
+    LOOM_WORKSPACE="$workspace" loom lead-may-merge off > "$case_dir/policy-off.txt"
     for layer in 1 2; do git --git-dir="$case_dir/app.git" show "main:lead-green-$layer.txt" >/dev/null; done
     ;;
 
@@ -260,17 +268,7 @@ case "$case_name" in
     ;;
 
   deps)
-    make_tasks none api:lead-deps-api.txt app:lead-deps-app.txt
-    api_task="$(cat "$case_dir/task-1.id")"
-    app_task="$(cat "$case_dir/task-2.id")"
-    # The issue store refuses new dependencies while a TaskRun is still open.
-    for _ in $(seq 1 45); do
-      code="$(curl -s -o "$case_dir/dependency.json" -w '%{http_code}' -X POST "$api/issues/$app_task/dependencies" \
-        -H 'Content-Type: application/json' -d "{\"depends_on_id\":\"$api_task\",\"dep_type\":\"blocks\"}")"
-      [[ "$code" == 2* ]] && break
-      sleep 2
-    done
-    [[ "$code" == 2* ]] || { cat "$case_dir/dependency.json" >&2; exit 1; }
+    make_tasks deps api:lead-deps-api.txt app:lead-deps-app.txt
     approve_and_apply
     for layer in 1 2; do
       change="$(cat "$case_dir/change-$layer.id")"

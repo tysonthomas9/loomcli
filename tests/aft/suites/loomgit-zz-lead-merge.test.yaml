@@ -1,4 +1,4 @@
-suite: loomgit-lead-merge
+suite: loomgit-zz-lead-merge
 classification: { area: reviews, feature: lead-merge, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: >-
