@@ -12,11 +12,11 @@ export interface AgentListProps {
  * Every row opens the same chat; the harness is only a label.
  */
 export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
-  const { roster, error } = useAgentRoster(workspaceId);
-  const kids = useMemo(() => childrenByParent(roster), [roster]);
-  const ws = encodeURIComponent(workspaceId);
   // The agent whose chat is open.
   const activeId = useMatch("/ws/:ws/chat/:agentId")?.params.agentId;
+  const { roster, error } = useAgentRoster(workspaceId, activeId);
+  const kids = useMemo(() => childrenByParent(roster), [roster]);
+  const ws = encodeURIComponent(workspaceId);
 
   const rows = (parent: string): JSX.Element | null => {
     const list = kids.get(parent);

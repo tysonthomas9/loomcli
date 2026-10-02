@@ -3,7 +3,8 @@
  */
 
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
+import type { NavigateFunction } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -148,6 +149,37 @@ describe("AgentList", () => {
     });
     expect(first.closed).toBe(true);
     expect(stream().opts.agents).toEqual(["kid", "kid2", "lead", "other"]);
+  });
+
+  it("shows a new lead without a reload when its chat opens, starting empty", async () => {
+    api.agents = [];
+    let navigate: NavigateFunction = () => {};
+    function Nav() {
+      navigate = useNavigate();
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={["/ws/ws1/agents"]}>
+        <Nav />
+        <AgentList workspaceId="ws1" />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(api.listAgents).toHaveBeenCalledTimes(1));
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(api.streams).toHaveLength(0);
+    // New Agent creates the lead, then opens its chat.
+    for (const id of ["lead", "lead2"]) {
+      api.agents.push(agent(id));
+      act(() => navigate(`/ws/ws1/chat/${id}`));
+      await waitFor(() =>
+        expect(
+          screen.getByRole("link", { name: new RegExp(`^${id}`) }),
+        ).toHaveAttribute("aria-current", "page"),
+      );
+    }
+    expect(names()).toEqual(["leadopencodeidle", "lead2opencodeidle"]);
+    expect(stream().opts.agents).toEqual(["lead", "lead2"]);
+    expect(api.streams.filter((s) => !s.closed)).toHaveLength(1);
   });
 
   it("re-lists on resync (feed.gap or reconnect) without duplicates", async () => {

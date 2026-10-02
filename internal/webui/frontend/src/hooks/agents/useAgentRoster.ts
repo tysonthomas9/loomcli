@@ -26,9 +26,14 @@ const message = (err: unknown) =>
 /**
  * The live agent roster: one List, then one live-only event stream over
  * every listed agent. child.created lists the parent's children; a
- * reconnect or feed.gap re-lists everything (§9.5 step 4).
+ * reconnect or feed.gap re-lists everything (§9.5 step 4). A new lead is no
+ * event on a listed agent, so it re-lists whenever the open chat changes
+ * (New Agent opens the new agent's chat).
  */
-export function useAgentRoster(workspaceId: string): {
+export function useAgentRoster(
+  workspaceId: string,
+  openId?: string,
+): {
   roster: Roster;
   error: string | null;
 } {
@@ -44,7 +49,7 @@ export function useAgentRoster(workspaceId: string): {
       .catch((err) => setError(message(err)));
   }, [workspaceId]);
 
-  useEffect(relist, [relist]);
+  useEffect(() => relist(), [relist, openId]);
 
   // The stream reopens only when the set of agents changes.
   const ids = useMemo(() => [...roster.keys()].sort().join(","), [roster]);
