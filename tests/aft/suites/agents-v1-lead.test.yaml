@@ -394,3 +394,27 @@ tests:
             (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-GH-AFTER')
         budget: 90000
         intent: "Wait until the lead's next turn replies normally"
+
+  - name: the New lead modal says why Create is disabled for an invalid name
+    intent: An operator who types "My Lead" sees the name rule under the Name field with Create disabled, and fixing the name clears the message and enables Create
+    steps:
+      - open: /ws/E2E-AGV1-LEAD/agents
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "My Lead" }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-name-error]')?.textContent || '').includes('lowercase letters, numbers, hyphens') &&
+            document.querySelector('[data-testid=create-agent-submit]')?.disabled === true
+        intent: "Wait until the Name field shows the name rule and Create is disabled"
+      - fill: { testid: create-agent-name, value: "my-lead-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-name-error]') &&
+            document.querySelector('[data-testid=create-agent-submit]')?.disabled === false
+        intent: "Wait until a valid name clears the message and enables Create"

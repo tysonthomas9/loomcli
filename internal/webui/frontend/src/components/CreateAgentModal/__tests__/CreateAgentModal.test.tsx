@@ -286,6 +286,29 @@ describe("CreateAgentModal: client-side validation", () => {
       screen.getByRole("button", { name: /create agent/i }),
     ).toBeDisabled();
     expect(mockCreateAgent).not.toHaveBeenCalled();
+    expect(
+      screen.queryByTestId("create-agent-name-error"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says why Create is disabled for an invalid name, and clears it once valid", () => {
+    renderModal();
+    const nameInput = screen.getByTestId("create-agent-name");
+    fireEvent.change(nameInput, { target: { value: "My Lead" } });
+    expect(screen.getByTestId("create-agent-name-error")).toHaveTextContent(
+      /lowercase letters, numbers, hyphens/i,
+    );
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(
+      screen.getByRole("button", { name: /create agent/i }),
+    ).toBeDisabled();
+
+    fireEvent.change(nameInput, { target: { value: "my-lead" } });
+    expect(
+      screen.queryByTestId("create-agent-name-error"),
+    ).not.toBeInTheDocument();
+    expect(nameInput).toHaveAttribute("aria-invalid", "false");
+    expect(screen.getByRole("button", { name: /create agent/i })).toBeEnabled();
   });
 
   it("treats a workspace with no repos as workspace scope (cross_repo)", async () => {

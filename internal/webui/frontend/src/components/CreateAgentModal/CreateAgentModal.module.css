@@ -295,6 +295,13 @@
   color: var(--color-text-muted);
 }
 
+.fieldError {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-danger);
+}
+
 .error {
   color: var(--color-danger);
   font-size: 12px;

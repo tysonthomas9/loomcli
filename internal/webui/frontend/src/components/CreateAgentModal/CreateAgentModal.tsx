@@ -294,10 +294,10 @@ export function CreateAgentModal({
     (selectedBuiltinPromptID === CUSTOM_PROMPT_ID
       ? customPrompt.trim() !== ""
       : selectedBuiltinPromptID.trim() !== "");
-  const canSubmit =
-    validateStoredAgentName(name) === null &&
-    hasPromptSelection &&
-    !isSubmitting;
+  const nameError = validateStoredAgentName(name);
+  // An empty name just disables Create; a typed but invalid one says why.
+  const showNameError = name.trim() !== "" && nameError !== null;
+  const canSubmit = nameError === null && hasPromptSelection && !isSubmitting;
 
   const selectBackground = (role: BackgroundRole): void => {
     setSelectedKind("background");
@@ -314,7 +314,6 @@ export function CreateAgentModal({
     setError(null);
     const trimmedName = normalizeStoredAgentName(name);
     const trimmedBackend = backend.trim();
-    const nameError = validateStoredAgentName(name);
     if (nameError) {
       setError(nameError);
       return;
@@ -561,8 +560,21 @@ export function CreateAgentModal({
                 onChange={(event) => setName(event.target.value)}
                 placeholder={namePlaceholder}
                 disabled={isSubmitting}
+                aria-invalid={showNameError}
+                aria-describedby={
+                  showNameError ? "agent-name-error" : undefined
+                }
                 data-testid="create-agent-name"
               />
+              {showNameError && (
+                <p
+                  id="agent-name-error"
+                  className={styles.fieldError}
+                  data-testid="create-agent-name-error"
+                >
+                  {nameError}
+                </p>
+              )}
             </div>
 
             <div className={styles.fieldGroup}>
