@@ -33,7 +33,7 @@ import type {
 } from "@/components/TerminalView";
 import { useAgentStoreInstance } from "@/hooks";
 import { wsUrl } from "@/hooks/api";
-import { type LoomAgentStatus, parseLoomStatus } from "@/types";
+import { isAgentActive, type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
 import {
   agentDisplayRoleLabel,
@@ -97,7 +97,9 @@ export function AgentDetailMain({
     () => setPendingAgentName(undefined),
     [],
   );
-  const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
+  const terminalUnavailable =
+    agent != null &&
+    (isTerminalUnavailable(agent) || isIdleDaemonWorker(agent));
   const ephemeralWorker = agent != null && isEphemeralWorker(agent);
   const shouldResolveLeadTerminal =
     agent != null && isInteractiveAgent(agent) && terminalUnavailable;
@@ -172,6 +174,18 @@ function isTerminalUnavailable(agent: LoomAgentStatus): boolean {
   const state = (agent.state ?? "").toLowerCase();
   const desiredState = (agent.desired_state ?? "").toLowerCase();
   return state === "stopped" || state === "dead" || desiredState === "stopped";
+}
+
+// The daemon owns a supervised worker's run loop, so there is no PTY to attach
+// to between tasks. Opening a terminal would launch a second single-task run
+// that exits at once with no work, which the terminal reports as a crash loop.
+function isIdleDaemonWorker(agent: LoomAgentStatus): boolean {
+  return (
+    agent.daemon_managed === true &&
+    !isInteractiveAgent(agent) &&
+    !agent.current_task_id &&
+    !isAgentActive(agent)
+  );
 }
 
 function terminalUnavailableEmptyState(_agent: LoomAgentStatus): {

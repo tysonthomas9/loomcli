@@ -267,4 +267,63 @@ describe("AgentDetailMain", () => {
     ).toBeInTheDocument();
     expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
   });
+  it("shows the stopped state for a finished daemon-supervised worker", () => {
+    const finished: LoomAgentStatus = {
+      name: "local-coder",
+      branch: "local-coder",
+      status: "3 changes",
+      ahead: 1,
+      behind: 0,
+      workspace: "LOCALMODE",
+      role: "task",
+      daemon_managed: true,
+      desired_state: "running",
+      live_status: "idle",
+      task_id: "LOCALMODE-3",
+      session_id: "sess-done",
+    };
+
+    renderWithAgents([finished], finished.name);
+
+    expect(screen.getByText("Agent is stopped")).toBeInTheDocument();
+    expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
+  });
+
+  it("keeps the terminal for a daemon-supervised worker with live work", () => {
+    const working: LoomAgentStatus = {
+      name: "local-coder",
+      branch: "local-coder",
+      status: "working: LOCALMODE-3",
+      ahead: 0,
+      behind: 0,
+      workspace: "LOCALMODE",
+      role: "task",
+      daemon_managed: true,
+      desired_state: "running",
+      current_task_id: "LOCALMODE-3",
+    };
+
+    renderWithAgents([working], working.name);
+
+    expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+    expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
+  });
+
+  it("keeps the terminal for an idle worker the daemon does not supervise", () => {
+    const idle: LoomAgentStatus = {
+      name: "planner",
+      branch: "planner",
+      status: "idle",
+      ahead: 0,
+      behind: 0,
+      workspace: "E2E",
+      role: "plan",
+      desired_state: "running",
+    };
+
+    renderWithAgents([idle], idle.name);
+
+    expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+    expect(screen.queryByText("Agent is stopped")).not.toBeInTheDocument();
+  });
 });

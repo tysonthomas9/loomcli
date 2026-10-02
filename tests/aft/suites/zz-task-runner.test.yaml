@@ -805,3 +805,57 @@ tests:
       - expect: { visible: { selector: "section[data-status=blocked] article[aria-label*='task-runner quarantine ${RUN_ID:-local}'] [aria-label='Task quarantined']" } }
       - expect: { attr: { selector: "section[data-status=blocked] article[aria-label*='task-runner quarantine ${RUN_ID:-local}'] [aria-label='Task quarantined']", name: title, equals: "Task quarantined by daemon after repeated no-progress kills — see comment for the kill timeline" } }
       - expect: { text: Quarantined }
+
+  # covers: 2.0t; AgentDetailMain idle daemon-supervised worker stopped empty state; no crash-loop terminal launch
+  - name: finished daemon-supervised task runner shows the stopped state instead of a crash-looping terminal
+    intent: An operator opening a daemon-supervised Task Runner that has no live work sees the stopped-agent message, not a terminal that keeps exiting
+    steps:
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          repo_a="$(cat "$AFT_WORK_DIR/task-repo-a.name")"
+          python3 - "$run" "$repo_a" > "$AFT_WORK_DIR/tsk-20t-agent.json" <<'PY'
+          import json, sys
+          run, repo = sys.argv[1], sys.argv[2]
+          print(json.dumps({
+              "name": f"finished-{run}",
+              "role_name": "task",
+              "auto": True,
+              "cross_repo": False,
+              "repos": [repo],
+              "backend": "codex",
+          }))
+          PY
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK/agents" \
+            -H "Content-Type: application/json" \
+            -d @"$AFT_WORK_DIR/tsk-20t-agent.json" > /dev/null
+          # budget: monitor-cache (16s) - the daemon_managed flag reaches the UI through monitor/status.
+          for i in $(seq 1 16); do
+            curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-TASK" > "$AFT_WORK_DIR/tsk-20t-monitor.json" &&
+            python3 - "$AFT_WORK_DIR/tsk-20t-monitor.json" "finished-$run" <<'PY' && exit 0
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          a = [x for x in d.get("agents", []) if x.get("name") == sys.argv[2]]
+          assert a and a[0].get("daemon_managed") is True, a
+          assert not a[0].get("current_task_id") and a[0].get("live_status", "idle") != "working", a
+          PY
+            sleep 1
+          done
+          echo "monitor status never exposed the idle daemon-supervised worker"
+          cat "$AFT_WORK_DIR/tsk-20t-monitor.json" 2>/dev/null || true
+          exit 1
+        intent: "An API client registers a daemon-supervised Task Runner and polls until monitor status shows it with no live work"
+      - open: /ws/E2E-WS-TASK/agents/finished-${RUN_ID:-local}
+      - wait:
+          fn: *agentsPageReady
+        intent: "Wait until the finished worker detail route is ready"
+      - wait:
+          fn: >-
+            document.body.textContent.includes('Agent is stopped') &&
+            document.body.textContent.includes('This agent does not have a live terminal session. Start the agent before attaching to its PTY.')
+        intent: "Wait until the stopped empty state replaces the terminal for the finished worker"
+      - wait: { ms: 5000 }
+        intent: "Hold past the terminal crash-loop window so a respawning shell would have surfaced"
+      - expect: { text: "Agent is stopped" }
+      - expect: { notText: "Shell keeps exiting" }
+      - expect: { count: { testid: terminal-view, equals: 0 } }
