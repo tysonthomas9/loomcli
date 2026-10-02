@@ -9,11 +9,6 @@ import (
 	"testing"
 )
 
-// P4.11 removes the old PR-review flow and its sole legacy ref literal.
-// Until then, this exact entry is the only exception to layout ownership.
-const legacyPRRefFile = "internal/localworkspace/localworkspace.go"
-const legacyPRRefLiteral = `"refs/loom/pr/%d/head"`
-
 func TestRefLiteralsOnlyInLayout(t *testing.T) {
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
@@ -25,7 +20,6 @@ func TestRefLiteralsOnlyInLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rootFS.Close()
-	legacyCount := 0
 	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -55,19 +49,11 @@ func TestRefLiteralsOnlyInLayout(t *testing.T) {
 			if strings.HasPrefix(rel, "internal/loomgit/internal/layout/") {
 				continue
 			}
-			if rel == legacyPRRefFile &&
-				strings.TrimSpace(line) == "checkoutRef := fmt.Sprintf("+legacyPRRefLiteral+", prNumber)" {
-				legacyCount++
-				continue
-			}
 			t.Errorf("ref literal outside layout: %s:%d: %s", rel, lineNo+1, strings.TrimSpace(line))
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if legacyCount != 1 {
-		t.Errorf("P4.11 legacy ref allowlist matched %d lines, want exactly one", legacyCount)
 	}
 }

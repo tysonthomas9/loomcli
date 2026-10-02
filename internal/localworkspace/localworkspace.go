@@ -265,7 +265,7 @@ func validatePRWorktreeInputs(repoPath, targetPath, remoteName string, prNumber 
 // serializes fetch and checkout across serve and daemon processes.
 func EnsureDetachedGitWorktreeAtPRHead(
 	ctx context.Context,
-	repoPath, targetPath, remoteName string,
+	repoPath, targetPath, remoteName, workspace string,
 	prNumber int,
 	headSHA string,
 ) (string, error) {
@@ -281,7 +281,10 @@ func EnsureDetachedGitWorktreeAtPRHead(
 	defer lock.Close()
 	defer func() { _ = lockfile.FlockUnlock(lock) }()
 
-	checkoutRef := fmt.Sprintf("refs/loom/pr/%d/head", prNumber)
+	checkoutRef, err := loomgit.PRHead(workspace, prNumber)
+	if err != nil {
+		return "", err
+	}
 	fetchRef := fmt.Sprintf("+refs/pull/%d/head:%s", prNumber, checkoutRef)
 	// Authentication remains the responsibility of the configured git remote
 	// and credential helper; direct connector-token injection is deferred.
