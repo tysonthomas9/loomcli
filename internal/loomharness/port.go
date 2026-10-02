@@ -185,10 +185,12 @@ type Event struct {
 }
 
 // Usage is one step's token counts, and its cost where the harness reports one.
-// Input excludes cached input; Output includes reasoning.
+// Input excludes cached input; Output includes reasoning. A harness that
+// reports only the session's running cost (Claude) sets CostTotalUSD instead
+// of CostUSD; loomagent saves its rise since the session's last saved total.
 type Usage struct {
 	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens int64
-	CostUSD                                                      float64
+	CostUSD, CostTotalUSD                                        float64
 }
 
 // Errors adapters return. Wrap them with fmt.Errorf("...: %w", err).

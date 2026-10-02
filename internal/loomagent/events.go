@@ -340,6 +340,9 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 	if e, err = s.withText(ctx, id, e); err != nil {
 		return false, err
 	}
+	if e, err = s.withCost(ctx, id, e); err != nil {
+		return false, err
+	}
 	if kind, ok := savedKinds[e.Type]; ok {
 		if _, err := s.events.Append(ctx, nativeRow(id, kind, e)); err != nil {
 			return false, err
@@ -413,8 +416,9 @@ func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 		CacheReadTokens  int64   `json:"cacheReadTokens,omitempty"`
 		CacheWriteTokens int64   `json:"cacheWriteTokens,omitempty"`
 		CostUSD          float64 `json:"costUsd,omitempty"`
+		CostTotalUSD     float64 `json:"costTotalUsd,omitempty"`
 	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.StopReason,
-		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSD})
+		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSD, u.CostTotalUSD})
 	return loomstore.Event{AgentID: agentID, Kind: kind, TurnID: e.TurnID, Payload: b,
 		EventID: kind + ":" + e.Session.Root + ":" + e.Session.NativeID + ":" + key}
 }

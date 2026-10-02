@@ -28,7 +28,6 @@ type mapper struct {
 	cancelled       bool            // Loom interrupted the running turn
 	lastInterrupted bool
 	usage           loomharness.Usage // the running turn's steps so far
-	cost            float64           // the running process's last total_cost_usd
 }
 
 func newMapper(ref loomharness.NativeRef) *mapper {
@@ -52,7 +51,7 @@ type wireFrame struct {
 	ResumeReason     string   `json:"resume_reason"`
 	TaskType         string   `json:"task_type"`
 	TaskID           string   `json:"task_id"`
-	TotalCostUSD     float64  `json:"total_cost_usd"` // result: the process's running total
+	TotalCostUSD     float64  `json:"total_cost_usd"` // result: the session's running total
 	Event            struct {
 		Type    string `json:"type"`
 		Index   int    `json:"index"`
@@ -206,13 +205,11 @@ func (m *mapper) assistant(msg string, blocks []block, emit func(loomharness.Eve
 
 // result ends the turn: completed on success, cancelled when Loom
 // interrupted it, else failed. Its usage is the sum of the turn's steps (the
-// result's own usage may be a running total), and its cost is the rise in
-// the process's running total_cost_usd since the last result.
+// result's own usage may be a running total). Its cost is the session's
+// running total_cost_usd, which a resumed process continues; loomagent saves
+// its rise since the session's last saved total.
 func (m *mapper) result(subtype string, total float64, emit func(loomharness.Event)) {
-	if total < m.cost { // a new process we did not see start
-		m.cost = 0
-	}
-	m.usage.CostUSD, m.cost = total-m.cost, total
+	m.usage.CostTotalUSD = total
 	emit(loomharness.Event{Type: loomharness.EventUsage, ItemID: m.turnID + "/usage", Usage: m.usage})
 	m.usage = loomharness.Usage{}
 	stop := "failed"
@@ -244,7 +241,7 @@ func (m *mapper) item(msg string, index int, b block) (kind, id string) {
 // lost, so it emits feed.gap, after the cut-off turn's partial usage.
 func (m *mapper) exited() []loomharness.Event {
 	out := m.flush()
-	m.turnID, m.cancelled, m.msgID, m.handed, m.cost = "", false, "", "", 0
+	m.turnID, m.cancelled, m.msgID, m.handed = "", false, "", ""
 	m.seq++
 	return append(out, loomharness.Event{Type: loomharness.EventFeedGap, Session: m.ref, Seq: m.seq, Time: time.Now()})
 }

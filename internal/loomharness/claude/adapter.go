@@ -316,9 +316,6 @@ func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 		proc = NewProcess(cfg, spec)
 	}
 	s.mu.Lock()
-	if !proc.Running() { // this Prompt launches a process: its cost and usage start at 0
-		s.m.cost, s.m.usage = 0, loomharness.Usage{}
-	}
 	s.proc = proc
 	s.m.pending[in.Key], s.m.handed = true, in.Key
 	s.mu.Unlock()
