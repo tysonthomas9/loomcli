@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
 
 func TestPrCmdRequiresLeadAndChange(t *testing.T) {
@@ -286,5 +287,45 @@ func TestDeliveryModeCommandSetsWorkspaceMode(t *testing.T) {
 	}
 	if output.String() != "trunk\n" {
 		t.Fatalf("read mode output = %q", output.String())
+	}
+}
+
+func TestLeadMayMergeSelectsWorkspaceOutsideWorkspace(t *testing.T) {
+	setupOutsideWorkspaceForPR(t)
+	journalDir := filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit")
+	if err := os.MkdirAll(journalDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(journalDir, "store.db"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	previousWorkspace, previousPolicy := prStackWorkspace, setWorkspacePolicy
+	t.Cleanup(func() {
+		prStackWorkspace, setWorkspacePolicy = previousWorkspace, previousPolicy
+		leadMayMergeCmd.SetArgs(nil)
+		leadMayMergeCmd.SetOut(nil)
+		leadMayMergeCmd.SetErr(nil)
+	})
+	var output bytes.Buffer
+	leadMayMergeCmd.SetOut(&output)
+	leadMayMergeCmd.SetErr(&bytes.Buffer{})
+	for _, args := range [][]string{
+		{"--workspace", "selected", "when_green"},
+		{"when_green", "--workspace", "selected"},
+	} {
+		prStackWorkspace = ""
+		output.Reset()
+		var selected string
+		setWorkspacePolicy = func(ctx context.Context, workspace, leadMayMerge string, actor review.Actor, env []string) (string, error) {
+			selected = workspace
+			return publish.SetWorkspacePolicyLocal(ctx, workspace, leadMayMerge, actor, nil)
+		}
+		leadMayMergeCmd.SetArgs(args)
+		if err := leadMayMergeCmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if selected != "SELECTED" || output.String() != "when_green\n" {
+			t.Fatalf("%v: workspace=%q output=%q", args, selected, output.String())
+		}
 	}
 }
