@@ -21,7 +21,8 @@ const leadMergeAuthority = "lead_may_merge"
 
 // Agent runtimes set these; a policy change carrying any of them is refused
 // (advisory in local mode, D28).
-var agentEnvMarkers = []string{"LOOM_AGENT_", "LOOM_TASK_RUN_", "LOOM_DRIVER_", "LOOM_LEAD_CONTROLLED", "LOOM_WORKTREE_PATH"}
+var agentEnvMarkers = []string{"LOOM_AGENT_", "LOOM_TASK_RUN_", "LOOM_DRIVER_", "LOOM_LEAD_CONTROLLED", "LOOM_WORKTREE_PATH",
+	"LOOM_ORCHESTRATOR_SESSION_ID"}
 
 type leadMergeForge interface {
 	Forge
