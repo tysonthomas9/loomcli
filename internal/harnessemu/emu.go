@@ -9,7 +9,9 @@
 // native session id or an AgentID (the session's metadata agent_id) to the
 // turns that key's prompts play, in order. User text never selects a
 // scenario. A prompt with no scripted turn left asks Model, 2.0's scripted
-// fake model, when set, and otherwise echoes its text.
+// fake model, when set, and otherwise echoes its text. Like OpenCode's Code
+// Mode, a model call to the execute tool with code `tools.<server>.<tool>(args)`
+// runs that tool on the location's registered MCP server (the Loom bridge).
 //
 // Modeled, not proven: real OpenCode keeps sessions in its database. The
 // emulator saves its state to one JSON file, so a restart keeps sessions,
@@ -20,6 +22,7 @@ package harnessemu
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -28,11 +31,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -53,6 +59,13 @@ type Turn struct {
 	Tokens    Tokens  `json:"tokens"`             // the step's usage
 	Cost      float64 `json:"cost,omitempty"`     // the step's cost
 	DelayMS   int     `json:"delay_ms,omitempty"` // pause before each streamed delta
+	Tools     []Tool  `json:"tools,omitempty"`    // MCP tool calls the turn ran first
+}
+
+// Tool is one MCP tool call a turn ran, with its output.
+type Tool struct {
+	ID     string `json:"id"`
+	Output string `json:"output"`
 }
 
 // Tokens is OpenCode's per-step token usage.
@@ -217,8 +230,9 @@ func (s *Server) next(ss *session, text string) Turn {
 var modelClient = &http.Client{Timeout: 30 * time.Second}
 
 // ask sends the session's user texts to the fake model's chat completions,
-// as OpenCode would, and plays its reply. A tool call holds the turn until
-// it is interrupted: the emulator runs no tools.
+// as OpenCode would, and plays its reply. A Code Mode call of an MCP tool
+// runs it and asks again with its result; any other tool call holds the turn
+// until it is interrupted: the emulator runs no other tools.
 func (s *Server) ask(ss *session) Turn {
 	msgs := []map[string]any{}
 	for _, m := range ss.Messages {
@@ -226,22 +240,58 @@ func (s *Server) ask(ss *session) Turn {
 			msgs = append(msgs, map[string]any{"role": "user", "content": m["text"]})
 		}
 	}
+	var tools []Tool
+	for {
+		t, calls := s.complete(msgs)
+		t.Tools = tools
+		if t.Fail != "" || len(calls) == 0 {
+			return t
+		}
+		msgs = append(msgs, map[string]any{"role": "assistant", "tool_calls": calls})
+		for _, c := range calls {
+			out, ok := s.runTool(ss, c.Function.Name, c.Function.Arguments)
+			if !ok {
+				t.Hold = true
+				return t
+			}
+			tools = append(tools, Tool{ID: c.ID, Output: out})
+			msgs = append(msgs, map[string]any{"role": "tool", "tool_call_id": c.ID, "content": out})
+		}
+	}
+}
+
+// toolCall is one streamed tool call, its arguments joined across deltas.
+type toolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// complete runs one chat completion: its text and its tool calls.
+func (s *Server) complete(msgs []map[string]any) (Turn, []toolCall) {
 	b, _ := json.Marshal(map[string]any{"model": "m", "stream": true, "messages": msgs})
 	resp, err := modelClient.Post(s.Model+"/chat/completions", "application/json", bytes.NewReader(b))
 	if err != nil {
-		return Turn{Fail: err.Error()}
+		return Turn{Fail: err.Error()}, nil
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return Turn{Fail: "model: " + resp.Status}
+		return Turn{Fail: "model: " + resp.Status}, nil
 	}
 	var t Turn
+	var calls []toolCall
 	for sc := bufio.NewScanner(resp.Body); sc.Scan(); {
 		var c struct {
 			Choices []struct {
 				Delta struct {
 					Content   string `json:"content"`
-					ToolCalls []any  `json:"tool_calls"`
+					ToolCalls []struct {
+						Index int `json:"index"`
+						toolCall
+					} `json:"tool_calls"`
 				} `json:"delta"`
 			} `json:"choices"`
 		}
@@ -249,10 +299,82 @@ func (s *Server) ask(ss *session) Turn {
 		_ = json.Unmarshal([]byte(v), &c)
 		for _, ch := range c.Choices {
 			t.Text += ch.Delta.Content
-			t.Hold = t.Hold || len(ch.Delta.ToolCalls) > 0
+			for _, d := range ch.Delta.ToolCalls {
+				for len(calls) <= d.Index {
+					calls = append(calls, toolCall{Type: "function"})
+				}
+				tc := &calls[d.Index]
+				tc.ID += d.ID
+				tc.Function.Name += d.Function.Name
+				tc.Function.Arguments += d.Function.Arguments
+			}
 		}
 	}
-	return t
+	return t, calls
+}
+
+// codeCall is the one Code Mode call the emulator runs: tools.<server>.<tool>(<JSON args>).
+var codeCall = regexp.MustCompile(`tools\.([\w-]+)\.(\w+)\(\s*(\{.*\})?\s*\)`)
+
+// runTool runs an execute call of an MCP tool on the session location's
+// registered server, as OpenCode's Code Mode does, and returns the tool's
+// output (its structured content, else its text) or the failure. false
+// means the call is not one the emulator runs.
+func (s *Server) runTool(ss *session, name, args string) (string, bool) {
+	var in struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal([]byte(args), &in)
+	m := codeCall.FindStringSubmatch(in.Code)
+	if name != "execute" || m == nil {
+		return "", false
+	}
+	loc, _ := ss.Info["location"].(map[string]any)
+	dir, _ := loc["directory"].(string)
+	cfg := s.mcp[dir][m[1]]
+	cmd, _ := cfg["command"].([]any)
+	if len(cmd) == 0 {
+		return "MCP server not found: " + m[1], true
+	}
+	argv := make([]string, len(cmd))
+	for i, a := range cmd {
+		argv[i], _ = a.(string)
+	}
+	toolArgs := map[string]any{}
+	if m[3] != "" {
+		if err := json.Unmarshal([]byte(m[3]), &toolArgs); err != nil {
+			return "invalid tool arguments: " + err.Error(), true
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // G204: the command Loom registered for this location.
+	c.Env = os.Environ()
+	env, _ := cfg["environment"].(map[string]any)
+	for k, v := range env {
+		c.Env = append(c.Env, fmt.Sprintf("%s=%v", k, v))
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "loom-harness-emu", Version: Version}, nil).
+		Connect(ctx, &mcp.CommandTransport{Command: c}, nil)
+	if err != nil {
+		return err.Error(), true
+	}
+	defer cs.Close()
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: m[2], Arguments: toolArgs})
+	if err != nil {
+		return err.Error(), true
+	}
+	if res.StructuredContent != nil {
+		out, _ := json.Marshal(res.StructuredContent)
+		return string(out), true
+	}
+	var out strings.Builder
+	for _, part := range res.Content {
+		if tc, ok := part.(*mcp.TextContent); ok {
+			out.WriteString(tc.Text)
+		}
+	}
+	return out.String(), true
 }
 
 // play streams turn r of session sid. Every change happens under the lock
@@ -268,6 +390,13 @@ func (s *Server) play(sid string, r *run) {
 	}
 	msg := map[string]any{"id": "msg_" + s.newID(), "type": "assistant", "content": []map[string]any{}}
 	s.add(sid, msg)
+	for _, tool := range t.Tools {
+		msg["content"] = append(msg["content"].([]map[string]any), map[string]any{"type": "tool", "id": tool.ID,
+			"state": map[string]any{"status": "completed", "output": tool.Output}})
+		call := map[string]any{"assistantMessageID": msg["id"], "id": tool.ID}
+		s.emit(sid, "session.tool.called", clone(call))
+		s.emit(sid, "session.tool.success", with(call, "output", tool.Output))
+	}
 	for _, p := range []struct{ kind, text string }{{"reasoning", t.Reasoning}, {"text", t.Text}} {
 		if p.text == "" {
 			continue
