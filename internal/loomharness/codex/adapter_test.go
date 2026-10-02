@@ -573,6 +573,51 @@ func TestCodexPromptBusy(t *testing.T) {
 	}
 }
 
+// TestCodexSetModelAndMove: SetModel and Move reach codex on the next
+// turn/start only, which codex keeps for later turns, so the turn after
+// sends neither; Move to a missing dir fails and changes nothing.
+func TestCodexSetModelAndMove(t *testing.T) {
+	f := newFixture(t, "codex-cli 0.157.1")
+	a, ctx := newAdapter(t, f), context.Background()
+	root, dir := a.Root(""), t.TempDir()
+	saveStore(root, fakeStore{Threads: map[string]fakeThread{"t-1": {}}})
+	s := a.Session(loomharness.NativeRef{Root: root, NativeID: "t-1"})
+	if err := s.Move(ctx, filepath.Join(dir, "gone")); err == nil {
+		t.Fatal("Move to a missing dir succeeded")
+	}
+	if err := s.SetModel(ctx, "gpt-5.5"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Move(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"k1", "k2"} {
+		if err := s.Prompt(ctx, loomharness.Input{Key: k, Text: "hi"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(root, "turn-starts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var p struct{ Model, Cwd *string }
+		_ = json.Unmarshal([]byte(line), &p)
+		got = append(got, fmt.Sprint(deref(p.Model), "|", deref(p.Cwd)))
+	}
+	if want := []string{"gpt-5.5|" + dir, "|"}; !slices.Equal(got, want) {
+		t.Fatalf("turn/start model|cwd %q, want %q", got, want)
+	}
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 // TestCodexRefusesOtherServerRequests: a server request that is not an ask
 // (here a dynamic tool call Loom never registered) is answered with an
 // error, never left hanging.

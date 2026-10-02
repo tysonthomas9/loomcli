@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -57,9 +58,25 @@ func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 		return fmt.Errorf("codex thread %s: %w", s.ref.NativeID, loomharness.ErrBusy)
 	}
 	text, _ := json.Marshal(map[string]string{"type": "text", "text": in.Text})
-	return s.call(ctx, "turn/start", protocol.TurnStartParams{
-		ThreadId: s.ref.NativeID, Input: []protocol.UserInput{text}, ClientUserMessageId: &in.Key,
-	}, nil)
+	params := protocol.TurnStartParams{ThreadId: s.ref.NativeID, Input: []protocol.UserInput{text}, ClientUserMessageId: &in.Key}
+	s.a.mu.Lock()
+	o := s.a.next[s.ref]
+	s.a.mu.Unlock()
+	if o.model != "" {
+		params.Model = &o.model
+	}
+	if o.dir != "" {
+		params.Cwd = &o.dir
+	}
+	if err := s.call(ctx, "turn/start", params, nil); err != nil {
+		return err
+	}
+	s.a.mu.Lock()
+	if s.a.next[s.ref] == o { // codex keeps both for later turns
+		delete(s.a.next, s.ref)
+	}
+	s.a.mu.Unlock()
+	return nil
 }
 
 // Interrupt stops the running turn; false means none was running.
@@ -217,14 +234,29 @@ func (s *Session) Resume(context.Context, loomharness.Launch, []loomharness.Perm
 	return loomharness.NativeRef{}, fmt.Errorf("codex: Resume is not available until 4.2b installs rules first: %w", loomharness.ErrUnavailable)
 }
 
-// SetModel is not wired for codex yet.
-func (s *Session) SetModel(context.Context, string) error {
-	return fmt.Errorf("codex: SetModel: %w", errors.ErrUnsupported)
+// SetModel takes effect from the next turn: the next Prompt's turn/start
+// sets it, and codex keeps it for later turns.
+func (s *Session) SetModel(_ context.Context, model string) error {
+	s.a.mu.Lock()
+	defer s.a.mu.Unlock()
+	o := s.a.next[s.ref]
+	o.model = model
+	s.a.next[s.ref] = o
+	return nil
 }
 
-// Move is not wired for codex yet.
-func (s *Session) Move(context.Context, string) error {
-	return fmt.Errorf("codex: Move: %w", errors.ErrUnsupported)
+// Move takes effect from the next turn, as SetModel does, with dir as the
+// thread's cwd. The NativeRef is unchanged.
+func (s *Session) Move(_ context.Context, dir string) error {
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return fmt.Errorf("codex: move to %s: not a directory", dir)
+	}
+	s.a.mu.Lock()
+	defer s.a.mu.Unlock()
+	o := s.a.next[s.ref]
+	o.dir = dir
+	s.a.next[s.ref] = o
+	return nil
 }
 
 // Reply answers an open ask on this thread with codex's own decision. An

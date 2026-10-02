@@ -29,17 +29,23 @@ type Adapter struct {
 	// starts holds each thread's turn.started until the turn's user item
 	// gives it the input's key (codex sends turn/started first).
 	starts map[loomharness.NativeRef]loomharness.Event
+	// next holds a thread's model and cwd from SetModel and Move until a
+	// turn/start sends them.
+	next map[loomharness.NativeRef]override
 
 	openMu sync.Mutex         // one Open at a time, so a key never gets two threads
 	opened map[opening]string // thread ids this process opened, until purged
 }
+
+// override is what a thread's next turn/start sets.
+type override struct{ model, dir string }
 
 // opening is what Open is idempotent by.
 type opening struct{ root, dir, key string }
 
 // NewAdapter returns an adapter; cfg.Unrouted is its own.
 func NewAdapter(cfg Config) *Adapter {
-	a := &Adapter{feeds: map[*feed]struct{}{}, asks: map[string]map[string]Message{}, starts: map[loomharness.NativeRef]loomharness.Event{}, opened: map[opening]string{}}
+	a := &Adapter{feeds: map[*feed]struct{}{}, asks: map[string]map[string]Message{}, starts: map[loomharness.NativeRef]loomharness.Event{}, next: map[loomharness.NativeRef]override{}, opened: map[opening]string{}}
 	cfg.Unrouted = a.receive
 	a.Supervisor = New(cfg)
 	return a
@@ -186,6 +192,9 @@ func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 			return err
 		}
 		a.forget(ref)
+		a.mu.Lock()
+		delete(a.next, ref)
+		a.mu.Unlock()
 	}
 	return nil
 }

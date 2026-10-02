@@ -80,7 +80,11 @@ func fakeCodex() int {
 			result = os.Getpid()
 		case "exit":
 			return 1
-		case "turn/start":
+		case "turn/start": // recorded, one line each, in $CODEX_HOME/turn-starts
+			if f, err := os.OpenFile(filepath.Join(home, "turn-starts"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+				_, _ = f.Write(append(req.Params, '\n'))
+				_ = f.Close()
+			}
 			result = map[string]any{}
 		case "ask":
 			method := cmp.Or(p.Method, "item/tool/requestUserInput")
