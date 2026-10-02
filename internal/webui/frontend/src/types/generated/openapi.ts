@@ -3333,6 +3333,8 @@ export interface components {
       verdict?: string;
       /** @description True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply). */
       applied: boolean;
+      /** @description True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed. */
+      needs_working_area: boolean;
     };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {

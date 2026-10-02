@@ -112,6 +112,13 @@ export function RevisionsSection({
         // The list reports the verdict for this exact revision head, so a new
         // derived revision has none and offers the buttons again.
         const decided = Boolean(revision.verdict);
+        // The server reports an approved revision still waiting for a working
+        // area, so Apply survives a reload. A follow status from this session
+        // (e.g. a 404 from Apply clearing it) takes precedence.
+        const needsArea =
+          follow[key] !== undefined
+            ? follow[key] === "approved_waiting_for_working_area"
+            : Boolean(revision.needs_working_area) && !revision.applied;
         return (
           <div className={styles.revision} key={key}>
             <div>
@@ -123,7 +130,7 @@ export function RevisionsSection({
                 ? "Incomplete capture"
                 : (revision.verdict ?? "Awaiting review")}
             </div>
-            {follow[key] === "approved_waiting_for_working_area" && (
+            {needsArea && (
               <div className={styles.actions}>
                 <span>
                   {lead

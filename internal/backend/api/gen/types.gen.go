@@ -2858,13 +2858,16 @@ type PullRequestReviewResult struct {
 // ReviewRevision defines model for ReviewRevision.
 type ReviewRevision struct {
 	// Applied True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
-	Applied    bool    `json:"applied"`
-	ChangeId   string  `json:"change_id"`
-	HeadSha    string  `json:"head_sha"`
-	Incomplete bool    `json:"incomplete"`
-	Number     int     `json:"number"`
-	Outcome    string  `json:"outcome"`
-	Verdict    *string `json:"verdict,omitempty"`
+	Applied    bool   `json:"applied"`
+	ChangeId   string `json:"change_id"`
+	HeadSha    string `json:"head_sha"`
+	Incomplete bool   `json:"incomplete"`
+
+	// NeedsWorkingArea True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed.
+	NeedsWorkingArea bool    `json:"needs_working_area"`
+	Number           int     `json:"number"`
+	Outcome          string  `json:"outcome"`
+	Verdict          *string `json:"verdict,omitempty"`
 }
 
 // ReviewerConversation defines model for ReviewerConversation.
