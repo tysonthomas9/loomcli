@@ -43,7 +43,7 @@ type Config struct {
 	// LoomBin runs `loom agent mcp-bridge`; "" is this executable.
 	LoomBin string
 	// GitHubRead is serve's host GitHub connector for the agents' github_read
-	// tool; nil leaves presets with github_read failing closed at launch.
+	// tool; nil leaves github_read unoffered.
 	GitHubRead agentsv1.GitHubReader
 }
 
@@ -103,7 +103,7 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		c := serviceConfig(st, ws, wt, cfg.Skills,
 			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}})
 		c.RecoverFirst = true // writes wait for the dispatcher's start-up Reconcile
-		c.Bridge, c.Launch, c.Retire = bridge(a.APIBase, cfg.GitHubRead != nil), launch(a.APIBase, ws, tokens), retire(oc)
+		c.Bridge, c.Launch, c.Retire = bridge(a.APIBase, cfg.GitHubRead != nil), launch(a.APIBase, ws, tokens, cfg.GitHubRead != nil), retire(oc)
 		svc = loomagent.New(c)
 		return svc, feed
 	}
@@ -247,33 +247,39 @@ func resolveRepo(ctx context.Context, _ loomagent.Target, repo string) (string, 
 }
 
 // bridge registers a preset's tools when the bridge serves them all and
-// knows where serve is; otherwise the agent fails closed at launch. A preset
-// with github_read also needs serve's host GitHub reader (github), and never
-// falls back to gh or an agent credential.
+// knows where serve is; otherwise the agent fails closed at launch. Without
+// serve's host GitHub reader (github), github_read is not offered at all; it
+// never falls back to gh or an agent credential.
 func bridge(apiBase func() string, github bool) func(context.Context, loomagent.Preset) (loomagent.BridgeCaps, error) {
 	return func(_ context.Context, p loomagent.Preset) (loomagent.BridgeCaps, error) {
-		if len(p.Tools) > 0 && apiBase() == "" {
+		t := offered(p.Tools, github)
+		if len(t) > 0 && apiBase() == "" {
 			return loomagent.BridgeCaps{}, errors.New("no Agent API address for the bridge")
 		}
-		if read := slices.Contains(p.Tools, "github_read"); read && !github {
-			return loomagent.BridgeCaps{}, errors.New("github_read: no host GitHub connector is wired")
-		} else if read {
-			return loomagent.BridgeCaps{HasGitHubRead: true}, agentmcp.Check(p.Tools)
-		}
-		return loomagent.BridgeCaps{}, agentmcp.Check(p.Tools)
+		return loomagent.BridgeCaps{HasGitHubRead: slices.Contains(t, "github_read")}, agentmcp.Check(t)
 	}
+}
+
+// offered is the preset tools the bridge serves: github_read only when serve
+// has a host GitHub reader.
+func offered(tools []string, github bool) []string {
+	if github {
+		return tools
+	}
+	return slices.DeleteFunc(slices.Clone(tools), func(t string) bool { return t == "github_read" })
 }
 
 // launch gives an agent whose preset has bridge tools its bridge settings,
 // with the bridge token that names it, on every harness.
-func launch(apiBase func() string, ws string, tokens *agentsv1.Tokens) func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
+func launch(apiBase func() string, ws string, tokens *agentsv1.Tokens, github bool) func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
 	return func(ctx context.Context, a loomstore.Agent, harness string) (loomharness.Launch, error) {
 		p, err := loomagent.BuiltinPresets{}.Get(ctx, a.Preset)
-		if err != nil || len(p.Tools) == 0 {
+		t := offered(p.Tools, github)
+		if err != nil || len(t) == 0 {
 			return loomharness.Launch{}, err
 		}
 		return loomharness.Launch{Env: agentmcp.Config{API: apiBase(), Workspace: ws, Token: tokens.Agent(ws, a.AgentID),
-			Repo: a.Repo, Harness: harness, Tools: p.Tools}.Env()}, nil
+			Repo: a.Repo, Harness: harness, Tools: t}.Env()}, nil
 	}
 }
 

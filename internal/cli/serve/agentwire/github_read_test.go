@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/agentmcp"
 	"github.com/tysonthomas9/loomcli/internal/agentworktree"
 	"github.com/tysonthomas9/loomcli/internal/gitrunner"
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
@@ -25,8 +26,8 @@ func workspaceMW(next http.Handler) http.Handler {
 }
 
 // TestGitHubReadCapabilityGate: serve's bridge wiring advertises github_read
-// (HasGitHubRead) only when serve wired its host GitHub reader at Start, and
-// refuses a github_read preset clearly without one. HasPublish stays false,
+// (HasGitHubRead) only when serve wired its host GitHub reader at Start;
+// without one the lead still works, with no github_read. HasPublish stays false,
 // so the gh and git push denies, which need both, are not compiled by this
 // ticket (3.1 owns the joint activation).
 func TestGitHubReadCapabilityGate(t *testing.T) {
@@ -37,8 +38,8 @@ func TestGitHubReadCapabilityGate(t *testing.T) {
 	}
 	task, _ := loomagent.BuiltinPresets{}.Get(ctx, "task")
 	base := func() string { return "http://127.0.0.1:1" }
-	if caps, err := bridge(base, false)(ctx, lead); err == nil || caps.HasGitHubRead || !strings.Contains(err.Error(), "no host GitHub connector") {
-		t.Errorf("no host reader: caps %+v, err %v; want a clear refusal", caps, err)
+	if caps, err := bridge(base, false)(ctx, lead); err != nil || caps != (loomagent.BridgeCaps{}) {
+		t.Errorf("no host reader: caps %+v, err %v; want the lead without github_read", caps, err)
 	}
 	if caps, err := bridge(base, false)(ctx, task); err != nil || caps != (loomagent.BridgeCaps{}) {
 		t.Errorf("task: caps %+v, err %v; want none", caps, err)
@@ -48,23 +49,25 @@ func TestGitHubReadCapabilityGate(t *testing.T) {
 	}
 }
 
-// opens counts harness Opens: a launch reaching the harness.
+// opens records harness Opens: a launch reaching the harness.
 type opens struct {
 	loomharness.Harness
-	n atomic.Int32
+	n     atomic.Int32
+	tools atomic.Value // the last Open's bridge tools
 }
 
 func (o *opens) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharness.NativeRef, error) {
 	o.n.Add(1)
+	o.tools.Store(spec.Launch.Env[agentmcp.EnvTools])
 	return o.Harness.Open(ctx, spec)
 }
 
-// TestServeRefusesBridgeAgentWithoutGitHubRead (R-G, serve half): serve's
-// bridge wiring with no host GitHub reader (Config.GitHubRead nil) refuses a
-// lead (its preset has github_read) before the harness opens a session, so
-// no turn runs, and nothing falls back to gh or an agent credential. The
-// 1.3 fake harness stands in for OpenCode.
-func TestServeRefusesBridgeAgentWithoutGitHubRead(t *testing.T) {
+// TestServeLeadWithoutGitHubRead: with no host GitHub reader
+// (Config.GitHubRead nil), as for a local user with no GitHub configured, a
+// lead is created and its session opens, with its other bridge tools and no
+// github_read, so nothing falls back to gh or an agent credential. The 1.3
+// fake harness stands in for OpenCode.
+func TestServeLeadWithoutGitHubRead(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	repo := filepath.Join(dir, "repo")
@@ -90,13 +93,14 @@ func TestServeRefusesBridgeAgentWithoutGitHubRead(t *testing.T) {
 	}
 	h := &opens{Harness: fake.New()}
 	cfg := serviceConfig(st, "ws", wt, nil, map[string]loomharness.Harness{"opencode": h})
-	cfg.Bridge, cfg.Launch = bridge(api.APIBase, false), launch(api.APIBase, "ws", api.tokens) // Start's wiring with Config.GitHubRead nil
+	cfg.Bridge, cfg.Launch = bridge(api.APIBase, false), launch(api.APIBase, "ws", api.tokens, false) // Start's wiring with Config.GitHubRead nil
 	_, err = loomagent.New(cfg).Create(ctx, loomagent.CreateRequest{Envelope: loomagent.Envelope{RequestID: "r1"}, Preset: "lead",
 		Name: "l", Repo: repo, BaseRef: "main", FirstMessage: "hi", Overrides: loomagent.Overrides{Harness: "opencode"}})
-	if err == nil || !strings.Contains(err.Error(), "github_read") {
-		t.Fatalf("Create lead: %v; want a refusal naming github_read", err)
+	if err != nil {
+		t.Fatalf("Create lead with no host GitHub reader: %v", err)
 	}
-	if n := h.n.Load(); n != 0 {
-		t.Fatalf("the harness opened %d session(s) for a lead whose github_read bridge is not registered", n)
+	tools, _ := h.tools.Load().(string)
+	if h.n.Load() == 0 || tools == "" || strings.Contains(tools, "github_read") {
+		t.Fatalf("opens %d, bridge tools %q; want the lead opened with its tools and no github_read", h.n.Load(), tools)
 	}
 }

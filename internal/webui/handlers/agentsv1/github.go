@@ -87,7 +87,7 @@ func (h *Handler) githubRead(w http.ResponseWriter, r *http.Request, s *loomagen
 		return 0, nil, &loomagent.Error{Code: CodeGitHubDenied, Message: "this agent has no github_read tool"}
 	}
 	if h.github == nil {
-		return 0, nil, &loomagent.Error{Code: CodeGitHubUnavailable, Message: "no host GitHub connector is registered"}
+		return 0, nil, &loomagent.Error{Code: CodeGitHubUnavailable, Message: "GitHub is not configured on this Loom host (no GitHub token in its settings), so github_read is unavailable"}
 	}
 	var args map[string]any // the set arguments, by their JSON names
 	raw, _ := json.Marshal(in)
