@@ -37,6 +37,8 @@ type Entry struct {
 	BaseDrift  string `json:"base_drift,omitempty"`
 	BaseBehind int    `json:"base_behind,omitempty"`
 	BaseAhead  int    `json:"base_ahead,omitempty"`
+	// Enforcement is "unenforced" on cross-repo delivery the provider does not hold back.
+	Enforcement string `json:"enforcement,omitempty"`
 }
 
 type ChangedEntry struct {
@@ -172,6 +174,9 @@ func Scan(ctx context.Context, integrity bool) (Snapshot, error) {
 	appendRevisions(ctx, rows, runners, integrity, &out)
 	appendPublications(ctx, rows.Publications, runners, integrity, &out)
 	appendMirrorRefs(ctx, rows.Mirrors, integrity, &out)
+	if err := appendDependencyChecks(ctx, store, &out); err != nil {
+		return out, err
+	}
 	for workspace, state := range local.Workspaces {
 		discoverCopies(ctx, workspace, state.Path, runners, trunks, knownPaths, integrity, &out)
 	}
@@ -219,6 +224,38 @@ func appendPublications(ctx context.Context, publications []journal.Publication,
 		}
 		out.Entries = append(out.Entries, item)
 	}
+}
+
+// appendDependencyChecks shows loom/dependencies per change and whether each
+// repository enforces it. A change whose repository does not require the check
+// from the Loom app is flagged: only Loom's own merges keep the order there.
+func appendDependencyChecks(ctx context.Context, store *journal.SQLite, out *Snapshot) error {
+	checks, enforcement, err := store.DependencyChecks(ctx)
+	if err != nil {
+		return err
+	}
+	unenforced := map[string]string{}
+	for _, row := range enforcement {
+		item := Entry{Kind: "dependency_enforcement", Repo: row.Repo, ID: row.Branch, State: row.State, Reason: row.Reason}
+		switch row.State {
+		case "not_enforced", "unknown":
+			item.NextAction = "ask a repo admin to require loom/dependencies from the Loom app in branch protection"
+			unenforced[row.Repo] = "not_enforced"
+		case "not_pinned":
+			item.NextAction = "ask a repo admin to pin the required loom/dependencies check to the Loom app"
+			unenforced[row.Repo] = "not_pinned"
+		}
+		out.Entries = append(out.Entries, item)
+	}
+	for _, check := range checks {
+		item := Entry{Kind: "dependency", Workspace: check.Workspace, Repo: check.Repo, ID: check.Change, State: check.State, Reason: check.Reason}
+		if state := unenforced[check.Repo]; state != "" {
+			item.Enforcement = "unenforced"
+			item.Reason += "; cross-repo order is " + strings.ReplaceAll(state, "_", " ") + " on " + check.Repo
+		}
+		out.Entries = append(out.Entries, item)
+	}
+	return nil
 }
 
 func scanWithoutJournal(ctx context.Context, local *bootstrap.StateCache) Snapshot {

@@ -58,6 +58,27 @@ func ensureLandedRule(db *sql.DB) error {
 		revision INTEGER NOT NULL, trunk_sha TEXT NOT NULL, derived_revision INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY(workspace, change_id, predecessor)
 	)`)
+	if err != nil {
+		return err
+	}
+	return createDependencyChecks(db)
+}
+
+func createDependencyChecks(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS dependency_checks (
+		workspace TEXT NOT NULL, change_id TEXT NOT NULL, repo TEXT NOT NULL,
+		state TEXT NOT NULL, reason TEXT NOT NULL,
+		PRIMARY KEY(workspace, change_id)
+	);
+	CREATE TABLE IF NOT EXISTS dependency_posts (
+		workspace TEXT NOT NULL, change_id TEXT NOT NULL, sha TEXT NOT NULL,
+		state TEXT NOT NULL, reason TEXT NOT NULL,
+		PRIMARY KEY(workspace, change_id, sha)
+	);
+	CREATE TABLE IF NOT EXISTS dependency_enforcement (
+		repo TEXT NOT NULL, branch TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL,
+		PRIMARY KEY(repo, branch)
+	)`)
 	return err
 }
 
@@ -221,4 +242,107 @@ func (s *SQLite) RestackOffers(ctx context.Context, workspace, change string) ([
 		offers = append(offers, offer)
 	}
 	return offers, rows.Err()
+}
+
+// DependencyCheck is the latest loom/dependencies result for a change whose
+// task depends on changes in other repositories.
+type DependencyCheck struct {
+	Workspace, Change, Repo, State, Reason string
+}
+
+// DependencyEnforcement records whether a repository requires loom/dependencies.
+type DependencyEnforcement struct {
+	Repo, Branch, State, Reason string
+}
+
+// TaskChanges returns every change a task owns, keyed by repository name.
+func (s *SQLite) TaskChanges(ctx context.Context, workspace, task string) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT repo,change_id FROM driver_changes WHERE workspace=? AND task_id=?`, workspace, task)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	changes := map[string]string{}
+	for rows.Next() {
+		var repo, change string
+		if err := rows.Scan(&repo, &change); err != nil {
+			return nil, err
+		}
+		changes[repo] = change
+	}
+	return changes, rows.Err()
+}
+
+func (s *SQLite) RecordDependencyCheck(ctx context.Context, check DependencyCheck) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO dependency_checks(workspace,change_id,repo,state,reason) VALUES (?,?,?,?,?)
+		ON CONFLICT(workspace,change_id) DO UPDATE SET repo=excluded.repo,state=excluded.state,reason=excluded.reason`,
+		check.Workspace, check.Change, check.Repo, check.State, check.Reason)
+	return err
+}
+
+// DependencyPosted reports whether exactly this result is already on the provider commit.
+func (s *SQLite) DependencyPosted(ctx context.Context, workspace, change, sha, state, reason string) (bool, error) {
+	var found int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM dependency_posts WHERE workspace=? AND change_id=? AND sha=? AND state=? AND reason=?`,
+		workspace, change, sha, state, reason).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (s *SQLite) RecordDependencyPost(ctx context.Context, workspace, change, sha, state, reason string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO dependency_posts(workspace,change_id,sha,state,reason) VALUES (?,?,?,?,?)
+		ON CONFLICT(workspace,change_id,sha) DO UPDATE SET state=excluded.state,reason=excluded.reason`,
+		workspace, change, sha, state, reason)
+	return err
+}
+
+func (s *SQLite) RecordDependencyEnforcement(ctx context.Context, enforcement DependencyEnforcement) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO dependency_enforcement(repo,branch,state,reason) VALUES (?,?,?,?)
+		ON CONFLICT(repo,branch) DO UPDATE SET state=excluded.state,reason=excluded.reason`,
+		enforcement.Repo, enforcement.Branch, enforcement.State, enforcement.Reason)
+	return err
+}
+
+// DependencyChecks reads every recorded check and enforcement row. A journal
+// written before dependency checks existed has none.
+func (s *SQLite) DependencyChecks(ctx context.Context) ([]DependencyCheck, []DependencyEnforcement, error) {
+	var name string
+	err := s.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name='dependency_enforcement'`).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, nil
+	} else if err != nil {
+		return nil, nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,state,reason FROM dependency_checks ORDER BY workspace,change_id`)
+	if err != nil {
+		return nil, nil, err
+	}
+	var checks []DependencyCheck
+	for rows.Next() {
+		var check DependencyCheck
+		if err := rows.Scan(&check.Workspace, &check.Change, &check.Repo, &check.State, &check.Reason); err != nil {
+			_ = rows.Close()
+			return nil, nil, err
+		}
+		checks = append(checks, check)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, nil, err
+	}
+	rows, err = s.db.QueryContext(ctx, `SELECT repo,branch,state,reason FROM dependency_enforcement ORDER BY repo,branch`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var enforcement []DependencyEnforcement
+	for rows.Next() {
+		var row DependencyEnforcement
+		if err := rows.Scan(&row.Repo, &row.Branch, &row.State, &row.Reason); err != nil {
+			return nil, nil, err
+		}
+		enforcement = append(enforcement, row)
+	}
+	return checks, enforcement, rows.Err()
 }

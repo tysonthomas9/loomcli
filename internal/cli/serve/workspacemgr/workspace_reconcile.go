@@ -39,8 +39,9 @@ func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
 
 func landingOptions() landing.Options {
 	return landing.Options{
-		Dependents: landing.LocalDependents,
-		Restack:    publish.RestackOffer,
+		Dependents:   landing.LocalDependents,
+		Restack:      publish.RestackOffer,
+		Predecessors: publish.IssuePredecessors,
 	}
 }
 

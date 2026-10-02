@@ -52,8 +52,11 @@ func LocalDependents(ctx context.Context, workspace, change string) ([]Dependent
 
 type Options struct {
 	Dependents func(context.Context, string, string) ([]Dependent, error)
-	Restack    func(context.Context, journal.RestackOffer, Forge) (int, error)
-	Forge      Forge
+	// Predecessors enables loom/dependencies for changes whose task waits for
+	// changes in other repositories.
+	Predecessors Predecessors
+	Restack      func(context.Context, journal.RestackOffer, Forge) (int, error)
+	Forge        Forge
 }
 
 type Forge interface {
@@ -144,10 +147,14 @@ func ReconcileWithOptions(ctx context.Context, store Store, forge Forge, options
 	if err := propagateClosure(ctx, store, publications); err != nil {
 		return err
 	}
-	if options.Restack != nil {
-		return runRestacks(ctx, store, forge, options.Restack)
+	var dependencyErr error
+	if options.Predecessors != nil {
+		dependencyErr = reconcileDependencies(ctx, store, forge, publications, options.Predecessors)
 	}
-	return nil
+	if options.Restack != nil {
+		return errors.Join(dependencyErr, runRestacks(ctx, store, forge, options.Restack))
+	}
+	return dependencyErr
 }
 
 func fetchPublications(ctx context.Context, store Store, publications []journal.Publication, includeLanded bool) ([]fetchedPublication, error) {
