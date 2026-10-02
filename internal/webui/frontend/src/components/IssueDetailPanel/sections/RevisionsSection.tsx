@@ -83,7 +83,9 @@ export function RevisionsSection({
     setError("");
     try {
       await applyRevision(workspaceId, revision, lead);
-      setFollow((prev) => ({ ...prev, [key]: "applied" }));
+      setFollow((prev) => ({ ...prev, [key]: "" }));
+      // Applied state comes from the server's applied log, never browser state.
+      setRevisions(await getTaskRevisions(workspaceId, taskId));
     } catch (err) {
       // 404: the lead agent does not exist, so Apply cannot open its area.
       if (err instanceof ApiError && err.status === 404)
@@ -107,6 +109,9 @@ export function RevisionsSection({
       {revisions.map((revision) => {
         const key = `${revision.change_id}:${revision.number}`;
         const disabled = Boolean(busy) || revision.incomplete;
+        // The list reports the verdict for this exact revision head, so a new
+        // derived revision has none and offers the buttons again.
+        const decided = Boolean(revision.verdict);
         return (
           <div className={styles.revision} key={key}>
             <div>
@@ -134,25 +139,25 @@ export function RevisionsSection({
                 </button>
               </div>
             )}
-            {follow[key] === "applied" && <div>Applied</div>}
+            {revision.applied && <div>Applied</div>}
             <div className={styles.actions}>
               <button
                 type="button"
-                disabled={disabled}
+                disabled={disabled || decided}
                 onClick={() => void decide(revision, "approve")}
               >
                 Approve
               </button>
               <button
                 type="button"
-                disabled={disabled}
+                disabled={disabled || decided}
                 onClick={() => void decide(revision, "reject")}
               >
                 Reject
               </button>
               <button
                 type="button"
-                disabled={disabled}
+                disabled={disabled || decided}
                 onClick={() => {
                   setOverride(key);
                   setReason("");
@@ -161,7 +166,7 @@ export function RevisionsSection({
                 Override
               </button>
             </div>
-            {override === key && (
+            {override === key && !decided && (
               <div className={styles.override}>
                 <label htmlFor={`override-reason-${revision.number}`}>
                   Override reason

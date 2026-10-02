@@ -2857,6 +2857,8 @@ type PullRequestReviewResult struct {
 
 // ReviewRevision defines model for ReviewRevision.
 type ReviewRevision struct {
+	// Applied True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
+	Applied    bool    `json:"applied"`
 	ChangeId   string  `json:"change_id"`
 	HeadSha    string  `json:"head_sha"`
 	Incomplete bool    `json:"incomplete"`

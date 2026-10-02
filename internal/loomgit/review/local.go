@@ -54,6 +54,7 @@ type TaskRevision struct {
 	Outcome    string `json:"outcome"`
 	Incomplete bool   `json:"incomplete"`
 	Verdict    string `json:"verdict,omitempty"`
+	Applied    bool   `json:"applied"`
 }
 
 func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]TaskRevision, error) {
@@ -67,6 +68,9 @@ func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]Ta
 		if v, err := l.store.LatestVerdict(ctx, r); err == nil {
 			i.Verdict = v.Kind
 		} else if !errors.Is(err, journal.ErrNotFound) {
+			return nil, err
+		}
+		if i.Applied, err = l.store.RevisionApplied(ctx, workspace, r.Change, r.Number); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
