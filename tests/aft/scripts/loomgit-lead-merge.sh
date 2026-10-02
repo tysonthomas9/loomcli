@@ -274,7 +274,7 @@ case "$case_name" in
     approve_and_apply
     for layer in 1 2; do
       change="$(cat "$case_dir/change-$layer.id")"
-      curl -fsS -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$change\"}" > "$case_dir/publish-$layer.json"
+      curl -sS --fail-with-body -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$change\"}" > "$case_dir/publish-$layer.json" || { cat "$case_dir/publish-$layer.json"; exit 1; }
       grep -q '"created":true' "$case_dir/publish-$layer.json"
     done
     api_number="$(json "$case_dir/publish-1.json" 'print(v["url"].rsplit("/",1)[-1])')"
