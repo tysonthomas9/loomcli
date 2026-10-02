@@ -7,6 +7,8 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
+import { AgentList } from "@/components/AgentList";
+
 import {
   useAgentStoreInstance,
   useDeleteWorkspaceAgent,
@@ -67,6 +69,8 @@ export function AgentSection({
   const [contextMenu, setContextMenu] = useState<AgentMenuState | null>(null);
   const prsView = activeView === "prs";
   const addClick = prsView ? undefined : onAddClick;
+  // Agent API agents, children under their lead (design v2 §9.4).
+  const showRoster = !prsView && !!workspaceId;
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
@@ -162,7 +166,7 @@ export function AgentSection({
     setContextMenu(null);
   }, []);
 
-  if (agents.length === 0 && !addClick) return <></>;
+  if (agents.length === 0 && !addClick && !showRoster) return <></>;
 
   const listProps = {
     fullOrder: agentOrder,
@@ -206,6 +210,7 @@ export function AgentSection({
             {...listProps}
           />
         )}
+        {showRoster && <AgentList workspaceId={workspaceId} />}
       </div>
       {addClick && (
         <button type="button" className={styles.addButton} onClick={addClick}>

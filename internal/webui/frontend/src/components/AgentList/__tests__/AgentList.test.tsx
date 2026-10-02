@@ -83,8 +83,8 @@ const names = () => screen.getAllByRole("link").map((l) => l.textContent ?? "");
 
 function renderList() {
   render(
-    <MemoryRouter>
-      <AgentList workspaceId="ws1" activeId="lead" />
+    <MemoryRouter initialEntries={["/ws/ws1/chat/lead"]}>
+      <AgentList workspaceId="ws1" />
     </MemoryRouter>,
   );
 }

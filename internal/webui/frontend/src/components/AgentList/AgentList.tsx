@@ -1,25 +1,22 @@
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useMatch } from "react-router-dom";
 import { childrenByParent, useAgentRoster } from "@/hooks";
 import styles from "./AgentList.module.css";
 
 export interface AgentListProps {
   workspaceId: string;
-  /** The agent whose chat is open. */
-  activeId?: string;
 }
 
 /**
  * Agent API agents with children grouped under their lead (design v2 §9.4).
  * Every row opens the same chat; the harness is only a label.
  */
-export function AgentList({
-  workspaceId,
-  activeId,
-}: AgentListProps): JSX.Element {
+export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   const { roster, error } = useAgentRoster(workspaceId);
   const kids = useMemo(() => childrenByParent(roster), [roster]);
   const ws = encodeURIComponent(workspaceId);
+  // The agent whose chat is open.
+  const activeId = useMatch("/ws/:ws/chat/:agentId")?.params.agentId;
 
   const rows = (parent: string): JSX.Element | null => {
     const list = kids.get(parent);
