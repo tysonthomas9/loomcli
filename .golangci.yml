@@ -59,6 +59,35 @@ linters:
       locale: US
     depguard:
       rules:
+        # Loom Git boundary (design §5 rules 1-2). The listed files are the
+        # remaining legacy readers; the lists may only shrink.
+        forge-only-in-loomgit:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!**/internal/loomgit/**"
+            - "!**/internal/stackpublish/**"
+            - "!**/internal/cli/stack/stack_cmd.go"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/stackpublish
+              desc: "Only loomgit uses the forge PR and branch APIs; read PR state through loomgit Status"
+        loomgit-internal-private:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!**/internal/loomgit/**"
+          deny:
+            - pkg: github.com/tysonthomas9/loomcli/internal/loomgit/internal
+              desc: "loomgit internals stay private to internal/loomgit"
+        go-git-only-in-gitread:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!**/internal/loomgit/gitread/**"
+            - "!**/internal/cli/git/git_diff.go"
+          deny:
+            - pkg: github.com/go-git/go-git
+              desc: "Only internal/loomgit/gitread reads Git through go-git"
         handler-layer-isolation:
           list-mode: lax
           files:
