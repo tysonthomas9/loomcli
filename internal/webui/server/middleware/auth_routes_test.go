@@ -54,6 +54,11 @@ func TestBridgeIdentityAuthBypass(t *testing.T) {
 		{"GET", "/api/workspaces/ws%2Fv1/agents", BridgeTokenPrefix + "x.y", false},
 		{"GET", "/api/workspaces/ws/v1%2Fagents", BridgeTokenPrefix + "x.y", false},
 		{"GET", "/api/workspaces/ws/v1/agents%2F..%2F..%2Fissues", BridgeTokenPrefix + "x.y", false},
+		{"POST", "/api/workspaces/ws/v1/agents%3Fnext=/issues", BridgeTokenPrefix + "x.y", false},
+		{"POST", "/api/workspaces/ws/v1/agents%23../issues", BridgeTokenPrefix + "x.y", false},
+		{"GET", "/api/workspaces/ws/v1/%61gents", BridgeTokenPrefix + "x.y", false},
+		{"GET", "/api/workspaces/ws/v1/agents%20", BridgeTokenPrefix + "x.y", false},
+		{"GET", "/api/workspaces/ws/v1/agents?x=%2F", BridgeTokenPrefix + "x.y", true},
 	} {
 		reached = false
 		r := httptest.NewRequest(tc.method, tc.target, nil)

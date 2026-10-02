@@ -206,11 +206,12 @@ const BridgeTokenPrefix = "loomb1."
 // isBridgeCall reports whether the request is an Agent API call carrying a
 // bridge or daemon token, which only the Agent API routes accept. The path
 // must be exactly /api/workspaces/{ws}/v1/…: clean (no dot segments or
-// double slashes) and with nothing percent-encoded, so no other route can
+// double slashes) and with nothing percent-encoded, even where Go leaves
+// RawPath empty (%3F, %23), so no other route can
 // be reached past the JWT check.
 func isBridgeCall(r *http.Request, token string) bool {
 	p := r.URL.Path
-	if !strings.HasPrefix(token, BridgeTokenPrefix) || r.URL.RawPath != "" || path.Clean(p) != p {
+	if !strings.HasPrefix(token, BridgeTokenPrefix) || strings.Contains(r.URL.EscapedPath(), "%") || path.Clean(p) != p {
 		return false
 	}
 	rest, ok := strings.CutPrefix(p, "/api/workspaces/")
