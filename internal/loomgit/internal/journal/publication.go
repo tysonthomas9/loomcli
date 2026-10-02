@@ -29,7 +29,14 @@ func createNativeMergeSchema(db *sql.DB) error {
 		changes TEXT NOT NULL,
 		phase TEXT NOT NULL, head_sha TEXT NOT NULL DEFAULT '', request_uuid TEXT NOT NULL DEFAULT '',
 		reason TEXT NOT NULL DEFAULT '',
-		PRIMARY KEY(workspace, stack_id))`)
+		PRIMARY KEY(workspace, stack_id));
+	CREATE TABLE IF NOT EXISTS merge_requests (
+		workspace TEXT NOT NULL, id TEXT NOT NULL, lead TEXT NOT NULL, stack_id TEXT NOT NULL,
+		target TEXT NOT NULL, changes TEXT NOT NULL, heads TEXT NOT NULL,
+		requested_kind TEXT NOT NULL, requested_by TEXT NOT NULL, status TEXT NOT NULL,
+		confirmed_by TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+		decided_at INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(workspace, id))`)
 	if err != nil {
 		return err
 	}
@@ -673,6 +680,99 @@ func (s *SQLite) AdvanceLoomMerge(ctx context.Context, before, after LoomMerge) 
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE loom_stack_merges SET state=?,version=version+1
 		WHERE workspace=? AND stack_id=? AND version=?`, data, before.Workspace, before.StackID, before.Version)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrStale
+	}
+	return nil
+}
+
+// MergeRequest is a merge of a stack up to Target pinned to exact layer heads.
+// It runs only after a human confirms it while still pending and unexpired.
+type MergeRequest struct {
+	Workspace, ID, Lead, StackID, Target string
+	Changes, Heads                       []string
+	RequestedKind, RequestedBy           string
+	Status, ConfirmedBy                  string
+	CreatedAt, ExpiresAt, DecidedAt      int64
+}
+
+func (s *SQLite) CreateMergeRequest(ctx context.Context, request MergeRequest) error {
+	if request.Workspace == "" || request.ID == "" || request.StackID == "" || request.Target == "" ||
+		len(request.Heads) == 0 || len(request.Heads) != len(request.Changes) || request.RequestedBy == "" {
+		return errors.New("merge request is incomplete")
+	}
+	changes, err := json.Marshal(request.Changes)
+	if err != nil {
+		return err
+	}
+	heads, err := json.Marshal(request.Heads)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO merge_requests
+		(workspace,id,lead,stack_id,target,changes,heads,requested_kind,requested_by,status,created_at,expires_at)
+		VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?)`, request.Workspace, request.ID, request.Lead, request.StackID,
+		request.Target, string(changes), string(heads), request.RequestedKind, request.RequestedBy,
+		request.CreatedAt, request.ExpiresAt)
+	return err
+}
+
+const mergeRequestColumns = `workspace,id,lead,stack_id,target,changes,heads,requested_kind,requested_by,
+	status,confirmed_by,created_at,expires_at,decided_at`
+
+func scanMergeRequest(row interface{ Scan(...any) error }) (MergeRequest, error) {
+	var request MergeRequest
+	var changes, heads string
+	if err := row.Scan(&request.Workspace, &request.ID, &request.Lead, &request.StackID, &request.Target,
+		&changes, &heads, &request.RequestedKind, &request.RequestedBy, &request.Status, &request.ConfirmedBy,
+		&request.CreatedAt, &request.ExpiresAt, &request.DecidedAt); err != nil {
+		return MergeRequest{}, err
+	}
+	if err := json.Unmarshal([]byte(changes), &request.Changes); err != nil {
+		return MergeRequest{}, err
+	}
+	return request, json.Unmarshal([]byte(heads), &request.Heads)
+}
+
+func (s *SQLite) MergeRequest(ctx context.Context, workspace, id string) (MergeRequest, error) {
+	request, err := scanMergeRequest(s.db.QueryRowContext(ctx, `SELECT `+mergeRequestColumns+`
+		FROM merge_requests WHERE workspace=? AND id=?`, workspace, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return MergeRequest{}, ErrNotFound
+	}
+	return request, err
+}
+
+// MergeRequests lists a lead's requests, newest first.
+func (s *SQLite) MergeRequests(ctx context.Context, workspace, lead string) ([]MergeRequest, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+mergeRequestColumns+` FROM merge_requests
+		WHERE workspace=? AND lead=? ORDER BY created_at DESC, id DESC`, workspace, lead)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var requests []MergeRequest
+	for rows.Next() {
+		request, err := scanMergeRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, request)
+	}
+	return requests, rows.Err()
+}
+
+// DecideMergeRequest moves a pending request to status; only one decision wins.
+func (s *SQLite) DecideMergeRequest(ctx context.Context, workspace, id, status, confirmedBy string, at int64) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE merge_requests SET status=?,confirmed_by=?,decided_at=?
+		WHERE workspace=? AND id=? AND status='pending'`, status, confirmedBy, at, workspace, id)
 	if err != nil {
 		return err
 	}

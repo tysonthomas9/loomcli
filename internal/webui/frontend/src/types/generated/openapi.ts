@@ -1438,6 +1438,41 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/agents/{name}/git/merge-requests": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List a lead's merge requests, newest first */
+    get: operations["gitMergeRequests"];
+    put?: never;
+    /** Record a merge request pinned to the stack's current heads; never merges */
+    post: operations["gitRequestMerge"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/git/merge-requests/{id}/confirm": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Confirm a pending merge request as a human (advisory in local mode) */
+    post: operations["gitConfirmMergeRequest"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/reset-preview": {
     parameters: {
       query?: never;
@@ -2460,6 +2495,33 @@ export interface components {
         head: string;
         pr_url: string;
         state: string;
+      }[];
+    };
+    MergeActor: {
+      /** @enum {string} */
+      kind: "human" | "lead" | "agent";
+      /** @description Omitted for a human in the local UI; the server uses its OS user (advisory, D28). */
+      id?: string;
+    };
+    MergeRequestView: {
+      id: string;
+      stack_id: string;
+      target: string;
+      lead: string;
+      /** @enum {string} */
+      status: "pending" | "confirmed" | "stale" | "expired";
+      requested_kind: string;
+      requested_by: string;
+      confirmed_by?: string;
+      /** Format: date-time */
+      expires_at: string;
+      audit?: string;
+      layers: {
+        change: string;
+        head: string;
+        pr_url: string;
+        checks: string;
+        review: string;
       }[];
     };
     ErrorResponse: {
@@ -6816,11 +6878,102 @@ export interface operations {
           stack_id: string;
           target: string;
           heads: string[];
+          actor: components["schemas"]["MergeActor"];
         };
       };
     };
     responses: {
       /** @description Merge request recorded */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeStackView"];
+        };
+      };
+    };
+  };
+  gitMergeRequests: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Merge requests */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeRequestView"][];
+        };
+      };
+    };
+  };
+  gitRequestMerge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          stack_id: string;
+          target: string;
+          actor: components["schemas"]["MergeActor"];
+        };
+      };
+    };
+    responses: {
+      /** @description Pending merge request */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeRequestView"];
+        };
+      };
+    };
+  };
+  gitConfirmMergeRequest: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent worktree name */
+        name: components["parameters"]["AgentName"];
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          actor: components["schemas"]["MergeActor"];
+        };
+      };
+    };
+    responses: {
+      /** @description Merge started */
       200: {
         headers: {
           [name: string]: unknown;

@@ -2667,16 +2667,92 @@ paths:
           application/json:
             schema:
               type: object
-              required: [stack_id, target, heads]
+              required: [stack_id, target, heads, actor]
               properties:
                 stack_id: {type: string}
                 target: {type: string}
                 heads:
                   type: array
                   items: {type: string}
+                actor:
+                  $ref: "#/components/schemas/MergeActor"
       responses:
         "200":
           description: Merge request recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeStackView"
+
+  /api/workspaces/{ws}/agents/{name}/git/merge-requests:
+    get:
+      operationId: gitMergeRequests
+      tags: [git]
+      summary: List a lead's merge requests, newest first
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      responses:
+        "200":
+          description: Merge requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MergeRequestView"
+    post:
+      operationId: gitRequestMerge
+      tags: [git]
+      summary: Record a merge request pinned to the stack's current heads; never merges
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stack_id, target, actor]
+              properties:
+                stack_id: {type: string}
+                target: {type: string}
+                actor:
+                  $ref: "#/components/schemas/MergeActor"
+      responses:
+        "200":
+          description: Pending merge request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeRequestView"
+
+  /api/workspaces/{ws}/agents/{name}/git/merge-requests/{id}/confirm:
+    post:
+      operationId: gitConfirmMergeRequest
+      tags: [git]
+      summary: Confirm a pending merge request as a human (advisory in local mode)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor]
+              properties:
+                actor:
+                  $ref: "#/components/schemas/MergeActor"
+      responses:
+        "200":
+          description: Merge started
           content:
             application/json:
               schema:
@@ -4696,6 +4772,39 @@ components:
               head: {type: string}
               pr_url: {type: string}
               state: {type: string}
+    MergeActor:
+      type: object
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [human, lead, agent]}
+        id:
+          type: string
+          description: Omitted for a human in the local UI; the server uses its OS user (advisory, D28).
+    MergeRequestView:
+      type: object
+      required: [id, stack_id, target, lead, status, requested_kind, requested_by, expires_at, layers]
+      properties:
+        id: {type: string}
+        stack_id: {type: string}
+        target: {type: string}
+        lead: {type: string}
+        status: {type: string, enum: [pending, confirmed, stale, expired]}
+        requested_kind: {type: string}
+        requested_by: {type: string}
+        confirmed_by: {type: string}
+        expires_at: {type: string, format: date-time}
+        audit: {type: string}
+        layers:
+          type: array
+          items:
+            type: object
+            required: [change, head, pr_url, checks, review]
+            properties:
+              change: {type: string}
+              head: {type: string}
+              pr_url: {type: string}
+              checks: {type: string}
+              review: {type: string}
     # ── Response Envelopes ──────────────────────────────────────────────
     ErrorResponse:
       type: object
