@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
@@ -80,9 +81,14 @@ func (m *Module) boundRepo(ctx context.Context, ws, repoPath string) (string, st
 }
 
 // stackHealth is checks, review and mergeable for the open PRs whose head
-// starts with args.head, as `loom stack status` shows them.
+// starts with args.head, as `loom stack status` shows them, one bounded page
+// (args.page, args.perPage) at a time, in head order.
 func (m *Module) stackHealth(ctx context.Context, owner, repo string, args map[string]any) (map[string]any, error) {
 	token, err := m.resolveGitHubToken()
+	if err != nil {
+		return nil, err
+	}
+	page, per, err := providers.ReadPage(args)
 	if err != nil {
 		return nil, err
 	}
@@ -99,5 +105,13 @@ func (m *Module) stackHealth(ctx context.Context, owner, repo string, args map[s
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].(map[string]any)["head"].(string) < items[j].(map[string]any)["head"].(string)
 	})
-	return map[string]any{"op": "stack_health", "items": items}, nil
+	start, end := len(items), len(items)
+	if page <= len(items)/per+1 {
+		start, end = (page-1)*per, min(page*per, len(items))
+	}
+	out := map[string]any{"op": "stack_health", "items": items[start:end]}
+	if end < len(items) {
+		out["next"] = strconv.Itoa(page + 1)
+	}
+	return out, nil
 }

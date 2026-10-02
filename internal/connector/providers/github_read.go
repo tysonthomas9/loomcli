@@ -21,7 +21,7 @@ const ActionGitHubRead = "github.read"
 // takes as query parameters, the array holding a list's items, and the
 // response keys kept (at any depth); everything else is dropped.
 type readOp struct {
-	path  string            // under /repos/{owner}/{repo}, or absolute when it starts with /search or /users
+	path  string            // under /repos/{owner}/{repo}, or absolute when it starts with /search
 	query map[string]string // arg -> GitHub query parameter
 	list  string            // the key of the items array; "" when the body itself is the item(s)
 	keys  string
@@ -68,7 +68,6 @@ var GitHubReadOps = map[string]readOp{
 	"branch_list":        {path: "/branches", keys: "name commit sha protected", page: true},
 	"contents":           {path: "/contents/{path}", query: map[string]string{"ref": "ref"}, keys: "name path type size sha content encoding html_url"},
 	"assignees":          {path: "/assignees", keys: userKeys, page: true},
-	"user_view":          {path: "/users/{login}", keys: "login name type company blog location bio html_url public_repos created_at"},
 }
 
 // maxLogBytes bounds job_log: the log's last maxLogBytes are returned.
@@ -136,10 +135,10 @@ func (g *GitHub) githubRead(ctx context.Context, spec CallSpec) (CallResult, err
 // are the bound repo; args never set them.
 func readRequest(op readOp, args map[string]any, owner, repo string) (string, url.Values, error) {
 	path := op.path
-	if !strings.HasPrefix(path, "/search") && !strings.HasPrefix(path, "/users") {
+	if !strings.HasPrefix(path, "/search") {
 		path = fmt.Sprintf("/repos/%s/%s", url.PathEscape(owner), url.PathEscape(repo)) + path
 	}
-	for _, name := range []string{"number", "run", "job", "ref", "base", "head", "tag", "login", "path"} {
+	for _, name := range []string{"number", "run", "job", "ref", "base", "head", "tag", "path"} {
 		if strings.Contains(path, "{"+name+"}") {
 			v, err := pathArg(args, name)
 			if err != nil {
@@ -206,20 +205,28 @@ func readQuery(op readOp, args map[string]any, owner, repo string) (url.Values, 
 	if !op.page {
 		return q, nil
 	}
-	perPage, _, err := intArg(args, "perPage")
+	page, perPage, err := ReadPage(args)
 	if err != nil {
 		return nil, err
 	}
-	page, _, err := intArg(args, "page")
-	if err != nil {
-		return nil, err
+	q.Set("per_page", strconv.Itoa(perPage))
+	q.Set("page", strconv.Itoa(page))
+	return q, nil
+}
+
+// ReadPage is a github_read call's page (from 1) and page size (30 by
+// default, at most 100).
+func ReadPage(args map[string]any) (page, perPage int, err error) {
+	if perPage, _, err = intArg(args, "perPage"); err != nil {
+		return 0, 0, err
+	}
+	if page, _, err = intArg(args, "page"); err != nil {
+		return 0, 0, err
 	}
 	if perPage <= 0 {
 		perPage = 30
 	}
-	q.Set("per_page", strconv.Itoa(min(perPage, 100)))
-	q.Set("page", strconv.Itoa(max(page, 1)))
-	return q, nil
+	return max(page, 1), min(perPage, 100), nil
 }
 
 // jobLog reads a job's log: GitHub redirects to a short-lived download URL,

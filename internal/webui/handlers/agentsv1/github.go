@@ -22,7 +22,7 @@ type GitHubReader = func(ctx context.Context, ws, agentID, repoPath, op string, 
 // query string: the repo is the calling agent's, and op picks one of the
 // allowlisted reads.
 type GitHubReadBody struct {
-	Op      string `json:"op" jsonschema:"the read: pr_view, pr_files (the diff), pr_list, pr_search, pr_reviews, pr_review_comments, issue_view, issue_list, issue_search, issue_comments, check_runs, commit_status, run_list, run_view, run_jobs, job_log, repo_view, release_list, release_view, release_latest, commit_list, commit_view, compare, branch_list, contents, assignees, user_view or stack_health"`
+	Op      string `json:"op" jsonschema:"the read: pr_view, pr_files (the diff), pr_list, pr_search, pr_reviews, pr_review_comments, issue_view, issue_list, issue_search, issue_comments, check_runs, commit_status, run_list, run_view, run_jobs, job_log, repo_view, release_list, release_view, release_latest, commit_list, commit_view, compare, branch_list, contents, assignees or stack_health"`
 	Number  int    `json:"number,omitempty" jsonschema:"the PR or issue number"`
 	Ref     string `json:"ref,omitempty" jsonschema:"a commit SHA, branch or tag"`
 	Base    string `json:"base,omitempty" jsonschema:"compare base, or pr_list base branch"`
@@ -33,7 +33,6 @@ type GitHubReadBody struct {
 	Status  string `json:"status,omitempty" jsonschema:"run_list status"`
 	Path    string `json:"path,omitempty" jsonschema:"a file or directory path in the repo"`
 	Tag     string `json:"tag,omitempty" jsonschema:"release_view tag"`
-	Login   string `json:"login,omitempty" jsonschema:"user_view login"`
 	Run     int    `json:"run,omitempty" jsonschema:"a workflow run id"`
 	Job     int    `json:"job,omitempty" jsonschema:"a workflow job id"`
 	Query   string `json:"query,omitempty" jsonschema:"search text; the repo is added for you"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -60,7 +61,6 @@ func readFixtures() map[string]any {
 		r + "/branches":                     []any{map[string]any{"name": "main", "protected": true, "commit": map[string]any{"sha": "abc", "url": "u"}}},
 		r + "/contents/docs/README.md":      map[string]any{"name": "README.md", "path": "docs/README.md", "type": "file", "content": "aGk=", "encoding": "base64", "git_url": "g"},
 		r + "/assignees":                    []any{user},
-		"/users/octocat":                    map[string]any{"login": "octocat", "name": "Octo", "type": "User", "email": "o@x", "node_id": "U1"},
 	}
 }
 
@@ -158,7 +158,6 @@ func TestGitHubReadInventoryR1ToR11(t *testing.T) {
 		{"R9 commits", "commit_list", nil, map[string]any{"items.0.commit.message": "fix", "items.0.commit.author.email": nil}},
 		{"R9 commit", "commit_view", map[string]any{"ref": "abc"}, map[string]any{"item.sha": "abc"}},
 		{"R9 branches", "branch_list", nil, map[string]any{"items.0.name": "main", "items.0.commit.sha": "abc"}},
-		{"R9 users", "user_view", map[string]any{"login": "octocat"}, map[string]any{"item.name": "Octo", "item.email": nil}},
 		{"R9 repo users", "assignees", nil, map[string]any{"items.0.login": "octocat"}},
 		{"R10 gh repo view (private)", "repo_view", nil, map[string]any{"item.private": true, "item.visibility": "private"}},
 		{"R10 gh release list", "release_list", nil, map[string]any{"items.0.tag_name": "v1"}},
@@ -216,6 +215,30 @@ func TestGitHubReadPagination(t *testing.T) {
 	}
 }
 
+// TestGitHubReadStackHealthPages: stack_health answers one bounded page of
+// the stack's PRs, at most 100, with next while more remain.
+func TestGitHubReadStackHealthPages(t *testing.T) {
+	h := readHarness(t)
+	nodes := []any{}
+	for i := range 150 {
+		nodes = append(nodes, map[string]any{"number": i + 1, "headRefName": fmt.Sprintf("loom/stack/s1/t%03d", i), "mergeable": "MERGEABLE"})
+	}
+	h.github.extra["/graphql"] = func(w http.ResponseWriter, _ *http.Request) {
+		writeUpstreamJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequests": map[string]any{
+			"nodes": nodes, "pageInfo": map[string]any{"hasNextPage": false}}}}})
+	}
+	for _, c := range []struct {
+		page, perPage, n int
+		next             any
+	}{{0, 1000, 100, "2"}, {2, 1000, 50, nil}, {1, 0, 30, "2"}, {1 << 40, 100, 0, nil}} {
+		got, err := h.read(t, "stack_health", map[string]any{"head": "loom/stack/s1/", "page": c.page, "perPage": c.perPage})
+		items, _ := got["items"].([]any)
+		if err != nil || len(items) != c.n || got["next"] != c.next {
+			t.Errorf("page %d perPage %d: %d items, next %v, err %v; want %d, %v", c.page, c.perPage, len(items), got["next"], err, c.n, c.next)
+		}
+	}
+}
+
 // TestGitHubReadToolsReadOnly: only allowlisted ops run, every request is a
 // GET (stack_health's fixed host-side GraphQL query is a read), and write
 // verbs, arbitrary REST or GraphQL, and shell commands are refused before
@@ -223,7 +246,7 @@ func TestGitHubReadPagination(t *testing.T) {
 func TestGitHubReadToolsReadOnly(t *testing.T) {
 	h := readHarness(t)
 	for _, op := range []string{"", "pr_merge", "pr_create", "review_post", "issue_comment_post", "merge", "api", "graphql", "rest",
-		"gh pr view 8", "sh -c gh", "GET /repos/evil/x", "../pr_view"} {
+		"gh pr view 8", "sh -c gh", "GET /repos/evil/x", "../pr_view", "user_view"} {
 		if _, err := h.read(t, op, map[string]any{"number": 8, "method": "POST", "path": "/repos/octocat/hello/pulls/8/merge"}); !errors.Is(err, domain.ErrInvalid) {
 			t.Errorf("op %q: err = %v; want invalid", op, err)
 		}
