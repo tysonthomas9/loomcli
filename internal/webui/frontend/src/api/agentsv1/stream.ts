@@ -1,10 +1,10 @@
 // The Agent API event stream (design v2 §9.1, §9.5). Every connect, and every
-// reconnect after a drop, an error frame (subscriber_lagged) or a feed.gap:
-// 1. fetches a fresh one-time token and reopens the SSE stream with
-//    after=<agent>:<seq> from the cache's cursors, buffering its events;
-// 2. pages each agent's committed history after its cursor;
-// 3. merges the pages, then the buffer, by EventID in seq order;
-// 4. calls onResync, so the UI refreshes List and Get.
+// reconnect after a drop or an error frame (subscriber_lagged), fetches a
+// fresh one-time token and reopens the SSE stream with after=<agent>:<seq>
+// from the cache's cursors, then syncs. A feed.gap syncs on the open stream.
+// A sync buffers the stream's saved events, pages each agent's committed
+// history after its cursor, merges the pages and then the buffer by EventID
+// in seq order, and calls onResync so the UI refreshes List and Get.
 // Nothing is missed or shown twice, and onEvents stays in seq order.
 
 import { ApiError, getApiOrigin, wsUrl } from "../common/client";
@@ -44,7 +44,9 @@ export class AgentEventStream {
   private gen = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private expired = new Set<string>();
-  private buffer: AgentEvent[] | null = null; // set while paging
+  private syncing = false; // paging; the stream's saved events are buffered
+  private again = false; // a feed.gap came while paging: page once more
+  private buffer: AgentEvent[] = [];
 
   constructor(
     private ws: string,
@@ -58,7 +60,6 @@ export class AgentEventStream {
     const gen = ++this.gen;
     const live = () => gen === this.gen;
     this.closeSource();
-    this.buffer = [];
     this.setState(this.attempts > 0 ? "reconnecting" : "connecting");
     if (!live()) return;
     try {
@@ -67,14 +68,7 @@ export class AgentEventStream {
       if (!live()) return;
       if (token.kind === "error") throw new Error(token.message);
       this.open(token);
-      const pages = await this.page();
-      if (!live()) return;
-      this.emit(pages.flat());
-      if (!live()) return;
-      const buffered = this.buffer.sort((a, b) => a.seq - b.seq);
-      this.buffer = null;
-      this.emit(buffered);
-      if (live()) this.opts.onResync?.();
+      await this.sync(gen);
     } catch (err) {
       if (!live()) return;
       this.opts.onError?.(err instanceof Error ? err.message : String(err));
@@ -122,6 +116,30 @@ export class AgentEventStream {
     return this.opts.types?.length ? this.opts.types : undefined;
   }
 
+  // One sync at a time; a feed.gap during one makes it page once more. It
+  // stops, with no further callbacks, once gen is stale (closed, reconnected
+  // or closed from inside a callback).
+  private async sync(gen: number): Promise<void> {
+    const live = () => gen === this.gen;
+    if (this.syncing) {
+      this.again = true;
+      return;
+    }
+    this.syncing = true;
+    do {
+      this.again = false;
+      const pages = await this.page();
+      if (!live()) return;
+      this.emit(pages.flat());
+      if (!live()) return;
+    } while (this.again);
+    this.syncing = false;
+    const buffered = this.buffer.sort((a, b) => a.seq - b.seq);
+    this.buffer = [];
+    this.emit(buffered);
+    if (live()) this.opts.onResync?.();
+  }
+
   // Pages every agent's committed events after its cursor. An agent whose
   // history is purged (410) is followed live-only from then on; a stream
   // opened with its cursor fails, and the reconnect leaves the cursor out.
@@ -163,12 +181,14 @@ export class AgentEventStream {
       return;
     }
     if (body.seq > 0) {
-      if (this.buffer) this.buffer.push(body);
+      if (this.syncing) this.buffer.push(body);
       else this.emit([body]);
       return;
     }
     this.opts.onNotice?.(body);
-    if (body.kind === "feed.gap" && es === this.es) void this.connect();
+    if (body.kind !== "feed.gap" || es !== this.es) return;
+    const gen = this.gen;
+    this.sync(gen).catch(() => gen === this.gen && this.reconnect());
   }
 
   private emit(events: AgentEvent[]): void {
@@ -196,7 +216,8 @@ export class AgentEventStream {
     this.timer = null;
     this.es?.close();
     this.es = null;
-    this.buffer = null;
+    this.syncing = false;
+    this.buffer = [];
   }
 
   private setState(state: ConnectionState): void {
