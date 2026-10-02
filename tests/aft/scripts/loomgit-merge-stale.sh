@@ -94,7 +94,7 @@ if [[ "$phase" == verify ]]; then
   change="$(cat "$case_dir/change.id")"
   old_head="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["layers"][0]["head"])' "$case_dir/preview-before.json")"
   status="$(curl -s -o "$case_dir/stale-response.json" -w '%{http_code}' -X POST "$api/agents/lead/git/merge-up-to" -H 'Content-Type: application/json' \
-    -d "{\"stack_id\":\"stale-card\",\"target\":\"$change\",\"heads\":[\"$old_head\"]}")"
+    -d "{\"stack_id\":\"stale-card\",\"target\":\"$change\",\"heads\":[\"$old_head\"],\"actor\":{\"kind\":\"human\",\"id\":\"aft\"}}")"
   test "$status" = 409
   grep -q 'confirmed stack head changed' "$case_dir/stale-response.json"
   test "$(git --git-dir="$remote" rev-parse refs/heads/main)" = "$(cat "$case_dir/trunk-after")"

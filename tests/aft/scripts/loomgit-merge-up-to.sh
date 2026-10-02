@@ -105,7 +105,7 @@ curl -fsS "$api/agents/lead/git/merge-up-to?stack_id=aft-chain&target=$target" >
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert len(v["layers"])==4 and v["backend"]==sys.argv[2], v' "$case_dir/preview.json" "$backend"
 
 if [[ "$backend" == native ]]; then
-  python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(json.dumps({"stack_id":"aft-chain","target":sys.argv[2],"heads":[x["head"] for x in v["layers"]]}))' "$case_dir/preview.json" "$target" |
+  python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(json.dumps({"stack_id":"aft-chain","target":sys.argv[2],"heads":[x["head"] for x in v["layers"]],"actor":{"kind":"human","id":"aft"}}))' "$case_dir/preview.json" "$target" |
     curl -fsS -X POST "$api/agents/lead/git/merge-up-to" -H 'Content-Type: application/json' -d @- > "$case_dir/request.json"
 else
   printf 'merge %s\n' "$target" | LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" merge-up-to aft-chain lead "$target" --workspace "$workspace" > "$case_dir/request.txt"
