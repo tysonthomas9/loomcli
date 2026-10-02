@@ -3331,6 +3331,10 @@ export interface components {
       outcome: string;
       incomplete: boolean;
       verdict?: string;
+      /** @description True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply). */
+      applied: boolean;
+      /** @description True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed. */
+      needs_working_area: boolean;
     };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {
@@ -7695,7 +7699,10 @@ export interface operations {
   };
   listTaskRevisions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Report applied and needs_working_area for this lead. Without it, applied means applied in any lead and needs_working_area means some approved target lead still lacks a working area. */
+        lead?: string;
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */

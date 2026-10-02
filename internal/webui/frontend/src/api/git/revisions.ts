@@ -6,12 +6,16 @@ export type ReviewRevision = components["schemas"]["ReviewRevision"];
 export async function getTaskRevisions(
   workspaceId: string,
   taskId: string,
+  lead?: string,
 ): Promise<ReviewRevision[]> {
   try {
     const { data, error, response } = await api.GET(
       "/api/workspaces/{ws}/issues/{id}/revisions",
       {
-        params: { path: { ws: workspaceId, id: taskId } },
+        params: {
+          path: { ws: workspaceId, id: taskId },
+          ...(lead ? { query: { lead } } : {}),
+        },
       },
     );
     if (error) throw apiErrorFromResponse(error, response);

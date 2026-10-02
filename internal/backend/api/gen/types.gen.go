@@ -2857,12 +2857,17 @@ type PullRequestReviewResult struct {
 
 // ReviewRevision defines model for ReviewRevision.
 type ReviewRevision struct {
-	ChangeId   string  `json:"change_id"`
-	HeadSha    string  `json:"head_sha"`
-	Incomplete bool    `json:"incomplete"`
-	Number     int     `json:"number"`
-	Outcome    string  `json:"outcome"`
-	Verdict    *string `json:"verdict,omitempty"`
+	// Applied True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
+	Applied    bool   `json:"applied"`
+	ChangeId   string `json:"change_id"`
+	HeadSha    string `json:"head_sha"`
+	Incomplete bool   `json:"incomplete"`
+
+	// NeedsWorkingArea True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed.
+	NeedsWorkingArea bool    `json:"needs_working_area"`
+	Number           int     `json:"number"`
+	Outcome          string  `json:"outcome"`
+	Verdict          *string `json:"verdict,omitempty"`
 }
 
 // ReviewerConversation defines model for ReviewerConversation.
@@ -3807,6 +3812,12 @@ type GetIssueEventsParams struct {
 
 	// Since Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history.
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
+}
+
+// ListTaskRevisionsParams defines parameters for ListTaskRevisions.
+type ListTaskRevisionsParams struct {
+	// Lead Report applied and needs_working_area for this lead. Without it, applied means applied in any lead and needs_working_area means some approved target lead still lacks a working area.
+	Lead *string `form:"lead,omitempty" json:"lead,omitempty"`
 }
 
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.

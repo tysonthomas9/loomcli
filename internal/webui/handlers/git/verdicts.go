@@ -163,7 +163,7 @@ func handleTaskRevisions(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer func() { _ = store.Close() }()
-	revisions, err := store.TaskRevisions(req.Context(), req.PathValue("ws"), req.PathValue("id"))
+	revisions, err := store.TaskRevisionsForLead(req.Context(), req.PathValue("ws"), req.PathValue("id"), req.URL.Query().Get("lead"))
 	if err != nil {
 		writeReviewError(w, err)
 		return
