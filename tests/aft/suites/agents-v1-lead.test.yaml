@@ -28,6 +28,7 @@ teardown: |
   set +e
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD" >/dev/null
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-GHREAD" >/dev/null
 
 tests:
   - name: canary - an OpenCode lead replies, replays after reload and survives an OpenCode restart
@@ -326,3 +327,70 @@ tests:
           fn: >-
             document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
         intent: "Wait until the chat labels the new lead's harness as opencode"
+
+  - name: R10 github_read with no host GitHub token fails at once as github_unavailable and the lead keeps working
+    intent: A lead whose host has the GitHub reader wired but no GitHub token calls github_read, gets the typed github_unavailable error straight away with no credential in it, and its next turn replies normally
+    steps:
+      - run: |
+          set -e
+          curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-GHREAD" >/dev/null || true
+          repo="$AFT_WORK_DIR/agv1-ghread-repo"
+          mkdir -p "$repo"
+          git -C "$repo" init -q -b main
+          git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q --allow-empty -m init
+          git -C "$repo" remote add origin https://github.com/loom-e2e/agv1-ghread.git
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" \
+            -d '{"name":"e2e-agv1-ghread","type":"empty","repos":[]}' >/dev/null
+          printf '{"repos":["%s"]}' "$repo" |
+            curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-GHREAD/repos" -H "Content-Type: application/json" -d @- \
+            > "$AFT_WORK_DIR/agv1-ghread-ws.json"
+          python3 - "$AFT_WORK_DIR/agv1-ghread-ws.json" "agv1-ghread-${RUN_ID:-local}" > "$AFT_WORK_DIR/agv1-ghread-create.json" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))["data"]["repos"][0]
+          assert r["remote_url"].startswith("https://github.com/"), r
+          print(json.dumps({"preset": "lead", "name": sys.argv[2], "repo": r["path"], "base_ref": r["default_branch"], "overrides": {"harness": "opencode"}}))
+          PY
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-GHREAD/v1/agents" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-ghread-${RUN_ID:-local}" -d @"$AFT_WORK_DIR/agv1-ghread-create.json" |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])' > "$AFT_WORK_DIR/agv1GhReadId"
+        intent: "Add a repo whose origin is on GitHub to a new workspace, and create an OpenCode lead on the workspace's copy"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 -c 'import json; code="return await tools.loom.github_read({\"op\": \"repo_view\"})"
+          print(json.dumps({"steps": [{"tool_calls": [{"name": "execute", "arguments": {"code": code}}]}, {"text": "AGV1-GH-DONE"}, {"text": "AGV1-GH-AFTER"}]}))' |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-GHREAD/chat/$(cat "$AFT_WORK_DIR/agv1GhReadId")"
+        intent: "Script the lead's github_read call and the replies after it, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat labels the lead's harness as opencode"
+      - fill: { label: Message, value: "read the repo on GitHub" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-GH-DONE')
+        budget: 30000
+        intent: "Wait until the turn with the github_read call ends promptly"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-ghread-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-ghread-requests.json" <<'PY'
+          import json, sys
+          reqs = json.load(open(sys.argv[1]))["requests"]
+          text = [json.dumps(r) for r in reqs]
+          hits = [t for t in text if "github_unavailable" in t]
+          assert hits, "no model request carried a github_unavailable tool result"
+          assert "GitHub is not configured on this Loom host" in hits[0], hits[0][-600:]
+          for bad in ("ghp_", "github_pat_", "Bearer ", "Authorization"):
+              assert not any(bad in t for t in hits), "the tool result carries " + bad
+          PY
+        intent: "Check that the model got the typed github_unavailable result, with no credential in it"
+      - fill: { label: Message, value: "hello after github" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-GH-AFTER')
+        budget: 90000
+        intent: "Wait until the lead's next turn replies normally"
