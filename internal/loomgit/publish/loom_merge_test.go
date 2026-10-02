@@ -23,6 +23,8 @@ type mergeForgeFake struct {
 	merged        int
 	deleted       []string
 	checks        string
+	prChecks      map[int]string
+	reviews       map[int]string
 	queued        bool
 	pending       bool
 	putStatus     string
@@ -46,7 +48,11 @@ func (forge *mergeForgeFake) PRStatuses(_ context.Context, _, _, prefix string) 
 	statuses := map[string]stackpublish.PRStatus{}
 	for _, pr := range forge.prs {
 		if pr.Head == prefix {
-			statuses[pr.Head] = stackpublish.PRStatus{Number: pr.Number, Checks: forge.checks, Mergeable: "mergeable"}
+			checks, ok := forge.prChecks[pr.Number]
+			if !ok {
+				checks = forge.checks
+			}
+			statuses[pr.Head] = stackpublish.PRStatus{Number: pr.Number, Checks: checks, Review: forge.reviews[pr.Number], Mergeable: "mergeable"}
 		}
 	}
 	return statuses, nil
