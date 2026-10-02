@@ -806,9 +806,9 @@ tests:
       - expect: { attr: { selector: "section[data-status=blocked] article[aria-label*='task-runner quarantine ${RUN_ID:-local}'] [aria-label='Task quarantined']", name: title, equals: "Task quarantined by daemon after repeated no-progress kills — see comment for the kill timeline" } }
       - expect: { text: Quarantined }
 
-  # covers: 2.0t; AgentDetailMain idle daemon-supervised worker stopped empty state; no crash-loop terminal launch
+  # covers: 2.0t; daemon-mode task run completes a task; AgentDetailMain finished daemon-supervised worker stopped empty state; no crash-loop terminal launch
   - name: finished daemon-supervised task runner shows the stopped state instead of a crash-looping terminal
-    intent: An operator opening a daemon-supervised Task Runner that has no live work sees the stopped-agent message, not a terminal that keeps exiting
+    intent: An operator opening a daemon-supervised Task Runner after it completed its task sees the stopped-agent message, not a terminal that keeps exiting
     steps:
       - run: |
           set -e
@@ -829,22 +829,90 @@ tests:
           curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK/agents" \
             -H "Content-Type: application/json" \
             -d @"$AFT_WORK_DIR/tsk-20t-agent.json" > /dev/null
-          # budget: monitor-cache (16s) - the daemon_managed flag reaches the UI through monitor/status.
+        intent: "An API client registers a daemon-supervised Task Runner, as agentdef add --auto does"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-TASK/issues"
+          body:
+            title: "task-runner finished ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+            design: "AFT finished-worker design ${RUN_ID:-local}"
+          save:
+            - from: "data.id"
+              as: "tsk20tIssueId"
+        intent: "An API client creates the designed task the Task Runner will complete"
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-TASK/issues/${var:tsk20tIssueId}"
+          body:
+            assignee: "finished-${RUN_ID:-local}"
+            status: "in_progress"
+        intent: "An orchestration client assigns the task to the Task Runner, as the daemon's dispatch does"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          name="finished-$run"
+          task="$(cat "$AFT_WORK_DIR/tsk20tIssueId")"
+          # The exact run the daemon supervisor launches for an assigned task,
+          # driven by the deterministic codex stub.
+          PATH="$AFT_TESTS_DIR/../../e2e/stubs:$PATH" \
+          LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" \
+          LOOM_SERVER_URL="$AFT_API_URL" \
+          LOOM_WORKSPACE_ID=E2E-WS-TASK \
+          LOOM_ASSIGNED_TASK_ID="$task" \
+          "$AFT_LOOM_BIN" --workspace E2E-WS-TASK --backend codex task "$name" --auto --daemon-mode \
+            > "$AFT_WORK_DIR/tsk-20t-run.out" 2>&1 || { cat "$AFT_WORK_DIR/tsk-20t-run.out"; exit 1; }
+        intent: "The local runtime runs the Task Runner's daemon-mode task run to completion"
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-TASK/issues/${var:tsk20tIssueId}"
+          body:
+            status: "closed"
+        intent: "The Task Runner's result closes the task, as the coder's loom data close does"
+      - run: |
+          set -e
+          run="${RUN_ID:-local}"
+          task="$(cat "$AFT_WORK_DIR/tsk20tIssueId")"
+          # budget: db-persist (10s) - the close and the finalized session persist through fleet-db.
+          for i in $(seq 1 10); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK/issues/$task" > "$AFT_WORK_DIR/tsk-20t-issue.json" &&
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK/tasks/$task/sessions" > "$AFT_WORK_DIR/tsk-20t-sessions.json" &&
+            python3 - "$AFT_WORK_DIR/tsk-20t-issue.json" "$AFT_WORK_DIR/tsk-20t-sessions.json" "finished-$run" <<'PY' && exit 0
+          import json, sys
+          issue = json.load(open(sys.argv[1])).get("data") or {}
+          assert issue.get("status") == "closed", issue
+          data = json.load(open(sys.argv[2])).get("data") or {}
+          sessions = data.get("sessions") if isinstance(data, dict) else data
+          mine = [s for s in sessions or [] if s.get("agent_name", s.get("agent_id")) == sys.argv[3]]
+          assert mine and all(s.get("status") == "completed" for s in mine), sessions
+          PY
+            sleep 1
+          done
+          echo "the Task Runner never closed its task with a completed run"
+          cat "$AFT_WORK_DIR/tsk-20t-issue.json" "$AFT_WORK_DIR/tsk-20t-sessions.json" 2>/dev/null || true
+          exit 1
+        intent: "An operator confirms the task closed and the Task Runner's run completed"
+      - run: |
+          set -e
+          name="finished-${RUN_ID:-local}"
+          # budget: monitor-cache (16s) - daemon_managed and liveness reach the UI through monitor/status.
           for i in $(seq 1 16); do
             curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-TASK" > "$AFT_WORK_DIR/tsk-20t-monitor.json" &&
-            python3 - "$AFT_WORK_DIR/tsk-20t-monitor.json" "finished-$run" <<'PY' && exit 0
+            python3 - "$AFT_WORK_DIR/tsk-20t-monitor.json" "$name" <<'PY' && exit 0
           import json, sys
           d = json.load(open(sys.argv[1]))
           a = [x for x in d.get("agents", []) if x.get("name") == sys.argv[2]]
           assert a and a[0].get("daemon_managed") is True, a
           assert not a[0].get("current_task_id") and a[0].get("live_status", "idle") != "working", a
+          assert not (a[0].get("status") or "").startswith(("working", "planning")), a
           PY
             sleep 1
           done
-          echo "monitor status never exposed the idle daemon-supervised worker"
+          echo "monitor status never showed the finished Task Runner without live work"
           cat "$AFT_WORK_DIR/tsk-20t-monitor.json" 2>/dev/null || true
           exit 1
-        intent: "An API client registers a daemon-supervised Task Runner and polls until monitor status shows it with no live work"
+        intent: "An operator polls until the finished Task Runner has no live task"
       - open: /ws/E2E-WS-TASK/agents/finished-${RUN_ID:-local}
       - wait:
           fn: *agentsPageReady
