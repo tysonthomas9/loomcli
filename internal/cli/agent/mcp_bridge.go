@@ -1,14 +1,9 @@
 package agent
 
 import (
-	"context"
-	"os"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/agentmcp"
-	"github.com/tysonthomas9/loomcli/internal/loomagent/client"
+	"github.com/tysonthomas9/loomcli/internal/agentmcp/bridge"
 )
 
 var mcpBridgeCmd = &cobra.Command{
@@ -28,26 +23,7 @@ error and serves nothing.`,
 	// stdout is the MCP channel: skip the root setup, which can log or reach
 	// a backend.
 	PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
-	RunE: func(cmd *cobra.Command, _ []string) error {
-		dir, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		cfg, err := agentmcp.Load(dir)
-		if err != nil {
-			return err
-		}
-		api := client.New(client.Config{BaseURL: cfg.API, Workspace: cfg.Workspace,
-			Token: func(context.Context) (string, error) { return cfg.Token, nil }})
-		s, err := agentmcp.NewServer(cfg, api)
-		if err != nil {
-			return err
-		}
-		if err := agentmcp.Verify(cmd.Context(), api); err != nil {
-			return err
-		}
-		return s.Run(cmd.Context(), &mcp.StdioTransport{})
-	},
+	RunE:              func(cmd *cobra.Command, _ []string) error { return bridge.Run(cmd.Context()) },
 }
 
 func init() { agentCmd.AddCommand(mcpBridgeCmd) }
