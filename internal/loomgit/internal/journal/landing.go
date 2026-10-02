@@ -62,6 +62,9 @@ func ensureLandedRule(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	if err := createLandingAttentionSchema(db); err != nil {
+		return err
+	}
 	return createDependencyChecks(db)
 }
 

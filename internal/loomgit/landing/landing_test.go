@@ -330,3 +330,149 @@ func TestFetchFailureChangesNoStatus(t *testing.T) {
 		t.Fatalf("state after fetch failure = %+v, %v", status, err)
 	}
 }
+
+func (fixture *fixture) publishAs(t *testing.T, workspace, change string, pr int) {
+	t.Helper()
+	ctx := context.Background()
+	publication := journal.Publication{Workspace: workspace, Change: change, Repo: fixture.source,
+		Branch: "loom/ws/" + workspace + "/change/" + change, Trunk: "main", Slug: "owner/repo", Head: fixture.initial}
+	if err := fixture.store.BeginPublication(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+	publication.Phase = "done"
+	publication.PRNumber = pr
+	if err := fixture.store.AdvancePublication(ctx, publication); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMismatchedPublicationDoesNotStallOtherWorkspaces(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	fixture.publishAs(t, "W1", "A", 4)
+	fixture.publishAs(t, "W2", "B", 5)
+	if _, err := fixture.store.DriverChange(ctx, "W2", "task-C", "repo", "C"); err != nil {
+		t.Fatal(err)
+	}
+	dependent, err := fixture.store.ReserveRevision(ctx, loomgit.Revision{Workspace: "W2", Change: "C", RequestID: "C-source",
+		Kind: "source", Outcome: "completed", BaseSHA: fixture.initial, TreeHash: fixture.initial, SourceHeadSHA: fixture.initial})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependent.HeadSHA = fixture.initial
+	if err := fixture.store.FinishRevision(ctx, dependent); err != nil {
+		t.Fatal(err)
+	}
+	// A fake-forge reset reused PR 4 for another branch; PR 5 merged normally.
+	mismatched := stackpublish.PR{Number: 4, Head: "someone/else", HeadSHA: fixture.initial, Base: "main", State: "open"}
+	fixture.forge.pulls = map[int]stackpublish.PR{
+		4: mismatched,
+		5: {Number: 5, Head: "loom/ws/W2/change/B", HeadSHA: fixture.initial, Base: "main", State: "closed",
+			Merged: true, MergeCommitSHA: fixture.initial},
+	}
+	var restacked []string
+	options := Options{Dependents: func(_ context.Context, workspace, _ string) ([]Dependent, error) {
+		if workspace != "W2" {
+			return nil, nil
+		}
+		return []Dependent{{Task: "task-C", Repo: "repo"}}, nil
+	}, Restack: func(_ context.Context, offer journal.RestackOffer, _ Forge) (int, error) {
+		restacked = append(restacked, offer.Workspace+"/"+offer.Change)
+		return 2, nil
+	}}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	for range 3 {
+		if err := ReconcileWithOptions(ctx, fixture.store, fixture.forge, options); err != nil {
+			t.Fatalf("one workspace's mismatch failed the pass: %v", err)
+		}
+	}
+	status, err := fixture.store.LandingStatus(ctx, "W2", "B")
+	if err != nil || status.State != "landed" {
+		t.Fatalf("healthy workspace landing = %+v, %v", status, err)
+	}
+	if len(restacked) != 1 || restacked[0] != "W2/C" {
+		t.Fatalf("healthy workspace restacks = %v", restacked)
+	}
+	attentions, err := fixture.store.LandingAttentions(ctx)
+	if err != nil || len(attentions) != 1 || attentions[0].Workspace != "W1" || attentions[0].Change != "A" ||
+		!strings.Contains(attentions[0].Reason, "publication mismatch: owned PR 4 does not match published change A") {
+		t.Fatalf("mismatch attention = %+v, %v", attentions, err)
+	}
+	if count := strings.Count(logs.String(), "landing needs attention"); count != 1 {
+		t.Fatalf("mismatch logged %d times over 3 passes:\n%s", count, logs.String())
+	}
+	status, err = fixture.store.LandingStatus(ctx, "W1", "A")
+	if err != nil || status.State != "published" {
+		t.Fatalf("mismatched workspace landing = %+v, %v", status, err)
+	}
+
+	// Repairing the PR clears the attention; a new mismatch is logged again.
+	fixture.forge.pulls[4] = stackpublish.PR{Number: 4, Head: "loom/ws/W1/change/A", HeadSHA: fixture.initial, Base: "main", State: "open"}
+	if err := ReconcileWithOptions(ctx, fixture.store, fixture.forge, options); err != nil {
+		t.Fatal(err)
+	}
+	if attentions, err := fixture.store.LandingAttentions(ctx); err != nil || len(attentions) != 0 {
+		t.Fatalf("repaired attention = %+v, %v", attentions, err)
+	}
+	fixture.forge.pulls[4] = mismatched
+	if err := ReconcileWithOptions(ctx, fixture.store, fixture.forge, options); err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(logs.String(), "landing needs attention"); count != 2 {
+		t.Fatalf("new mismatch logged %d times in total:\n%s", count, logs.String())
+	}
+}
+
+func TestFailedRestackDoesNotBlockOtherWorkspaces(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	for _, offer := range []journal.RestackOffer{
+		{Workspace: "W1", Change: "C1", Predecessor: "A", Task: "t1", Repo: "repo", Revision: 1, TrunkSHA: fixture.initial},
+		{Workspace: "W2", Change: "C2", Predecessor: "B", Task: "t2", Repo: "repo", Revision: 1, TrunkSHA: fixture.initial},
+	} {
+		if err := fixture.store.OfferRestack(ctx, offer); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := runRestacks(ctx, fixture.store, fixture.forge, func(_ context.Context, offer journal.RestackOffer, _ Forge) (int, error) {
+		if offer.Workspace == "W1" {
+			return 0, errors.New("restack unavailable")
+		}
+		return 2, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "W1/C1") {
+		t.Fatalf("failed restack error = %v", err)
+	}
+	open, err := fixture.store.OpenRestackOffers(ctx)
+	if err != nil || len(open) != 1 || open[0].Workspace != "W1" {
+		t.Fatalf("open offers after one failure = %+v, %v", open, err)
+	}
+}
+
+func TestFailingChangeDoesNotStallOtherWorkspaces(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	broken := journal.Publication{Workspace: "W1", Change: "A", Repo: fixture.source,
+		Branch: "loom/ws/W1/change/A", Trunk: "main", Slug: "not-a-slug", Head: fixture.initial}
+	if err := fixture.store.BeginPublication(ctx, broken); err != nil {
+		t.Fatal(err)
+	}
+	broken.Phase, broken.PRNumber = "done", 4
+	if err := fixture.store.AdvancePublication(ctx, broken); err != nil {
+		t.Fatal(err)
+	}
+	fixture.publishAs(t, "W2", "B", 5)
+	fixture.forge.pulls = map[int]stackpublish.PR{5: {Number: 5, Head: "loom/ws/W2/change/B", HeadSHA: fixture.initial,
+		Base: "main", State: "closed", Merged: true, MergeCommitSHA: fixture.initial}}
+	err := Reconcile(ctx, fixture.store, fixture.forge)
+	if err == nil || !strings.Contains(err.Error(), "W1/A") {
+		t.Fatalf("failing change error = %v", err)
+	}
+	status, err := fixture.store.LandingStatus(ctx, "W2", "B")
+	if err != nil || status.State != "landed" {
+		t.Fatalf("healthy workspace landing = %+v, %v", status, err)
+	}
+}
