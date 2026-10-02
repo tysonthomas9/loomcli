@@ -26,6 +26,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -60,6 +61,7 @@ type Turn struct {
 	Cost      float64 `json:"cost,omitempty"`     // the step's cost
 	DelayMS   int     `json:"delay_ms,omitempty"` // pause before each streamed delta
 	Tools     []Tool  `json:"tools,omitempty"`    // MCP tool calls the turn ran first
+	Ask       bool    `json:"ask,omitempty"`      // ask Model when the turn plays
 }
 
 // Tool is one MCP tool call a turn ran, with its output.
@@ -222,7 +224,7 @@ func (s *Server) next(ss *session, text string) Turn {
 		return turns[ss.Played-1]
 	}
 	if s.Model != "" {
-		return s.ask(ss)
+		return Turn{Ask: true}
 	}
 	return Turn{Text: text}
 }
@@ -231,15 +233,11 @@ var modelClient = &http.Client{Timeout: 30 * time.Second}
 
 // ask sends the session's user texts to the fake model's chat completions,
 // as OpenCode would, and plays its reply. A Code Mode call of an MCP tool
-// runs it and asks again with its result; any other tool call holds the turn
-// until it is interrupted: the emulator runs no other tools.
-func (s *Server) ask(ss *session) Turn {
-	msgs := []map[string]any{}
-	for _, m := range ss.Messages {
-		if m["type"] == "user" {
-			msgs = append(msgs, map[string]any{"role": "user", "content": m["text"]})
-		}
-	}
+// on one of servers runs it and asks again with its result; any other tool
+// call holds the turn until it is interrupted: the emulator runs no other
+// tools. It runs without the lock, after the prompt is answered, as in
+// OpenCode, so a tool may call back into this service (a child's session).
+func (s *Server) ask(msgs []map[string]any, servers map[string]map[string]any) Turn {
 	var tools []Tool
 	for {
 		t, calls := s.complete(msgs)
@@ -249,7 +247,7 @@ func (s *Server) ask(ss *session) Turn {
 		}
 		msgs = append(msgs, map[string]any{"role": "assistant", "tool_calls": calls})
 		for _, c := range calls {
-			out, ok := s.runTool(ss, c.Function.Name, c.Function.Arguments)
+			out, ok := runTool(servers, c.Function.Name, c.Function.Arguments)
 			if !ok {
 				t.Hold = true
 				return t
@@ -320,7 +318,7 @@ var codeCall = regexp.MustCompile(`tools\.([\w-]+)\.(\w+)\(\s*(\{.*\})?\s*\)`)
 // registered server, as OpenCode's Code Mode does, and returns the tool's
 // output (its structured content, else its text) or the failure. false
 // means the call is not one the emulator runs.
-func (s *Server) runTool(ss *session, name, args string) (string, bool) {
+func runTool(servers map[string]map[string]any, name, args string) (string, bool) {
 	var in struct {
 		Code string `json:"code"`
 	}
@@ -329,9 +327,7 @@ func (s *Server) runTool(ss *session, name, args string) (string, bool) {
 	if name != "execute" || m == nil {
 		return "", false
 	}
-	loc, _ := ss.Info["location"].(map[string]any)
-	dir, _ := loc["directory"].(string)
-	cfg := s.mcp[dir][m[1]]
+	cfg := servers[m[1]]
 	cmd, _ := cfg["command"].([]any)
 	if len(cmd) == 0 {
 		return "MCP server not found: " + m[1], true
@@ -383,12 +379,43 @@ func callMCP(argv []string, env map[string]any, tool string, args map[string]any
 	return out.String()
 }
 
+// turn is r's turn, asking Model first, with the lock released, when it
+// says to; false means r stopped or was replaced, or the server is closing.
+func (s *Server) turn(sid string, r *run) (Turn, bool) {
+	if !r.Turn.Ask {
+		return r.Turn, true
+	}
+	ss := s.st.Sessions[sid]
+	msgs := []map[string]any{}
+	for _, m := range ss.Messages {
+		if m["type"] == "user" {
+			msgs = append(msgs, map[string]any{"role": "user", "content": m["text"]})
+		}
+	}
+	loc, _ := ss.Info["location"].(map[string]any)
+	dir, _ := loc["directory"].(string)
+	servers := maps.Clone(s.mcp[dir])
+	s.mu.Unlock()
+	t := s.ask(msgs, servers)
+	s.mu.Lock()
+	select {
+	case <-s.quit:
+		return t, false
+	default:
+	}
+	ss = s.st.Sessions[sid]
+	return t, ss != nil && ss.Running == r
+}
+
 // play streams turn r of session sid. Every change happens under the lock
 // and only while r is still the session's running turn.
 func (s *Server) play(sid string, r *run) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t := r.Turn
+	t, ok := s.turn(sid, r)
+	if !ok {
+		return
+	}
 	if t.Child {
 		child := "ses_" + s.newID()
 		s.st.Sessions[child] = &session{Info: map[string]any{"id": child, "parentID": sid, "metadata": map[string]any{}}}
