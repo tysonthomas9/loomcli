@@ -90,10 +90,12 @@ func TestMergeUpToCommandRequiresExactHumanConfirmation(t *testing.T) {
 		}}, nil
 	}
 	called := 0
-	prMergeRequest = func(_ context.Context, _, _, _, _ string, heads []string) (publish.MergeStackView, error) {
+	clearAgentMarkers(t)
+	t.Setenv("USER", "tyson")
+	prMergeRequest = func(_ context.Context, _, _, _, _ string, heads []string, actor publish.MergeActor) (publish.MergeStackView, error) {
 		called++
-		if !reflect.DeepEqual(heads, []string{"head-A", "head-B", "head-C", "head-D"}) {
-			t.Fatalf("heads: %v", heads)
+		if !reflect.DeepEqual(heads, []string{"head-A", "head-B", "head-C", "head-D"}) || actor != (publish.MergeActor{Kind: "human", ID: "tyson"}) {
+			t.Fatalf("heads: %v actor: %+v", heads, actor)
 		}
 		return publish.MergeStackView{Phase: "ready"}, nil
 	}
@@ -106,6 +108,92 @@ func TestMergeUpToCommandRequiresExactHumanConfirmation(t *testing.T) {
 	cmd.SetIn(strings.NewReader("merge C\n"))
 	if err := runMergeUpTo(&cmd, []string{"feature", "L", "C"}); err != nil || called != 1 {
 		t.Fatalf("confirmed merge: err=%v calls=%d", err, called)
+	}
+	for _, marker := range agentEnvMarkers {
+		t.Run(marker, func(t *testing.T) {
+			t.Setenv(marker, "L")
+			cmd.SetIn(strings.NewReader("merge C\n"))
+			if err := runMergeUpTo(&cmd, []string{"feature", "L", "C"}); err == nil || !strings.Contains(err.Error(), marker) || called != 1 {
+				t.Fatalf("agent session confirmed merge: err=%v calls=%d", err, called)
+			}
+		})
+	}
+}
+
+func clearAgentMarkers(t *testing.T) {
+	t.Helper()
+	for _, marker := range agentEnvMarkers {
+		t.Setenv(marker, "")
+	}
+}
+
+func stubMergeRequestCommands(t *testing.T) *[]string {
+	t.Helper()
+	oldResolver, oldRequest, oldList, oldConfirm := prStackResolver, prRequestMerge, prMergeRequests, prConfirmMerge
+	t.Cleanup(func() {
+		prStackResolver, prRequestMerge, prMergeRequests, prConfirmMerge = oldResolver, oldRequest, oldList, oldConfirm
+	})
+	prStackResolver = func() (*cli.Resolver, error) {
+		return &cli.Resolver{Workspace: "workspace", Config: &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+			"workspace": {ID: "W"},
+		}}}, nil
+	}
+	var calls []string
+	card := publish.MergeRequestView{ID: "R1", StackID: "feature", Target: "C", Status: "pending", RequestedKind: "lead",
+		RequestedBy: "L", Layers: []publish.MergeRequestLayer{{Change: "A", Head: "head-A", Checks: "passing", Review: "approved"}}}
+	prRequestMerge = func(_ context.Context, workspace, lead, stack, target string, requester publish.MergeActor) (publish.MergeRequestView, error) {
+		calls = append(calls, "request "+workspace+" "+lead+" "+stack+" "+target+" "+requester.Kind+":"+requester.ID)
+		return card, nil
+	}
+	prMergeRequests = func(context.Context, string, string) ([]publish.MergeRequestView, error) {
+		return []publish.MergeRequestView{card}, nil
+	}
+	prConfirmMerge = func(_ context.Context, workspace, lead, id string, confirmer publish.MergeActor) (publish.MergeStackView, error) {
+		calls = append(calls, "confirm "+workspace+" "+lead+" "+id+" "+confirmer.Kind+":"+confirmer.ID)
+		return publish.MergeStackView{Phase: "ready"}, nil
+	}
+	return &calls
+}
+
+func TestRequestMergeFromLeadSessionOnlyCreatesRequest(t *testing.T) {
+	calls := stubMergeRequestCommands(t)
+	clearAgentMarkers(t)
+	t.Setenv("LOOM_AGENT_NAME", "L")
+	var output bytes.Buffer
+	cmd := *requestMergeCmd
+	cmd.SetOut(&output)
+	if err := cmd.RunE(&cmd, []string{"feature", "L", "C"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(*calls, "|") != "request W L feature C lead:L" ||
+		!strings.Contains(output.String(), "A head-A checks=passing review=approved") {
+		t.Fatalf("calls=%v output=%q", *calls, output.String())
+	}
+	confirm := *confirmMergeCmd
+	confirm.SetOut(&bytes.Buffer{})
+	confirm.SetIn(strings.NewReader("merge C\n"))
+	if err := confirm.RunE(&confirm, []string{"L", "R1"}); err == nil || len(*calls) != 1 {
+		t.Fatalf("lead session confirmed its own request: err=%v calls=%v", err, *calls)
+	}
+}
+
+func TestConfirmMergePromptsHumanForExactRequest(t *testing.T) {
+	calls := stubMergeRequestCommands(t)
+	clearAgentMarkers(t)
+	t.Setenv("USER", "tyson")
+	cmd := *confirmMergeCmd
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+	cmd.SetIn(strings.NewReader("merge B\n"))
+	if err := cmd.RunE(&cmd, []string{"L", "R1"}); err == nil || len(*calls) != 0 {
+		t.Fatalf("wrong confirmation: err=%v calls=%v", err, *calls)
+	}
+	cmd.SetIn(strings.NewReader("merge C\n"))
+	if err := cmd.RunE(&cmd, []string{"L", "R1"}); err != nil || strings.Join(*calls, "|") != "confirm W L R1 human:tyson" {
+		t.Fatalf("confirm: err=%v calls=%v", err, *calls)
+	}
+	if !strings.Contains(output.String(), "merge request R1: feature up to C, pending by lead L") {
+		t.Fatalf("card=%q", output.String())
 	}
 }
 

@@ -6,6 +6,7 @@ import {
 } from "@/hooks/workspace/useMergeUpTo";
 
 import styles from "./CreatePRAction.module.css";
+import { MergeRequestCards } from "./MergeRequestCards";
 import actionStyles from "./GitActionBar.module.css";
 
 interface MergeUpToActionProps {
@@ -78,6 +79,7 @@ export function MergeUpToAction({
   const form = useMergeUpToForm(workspaceId, agentName);
   return (
     <>
+      <MergeRequestCards workspaceId={workspaceId} agentName={agentName} />
       <button
         type="button"
         className={styles.createPrBtn}

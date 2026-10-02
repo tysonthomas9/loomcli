@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  gitConfirmMergeRequest,
   gitMergePreview,
+  gitMergeRequests,
   gitMergeUpTo,
+  type MergeRequestView,
   type MergeStackView,
 } from "@/api/workspace/git";
 
-export type { MergeStackView };
+export type { MergeRequestView, MergeStackView };
 
 function useMergePolling(
   view: MergeStackView | null,
@@ -73,5 +76,42 @@ export function useMergeUpToForm(workspaceId: string, agentName: string) {
     refresh,
     submit,
     clear: () => setView(null),
+  };
+}
+
+/** Pending merge requests for a lead, refreshed every 10s; confirm runs one. */
+export function useMergeRequests(workspaceId: string, agentName: string) {
+  const [requests, setRequests] = useState<MergeRequestView[]>([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const refresh = useCallback(async () => {
+    try {
+      setRequests(await gitMergeRequests(workspaceId, agentName));
+    } catch (cause) {
+      setError(String(cause));
+    }
+  }, [workspaceId, agentName]);
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 10000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+  const confirm = async (request: MergeRequestView) => {
+    setBusy(true);
+    try {
+      await gitConfirmMergeRequest(workspaceId, agentName, request.id);
+      setError("");
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+      await refresh();
+    }
+  };
+  return {
+    pending: requests.filter((request) => request.status === "pending"),
+    error,
+    busy,
+    confirm,
   };
 }

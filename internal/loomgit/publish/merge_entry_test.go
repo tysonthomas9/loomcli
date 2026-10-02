@@ -65,12 +65,12 @@ func TestFourLayerMergeEntryUsesRecordedBackendAndExactHeads(t *testing.T) {
 			}
 			wrong := append([]string(nil), heads...)
 			wrong[2] = "changed"
-			_, err = MergeStackLocal(ctx, "W", "L", "feature", "C", wrong)
+			_, err = MergeStackLocal(ctx, "W", "L", "feature", "C", wrong, tyson)
 			var coded *loomgit.Error
 			if !errors.As(err, &coded) || coded.Kind != loomgit.Stale {
 				t.Fatalf("moved head: %v", err)
 			}
-			view, err = MergeStackLocal(ctx, "W", "L", "feature", "C", heads)
+			view, err = MergeStackLocal(ctx, "W", "L", "feature", "C", heads, tyson)
 			if err != nil || (view.Phase != "ready" && view.Phase != "sent") {
 				t.Fatalf("request=%+v err=%v", view, err)
 			}
@@ -106,7 +106,7 @@ func assertBlockedMergeEntry(t *testing.T, item fixture, backend string, heads [
 	if backend == "loom" && view.Layers[0].State != "review_required" {
 		t.Fatalf("review state=%+v", view.Layers[0])
 	}
-	view, err = MergeStackLocal(ctx, "W", "L", "feature", "C", heads)
+	view, err = MergeStackLocal(ctx, "W", "L", "feature", "C", heads, tyson)
 	if err != nil || view.Phase != "blocked" {
 		t.Fatalf("replayed blocked request=%+v err=%v", view, err)
 	}

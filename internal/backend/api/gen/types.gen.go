@@ -163,19 +163,19 @@ func (e BlockedIssueStatus) Valid() bool {
 
 // Defines values for ChangeFeedbackStatus.
 const (
-	Addressed ChangeFeedbackStatus = "addressed"
-	Ignored   ChangeFeedbackStatus = "ignored"
-	Pending   ChangeFeedbackStatus = "pending"
+	ChangeFeedbackStatusAddressed ChangeFeedbackStatus = "addressed"
+	ChangeFeedbackStatusIgnored   ChangeFeedbackStatus = "ignored"
+	ChangeFeedbackStatusPending   ChangeFeedbackStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the ChangeFeedbackStatus enum.
 func (e ChangeFeedbackStatus) Valid() bool {
 	switch e {
-	case Addressed:
+	case ChangeFeedbackStatusAddressed:
 		return true
-	case Ignored:
+	case ChangeFeedbackStatusIgnored:
 		return true
-	case Pending:
+	case ChangeFeedbackStatusPending:
 		return true
 	default:
 		return false
@@ -569,6 +569,51 @@ func (e IssueTabType) Valid() bool {
 	case Sessions:
 		return true
 	case Terminal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MergeActorKind.
+const (
+	MergeActorKindAgent MergeActorKind = "agent"
+	MergeActorKindHuman MergeActorKind = "human"
+	MergeActorKindLead  MergeActorKind = "lead"
+)
+
+// Valid indicates whether the value is a known member of the MergeActorKind enum.
+func (e MergeActorKind) Valid() bool {
+	switch e {
+	case MergeActorKindAgent:
+		return true
+	case MergeActorKindHuman:
+		return true
+	case MergeActorKindLead:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MergeRequestViewStatus.
+const (
+	MergeRequestViewStatusConfirmed MergeRequestViewStatus = "confirmed"
+	MergeRequestViewStatusExpired   MergeRequestViewStatus = "expired"
+	MergeRequestViewStatusPending   MergeRequestViewStatus = "pending"
+	MergeRequestViewStatusStale     MergeRequestViewStatus = "stale"
+)
+
+// Valid indicates whether the value is a known member of the MergeRequestViewStatus enum.
+func (e MergeRequestViewStatus) Valid() bool {
+	switch e {
+	case MergeRequestViewStatusConfirmed:
+		return true
+	case MergeRequestViewStatusExpired:
+		return true
+	case MergeRequestViewStatusPending:
+		return true
+	case MergeRequestViewStatusStale:
 		return true
 	default:
 		return false
@@ -1429,19 +1474,19 @@ func (e StatScopedFileParamsScope) Valid() bool {
 
 // Defines values for GetScopedFileTreeParamsScope.
 const (
-	Agent     GetScopedFileTreeParamsScope = "agent"
-	Repo      GetScopedFileTreeParamsScope = "repo"
-	Workspace GetScopedFileTreeParamsScope = "workspace"
+	GetScopedFileTreeParamsScopeAgent     GetScopedFileTreeParamsScope = "agent"
+	GetScopedFileTreeParamsScopeRepo      GetScopedFileTreeParamsScope = "repo"
+	GetScopedFileTreeParamsScopeWorkspace GetScopedFileTreeParamsScope = "workspace"
 )
 
 // Valid indicates whether the value is a known member of the GetScopedFileTreeParamsScope enum.
 func (e GetScopedFileTreeParamsScope) Valid() bool {
 	switch e {
-	case Agent:
+	case GetScopedFileTreeParamsScopeAgent:
 		return true
-	case Repo:
+	case GetScopedFileTreeParamsScopeRepo:
 		return true
-	case Workspace:
+	case GetScopedFileTreeParamsScopeWorkspace:
 		return true
 	default:
 		return false
@@ -2366,6 +2411,39 @@ type JourneySpan struct {
 	Start         time.Time  `json:"start"`
 	UnknownStart  bool       `json:"unknown_start"`
 }
+
+// MergeActor defines model for MergeActor.
+type MergeActor struct {
+	Id   string         `json:"id"`
+	Kind MergeActorKind `json:"kind"`
+}
+
+// MergeActorKind defines model for MergeActor.Kind.
+type MergeActorKind string
+
+// MergeRequestView defines model for MergeRequestView.
+type MergeRequestView struct {
+	Audit       *string   `json:"audit,omitempty"`
+	ConfirmedBy *string   `json:"confirmed_by,omitempty"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	Id          string    `json:"id"`
+	Layers      []struct {
+		Change string `json:"change"`
+		Checks string `json:"checks"`
+		Head   string `json:"head"`
+		PrUrl  string `json:"pr_url"`
+		Review string `json:"review"`
+	} `json:"layers"`
+	Lead          string                 `json:"lead"`
+	RequestedBy   string                 `json:"requested_by"`
+	RequestedKind string                 `json:"requested_kind"`
+	StackId       string                 `json:"stack_id"`
+	Status        MergeRequestViewStatus `json:"status"`
+	Target        string                 `json:"target"`
+}
+
+// MergeRequestViewStatus defines model for MergeRequestView.Status.
+type MergeRequestViewStatus string
 
 // MergeStackView defines model for MergeStackView.
 type MergeStackView struct {
@@ -3368,6 +3446,18 @@ type GetDiffFileParams struct {
 	Path string `form:"path" json:"path"`
 }
 
+// GitRequestMergeJSONBody defines parameters for GitRequestMerge.
+type GitRequestMergeJSONBody struct {
+	Actor   MergeActor `json:"actor"`
+	StackId string     `json:"stack_id"`
+	Target  string     `json:"target"`
+}
+
+// GitConfirmMergeRequestJSONBody defines parameters for GitConfirmMergeRequest.
+type GitConfirmMergeRequestJSONBody struct {
+	Actor MergeActor `json:"actor"`
+}
+
 // GitMergePreviewParams defines parameters for GitMergePreview.
 type GitMergePreviewParams struct {
 	StackId string `form:"stack_id" json:"stack_id"`
@@ -3376,9 +3466,10 @@ type GitMergePreviewParams struct {
 
 // GitMergeUpToJSONBody defines parameters for GitMergeUpTo.
 type GitMergeUpToJSONBody struct {
-	Heads   []string `json:"heads"`
-	StackId string   `json:"stack_id"`
-	Target  string   `json:"target"`
+	Actor   MergeActor `json:"actor"`
+	Heads   []string   `json:"heads"`
+	StackId string     `json:"stack_id"`
+	Target  string     `json:"target"`
 }
 
 // GitCreatePRJSONBody defines parameters for GitCreatePR.
@@ -3840,6 +3931,12 @@ type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody CreateAgentJSONBody
+
+// GitRequestMergeJSONRequestBody defines body for GitRequestMerge for application/json ContentType.
+type GitRequestMergeJSONRequestBody GitRequestMergeJSONBody
+
+// GitConfirmMergeRequestJSONRequestBody defines body for GitConfirmMergeRequest for application/json ContentType.
+type GitConfirmMergeRequestJSONRequestBody GitConfirmMergeRequestJSONBody
 
 // GitMergeUpToJSONRequestBody defines body for GitMergeUpTo for application/json ContentType.
 type GitMergeUpToJSONRequestBody GitMergeUpToJSONBody

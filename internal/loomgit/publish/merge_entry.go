@@ -33,12 +33,19 @@ type MergeStackView struct {
 }
 
 type confirmedHumanMerge struct {
-	Heads []string
-	Store *journal.SQLite
+	Request journal.MergeRequest
+	Store   *journal.SQLite
 }
 
 func (authority confirmedHumanMerge) AuthorizeMerge(ctx context.Context, request StackRequest, target string) error {
-	if len(authority.Heads) != len(request.Changes) || target == "" {
+	recorded, err := authority.Store.MergeRequest(ctx, request.Workspace, authority.Request.ID)
+	if err != nil {
+		return err
+	}
+	if recorded.Status != "confirmed" || recorded.ConfirmedBy == "" || recorded.StackID != request.StackID || recorded.Target != target {
+		return errors.New("merge request is not confirmed by a human")
+	}
+	if len(recorded.Heads) != len(request.Changes) {
 		return errors.New("confirmation must include every stack head")
 	}
 	for index, change := range request.Changes {
@@ -46,21 +53,45 @@ func (authority confirmedHumanMerge) AuthorizeMerge(ctx context.Context, request
 		if err != nil {
 			return err
 		}
-		if !found || publication.StackID != request.StackID || publication.Head == "" || publication.Head != authority.Heads[index] {
+		if !found || publication.StackID != request.StackID || publication.Head == "" || publication.Head != recorded.Heads[index] {
 			return loomgit.NewError(loomgit.Stale, "confirmed stack head changed", nil)
 		}
 	}
 	return nil
 }
 
-func MergeStackLocal(ctx context.Context, workspace, lead, stackID, target string, heads []string) (MergeStackView, error) {
+// MergeStackLocal is a human's request and confirmation in one call: heads are
+// the exact heads the human saw. Agents use RequestMergeLocal instead.
+func MergeStackLocal(ctx context.Context, workspace, lead, stackID, target string, heads []string, actor MergeActor) (MergeStackView, error) {
 	store, err := openLocalStore()
 	if err != nil {
 		return MergeStackView{}, err
 	}
 	defer func() { _ = store.Close() }()
 	forge, _, _ := localPublishProvider()
-	return mergeStackRecorded(ctx, store, workspace, lead, stackID, target, heads, forge)
+	return mergeStackConfirmed(ctx, store, workspace, lead, stackID, target, heads, actor, forge)
+}
+
+func mergeStackConfirmed(ctx context.Context, store *journal.SQLite, workspace, lead, stackID, target string, heads []string, actor MergeActor, forge Forge) (MergeStackView, error) {
+	if actor.Kind != "human" || actor.ID == "" || actor.ID == lead {
+		return MergeStackView{}, loomgit.NewError(loomgit.MergeNotAuthorized, "a merge can only be confirmed by a human", nil)
+	}
+	request, err := requestMerge(ctx, store, workspace, lead, stackID, target, actor)
+	if err != nil {
+		return MergeStackView{}, err
+	}
+	if len(heads) != len(request.Heads) {
+		return MergeStackView{}, loomgit.NewError(loomgit.MergeNotAuthorized, "confirm every stack head", nil)
+	}
+	for index, head := range heads {
+		if head != request.Heads[index] {
+			if err := store.DecideMergeRequest(ctx, workspace, request.ID, "stale", actor.ID, mergeRequestNow().UnixNano()); err != nil {
+				return MergeStackView{}, err
+			}
+			return MergeStackView{}, loomgit.NewError(loomgit.Stale, "confirmed stack head changed", nil)
+		}
+	}
+	return confirmMergeRequest(ctx, store, workspace, lead, request.ID, actor, forge)
 }
 
 func MergeStackPreviewLocal(ctx context.Context, workspace, lead, stackID, target string) (MergeStackView, error) {
@@ -72,24 +103,20 @@ func MergeStackPreviewLocal(ctx context.Context, workspace, lead, stackID, targe
 	return mergeStackView(ctx, store, workspace, lead, stackID, target)
 }
 
-func mergeStackRecorded(ctx context.Context, store *journal.SQLite, workspace, lead, stackID, target string, heads []string, forge Forge) (MergeStackView, error) {
+func mergeStackRecorded(ctx context.Context, store *journal.SQLite, confirmed journal.MergeRequest, forge Forge) (MergeStackView, error) {
+	workspace, lead, stackID, target := confirmed.Workspace, confirmed.Lead, confirmed.StackID, confirmed.Target
 	view, err := mergeStackView(ctx, store, workspace, lead, stackID, target)
 	if err != nil {
 		return view, err
 	}
-	if len(heads) != len(view.Layers) {
-		return view, loomgit.NewError(loomgit.MergeNotAuthorized, "confirm every stack head", nil)
-	}
-	for index, layer := range view.Layers {
-		if heads[index] != layer.Head {
-			return view, loomgit.NewError(loomgit.Stale, "confirmed stack head changed", nil)
-		}
+	if !sameMergeHeads(view, confirmed.Heads) {
+		return view, loomgit.NewError(loomgit.Stale, "confirmed stack head changed", nil)
 	}
 	request, err := mergeEntryRequest(ctx, store, workspace, lead, stackID, view, forge)
 	if err != nil {
 		return view, err
 	}
-	request.MergeAuthority = confirmedHumanMerge{Heads: heads, Store: store}
+	request.MergeAuthority = confirmedHumanMerge{Request: confirmed, Store: store}
 	var backend StackBackend = LoomStackBackend{Store: store}
 	if view.Backend == "native" {
 		backend = GitHubStackBackend{Store: store}
