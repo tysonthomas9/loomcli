@@ -18,6 +18,8 @@ import {
   gitCreatePR,
   gitMergePreview,
   gitMergeUpTo,
+  gitMergeRequests,
+  gitConfirmMergeRequest,
   gitReset,
   gitResetPreview,
   gitUpdateTarget,
@@ -234,7 +236,22 @@ describe("git API functions", () => {
           stack_id: "feature",
           target: "C",
           heads: ["a", "b", "c", "d"],
+          actor: { kind: "human", id: "local-user" },
         },
+      );
+    });
+
+    it("lists merge requests and confirms one as a human", async () => {
+      mockGet.mockResolvedValue([]);
+      mockPost.mockResolvedValue({ phase: "ready" });
+      await gitMergeRequests("W", "L");
+      await gitConfirmMergeRequest("W", "L", "R1");
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/W/agents/L/git/merge-requests",
+      );
+      expect(mockPost).toHaveBeenCalledWith(
+        "/api/workspaces/W/agents/L/git/merge-requests/R1/confirm",
+        { actor: { kind: "human", id: "local-user" } },
       );
     });
   });
