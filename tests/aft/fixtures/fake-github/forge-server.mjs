@@ -8,20 +8,33 @@ const stacks = [];
 const merges = new Map();
 let remote = "";
 let nativeStacks = false;
+// Multi-repo mode: one bare remote per owner/repo; pulls and GraphQL are per repo.
+let remotes = {};
+const prStatus = new Map();
+const statuses = [];
 
-function branchSha(ref) {
-  if (!remote) return "";
+function remoteFor(key) {
+  return (key && remotes[key]) || remote;
+}
+
+function branchSha(ref, key) {
+  const dir = remoteFor(key);
+  if (!dir) return "";
   try {
-    return execFileSync("git", [`--git-dir=${remote}`, "rev-parse", `refs/heads/${ref}`], { encoding: "utf8" }).trim();
+    return execFileSync("git", [`--git-dir=${dir}`, "rev-parse", `refs/heads/${ref}`], { encoding: "utf8" }).trim();
   } catch {
     return "";
   }
 }
 
 function currentPull(pull) {
-  pull.head.sha = branchSha(pull.head.ref) || pull.head.sha || "";
-  pull.base.sha = branchSha(pull.base.ref) || pull.base.sha || "";
+  pull.head.sha = branchSha(pull.head.ref, pull.repo) || pull.head.sha || "";
+  pull.base.sha = branchSha(pull.base.ref, pull.repo) || pull.base.sha || "";
   return pull;
+}
+
+function inRepo(pull, owner, repo) {
+  return Object.keys(remotes).length === 0 || pull.repo === `${owner}/${repo}`;
 }
 
 function stackView(stack) {
@@ -55,9 +68,17 @@ const server = createServer(async (request, response) => {
       merges.clear();
     }
     remote = body.remote || "";
+    remotes = body.remotes || {};
     nativeStacks = body.native_stacks === true;
+    if (!body.preserve) prStatus.clear();
+    statuses.length = 0;
     return send(response, 200, { ok: true });
   }
+  if (path === "/__pr_status" && request.method === "POST") {
+    prStatus.set(body.number, { ...(prStatus.get(body.number) || {}), ...body });
+    return send(response, 200, prStatus.get(body.number));
+  }
+  if (path === "/__statuses" && request.method === "GET") return send(response, 200, statuses.filter((item) => !url.searchParams.has("sha") || item.sha === url.searchParams.get("sha")));
   if (path === "/__merge" && request.method === "POST") {
     const pull = pulls.find((item) => item.number === body.number);
     if (!pull || pull.state !== "open" || !body.sha) return send(response, 409, { message: "open pull and merge sha required" });
@@ -69,7 +90,7 @@ const server = createServer(async (request, response) => {
 
   requests.push({ method: request.method, path: url.pathname, body });
   const list = path.match(/^\/repos\/([^/]+)\/([^/]+)\/pulls$/);
-  if (list && request.method === "GET") return send(response, 200, pulls.map(currentPull));
+  if (list && request.method === "GET") return send(response, 200, pulls.filter((pull) => inRepo(pull, list[1], list[2])).map(currentPull));
   if (list && request.method === "POST") {
     if (!body.head || !body.base) return send(response, 422, { message: "head and base required" });
     if (pulls.some((item) => item.head.ref === body.head && item.state === "open")) return send(response, 422, { message: "pull already exists" });
@@ -81,8 +102,9 @@ const server = createServer(async (request, response) => {
       html_url: `http://fake-github.local/pulls/${pulls.length + 1}`,
       merged_at: null,
       merge_commit_sha: "",
-      head: { ref: body.head, sha: branchSha(body.head) },
-      base: { ref: body.base, sha: branchSha(body.base) },
+      repo: `${list[1]}/${list[2]}`,
+      head: { ref: body.head, sha: branchSha(body.head, `${list[1]}/${list[2]}`) },
+      base: { ref: body.base, sha: branchSha(body.base, `${list[1]}/${list[2]}`) },
     };
     pulls.push(pull);
     return send(response, 201, pull);
@@ -140,7 +162,7 @@ const server = createServer(async (request, response) => {
       const numbers = stack ? stack.numbers.slice(0, stack.numbers.indexOf(merge.number) + 1) : [merge.number];
       const target = pulls.find((item) => item.number === merge.number);
       const sha = currentPull(target).head.sha;
-      if (remote) execFileSync("git", [`--git-dir=${remote}`, "update-ref", "refs/heads/main", sha]);
+      if (remoteFor(target.repo)) execFileSync("git", [`--git-dir=${remoteFor(target.repo)}`, "update-ref", "refs/heads/main", sha]);
       for (const number of numbers) {
         const pull = pulls.find((item) => item.number === number);
         pull.state = "closed";
@@ -155,12 +177,18 @@ const server = createServer(async (request, response) => {
     return send(response, 200, { status: merge.status, details: merge.details });
   }
   if (path === "/graphql" && request.method === "POST") {
+    const vars = body.variables || {};
     return send(response, 200, { data: { repository: { pullRequests: {
-      nodes: pulls.filter((pull) => pull.state === "open").map((pull) => ({
-        number: pull.number, headRefName: pull.head.ref, mergeable: "MERGEABLE",
-        reviewDecision: "APPROVED", mergeQueueEntry: null,
-        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
-      })),
+      nodes: pulls.filter((pull) => pull.state === "open" && (!vars.owner || inRepo(pull, vars.owner, vars.repo))).map((pull) => {
+        const override = prStatus.get(pull.number) || {};
+        const node = {
+          number: pull.number, headRefName: pull.head.ref, mergeable: "MERGEABLE",
+          reviewDecision: override.review || "APPROVED", mergeQueueEntry: null,
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: override.checks || "SUCCESS" } } }] },
+        };
+        if (override.merge_state) node.mergeStateStatus = override.merge_state;
+        return node;
+      }),
       pageInfo: { hasNextPage: false, endCursor: null },
     } } } });
   }
@@ -170,10 +198,16 @@ const server = createServer(async (request, response) => {
   if (/^\/repos\/[^/]+\/[^/]+\/commits\/[^/]+\/status$/.test(path) && request.method === "GET") {
     return send(response, 200, { statuses: [] });
   }
+  const commitStatus = path.match(/^\/repos\/([^/]+)\/([^/]+)\/statuses\/([^/]+)$/);
+  if (commitStatus && request.method === "POST") {
+    const posted = { repo: `${commitStatus[1]}/${commitStatus[2]}`, sha: commitStatus[3], state: body.state, context: body.context, description: body.description, at: new Date().toISOString() };
+    statuses.push(posted);
+    return send(response, 201, posted);
+  }
   const deletedRef = path.match(/^\/repos\/[^/]+\/[^/]+\/git\/refs\/heads\/(.+)$/);
   if (deletedRef && request.method === "DELETE") {
-    if (remote) {
-      try { execFileSync("git", [`--git-dir=${remote}`, "update-ref", "-d", `refs/heads/${decodeURIComponent(deletedRef[1])}`]); } catch { return send(response, 404, { message: "ref not found" }); }
+    if (remoteFor(path.split("/").slice(2, 4).join("/"))) {
+      try { execFileSync("git", [`--git-dir=${remoteFor(path.split("/").slice(2, 4).join("/"))}`, "update-ref", "-d", `refs/heads/${decodeURIComponent(deletedRef[1])}`]); } catch { return send(response, 404, { message: "ref not found" }); }
     }
     return send(response, 204, "");
   }
