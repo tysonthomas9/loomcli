@@ -1,0 +1,443 @@
+// Package fake is a scripted, in-memory loomharness.Harness for tests. It
+// calls no external service. Tests script each agent's turns (deltas, asks,
+// crashes, event gaps and how delivery looks after a crash) by OpenSpec.Key,
+// then drive the port and read the Feed and Messages.
+//
+// Turns run synchronously inside Prompt and Reply, so events are already on
+// the Feed when those calls return.
+package fake
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
+)
+
+// Step is one scripted step of a turn. Set exactly one of Delta, Ask or Crash.
+type Step struct {
+	Delta string // emits a delta on the turn's message item
+	Ask   string // opens an ask with this ID; the turn waits for Reply
+	Crash bool   // the harness process dies here, mid-turn
+	Gap   bool   // the live Feed misses this step's event (it gets feed.gap); Messages still has it
+}
+
+// Turn is one scripted turn.
+type Turn struct {
+	Steps []Step
+	// Delivery is how the turn's input fares. "" or LandedFound: it lands and
+	// the steps run. LandedNotFound: the harness dies before the input lands.
+	// LandedUnknown: the harness dies and its history cannot tell afterwards.
+	Delivery loomharness.Landed
+	// ResumeContinues: after a crash, Resume emits turn.resumed and runs the
+	// remaining steps (Claude's resume_reason, codex's continued turn).
+	// Otherwise Resume ends the turn as cancelled and loses its open ask.
+	ResumeContinues bool
+}
+
+// feedBuffer bounds each Feed; a test that lets it fill is broken.
+const feedBuffer = 1024
+
+// Harness is the fake. Use New.
+type Harness struct {
+	mu       sync.Mutex
+	down     bool
+	nextID   int
+	byKey    map[string]loomharness.NativeRef
+	sessions map[loomharness.NativeRef]*session
+	scripts  map[string][]Turn
+	feeds    map[*feed]bool
+}
+
+type session struct {
+	ref           loomharness.NativeRef
+	key           string
+	model, dir    string
+	seq           int64
+	turns         int
+	history       []loomharness.Event
+	inputs        map[string]loomharness.Landed
+	turn          Turn
+	turnID        string
+	step          int
+	running       bool
+	ask           string
+	crashed       bool // a turn was running when the harness died; Resume first
+	lastInterrupt bool
+}
+
+var (
+	_ loomharness.Harness = (*Harness)(nil)
+	_ loomharness.Session = (*sessionHandle)(nil)
+)
+
+// New returns a running fake harness.
+func New() *Harness {
+	return &Harness{
+		byKey:    map[string]loomharness.NativeRef{},
+		sessions: map[loomharness.NativeRef]*session{},
+		scripts:  map[string][]Turn{},
+		feeds:    map[*feed]bool{},
+	}
+}
+
+// Script queues turns for the agent opened with key. Each Prompt takes the
+// next one; with none queued a turn emits one "ok" delta.
+func (h *Harness) Script(key string, turns ...Turn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.scripts[key] = append(h.scripts[key], turns...)
+}
+
+func (h *Harness) Name() string { return "fake" }
+
+func (h *Harness) Models(context.Context) ([]loomharness.Model, error) {
+	return []loomharness.Model{{ID: "fake-model", Name: "Fake model"}}, nil
+}
+
+func (h *Harness) Health(context.Context) (loomharness.Health, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return loomharness.Health{OK: !h.down, Version: loomharness.VersionCheck{Harness: "fake"}}, nil
+}
+
+func (h *Harness) Open(_ context.Context, spec loomharness.OpenSpec) (loomharness.NativeRef, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.down {
+		return loomharness.NativeRef{}, loomharness.ErrUnavailable
+	}
+	if ref, ok := h.byKey[spec.Key]; ok {
+		return ref, nil
+	}
+	h.nextID++
+	ref := loomharness.NativeRef{Root: spec.Launch.Root, NativeID: "fake_ses_" + strconv.Itoa(h.nextID)}
+	h.byKey[spec.Key] = ref
+	h.sessions[ref] = &session{ref: ref, key: spec.Key, model: spec.Model, dir: spec.Dir, inputs: map[string]loomharness.Landed{}}
+	return ref, nil
+}
+
+func (h *Harness) Session(ref loomharness.NativeRef) loomharness.Session {
+	return &sessionHandle{h: h, ref: ref}
+}
+
+// Feed returns a live feed. It ends when the harness crashes or restarts, or ctx ends.
+func (h *Harness) Feed(ctx context.Context) (loomharness.Feed, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.down {
+		return nil, loomharness.ErrUnavailable
+	}
+	f := &feed{h: h, ch: make(chan loomharness.Event, feedBuffer)}
+	h.feeds[f] = true
+	context.AfterFunc(ctx, func() { _ = f.Close() })
+	return f, nil
+}
+
+// Purge deletes exactly the given refs.
+func (h *Harness) Purge(_ context.Context, owned []loomharness.NativeRef) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, ref := range owned {
+		if s, ok := h.sessions[ref]; ok {
+			delete(h.byKey, s.key)
+			delete(h.sessions, ref)
+		}
+	}
+	return nil
+}
+
+// Restart stops and starts the harness; running turns die as in a crash.
+func (h *Harness) Restart(context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.crash()
+	h.down = false
+	return nil
+}
+
+// Crash kills the harness now, as a Crash step does. Calls fail with
+// ErrUnavailable until Restart.
+func (h *Harness) Crash() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.crash()
+}
+
+func (h *Harness) crash() {
+	h.down = true
+	for _, s := range h.sessions {
+		if s.running {
+			s.crashed = true
+		}
+	}
+	for f := range h.feeds {
+		f.closeLocked()
+	}
+}
+
+// emit records e in the session's history and sends it to live feeds,
+// or sends feed.gap instead when live is false.
+func (h *Harness) emit(s *session, e loomharness.Event, live bool) {
+	s.seq++
+	e.Session, e.Seq, e.Time, e.TurnID = s.ref, s.seq, time.Now(), s.turnID
+	if e.ItemID == "" {
+		e.ItemID = s.ref.NativeID + "/" + strconv.FormatInt(s.seq, 10)
+	}
+	s.history = append(s.history, e)
+	if !live {
+		e = loomharness.Event{Type: loomharness.EventFeedGap, Session: s.ref, Seq: s.seq - 1, Time: e.Time}
+	}
+	for f := range h.feeds {
+		select {
+		case f.ch <- e:
+		default:
+			panic("fake: feed buffer full; read the Feed")
+		}
+	}
+}
+
+// run plays the current turn's steps until it ends, waits on an ask or crashes.
+func (h *Harness) run(s *session) {
+	for s.step < len(s.turn.Steps) {
+		st := s.turn.Steps[s.step]
+		s.step++
+		switch {
+		case st.Crash:
+			h.crash()
+			return
+		case st.Ask != "":
+			s.ask = st.Ask
+			h.emit(s, loomharness.Event{Type: loomharness.EventAskOpened, AskID: st.Ask}, !st.Gap)
+			return
+		default:
+			h.emit(s, loomharness.Event{Type: loomharness.EventDelta, ItemID: s.turnID + "/msg", ItemKind: "message", Text: st.Delta}, !st.Gap)
+		}
+	}
+	h.endTurn(s, "completed")
+}
+
+func (h *Harness) endTurn(s *session, reason string) {
+	if s.ask != "" {
+		h.emit(s, loomharness.Event{Type: loomharness.EventAskLost, AskID: s.ask}, true)
+		s.ask = ""
+	}
+	s.running, s.crashed = false, false
+	s.lastInterrupt = reason == "cancelled"
+	h.emit(s, loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: reason}, true)
+}
+
+// lookup returns the live session for ref, under h.mu.
+func (h *Harness) lookup(ref loomharness.NativeRef) (*session, error) {
+	if h.down {
+		return nil, loomharness.ErrUnavailable
+	}
+	s, ok := h.sessions[ref]
+	if !ok {
+		return nil, fmt.Errorf("fake %s: %w", ref.NativeID, loomharness.ErrSessionNotFound)
+	}
+	return s, nil
+}
+
+type feed struct {
+	h      *Harness
+	ch     chan loomharness.Event
+	closed bool
+}
+
+func (f *feed) Events() <-chan loomharness.Event { return f.ch }
+
+func (f *feed) Close() error {
+	f.h.mu.Lock()
+	defer f.h.mu.Unlock()
+	f.closeLocked()
+	return nil
+}
+
+func (f *feed) closeLocked() {
+	if !f.closed {
+		f.closed = true
+		close(f.ch)
+		delete(f.h.feeds, f)
+	}
+}
+
+type sessionHandle struct {
+	h   *Harness
+	ref loomharness.NativeRef
+}
+
+// Resume recovers the session under the same root. A turn cut off by a crash
+// either continues (Turn.ResumeContinues) or ends cancelled with its ask lost.
+func (x *sessionHandle) Resume(_ context.Context, l loomharness.Launch) (loomharness.NativeRef, error) {
+	x.h.mu.Lock()
+	defer x.h.mu.Unlock()
+	s, err := x.h.lookup(x.ref)
+	if err != nil {
+		return loomharness.NativeRef{}, err
+	}
+	if l.Root != s.ref.Root {
+		return loomharness.NativeRef{}, fmt.Errorf("fake %s not under root %q: %w", s.ref.NativeID, l.Root, loomharness.ErrSessionNotFound)
+	}
+	if s.crashed {
+		s.crashed = false
+		if s.turn.ResumeContinues {
+			x.h.emit(s, loomharness.Event{Type: loomharness.EventTurnResumed}, true)
+			if s.ask == "" {
+				x.h.run(s)
+			}
+		} else {
+			x.h.endTurn(s, "cancelled")
+		}
+	}
+	return s.ref, nil
+}
+
+func (x *sessionHandle) Prompt(_ context.Context, in loomharness.Input) error {
+	h := x.h
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s, err := h.lookup(x.ref)
+	if err != nil {
+		return err
+	}
+	if s.crashed {
+		return fmt.Errorf("fake %s: Resume after the crash first: %w", s.ref.NativeID, loomharness.ErrBusy)
+	}
+	if s.running {
+		return loomharness.ErrBusy
+	}
+	t := Turn{Steps: []Step{{Delta: "ok"}}}
+	if q := h.scripts[s.key]; len(q) > 0 {
+		t, h.scripts[s.key] = q[0], q[1:]
+	}
+	if t.Delivery == loomharness.LandedNotFound || t.Delivery == loomharness.LandedUnknown {
+		if t.Delivery == loomharness.LandedUnknown {
+			s.inputs[in.Key] = loomharness.LandedUnknown
+		}
+		h.crash()
+		return nil
+	}
+	s.turns++
+	s.turn, s.turnID, s.step = t, s.ref.NativeID+"/turn_"+strconv.Itoa(s.turns), 0
+	s.running, s.lastInterrupt = true, false
+	s.inputs[in.Key] = loomharness.LandedFound
+	h.emit(s, loomharness.Event{Type: loomharness.EventMessageDelivered, InputKey: in.Key, Text: in.Text}, true)
+	h.emit(s, loomharness.Event{Type: loomharness.EventTurnStarted}, true)
+	h.run(s)
+	return nil
+}
+
+func (x *sessionHandle) Interrupt(context.Context) (bool, error) {
+	x.h.mu.Lock()
+	defer x.h.mu.Unlock()
+	s, err := x.h.lookup(x.ref)
+	if err != nil || !s.running || s.crashed {
+		return false, err
+	}
+	x.h.endTurn(s, "cancelled")
+	return true, nil
+}
+
+func (x *sessionHandle) Reply(_ context.Context, askID string, r loomharness.Reply) error {
+	x.h.mu.Lock()
+	defer x.h.mu.Unlock()
+	s, err := x.h.lookup(x.ref)
+	if err != nil {
+		return err
+	}
+	if s.crashed || s.ask == "" || s.ask != askID {
+		return fmt.Errorf("fake %s: no open ask %q", s.ref.NativeID, askID)
+	}
+	s.ask = ""
+	x.h.emit(s, loomharness.Event{Type: loomharness.EventAskResolved, AskID: askID, Text: r.Answer}, true)
+	x.h.run(s)
+	return nil
+}
+
+// HasInput is found once an input landed, unknown when the scripted crash
+// hid it, and not_found otherwise.
+func (x *sessionHandle) HasInput(_ context.Context, key string) (loomharness.Landed, error) {
+	x.h.mu.Lock()
+	defer x.h.mu.Unlock()
+	s, err := x.h.lookup(x.ref)
+	if err != nil {
+		return "", err
+	}
+	if l, ok := s.inputs[key]; ok {
+		return l, nil
+	}
+	return loomharness.LandedNotFound, nil
+}
+
+// Messages pages the session history; the cursor is the last Seq read.
+func (x *sessionHandle) Messages(_ context.Context, after string, limit int) (loomharness.MessagePage, error) {
+	x.h.mu.Lock()
+	defer x.h.mu.Unlock()
+	s, err := x.h.lookup(x.ref)
+	if err != nil {
+		return loomharness.MessagePage{}, err
+	}
+	var from int64
+	if after != "" {
+		if from, err = strconv.ParseInt(after, 10, 64); err != nil {
+			return loomharness.MessagePage{}, fmt.Errorf("fake: bad cursor %q: %w", after, err)
+		}
+	}
+	var page loomharness.MessagePage
+	for _, e := range s.history {
+		if e.Seq <= from {
+			continue
+		}
+		if limit > 0 && len(page.Events) == limit {
+			page.Next = strconv.FormatInt(page.Events[limit-1].Seq, 10)
+			break
+		}
+		page.Events = append(page.Events, e)
+	}
+	return page, nil
+}
+
+func (x *sessionHandle) Status(context.Context) (loomharness.Status, error) {
+	x.h.mu.Lock()
+	defer x.h.mu.Unlock()
+	s, err := x.h.lookup(x.ref)
+	if err != nil {
+		return loomharness.Status{}, err
+	}
+	st := loomharness.Status{Running: s.running && !s.crashed, LastTurnInterrupt: s.lastInterrupt}
+	if st.Running {
+		st.TurnID = s.turnID
+	}
+	return st, nil
+}
+
+func (x *sessionHandle) SetModel(_ context.Context, model string) error {
+	return x.idle(func(s *session) { s.model = model }, false)
+}
+
+func (x *sessionHandle) Move(_ context.Context, dir string) error {
+	return x.idle(func(s *session) { s.dir = dir }, true)
+}
+
+func (x *sessionHandle) Unload(context.Context) error { return x.idle(func(*session) {}, true) }
+
+func (x *sessionHandle) Close(context.Context) error { return x.idle(func(*session) {}, false) }
+
+// idle applies fn to the session, refusing with ErrBusy mid-turn when needIdle.
+func (x *sessionHandle) idle(fn func(*session), needIdle bool) error {
+	x.h.mu.Lock()
+	defer x.h.mu.Unlock()
+	s, err := x.h.lookup(x.ref)
+	if err != nil {
+		return err
+	}
+	if needIdle && (s.running || s.crashed) {
+		return loomharness.ErrBusy
+	}
+	fn(s)
+	return nil
+}
