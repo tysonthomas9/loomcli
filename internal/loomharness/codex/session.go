@@ -207,8 +207,9 @@ func (s *Session) Unload(ctx context.Context) error {
 	return err
 }
 
-// Close keeps the thread and stops nothing: the app-server is shared.
-func (s *Session) Close(context.Context) error { return nil }
+// Close frees what Unload frees and stops nothing else: the app-server is
+// shared, and the thread and its history are kept.
+func (s *Session) Close(ctx context.Context) error { return s.Unload(ctx) }
 
 // Resume (4.2b) must install the rules first; until then it fails and
 // nothing runs.

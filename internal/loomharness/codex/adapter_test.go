@@ -771,7 +771,7 @@ func TestCodexSlowCleanupDoesNotBlockOpen(t *testing.T) {
 	}
 }
 
-// TestCodexIdleUnloadAndRestart: Unload leaves an active turn and its
+// TestCodexIdleUnloadAndRestart: Unload (and Close) leaves an active turn and its
 // pending approval alone; it frees the opened record of a thread with a first
 // message, which Open then finds by name, and keeps that of one without, so
 // Open stays idempotent; the next Prompt works. Once nothing runs and no ask
@@ -818,23 +818,32 @@ func TestCodexIdleUnloadAndRestart(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "turns-"+used.NativeID+".json"), []byte(`{"data":[{"id":"u1","status":"completed","items":[]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, ref := range []loomharness.NativeRef{fresh, used} {
-		if err := a.Session(ref).Unload(ctx); err != nil {
-			t.Fatal(err)
-		}
-	}
 	a.openMu.Lock()
-	kept := slices.Collect(maps.Values(a.opened))
+	opened := maps.Clone(a.opened) // both records; an Open that finds a thread by name records nothing
 	a.openMu.Unlock()
-	if !slices.Equal(kept, []string{fresh.NativeID}) {
-		t.Fatalf("opened records after Unload %v, want only %s", kept, fresh.NativeID)
-	}
-	for _, c := range []struct {
-		key string
-		ref loomharness.NativeRef
-	}{{"fresh", fresh}, {"used", used}} {
-		if again, err := a.Open(ctx, spec(c.key, "/work", "")); err != nil || again != c.ref {
-			t.Fatalf("Open %s after Unload: %+v %v, want %+v", c.key, again, err, c.ref)
+	for _, free := range []string{"Unload", "Close"} { // Close frees what Unload frees
+		a.openMu.Lock()
+		a.opened = maps.Clone(opened)
+		a.openMu.Unlock()
+		for _, ref := range []loomharness.NativeRef{fresh, used} {
+			s := a.Session(ref)
+			if err := map[string]func(context.Context) error{"Unload": s.Unload, "Close": s.Close}[free](ctx); err != nil {
+				t.Fatal(free, err)
+			}
+		}
+		a.openMu.Lock()
+		kept := slices.Collect(maps.Values(a.opened))
+		a.openMu.Unlock()
+		if !slices.Equal(kept, []string{fresh.NativeID}) {
+			t.Fatalf("opened records after %s %v, want only %s", free, kept, fresh.NativeID)
+		}
+		for _, c := range []struct {
+			key string
+			ref loomharness.NativeRef
+		}{{"fresh", fresh}, {"used", used}} {
+			if again, err := a.Open(ctx, spec(c.key, "/work", "")); err != nil || again != c.ref {
+				t.Fatalf("Open %s after %s: %+v %v, want %+v", c.key, free, again, err, c.ref)
+			}
 		}
 	}
 	if n := len(loadStore(root).Threads); n != 3 {
