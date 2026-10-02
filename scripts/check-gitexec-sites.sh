@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Only gitexec runs git (Loom Git design §5 rule 1). Production code outside
+# Only gitexec runs git (Loom Git design §5 rule 1). Production code anywhere
+# in the repo (all non-test Go files, vendored and generated trees skipped) outside
 # internal/loomgit/internal/gitexec may not call exec.Command("git", ...).
 # The list holds the remaining legacy callers with exact site counts; it may
 # only shrink. Unit tests are covered by check-no-raw-exec.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+skip=(--exclude-dir=node_modules --exclude-dir=vendor --exclude-dir=third_party --exclude-dir=.git --exclude-dir=worktrees --exclude-dir=dist)
 
 allowed='internal/cli/daemon/seed_worktree_cmd.go:1
 internal/cli/exec.go:1
@@ -16,9 +18,9 @@ internal/localworkspace/localworkspace.go:2
 internal/skillmat/materialize.go:1
 internal/stackpublish/gitutil.go:1'
 
-actual=$(grep -rEc --include='*.go' --exclude='*_test.go' \
-	'exec\.Command(Context)?\(([A-Za-z_][A-Za-z0-9_.]*(\(\))?, )?"git"' internal cmd |
-	grep -v ':0$' | grep -v '^internal/loomgit/internal/gitexec/' | sort || true)
+actual=$(grep -rEc --include='*.go' --exclude='*_test.go' "${skip[@]}" \
+	'exec\.Command(Context)?\(([A-Za-z_][A-Za-z0-9_.]*(\(\))?, )?"git"' . |
+	grep -v ':0$' | sed 's#^\./##' | grep -v '^internal/loomgit/internal/gitexec/' | sort || true)
 allowed=$(printf '%s\n' "$allowed" | sort)
 
 if [ "$actual" != "$allowed" ]; then
@@ -33,9 +35,9 @@ fi
 allowed_writes='internal/cli/git/git_deps.go:1
 internal/cli/git/reset_safety.go:1'
 writes=$(grep -rEc --include='*.go' --include='*.ts' --include='*.mjs' --exclude='*_test.go' \
-	--exclude='*.test.*' --exclude-dir=node_modules \
-	'"push"[^])]*"(--force|-f)"|"clean", *"-[a-z]*f|"reset", *"--hard"' internal cmd |
-	grep -v ':0$' | grep -v '^internal/loomgit/internal/gitexec/' | sort || true)
+	--exclude='*.test.*' "${skip[@]}" \
+	'"push"[^])]*"(--force|-f)"|"clean", *"-[a-z]*f|"reset", *"--hard"' . |
+	grep -v ':0$' | sed 's#^\./##' | grep -v '^internal/loomgit/internal/gitexec/' | sort || true)
 if [ "$writes" != "$allowed_writes" ]; then
 	echo "force push, clean -f or reset --hard sites changed (want left, got right):" >&2
 	diff <(printf '%s\n' "$allowed_writes") <(printf '%s\n' "$writes") >&2 || true
