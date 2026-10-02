@@ -251,3 +251,94 @@ func (s *Store) CompareAndSetState(ctx context.Context, agentID string, from, to
 	}
 	return nil
 }
+
+// AgentFilter selects agents for ListAgents. Empty fields match anything.
+// Archived agents are left out unless included or filtered by
+// state; deleted agents unless included.
+type AgentFilter struct {
+	WorkspaceID, OwnerKind, OwnerID, Parent, Root, Preset, Mode, Harness, RoleKind, State string
+	SubjectType, SubjectID, ExternalKeyPrefix, Name                                       string
+	IncludeArchived, IncludeDeleted                                                       bool
+	After                                                                                 string // cursor: the last agent_id of the previous page
+	Limit                                                                                 int    // 0 means no limit
+}
+
+// ListAgents returns one page of agents matching f in agent_id order, and the
+// cursor of the next page ("" on the last page).
+func (s *Store) ListAgents(ctx context.Context, f AgentFilter) ([]Agent, string, error) {
+	where, args := []string{"agent_id > ?"}, []any{f.After}
+	for col, v := range map[string]string{"workspace_id": f.WorkspaceID, "owner_kind": f.OwnerKind,
+		"owner_id": f.OwnerID, "parent_agent_id": f.Parent, "root_agent_id": f.Root, "preset": f.Preset,
+		"mode": f.Mode, "harness": f.Harness, "role_kind": f.RoleKind, "state": f.State,
+		"subject_type": f.SubjectType, "subject_id": f.SubjectID, "name": f.Name} {
+		if v != "" {
+			where, args = append(where, col+" = ?"), append(args, v)
+		}
+	}
+	if f.ExternalKeyPrefix != "" {
+		where = append(where, "substr(external_key, 1, length(?)) = ?")
+		args = append(args, f.ExternalKeyPrefix, f.ExternalKeyPrefix)
+	}
+	if !f.IncludeArchived && f.State == "" {
+		where = append(where, "state <> 'archived'")
+	}
+	if !f.IncludeDeleted {
+		where = append(where, "deleted_at IS NULL")
+	}
+	q := "SELECT " + agentCols + " FROM agents WHERE " + strings.Join(where, " AND ") + " ORDER BY agent_id" //nolint:gosec // G202: constant column names and placeholders only.
+	if f.Limit > 0 {
+		q += " LIMIT ?"
+		args = append(args, f.Limit+1)
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...) //nolint:gosec // G202: constant column names and placeholders only.
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Agent
+	for rows.Next() {
+		var a Agent
+		if err := rows.Scan(a.fields()...); err != nil {
+			return nil, "", err
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+		return out, out[f.Limit-1].AgentID, nil
+	}
+	return out, "", nil
+}
+
+// SetArchive records agentID's archive reason and starts its R29 clock at
+// `at`, keeping an earlier start so a retried Archive never moves it. A nil
+// `at` clears both (Unarchive cancels the clock).
+func (s *Store) SetArchive(ctx context.Context, agentID string, reason *string, at *time.Time) error {
+	var stamp *string
+	if at != nil {
+		v := Stamp(*at)
+		stamp = &v
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET archive_reason = ?,
+		archived_at = CASE WHEN ? IS NULL THEN NULL ELSE COALESCE(archived_at, ?) END, updated_at = ?
+		WHERE agent_id = ?`, reason, stamp, stamp, Stamp(time.Now()), agentID)
+	return err
+}
+
+// MarkDeleteRequested flags agentID as being deleted, so Reconcile finishes a
+// Delete that crashed midway.
+func (s *Store) MarkDeleteRequested(ctx context.Context, agentID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET delete_requested = 1, updated_at = ? WHERE agent_id = ?`,
+		Stamp(time.Now()), agentID)
+	return err
+}
+
+// Tombstone marks agentID deleted at now, keeping an earlier tombstone.
+func (s *Store) Tombstone(ctx context.Context, agentID string, now time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET deleted_at = COALESCE(deleted_at, ?), updated_at = ?
+		WHERE agent_id = ?`, Stamp(now), Stamp(now), agentID)
+	return err
+}

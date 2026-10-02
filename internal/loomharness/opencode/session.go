@@ -28,9 +28,9 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		body["model"] = map[string]string{"providerID": provider, "id": model}
 	}
 	if len(spec.Rules) > 0 {
-		rules := make([]map[string]string, len(spec.Rules))
-		for i, r := range spec.Rules {
-			rules[i] = map[string]string{"action": r.Action, "resource": r.Resource, "effect": r.Effect}
+		rules, err := nativeRules(spec.Rules)
+		if err != nil {
+			return loomharness.NativeRef{}, err
 		}
 		body["permissions"] = rules
 	}
@@ -42,6 +42,34 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		return loomharness.NativeRef{}, err
 	}
 	return ref, nil
+}
+
+// nativeActions maps Loom's permission actions to the actions OpenCode
+// b30c4d0 asserts: packages/core/src/tool/plugin/shell.ts asserts "shell";
+// edit.ts, write.ts and patch.ts assert "edit"; file-access.ts asserts
+// "read" and grep.ts and glob.ts assert "grep" and "glob", which only read.
+var nativeActions = map[string][]string{
+	"*":    {"*"},
+	"read": {"read", "grep", "glob"},
+	"edit": {"edit"},
+	"bash": {"shell"},
+}
+
+// nativeRules renders Loom rules as OpenCode rules, keeping their order
+// (both evaluate last match wins). A rule with no OpenCode action fails the
+// whole Open: it is never dropped or widened.
+func nativeRules(rules []loomharness.PermissionRule) ([]map[string]string, error) {
+	var out []map[string]string
+	for _, r := range rules {
+		actions, ok := nativeActions[r.Action]
+		if !ok {
+			return nil, &Error{Code: "bad_request", Message: fmt.Sprintf("permission action %q has no OpenCode equivalent; refusing to open the session", r.Action)}
+		}
+		for _, a := range actions {
+			out = append(out, map[string]string{"action": a, "resource": r.Resource, "effect": r.Effect})
+		}
+	}
+	return out, nil
 }
 
 // Purge deletes exactly the given recorded sessions; one already gone is fine.
@@ -117,7 +145,9 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 	return out, nil
 }
 
-// Status reports whether the session has a running execution.
+// Status reports whether the session has a running execution and whether
+// its newest finished turn was interrupted. OpenCode has no turn id outside
+// the live feed, so TurnID stays empty.
 func (s *Session) Status(ctx context.Context) (loomharness.Status, error) {
 	var active struct {
 		Data map[string]struct {
@@ -128,7 +158,32 @@ func (s *Session) Status(ctx context.Context) (loomharness.Status, error) {
 		return loomharness.Status{}, err
 	}
 	st, ok := active.Data[s.ref.NativeID]
-	return loomharness.Status{Running: ok && st.Type != "idle"}, nil
+	outcome, err := s.lastOutcome(ctx)
+	if err != nil {
+		return loomharness.Status{}, err
+	}
+	return loomharness.Status{Running: ok && st.Type != "idle", LastTurnInterrupt: outcome == "interrupted"}, nil
+}
+
+// lastOutcome is the outcome of the newest idle message (a finished turn),
+// read newest first; "" when no turn has finished.
+func (s *Session) lastOutcome(ctx context.Context) (string, error) {
+	q := "order=desc&limit=50"
+	for {
+		var page messagePage
+		if err := s.c.call(ctx, "GET", s.path("/message?"+q), nil, &page); err != nil {
+			return "", fmt.Errorf("list messages: %w", err)
+		}
+		for _, m := range page.Data {
+			if m.Type == "idle" {
+				return m.Outcome, nil
+			}
+		}
+		if len(page.Data) < 50 || page.Cursor.Next == "" {
+			return "", nil
+		}
+		q = "limit=50&cursor=" + url.QueryEscape(page.Cursor.Next)
+	}
 }
 
 // Move points the session at dir, which must exist.

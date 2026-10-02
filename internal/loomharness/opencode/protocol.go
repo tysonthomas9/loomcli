@@ -58,8 +58,8 @@ func digest(s string) string {
 }
 
 // Error is a translated OpenCode error response. Code is the adapter code
-// from design v2 §8.1.4: harness_down, ask_missing, session_missing,
-// input_id_conflict or bad_request.
+// from design v2 §8.1.4: harness_down, auth_failed, ask_missing,
+// session_missing, input_id_conflict or bad_request.
 type Error struct {
 	Status  int
 	Code    string
@@ -74,7 +74,7 @@ func (e *Error) Error() string {
 // Unwrap lets callers match the port sentinels with errors.Is.
 func (e *Error) Unwrap() error {
 	switch e.Code {
-	case "harness_down":
+	case "harness_down", "auth_failed":
 		return loomharness.ErrUnavailable
 	case "session_missing":
 		return loomharness.ErrSessionNotFound
@@ -92,6 +92,8 @@ func translate(status int, body []byte) error {
 	switch {
 	case status >= 500:
 		e.Code = "harness_down"
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		e.Code = "auth_failed"
 	case b.Tag == "PermissionNotFoundError", b.Tag == "FormNotFoundError", b.Tag == "FormAlreadySettledError":
 		e.Code = "ask_missing"
 	case b.Tag == "SessionNotFoundError" || status == http.StatusNotFound:

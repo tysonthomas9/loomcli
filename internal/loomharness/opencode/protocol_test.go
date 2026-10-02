@@ -177,7 +177,7 @@ func TestProtocolSessionMethods(t *testing.T) {
 	spec := loomharness.OpenSpec{
 		Key: "agent-1", Launch: loomharness.Launch{Root: "/root"}, Dir: "/repo", Model: "openai/gpt-x",
 		Preset: loomharness.PresetConfig{Name: "lead"}, Metadata: map[string]string{"agent_id": "agent-1"},
-		Rules: []loomharness.PermissionRule{{Action: "shell", Resource: "*", Effect: "ask"}},
+		Rules: []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}},
 	}
 	ref, err := c.Open(ctx, spec)
 	if err != nil {
@@ -350,5 +350,43 @@ func TestProtocolErrorTranslation(t *testing.T) {
 	down := NewClient("http://127.0.0.1:1", "pw")
 	if _, err := down.Session(loomharness.NativeRef{NativeID: "ses_x"}).Status(context.Background()); !errors.Is(err, loomharness.ErrUnavailable) {
 		t.Fatalf("connection refused = %v", err)
+	}
+}
+
+func TestProtocolPolicyTranslation(t *testing.T) {
+	got, err := nativeRules([]loomharness.PermissionRule{
+		{Action: "*", Resource: "*", Effect: "deny"},
+		{Action: "read", Resource: "*", Effect: "allow"},
+		{Action: "bash", Resource: "gh *", Effect: "deny"},
+		{Action: "edit", Resource: "*", Effect: "ask"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flat []string
+	for _, r := range got {
+		flat = append(flat, r["action"]+":"+r["resource"]+":"+r["effect"])
+	}
+	want := []string{"*:*:deny", "read:*:allow", "grep:*:allow", "glob:*:allow", "shell:gh *:deny", "edit:*:ask"}
+	if strings.Join(flat, ",") != strings.Join(want, ",") {
+		t.Fatalf("native rules = %v; want %v (order kept)", flat, want)
+	}
+
+	st := newStore()
+	c := fakeServer(t, st)
+	_, err = c.Open(context.Background(), loomharness.OpenSpec{Key: "a", Rules: []loomharness.PermissionRule{
+		{Action: "bash", Resource: "*", Effect: "allow"}, {Action: "agent_create", Resource: "*", Effect: "deny"},
+	}})
+	if !isCode(err, "bad_request") || !strings.Contains(err.Error(), "agent_create") || len(st.sessions) != 0 {
+		t.Fatalf("Open with an unmappable rule = %v, sessions %d; want refused before any call", err, len(st.sessions))
+	}
+}
+
+func TestProtocolAuthErrors(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		err := translate(status, []byte(`{"_tag":"UnauthorizedError","message":"Authentication required"}`))
+		if !isCode(err, "auth_failed") || !errors.Is(err, loomharness.ErrUnavailable) {
+			t.Fatalf("%d -> %v; want auth_failed", status, err)
+		}
 	}
 }

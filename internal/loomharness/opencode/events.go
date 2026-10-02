@@ -144,12 +144,22 @@ type wireEvent struct {
 		Metadata           struct {
 			Notice string `json:"notice"`
 		} `json:"metadata"`
+		Form struct {
+			ID        string `json:"id"`
+			SessionID string `json:"sessionID"`
+		} `json:"form"` // form.created
 	} `json:"data"`
 }
 
 func (m *mapper) mapEvent(raw []byte) (loomharness.Event, bool) {
 	var w wireEvent
-	if json.Unmarshal(raw, &w) != nil || w.Data.SessionID == "" {
+	if json.Unmarshal(raw, &w) != nil {
+		return loomharness.Event{}, false
+	}
+	if w.Type == "form.created" {
+		w.Data.SessionID, w.Data.ID = w.Data.Form.SessionID, w.Data.Form.ID
+	}
+	if w.Data.SessionID == "" {
 		return loomharness.Event{}, false
 	}
 	if w.Durable != nil {
@@ -201,8 +211,10 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 	case "session.execution.succeeded", "session.execution.interrupted", "session.execution.failed":
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
 		delete(m.turn, sid)
-	case "permission.asked":
+	case "permission.asked", "form.created":
 		e.Type, e.AskID = loomharness.EventAskOpened, d.ID
+	case "form.replied", "form.cancelled":
+		e.Type, e.AskID = loomharness.EventAskResolved, d.ID
 	case "permission.replied":
 		e.Type, e.AskID = loomharness.EventAskResolved, d.RequestID
 	case "session.synthetic":

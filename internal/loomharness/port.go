@@ -18,7 +18,7 @@ type Harness interface {
 	Health(ctx context.Context) (Health, error)
 	Open(ctx context.Context, spec OpenSpec) (NativeRef, error) // idempotent by spec.Key
 	Session(ref NativeRef) Session
-	Feed(ctx context.Context) (Feed, error) // live events for all sessions; ends on disconnect
+	Feed(ctx context.Context) (Feed, error) // live events for all sessions; reconnects itself and emits feed.gap, ends only on ctx or Close
 	// Purge deletes exactly the recorded refs it is given, never more, and
 	// never resolves a root itself.
 	Purge(ctx context.Context, owned []NativeRef) error
@@ -101,11 +101,12 @@ const (
 	LandedUnknown  Landed = "unknown"
 )
 
-// Status is the session's run state.
+// Status is the session's run state. TurnID is empty when the harness has no
+// turn id outside its live feed (OpenCode); its Interrupt needs none.
 type Status struct {
 	Running           bool
 	TurnID            string
-	LastTurnInterrupt bool
+	LastTurnInterrupt bool // the newest finished turn was interrupted
 }
 
 // Model is one model the harness offers.

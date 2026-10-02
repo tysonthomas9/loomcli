@@ -12,6 +12,9 @@ const (
 	EventSettled          = "agent.settled"
 	EventAttentionRaised  = "attention.raised"
 	EventAttentionCleared = "attention.cleared"
+	EventArchived         = "agent.archived" // Reason: done | cancelled
+	EventDeleted          = "agent.deleted"
+	EventWithdrawn        = "message.withdrawn" // Reason: the sender
 )
 
 // Event is one live service event. Watchers subscribe first, then Get the

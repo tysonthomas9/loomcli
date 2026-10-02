@@ -31,11 +31,13 @@ const (
 )
 
 // Error is a loomagent error. Allowed lists the accepted values for
-// preset_invalid.
+// preset_invalid; Paths and Fingerprint describe unsaved_work.
 type Error struct {
-	Code    Code
-	Message string
-	Allowed []string
+	Code        Code
+	Message     string
+	Allowed     []string
+	Paths       []string
+	Fingerprint string
 }
 
 func (e *Error) Error() string {
@@ -102,7 +104,7 @@ type CreateRequest struct {
 	FirstMessage string
 	// Bridge is set only by Loom's host-owned bridge wiring, never from a
 	// request body or any model or agent input.
-	Bridge BridgeCaps
+	Bridge BridgeCaps `json:"-"`
 }
 
 // BridgeCaps are the agent's Loom bridge capabilities that replace gh and git push.
