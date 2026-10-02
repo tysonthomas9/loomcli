@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/replay"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
+	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -185,6 +186,25 @@ func taskFeatureFlag(ctx context.Context, workspace, task string) (string, error
 		return "", fmt.Errorf("task %s is unavailable", task)
 	}
 	return featureFlagFromLabels(detail.Labels)
+}
+
+// IssuePredecessors reads the tasks a task is blocked by from the workspace's
+// issue backend.
+func IssuePredecessors(ctx context.Context, workspace, task string) ([]string, error) {
+	detail, err := cli.DefaultIssueBackend().Get(middleware.WithWorkspace(ctx, workspace), task)
+	if err != nil {
+		return nil, fmt.Errorf("load task %s dependencies: %w", task, err)
+	}
+	if detail == nil {
+		return nil, fmt.Errorf("task %s is unavailable", task)
+	}
+	var tasks []string
+	for _, dependency := range detail.Dependencies {
+		if dependency.IssueID == task && types.DependencyType(dependency.Type).IsDirectBlocker() {
+			tasks = append(tasks, dependency.DependsOnID)
+		}
+	}
+	return tasks, nil
 }
 
 func featureFlagFromLabels(labels []string) (string, error) {

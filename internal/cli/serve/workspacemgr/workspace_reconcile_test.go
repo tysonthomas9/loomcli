@@ -28,7 +28,7 @@ func TestReconcileJournalLandingUsesRecordedDependents(t *testing.T) {
 	}
 	options := landingOptions()
 	dependents, err := options.Dependents(ctx, "W", "X")
-	if err != nil || len(dependents) != 1 || dependents[0].Task != "B" || dependents[0].Repo != "repo" || options.Restack == nil {
+	if err != nil || len(dependents) != 1 || dependents[0].Task != "B" || dependents[0].Repo != "repo" || options.Restack == nil || options.Predecessors == nil {
 		t.Fatalf("landing adapters = %+v, %v", dependents, err)
 	}
 }

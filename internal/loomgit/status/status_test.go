@@ -330,3 +330,50 @@ func TestScanWarnsWhileLeadMayMergeWhenGreen(t *testing.T) {
 		}
 	}
 }
+
+func TestScanShowsUnenforcedCrossRepoDelivery(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	path := filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, row := range []journal.DependencyEnforcement{
+		{Repo: "owner/repo2", Branch: "main", State: "not_enforced", Reason: "not enforced: branch protection does not require loom/dependencies"},
+		{Repo: "owner/repo3", Branch: "main", State: "not_pinned", Reason: "loom/dependencies is required but not pinned to the Loom app: any collaborator could post it"},
+	} {
+		if err := store.RecordDependencyEnforcement(ctx, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.RecordDependencyCheck(ctx, journal.DependencyCheck{Workspace: "W", Change: "C2", Repo: "owner/repo2",
+		State: "pending", Reason: "Waiting for owner/repo1#1 to land"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Scan(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]Entry{}
+	for _, entry := range snapshot.Entries {
+		found[entry.Kind+":"+entry.Repo] = entry
+	}
+	repo2, repo3, change := found["dependency_enforcement:owner/repo2"], found["dependency_enforcement:owner/repo3"], found["dependency:owner/repo2"]
+	if repo2.State != "not_enforced" || !strings.Contains(repo2.Reason, "not enforced") || repo2.NextAction == "" {
+		t.Fatalf("repo2 enforcement = %+v", repo2)
+	}
+	if repo3.State != "not_pinned" || !strings.Contains(repo3.Reason, "any collaborator could post") {
+		t.Fatalf("repo3 enforcement = %+v", repo3)
+	}
+	if change.ID != "C2" || change.State != "pending" || change.Enforcement != "unenforced" ||
+		!strings.Contains(change.Reason, "owner/repo1#1") || !strings.Contains(change.Reason, "not enforced on owner/repo2") {
+		t.Fatalf("dependent delivery = %+v", change)
+	}
+}

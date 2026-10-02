@@ -30,6 +30,9 @@ func beginLoomMerge(ctx context.Context, store Store, request StackRequest, targ
 	if err := requireMergeAuthority(ctx, request, target); err != nil {
 		return err
 	}
+	if err := requireDependenciesLanded(ctx, store, request, target); err != nil {
+		return err
+	}
 	if request.StackID == "" || len(request.Changes) == 0 || target == "" {
 		return errors.New("stack, changes and target are required")
 	}

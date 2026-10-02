@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/mirror"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
@@ -20,7 +21,9 @@ type StackRequest struct {
 	StackID        string
 	Changes        []string
 	MergeAuthority MergeAuthority
-	pusher         mirror.RefPusher
+	// Predecessors lists a task's blocking tasks; nil reads the issue backend.
+	Predecessors landing.Predecessors
+	pusher       mirror.RefPusher
 }
 
 type MergeAuthority interface {
@@ -33,6 +36,33 @@ func requireMergeAuthority(ctx context.Context, request StackRequest, target str
 	}
 	if err := request.MergeAuthority.AuthorizeMerge(ctx, request, target); err != nil {
 		return loomgit.NewError(loomgit.MergeNotAuthorized, "merge authorization denied", err)
+	}
+	return nil
+}
+
+// requireDependenciesLanded keeps Loom's own merges in cross-repo order (D16):
+// no layer up to target merges until every predecessor change in another
+// repository has landed on its trunk.
+func requireDependenciesLanded(ctx context.Context, store Store, request StackRequest, target string) error {
+	deps, ok := store.(landing.DependencyStore)
+	if !ok {
+		return errors.New("store cannot read cross-repo dependencies")
+	}
+	predecessors := request.Predecessors
+	if predecessors == nil {
+		predecessors = IssuePredecessors
+	}
+	for _, change := range request.Changes {
+		status, found, err := landing.CrossRepoDependencies(ctx, deps, request.Workspace, change, predecessors)
+		if err != nil {
+			return err
+		}
+		if found && status.State != "success" {
+			return loomgit.NewError(loomgit.MergeBlocked, status.Description, nil)
+		}
+		if change == target {
+			break
+		}
 	}
 	return nil
 }
