@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path"
 	"regexp"
 	"strings"
 )
@@ -175,37 +174,11 @@ func (b *BitbucketForge) PostDependencyStatus(ctx context.Context, owner, repo, 
 			"url": fmt.Sprintf("https://bitbucket.org/%s/%s/commits/%s", owner, repo, sha)}, nil, http.StatusOK, http.StatusCreated)
 }
 
-// DependencyEnforcement is not_pinned when a require_passing_builds_to_merge
-// branch restriction matches branch by glob (Bitbucket matches build keys by
-// name only, so any writer could post one), and not_enforced otherwise. A
-// branching-model restriction cannot be matched by name, so it is an error.
-// Bitbucket has no app pinning, so loomApp is unused.
-func (b *BitbucketForge) DependencyEnforcement(ctx context.Context, owner, repo, branch string, _ int64) (string, error) {
-	state := "not_enforced"
-	for next := fmt.Sprintf("/repositories/%s/%s/branch-restrictions?kind=require_passing_builds_to_merge", owner, repo); next != ""; {
-		var page struct {
-			Values []struct {
-				Kind            string `json:"kind"`
-				BranchMatchKind string `json:"branch_match_kind"`
-				Pattern         string `json:"pattern"`
-			} `json:"values"`
-			Next string `json:"next"`
-		}
-		if err := b.call(ctx, http.MethodGet, next, nil, &page, http.StatusOK); err != nil {
-			return "", err
-		}
-		for _, restriction := range page.Values {
-			if restriction.Kind != "require_passing_builds_to_merge" {
-				continue
-			}
-			if restriction.BranchMatchKind != "glob" {
-				return "", fmt.Errorf("bitbucket branch restriction matches by %q; cannot tell if it covers %s", restriction.BranchMatchKind, branch)
-			}
-			if matched, _ := path.Match(restriction.Pattern, branch); matched {
-				state = "not_pinned"
-			}
-		}
-		next = page.Next
-	}
-	return state, nil
+// DependencyEnforcement is always not_enforced: Bitbucket Cloud's merge check
+// (require_passing_builds_to_merge) counts passing builds of any key, so an
+// unrelated green build satisfies it while loom/dependencies is INPROGRESS. No
+// Bitbucket rule can require the loom/dependencies key itself. Bitbucket has no
+// app pinning, so loomApp is unused.
+func (b *BitbucketForge) DependencyEnforcement(context.Context, string, string, string, int64) (string, error) {
+	return "not_enforced", nil
 }
