@@ -135,4 +135,6 @@ CREATE TABLE native_purge_pending (         -- an owned native session a failed 
 ALTER TABLE agent_send_receipts ADD COLUMN body TEXT;       -- the Send's message text; NULL on a legacy row or a Send with no message
 ALTER TABLE agent_send_receipts ADD COLUMN native_key TEXT; -- the input key the message was handed over with
 CREATE INDEX agent_send_receipts_native_key ON agent_send_receipts(agent_id, native_key);
+`, `
+CREATE INDEX agent_events_kind ON agent_events(agent_id, kind); -- task_completed notices and the last message, without a history scan
 `}

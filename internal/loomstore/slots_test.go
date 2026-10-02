@@ -430,3 +430,35 @@ func TestSlotHandedRequeueReceiptAndFinish(t *testing.T) {
 		t.Fatal("a finished turn set no finished_at")
 	}
 }
+
+// TestNotifyMergesOnceByKey: notices join a waiting slot in order and keep
+// its place; a notice whose key was already added is skipped; a handed
+// slot refuses them.
+func TestNotifyMergesOnceByKey(t *testing.T) {
+	ctx := context.Background()
+	st, _ := newSlotStore(t)
+	res := func(string, bool) (string, error) { return "{}", nil }
+	n1, n2 := Notice{Key: "k1", Text: "one"}, Notice{Key: "k2", Text: "two"}
+	if added, err := st.Notify(ctx, "a1", "agent:c", "system", []Notice{n1}, res); err != nil || !added {
+		t.Fatalf("first = %v, %v", added, err)
+	}
+	if added, err := st.Notify(ctx, "a1", "agent:c", "system", []Notice{n1, n2}, res); err != nil || !added {
+		t.Fatalf("second = %v, %v", added, err)
+	}
+	if added, err := st.Notify(ctx, "a1", "agent:c", "system", []Notice{n1, n2}, res); err != nil || added {
+		t.Fatalf("repeat = %v, %v", added, err)
+	}
+	slots, err := st.Slots(ctx, "a1")
+	if err != nil || len(slots) != 1 || slots[0].Body != "one\ntwo" || slots[0].RequestID != "k2" || slots[0].State != SlotWaiting {
+		t.Fatalf("slots = %+v, %v", slots, err)
+	}
+	if _, err := st.HandNext(ctx, "a1", func(Slot) string { return "nk" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Notify(ctx, "a1", "agent:c", "system", []Notice{{Key: "k3", Text: "three"}}, res); !errors.Is(err, ErrSlotBusy) {
+		t.Fatalf("handed = %v", err)
+	}
+	if text, ok, err := st.HandedText(ctx, "a1", "nk"); err != nil || !ok || text != "one\ntwo" {
+		t.Fatalf("handed text = %q, %v, %v", text, ok, err)
+	}
+}

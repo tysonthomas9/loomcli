@@ -236,7 +236,13 @@ func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.
 	before := a
 	a.State, a.StateReason, a.WaitingOn, a.Outcome = to.State, to.StateReason, to.WaitingOn, to.Outcome
 	a.AttentionReason, a.RunningTurnID, a.Attempt = to.AttentionReason, to.RunningTurn, to.Attempt
-	return a, s.publishChange(ctx, before, a)
+	if err := s.publishChange(ctx, before, a); err != nil {
+		return a, err
+	}
+	if completed(a) && !completed(before) { // a child's attempt ended: tell its parent (§10.3)
+		return a, s.recordCompletion(ctx, a)
+	}
+	return a, nil
 }
 
 // raiseAttention sets Attention{reason} beside a's state.

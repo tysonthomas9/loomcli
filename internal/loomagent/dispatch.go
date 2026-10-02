@@ -77,6 +77,9 @@ func takes(a loomstore.Agent) bool {
 
 // dispatch is Dispatch with the agent lock held.
 func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
+	if err := s.deliverCompletions(ctx, a); err != nil {
+		return a, err
+	}
 	if !takes(a) {
 		return a, nil
 	}
@@ -284,6 +287,7 @@ func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomha
 // whenever its subscription lags and is replaced.
 func (s *Service) RunDispatcher(ctx context.Context) {
 	s.recoverAtStart(ctx)
+	s.recordCompletions(ctx)
 	for ctx.Err() == nil {
 		sub := s.Bus.Subscribe()
 		_ = s.PurgeLeftovers(ctx)
@@ -307,7 +311,7 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription) {
 			if !ok {
 				return
 			}
-			if e.Type == EventIdle {
+			if e.Type == EventIdle || e.Type == KindTaskCompleted {
 				_ = s.dispatchWake(ctx, e.AgentID)
 			}
 		}

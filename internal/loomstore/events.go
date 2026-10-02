@@ -195,3 +195,45 @@ func (s *Store) ListEvents(ctx context.Context, q EventQuery) (EventPage, error)
 	}
 	return page, rows.Err()
 }
+
+// HasEvent reports whether agentID has saved event eventID.
+func (s *Store) HasEvent(ctx context.Context, agentID, eventID string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_events WHERE agent_id = ? AND event_id = ?`,
+		agentID, eventID).Scan(&n)
+	return n > 0, err
+}
+
+// Unreceipted lists agentID's events of kind, in order, whose EventID has
+// no Send receipt on the agent yet: notices not yet put in a slot.
+func (s *Store) Unreceipted(ctx context.Context, agentID, kind string) ([]Event, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+eventCols+` FROM agent_events e WHERE agent_id = ? AND kind = ?
+		AND NOT EXISTS (SELECT 1 FROM agent_send_receipts r WHERE r.agent_id = e.agent_id AND r.request_id = e.event_id)
+		ORDER BY seq`, agentID, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// LastMessage returns the text of agentID's last saved completed message
+// item, or "" when it has none.
+func (s *Store) LastMessage(ctx context.Context, agentID string) (string, error) {
+	var text sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT json_extract(redacted_payload, '$.text') FROM agent_events
+		WHERE agent_id = ? AND kind = 'item.completed' AND json_extract(redacted_payload, '$.itemKind') = 'message'
+		ORDER BY seq DESC LIMIT 1`, agentID).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return text.String, err
+}

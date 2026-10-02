@@ -272,8 +272,7 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 			return a, err
 		}
 	}
-	if err := s.appendEvent(ctx, a.AgentID, KindAgentCreated, KindAgentCreated,
-		map[string]any{"name": a.Name, "preset": a.Preset, "harness": a.Harness}); err != nil {
+	if err := s.created(ctx, a); err != nil {
 		return a, err
 	}
 	a.CreateStep = stepDone

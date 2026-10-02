@@ -1,0 +1,178 @@
+package loomagent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strconv"
+	"time"
+	"unicode/utf8"
+
+	"github.com/tysonthomas9/loomcli/internal/loomstore"
+)
+
+// Delegation events saved on the parent (design v2 §5.2, §10.3).
+const (
+	KindChildCreated  = "child.created"
+	KindTaskCompleted = "task_completed"
+)
+
+// summaryCap bounds the final message a task_completed record quotes; the
+// lead reads the rest from the child's history and branch.
+const summaryCap = 500
+
+// TaskCompleted is one child attempt's completion record, saved once on the
+// parent's history with EventID task_completed:<child>:<attempt>.
+type TaskCompleted struct {
+	Child   string `json:"child"`
+	Attempt int64  `json:"attempt"`
+	Outcome string `json:"outcome"`
+	Branch  string `json:"branch,omitempty"`
+	Head    string `json:"head,omitempty"`
+	Summary string `json:"summary,omitempty"`
+}
+
+func completionKey(child string, attempt int64) string {
+	return KindTaskCompleted + ":" + child + ":" + strconv.FormatInt(attempt, 10)
+}
+
+// text is the record as the lead reads it in the child's slot.
+func (t TaskCompleted) text() string {
+	return fmt.Sprintf("%s outcome=%s branch=%s head=%s summary=%s", completionKey(t.Child, t.Attempt),
+		t.Outcome, t.Branch, t.Head, strconv.Quote(t.Summary))
+}
+
+// created saves agent.created once, when Create finishes, and child.created
+// on a's parent.
+func (s *Service) created(ctx context.Context, a loomstore.Agent) error {
+	if err := s.appendEvent(ctx, a.AgentID, KindAgentCreated, KindAgentCreated,
+		map[string]any{"name": a.Name, "preset": a.Preset, "harness": a.Harness}); err != nil || a.ParentAgentID == nil {
+		return err
+	}
+	return s.appendEvent(ctx, *a.ParentAgentID, KindChildCreated, KindChildCreated+":"+a.AgentID,
+		map[string]any{"child": a.AgentID, "name": a.Name, "preset": a.Preset})
+}
+
+// completed reports whether a is a child single task whose current attempt
+// has ended with an outcome: finished, or archived (a cancel). Attention
+// alone is not an end.
+func completed(a loomstore.Agent) bool {
+	return a.ParentAgentID != nil && a.Mode == "single_task" && a.Outcome != nil && a.DeletedAt == nil &&
+		(a.State == StateFinished || a.State == StateArchived)
+}
+
+// recordCompletion saves a's task_completed record on its parent once per
+// attempt, with the branch and head from the Workspace port (R32), and
+// wakes the parent's dispatcher, which puts it in a's slot there. A repeat
+// for the same attempt changes nothing, so the record keeps the branch and
+// head of its first save. It takes no parent lock.
+func (s *Service) recordCompletion(ctx context.Context, a loomstore.Agent) error {
+	if !completed(a) {
+		return nil
+	}
+	parent, key := *a.ParentAgentID, completionKey(a.AgentID, a.Attempt)
+	if ok, err := s.store.HasEvent(ctx, parent, key); err != nil || ok {
+		return err
+	}
+	rec := TaskCompleted{Child: a.AgentID, Attempt: a.Attempt, Outcome: *a.Outcome, Branch: deref(a.Branch)}
+	if a.WorktreePath != nil && s.workspace != nil {
+		repo, err := s.repoPath(ctx, a.Repo)
+		if err == nil {
+			var st WorkspaceStatus
+			st, err = s.workspace.Status(ctx, WorkspaceSpec{Key: a.AgentID, Repo: repo, BaseRef: deref(a.BaseRef),
+				Branch: deref(a.Branch), Detached: a.Branch == nil})
+			rec.Branch, rec.Head = st.Branch, st.HEAD
+		}
+		if err != nil { // still notify; the lead can read the branch itself
+			slog.Warn("loomagent: task_completed without a workspace status", "agent", a.AgentID, "error", err)
+			rec.Branch = deref(a.Branch)
+		}
+	}
+	summary, err := s.store.LastMessage(ctx, a.AgentID)
+	if err != nil {
+		return err
+	}
+	rec.Summary = clip(summary, summaryCap)
+	if err := s.appendEvent(ctx, parent, KindTaskCompleted, key, rec); err != nil {
+		return err
+	}
+	s.Bus.publish(Event{AgentID: parent, Type: KindTaskCompleted, Reason: a.AgentID, Outcome: rec.Outcome,
+		Attempt: rec.Attempt, Time: time.Now()})
+	return nil
+}
+
+// recordCompletions saves every owed task_completed record in the
+// workspace: an attempt that ended just before a crash. Each is saved once.
+func (s *Service) recordCompletions(ctx context.Context) {
+	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Mode: "single_task",
+		IncludeArchived: true})
+	if err != nil {
+		slog.Warn("loomagent: task_completed sweep", "error", err)
+		return
+	}
+	for _, a := range agents {
+		if err := s.recordCompletion(ctx, a); err != nil {
+			slog.Warn("loomagent: task_completed sweep", "agent", a.AgentID, "error", err)
+		}
+	}
+}
+
+// deliverCompletions puts a's saved task_completed records that no slot has
+// taken yet into each child's one slot on a, merged after a waiting record
+// of that child (§10.3), with the agent lock held. An agent that takes no
+// messages keeps them in its history only; a child slot still handed takes
+// them after that message is delivered.
+func (s *Service) deliverCompletions(ctx context.Context, a loomstore.Agent) error {
+	if a.State != StateIdle && a.State != StateActive && a.State != StateWaiting {
+		return nil
+	}
+	events, err := s.store.Unreceipted(ctx, a.AgentID, KindTaskCompleted)
+	if err != nil || len(events) == 0 {
+		return err
+	}
+	byChild, order := map[string][]loomstore.Notice{}, []string{}
+	for _, e := range events {
+		var rec TaskCompleted
+		if err := json.Unmarshal(e.Payload, &rec); err != nil {
+			return err
+		}
+		if _, ok := byChild[rec.Child]; !ok {
+			order = append(order, rec.Child)
+		}
+		byChild[rec.Child] = append(byChild[rec.Child], loomstore.Notice{Key: e.EventID, Text: rec.text()})
+	}
+	for _, child := range order {
+		sender := senderOf(ActorRef{Kind: "agent", ID: child})
+		added, err := s.store.Notify(ctx, a.AgentID, sender, "system", byChild[child],
+			func(requestID string, replaced bool) (string, error) {
+				b, err := json.Marshal(SendResult{MessageID: messageID(a.AgentID, sender, requestID),
+					State: loomstore.SlotWaiting, Replaced: replaced})
+				return string(b), err
+			})
+		if errors.Is(err, loomstore.ErrSlotBusy) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if added {
+			if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWaiting, Reason: sender, Time: time.Now()}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// clip cuts s to at most n bytes on a rune boundary.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
+}
