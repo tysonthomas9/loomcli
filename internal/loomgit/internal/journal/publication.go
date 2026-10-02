@@ -20,6 +20,7 @@ type Publication struct {
 
 type NativeMerge struct {
 	Workspace, StackID, Target, Phase, Head, UUID, Reason string
+	Authority                                             string
 	Changes                                               []string
 }
 
@@ -33,9 +34,11 @@ func createNativeMergeSchema(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	_, err = db.Exec(`ALTER TABLE native_stack_merges ADD COLUMN request_uuid TEXT NOT NULL DEFAULT ''`)
-	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
-		return err
+	for _, column := range []string{"request_uuid", "authority"} {
+		_, err = db.Exec(`ALTER TABLE native_stack_merges ADD COLUMN ` + column + ` TEXT NOT NULL DEFAULT ''`)
+		if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
 	}
 	return nil
 }
@@ -46,8 +49,8 @@ func (s *SQLite) BeginNativeMerge(ctx context.Context, merge NativeMerge) error 
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT OR IGNORE INTO native_stack_merges
-		(workspace,stack_id,target,changes,phase) VALUES (?,?,?,?, 'ready')`,
-		merge.Workspace, merge.StackID, merge.Target, string(encoded))
+		(workspace,stack_id,target,changes,phase,authority) VALUES (?,?,?,?, 'ready',?)`,
+		merge.Workspace, merge.StackID, merge.Target, string(encoded), merge.Authority)
 	if err != nil {
 		return err
 	}
@@ -64,7 +67,7 @@ func (s *SQLite) BeginNativeMerge(ctx context.Context, merge NativeMerge) error 
 }
 
 func (s *SQLite) OpenNativeMerges(ctx context.Context) ([]NativeMerge, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workspace,stack_id,target,changes,phase,head_sha,request_uuid
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,stack_id,target,changes,phase,head_sha,request_uuid,authority
 		FROM native_stack_merges WHERE phase != 'done' AND phase != 'blocked'`)
 	if err != nil {
 		return nil, err
@@ -74,7 +77,7 @@ func (s *SQLite) OpenNativeMerges(ctx context.Context) ([]NativeMerge, error) {
 	for rows.Next() {
 		var merge NativeMerge
 		var changes string
-		if err := rows.Scan(&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Phase, &merge.Head, &merge.UUID); err != nil {
+		if err := rows.Scan(&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Phase, &merge.Head, &merge.UUID, &merge.Authority); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(changes), &merge.Changes); err != nil {
@@ -88,9 +91,9 @@ func (s *SQLite) OpenNativeMerges(ctx context.Context) ([]NativeMerge, error) {
 func (s *SQLite) NativeMerge(ctx context.Context, workspace, stackID string) (NativeMerge, error) {
 	var merge NativeMerge
 	var changes string
-	err := s.db.QueryRowContext(ctx, `SELECT workspace,stack_id,target,changes,phase,head_sha,request_uuid,reason
+	err := s.db.QueryRowContext(ctx, `SELECT workspace,stack_id,target,changes,phase,head_sha,request_uuid,reason,authority
 		FROM native_stack_merges WHERE workspace=? AND stack_id=?`, workspace, stackID).Scan(
-		&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Phase, &merge.Head, &merge.UUID, &merge.Reason)
+		&merge.Workspace, &merge.StackID, &merge.Target, &changes, &merge.Phase, &merge.Head, &merge.UUID, &merge.Reason, &merge.Authority)
 	if err != nil {
 		return NativeMerge{}, err
 	}

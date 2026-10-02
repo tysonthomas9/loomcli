@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
 
 var human = review.Actor{Kind: "human", ID: "tyson"}
@@ -225,5 +226,89 @@ func TestTurningPolicyOffCancelsQueuedLeadMerge(t *testing.T) {
 	merge := leadMerge(t, item)
 	if merge.Phase != "blocked" || merge.Reason != "cancelled: lead_may_merge is off" || forge.merged != 0 {
 		t.Fatalf("cancelled merge = %+v, merged = %d", merge, forge.merged)
+	}
+}
+
+type leadNativeForge struct {
+	*mergeForgeFake
+	native *fakeMergeForge
+}
+
+func (forge leadNativeForge) MergeNativePull(ctx context.Context, owner, repo string, number int, head string) (stackpublish.NativeMergeResult, error) {
+	return forge.native.MergeNativePull(ctx, owner, repo, number, head)
+}
+
+func (forge leadNativeForge) RecoverNativePull(ctx context.Context, owner, repo string, number int, head string) (stackpublish.NativeMergeResult, error) {
+	return forge.native.RecoverNativePull(ctx, owner, repo, number, head)
+}
+
+func (forge leadNativeForge) NativeMergeStatus(ctx context.Context, owner, repo string, number int, uuid string) (stackpublish.NativeMergeResult, error) {
+	return forge.native.NativeMergeStatus(ctx, owner, repo, number, uuid)
+}
+
+func TestWhenGreenMergesNativeGreenPrefix(t *testing.T) {
+	item, loomForge, _ := fourLayerMergeEntryFixture(t, "native")
+	loomForge.reviews = map[int]string{}
+	for _, pr := range loomForge.prs {
+		loomForge.reviews[pr.Number] = "approved"
+	}
+	loomForge.prChecks = map[int]string{loomForge.prs[2].Number: "pending"}
+	forge := leadNativeForge{mergeForgeFake: loomForge, native: &fakeMergeForge{fakeForge: loomForge.fakeForge, prs: loomForge.prs}}
+	ctx := context.Background()
+	setLeadMayMerge(t, item, "when_green")
+	if err := ReconcileLeadMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	merge, err := item.store.NativeMerge(ctx, "W", "feature")
+	if err != nil || merge.Target != "B" || len(merge.Changes) != 2 || merge.Authority != leadMergeAuthority {
+		t.Fatalf("native lead merge = %+v, %v", merge, err)
+	}
+	if len(forge.native.submitted) != 1 || forge.native.submitted[0] != loomForge.prs[1].Number {
+		t.Fatalf("submitted = %v, want only layer B's PR", forge.native.submitted)
+	}
+}
+
+func TestTurningPolicyOffCancelsQueuedNativeLeadMerge(t *testing.T) {
+	item, loomForge, _ := fourLayerMergeEntryFixture(t, "native")
+	native := &fakeMergeForge{fakeForge: loomForge.fakeForge, prs: loomForge.prs}
+	ctx := context.Background()
+	if err := item.store.BeginNativeMerge(ctx, journal.NativeMerge{Workspace: "W", StackID: "feature", Target: "B",
+		Changes: []string{"A", "B"}, Authority: leadMergeAuthority}); err != nil {
+		t.Fatal(err)
+	}
+	setLeadMayMerge(t, item, "off")
+	if err := ReconcileNativeMerges(ctx, item.store, native); err != nil {
+		t.Fatal(err)
+	}
+	merge, err := item.store.NativeMerge(ctx, "W", "feature")
+	if err != nil || merge.Phase != "blocked" || merge.Reason != "cancelled: lead_may_merge is off" || len(native.submitted) != 0 {
+		t.Fatalf("native merge = %+v, submitted = %v, %v", merge, native.submitted, err)
+	}
+}
+
+func TestTurningPolicyOffCancelsProviderQueuedLeadMerge(t *testing.T) {
+	item, forge := leadMergeFixture(t, "approved", "approved")
+	forge.queued = true
+	ctx := context.Background()
+	setLeadMayMerge(t, item, "when_green")
+	if err := ReconcileLeadMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+		t.Fatal(err)
+	}
+	if merge := leadMerge(t, item); merge.Phase != "dispatching" || merge.DispatchAttempts != 0 {
+		t.Fatalf("queued dispatch = %+v", merge)
+	}
+	setLeadMayMerge(t, item, "off")
+	forge.queued = false
+	for range 2 {
+		if err := ReconcileLoomMergesAt(ctx, item.storePath, forge); err != nil {
+			t.Fatal(err)
+		}
+	}
+	merge := leadMerge(t, item)
+	if merge.Phase != "blocked" || merge.Reason != "cancelled: lead_may_merge is off" || forge.merged != 0 {
+		t.Fatalf("queued merge after policy off = %+v, merged = %d", merge, forge.merged)
 	}
 }

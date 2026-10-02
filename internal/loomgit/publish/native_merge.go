@@ -25,6 +25,7 @@ type nativeMergeStore interface {
 	BlockNativeMerge(context.Context, journal.NativeMerge, string) error
 	LandingStatus(context.Context, string, string) (journal.LandingStatus, error)
 	StackBackend(context.Context, string, string) (string, error)
+	LeadMayMerge(context.Context, string) (journal.LeadMergePolicy, error)
 }
 
 type nativeMergeForge interface {
@@ -78,9 +79,11 @@ func beginNativeMerge(ctx context.Context, store Store, request StackRequest, ta
 	if index < 0 {
 		return loomgit.NewError(loomgit.Stale, "merge target is not in stack", nil)
 	}
-	return mergeStore.BeginNativeMerge(ctx, journal.NativeMerge{
-		Workspace: request.Workspace, StackID: request.StackID, Target: target, Changes: request.Changes[:index+1],
-	})
+	merge := journal.NativeMerge{Workspace: request.Workspace, StackID: request.StackID, Target: target, Changes: request.Changes[:index+1]}
+	if _, ok := request.MergeAuthority.(whenGreenMerge); ok {
+		merge.Authority = leadMergeAuthority
+	}
+	return mergeStore.BeginNativeMerge(ctx, merge)
 }
 
 func requireNativeVerdict(ctx context.Context, store Store, publication journal.Publication) error {
@@ -148,6 +151,15 @@ func reconcileNativeMerge(ctx context.Context, store nativeMergeStore, forge nat
 	}
 	switch merge.Phase {
 	case "ready":
+		if merge.Authority == leadMergeAuthority {
+			policy, err := store.LeadMayMerge(ctx, merge.Workspace)
+			if err != nil {
+				return err
+			}
+			if policy.Value != "when_green" {
+				return store.BlockNativeMerge(ctx, merge, "cancelled: lead_may_merge is off")
+			}
+		}
 		return submitNativeMerge(ctx, store, forge, merge, publication, parts)
 	case "dispatching":
 		return recoverNativeDispatch(ctx, store, forge, merge, publication, parts)

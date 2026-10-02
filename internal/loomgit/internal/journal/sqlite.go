@@ -163,7 +163,7 @@ const LeadMayMergeWarning = "no required review: Loom adds no review requirement
 type LeadMergePolicy struct{ Workspace, Value, SetBy string }
 
 // LeadMergeStack is a Loom-backend stack in a workspace whose lead may merge when green.
-type LeadMergeStack struct{ Workspace, StackID, Lead, SetBy string }
+type LeadMergeStack struct{ Workspace, StackID, Backend, Lead, SetBy string }
 
 func ensureLeadMayMerge(db *sql.DB) error {
 	for _, column := range []string{"lead_may_merge TEXT NOT NULL DEFAULT 'off'", "lead_may_merge_set_by TEXT NOT NULL DEFAULT ''"} {
@@ -224,16 +224,16 @@ func (s *SQLite) LeadMergePolicies(ctx context.Context) ([]LeadMergePolicy, erro
 	return policies, rows.Err()
 }
 
-// LeadMergeStacks lists Loom-backend stacks whose workspace lets the lead merge
+// LeadMergeStacks lists Loom and native stacks whose workspace lets the lead merge
 // when green, with the lead whose working area applied the stack.
 func (s *SQLite) LeadMergeStacks(ctx context.Context) ([]LeadMergeStack, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT b.workspace,b.stack_id,ws.lead_may_merge_set_by,
+	rows, err := s.db.QueryContext(ctx, `SELECT b.workspace,b.stack_id,b.backend,ws.lead_may_merge_set_by,
 		COALESCE((SELECT a.lead FROM applied_layers a JOIN change_publications p
 			ON p.workspace=a.workspace AND p.change_id=a.change_id
 			WHERE p.workspace=b.workspace AND p.stack_id=b.stack_id AND a.phase='done'
 			ORDER BY a.rowid DESC LIMIT 1),'')
 		FROM stack_backends b JOIN workspace_settings ws ON ws.workspace=b.workspace
-		WHERE b.backend='loom' AND ws.lead_may_merge='when_green' ORDER BY b.workspace,b.stack_id`)
+		WHERE b.backend IN ('loom','native') AND ws.lead_may_merge='when_green' ORDER BY b.workspace,b.stack_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (s *SQLite) LeadMergeStacks(ctx context.Context) ([]LeadMergeStack, error) 
 	var stacks []LeadMergeStack
 	for rows.Next() {
 		var stack LeadMergeStack
-		if err := rows.Scan(&stack.Workspace, &stack.StackID, &stack.SetBy, &stack.Lead); err != nil {
+		if err := rows.Scan(&stack.Workspace, &stack.StackID, &stack.Backend, &stack.SetBy, &stack.Lead); err != nil {
 			return nil, err
 		}
 		stacks = append(stacks, stack)
