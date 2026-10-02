@@ -231,6 +231,8 @@ func resolveRepo(ctx context.Context, _ loomagent.Target, repo string) (string, 
 		_, err = os.Stat(filepath.Join(repo, ".git"))
 	}
 	if err == nil && info.IsDir() {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
 		_, err = gitrunner.Exec{}.Run(ctx, repo, "rev-parse", "--git-dir")
 	}
 	if err != nil || !info.IsDir() || !filepath.IsAbs(repo) {
