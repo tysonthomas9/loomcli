@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,27 +155,69 @@ func TestReadAgentUsageNoDatabase(t *testing.T) {
 	}
 }
 
+// v5Record is a usage.jsonl record as the v5 runners write it: built by
+// usage.Collector.Finalize, so it has no session id.
+func v5Record(backend, agent string, input int64) usage.SessionUsage {
+	c := usage.NewCollector(backend, agent)
+	c.Accumulate("m1", input, 1, 0, 0)
+	now := time.Now()
+	return c.Finalize("", "", now, now, 0)
+}
+
 func TestJoinUsageCountsEachSessionOnce(t *testing.T) {
 	dir := seedUsageDB(t)
 	agents, err := readAgentUsage(context.Background(), dir, "ws", usage.Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	v5 := []usage.SessionUsage{
-		{AgentName: "nova", Backend: "claude", InputTokens: 1000, SessionID: "v5-1"},
-		{AgentName: "oc", Backend: "opencode", InputTokens: 200, SessionID: "oc"}, // also in agents.db
-		{AgentName: "old", Backend: "codex", InputTokens: 7},
-	}
+	// "oc"/opencode in v5 is a different, older session of a same-named
+	// agent: both are counted, each once.
+	v5 := []usage.SessionUsage{v5Record("claude", "nova", 1000), v5Record("opencode", "oc", 200), v5Record("codex", "old", 7)}
 	joined := joinUsage(v5, agents)
 	agg := aggregateUsage(joined)
-	if agg.SessionCount != 6 || agg.TotalInput != 1000+200+7+100 {
+	if agg.SessionCount != 7 || agg.TotalInput != 1000+200+7+200+100 {
 		t.Fatalf("sessions %d input %d: %+v", agg.SessionCount, agg.TotalInput, joined)
+	}
+	sessions := map[string]int{}
+	for _, a := range agg.ByAgent {
+		sessions[a.Name] = a.Sessions
+	}
+	if sessions["oc"] != 2 || sessions["nova"] != 1 || sessions["cl"] != 1 || sessions["idle"] != 1 {
+		t.Errorf("by agent %+v", sessions)
 	}
 	backends := map[string]int{}
 	for _, b := range agg.ByBackend {
 		backends[b.Name] = b.Sessions
 	}
-	if backends["claude"] != 3 || backends["opencode"] != 1 || backends["codex"] != 2 {
+	if backends["claude"] != 3 || backends["opencode"] != 2 || backends["codex"] != 2 {
 		t.Errorf("by backend %+v", backends)
 	}
+}
+
+// TestUsageProducersAreDisjoint pins joinUsage's invariant: the Agent API
+// side never reaches the v5 usage writers and the v5 runners never reach
+// the agent event store, so no usage can land in both histories.
+func TestUsageProducersAreDisjoint(t *testing.T) {
+	gobin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH")
+	}
+	const m = "github.com/tysonthomas9/loomcli/internal/"
+	check := func(pkgs []string, banned ...string) {
+		t.Helper()
+		args := append([]string{"list", "-deps"}, pkgs...)
+		out, err := exec.Command(gobin, args...).Output()
+		if err != nil {
+			t.Fatalf("go list: %v", err)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			for _, b := range banned {
+				if dep == m+b {
+					t.Errorf("%v depends on %s", pkgs, dep)
+				}
+			}
+		}
+	}
+	check([]string{m + "loomagent", m + "loomharness/...", m + "cli/serve/agentwire"}, "usage", "cli/backends", "cli/automode")
+	check([]string{m + "cli/automode", m + "cli/agent"}, "loomstore", "loomagent")
 }

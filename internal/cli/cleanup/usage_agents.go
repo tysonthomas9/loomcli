@@ -134,20 +134,11 @@ func matchesFilterIDs(rec usage.SessionUsage, f usage.Filter) bool {
 	return (f.TaskID == "" || rec.TaskID == f.TaskID) && (f.EpicID == "" || rec.EpicID == f.EpicID)
 }
 
-// joinUsage appends the Agent API records to the v5 ones, dropping any agent
-// a v5 record already counts (same session id), so nothing is counted twice.
+// joinUsage appends the Agent API records to the v5 ones. The two never
+// describe the same usage: usage.jsonl is written only by the v5 runners
+// (automode, agent plan) from cli/backends collectors, and agent_events only
+// by loomagent from loomharness adapters; neither side imports the other's
+// writer (TestUsageProducersAreDisjoint), and v5 records carry no shared id.
 func joinUsage(v5, agents []usage.SessionUsage) []usage.SessionUsage {
-	counted := make(map[string]bool, len(v5))
-	for _, r := range v5 {
-		if r.SessionID != "" {
-			counted[r.SessionID] = true
-		}
-	}
-	out := v5
-	for _, r := range agents {
-		if !counted[r.SessionID] {
-			out = append(out, r)
-		}
-	}
-	return out
+	return append(v5, agents...)
 }
