@@ -178,7 +178,7 @@ describe("AgentEventStream", () => {
   const delivered = (fn: ReturnType<typeof vi.fn>) =>
     fn.mock.calls.flatMap((c) => (c[0] as AgentEvent[]).map((e) => e.event_id));
 
-  it("pages committed history, then streams after each agent's cursor with a token", async () => {
+  it("opens the stream with a token, then pages committed history into the cache", async () => {
     commit("a1", 1, 2, 3, 4, 5);
     const { s, onResync } = open();
     await s.connect();
@@ -193,35 +193,41 @@ describe("AgentEventStream", () => {
     const u = lastES().url;
     expect(u.pathname).toBe("/api/workspaces/ws1/v1/events");
     expect(u.searchParams.get("agents")).toBe("a1,a2");
-    expect(u.searchParams.get("after")).toBe("a1:5,a2:0");
+    expect(u.searchParams.get("after")).toBe("a1:0,a2:0");
     expect(u.searchParams.get("deltas")).toBe("true");
     expect(u.searchParams.get("token")).toBe("tok1");
     expect(onResync).toHaveBeenCalledTimes(1);
     s.close();
   });
 
-  it("after feed.gap pages committed history and merges without gaps or duplicates", async () => {
+  it("reopens the stream after feed.gap, pages, and merges without gaps or duplicates", async () => {
     commit("a1", 1, 2);
-    const { s, onEvents } = open();
+    const { s, onEvents, onResync } = open();
     await s.connect();
-    const es = lastES();
+    const first = lastES();
     commit("a1", 3, 4, 5, 6);
-    es.saved(ev("a1", 3));
-    es.saved(ev("a1", 3)); // a repeat on the wire
-    // 4..6 committed but missed live; the gap notice triggers paging.
-    es.gap();
+    first.saved(ev("a1", 3));
+    first.saved(ev("a1", 3)); // a repeat on the wire
+    // 4..6 committed but missed live; the gap reopens the stream and pages.
+    first.gap();
     await flush();
-    es.saved(ev("a1", 5)); // late live copy of a paged event
+    expect(first.closed).toBe(true);
+    const second = lastES();
+    expect(second).not.toBe(first);
+    expect(second.url.searchParams.get("token")).toBe("tok2");
+    expect(second.url.searchParams.get("after")).toBe("a1:3,a2:0");
+    first.saved(ev("a1", 9)); // the closed stream is ignored
+    second.saved(ev("a1", 5)); // late replay of a paged event
     commit("a1", 7);
-    es.saved(ev("a1", 7));
+    second.saved(ev("a1", 7));
     expect(seqs(s.history, "a1")).toEqual([1, 2, 3, 4, 5, 6, 7]);
     const ids = delivered(onEvents);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toHaveLength(7);
+    expect(ids).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `a1-e${n}`));
     const gapRead = eventReads()
       .filter((r) => r.url.pathname.includes("/a1/"))
       .at(-2)!;
     expect(gapRead.url.searchParams.get("after")).toBe("3");
+    expect(onResync).toHaveBeenCalledTimes(2);
     s.close();
   });
 
@@ -238,8 +244,9 @@ describe("AgentEventStream", () => {
     const second = lastES();
     expect(second).not.toBe(first);
     expect(second.url.searchParams.get("token")).toBe("tok2");
-    expect(second.url.searchParams.get("after")).toBe("a1:4");
-    second.saved(ev("a1", 4)); // server replay overlap
+    expect(second.url.searchParams.get("after")).toBe("a1:2");
+    second.saved(ev("a1", 3)); // server replay overlapping the page
+    second.saved(ev("a1", 4));
     expect(seqs(s.history, "a1")).toEqual([1, 2, 3, 4]);
     expect(delivered(onEvents)).toHaveLength(4);
     s.close();
@@ -265,6 +272,9 @@ describe("AgentEventStream", () => {
     commit("a1", 1);
     const { s } = open();
     await s.connect();
+    // The server refuses a cursor into purged history; the retry leaves it out.
+    lastES().drop();
+    await vi.advanceTimersByTimeAsync(1000);
     expect(lastES().url.searchParams.get("after")).toBe("a1:1");
     s.close();
   });
@@ -287,7 +297,7 @@ describe("AgentEventStream", () => {
     commit("a1", 5);
     await vi.advanceTimersByTimeAsync(1000);
     es = lastES();
-    expect(es.url.searchParams.get("after")).toBe("a1:5");
+    expect(es.url.searchParams.get("after")).toBe("a1:3");
     // Missed live, then a feed.gap: recovered by the gap's paging.
     commitKind(6, "custom.kind");
     commit("a1", 7);
@@ -311,15 +321,15 @@ describe("AgentEventStream", () => {
     s.close();
   });
 
-  it("holds live events while a feed.gap page is in flight, keeping seq order", async () => {
+  it("buffers the reopened stream while a feed.gap page is in flight, keeping seq order", async () => {
     commit("a1", 1);
     const { s, onEvents, onResync } = open(["a1"]);
     await s.connect();
-    const es = lastES();
     commit("a1", 2, 3, 4);
     const release = holdPages();
-    es.gap();
-    es.gap();
+    lastES().gap();
+    await flush();
+    const es = lastES(); // reopened; its page is held
     commit("a1", 5);
     es.saved(ev("a1", 5)); // newer, arrives before the page
     es.saved(ev("a1", 4));
@@ -333,25 +343,56 @@ describe("AgentEventStream", () => {
       "a1-e4",
       "a1-e5",
     ]);
-    // Connect, then one catch-up per gap, run one after the other.
-    expect(onResync).toHaveBeenCalledTimes(3);
+    expect(onResync).toHaveBeenCalledTimes(2);
     s.close();
   });
 
-  it("emits nothing from a page still in flight at close", async () => {
+  it("makes no callbacks after a close during a pending page", async () => {
     commit("a1", 1, 2);
     const { s, onEvents, onResync } = open(["a1"]);
     const release = holdPages();
     const done = s.connect();
     await flush();
     s.close();
+    expect(lastES().closed).toBe(true);
+    lastES().saved(ev("a1", 3));
     release();
     await done;
     expect(onEvents).not.toHaveBeenCalled();
     expect(onResync).not.toHaveBeenCalled();
-    expect(MockEventSource.instances).toHaveLength(0);
     expect(seqs(s.history, "a1")).toEqual([]);
   });
+
+  it.each([
+    ["a paged event", 2, 2],
+    ["a buffered event", 3, 3],
+  ])(
+    "makes no callbacks after a close from inside onEvents on %s",
+    async (_, closeAt, lastCall) => {
+      commit("a1", 1);
+      const onResync = vi.fn();
+      const onEvents = vi.fn((events: AgentEvent[]) => {
+        if (events.some((e) => e.seq === closeAt)) s.close();
+      });
+      const s = new AgentEventStream("ws1", {
+        agents: ["a1"],
+        onEvents,
+        onResync,
+      });
+      await s.connect();
+      commit("a1", 2);
+      const release = holdPages();
+      lastES().gap();
+      await flush();
+      lastES().saved(ev("a1", 3)); // buffered behind the page
+      release();
+      await flush();
+      expect(onResync).toHaveBeenCalledTimes(1); // the first connect only
+      const last = onEvents.mock.calls.at(-1)![0] as AgentEvent[];
+      expect(last.at(-1)!.seq).toBe(lastCall);
+      expect(seqs(s.history, "a1").at(-1)).toBe(lastCall);
+    },
+  );
 
   it("stops reconnecting after close", async () => {
     const { s } = open(["a1"]);

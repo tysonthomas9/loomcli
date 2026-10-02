@@ -1,9 +1,11 @@
-// The Agent API event stream (design v2 §9.1, §9.5). Each connect fetches a
-// fresh one-time token, pages committed history after the cache's cursor,
-// then opens the SSE stream with after=<agent>:<seq> so the server replays
-// whatever was committed in between. A dropped stream, an error frame
-// (subscriber_lagged) or a feed.gap repeats the paging; everything is merged
-// by EventID, so nothing is missed or shown twice.
+// The Agent API event stream (design v2 §9.1, §9.5). Every connect, and every
+// reconnect after a drop, an error frame (subscriber_lagged) or a feed.gap:
+// 1. fetches a fresh one-time token and reopens the SSE stream with
+//    after=<agent>:<seq> from the cache's cursors, buffering its events;
+// 2. pages each agent's committed history after its cursor;
+// 3. merges the pages, then the buffer, by EventID in seq order;
+// 4. calls onResync, so the UI refreshes List and Get.
+// Nothing is missed or shown twice, and onEvents stays in seq order.
 
 import { ApiError, getApiOrigin, wsUrl } from "../common/client";
 import { fetchSseToken } from "../common/sse";
@@ -37,12 +39,12 @@ export class AgentEventStream {
   private es: EventSource | null = null;
   private state: ConnectionState = "disconnected";
   private attempts = 0;
+  // Bumped by every connect, reconnect and close: work started under an
+  // older gen, including after a user callback that closed, does nothing.
   private gen = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private expired = new Set<string>();
-  private syncing = false; // a catch-up is paging; live saved events wait
-  private again = false; // another catch-up was asked for meanwhile
-  private buffer: AgentEvent[] = [];
+  private buffer: AgentEvent[] | null = null; // set while paging
 
   constructor(
     private ws: string,
@@ -51,34 +53,33 @@ export class AgentEventStream {
     this.history = opts.history ?? new AgentHistory();
   }
 
-  /** Pages history, then opens the stream; reconnects until close(). */
+  /** Opens the stream and catches up; reconnects until close(). */
   async connect(): Promise<void> {
     const gen = ++this.gen;
+    const live = () => gen === this.gen;
     this.closeSource();
-    this.syncing = false;
     this.buffer = [];
     this.setState(this.attempts > 0 ? "reconnecting" : "connecting");
-    let token: SseTokenResult;
+    if (!live()) return;
     try {
-      await this.catchUp(gen);
-      token = await (this.opts.fetchToken ?? (() => fetchSseToken(this.ws)))();
+      const fetchToken = this.opts.fetchToken ?? (() => fetchSseToken(this.ws));
+      const token = await fetchToken();
+      if (!live()) return;
       if (token.kind === "error") throw new Error(token.message);
+      this.open(token);
+      const pages = await this.page();
+      if (!live()) return;
+      this.emit(pages.flat());
+      if (!live()) return;
+      const buffered = this.buffer.sort((a, b) => a.seq - b.seq);
+      this.buffer = null;
+      this.emit(buffered);
+      if (live()) this.opts.onResync?.();
     } catch (err) {
-      if (gen !== this.gen) return;
+      if (!live()) return;
       this.opts.onError?.(err instanceof Error ? err.message : String(err));
-      return this.reconnect();
+      if (live()) this.reconnect();
     }
-    if (gen !== this.gen) return;
-    const es = new EventSource(this.url(token));
-    this.es = es;
-    es.onopen = () => {
-      this.attempts = 0;
-      this.setState("connected");
-    };
-    // Every saved event and notice is one "event" frame with its kind in the
-    // data; "error" is the server's error frame or a native connection error.
-    es.addEventListener("event", (e) => this.frame(es, e));
-    es.addEventListener("error", (e) => this.frame(es, e));
   }
 
   /** Closes the stream for good. */
@@ -86,6 +87,20 @@ export class AgentEventStream {
     this.gen++;
     this.closeSource();
     this.setState("disconnected");
+  }
+
+  private open(token: SseTokenResult): void {
+    const es = new EventSource(this.url(token));
+    this.es = es;
+    es.onopen = () => {
+      if (es !== this.es) return;
+      this.attempts = 0;
+      this.setState("connected");
+    };
+    // Every saved event and notice is one "event" frame with its kind in the
+    // data; "error" is the server's error frame or a native connection error.
+    es.addEventListener("event", (e) => this.frame(es, e));
+    es.addEventListener("error", (e) => this.frame(es, e));
   }
 
   private url(token: SseTokenResult): string {
@@ -107,59 +122,26 @@ export class AgentEventStream {
     return this.opts.types?.length ? this.opts.types : undefined;
   }
 
-  // Pages every agent's committed events after its cursor into the cache,
-  // one catch-up at a time; live saved events that arrive meanwhile are
-  // buffered and merged after it, so onEvents stays in seq order. A stale
-  // catch-up (closed or reconnected since) emits nothing. An agent whose
-  // history is purged (410) is followed live-only from then on.
-  private async catchUp(gen: number): Promise<void> {
-    if (this.syncing) {
-      this.again = true;
-      return;
-    }
-    this.syncing = true;
-    try {
-      do {
-        this.again = false;
-        const pages = await Promise.all(
-          this.opts.agents
-            .filter((a) => !this.expired.has(a))
-            .map((a) =>
-              listEventsAfter(
-                this.ws,
-                a,
-                this.history.lastSeq(a),
-                this.filter(),
-              ).catch((err) => {
-                if (!(err instanceof ApiError && err.status === 410)) throw err;
-                this.expired.add(a);
-                return [];
-              }),
-            ),
-        );
-        if (gen !== this.gen) return;
-        this.emit(pages.flat());
-        this.opts.onResync?.();
-      } while (this.again);
-    } finally {
-      if (gen === this.gen) this.syncing = false;
-    }
-    const buffered = this.buffer.sort((a, b) => a.seq - b.seq);
-    this.buffer = [];
-    buffered.forEach((e) => this.saved(e));
-  }
-
-  private resync(): void {
-    const { gen, es } = this;
-    this.catchUp(gen).catch(
-      () => gen === this.gen && es === this.es && this.reconnect(),
+  // Pages every agent's committed events after its cursor. An agent whose
+  // history is purged (410) is followed live-only from then on; a stream
+  // opened with its cursor fails, and the reconnect leaves the cursor out.
+  private page(): Promise<AgentEvent[][]> {
+    return Promise.all(
+      this.opts.agents
+        .filter((a) => !this.expired.has(a))
+        .map((a) =>
+          listEventsAfter(
+            this.ws,
+            a,
+            this.history.lastSeq(a),
+            this.filter(),
+          ).catch((err) => {
+            if (!(err instanceof ApiError && err.status === 410)) throw err;
+            this.expired.add(a);
+            return [];
+          }),
+        ),
     );
-  }
-
-  // A saved event from the stream; held while a catch-up is paging.
-  private saved(e: AgentEvent): void {
-    if (this.syncing) this.buffer.push(e);
-    else this.emit([e]);
   }
 
   // One SSE frame. A native connection error has no data; a saved event has
@@ -177,11 +159,16 @@ export class AgentEventStream {
     }
     if (!("seq" in body)) {
       this.opts.onError?.(body.code || body.error);
-      return this.reconnect();
+      if (es === this.es) this.reconnect();
+      return;
     }
-    if (body.seq > 0) return this.saved(body);
+    if (body.seq > 0) {
+      if (this.buffer) this.buffer.push(body);
+      else this.emit([body]);
+      return;
+    }
     this.opts.onNotice?.(body);
-    if (body.kind === "feed.gap") this.resync();
+    if (body.kind === "feed.gap" && es === this.es) void this.connect();
   }
 
   private emit(events: AgentEvent[]): void {
@@ -209,6 +196,7 @@ export class AgentEventStream {
     this.timer = null;
     this.es?.close();
     this.es = null;
+    this.buffer = null;
   }
 
   private setState(state: ConnectionState): void {
