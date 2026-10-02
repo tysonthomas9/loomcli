@@ -23,3 +23,23 @@ func TestAgentSSERouteIsPublicOnlyForGet(t *testing.T) {
 		}
 	}
 }
+
+// TestBridgeIdentityAuthBypass: only an Agent API path carrying a bridge
+// token skips the user-JWT check; agentsv1 then verifies the token itself.
+func TestBridgeIdentityAuthBypass(t *testing.T) {
+	for _, tc := range []struct {
+		path, token string
+		want        bool
+	}{
+		{"/api/workspaces/ws/v1/agents", BridgeTokenPrefix + "x.y", true},
+		{"/api/workspaces/ws/v1/agents/a1/messages", BridgeTokenPrefix + "x.y", true},
+		{"/api/workspaces/ws/v1/agents", "eyJhbGciOi.jwt", false},
+		{"/api/workspaces/ws/issues", BridgeTokenPrefix + "x.y", false},
+		{"/api/v1/agents", BridgeTokenPrefix + "x.y", false},
+		{"/api/workspaces/ws/fleet/v1/agents", BridgeTokenPrefix + "x.y", false},
+	} {
+		if got := isBridgeCall(tc.path, tc.token); got != tc.want {
+			t.Errorf("isBridgeCall(%q, %q) = %v; want %v", tc.path, tc.token, got, tc.want)
+		}
+	}
+}

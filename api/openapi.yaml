@@ -72,6 +72,8 @@ tags:
     description: Daemon monitor dashboard and metrics
   - name: observability
     description: Event metrics and paginated event log
+  - name: agents-v1
+    description: Agent API v1 (create, message, interrupt, archive agents)
 
 security:
   - BearerAuth: []
@@ -4318,8 +4320,243 @@ paths:
               schema:
                 type: object
 
+  # ── Agent API v1 (design v2 §9.1) ──────────────────────────────────────
+  # The caller is the signed-in user, or an agent bridge or the daemon by
+  # its server-issued AgentBridgeToken (design v2 §6.1). A bridge sees and
+  # changes only its own children; any other agent is agent_not_found.
+  /api/workspaces/{ws}/v1/agents:
+    get:
+      operationId: listAgentsV1
+      tags: [agents-v1]
+      summary: List agents (a bridge lists only its own children)
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: owner_kind, in: query, schema: {type: string}}
+        - {name: owner_id, in: query, schema: {type: string}}
+        - {name: parent, in: query, description: Ignored for a bridge caller, schema: {type: string}}
+        - {name: root, in: query, schema: {type: string}}
+        - {name: preset, in: query, schema: {type: string}}
+        - {name: mode, in: query, schema: {type: string}}
+        - {name: harness, in: query, schema: {type: string}}
+        - {name: role_kind, in: query, schema: {type: string}}
+        - {name: state, in: query, schema: {type: string}}
+        - {name: subject_type, in: query, schema: {type: string}}
+        - {name: subject_id, in: query, schema: {type: string}}
+        - {name: external_key_prefix, in: query, schema: {type: string}}
+        - {name: name, in: query, schema: {type: string}}
+        - {name: include_archived, in: query, schema: {type: boolean}}
+        - {name: after, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 0}}
+      responses:
+        "200": {description: One page of agents, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1List"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+    post:
+      operationId: createAgentV1
+      tags: [agents-v1]
+      summary: Create an agent (a bridge's parent is always itself)
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentV1IdempotencyKey"
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1CreateBody"}}}
+      responses:
+        "201": {description: The agent, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/agents/{id}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - $ref: "#/components/parameters/AgentV1Id"
+    get:
+      operationId: getAgentV1
+      tags: [agents-v1]
+      summary: Get an agent with its waiting messages and open asks
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      responses:
+        "200": {description: The agent, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+    patch:
+      operationId: updateAgentV1
+      tags: [agents-v1]
+      summary: Rename an agent or change its model or harness
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/AgentV1IdempotencyKey"
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1UpdateBody"}}}
+      responses:
+        "200": {description: The agent, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+    delete:
+      operationId: deleteAgentV1
+      tags: [agents-v1]
+      summary: Delete an agent
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/AgentV1IdempotencyKey"
+        - {name: cascade, in: query, schema: {type: boolean}}
+        - {name: fingerprint, in: query, schema: {type: string}}
+      responses:
+        "204": {description: Deleted}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/agents/{id}/archive:
+    post:
+      operationId: archiveAgentV1
+      tags: [agents-v1]
+      summary: Archive an agent
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentV1Id"
+        - $ref: "#/components/parameters/AgentV1IdempotencyKey"
+      requestBody:
+        content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1ArchiveBody"}}}
+      responses:
+        "204": {description: Archived}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/agents/{id}/unarchive:
+    post:
+      operationId: unarchiveAgentV1
+      tags: [agents-v1]
+      summary: Unarchive an agent
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentV1Id"
+        - $ref: "#/components/parameters/AgentV1IdempotencyKey"
+      responses:
+        "204": {description: Unarchived}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/agents/{id}/messages:
+    post:
+      operationId: sendAgentV1
+      tags: [agents-v1]
+      summary: Send a message, or interrupt (with no text, Stop)
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentV1Id"
+        - $ref: "#/components/parameters/AgentV1IdempotencyKey"
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1SendBody"}}}
+      responses:
+        "202": {description: Accepted, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1SendResult"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/agents/{id}/messages/waiting:
+    delete:
+      operationId: withdrawAgentV1
+      tags: [agents-v1]
+      summary: Withdraw the caller's waiting message
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentV1Id"
+        - $ref: "#/components/parameters/AgentV1IdempotencyKey"
+      responses:
+        "200": {description: The result, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1WithdrawResult"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/agents/{id}/asks/{askId}:
+    post:
+      operationId: respondAgentV1
+      tags: [agents-v1]
+      summary: Answer an open approval or question
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentV1Id"
+        - {name: askId, in: path, required: true, schema: {type: string}}
+        - $ref: "#/components/parameters/AgentV1IdempotencyKey"
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1RespondBody"}}}
+      responses:
+        "204": {description: Answered}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/agents/{id}/events:
+    get:
+      operationId: listAgentEventsV1
+      tags: [agents-v1]
+      summary: Page through an agent's saved events
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentV1Id"
+        - {name: after, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: snapshot, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 0}}
+        - {name: kind, in: query, schema: {type: array, items: {type: string}}}
+      responses:
+        "200": {description: One page of events, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1EventPage"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/events:
+    get:
+      operationId: streamAgentEventsV1
+      tags: [agents-v1]
+      summary: Subscribe to agent events over SSE (one-time token auth)
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: token, in: query, description: "One-time token from GET /api/workspaces/{ws}/events/token", schema: {type: string}}
+        - {name: agents, in: query, description: Comma-separated agent ids, schema: {type: string}}
+        - {name: after, in: query, description: "Comma-separated <agent_id>:<seq> cursors", schema: {type: string}}
+        - {name: types, in: query, description: Comma-separated event kinds, schema: {type: string}}
+        - {name: deltas, in: query, schema: {type: boolean}}
+      responses:
+        "200":
+          description: Event stream; each frame's data is an AgentV1Event, and a last "error" frame carries an AgentV1Error
+          content:
+            text/event-stream:
+              schema: {$ref: "#/components/schemas/AgentV1Event"}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/presets:
+    get:
+      operationId: listAgentPresetsV1
+      tags: [agents-v1]
+      summary: List agent presets
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200": {description: The presets, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1PresetList"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/presets/{name}:
+    get:
+      operationId: getAgentPresetV1
+      tags: [agents-v1]
+      summary: Get one agent preset
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: name, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: The preset, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1Preset"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
 components:
   securitySchemes:
+    AgentBridgeToken:
+      type: http
+      scheme: bearer
+      description: |
+        Server-issued token (prefix `loomb1.`) bound to one workspace and to
+        one agent's bridge or to the daemon. The Agent API derives the caller
+        from it alone, never from a header, body field, tool argument or
+        harness metadata. A bad, foreign or other-workspace token is 401.
+
     BearerAuth:
       type: http
       scheme: bearer
@@ -4369,6 +4606,21 @@ components:
       schema:
         type: string
 
+    AgentV1Id:
+      name: id
+      in: path
+      required: true
+      description: Agent ID
+      schema:
+        type: string
+
+    AgentV1IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: The write's RequestID; a retry with the same key returns the first result
+      schema:
+        type: string
+
     AgentName:
       name: name
       in: path
@@ -4377,7 +4629,231 @@ components:
       schema:
         type: string
 
+  responses:
+    AgentV1Error:
+      description: An Agent API error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AgentV1Error"
+
   schemas:
+    # ── Agent API v1 (internal/webui/handlers/agentsv1/wire.go) ─────────
+    AgentV1:
+      type: object
+      description: An agent; waiting_messages and open_asks are filled by Get only.
+      required: [agent_id, workspace_id, name, profile_key, preset, preset_version, mode, interaction_mode, role_kind, spec_json, spec_version, owner_kind, owner_id, created_by_kind, created_by_id, parent_agent_id, root_agent_id, subject_type, subject_id, subject_version, external_key, repo, base_ref, worktree_path, branch, harness, host, model, state, state_reason, waiting_on, attempt, outcome, archive_reason, attention_reason, running_turn_id, delete_requested, last_active_at, created_at, updated_at, archived_at, finished_at, history_purged_at, deleted_at, compute, waiting_messages, open_asks]
+      properties:
+        agent_id: {type: string}
+        workspace_id: {type: string}
+        name: {type: string}
+        profile_key: {type: string}
+        preset: {type: string}
+        preset_version: {type: string}
+        mode: {type: string}
+        interaction_mode: {type: string}
+        role_kind: {type: string}
+        spec_json: {type: string}
+        spec_version: {type: integer, format: int64}
+        owner_kind: {type: string}
+        owner_id: {type: string}
+        created_by_kind: {type: string, description: "user, agent or system; from the caller's token, never the body"}
+        created_by_id: {type: string}
+        parent_agent_id: {type: [string, "null"]}
+        root_agent_id: {type: [string, "null"]}
+        subject_type: {type: [string, "null"]}
+        subject_id: {type: [string, "null"]}
+        subject_version: {type: [string, "null"]}
+        external_key: {type: [string, "null"]}
+        repo: {type: string}
+        base_ref: {type: [string, "null"]}
+        worktree_path: {type: [string, "null"]}
+        branch: {type: [string, "null"]}
+        harness: {type: string}
+        host: {type: string}
+        model: {type: [string, "null"]}
+        state: {type: string}
+        state_reason: {type: [string, "null"]}
+        waiting_on: {type: [string, "null"]}
+        attempt: {type: integer, format: int64}
+        outcome: {type: [string, "null"]}
+        archive_reason: {type: [string, "null"]}
+        attention_reason: {type: [string, "null"]}
+        running_turn_id: {type: [string, "null"]}
+        delete_requested: {type: boolean}
+        last_active_at: {type: [string, "null"]}
+        created_at: {type: string}
+        updated_at: {type: string}
+        archived_at: {type: [string, "null"]}
+        finished_at: {type: [string, "null"]}
+        history_purged_at: {type: [string, "null"]}
+        deleted_at: {type: [string, "null"]}
+        compute: {type: string}
+        waiting_messages: {type: array, items: {$ref: "#/components/schemas/AgentV1WaitingMessage"}}
+        open_asks: {type: array, items: {$ref: "#/components/schemas/AgentV1Ask"}}
+    AgentV1WaitingMessage:
+      type: object
+      description: One sender's message waiting for the agent.
+      required: [sender, text, since]
+      properties:
+        sender: {type: string}
+        text: {type: string}
+        since: {type: string}
+    AgentV1Ask:
+      type: object
+      description: One open harness ask.
+      required: [id, type, about]
+      properties:
+        id: {type: string}
+        type: {type: string}
+        about: {type: string}
+    AgentV1List:
+      type: object
+      required: [agents, next]
+      properties:
+        agents: {type: array, items: {$ref: "#/components/schemas/AgentV1"}}
+        next: {type: string, description: Cursor of the following page}
+    AgentV1Overrides:
+      type: object
+      description: A Create's per-agent changes to its preset.
+      properties:
+        harness: {type: string}
+        model: {type: string}
+        effort: {type: string}
+        max_budget_usd: {type: [number, "null"], format: double}
+        max_run_duration: {type: [integer, "null"], description: Seconds}
+        read_only: {type: boolean}
+        allowed_tools: {type: [array, "null"], items: {type: string}}
+        denied_tools: {type: [array, "null"], items: {type: string}}
+    AgentV1Persona:
+      type: object
+      description: Replaces the preset's persona with a file or inline text.
+      properties:
+        file: {type: string}
+        text: {type: string}
+    AgentV1Subject:
+      type: object
+      description: What an agent works on, for example a PR at a head SHA.
+      properties:
+        type: {type: string}
+        id: {type: string}
+        version: {type: string}
+    AgentV1CreateBody:
+      type: object
+      description: The Create body. For a bridge caller, parent is always the caller.
+      properties:
+        preset: {type: string}
+        overrides: {$ref: "#/components/schemas/AgentV1Overrides"}
+        persona: {$ref: "#/components/schemas/AgentV1Persona"}
+        name: {type: string}
+        parent: {type: string}
+        subject: {$ref: "#/components/schemas/AgentV1Subject"}
+        repo: {type: string}
+        base_ref: {type: string}
+        external_key: {type: string}
+        first_message: {type: string}
+    AgentV1Expect:
+      type: object
+      description: Optional version checks on a write.
+      properties:
+        spec_version: {type: integer, format: int64}
+        subject_version: {type: string}
+    AgentV1UpdateBody:
+      type: object
+      description: Empty fields are unchanged.
+      properties:
+        name: {type: string}
+        model: {type: string}
+        harness: {type: string}
+        expect: {$ref: "#/components/schemas/AgentV1Expect"}
+    AgentV1ArchiveBody:
+      type: object
+      properties:
+        reason: {type: string, description: Defaults to done}
+    AgentV1SendBody:
+      type: object
+      properties:
+        text: {type: string}
+        delivery: {type: string, enum: [queue, interrupt], description: "queue (default) or interrupt; interrupt with no text is Stop"}
+    AgentV1SendResult:
+      type: object
+      required: [message_id, state, replaced]
+      properties:
+        message_id: {type: string}
+        state: {type: string}
+        replaced: {type: boolean}
+        turn_id: {type: string}
+        interrupted: {type: boolean, description: Set only for delivery interrupt}
+    AgentV1WithdrawResult:
+      type: object
+      required: [result]
+      properties:
+        result: {type: string, enum: [withdrawn, nothing_waiting, already_handed]}
+    AgentV1RespondBody:
+      type: object
+      description: decision for an approval, answer for a question.
+      properties:
+        decision: {type: string, enum: [allow_once, allow_always, deny]}
+        answer: {type: string}
+    AgentV1Event:
+      type: object
+      description: One saved agent event; payload is opaque.
+      required: [agent_id, seq, event_id, kind, turn_id, payload, created_at]
+      properties:
+        agent_id: {type: string}
+        seq: {type: integer, format: int64}
+        event_id: {type: string}
+        kind: {type: string}
+        turn_id: {type: string}
+        payload: {}
+        created_at: {type: string}
+    AgentV1EventPage:
+      type: object
+      required: [events, snapshot_seq, next, more]
+      properties:
+        events: {type: array, items: {$ref: "#/components/schemas/AgentV1Event"}}
+        snapshot_seq: {type: integer, format: int64}
+        next: {type: integer, format: int64}
+        more: {type: boolean}
+    AgentV1PermissionRule:
+      type: object
+      required: [action, resource, effect]
+      properties:
+        action: {type: string}
+        resource: {type: string}
+        effect: {type: string, enum: [allow, deny, ask]}
+    AgentV1Preset:
+      type: object
+      required: [name, version, mode, role_kind, owner_kind, external_key_fmt, persona, harnesses, rules, tools, subagents, overridable]
+      properties:
+        name: {type: string}
+        version: {type: integer}
+        mode: {type: string}
+        role_kind: {type: string}
+        owner_kind: {type: string}
+        external_key_fmt: {type: string}
+        persona: {type: string}
+        harnesses: {type: [array, "null"], items: {type: string}}
+        rules: {type: array, items: {$ref: "#/components/schemas/AgentV1PermissionRule"}}
+        tools: {type: [array, "null"], items: {type: string}}
+        subagents: {type: boolean}
+        overridable: {type: [array, "null"], items: {type: string}}
+    AgentV1PresetList:
+      type: object
+      required: [presets]
+      properties:
+        presets: {type: array, items: {$ref: "#/components/schemas/AgentV1Preset"}}
+    AgentV1Error:
+      type: object
+      description: Every Agent API error. code is a loomagent code (design v2 §12.1), empty for request errors such as a bad body.
+      required: [error]
+      properties:
+        error: {type: string}
+        code: {type: string}
+        allowed: {type: array, items: {type: string}}
+        paths: {type: array, items: {type: string}}
+        fingerprint: {type: string}
+
     # ── Response Envelopes ──────────────────────────────────────────────
     ErrorResponse:
       type: object

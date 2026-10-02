@@ -20,6 +20,7 @@ type Handler struct {
 	services      func(ws string) *loomagent.Service
 	presets       loomagent.Presets
 	validateToken func(token, workspace string) (string, error)
+	tokens        *Tokens
 }
 
 // New returns a Handler. services returns the workspace's Agent API service,
@@ -29,6 +30,13 @@ func New(services func(ws string) *loomagent.Service, presets loomagent.Presets)
 		presets = loomagent.BuiltinPresets{}
 	}
 	return &Handler{services: services, presets: presets}
+}
+
+// WithTokens sets the bridge and daemon tokens the routes accept; with none,
+// every bridge token is refused.
+func (h *Handler) WithTokens(t *Tokens) *Handler {
+	h.tokens = t
+	return h
 }
 
 type route func(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error)
@@ -69,7 +77,23 @@ func (h *Handler) serve(fn route) http.Handler {
 			handler.RespondError(w, http.StatusNotFound, "agent API not available in this workspace")
 			return
 		}
-		status, body, err := fn(w, r, s)
+		c, ok := h.caller(r, s)
+		if !ok {
+			handler.RespondError(w, http.StatusUnauthorized, "invalid agent token")
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), callerKey{}, c))
+		var (
+			status int
+			body   any
+			err    error
+		)
+		if id := r.PathValue("id"); c.Kind == "agent" && id != "" {
+			err = ownChild(r.Context(), s, c.ID, id)
+		}
+		if err == nil {
+			status, body, err = fn(w, r, s)
+		}
 		switch {
 		case err != nil:
 			writeError(w, err)
@@ -79,15 +103,6 @@ func (h *Handler) serve(fn route) http.Handler {
 			handler.WriteJSON(w, status, body)
 		}
 	})
-}
-
-// actor is the caller from the authenticated request; no body field names it:
-// the verified signed-in user, else the local user.
-func actor(r *http.Request) loomagent.ActorRef {
-	if _, id, ok := middleware.VerifiedUserActorFromContext(r.Context()); ok {
-		return loomagent.ActorRef{Kind: "user", ID: id}
-	}
-	return loomagent.ActorRef{Kind: "user", ID: "local"}
 }
 
 // envelope reads the JSON body (capped at handler.MaxRequestBody) into dst
@@ -109,6 +124,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, s *loomagent.Se
 	}
 	req := body.request()
 	req.RequestID, req.Actor = id, actor(r)
+	if req.Actor.Kind == "agent" {
+		req.Parent = req.Actor.ID
+	}
 	a, err := s.Create(r.Context(), req)
 	return http.StatusCreated, agentOut(a), err
 }
@@ -119,9 +137,13 @@ func list(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, an
 	if err != nil {
 		return 0, nil, err
 	}
+	parent := q.Get("parent")
+	if c := actor(r); c.Kind == "agent" {
+		parent = c.ID
+	}
 	agents, next, err := s.List(r.Context(), loomstore.AgentFilter{
 		WorkspaceID: middleware.WorkspaceFromContext(r.Context()),
-		OwnerKind:   q.Get("owner_kind"), OwnerID: q.Get("owner_id"), Parent: q.Get("parent"),
+		OwnerKind:   q.Get("owner_kind"), OwnerID: q.Get("owner_id"), Parent: parent,
 		Root: q.Get("root"), Preset: q.Get("preset"), Mode: q.Get("mode"), Harness: q.Get("harness"),
 		RoleKind: q.Get("role_kind"), State: q.Get("state"), SubjectType: q.Get("subject_type"),
 		SubjectID: q.Get("subject_id"), ExternalKeyPrefix: q.Get("external_key_prefix"), Name: q.Get("name"),

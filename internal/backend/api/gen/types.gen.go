@@ -8,10 +8,11 @@ import (
 )
 
 const (
-	BearerAuthScopes  = "BearerAuth.Scopes"
-	FleetApiKeyScopes = "FleetApiKey.Scopes"
-	FleetJWTScopes    = "FleetJWT.Scopes"
-	WorkerTokenScopes = "WorkerToken.Scopes"
+	AgentBridgeTokenScopes = "AgentBridgeToken.Scopes"
+	BearerAuthScopes       = "BearerAuth.Scopes"
+	FleetApiKeyScopes      = "FleetApiKey.Scopes"
+	FleetJWTScopes         = "FleetJWT.Scopes"
+	WorkerTokenScopes      = "WorkerToken.Scopes"
 )
 
 // Defines values for AgentStatusResponseAgentState.
@@ -44,6 +45,87 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 	case AgentStatusResponseAgentStateStuck:
 		return true
 	case AgentStatusResponseAgentStateWorking:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentV1PermissionRuleEffect.
+const (
+	AgentV1PermissionRuleEffectAllow AgentV1PermissionRuleEffect = "allow"
+	AgentV1PermissionRuleEffectAsk   AgentV1PermissionRuleEffect = "ask"
+	AgentV1PermissionRuleEffectDeny  AgentV1PermissionRuleEffect = "deny"
+)
+
+// Valid indicates whether the value is a known member of the AgentV1PermissionRuleEffect enum.
+func (e AgentV1PermissionRuleEffect) Valid() bool {
+	switch e {
+	case AgentV1PermissionRuleEffectAllow:
+		return true
+	case AgentV1PermissionRuleEffectAsk:
+		return true
+	case AgentV1PermissionRuleEffectDeny:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentV1RespondBodyDecision.
+const (
+	AgentV1RespondBodyDecisionAllowAlways AgentV1RespondBodyDecision = "allow_always"
+	AgentV1RespondBodyDecisionAllowOnce   AgentV1RespondBodyDecision = "allow_once"
+	AgentV1RespondBodyDecisionDeny        AgentV1RespondBodyDecision = "deny"
+)
+
+// Valid indicates whether the value is a known member of the AgentV1RespondBodyDecision enum.
+func (e AgentV1RespondBodyDecision) Valid() bool {
+	switch e {
+	case AgentV1RespondBodyDecisionAllowAlways:
+		return true
+	case AgentV1RespondBodyDecisionAllowOnce:
+		return true
+	case AgentV1RespondBodyDecisionDeny:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentV1SendBodyDelivery.
+const (
+	Interrupt AgentV1SendBodyDelivery = "interrupt"
+	Queue     AgentV1SendBodyDelivery = "queue"
+)
+
+// Valid indicates whether the value is a known member of the AgentV1SendBodyDelivery enum.
+func (e AgentV1SendBodyDelivery) Valid() bool {
+	switch e {
+	case Interrupt:
+		return true
+	case Queue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentV1WithdrawResultResult.
+const (
+	AlreadyHanded  AgentV1WithdrawResultResult = "already_handed"
+	NothingWaiting AgentV1WithdrawResultResult = "nothing_waiting"
+	Withdrawn      AgentV1WithdrawResultResult = "withdrawn"
+)
+
+// Valid indicates whether the value is a known member of the AgentV1WithdrawResultResult enum.
+func (e AgentV1WithdrawResultResult) Valid() bool {
+	switch e {
+	case AlreadyHanded:
+		return true
+	case NothingWaiting:
+		return true
+	case Withdrawn:
 		return true
 	default:
 		return false
@@ -1594,6 +1676,245 @@ type AgentStatusResponse struct {
 // AgentStatusResponseAgentState defines model for AgentStatusResponse.AgentState.
 type AgentStatusResponseAgentState string
 
+// AgentV1 An agent; waiting_messages and open_asks are filled by Get only.
+type AgentV1 struct {
+	AgentId         string  `json:"agent_id"`
+	ArchiveReason   *string `json:"archive_reason"`
+	ArchivedAt      *string `json:"archived_at"`
+	Attempt         int64   `json:"attempt"`
+	AttentionReason *string `json:"attention_reason"`
+	BaseRef         *string `json:"base_ref"`
+	Branch          *string `json:"branch"`
+	Compute         string  `json:"compute"`
+	CreatedAt       string  `json:"created_at"`
+	CreatedById     string  `json:"created_by_id"`
+
+	// CreatedByKind user, agent or system; from the caller's token, never the body
+	CreatedByKind   string                  `json:"created_by_kind"`
+	DeleteRequested bool                    `json:"delete_requested"`
+	DeletedAt       *string                 `json:"deleted_at"`
+	ExternalKey     *string                 `json:"external_key"`
+	FinishedAt      *string                 `json:"finished_at"`
+	Harness         string                  `json:"harness"`
+	HistoryPurgedAt *string                 `json:"history_purged_at"`
+	Host            string                  `json:"host"`
+	InteractionMode string                  `json:"interaction_mode"`
+	LastActiveAt    *string                 `json:"last_active_at"`
+	Mode            string                  `json:"mode"`
+	Model           *string                 `json:"model"`
+	Name            string                  `json:"name"`
+	OpenAsks        []AgentV1Ask            `json:"open_asks"`
+	Outcome         *string                 `json:"outcome"`
+	OwnerId         string                  `json:"owner_id"`
+	OwnerKind       string                  `json:"owner_kind"`
+	ParentAgentId   *string                 `json:"parent_agent_id"`
+	Preset          string                  `json:"preset"`
+	PresetVersion   string                  `json:"preset_version"`
+	ProfileKey      string                  `json:"profile_key"`
+	Repo            string                  `json:"repo"`
+	RoleKind        string                  `json:"role_kind"`
+	RootAgentId     *string                 `json:"root_agent_id"`
+	RunningTurnId   *string                 `json:"running_turn_id"`
+	SpecJson        string                  `json:"spec_json"`
+	SpecVersion     int64                   `json:"spec_version"`
+	State           string                  `json:"state"`
+	StateReason     *string                 `json:"state_reason"`
+	SubjectId       *string                 `json:"subject_id"`
+	SubjectType     *string                 `json:"subject_type"`
+	SubjectVersion  *string                 `json:"subject_version"`
+	UpdatedAt       string                  `json:"updated_at"`
+	WaitingMessages []AgentV1WaitingMessage `json:"waiting_messages"`
+	WaitingOn       *string                 `json:"waiting_on"`
+	WorkspaceId     string                  `json:"workspace_id"`
+	WorktreePath    *string                 `json:"worktree_path"`
+}
+
+// AgentV1ArchiveBody defines model for AgentV1ArchiveBody.
+type AgentV1ArchiveBody struct {
+	// Reason Defaults to done
+	Reason *string `json:"reason,omitempty"`
+}
+
+// AgentV1Ask One open harness ask.
+type AgentV1Ask struct {
+	About string `json:"about"`
+	Id    string `json:"id"`
+	Type  string `json:"type"`
+}
+
+// AgentV1CreateBody The Create body. For a bridge caller, parent is always the caller.
+type AgentV1CreateBody struct {
+	BaseRef      *string `json:"base_ref,omitempty"`
+	ExternalKey  *string `json:"external_key,omitempty"`
+	FirstMessage *string `json:"first_message,omitempty"`
+	Name         *string `json:"name,omitempty"`
+
+	// Overrides A Create's per-agent changes to its preset.
+	Overrides *AgentV1Overrides `json:"overrides,omitempty"`
+	Parent    *string           `json:"parent,omitempty"`
+
+	// Persona Replaces the preset's persona with a file or inline text.
+	Persona *AgentV1Persona `json:"persona,omitempty"`
+	Preset  *string         `json:"preset,omitempty"`
+	Repo    *string         `json:"repo,omitempty"`
+
+	// Subject What an agent works on, for example a PR at a head SHA.
+	Subject *AgentV1Subject `json:"subject,omitempty"`
+}
+
+// AgentV1Error Every Agent API error. code is a loomagent code (design v2 §12.1), empty for request errors such as a bad body.
+type AgentV1Error struct {
+	Allowed     *[]string `json:"allowed,omitempty"`
+	Code        *string   `json:"code,omitempty"`
+	Error       string    `json:"error"`
+	Fingerprint *string   `json:"fingerprint,omitempty"`
+	Paths       *[]string `json:"paths,omitempty"`
+}
+
+// AgentV1Event One saved agent event; payload is opaque.
+type AgentV1Event struct {
+	AgentId   string      `json:"agent_id"`
+	CreatedAt string      `json:"created_at"`
+	EventId   string      `json:"event_id"`
+	Kind      string      `json:"kind"`
+	Payload   interface{} `json:"payload"`
+	Seq       int64       `json:"seq"`
+	TurnId    string      `json:"turn_id"`
+}
+
+// AgentV1EventPage defines model for AgentV1EventPage.
+type AgentV1EventPage struct {
+	Events      []AgentV1Event `json:"events"`
+	More        bool           `json:"more"`
+	Next        int64          `json:"next"`
+	SnapshotSeq int64          `json:"snapshot_seq"`
+}
+
+// AgentV1Expect Optional version checks on a write.
+type AgentV1Expect struct {
+	SpecVersion    *int64  `json:"spec_version,omitempty"`
+	SubjectVersion *string `json:"subject_version,omitempty"`
+}
+
+// AgentV1List defines model for AgentV1List.
+type AgentV1List struct {
+	Agents []AgentV1 `json:"agents"`
+
+	// Next Cursor of the following page
+	Next string `json:"next"`
+}
+
+// AgentV1Overrides A Create's per-agent changes to its preset.
+type AgentV1Overrides struct {
+	AllowedTools *[]string `json:"allowed_tools,omitempty"`
+	DeniedTools  *[]string `json:"denied_tools,omitempty"`
+	Effort       *string   `json:"effort,omitempty"`
+	Harness      *string   `json:"harness,omitempty"`
+	MaxBudgetUsd *float64  `json:"max_budget_usd,omitempty"`
+
+	// MaxRunDuration Seconds
+	MaxRunDuration *int    `json:"max_run_duration,omitempty"`
+	Model          *string `json:"model,omitempty"`
+	ReadOnly       *bool   `json:"read_only,omitempty"`
+}
+
+// AgentV1PermissionRule defines model for AgentV1PermissionRule.
+type AgentV1PermissionRule struct {
+	Action   string                      `json:"action"`
+	Effect   AgentV1PermissionRuleEffect `json:"effect"`
+	Resource string                      `json:"resource"`
+}
+
+// AgentV1PermissionRuleEffect defines model for AgentV1PermissionRule.Effect.
+type AgentV1PermissionRuleEffect string
+
+// AgentV1Persona Replaces the preset's persona with a file or inline text.
+type AgentV1Persona struct {
+	File *string `json:"file,omitempty"`
+	Text *string `json:"text,omitempty"`
+}
+
+// AgentV1Preset defines model for AgentV1Preset.
+type AgentV1Preset struct {
+	ExternalKeyFmt string                  `json:"external_key_fmt"`
+	Harnesses      *[]string               `json:"harnesses"`
+	Mode           string                  `json:"mode"`
+	Name           string                  `json:"name"`
+	Overridable    *[]string               `json:"overridable"`
+	OwnerKind      string                  `json:"owner_kind"`
+	Persona        string                  `json:"persona"`
+	RoleKind       string                  `json:"role_kind"`
+	Rules          []AgentV1PermissionRule `json:"rules"`
+	Subagents      bool                    `json:"subagents"`
+	Tools          *[]string               `json:"tools"`
+	Version        int                     `json:"version"`
+}
+
+// AgentV1PresetList defines model for AgentV1PresetList.
+type AgentV1PresetList struct {
+	Presets []AgentV1Preset `json:"presets"`
+}
+
+// AgentV1RespondBody decision for an approval, answer for a question.
+type AgentV1RespondBody struct {
+	Answer   *string                     `json:"answer,omitempty"`
+	Decision *AgentV1RespondBodyDecision `json:"decision,omitempty"`
+}
+
+// AgentV1RespondBodyDecision defines model for AgentV1RespondBody.Decision.
+type AgentV1RespondBodyDecision string
+
+// AgentV1SendBody defines model for AgentV1SendBody.
+type AgentV1SendBody struct {
+	// Delivery queue (default) or interrupt; interrupt with no text is Stop
+	Delivery *AgentV1SendBodyDelivery `json:"delivery,omitempty"`
+	Text     *string                  `json:"text,omitempty"`
+}
+
+// AgentV1SendBodyDelivery queue (default) or interrupt; interrupt with no text is Stop
+type AgentV1SendBodyDelivery string
+
+// AgentV1SendResult defines model for AgentV1SendResult.
+type AgentV1SendResult struct {
+	// Interrupted Set only for delivery interrupt
+	Interrupted *bool   `json:"interrupted,omitempty"`
+	MessageId   string  `json:"message_id"`
+	Replaced    bool    `json:"replaced"`
+	State       string  `json:"state"`
+	TurnId      *string `json:"turn_id,omitempty"`
+}
+
+// AgentV1Subject What an agent works on, for example a PR at a head SHA.
+type AgentV1Subject struct {
+	Id      *string `json:"id,omitempty"`
+	Type    *string `json:"type,omitempty"`
+	Version *string `json:"version,omitempty"`
+}
+
+// AgentV1UpdateBody Empty fields are unchanged.
+type AgentV1UpdateBody struct {
+	// Expect Optional version checks on a write.
+	Expect  *AgentV1Expect `json:"expect,omitempty"`
+	Harness *string        `json:"harness,omitempty"`
+	Model   *string        `json:"model,omitempty"`
+	Name    *string        `json:"name,omitempty"`
+}
+
+// AgentV1WaitingMessage One sender's message waiting for the agent.
+type AgentV1WaitingMessage struct {
+	Sender string `json:"sender"`
+	Since  string `json:"since"`
+	Text   string `json:"text"`
+}
+
+// AgentV1WithdrawResult defines model for AgentV1WithdrawResult.
+type AgentV1WithdrawResult struct {
+	Result AgentV1WithdrawResultResult `json:"result"`
+}
+
+// AgentV1WithdrawResultResult defines model for AgentV1WithdrawResult.Result.
+type AgentV1WithdrawResultResult string
+
 // BackendConfigResponse defines model for BackendConfigResponse.
 type BackendConfigResponse struct {
 	Data *struct {
@@ -3123,6 +3444,12 @@ type WorkspaceSummary struct {
 // AgentName defines model for AgentName.
 type AgentName = string
 
+// AgentV1Id defines model for AgentV1Id.
+type AgentV1Id = string
+
+// AgentV1IdempotencyKey defines model for AgentV1IdempotencyKey.
+type AgentV1IdempotencyKey = string
+
 // IssueId defines model for IssueId.
 type IssueId = string
 
@@ -3604,6 +3931,103 @@ type ConnectTerminalWSParams struct {
 	Session *string `form:"session,omitempty" json:"session,omitempty"`
 }
 
+// ListAgentsV1Params defines parameters for ListAgentsV1.
+type ListAgentsV1Params struct {
+	OwnerKind *string `form:"owner_kind,omitempty" json:"owner_kind,omitempty"`
+	OwnerId   *string `form:"owner_id,omitempty" json:"owner_id,omitempty"`
+
+	// Parent Ignored for a bridge caller
+	Parent            *string `form:"parent,omitempty" json:"parent,omitempty"`
+	Root              *string `form:"root,omitempty" json:"root,omitempty"`
+	Preset            *string `form:"preset,omitempty" json:"preset,omitempty"`
+	Mode              *string `form:"mode,omitempty" json:"mode,omitempty"`
+	Harness           *string `form:"harness,omitempty" json:"harness,omitempty"`
+	RoleKind          *string `form:"role_kind,omitempty" json:"role_kind,omitempty"`
+	State             *string `form:"state,omitempty" json:"state,omitempty"`
+	SubjectType       *string `form:"subject_type,omitempty" json:"subject_type,omitempty"`
+	SubjectId         *string `form:"subject_id,omitempty" json:"subject_id,omitempty"`
+	ExternalKeyPrefix *string `form:"external_key_prefix,omitempty" json:"external_key_prefix,omitempty"`
+	Name              *string `form:"name,omitempty" json:"name,omitempty"`
+	IncludeArchived   *bool   `form:"include_archived,omitempty" json:"include_archived,omitempty"`
+	After             *string `form:"after,omitempty" json:"after,omitempty"`
+	Limit             *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// CreateAgentV1Params defines parameters for CreateAgentV1.
+type CreateAgentV1Params struct {
+	// IdempotencyKey The write's RequestID; a retry with the same key returns the first result
+	IdempotencyKey *AgentV1IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// DeleteAgentV1Params defines parameters for DeleteAgentV1.
+type DeleteAgentV1Params struct {
+	Cascade     *bool   `form:"cascade,omitempty" json:"cascade,omitempty"`
+	Fingerprint *string `form:"fingerprint,omitempty" json:"fingerprint,omitempty"`
+
+	// IdempotencyKey The write's RequestID; a retry with the same key returns the first result
+	IdempotencyKey *AgentV1IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// UpdateAgentV1Params defines parameters for UpdateAgentV1.
+type UpdateAgentV1Params struct {
+	// IdempotencyKey The write's RequestID; a retry with the same key returns the first result
+	IdempotencyKey *AgentV1IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// ArchiveAgentV1Params defines parameters for ArchiveAgentV1.
+type ArchiveAgentV1Params struct {
+	// IdempotencyKey The write's RequestID; a retry with the same key returns the first result
+	IdempotencyKey *AgentV1IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// RespondAgentV1Params defines parameters for RespondAgentV1.
+type RespondAgentV1Params struct {
+	// IdempotencyKey The write's RequestID; a retry with the same key returns the first result
+	IdempotencyKey *AgentV1IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// ListAgentEventsV1Params defines parameters for ListAgentEventsV1.
+type ListAgentEventsV1Params struct {
+	After    *int64    `form:"after,omitempty" json:"after,omitempty"`
+	Snapshot *int64    `form:"snapshot,omitempty" json:"snapshot,omitempty"`
+	Limit    *int      `form:"limit,omitempty" json:"limit,omitempty"`
+	Kind     *[]string `form:"kind,omitempty" json:"kind,omitempty"`
+}
+
+// SendAgentV1Params defines parameters for SendAgentV1.
+type SendAgentV1Params struct {
+	// IdempotencyKey The write's RequestID; a retry with the same key returns the first result
+	IdempotencyKey *AgentV1IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// WithdrawAgentV1Params defines parameters for WithdrawAgentV1.
+type WithdrawAgentV1Params struct {
+	// IdempotencyKey The write's RequestID; a retry with the same key returns the first result
+	IdempotencyKey *AgentV1IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// UnarchiveAgentV1Params defines parameters for UnarchiveAgentV1.
+type UnarchiveAgentV1Params struct {
+	// IdempotencyKey The write's RequestID; a retry with the same key returns the first result
+	IdempotencyKey *AgentV1IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// StreamAgentEventsV1Params defines parameters for StreamAgentEventsV1.
+type StreamAgentEventsV1Params struct {
+	// Token One-time token from GET /api/workspaces/{ws}/events/token
+	Token *string `form:"token,omitempty" json:"token,omitempty"`
+
+	// Agents Comma-separated agent ids
+	Agents *string `form:"agents,omitempty" json:"agents,omitempty"`
+
+	// After Comma-separated <agent_id>:<seq> cursors
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+
+	// Types Comma-separated event kinds
+	Types  *string `form:"types,omitempty" json:"types,omitempty"`
+	Deltas *bool   `form:"deltas,omitempty" json:"deltas,omitempty"`
+}
+
 // ReportClientErrorJSONRequestBody defines body for ReportClientError for application/json ContentType.
 type ReportClientErrorJSONRequestBody = ReportClientErrorJSONBody
 
@@ -3723,3 +4147,18 @@ type PatchTerminalTabJSONRequestBody = TabPatchRequest
 
 // PutTerminalTabJSONRequestBody defines body for PutTerminalTab for application/json ContentType.
 type PutTerminalTabJSONRequestBody = TabPutRequest
+
+// CreateAgentV1JSONRequestBody defines body for CreateAgentV1 for application/json ContentType.
+type CreateAgentV1JSONRequestBody = AgentV1CreateBody
+
+// UpdateAgentV1JSONRequestBody defines body for UpdateAgentV1 for application/json ContentType.
+type UpdateAgentV1JSONRequestBody = AgentV1UpdateBody
+
+// ArchiveAgentV1JSONRequestBody defines body for ArchiveAgentV1 for application/json ContentType.
+type ArchiveAgentV1JSONRequestBody = AgentV1ArchiveBody
+
+// RespondAgentV1JSONRequestBody defines body for RespondAgentV1 for application/json ContentType.
+type RespondAgentV1JSONRequestBody = AgentV1RespondBody
+
+// SendAgentV1JSONRequestBody defines body for SendAgentV1 for application/json ContentType.
+type SendAgentV1JSONRequestBody = AgentV1SendBody

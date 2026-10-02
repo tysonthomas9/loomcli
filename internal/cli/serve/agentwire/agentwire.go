@@ -38,6 +38,7 @@ type Config struct {
 // registry, worktree root and OpenCode adapter.
 type API struct {
 	handler  *agentsv1.Handler
+	tokens   *agentsv1.Tokens
 	store    *loomstore.Store
 	opencode *opencode.Adapter
 	ctx      context.Context
@@ -52,7 +53,8 @@ type API struct {
 // Start opens the registry and wires the OpenCode harness. Each workspace's
 // service starts on its first request, or at once for a workspace that
 // already has agents, so their pending messages and purges resume. OpenCode
-// is reached on first use. No bridge is wired yet (2.2a), so presets with
+// is reached on first use. The bridge and daemon tokens are signed with a
+// key kept in the data dir; no bridge is launched yet (2.2b), so presets with
 // bridge tools fail closed at launch.
 func Start(ctx context.Context, cfg Config) (*API, error) {
 	if cfg.Dir == "" {
@@ -60,6 +62,10 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 	}
 	root := filepath.Join(cfg.Dir, "worktrees")
 	if err := os.MkdirAll(root, 0o750); err != nil {
+		return nil, fmt.Errorf("agentwire: %w", err)
+	}
+	tokens, err := agentsv1.LoadTokens(filepath.Join(cfg.Dir, "agent-token.key"))
+	if err != nil {
 		return nil, fmt.Errorf("agentwire: %w", err)
 	}
 	wt, err := agentworktree.New(root, agentworktree.TargetLocal, gitrunner.Exec{})
@@ -79,7 +85,7 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		return nil, fmt.Errorf("agentwire: %w", err)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	a := &API{store: st, opencode: oc, ctx: ctx, cancel: cancel, services: map[string]*loomagent.Service{}}
+	a := &API{store: st, tokens: tokens, opencode: oc, ctx: ctx, cancel: cancel, services: map[string]*loomagent.Service{}}
 	a.newSvc = func(ws string) (*loomagent.Service, func()) {
 		var svc *loomagent.Service
 		feed := sync.OnceFunc(func() { a.run(func(ctx context.Context) { svc.RunFeed(ctx, "opencode") }) })
@@ -87,7 +93,7 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}}))
 		return svc, feed
 	}
-	a.handler = agentsv1.New(a.service, nil)
+	a.handler = agentsv1.New(a.service, nil).WithTokens(tokens)
 	known, _, err := st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true})
 	if err != nil {
 		a.Stop()
@@ -143,6 +149,9 @@ func (h lazyFeed) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharn
 	h.start()
 	return h.Harness.Open(ctx, spec)
 }
+
+// Tokens issues the per-agent bridge and daemon tokens the routes accept.
+func (a *API) Tokens() *agentsv1.Tokens { return a.tokens }
 
 // Register mounts the Agent API routes; it is a webui AgentAPIRoutesFn.
 func (a *API) Register(mux *http.ServeMux, workspace middleware.Middleware,

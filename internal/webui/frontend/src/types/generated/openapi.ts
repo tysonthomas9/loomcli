@@ -2308,10 +2308,405 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/v1/agents": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List agents (a bridge lists only its own children) */
+    get: operations["listAgentsV1"];
+    put?: never;
+    /** Create an agent (a bridge's parent is always itself) */
+    post: operations["createAgentV1"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/agents/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+      };
+      cookie?: never;
+    };
+    /** Get an agent with its waiting messages and open asks */
+    get: operations["getAgentV1"];
+    put?: never;
+    post?: never;
+    /** Delete an agent */
+    delete: operations["deleteAgentV1"];
+    options?: never;
+    head?: never;
+    /** Rename an agent or change its model or harness */
+    patch: operations["updateAgentV1"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/agents/{id}/archive": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Archive an agent */
+    post: operations["archiveAgentV1"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/agents/{id}/unarchive": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Unarchive an agent */
+    post: operations["unarchiveAgentV1"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/agents/{id}/messages": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Send a message, or interrupt (with no text, Stop) */
+    post: operations["sendAgentV1"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/agents/{id}/messages/waiting": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Withdraw the caller's waiting message */
+    delete: operations["withdrawAgentV1"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/agents/{id}/asks/{askId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Answer an open approval or question */
+    post: operations["respondAgentV1"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/agents/{id}/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Page through an agent's saved events */
+    get: operations["listAgentEventsV1"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Subscribe to agent events over SSE (one-time token auth) */
+    get: operations["streamAgentEventsV1"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/presets": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List agent presets */
+    get: operations["listAgentPresetsV1"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/presets/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one agent preset */
+    get: operations["getAgentPresetV1"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @description An agent; waiting_messages and open_asks are filled by Get only. */
+    AgentV1: {
+      agent_id: string;
+      workspace_id: string;
+      name: string;
+      profile_key: string;
+      preset: string;
+      preset_version: string;
+      mode: string;
+      interaction_mode: string;
+      role_kind: string;
+      spec_json: string;
+      /** Format: int64 */
+      spec_version: number;
+      owner_kind: string;
+      owner_id: string;
+      /** @description user, agent or system; from the caller's token, never the body */
+      created_by_kind: string;
+      created_by_id: string;
+      parent_agent_id: string | null;
+      root_agent_id: string | null;
+      subject_type: string | null;
+      subject_id: string | null;
+      subject_version: string | null;
+      external_key: string | null;
+      repo: string;
+      base_ref: string | null;
+      worktree_path: string | null;
+      branch: string | null;
+      harness: string;
+      host: string;
+      model: string | null;
+      state: string;
+      state_reason: string | null;
+      waiting_on: string | null;
+      /** Format: int64 */
+      attempt: number;
+      outcome: string | null;
+      archive_reason: string | null;
+      attention_reason: string | null;
+      running_turn_id: string | null;
+      delete_requested: boolean;
+      last_active_at: string | null;
+      created_at: string;
+      updated_at: string;
+      archived_at: string | null;
+      finished_at: string | null;
+      history_purged_at: string | null;
+      deleted_at: string | null;
+      compute: string;
+      waiting_messages: components["schemas"]["AgentV1WaitingMessage"][];
+      open_asks: components["schemas"]["AgentV1Ask"][];
+    };
+    /** @description One sender's message waiting for the agent. */
+    AgentV1WaitingMessage: {
+      sender: string;
+      text: string;
+      since: string;
+    };
+    /** @description One open harness ask. */
+    AgentV1Ask: {
+      id: string;
+      type: string;
+      about: string;
+    };
+    AgentV1List: {
+      agents: components["schemas"]["AgentV1"][];
+      /** @description Cursor of the following page */
+      next: string;
+    };
+    /** @description A Create's per-agent changes to its preset. */
+    AgentV1Overrides: {
+      harness?: string;
+      model?: string;
+      effort?: string;
+      /** Format: double */
+      max_budget_usd?: number | null;
+      /** @description Seconds */
+      max_run_duration?: number | null;
+      read_only?: boolean;
+      allowed_tools?: string[] | null;
+      denied_tools?: string[] | null;
+    };
+    /** @description Replaces the preset's persona with a file or inline text. */
+    AgentV1Persona: {
+      file?: string;
+      text?: string;
+    };
+    /** @description What an agent works on, for example a PR at a head SHA. */
+    AgentV1Subject: {
+      type?: string;
+      id?: string;
+      version?: string;
+    };
+    /** @description The Create body. For a bridge caller, parent is always the caller. */
+    AgentV1CreateBody: {
+      preset?: string;
+      overrides?: components["schemas"]["AgentV1Overrides"];
+      persona?: components["schemas"]["AgentV1Persona"];
+      name?: string;
+      parent?: string;
+      subject?: components["schemas"]["AgentV1Subject"];
+      repo?: string;
+      base_ref?: string;
+      external_key?: string;
+      first_message?: string;
+    };
+    /** @description Optional version checks on a write. */
+    AgentV1Expect: {
+      /** Format: int64 */
+      spec_version?: number;
+      subject_version?: string;
+    };
+    /** @description Empty fields are unchanged. */
+    AgentV1UpdateBody: {
+      name?: string;
+      model?: string;
+      harness?: string;
+      expect?: components["schemas"]["AgentV1Expect"];
+    };
+    AgentV1ArchiveBody: {
+      /** @description Defaults to done */
+      reason?: string;
+    };
+    AgentV1SendBody: {
+      text?: string;
+      /**
+       * @description queue (default) or interrupt; interrupt with no text is Stop
+       * @enum {string}
+       */
+      delivery?: "queue" | "interrupt";
+    };
+    AgentV1SendResult: {
+      message_id: string;
+      state: string;
+      replaced: boolean;
+      turn_id?: string;
+      /** @description Set only for delivery interrupt */
+      interrupted?: boolean;
+    };
+    AgentV1WithdrawResult: {
+      /** @enum {string} */
+      result: "withdrawn" | "nothing_waiting" | "already_handed";
+    };
+    /** @description decision for an approval, answer for a question. */
+    AgentV1RespondBody: {
+      /** @enum {string} */
+      decision?: "allow_once" | "allow_always" | "deny";
+      answer?: string;
+    };
+    /** @description One saved agent event; payload is opaque. */
+    AgentV1Event: {
+      agent_id: string;
+      /** Format: int64 */
+      seq: number;
+      event_id: string;
+      kind: string;
+      turn_id: string;
+      payload: unknown;
+      created_at: string;
+    };
+    AgentV1EventPage: {
+      events: components["schemas"]["AgentV1Event"][];
+      /** Format: int64 */
+      snapshot_seq: number;
+      /** Format: int64 */
+      next: number;
+      more: boolean;
+    };
+    AgentV1PermissionRule: {
+      action: string;
+      resource: string;
+      /** @enum {string} */
+      effect: "allow" | "deny" | "ask";
+    };
+    AgentV1Preset: {
+      name: string;
+      version: number;
+      mode: string;
+      role_kind: string;
+      owner_kind: string;
+      external_key_fmt: string;
+      persona: string;
+      harnesses: string[] | null;
+      rules: components["schemas"]["AgentV1PermissionRule"][];
+      tools: string[] | null;
+      subagents: boolean;
+      overridable: string[] | null;
+    };
+    AgentV1PresetList: {
+      presets: components["schemas"]["AgentV1Preset"][];
+    };
+    /** @description Every Agent API error. code is a loomagent code (design v2 §12.1), empty for request errors such as a bad body. */
+    AgentV1Error: {
+      error: string;
+      code?: string;
+      allowed?: string[];
+      paths?: string[];
+      fingerprint?: string;
+    };
     ErrorResponse: {
       /** @constant */
       success: false;
@@ -3643,12 +4038,26 @@ export interface components {
       data?: Record<string, never>;
     };
   };
-  responses: never;
+  responses: {
+    /** @description An Agent API error */
+    AgentV1Error: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["AgentV1Error"];
+      };
+    };
+  };
   parameters: {
     /** @description Workspace identifier */
     WorkspaceId: string;
     /** @description Issue identifier */
     IssueId: string;
+    /** @description Agent ID */
+    AgentV1Id: string;
+    /** @description The write's RequestID; a retry with the same key returns the first result */
+    AgentV1IdempotencyKey: string;
     /** @description Agent worktree name */
     AgentName: string;
   };
@@ -8381,6 +8790,434 @@ export interface operations {
           "application/json": Record<string, never>;
         };
       };
+    };
+  };
+  listAgentsV1: {
+    parameters: {
+      query?: {
+        owner_kind?: string;
+        owner_id?: string;
+        /** @description Ignored for a bridge caller */
+        parent?: string;
+        root?: string;
+        preset?: string;
+        mode?: string;
+        harness?: string;
+        role_kind?: string;
+        state?: string;
+        subject_type?: string;
+        subject_id?: string;
+        external_key_prefix?: string;
+        name?: string;
+        include_archived?: boolean;
+        after?: string;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page of agents */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1List"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  createAgentV1: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The write's RequestID; a retry with the same key returns the first result */
+        "Idempotency-Key"?: components["parameters"]["AgentV1IdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgentV1CreateBody"];
+      };
+    };
+    responses: {
+      /** @description The agent */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  getAgentV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The agent */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  deleteAgentV1: {
+    parameters: {
+      query?: {
+        cascade?: boolean;
+        fingerprint?: string;
+      };
+      header?: {
+        /** @description The write's RequestID; a retry with the same key returns the first result */
+        "Idempotency-Key"?: components["parameters"]["AgentV1IdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  updateAgentV1: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The write's RequestID; a retry with the same key returns the first result */
+        "Idempotency-Key"?: components["parameters"]["AgentV1IdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgentV1UpdateBody"];
+      };
+    };
+    responses: {
+      /** @description The agent */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  archiveAgentV1: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The write's RequestID; a retry with the same key returns the first result */
+        "Idempotency-Key"?: components["parameters"]["AgentV1IdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["AgentV1ArchiveBody"];
+      };
+    };
+    responses: {
+      /** @description Archived */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  unarchiveAgentV1: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The write's RequestID; a retry with the same key returns the first result */
+        "Idempotency-Key"?: components["parameters"]["AgentV1IdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Unarchived */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  sendAgentV1: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The write's RequestID; a retry with the same key returns the first result */
+        "Idempotency-Key"?: components["parameters"]["AgentV1IdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgentV1SendBody"];
+      };
+    };
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1SendResult"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  withdrawAgentV1: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The write's RequestID; a retry with the same key returns the first result */
+        "Idempotency-Key"?: components["parameters"]["AgentV1IdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1WithdrawResult"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  respondAgentV1: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The write's RequestID; a retry with the same key returns the first result */
+        "Idempotency-Key"?: components["parameters"]["AgentV1IdempotencyKey"];
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+        askId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgentV1RespondBody"];
+      };
+    };
+    responses: {
+      /** @description Answered */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  listAgentEventsV1: {
+    parameters: {
+      query?: {
+        after?: number;
+        snapshot?: number;
+        limit?: number;
+        kind?: string[];
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page of events */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1EventPage"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  streamAgentEventsV1: {
+    parameters: {
+      query?: {
+        /** @description One-time token from GET /api/workspaces/{ws}/events/token */
+        token?: string;
+        /** @description Comma-separated agent ids */
+        agents?: string;
+        /** @description Comma-separated <agent_id>:<seq> cursors */
+        after?: string;
+        /** @description Comma-separated event kinds */
+        types?: string;
+        deltas?: boolean;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Event stream; each frame's data is an AgentV1Event, and a last "error" frame carries an AgentV1Error */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": components["schemas"]["AgentV1Event"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  listAgentPresetsV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The presets */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1PresetList"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  getAgentPresetV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The preset */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1Preset"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
     };
   };
 }
