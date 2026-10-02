@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,6 +102,84 @@ func TestEpicReconcileWaitsLongerThanManualEntry(t *testing.T) {
 	}
 	if got := WaitLimit(ForEpicReconcile(context.Background())); got != epicWaitTimeout || got <= waitTimeout {
 		t.Fatalf("epic wait = %v", got)
+	}
+}
+
+// renewDuringFinish holds the first renewal until the action has returned and
+// withStore has canceled the action's context, then lets it reach the store.
+type renewDuringFinish struct {
+	loomgit.Store
+	once    sync.Once
+	entered chan struct{}
+	runCtx  chan context.Context
+}
+
+func (s *renewDuringFinish) RenewLease(ctx context.Context, prior loomgit.Lease, ttl time.Duration) (loomgit.Lease, error) {
+	s.once.Do(func() {
+		close(s.entered)
+		<-(<-s.runCtx).Done()
+	})
+	return s.Store.RenewLease(ctx, prior, ttl)
+}
+
+func newRenewDuringFinish(t *testing.T) *renewDuringFinish {
+	return &renewDuringFinish{Store: loomgitStore(t), entered: make(chan struct{}), runCtx: make(chan context.Context, 1)}
+}
+
+func TestRenewalInFlightWhenActionFinishesIsNotAnError(t *testing.T) {
+	store := newRenewDuringFinish(t)
+	err := withStore(context.Background(), store, "stack:ws:finish", time.Second, 300*time.Millisecond, func(ctx context.Context) error {
+		store.runCtx <- ctx
+		<-store.entered
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("successful action reported %v after a renewal raced its finish", err)
+	}
+	next, err := store.ClaimLease(context.Background(), "stack:ws:finish", "next", time.Second)
+	if err != nil || next.Fence != 2 {
+		t.Fatalf("lease not released after renewal: lease=%+v err=%v", next, err)
+	}
+}
+
+func TestCallerCancelDuringRenewalReleasesLease(t *testing.T) {
+	store := newRenewDuringFinish(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := withStore(ctx, store, "stack:ws:shutdown", time.Second, 300*time.Millisecond, func(runCtx context.Context) error {
+		store.runCtx <- runCtx
+		<-store.entered
+		cancel()
+		<-runCtx.Done()
+		return runCtx.Err()
+	})
+	if !errors.Is(err, context.Canceled) || errors.Is(err, loomgit.NewError(loomgit.StackLocked, "", nil)) {
+		t.Fatalf("shutdown error = %v, want only the action's cancellation", err)
+	}
+	if _, err := store.ClaimLease(context.Background(), "stack:ws:shutdown", "next", time.Second); err != nil {
+		t.Fatalf("lease not released on shutdown: %v", err)
+	}
+}
+
+func TestLostLeaseCancelsActionWithStackLocked(t *testing.T) {
+	store, err := journal.OpenSQLite(filepath.Join(t.TempDir(), "journal.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	err = withStore(context.Background(), store, "stack:ws:lost", time.Second, 300*time.Millisecond, func(ctx context.Context) error {
+		held, err := store.CurrentLease(ctx, "stack:ws:lost")
+		if err != nil {
+			return err
+		}
+		if err := store.ReleaseLease(ctx, held); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return nil
+	})
+	if !errors.Is(err, loomgit.NewError(loomgit.StackLocked, "", nil)) || !errors.Is(err, journal.ErrStale) {
+		t.Fatalf("lost lease error = %v, want stack_locked wrapping stale", err)
 	}
 }
 

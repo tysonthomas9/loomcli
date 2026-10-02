@@ -87,10 +87,15 @@ func withStore(ctx context.Context, store loomgit.Store, scope string, timeout, 
 				done <- renewal{lease: current}
 				return
 			case <-ticker.C:
-				next, err := store.RenewLease(runCtx, current, ttl)
+				// A renewal must not be cut short by the action finishing or the
+				// caller canceling: it either commits before the lease expires or
+				// the holder learns the lease is lost.
+				renewCtx, stopRenew := context.WithDeadline(context.WithoutCancel(runCtx), current.ExpiresAt)
+				next, err := store.RenewLease(renewCtx, current, ttl)
+				stopRenew()
 				if err != nil {
 					cancel()
-					done <- renewal{lease: current, err: err}
+					done <- renewal{lease: current, err: loomgit.NewError(loomgit.StackLocked, "stack lock lease lost", err)}
 					return
 				}
 				current = next
