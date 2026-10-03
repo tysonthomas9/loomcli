@@ -53,16 +53,7 @@ func (s *Service) replaceExisting(ctx context.Context, in Request) (Result, bool
 		if err != nil {
 			return Result{}, true, err
 		}
-		layer, found := lastLayer(layers, in.Change)
-		if !found {
-			return Result{}, false, nil
-		}
-		// A layer that already holds this revision is Apply's own repeat case.
-		held, err := DerivesFrom(ctx, s.store, in.Workspace, in.Change, layer.Revision, in.Revision)
-		if err != nil {
-			return Result{}, true, err
-		}
-		if held {
+		if !hasLayer(layers, in.Change) {
 			return Result{}, false, nil
 		}
 	}
@@ -73,13 +64,13 @@ func (s *Service) replaceExisting(ctx context.Context, in Request) (Result, bool
 	return result, true, err
 }
 
-func lastLayer(layers []loomgit.AppliedLayer, change string) (loomgit.AppliedLayer, bool) {
-	for index := len(layers) - 1; index >= 0; index-- {
-		if layers[index].Change == change {
-			return layers[index], true
+func hasLayer(layers []loomgit.AppliedLayer, change string) bool {
+	for _, layer := range layers {
+		if layer.Change == change {
+			return true
 		}
 	}
-	return loomgit.AppliedLayer{}, false
+	return false
 }
 
 // DerivesFrom reports whether revision number of change is revision want or
