@@ -600,8 +600,8 @@ tests:
             (() => { const m = document.querySelector('[data-chat-provider-model-picker]');
               const t = document.querySelector('[data-chat-traits-picker]');
               return !!m && !m.disabled && (m.textContent || '').includes('Emulator') &&
-                !!t && (t.textContent || '').includes('Medium'); })()
-        intent: "Wait until the composer bar shows the catalog's default model and its default effort"
+                !!t && (t.textContent || '').trim() === 'Default'; })()
+        intent: "Wait until the composer bar shows the catalog's default model, and Default effort as no variant is chosen"
       - click: { selector: "[data-chat-provider-model-picker]" }
       - wait:
           fn: >-

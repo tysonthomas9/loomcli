@@ -266,6 +266,21 @@ describe("composer model and effort pickers (UI2)", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("labels effort Default when the model marks no default and none is saved", async () => {
+    const noDefault = structuredClone(CATALOG);
+    const d = noDefault.providers[0]!.models[0]!.option_descriptors[0]!;
+    delete d.current_value;
+    d.options = d.options!.map(({ id, label }) => ({ id, label }));
+    api.listHarnessModels.mockResolvedValue(noDefault);
+    await mount(agent());
+    fireEvent.click(screen.getByRole("button", { name: "Variant: Default" }));
+    expect(
+      screen
+        .getAllByRole("menuitemradio")
+        .filter((i) => i.getAttribute("aria-checked") === "true"),
+    ).toHaveLength(0);
+  });
+
   it("hides the effort control for a model without options", async () => {
     await mount(agent({ model: "anthropic/claude-sonnet-5" }));
     expect(modelButton()).toHaveAccessibleName("Model: Claude Sonnet 5");

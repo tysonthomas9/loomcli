@@ -28,7 +28,11 @@ export function currentChoiceLabel(d: OptionDescriptor): string | null {
   return d.options?.find((o) => o.id === value)?.label ?? value ?? null;
 }
 
-/** The trigger text: each option's current choice, joined by " · ". */
+/**
+ * The trigger text: each option's current choice, joined by " · ". A select
+ * with no choice saved and no default marked shows "Default": the harness's
+ * own default applies.
+ */
 export function buildTraitsTriggerLabel(
   descriptors: readonly OptionDescriptor[],
 ): string {
@@ -36,9 +40,8 @@ export function buildTraitsTriggerLabel(
     .map((d) =>
       d.type === "boolean"
         ? `${d.label} ${d.current_value === true ? "On" : "Off"}`
-        : currentChoiceLabel(d),
+        : (currentChoiceLabel(d) ?? "Default"),
     )
-    .filter((l): l is string => !!l)
     .join(" · ");
 }
 
