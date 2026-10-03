@@ -286,19 +286,23 @@ describe("RevisionsSection", () => {
     expect(
       await screen.findByText(`Not applied: ${reason}`),
     ).toBeInTheDocument();
-    const approve = screen.getByRole("button", { name: "Approve" });
+    const approve = screen.getByRole("button", {
+      name: "Approve and create PR",
+    });
     expect(approve).toBeEnabled();
     fireEvent.click(approve);
     expect(await screen.findByText("Applied")).toBeInTheDocument();
-    expect(submitRevisionVerdict).toHaveBeenCalledWith(
+    expect(submitRevisionVerdict.mock.calls[0].slice(0, 5)).toEqual([
       "W",
       expect.objectContaining({ change_id: "C", number: 2 }),
       "approve",
       "",
       "lead-a",
-    );
+    ]);
     expect(screen.queryByText(/Not applied:/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    ).toBeDisabled();
   });
 
   it("does not offer verdicts for an incomplete revision", async () => {
