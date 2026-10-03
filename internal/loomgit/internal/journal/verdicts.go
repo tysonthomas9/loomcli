@@ -121,19 +121,8 @@ func (s *SQLite) RecordVerdict(ctx context.Context, v loomgit.Verdict) (loomgit.
 		return v, err
 	}
 	v.ID = id
-	if v.TargetLead != "" && (v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy") {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO approval_follow(workspace,lead,change_id,revision,verdict_id)
-			VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
-			v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
-			return v, err
-		}
-		if v.Publish {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO approval_publications(workspace,lead,change_id,revision,verdict_id)
-				VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
-				v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
-				return v, err
-			}
-		}
+	if err := recordApprovalTargets(ctx, tx, v); err != nil {
+		return v, err
 	}
 	if err := queueVerdictEvent(ctx, tx, v); err != nil {
 		return v, err
@@ -186,4 +175,24 @@ func (s *SQLite) ListTaskRevisions(ctx context.Context, workspace, task string) 
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// recordApprovalTargets records, with the verdict, the lead an approval is
+// followed into and, for Approve and create PR, the intent to open its PR.
+func recordApprovalTargets(ctx context.Context, tx *sql.Tx, v loomgit.Verdict) error {
+	if v.TargetLead == "" || (v.Kind != "approve" && v.Kind != "override" && v.Kind != "policy") {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO approval_follow(workspace,lead,change_id,revision,verdict_id)
+		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
+		v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
+		return err
+	}
+	if !v.Publish {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO approval_publications(workspace,lead,change_id,revision,verdict_id)
+		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
+		v.Workspace, v.TargetLead, v.Change, v.Number, v.ID)
+	return err
 }

@@ -124,6 +124,12 @@ func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local
 			}
 		}
 	}
+	writeApprovalResponse(w, req, verdict, lead, status, available)
+}
+
+// writeApprovalResponse opens the PR an Approve and create PR verdict asked
+// for, once its working area exists, and reports the outcome with the status.
+func writeApprovalResponse(w http.ResponseWriter, req *http.Request, verdict loomgit.Verdict, lead, status string, available bool) {
 	response := map[string]any{"success": true, "data": verdict, "status": status}
 	if verdict.Publish && available {
 		outcome, err := publishVerdict(req.Context(), verdict, lead)
