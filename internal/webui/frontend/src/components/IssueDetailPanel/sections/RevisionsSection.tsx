@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   applyRevision,
+  approveRevisionMerge,
+  cancelRevisionMerge,
   createRevisionPR,
   getTaskRevisions,
   submitRevisionVerdict,
@@ -56,6 +58,7 @@ export function RevisionsSection({
     verdict: "approve" | "reject" | "override",
     detail = "",
     approveOnly?: boolean,
+    merge?: boolean,
   ) {
     const key = `${revision.change_id}:${revision.number}`;
     setBusy(key);
@@ -70,6 +73,7 @@ export function RevisionsSection({
             detail,
             lead,
             Boolean(approveOnly),
+            ...(merge ? [true] : []),
           )
         : submitRevisionVerdict(workspaceId, revision, verdict, detail, lead));
       if (status) setFollow((prev) => ({ ...prev, [key]: status }));
@@ -95,6 +99,41 @@ export function RevisionsSection({
       setError(err instanceof Error ? err.message : "Could not create the PR");
     } finally {
       // The PR, or why it is still missing, comes from the server.
+      setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      setBusy("");
+    }
+  }
+
+  // Approve and merge on an open PR (D29): merges the bottom PR now, or
+  // records the approval so it merges after the PRs below it.
+  async function approveMerge(revision: ReviewRevision) {
+    if (!lead) return;
+    const key = `${revision.change_id}:${revision.number}`;
+    setBusy(key);
+    setError("");
+    try {
+      await approveRevisionMerge(workspaceId, revision, lead);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not approve the merge",
+      );
+    } finally {
+      setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      setBusy("");
+    }
+  }
+
+  async function cancelMerge(revision: ReviewRevision) {
+    const key = `${revision.change_id}:${revision.number}`;
+    setBusy(key);
+    setError("");
+    try {
+      await cancelRevisionMerge(workspaceId, revision.change_id);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not cancel auto-merge",
+      );
+    } finally {
       setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
       setBusy("");
     }
@@ -153,6 +192,7 @@ export function RevisionsSection({
         // InWorkingArea: approved and applied with no PR yet (Approve only,
         // or Approve and create PR that could not publish).
         const canCreatePR = approved && revision.applied && !prOpen;
+        const merge = mergeState(revision, approved, decided);
         return (
           <div className={styles.revision} key={key}>
             <div>
@@ -209,16 +249,48 @@ export function RevisionsSection({
                 </button>
               </div>
             )}
+            {merge.status && (
+              <div data-testid="merge-status" className={styles.mergeStatus}>
+                {merge.status}
+                {merge.canCancel && (
+                  <button
+                    type="button"
+                    data-testid="cancel-auto-merge"
+                    disabled={Boolean(busy)}
+                    onClick={() => void cancelMerge(revision)}
+                  >
+                    Cancel auto-merge
+                  </button>
+                )}
+              </div>
+            )}
             <div className={styles.actions}>
               <span className={styles.split}>
-                <button
-                  type="button"
-                  data-testid="approve-create-pr"
-                  disabled={disabled || decided}
-                  onClick={() => void decide(revision, "approve", "", false)}
-                >
-                  {prOpen ? "Approve" : "Approve and create PR"}
-                </button>
+                {prOpen ? (
+                  merge.action !== "none" && (
+                    <button
+                      type="button"
+                      data-testid="approve-merge"
+                      disabled={disabled || (merge.action === "merge" && !lead)}
+                      onClick={() =>
+                        void (merge.action === "merge"
+                          ? approveMerge(revision)
+                          : decide(revision, "approve", "", false, true))
+                      }
+                    >
+                      {merge.label}
+                    </button>
+                  )
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="approve-create-pr"
+                    disabled={disabled || decided}
+                    onClick={() => void decide(revision, "approve", "", false)}
+                  >
+                    Approve and create PR
+                  </button>
+                )}
                 {/* No "Approve only" once the PR is open (D29). */}
                 {!prOpen && (
                   <button
@@ -291,4 +363,60 @@ export function RevisionsSection({
       })}
     </section>
   );
+}
+
+const activeMerge = ["waiting", "blocked", "merging"];
+
+/**
+ * What a revision with an open PR offers (D29): Approve and merge on the
+ * bottom PR, Approve, merge after #N on a higher one, and the state of an
+ * approval already made. "verdict" approves a new version and its merge in
+ * one click; "merge" approves the merge of the version already on the PR.
+ */
+export function mergeState(
+  revision: ReviewRevision,
+  approved: boolean,
+  decided: boolean,
+): {
+  action: "none" | "merge" | "verdict";
+  label: string;
+  status: string;
+  canCancel: boolean;
+} {
+  const below = revision.merge_after ?? [];
+  const label =
+    below.length > 0
+      ? `Approve, merge after #${below[below.length - 1]}`
+      : "Approve and merge";
+  const status = revision.merge_status ?? "";
+  const reason = revision.merge_reason ?? "";
+  const after = below.map((n) => `#${n}`).join(", ");
+  const text: Record<string, string> = {
+    waiting:
+      reason.startsWith("merges after") && after
+        ? `Approved, merges after ${after}`
+        : `Approved, waiting: ${reason}`,
+    blocked: `Approved, merge blocked: ${reason}. Retries when it passes.`,
+    merging: "Merging…",
+    merged: "Merged",
+    stale_subject: `Not merged: ${reason}. Approve the new version to merge it.`,
+    reapproval_required: `Not merged: ${reason}`,
+    cancelled: "Auto-merge cancelled",
+  };
+  let action: "none" | "merge" | "verdict" = "none";
+  if (
+    revision.pr_number &&
+    !activeMerge.includes(status) &&
+    status !== "merged"
+  ) {
+    if (!decided) action = "verdict";
+    else if (approved && revision.head_sha === revision.pr_head)
+      action = "merge";
+  }
+  return {
+    action,
+    label,
+    status: revision.pr_number ? (text[status] ?? "") : "",
+    canCancel: status === "waiting" || status === "blocked",
+  };
 }

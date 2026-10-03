@@ -483,6 +483,7 @@ func (g *GitOpsImpl) CreatePR(ctx context.Context, workspace, lead, change strin
 		Created:       result.Created,
 		AlreadyExists: result.AlreadyExists,
 		NoCommits:     result.NoCommits,
+		StackID:       result.StackID,
 	}, nil
 }
 

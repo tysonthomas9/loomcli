@@ -36,6 +36,9 @@ type PRResult struct {
 	Created       bool   `json:"created"`
 	AlreadyExists bool   `json:"already_exists"`
 	NoCommits     bool   `json:"no_commits"`
+	// StackID names the Loom Git stack the PR joined (per repository for a
+	// cross-repo lead), for loom git merge-up-to --stack.
+	StackID string `json:"stack_id,omitempty"`
 }
 
 // ResetResult contains the structured result of a reset operation.
@@ -91,7 +94,8 @@ func CreatePRResult(ctx context.Context, workspace, lead, change string) (*PRRes
 		if err != nil {
 			return nil, err
 		}
-		return &PRResult{URL: result.PRURL, Created: !result.AlreadyExists, AlreadyExists: result.AlreadyExists}, nil
+		return &PRResult{URL: result.PRURL, Created: !result.AlreadyExists, AlreadyExists: result.AlreadyExists,
+			StackID: result.StackID}, nil
 	}
 	result, err := publish.PublishLocal(ctx, workspace, lead, change)
 	if err != nil {

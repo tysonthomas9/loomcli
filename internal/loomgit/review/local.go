@@ -69,6 +69,16 @@ type TaskRevision struct {
 	// waiting, published, not_published or superseded; PublishReason says why.
 	PublishStatus string `json:"publish_status,omitempty"`
 	PublishReason string `json:"publish_reason,omitempty"`
+	// PRHead is the open PR's head SHA; Approve and merge pins it (D29 (3)).
+	PRHead string `json:"pr_head,omitempty"`
+	// MergeAfter lists the open PRs below this one in its stack, bottom first;
+	// empty means the PR is the bottom and Approve merges it now.
+	MergeAfter []int `json:"merge_after,omitempty"`
+	// MergeStatus and MergeReason report the change's Approve and merge:
+	// waiting, blocked, merging, merged, stale_subject, reapproval_required or
+	// cancelled.
+	MergeStatus string `json:"merge_status,omitempty"`
+	MergeReason string `json:"merge_reason,omitempty"`
 }
 
 func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]TaskRevision, error) {
@@ -147,12 +157,29 @@ func (l *Local) addPublishState(ctx context.Context, workspace string, i *TaskRe
 		return err
 	}
 	if found && publication.Phase == "done" && publication.PRNumber > 0 {
-		i.PRURL, i.PRNumber = publication.PRURL, publication.PRNumber
+		i.PRURL, i.PRNumber, i.PRHead = publication.PRURL, publication.PRNumber, publication.Head
+		if err := l.addMergeState(ctx, publication, i); err != nil {
+			return err
+		}
 	}
 	intent, found, err := l.store.LatestApprovalPublication(ctx, workspace, i.ChangeID, i.Number)
 	if err != nil || !found {
 		return err
 	}
 	i.PublishStatus, i.PublishReason = intent.Status, intent.Reason
+	return nil
+}
+
+func (l *Local) addMergeState(ctx context.Context, publication journal.Publication, i *TaskRevision) error {
+	below, err := l.store.UnlandedPRsBelow(ctx, publication)
+	if err != nil {
+		return err
+	}
+	i.MergeAfter = below
+	approval, found, err := l.store.MergeApproval(ctx, publication.Workspace, publication.Change)
+	if err != nil || !found {
+		return err
+	}
+	i.MergeStatus, i.MergeReason = approval.Status, approval.Reason
 	return nil
 }

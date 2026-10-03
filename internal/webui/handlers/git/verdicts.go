@@ -35,6 +35,10 @@ type verdictRequest struct {
 	// ApproveOnly applies an approval without opening its PR (D29 Approve
 	// only). By default an approval opens the PR as soon as it applies.
 	ApproveOnly bool `json:"approve_only"`
+	// Merge is Approve and merge on a task whose PR is already open, for a new
+	// version that needs approving again (D29 (3)): the merge is approved at
+	// this revision's head and waits for the PR to carry it. Human only.
+	Merge bool `json:"merge"`
 }
 
 var followApproved = apply.FollowLocal
@@ -76,6 +80,16 @@ func handleVerdictWithPublisher(w http.ResponseWriter, req *http.Request, publis
 	if err != nil {
 		writeReviewError(w, err)
 		return
+	}
+	if body.Merge && v.Kind != "reject" {
+		// A lead's approval records as policy; approveMerge refuses it (D15).
+		if _, err := approveMerge(req.Context(), v.Workspace, body.Lead, v.Change, v.HeadSHA,
+			reportedHuman(publish.MergeActor{Kind: body.Actor.Kind, ID: body.Actor.ID})); err != nil {
+			// The verdict stands; only the merge approval was refused.
+			handler.WriteJSON(w, http.StatusConflict, map[string]any{"success": false,
+				"error": "merge_approval_failed", "message": err.Error(), "status": "recorded", "data": v})
+			return
+		}
 	}
 	if v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy" {
 		followVerdict(w, req, store, v, body.Lead, publisher)
