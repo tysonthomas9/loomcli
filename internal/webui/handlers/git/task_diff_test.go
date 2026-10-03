@@ -168,6 +168,14 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 		t.Fatal("fixture does not distinguish the layer diff from the revision diff")
 	}
 
+	// PR per task (trunk mode): every task's PR is its own revision on trunk,
+	// so the middle task no longer compares with the layer below.
+	run(`INSERT INTO workspace_settings (workspace,delivery_mode) VALUES ('W','trunk')`)
+	if got := taskDiff("MID"); got.Compare != "trunk" || patches(got) != prDiff(mid.BaseSHA, mid.HeadSHA) {
+		t.Fatalf("trunk mode MID: compare=%q patch=%q", got.Compare, patches(got))
+	}
+	run(`UPDATE workspace_settings SET delivery_mode='stack' WHERE workspace='W'`)
+
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/workspaces/W/issues/LOOSE/revisions", nil))
 	var list struct {

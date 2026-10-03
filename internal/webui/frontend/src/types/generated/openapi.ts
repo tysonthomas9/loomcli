@@ -1771,7 +1771,7 @@ export interface paths {
     };
     /**
      * One diff for a task, the same as its PR
-     * @description The task's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied.
+     * @description The task's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied or the workspace delivers a PR per task.
      */
     get: operations["getTaskDiff"];
     put?: never;
@@ -3395,7 +3395,7 @@ export interface components {
       change: string;
       repo: string;
       /**
-       * @description layer: against the layer below in the lead's stack; trunk: bottom layer; base: not applied, against the revision's own base.
+       * @description layer: against the layer below in the lead's stack; trunk: bottom layer, or PR-per-task (trunk) mode where the revision is its own PR to trunk; base: not applied, against the revision's own base.
        * @enum {string}
        */
       compare: "layer" | "trunk" | "base";
