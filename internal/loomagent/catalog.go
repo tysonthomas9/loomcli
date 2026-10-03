@@ -29,22 +29,38 @@ func (s *Service) catalog(ctx context.Context, harness string) ([]loomharness.Mo
 	if err != nil {
 		return nil, harnessErr(err)
 	}
+	s.mu.Lock()
+	if _, ok := s.listed[harness]; !ok {
+		s.listed[harness] = time.Now()
+	}
+	s.mu.Unlock()
 	return ms, nil
 }
 
-// createModels lists harness's model ids for a create of model. A harness
-// lists no models for a moment after its service boots (OpenCode), so while
-// the catalog is empty a create naming a model polls it for up to
-// catalogWait, then fails "model catalog not ready" rather than "unknown
-// model" (MC1). A loaded catalog is used at once.
+// createModels lists harness's model ids for a create of model (MC1). A
+// harness that just started lists no models for a moment (OpenCode), or only
+// some providers' models: while the catalog is empty a create naming a model
+// polls it for up to catalogWait, then fails "model catalog not ready"; while
+// it lacks the model, it polls until catalogWarmUp after this service first
+// listed the harness, or catalogWait at most, then Resolve refuses the
+// unknown model. A warm catalog is used at once. catalogWait keeps a create
+// well inside the API server's 30s write timeout.
 func (s *Service) createModels(ctx context.Context, harness, model string) ([]string, error) {
 	deadline := time.Now().Add(s.catalogWait)
 	for {
 		ids, err := s.models(ctx, harness)
-		if err != nil || ids == nil || len(ids) > 0 || model == "" {
+		if err != nil || ids == nil || model == "" || slices.Contains(ids, model) {
 			return ids, err
 		}
-		if !time.Now().Before(deadline) {
+		now := time.Now()
+		if len(ids) > 0 {
+			s.mu.Lock()
+			warm := s.listed[harness].Add(s.catalogWarmUp)
+			s.mu.Unlock()
+			if !now.Before(warm) || !now.Before(deadline) {
+				return ids, nil
+			}
+		} else if !now.Before(deadline) {
 			return nil, &Error{Code: CodeHarnessUnavailable, Message: fmt.Sprintf("model catalog not ready on %s, retry", harness)}
 		}
 		select {

@@ -74,6 +74,11 @@ type ServiceConfig struct {
 	// at rest (its bridge settings); the next Resume after an Unarchive
 	// launches it again. It must be safe to repeat; nil does nothing.
 	Retire func(ctx context.Context, a loomstore.Agent) error
+	// CatalogWarmUp is how long after this service first lists a harness's
+	// models a create naming a model the catalog lacks re-fetches it: a
+	// harness that just started may list only some providers (MC1). Zero
+	// refuses the missing model at once.
+	CatalogWarmUp time.Duration
 	// WorkspaceID is the workspace this service creates agents in.
 	WorkspaceID string
 	// Presets defaults to BuiltinPresets.
@@ -137,6 +142,8 @@ type Service struct {
 	// catalogWait bounds how long a create waits for a harness's model
 	// catalog to load after it boots, polling every catalogPoll (MC1).
 	catalogWait, catalogPoll time.Duration
+	catalogWarmUp            time.Duration
+	listed                   map[string]time.Time // by harness, the first successful catalog listing, under mu
 }
 
 // New returns a Service for cfg.
@@ -146,6 +153,7 @@ func New(cfg ServiceConfig) *Service {
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
 		retire: cfg.Retire, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
+		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{},
 		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
 	if cfg.RecoverFirst {
 		s.ready = make(chan struct{})
