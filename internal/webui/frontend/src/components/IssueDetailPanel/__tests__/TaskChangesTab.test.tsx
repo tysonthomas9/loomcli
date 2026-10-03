@@ -176,7 +176,9 @@ describe("TaskChangesTab", () => {
 
   it("closes an empty attempt as No changes with no verdict buttons", async () => {
     getTaskRevisions.mockResolvedValue([{ ...rev2, no_changes: true }]);
-    getTaskDiff.mockResolvedValue({ ...taskDiff, compare: "base", files: [] });
+    getTaskDiff.mockResolvedValue([
+      { ...taskDiff, compare: "base", files: [] },
+    ]);
     render(<TaskChangesTab workspaceId="W" taskId="T" />);
     expect(
       await screen.findByTestId("revision-no-changes"),
