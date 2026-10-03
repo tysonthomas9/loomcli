@@ -1,8 +1,10 @@
 /**
  * TaskChangesTab — review a task, not a revision (D29). Loads the task's
- * revisions first, then shows one diff: the newest revision against the layer
- * below it in the lead's stack (what its PR contains). Verdicts act on the
- * newest revision; earlier revisions are read-only under History.
+ * revisions first, then its diff per repo: each repo's newest revision against
+ * the layer below it in the lead's stack (what that repo's PR contains). A
+ * cross-repo task gets one section per repo, ordered by repo name, each with
+ * the verdict buttons for that repo's newest revision only; earlier revisions
+ * are read-only under that repo's History.
  */
 
 import { useEffect, useState } from "react";
@@ -41,18 +43,14 @@ export function TaskChangesTab({
   lead?: string | undefined;
 }): JSX.Element {
   const [revisions, setRevisions] = useState<ReviewRevision[] | null>(null);
-  const [diff, setDiff] = useState<TaskDiff | null>(null);
+  const [diffs, setDiffs] = useState<TaskDiff[] | null>(null);
   const [error, setError] = useState("");
-  const [showHistory, setShowHistory] = useState(false);
-  const [viewing, setViewing] = useState<ReviewRevision | null>(null);
   const [version, setVersion] = useState(0);
 
   // A different task starts clean; a reload after a verdict keeps the view.
   useEffect(() => {
     setRevisions(null);
-    setDiff(null);
-    setShowHistory(false);
-    setViewing(null);
+    setDiffs(null);
   }, [workspaceId, taskId, lead]);
 
   useEffect(() => {
@@ -64,7 +62,7 @@ export function TaskChangesTab({
         setRevisions(items);
         if (items.length === 0) return;
         const result = await getTaskDiff(workspaceId, taskId, lead);
-        if (active) setDiff(result);
+        if (active) setDiffs(result);
       })
       .catch((err: unknown) => {
         if (active) setError(errorText(err, "Could not load changes"));
@@ -88,17 +86,77 @@ export function TaskChangesTab({
     return <div className={styles.message}>No revisions yet.</div>;
   }
 
-  const current = new Set(newestRevisions(revisions));
-  const history = revisions.filter((r) => !current.has(r));
+  // One change per repo: one section each, ordered by repo name.
+  const changes = newestRevisions(revisions).sort(
+    (a, b) =>
+      a.repo.localeCompare(b.repo) || a.change_id.localeCompare(b.change_id),
+  );
+  const multiRepo = changes.length > 1;
 
   return (
     <div className={styles.wrap} data-testid="task-changes-tab">
+      {changes.map((newest) => (
+        <RepoChanges
+          key={newest.change_id}
+          workspaceId={workspaceId}
+          taskId={taskId}
+          lead={lead}
+          newest={newest}
+          history={revisions.filter(
+            (r) => r.change_id === newest.change_id && r !== newest,
+          )}
+          diff={diffs?.find((d) => d.change === newest.change_id)}
+          diffsLoaded={diffs !== null}
+          multiRepo={multiRepo}
+          onChanged={() => setVersion((v) => v + 1)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** One repo's part of the task: its verdicts, its diff and its History. */
+function RepoChanges({
+  workspaceId,
+  taskId,
+  lead,
+  newest,
+  history,
+  diff,
+  diffsLoaded,
+  multiRepo,
+  onChanged,
+}: {
+  workspaceId: string;
+  taskId: string;
+  lead?: string | undefined;
+  newest: ReviewRevision;
+  history: ReviewRevision[];
+  diff: TaskDiff | undefined;
+  diffsLoaded: boolean;
+  multiRepo: boolean;
+  onChanged: () => void;
+}): JSX.Element {
+  const [showHistory, setShowHistory] = useState(false);
+  const [viewing, setViewing] = useState<ReviewRevision | null>(null);
+  // Verdicts decide on the code shown: only once this repo's diff has loaded,
+  // and only for the very revision the diff shows.
+  const shown = diff !== undefined && diff.revision === newest.number;
+
+  return (
+    <section
+      aria-label={multiRepo ? `Repo ${newest.repo}` : undefined}
+      data-testid="task-repo-changes"
+    >
+      {multiRepo && <h3 className={own.repo}>{newest.repo}</h3>}
       <div className={own.review}>
         <RevisionsSection
           workspaceId={workspaceId}
           taskId={taskId}
           lead={lead}
-          onChanged={() => setVersion((v) => v + 1)}
+          changeId={newest.change_id}
+          locked={!shown}
+          onChanged={onChanged}
         />
       </div>
       {viewing ? (
@@ -132,7 +190,14 @@ export function TaskChangesTab({
             )}
           </div>
           {showHistory && (
-            <ul aria-label="Revision history" className={own.history}>
+            <ul
+              aria-label={
+                multiRepo
+                  ? `${newest.repo} revision history`
+                  : "Revision history"
+              }
+              className={own.history}
+            >
               {history.map((r) => (
                 <li key={`${r.change_id}:${r.number}`}>
                   <button type="button" onClick={() => setViewing(r)}>
@@ -149,11 +214,13 @@ export function TaskChangesTab({
           {diff ? (
             <DiffFiles files={diff.files} />
           ) : (
-            <div className={styles.message}>Loading diff…</div>
+            <div className={styles.message}>
+              {diffsLoaded ? "No diff for this repo yet." : "Loading diff…"}
+            </div>
           )}
         </>
       )}
-    </div>
+    </section>
   );
 }
 

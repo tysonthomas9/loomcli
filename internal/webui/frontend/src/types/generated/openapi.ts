@@ -1788,8 +1788,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * One diff for a task, the same as its PR
-     * @description The task's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied or the workspace delivers a PR per task.
+     * A task's diff per repo, the same as its PRs
+     * @description One entry per repo the task changed, ordered by repo name. Each is that repo's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied or the workspace delivers a PR per task.
      */
     get: operations["getTaskDiff"];
     put?: never;
@@ -7903,7 +7903,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Task diff */
+      /** @description Task diff per repo */
       200: {
         headers: {
           [name: string]: unknown;
@@ -7911,7 +7911,7 @@ export interface operations {
         content: {
           "application/json": {
             success: boolean;
-            data: components["schemas"]["TaskDiff"];
+            data: components["schemas"]["TaskDiff"][];
           };
         };
       };

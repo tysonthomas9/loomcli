@@ -76,11 +76,12 @@ export type RevisionDiff = components["schemas"]["RevisionDiff"];
 export type TaskDiff = components["schemas"]["TaskDiff"];
 
 /** One diff for the task: what its PR contains (or will contain). */
+/** A task's diff per repo, ordered by repo name. */
 export async function getTaskDiff(
   workspaceId: string,
   taskId: string,
   lead?: string,
-): Promise<TaskDiff> {
+): Promise<TaskDiff[]> {
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/issues/{id}/diff",
     {

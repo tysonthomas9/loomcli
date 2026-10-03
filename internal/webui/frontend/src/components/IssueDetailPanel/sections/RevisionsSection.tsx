@@ -13,12 +13,18 @@ export function RevisionsSection({
   taskId,
   lead,
   onChanged,
+  changeId,
+  locked = false,
 }: {
   workspaceId: string;
   taskId: string;
   lead?: string | undefined;
   /** Called after a verdict or Apply changes what the task's diff compares with. */
   onChanged?: (() => void) | undefined;
+  /** Show only this change (one repo of a cross-repo task). */
+  changeId?: string | undefined;
+  /** Disable verdicts, e.g. until the diff they decide on has loaded. */
+  locked?: boolean | undefined;
 }): JSX.Element {
   const [revisions, setRevisions] = useState<ReviewRevision[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,7 +109,9 @@ export function RevisionsSection({
 
   // Review a task, not a revision: only each change's newest revision is
   // reviewable here. Earlier ones are read-only under Changes → History.
-  const current = newestRevisions(revisions);
+  const current = newestRevisions(revisions).filter(
+    (r) => !changeId || r.change_id === changeId,
+  );
 
   return (
     <section
@@ -117,7 +125,7 @@ export function RevisionsSection({
       {!loading && revisions.length === 0 && <p>No revisions yet.</p>}
       {current.map((revision) => {
         const key = `${revision.change_id}:${revision.number}`;
-        const disabled = Boolean(busy) || revision.incomplete;
+        const disabled = Boolean(busy) || revision.incomplete || locked;
         // The list reports the verdict for this exact revision head, so a new
         // derived revision has none and offers the buttons again.
         const decided = Boolean(revision.verdict);

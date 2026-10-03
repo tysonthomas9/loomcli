@@ -3479,8 +3479,8 @@ paths:
     get:
       operationId: getTaskDiff
       tags: [git]
-      summary: One diff for a task, the same as its PR
-      description: The task's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied or the workspace delivers a PR per task.
+      summary: A task's diff per repo, the same as its PRs
+      description: One entry per repo the task changed, ordered by repo name. Each is that repo's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied or the workspace delivers a PR per task.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: id
@@ -3496,7 +3496,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Task diff
+          description: Task diff per repo
           content:
             application/json:
               schema:
@@ -3506,7 +3506,9 @@ paths:
                   success:
                     type: boolean
                   data:
-                    $ref: "#/components/schemas/TaskDiff"
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TaskDiff"
         "404":
           description: The task has no revisions (error not_found) or the workspace has no revision journal.
           content:

@@ -65,7 +65,7 @@ describe("TaskChangesTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getTaskRevisions.mockResolvedValue([rev2, rev1]);
-    getTaskDiff.mockResolvedValue(taskDiff);
+    getTaskDiff.mockResolvedValue([taskDiff]);
     getRevisionDiff.mockResolvedValue({
       revision: 1,
       files: [
@@ -122,8 +122,8 @@ describe("TaskChangesTab", () => {
 
   it("reloads the task diff after a verdict applies the revision", async () => {
     getTaskDiff
-      .mockResolvedValueOnce({ ...taskDiff, compare: "base" })
-      .mockResolvedValue({ ...taskDiff, compare: "trunk" });
+      .mockResolvedValueOnce([{ ...taskDiff, compare: "base" }])
+      .mockResolvedValue([{ ...taskDiff, compare: "trunk" }]);
     render(<TaskChangesTab workspaceId="W" taskId="T" />);
     expect(
       await screen.findByText("Revision 2 against its base (not applied yet)"),
@@ -163,7 +163,9 @@ describe("TaskChangesTab", () => {
 
   it("says No changes for an empty newest revision", async () => {
     getTaskRevisions.mockResolvedValue([rev2]);
-    getTaskDiff.mockResolvedValue({ ...taskDiff, compare: "base", files: [] });
+    getTaskDiff.mockResolvedValue([
+      { ...taskDiff, compare: "base", files: [] },
+    ]);
     render(<TaskChangesTab workspaceId="W" taskId="T" />);
     expect(await screen.findByText("No changes")).toBeInTheDocument();
     expect(
@@ -187,5 +189,126 @@ describe("TaskChangesTab", () => {
     render(<TaskChangesTab workspaceId="W" taskId="T" />);
     expect(await screen.findByText("No revisions yet.")).toBeInTheDocument();
     expect(getTaskDiff).not.toHaveBeenCalled();
+  });
+
+  describe("a task with code in two repos", () => {
+    const zeta = {
+      ...base,
+      change_id: "Z",
+      repo: "zeta",
+      number: 1,
+      head_sha: "z".repeat(40),
+      superseded: false,
+    };
+    const alpha = {
+      ...base,
+      change_id: "A",
+      repo: "alpha",
+      number: 1,
+      head_sha: "c".repeat(40),
+      superseded: false,
+    };
+    const diffFor = (change: string, repo: string, line: string) => ({
+      revision: 1,
+      change,
+      repo,
+      compare: "base",
+      files: [
+        {
+          path: `${repo}.txt`,
+          patchSize: 40,
+          truncated: false,
+          patch: patch(line),
+        },
+      ],
+    });
+
+    it("shows one section per repo, ordered by repo name, each with its own diff and verdicts", async () => {
+      // The list's order is not the repo order: zeta comes first.
+      getTaskRevisions.mockResolvedValue([zeta, alpha]);
+      getTaskDiff.mockResolvedValue([
+        diffFor("A", "alpha", "alpha-code"),
+        diffFor("Z", "zeta", "zeta-code"),
+      ]);
+      render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
+      const alphaSection = await screen.findByRole("region", {
+        name: "Repo alpha",
+      });
+      const zetaSection = screen.getByRole("region", { name: "Repo zeta" });
+      expect(
+        alphaSection.compareDocumentPosition(zetaSection) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(
+        await within(alphaSection).findByText("+alpha-code"),
+      ).toBeVisible();
+      expect(within(alphaSection).queryByText("+zeta-code")).toBeNull();
+      expect(within(zetaSection).getByText("+zeta-code")).toBeVisible();
+      expect(within(zetaSection).queryByText("+alpha-code")).toBeNull();
+      // Each repo's own revision gets its own, enabled verdict buttons.
+      const zetaApprove = await within(zetaSection).findByRole("button", {
+        name: "Approve",
+      });
+      expect(
+        within(alphaSection).getAllByRole("button", { name: "Approve" }),
+      ).toHaveLength(1);
+      await vi.waitFor(() => expect(zetaApprove).toBeEnabled());
+      fireEvent.click(zetaApprove);
+      await vi.waitFor(() =>
+        expect(submitRevisionVerdict).toHaveBeenCalledWith(
+          "W",
+          zeta,
+          "approve",
+          "",
+          "lead",
+        ),
+      );
+    });
+
+    it("keeps a repo's verdict buttons disabled until that repo's diff has loaded", async () => {
+      getTaskRevisions.mockResolvedValue([zeta, alpha]);
+      let release: (value: unknown) => void = () => {};
+      getTaskDiff.mockReturnValue(
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      );
+      render(<TaskChangesTab workspaceId="W" taskId="T" />);
+      const zetaSection = await screen.findByRole("region", {
+        name: "Repo zeta",
+      });
+      const approve = await within(zetaSection).findByRole("button", {
+        name: "Approve",
+      });
+      expect(approve).toBeDisabled();
+      expect(within(zetaSection).getByText("Loading diff…")).toBeVisible();
+      release([
+        diffFor("A", "alpha", "alpha-code"),
+        diffFor("Z", "zeta", "zeta-code"),
+      ]);
+      await vi.waitFor(() => expect(approve).toBeEnabled());
+    });
+
+    it("keeps verdicts disabled when the diff shown is not the newest revision's", async () => {
+      getTaskRevisions.mockResolvedValue([{ ...zeta, number: 2 }, alpha]);
+      getTaskDiff.mockResolvedValue([
+        diffFor("A", "alpha", "alpha-code"),
+        diffFor("Z", "zeta", "zeta-code"),
+      ]);
+      render(<TaskChangesTab workspaceId="W" taskId="T" />);
+      const zetaSection = await screen.findByRole("region", {
+        name: "Repo zeta",
+      });
+      expect(await within(zetaSection).findByText("+zeta-code")).toBeVisible();
+      expect(
+        within(zetaSection).getByRole("button", { name: "Approve" }),
+      ).toBeDisabled();
+      const alphaSection = screen.getByRole("region", { name: "Repo alpha" });
+      await vi.waitFor(() =>
+        expect(
+          within(alphaSection).getByRole("button", { name: "Approve" }),
+        ).toBeEnabled(),
+      );
+    });
   });
 });
