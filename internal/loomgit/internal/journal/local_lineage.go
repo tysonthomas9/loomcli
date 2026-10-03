@@ -2,9 +2,11 @@ package journal
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 )
 
 type LocalLineage struct {
@@ -100,6 +102,16 @@ func (s *SQLite) DependencyForChange(ctx context.Context, workspace, change stri
 	return predecessor, err
 }
 
+// LeadStackID is the stack a lead's applied layers publish as.
+func LeadStackID(lead string) string {
+	return fmt.Sprintf("lead-%x", sha256.Sum256([]byte(lead)))
+}
+
+// LeadRepoStackID is one repository's stack of a cross-repo lead.
+func LeadRepoStackID(lead, repo string) string {
+	return fmt.Sprintf("lead-%x", sha256.Sum256([]byte(lead+"\x00"+repo)))
+}
+
 // DependentsOf returns the task copies pinned to a predecessor change, and the
 // task layers whose PR sits on its PR in a lead's published stack. Tasks
 // approved one after another on a lead (D29) declare no predecessor; their
@@ -108,20 +120,37 @@ func (s *SQLite) DependencyForChange(ctx context.Context, workspace, change stri
 // than copied. Only layers still applied count, so Unapply drops a layer at
 // once. A task with a declared lineage to the same change is listed once.
 func (s *SQLite) DependentsOf(ctx context.Context, workspace, change string) ([]LocalLineage, error) {
+	dependents, err := s.declaredDependents(ctx, workspace, change)
+	if err != nil {
+		return nil, err
+	}
+	stacked, err := s.leadStackDependents(ctx, workspace, change)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(dependents))
+	for _, l := range dependents {
+		seen[l.Task+"\x00"+l.Repo] = true
+	}
+	for _, l := range stacked {
+		if !seen[l.Task+"\x00"+l.Repo] {
+			seen[l.Task+"\x00"+l.Repo] = true
+			dependents = append(dependents, l)
+		}
+	}
+	sort.Slice(dependents, func(i, j int) bool {
+		if dependents[i].Task != dependents[j].Task {
+			return dependents[i].Task < dependents[j].Task
+		}
+		return dependents[i].Repo < dependents[j].Repo
+	})
+	return dependents, nil
+}
+
+func (s *SQLite) declaredDependents(ctx context.Context, workspace, change string) ([]LocalLineage, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT task_id, repo, predecessor_revision, base_sha
 		FROM local_lineage WHERE workspace = ? AND predecessor_change = ?
-		UNION
-		SELECT d.task_id, d.repo, 0, below.head_sha FROM change_publications below
-		JOIN change_publications above ON above.workspace = below.workspace
-			AND above.stack_id = below.stack_id AND above.trunk = below.branch
-			AND above.change_id <> below.change_id
-		JOIN driver_changes d ON d.workspace = above.workspace AND d.change_id = above.change_id
-		WHERE below.workspace = ? AND below.change_id = ? AND below.stack_id LIKE 'lead-%'
-			AND EXISTS (SELECT 1 FROM applied_layers a WHERE a.workspace = above.workspace
-				AND a.change_id = above.change_id AND a.phase = 'done')
-			AND NOT EXISTS (SELECT 1 FROM local_lineage l WHERE l.workspace = d.workspace
-				AND l.task_id = d.task_id AND l.repo = d.repo AND l.predecessor_change = below.change_id)
-		ORDER BY 1, 2`, workspace, change, workspace, change)
+		ORDER BY task_id, repo`, workspace, change)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +162,38 @@ func (s *SQLite) DependentsOf(ctx context.Context, workspace, change string) ([]
 			return nil, err
 		}
 		dependents = append(dependents, l)
+	}
+	return dependents, rows.Err()
+}
+
+// leadStackDependents reads the applied task layers whose PR targets change's
+// PR branch in the stack their lead publishes. A stack declared with
+// `loom stack` is never a lead's stack, whatever its name.
+func (s *SQLite) leadStackDependents(ctx context.Context, workspace, change string) ([]LocalLineage, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT d.task_id, d.repo, below.head_sha, below.stack_id, a.lead
+		FROM change_publications below
+		JOIN change_publications above ON above.workspace = below.workspace
+			AND above.stack_id = below.stack_id AND above.trunk = below.branch
+			AND above.change_id <> below.change_id
+		JOIN driver_changes d ON d.workspace = above.workspace AND d.change_id = above.change_id
+		JOIN applied_layers a ON a.workspace = above.workspace AND a.change_id = above.change_id
+			AND a.phase = 'done'
+		WHERE below.workspace = ? AND below.change_id = ? AND below.stack_id <> ''
+		ORDER BY 1, 2`, workspace, change)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var dependents []LocalLineage
+	for rows.Next() {
+		l := LocalLineage{Workspace: workspace, PredecessorChange: change}
+		var stack, lead string
+		if err := rows.Scan(&l.Task, &l.Repo, &l.BaseSHA, &stack, &lead); err != nil {
+			return nil, err
+		}
+		if stack == LeadStackID(lead) || stack == LeadRepoStackID(lead, l.Repo) {
+			dependents = append(dependents, l)
+		}
 	}
 	return dependents, rows.Err()
 }
