@@ -123,12 +123,28 @@ func carryApprovalHead(ctx context.Context, store *journal.SQLite, approval jour
 	if !carried {
 		reason := "the rebuild after the PRs below merged was not clean; approve again"
 		if newest.Kind == "source" {
+			// A review fix-up is decided by its feedback update first, which
+			// cancels this approval when it pushes the fix-up (D29 (6)).
+			if unsettled, err := unsettledFixup(ctx, store, newest); err != nil || unsettled {
+				return approval, MergeApprovalWaiting, "waiting for the new version's review fix-up update", err
+			}
 			reason = "a new version of this task needs review; approve again"
 		}
 		return approval, MergeApprovalReapproval, reason, nil
 	}
 	approval.Head = newest.HeadSHA
 	return approval, "", "", nil
+}
+
+// unsettledFixup reports whether revision is a new source version on the open
+// PR that has no verdict and no feedback update yet: the feedback reconciler
+// still has to push it, hold it or say why it is not pushed.
+func unsettledFixup(ctx context.Context, store *journal.SQLite, revision loomgit.Revision) (bool, error) {
+	if _, err := store.LatestVerdict(ctx, revision); err == nil || !errors.Is(err, journal.ErrNotFound) {
+		return false, err
+	}
+	_, found, err := store.FeedbackUpdateFor(ctx, revision.Workspace, revision.Change, revision.Number)
+	return !found, err
 }
 
 // verdictCarriedFrom reports whether revision's verdict is a chain of carried

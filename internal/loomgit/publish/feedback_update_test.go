@@ -448,6 +448,30 @@ func TestFixupCancelsMergeAfterApproval(t *testing.T) {
 	}
 }
 
+// The merge reconciler may see a fix-up revision before the feedback
+// reconciler does. It must leave the decision to the fix-up's update instead
+// of asking for approval again, so the fix-up still cancels "merge after #N".
+func TestMergeReconcileLeavesUnsettledFixupToFeedbackUpdate(t *testing.T) {
+	fx := newFixupFixture(t, "stack")
+	ctx := context.Background()
+	headB := remoteSHA(t, fx.fixture, "B")
+	if _, err := fx.store.RecordMergeApproval(ctx, journal.MergeApproval{Workspace: "W", Change: "B", Lead: "L",
+		StackID: LeadStackID("L"), Head: headB, ActorKind: "human", ActorID: "Tyson",
+		Status: MergeApprovalWaiting, Reason: "merges after #1", CreatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
+	fixupRevision(t, fx.fixture, "B", 2, headB, map[string]string{"B": "B fixed"}, false)
+	reconcileApprovals(t, fx.fixture, &mergeForgeFake{fakeForge: &fakeForge{}, checks: "passing"})
+	if approval, _, _ := fx.store.MergeApproval(ctx, "W", "B"); approval.Status != MergeApprovalWaiting {
+		t.Fatalf("merge approval before the fix-up's update = %+v", approval)
+	}
+	reconcileFixups(t, fx)
+	approval, found, err := fx.store.MergeApproval(ctx, "W", "B")
+	if err != nil || !found || approval.Status != MergeApprovalCancelled || approval.Reason != FeedbackMergeCancelReason {
+		t.Fatalf("merge approval after the fix-up's update = %+v, %v", approval, err)
+	}
+}
+
 func TestFixupWaitsWhileMergeIsRunning(t *testing.T) {
 	fx := newFixupFixture(t, "stack")
 	ctx := context.Background()
