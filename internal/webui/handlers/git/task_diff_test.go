@@ -102,6 +102,9 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	otherTrunk := gitIn(other, "rev-parse", "HEAD")
 	crossRepo := freeze("CROSS", "cross-repo", trunk, func() { write("cross", "in repo\n") })
 	crossAlpha := freezeIn(other, "alpha", "CROSS", "cross-alpha", otherTrunk, func() { writeOther("g", "alpha changed\n") })
+	// A retry in "repo" makes its revision the task's highest number, and it is
+	// applied as a higher layer: row order must not hide alpha's diff.
+	crossRetry := freeze("CROSS", "cross-repo-2", trunk, func() { write("cross", "in repo, again\n") })
 
 	// Lead stack: LOW, MID (rebuilt on LOW), TOP.
 	git("checkout", "-q", "-b", "lead", trunk)
@@ -115,6 +118,8 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	ownTip := commit("own")
 	write("up", "up\n")
 	upTip := commit("up")
+	write("cross", "in repo, again\n")
+	crossTip := commit("cross")
 
 	db, err := sql.Open("sqlite", storePath)
 	if err != nil {
@@ -133,7 +138,7 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	for i, layer := range []struct {
 		rev      loomgit.Revision
 		old, tip string
-	}{{low, trunk, lowTip}, {mid, lowTip, midTip}, {top, midTip, topTip}, {up, ownTip, upTip}} {
+	}{{low, trunk, lowTip}, {mid, lowTip, midTip}, {top, midTip, topTip}, {up, ownTip, upTip}, {crossRetry, upTip, crossTip}} {
 		run(`INSERT INTO applied_layers (request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,phase)
 			VALUES (?,'W','lead',?,?,?,?,'[]','[]','done')`, "req-"+string(rune('a'+i)), layer.rev.Change, layer.rev.Number, layer.old, layer.tip)
 	}
@@ -223,7 +228,8 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	wantAlpha := gitOther("diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-color", "--patch", otherTrunk, crossAlpha.HeadSHA) + "\n"
 	if len(cross) != 2 ||
 		cross[0].Repo != "alpha" || cross[0].Change != crossAlpha.Change || cross[0].Compare != "base" || patches(cross[0]) != wantAlpha ||
-		cross[1].Repo != "repo" || cross[1].Change != crossRepo.Change || cross[1].Compare != "base" || patches(cross[1]) != prDiff(trunk, crossRepo.HeadSHA) {
+		cross[1].Repo != "repo" || cross[1].Change != crossRepo.Change || cross[1].Revision != crossRetry.Number ||
+		cross[1].Compare != "layer" || patches(cross[1]) != prDiff(upTip, crossTip) {
 		t.Fatalf("cross-repo task diffs: %+v", cross)
 	}
 
