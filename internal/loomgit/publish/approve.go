@@ -253,7 +253,9 @@ func providerMissing(ctx context.Context, store *journal.SQLite, workspace, chan
 		if repo.Name != repoName {
 			continue
 		}
-		runner, err := gitexec.New(repo.ResolveAbsPath(configured.Path), gitexec.Options{})
+		// Only reads the origin URL, so a host with no Git identity still gets
+		// a no-provider reason instead of a failed publish.
+		runner, err := gitexec.New(repo.ResolveAbsPath(configured.Path), gitexec.Options{ReadOnly: true})
 		if err != nil {
 			return ""
 		}

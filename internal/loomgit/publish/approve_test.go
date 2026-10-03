@@ -3,6 +3,7 @@ package publish
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -245,6 +246,24 @@ func TestPublishFailureAfterApplyRetriesOnceWithoutDuplicates(t *testing.T) {
 	}
 	if len(forge.prs) != 1 || intentStatus(t, fx, "A").Status != "published" {
 		t.Fatalf("retry PRs = %+v", forge.prs)
+	}
+}
+
+// A host with no Git identity (CI, a fresh container) still reads the origin
+// remote, so a repository without one says why instead of failing the publish.
+func TestApproveWithoutProviderOnHostWithoutGitIdentity(t *testing.T) {
+	fx, _ := approvalFixture(t, "stack")
+	previous := localPublishProvider
+	localPublishProvider = func() (Forge, string, string) { return nil, "", "" }
+	t.Cleanup(func() { localPublishProvider = previous })
+	a := appliedTask(t, fx, "A", fx.base)
+	approveForLead(t, fx, a, reviewer, true, "applied")
+	git(t, fx.repo, "remote", "remove", "origin")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	outcomes, err := PublishApproved(context.Background(), "W", "L", nil)
+	if err != nil || len(outcomes) != 1 || outcomes[0].Status != "not_published" ||
+		outcomes[0].Reason != NoProviderReason+" (the repository has no origin remote)" {
+		t.Fatalf("no-identity outcome = %+v, %v", outcomes, err)
 	}
 }
 
