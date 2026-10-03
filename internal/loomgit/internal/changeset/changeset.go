@@ -105,16 +105,20 @@ func FreezeSource(ctx context.Context, store loomgit.RevisionStore, runner *gite
 	if err := validateNames(in.Workspace, in.Change); err != nil {
 		return loomgit.Revision{}, err
 	}
-	if _, err := tree(ctx, runner, in.BaseSHA); err != nil {
+	baseTree, err := tree(ctx, runner, in.BaseSHA)
+	if err != nil {
 		return loomgit.Revision{}, err
 	}
 	hash, err := tree(ctx, runner, in.CaptureSHA)
 	if err != nil {
 		return loomgit.Revision{}, err
 	}
+	// An incomplete capture may have left work out, so only a complete one
+	// with the base's exact tree counts as "no changes".
 	r, err := store.ReserveRevision(ctx, loomgit.Revision{Workspace: in.Workspace, Change: in.Change,
 		RequestID: in.RequestID, Kind: "source", Operation: "snapshot", Outcome: in.Outcome,
-		BaseSHA: in.BaseSHA, TreeHash: hash, SourceHeadSHA: in.CaptureSHA, Incomplete: !in.Complete})
+		BaseSHA: in.BaseSHA, TreeHash: hash, SourceHeadSHA: in.CaptureSHA, Incomplete: !in.Complete,
+		NoChanges: in.Complete && hash == baseTree})
 	if err != nil || r.Ready {
 		return r, err
 	}
@@ -152,7 +156,8 @@ func ImportSource(ctx context.Context, store loomgit.RevisionStore, runner *gite
 	if !fullSHA.MatchString(in.TreeHash) {
 		return loomgit.Revision{}, errors.New("full tree hash required")
 	}
-	if _, err := tree(ctx, runner, in.BaseSHA); err != nil {
+	baseTree, err := tree(ctx, runner, in.BaseSHA)
+	if err != nil {
 		return loomgit.Revision{}, err
 	}
 	actual, err := tree(ctx, runner, in.HeadSHA)
@@ -164,7 +169,7 @@ func ImportSource(ctx context.Context, store loomgit.RevisionStore, runner *gite
 	}
 	r, err := store.ReserveRevision(ctx, loomgit.Revision{Workspace: in.Workspace, Change: in.Change,
 		RequestID: in.RequestID, Kind: "source", Operation: "import", Outcome: in.Outcome,
-		BaseSHA: in.BaseSHA, TreeHash: in.TreeHash, SourceHeadSHA: in.HeadSHA})
+		BaseSHA: in.BaseSHA, TreeHash: in.TreeHash, SourceHeadSHA: in.HeadSHA, NoChanges: actual == baseTree})
 	if err != nil || r.Ready {
 		return r, err
 	}

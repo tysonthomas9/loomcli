@@ -208,6 +208,7 @@ function RepoChanges({
                   </button>{" "}
                   <code>{r.head_sha.slice(0, 12)}</code> · {r.outcome}
                   {r.superseded && " · replaced by a newer revision"}
+                  {r.no_changes && " · no changes"}
                   {r.verdict && ` · ${r.verdict}`}
                   {r.date && ` · ${new Date(r.date).toLocaleString()}`}
                 </li>

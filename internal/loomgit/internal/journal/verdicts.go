@@ -56,7 +56,7 @@ func (s *SQLite) RevisionAuthor(ctx context.Context, r loomgit.Revision) (string
 }
 
 func (s *SQLite) SetRevisionIncomplete(ctx context.Context, r loomgit.Revision) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE change_revisions SET incomplete=1 WHERE workspace=? AND change_id=? AND number=?`, r.Workspace, r.Change, r.Number)
+	result, err := s.db.ExecContext(ctx, `UPDATE change_revisions SET incomplete=1, no_changes=0 WHERE workspace=? AND change_id=? AND number=?`, r.Workspace, r.Change, r.Number)
 	if err != nil {
 		return err
 	}

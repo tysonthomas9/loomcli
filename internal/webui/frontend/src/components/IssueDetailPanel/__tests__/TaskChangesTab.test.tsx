@@ -174,6 +174,28 @@ describe("TaskChangesTab", () => {
     expect(screen.queryByRole("button", { name: /History/ })).toBeNull();
   });
 
+  it("closes an empty attempt as No changes with no verdict buttons", async () => {
+    getTaskRevisions.mockResolvedValue([{ ...rev2, no_changes: true }]);
+    getTaskDiff.mockResolvedValue({ ...taskDiff, compare: "base", files: [] });
+    render(<TaskChangesTab workspaceId="W" taskId="T" />);
+    expect(
+      await screen.findByTestId("revision-no-changes"),
+    ).toBeInTheDocument();
+    expect(await screen.findAllByText("No changes")).toHaveLength(2);
+    expect(screen.queryByText("Awaiting review")).toBeNull();
+    for (const name of ["Approve", "Reject", "Override"])
+      expect(screen.queryByRole("button", { name })).toBeNull();
+  });
+
+  it("marks an empty earlier attempt in History and reviews the newer one", async () => {
+    getTaskRevisions.mockResolvedValue([rev2, { ...rev1, no_changes: true }]);
+    render(<TaskChangesTab workspaceId="W" taskId="T" />);
+    fireEvent.click(await screen.findByRole("button", { name: "History (1)" }));
+    const list = screen.getByRole("list", { name: "Revision history" });
+    expect(within(list).getByText(/no changes/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+  });
+
   it("shows the API error code when the diff fails", async () => {
     getTaskDiff.mockRejectedValue(
       new ApiError(409, "Conflict", { error: "base_ref_unresolvable" }),

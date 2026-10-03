@@ -41,6 +41,9 @@ type OutboxEvent struct {
 
 // Revision is one immutable source or derived version of a change. Ready is
 // false only while a reserved revision is being installed or recovered.
+// NoChanges marks a complete source revision whose tree equals its base tree:
+// the attempt changed nothing, so it is never reviewed, applied or published.
+// Derived revisions never set it.
 type Revision struct {
 	Workspace, Change, RequestID string
 	Number                       int
@@ -51,6 +54,7 @@ type Revision struct {
 	DerivedFromNumber            int
 	Ready                        bool
 	Incomplete                   bool
+	NoChanges                    bool
 }
 
 // AppliedLayer attributes commits installed in a lead's working area.

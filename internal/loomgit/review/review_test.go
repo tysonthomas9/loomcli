@@ -201,3 +201,54 @@ func TestCancelledIncompleteRevisionCannotBeApprovedOrPublished(t *testing.T) {
 	}(), loomgit.CaptureIncomplete)
 	codeIs(t, RequireVerdict(ctx, s, "W", "C", r.Number, r.HeadSHA, "publish", ""), loomgit.CaptureIncomplete)
 }
+
+func emptySource(t *testing.T, s *journal.SQLite, request string) loomgit.Revision {
+	t.Helper()
+	ctx := context.Background()
+	base := strings.Repeat("a", 40)
+	r, err := s.ReserveRevision(ctx, loomgit.Revision{Workspace: "W", Change: "C", RequestID: request, Kind: "source",
+		Operation: "snapshot", Outcome: "completed", BaseSHA: base, TreeHash: strings.Repeat("b", 40),
+		SourceHeadSHA: base, NoChanges: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.HeadSHA = base
+	if err := s.FinishRevision(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	r.Ready = true
+	return r
+}
+
+// D29 (4): an empty attempt closes the task. Every verdict and the Apply and
+// Publish gates refuse it with no_changes; a later attempt with changes is
+// reviewed normally.
+func TestNoChangesRevisionRefusesVerdictsAndDelivery(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	empty := emptySource(t, s, "empty")
+	for _, kind := range []string{"approve", "reject", "override"} {
+		codeIs(t, func() error {
+			_, err := Submit(ctx, s, "W", "C", empty.Number, empty.HeadSHA, kind, "why", Actor{"human", "user"})
+			return err
+		}(), loomgit.NoChanges)
+	}
+	codeIs(t, func() error {
+		_, err := SubmitForLead(ctx, s, "W", "C", empty.Number, empty.HeadSHA, "approve", "", Actor{"lead", "L"}, "L")
+		return err
+	}(), loomgit.NoChanges)
+	codeIs(t, RequireVerdict(ctx, s, "W", "C", empty.Number, empty.HeadSHA, "apply", "L"), loomgit.NoChanges)
+	codeIs(t, RequireVerdict(ctx, s, "W", "C", empty.Number, empty.HeadSHA, "publish", ""), loomgit.NoChanges)
+
+	next := revision(t, s, "2", "source")
+	if _, err := Submit(ctx, s, "W", "C", next.Number, next.HeadSHA, "approve", "", Actor{"human", "user"}); err != nil {
+		t.Fatalf("revision with changes after an empty one: %v", err)
+	}
+	if err := RequireVerdict(ctx, s, "W", "C", next.Number, next.HeadSHA, "publish", ""); err != nil {
+		t.Fatal(err)
+	}
+	codeIs(t, func() error {
+		_, err := Submit(ctx, s, "W", "C", empty.Number, empty.HeadSHA, "approve", "", Actor{"human", "user"})
+		return err
+	}(), loomgit.RevisionSuperseded)
+}
