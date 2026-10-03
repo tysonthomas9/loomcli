@@ -61,6 +61,17 @@ func (s *agentServiceImpl) resolveAgentWorktree(wsID, agentName string) (*ops.Ag
 	return wt, nil
 }
 
+// resolveWritableWorktree is resolveAgentWorktree for git writes. An Agent
+// API agent's worktree is read-only through these v5 routes (3.2t), so it is
+// refused before any git or gh call.
+func (s *agentServiceImpl) resolveWritableWorktree(wsID, agentName string) (*ops.AgentWorktree, error) {
+	wt, err := s.resolveAgentWorktree(wsID, agentName)
+	if err == nil && wt.AgentAPI {
+		return nil, service.ErrForbidden(fmt.Sprintf("agent %q is an Agent API agent; its worktree is read-only here", agentName))
+	}
+	return wt, err
+}
+
 func (s *agentServiceImpl) GetTerminalInfo(_ context.Context, wsID, agentName string) (*service.AgentTerminalInfoResult, error) {
 	if err := validateAgentName(agentName); err != nil {
 		return nil, err
@@ -147,7 +158,7 @@ func (s *agentServiceImpl) GetDiffStat(_ context.Context, wsID, agentName string
 }
 
 func (s *agentServiceImpl) GitPush(_ context.Context, wsID, agentName, target string) (*ops.GitPushResult, error) {
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
+	wt, err := s.resolveWritableWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +218,7 @@ func (s *agentServiceImpl) pushOneWorktree(wt ops.AgentWorktree) (service.GitPus
 }
 
 func (s *agentServiceImpl) GitPull(_ context.Context, wsID, agentName, source string) (*ops.GitPullResult, error) {
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
+	wt, err := s.resolveWritableWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +240,7 @@ func (s *agentServiceImpl) GitPull(_ context.Context, wsID, agentName, source st
 }
 
 func (s *agentServiceImpl) GitSync(_ context.Context, wsID, agentName string) (*service.GitSyncResult, error) {
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
+	wt, err := s.resolveWritableWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +293,7 @@ func (s *agentServiceImpl) CreatePR(_ context.Context, wsID, agentName, target s
 		return nil, service.ErrUnavailable("gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'")
 	}
 
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
+	wt, err := s.resolveWritableWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +310,7 @@ func (s *agentServiceImpl) CreatePR(_ context.Context, wsID, agentName, target s
 }
 
 func (s *agentServiceImpl) GitReset(_ context.Context, wsID, agentName, branch string, force, push bool) (*ops.GitResetResult, error) {
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
+	wt, err := s.resolveWritableWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
 	}
@@ -637,7 +648,7 @@ func validateAgentCreateInput(in service.AgentCreateInput) error {
 }
 
 func (s *agentServiceImpl) SetTargetBranch(_ context.Context, wsID, agentName, branch string) error {
-	wt, err := s.resolveAgentWorktree(wsID, agentName)
+	wt, err := s.resolveWritableWorktree(wsID, agentName)
 	if err != nil {
 		return err
 	}

@@ -518,6 +518,7 @@ vi.mock("@/hooks", async () => {
   };
 });
 
+import { ExtraBrowserAgent } from "../browserAgents";
 import { WorkspaceFileBrowser } from "../WorkspaceFileBrowser";
 
 function entry(name: string, isDir = false): FileEntry {
@@ -2350,6 +2351,44 @@ describe("WorkspaceFileBrowser", () => {
     expect(screen.getByLabelText("Search files")).toBeVisible();
     expect(screen.queryByLabelText("Replace with")).toBeNull();
     expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+  });
+
+  it("keeps an Agent API agent's worktree read-only even for editors", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        { kind: "agent", agent: "agt_1", repo: "loomcli", exists: true },
+      ],
+    });
+    render(
+      <ExtraBrowserAgent.Provider
+        value={{
+          name: "agt_1",
+          repos: ["loomcli"],
+          repo_groups: [],
+          cross_repo: false,
+        }}
+      >
+        <WorkspaceFileBrowser mode="agent" agentName="agt_1" />
+      </ExtraBrowserAgent.Provider>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /agt_1.*loomcli/ }),
+    );
+    fireEvent.click(await screen.findByLabelText("main.ts"));
+    expect(await screen.findByTestId("mock-codemirror")).toHaveAttribute(
+      "data-readonly",
+      "true",
+    );
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    expect(screen.getByRole("menuitem", { name: "Copy Path" })).toBeVisible();
+    for (const name of ["Delete", "Rename", "New File", "New Folder"]) {
+      expect(screen.queryByRole("menuitem", { name })).toBeNull();
+    }
+    expect(
+      screen.queryByRole("button", { name: /Repair checkout/ }),
+    ).toBeNull();
   });
 
   it("shows capability loading and fail-closed retry states", async () => {

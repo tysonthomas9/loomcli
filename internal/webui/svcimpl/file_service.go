@@ -180,6 +180,33 @@ func (s *fileServiceImpl) resolveScopedRoot(wsID string, scope service.FileScope
 	return root, nil
 }
 
+// resolveWritableScopedRoot is resolveScopedRoot for writes. An Agent API
+// agent's worktree is read-only through these v5 routes (3.2t), so a write
+// to it is refused before anything touches the disk.
+func (s *fileServiceImpl) resolveWritableScopedRoot(wsID string, scope service.FileScope, target, repo string) (*scopedRoot, error) {
+	if err := s.refuseAgentAPIWrite(wsID, scope, target, repo); err != nil {
+		return nil, err
+	}
+	return s.resolveScopedRoot(wsID, scope, target, repo)
+}
+
+func (s *fileServiceImpl) refuseAgentAPIWrite(wsID string, scope service.FileScope, target, repo string) error {
+	if scope != service.ScopeAgent || validateAgentName(target) != nil {
+		return nil
+	}
+	var wt *ops.AgentWorktree
+	var err error
+	if repo = strings.TrimSpace(repo); repo != "" {
+		wt, err = s.fileOps.ResolveAgentWorktreeForRepo(wsID, target, repo)
+	} else {
+		wt, err = s.fileOps.ResolveAgentWorktree(wsID, target)
+	}
+	if err == nil && wt.AgentAPI {
+		return service.ErrForbidden(fmt.Sprintf("agent %q is an Agent API agent; its worktree is read-only here", target))
+	}
+	return nil
+}
+
 func (s *fileServiceImpl) resolveWorkspaceScopeRoot(wsID, target string) (string, error) {
 	if target != "" {
 		return "", service.ErrValidation("workspace scope does not take a target")
@@ -344,7 +371,7 @@ func (s *fileServiceImpl) StatPathScoped(ctx context.Context, wsID string, scope
 }
 
 func (s *fileServiceImpl) WriteFileConditionalScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, content string, preconditions service.FileWritePreconditions) (*service.FileMutationResult, error) {
-	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
+	root, err := s.resolveWritableScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +422,7 @@ func (s *fileServiceImpl) DeletePathVersionedScoped(ctx context.Context, wsID st
 	if strings.TrimSpace(version) == "" {
 		return service.ErrPreconditionRequired("current source version is required")
 	}
-	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
+	root, err := s.resolveWritableScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
@@ -424,7 +451,7 @@ func (s *fileServiceImpl) DeletePathVersionedScoped(ctx context.Context, wsID st
 }
 
 func (s *fileServiceImpl) MkdirScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) error {
-	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
+	root, err := s.resolveWritableScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
@@ -449,7 +476,7 @@ func (s *fileServiceImpl) MovePathVersionedScoped(ctx context.Context, wsID stri
 	if strings.TrimSpace(sourceVersion) == "" {
 		return nil, service.ErrPreconditionRequired("current source version is required")
 	}
-	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
+	root, err := s.resolveWritableScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
