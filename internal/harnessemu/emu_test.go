@@ -732,3 +732,57 @@ func TestEmulatorRejectEndsTheTurn(t *testing.T) {
 		t.Fatalf("next turn = %+v", e[len(e)-1])
 	}
 }
+
+// TestEmulatorSubagentTool (SA1): the emulator's subagent tool asserts the
+// subagent action against the session's installed rules as OpenCode does:
+// a lead's subagent deny fails the call with OpenCode's error and starts no
+// child; a task agent's allow-all rules start one.
+func TestEmulatorSubagentTool(t *testing.T) {
+	ctx := context.Background()
+	call := harnessemu.Tool{ID: "call_sub", Name: "subagent", Input: map[string]any{"agent": "general", "prompt": "look"}, Output: "child done"}
+	turn := []harnessemu.Turn{{Text: "after", Tools: []harnessemu.Tool{call}}}
+	sc := scenarios(t, map[string][]harnessemu.Turn{"lead-1": turn, "task-1": turn})
+	c, _ := emu(t, filepath.Join(t.TempDir(), "state.json"), sc)
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	allow := []loomharness.PermissionRule{
+		{Action: "read", Resource: "*", Effect: "allow"},
+		{Action: "edit", Resource: "*", Effect: "allow"},
+		{Action: "bash", Resource: "*", Effect: "allow"},
+	}
+	for _, a := range []struct {
+		key   string
+		rules []loomharness.PermissionRule
+		deny  bool
+	}{
+		{"lead-1", append(append([]loomharness.PermissionRule{}, allow...), loomharness.PermissionRule{Action: "subagent", Resource: "*", Effect: "deny"}), true},
+		{"task-1", allow, false},
+	} {
+		ref, err := c.Open(ctx, loomharness.OpenSpec{Key: a.key, Dir: t.TempDir(), Rules: a.rules, Metadata: map[string]string{"agent_id": a.key}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Session(ref).Prompt(ctx, loomharness.Input{Key: opencode.PromptID(a.key, "r1"), Text: "call an agent"}); err != nil {
+			t.Fatal(err)
+		}
+		started, failed := false, false
+		var out string
+		for _, e := range until(t, f, completed) {
+			if e.Type == loomharness.EventSubagentStarted && e.Session.NativeID == ref.NativeID {
+				started = true
+			}
+			if e.Type == loomharness.EventItemCompleted && e.Tool != nil && e.Tool.Name == "subagent" {
+				failed, out = e.Tool.Failed, e.Tool.Output
+			}
+		}
+		if a.deny && (started || !failed || !strings.Contains(out, "Subagent denied: general")) {
+			t.Errorf("%s: subagent started %v, failed %v, output %q; want OpenCode's denial and no child", a.key, started, failed, out)
+		}
+		if !a.deny && (!started || failed) {
+			t.Errorf("%s: subagent started %v, failed %v, output %q; want a child session", a.key, started, failed, out)
+		}
+	}
+}

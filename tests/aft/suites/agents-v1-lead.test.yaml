@@ -982,3 +982,62 @@ tests:
           assert a["state"] == "idle" and a["running_turn_id"] is None, "after Stop: %s, running turn %s" % (a["state"], a["running_turn_id"])
           PY
         intent: "Check that the agent is idle with no running turn after Stop"
+
+  - name: SA1 - a lead told to use OpenCode's own subagent tool is denied and starts no harness subagent
+    intent: An operator tells a lead to call an agent through OpenCode's subagent tool; the lead's policy denies that tool, so no harness subagent starts and the lead goes on, delegating only through Loom child agents
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-sa1-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sa1-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Sa1Id
+        intent: "Create an OpenCode lead"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Sa1Id")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          call = {"agent": "general", "description": "AGV1-SA1 helper", "prompt": "say hi"}
+          if scenarios:
+              # The emulator's subagent tool asserts the session's rules as OpenCode's does.
+              turns = [{"tools": [{"id": "call_sa1_sub", "name": "subagent", "input": call, "output": "AGV1-SA1-CHILD"}],
+                        "text": "AGV1-SA1-AFTER"}]
+              json.dump({agent: turns}, open(scenarios, "w"))
+          else:
+              steps = [{"tool_calls": [{"name": "subagent", "arguments": call}]}, {"text": "AGV1-SA1-AFTER"}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that calls OpenCode's subagent tool, then replies, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "use OpenCode's subagent tool to call an agent" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-SA1-AFTER')
+        budget: 90000
+        intent: "Wait until the lead replies after the subagent call"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Sa1Id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id/events?limit=500" > "$AFT_WORK_DIR/agv1-sa1.json"
+          python3 - "$AFT_WORK_DIR/agv1-sa1.json" "${AFT_EMU_SCENARIOS:-}" <<'PY'
+          import json, sys
+          body = json.load(open(sys.argv[1]))
+          text = json.dumps(body)
+          assert "harness.subagent.started" not in text, "the lead started a harness subagent"
+          assert "AGV1-SA1-CHILD" not in text, "the subagent call ran"
+          if sys.argv[2]:
+              assert "Subagent denied: general" in text, "the subagent call was not denied"
+          PY
+        intent: "Check that the lead's events have no harness subagent start and the call was denied"
