@@ -61,6 +61,11 @@ tests:
         intent: A real TaskRun whose agent changes nothing records its revision in the trunk-mode workspace
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" closed E2E-WS-NOCHG-TRUNK
         intent: Every verdict and the publication are refused with nothing applied and no PR
+      - open: /ws/E2E-WS-NOCHG-TRUNK/kanban
+        intent: Load the trunk-mode workspace before following the task deep link
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: The board has mounted, so the workspace is loaded before the deep link
       - run: >-
           agent-browser --session "$AFT_SESSION" open
           "$AFT_BASE_URL/ws/E2E-WS-NOCHG-TRUNK/issues/$(cat "$AFT_WORK_DIR/E2E-WS-NOCHG-TRUNK-task")"
