@@ -9,6 +9,7 @@ import type {
   CreateAgentBody,
   Delivery,
   EventPage,
+  ModelCatalog,
   Preset,
   RespondBody,
   SendResult,
@@ -169,3 +170,7 @@ export const listPresets = (ws: string) =>
 
 export const getPreset = (ws: string, name: string) =>
   get<Preset>(v1(ws, `/presets/${encodeURIComponent(name)}`));
+
+/** The harness's connected providers and models, with each model's options. */
+export const listHarnessModels = (ws: string, harness: string) =>
+  get<ModelCatalog>(v1(ws, `/harnesses/${encodeURIComponent(harness)}/models`));

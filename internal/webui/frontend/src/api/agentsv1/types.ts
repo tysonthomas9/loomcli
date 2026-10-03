@@ -31,9 +31,19 @@ export interface CreateAgentBody {
   first_message?: string;
 }
 
+/** One chosen model option: a string, or a boolean for a boolean option. */
+export interface OptionValue {
+  id: string;
+  value: string | boolean;
+}
+
 export interface UpdateAgentBody {
   name?: string;
   model?: string;
+  /** Shorthand for the effort option; applies from the next turn. */
+  effort?: string;
+  /** Model options by id (from listHarnessModels); the others are kept. */
+  options?: OptionValue[];
   harness?: string;
   expect?: Expect;
 }
@@ -174,4 +184,43 @@ export interface AgentApiErrorBody {
   allowed?: string[];
   paths?: string[];
   fingerprint?: string;
+}
+
+/** One value of a select option. */
+export interface OptionChoice {
+  id: string;
+  label: string;
+  description?: string;
+  is_default?: boolean;
+}
+
+/** One option a model takes (T3 Code's option-descriptor shape). */
+export interface OptionDescriptor {
+  id: string;
+  label: string;
+  description?: string;
+  type: "select" | "boolean";
+  options?: OptionChoice[];
+  current_value?: string | boolean;
+}
+
+export interface CatalogModel {
+  id: string;
+  name: string;
+  context_limit: number; // tokens; 0 when unknown
+  input: string[]; // text | image | pdf
+  is_default: boolean;
+  option_descriptors: OptionDescriptor[];
+}
+
+export interface ModelProvider {
+  id: string;
+  name: string;
+  models: CatalogModel[];
+}
+
+/** GET /v1/harnesses/{harness}/models. */
+export interface ModelCatalog {
+  harness: string;
+  providers: ModelProvider[];
 }
