@@ -421,7 +421,7 @@ func (r *Runner) runWithEnv(ctx context.Context, input io.Reader, env map[string
 	if forbidden(args) {
 		return nil, ErrForbidden
 	}
-	if r.readOnly && (len(args) == 0 || (args[0] != "diff" && args[0] != "range-diff" && args[0] != "rev-parse" && !(len(args) == 3 && args[0] == "cat-file" && args[1] == "-s"))) {
+	if r.readOnly && !readOnlyCommand(args) {
 		return nil, ErrForbidden
 	}
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
@@ -482,4 +482,19 @@ func (r *Runner) UpdateRef(ctx context.Context, ref, next, expected string) erro
 		return fmt.Errorf("%w: %s", ErrStale, ref)
 	}
 	return err
+}
+
+// readOnlyCommand lists the Git reads a read-only runner may run.
+func readOnlyCommand(args []string) bool {
+	switch {
+	case len(args) == 0:
+		return false
+	case args[0] == "diff" || args[0] == "range-diff" || args[0] == "rev-parse":
+		return true
+	case len(args) == 3 && args[0] == "cat-file" && args[1] == "-s":
+		return true
+	default: // A commit's date, for revision history; never an option such as --output.
+		return len(args) == 4 && args[0] == "show" && args[1] == "-s" && args[2] == "--format=%cI" &&
+			!strings.HasPrefix(args[3], "-")
+	}
 }

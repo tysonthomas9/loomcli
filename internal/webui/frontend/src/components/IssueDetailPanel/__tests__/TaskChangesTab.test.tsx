@@ -1,0 +1,174 @@
+/** @vitest-environment jsdom */
+
+import "@testing-library/jest-dom";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/types";
+import { TaskChangesTab } from "../TaskChangesTab";
+
+const {
+  applyRevision,
+  getRevisionDiff,
+  getTaskDiff,
+  getTaskRevisions,
+  submitRevisionVerdict,
+} = vi.hoisted(() => ({
+  applyRevision: vi.fn(),
+  getRevisionDiff: vi.fn(),
+  getTaskDiff: vi.fn(),
+  getTaskRevisions: vi.fn(),
+  submitRevisionVerdict: vi.fn(),
+}));
+vi.mock("@/api/git/revisions", () => ({
+  applyRevision,
+  getRevisionDiff,
+  getTaskDiff,
+  getTaskRevisions,
+  submitRevisionVerdict,
+}));
+
+const base = {
+  change_id: "C",
+  repo: "source-repo",
+  outcome: "completed",
+  incomplete: false,
+  applied: false,
+  needs_working_area: false,
+};
+const rev2 = {
+  ...base,
+  number: 2,
+  head_sha: "b".repeat(40),
+  superseded: false,
+};
+const rev1 = {
+  ...base,
+  number: 1,
+  head_sha: "a".repeat(40),
+  superseded: true,
+  date: "2026-10-02T23:14:24Z",
+};
+const patch = (line: string) =>
+  `diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+${line}\n`;
+const taskDiff = {
+  revision: 2,
+  change: "C",
+  repo: "source-repo",
+  compare: "layer",
+  files: [
+    { path: "f", patchSize: 40, truncated: false, patch: patch("task") },
+    { path: "big.bin", patchSize: 3_000_000, truncated: true },
+  ],
+};
+
+describe("TaskChangesTab", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getTaskRevisions.mockResolvedValue([rev2, rev1]);
+    getTaskDiff.mockResolvedValue(taskDiff);
+    getRevisionDiff.mockResolvedValue({
+      revision: 1,
+      files: [
+        { path: "f", patchSize: 40, truncated: false, patch: patch("old-try") },
+      ],
+    });
+    submitRevisionVerdict.mockResolvedValue("recorded");
+  });
+
+  it("loads the revisions before the task diff and shows one diff", async () => {
+    let releaseRevisions: (value: unknown) => void = () => {};
+    getTaskRevisions.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseRevisions = resolve;
+      }),
+    );
+    render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
+    expect(screen.getByText("Loading revisions…")).toBeInTheDocument();
+    expect(getTaskDiff).not.toHaveBeenCalled();
+    releaseRevisions([rev2, rev1]);
+    expect(
+      await screen.findByText(
+        "Revision 2 against the layer below it in the stack",
+      ),
+    ).toBeInTheDocument();
+    expect(getTaskDiff).toHaveBeenCalledWith("W", "T", "lead");
+    expect(getTaskDiff).toHaveBeenCalledTimes(1);
+    expect(getRevisionDiff).not.toHaveBeenCalled();
+    expect(screen.getByText("+task")).toBeInTheDocument();
+    const files = screen.getByRole("complementary", { name: "Changed files" });
+    expect(within(files).getAllByRole("button")).toHaveLength(2);
+    fireEvent.click(within(files).getByRole("button", { name: "big.bin" }));
+    expect(
+      screen.getByText(/3000000 bytes · too large to show/),
+    ).toBeInTheDocument();
+  });
+
+  it("puts verdict buttons on the newest revision only", async () => {
+    render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(screen.getAllByRole("button", { name: "Approve" })).toHaveLength(1);
+    await vi.waitFor(() =>
+      expect(submitRevisionVerdict).toHaveBeenCalledWith(
+        "W",
+        rev2,
+        "approve",
+        "",
+        "lead",
+      ),
+    );
+  });
+
+  it("lists older revisions read-only under History with their own diffs", async () => {
+    render(<TaskChangesTab workspaceId="W" taskId="T" />);
+    const history = await screen.findByRole("button", { name: "History (1)" });
+    expect(screen.queryByRole("list", { name: "Revision history" })).toBeNull();
+    fireEvent.click(history);
+    const list = screen.getByRole("list", { name: "Revision history" });
+    expect(within(list).getByText("aaaaaaaaaaaa")).toBeInTheDocument();
+    expect(within(list).getByText(/completed/)).toBeInTheDocument();
+    expect(
+      within(list).getByText(/replaced by a newer revision/),
+    ).toBeInTheDocument();
+    expect(within(list).queryByRole("button", { name: "Approve" })).toBeNull();
+    fireEvent.click(within(list).getByRole("button", { name: "Revision 1" }));
+    expect(await screen.findByText("+old-try")).toBeInTheDocument();
+    expect(getRevisionDiff).toHaveBeenCalledWith("W", rev1);
+    expect(
+      screen.getByText("Revision 1 (read-only history), against its base"),
+    ).toBeInTheDocument();
+    // Still one set of verdict buttons: the task's, never the old revision's.
+    expect(screen.getAllByRole("button", { name: "Approve" })).toHaveLength(1);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Back to the task diff" }),
+    );
+    expect(screen.getByText("+task")).toBeInTheDocument();
+  });
+
+  it("says No changes for an empty newest revision", async () => {
+    getTaskRevisions.mockResolvedValue([rev2]);
+    getTaskDiff.mockResolvedValue({ ...taskDiff, compare: "base", files: [] });
+    render(<TaskChangesTab workspaceId="W" taskId="T" />);
+    expect(await screen.findByText("No changes")).toBeInTheDocument();
+    expect(
+      screen.getByText("Revision 2 against its base (not applied yet)"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /History/ })).toBeNull();
+  });
+
+  it("shows the API error code when the diff fails", async () => {
+    getTaskDiff.mockRejectedValue(
+      new ApiError(409, "Conflict", { error: "base_ref_unresolvable" }),
+    );
+    render(<TaskChangesTab workspaceId="W" taskId="T" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not load changes: base_ref_unresolvable",
+    );
+  });
+
+  it("does not ask for a diff when the task has no revisions", async () => {
+    getTaskRevisions.mockResolvedValue([]);
+    render(<TaskChangesTab workspaceId="W" taskId="T" />);
+    expect(await screen.findByText("No revisions yet.")).toBeInTheDocument();
+    expect(getTaskDiff).not.toHaveBeenCalled();
+  });
+});

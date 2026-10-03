@@ -48,7 +48,9 @@ func (l *Local) WorkingAreas(ctx context.Context, workspace, lead string) ([]jou
 }
 
 type TaskRevision struct {
-	ChangeID   string `json:"change_id"`
+	ChangeID string `json:"change_id"`
+	// Repo is the workspace repo name the revision diff route accepts.
+	Repo       string `json:"repo"`
 	Number     int    `json:"number"`
 	HeadSHA    string `json:"head_sha"`
 	Outcome    string `json:"outcome"`
@@ -58,6 +60,11 @@ type TaskRevision struct {
 	// NeedsWorkingArea marks an approved, unapplied revision whose target lead
 	// has no working area yet, so the UI can offer Apply after a reload.
 	NeedsWorkingArea bool `json:"needs_working_area"`
+	// Superseded marks a revision older than its change's newest source
+	// revision; the server refuses verdicts on it.
+	Superseded bool `json:"superseded"`
+	// Date is the revision head's commit date, when the repo is readable.
+	Date string `json:"date,omitempty"`
 }
 
 func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]TaskRevision, error) {
@@ -75,6 +82,14 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 	out := make([]TaskRevision, 0, len(revisions))
 	for _, r := range revisions {
 		i := TaskRevision{ChangeID: r.Change, Number: r.Number, HeadSHA: r.HeadSHA, Outcome: r.Outcome, Incomplete: r.Incomplete}
+		if i.Repo, err = l.store.RepoForChange(ctx, workspace, r.Change); err != nil && !errors.Is(err, journal.ErrNotFound) {
+			return nil, err
+		}
+		latest, err := l.store.LatestSourceNumber(ctx, workspace, r.Change)
+		if err != nil {
+			return nil, err
+		}
+		i.Superseded = latest > r.Number
 		v, err := l.store.LatestVerdict(ctx, r)
 		if err == nil {
 			i.Verdict = v.Kind
