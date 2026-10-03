@@ -26,9 +26,9 @@ tests:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" run later
         intent: Merge the Loom stack in two rounds and require C on trunk after the second
   - name: cross-repo dependency holds loom/dependencies until its predecessor lands
-    intent: An app task blocked by an api task keeps a pending loom/dependencies status until the api PR lands on its trunk
+    intent: An app task blocked by an api task keeps a pending loom/dependencies status, and does not merge, until the api PR lands on its trunk
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" setup deps
         intent: Create two disposable repositories in one workspace through the product API
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" run deps
-        intent: Publish both changes, observe pending loom/dependencies on the app PR, land the api PR and observe success
+        intent: Publish both changes, see pending loom/dependencies and a refused or held app merge, land the api PR, then see success and the app PR merge

@@ -108,6 +108,9 @@ make_tasks() {
     # refuses new dependencies on running or closed tasks.
     curl -fsS -X POST "$api/issues/$(cat "$case_dir/task-2.id")/dependencies" -H 'Content-Type: application/json' \
       -d "{\"depends_on_id\":\"$(cat "$case_dir/task-1.id")\",\"dep_type\":\"blocks\"}" >/dev/null
+    # The app change gets a named stack so a human can ask Loom to merge it.
+    loom stack init deps-app --repo "${repos[1]}" --base main >/dev/null
+    loom stack add "$(cat "$case_dir/task-2.id")" --stack deps-app >/dev/null
   fi
   curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
     -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$case_dir/workflow.json"
@@ -272,13 +275,15 @@ case "$case_name" in
   deps)
     make_tasks deps "$api_repo":lead-deps-api.txt "$app_repo":lead-deps-app.txt
     approve_and_apply
-    for layer in 1 2; do
-      change="$(cat "$case_dir/change-$layer.id")"
-      curl -sS --fail-with-body -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$change\"}" > "$case_dir/publish-$layer.json" || { cat "$case_dir/publish-$layer.json"; exit 1; }
-      grep -q '"created":true' "$case_dir/publish-$layer.json"
-    done
-    api_number="$(json "$case_dir/publish-1.json" 'print(v["url"].rsplit("/",1)[-1])')"
+    # The api change is published from the lead's Git panel (one change), the
+    # app change as the named deps-app stack.
+    curl -sS --fail-with-body -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' -d "{\"change_id\":\"$(cat "$case_dir/change-1.id")\"}" > "$case_dir/publish-1.json" || { cat "$case_dir/publish-1.json"; exit 1; }
+    grep -q '"created":true' "$case_dir/publish-1.json"
     app_change="$(cat "$case_dir/change-2.id")"
+    loom pr-stack deps-app lead "$app_change" > "$case_dir/publish-2.txt"
+    api_number="$(json "$case_dir/publish-1.json" 'print(v["url"].rsplit("/",1)[-1])')"
+    pulls_now
+    app_number="$(json "$case_dir/pulls-now.json" 'print([x for x in v if x["head"]["ref"].endswith("/change/"+sys.argv[2])][0]["number"])' "$app_change")"
     app_head="$(git --git-dir="$case_dir/$app_repo.git" rev-parse "refs/heads/loom/ws/$workspace/change/$app_change")"
     for _ in $(seq 1 45); do
       curl -fsS "$AFT_FAKE_GH_BASE/__statuses?sha=$app_head" > "$case_dir/statuses-pending.json"
@@ -286,25 +291,50 @@ case "$case_name" in
       sleep 2
     done
     json "$case_dir/statuses-pending.json" 'p=[x for x in v if x["context"]=="loom/dependencies"]; assert p and p[-1]["state"]=="pending" and ("owner/"+sys.argv[3]+"#"+sys.argv[2]) in p[-1]["description"] and p[-1]["repo"]=="owner/"+sys.argv[4], v' "$api_number" "$api_repo" "$app_repo"
-    hold_seconds=6
+    # A human asks Loom to merge the app before the api PR has landed: Loom
+    # refuses or holds the request, and the app PR must not merge.
+    set +e
+    printf 'merge %s\n' "$app_change" | loom merge-up-to deps-app lead "$app_change" > "$case_dir/merge-early.txt" 2>&1
+    early_rc=$?
+    set -e
+    printf 'app merge requested before owner/%s#%s landed exited %s:\n' "$api_repo" "$api_number" "$early_rc"
+    cat "$case_dir/merge-early.txt"
+    hold_seconds=10
     for _ in $(seq 1 "$hold_seconds"); do
       curl -fsS "$AFT_FAKE_GH_BASE/__statuses?sha=$app_head" > "$case_dir/statuses-hold.json"
       json "$case_dir/statuses-hold.json" 'assert not any(x["context"]=="loom/dependencies" and x["state"]=="success" for x in v), v'
+      pulls_now
+      json "$case_dir/pulls-now.json" 'p=[x for x in v if x["number"]==int(sys.argv[2])][0]; assert p["state"]=="open" and not p["merged_at"], p' "$app_number"
       sleep 1
     done
+    test "$(merge_puts "$app_number")" = 0
     api_change="$(cat "$case_dir/change-1.id")"
     git -C "$case_dir/$api_repo" fetch -q origin "loom/ws/$workspace/change/$api_change"
     sha="$(git -C "$case_dir/$api_repo" rev-parse FETCH_HEAD)"
     git -C "$case_dir/$api_repo" push -q origin FETCH_HEAD:refs/heads/main
     curl -fsS -X POST "$AFT_FAKE_GH_BASE/__merge" -H 'Content-Type: application/json' -d "{\"number\":$api_number,\"sha\":\"$sha\"}" > "$case_dir/api-merge.json"
     grep -q '"state":"closed"' "$case_dir/api-merge.json"
+    landed=""
     for _ in $(seq 1 45); do
       curl -fsS "$AFT_FAKE_GH_BASE/__statuses?sha=$app_head" > "$case_dir/statuses-final.json"
-      json "$case_dir/statuses-final.json" 'p=[x for x in v if x["context"]=="loom/dependencies"]; sys.exit(0 if p and p[-1]["state"]=="success" else 1)' && exit 0
+      json "$case_dir/statuses-final.json" 'p=[x for x in v if x["context"]=="loom/dependencies"]; sys.exit(0 if p and p[-1]["state"]=="success" else 1)' && { landed=1; break; }
       sleep 2
     done
-    cat "$case_dir/statuses-final.json"
-    echo "loom/dependencies stayed pending after owner/$api_repo#$api_number landed" >&2
-    exit 1
+    if [[ -z "$landed" ]]; then
+      cat "$case_dir/statuses-final.json"
+      echo "loom/dependencies stayed pending after owner/$api_repo#$api_number landed" >&2
+      exit 1
+    fi
+    # A refused early request is asked again now; a held one proceeds by itself.
+    if [[ "$early_rc" != 0 ]]; then
+      printf 'merge %s\n' "$app_change" | loom merge-up-to deps-app lead "$app_change" > "$case_dir/merge-app.txt" 2>&1 || { cat "$case_dir/merge-app.txt"; exit 1; }
+    fi
+    for _ in $(seq 1 60); do
+      pulls_now
+      json "$case_dir/pulls-now.json" 'p=[x for x in v if x["number"]==int(sys.argv[2])][0]; sys.exit(0 if p["merged_at"] else 1)' "$app_number" && break
+      sleep 2
+    done
+    json "$case_dir/pulls-now.json" 'p=[x for x in v if x["number"]==int(sys.argv[2])][0]; assert p["merged_at"], p' "$app_number"
+    git --git-dir="$case_dir/$app_repo.git" show main:lead-deps-app.txt >/dev/null
     ;;
 esac
