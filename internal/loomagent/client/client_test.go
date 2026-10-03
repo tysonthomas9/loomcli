@@ -114,7 +114,7 @@ func code(err error) loomagent.Code {
 }
 
 func lead(name string) agentsv1.CreateBody {
-	return agentsv1.CreateBody{Preset: "lead", Name: name, Repo: "/repo", Overrides: agentsv1.Overrides{Harness: "opencode"}}
+	return agentsv1.CreateBody{Preset: "lead", Name: name, Repo: "/repo", BaseRef: "main", Overrides: agentsv1.Overrides{Harness: "opencode"}}
 }
 
 // TestClientEveryMethod drives every Agent API method through the client

@@ -80,7 +80,7 @@ func shapedService(t *testing.T, name string) (*Service, *createEnv, loomstore.A
 	s := e.service(ServiceConfig{})
 	s.harnesses = map[string]loomharness.Harness{name: shaped{e.h, name}}
 	info, err := s.Create(context.Background(), CreateRequest{Envelope: Envelope{RequestID: "alpha"}, Preset: "lead",
-		Name: "alpha", Repo: "/repo", Overrides: Overrides{Harness: name, Model: "fake-model"}})
+		Name: "alpha", Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: name, Model: "fake-model"}})
 	if err != nil {
 		t.Fatal(err)
 	}

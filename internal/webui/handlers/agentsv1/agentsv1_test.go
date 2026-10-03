@@ -186,6 +186,14 @@ func TestAgentRESTRoutes(t *testing.T) {
 	want(t, "create without Idempotency-Key", status, out, 400, "preset_invalid")
 	status, out = call(t, srv, "POST", "ws/v1/agents", "c1", `{"preset":"nope"}`)
 	want(t, "create unknown preset", status, out, 404, "preset_not_found")
+	status, out = call(t, srv, "POST", "ws/v1/agents", "c2", `{"preset":"lead","name":"nobase","repo":"/repo"}`)
+	if msg, _ := out["error"].(string); status != 400 || out["code"] != "preset_invalid" || !strings.Contains(msg, "base_ref") {
+		t.Fatalf("create without base_ref = %d %v; want 400 preset_invalid naming base_ref", status, out)
+	}
+	status, out = call(t, srv, "GET", "ws/v1/agents?include_archived=true", "", "")
+	if as, _ := out["agents"].([]any); status != 200 || len(as) != 2 {
+		t.Fatalf("agents after a refused create = %d %v; want no new row", status, out)
+	}
 
 	status, out = call(t, srv, "GET", "ws/v1/presets", "", "")
 	if ps, _ := out["presets"].([]any); status != 200 || len(ps) != 5 {

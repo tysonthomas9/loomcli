@@ -48,7 +48,7 @@ func pump(t *testing.T, s *Service, h loomharness.Harness, st *loomstore.Store) 
 func newLead(t *testing.T, e *createEnv, s *Service, name string) (loomstore.Agent, loomharness.NativeRef) {
 	t.Helper()
 	info, err := s.Create(context.Background(), CreateRequest{Envelope: Envelope{RequestID: name}, Preset: "lead",
-		Name: name, Repo: "/repo", Overrides: Overrides{Harness: "opencode"}})
+		Name: name, Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ func TestDispatchArchiveDoneAndSingleTaskOutcome(t *testing.T) {
 	eventually(t, "archived", func() bool { return s.get(t, a.AgentID).State == StateArchived })
 
 	info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: "w1"}, Preset: "daemon-worker", Name: "w",
-		Repo: "/repo", Overrides: Overrides{Harness: "opencode"}, FirstMessage: "fix it"})
+		Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode"}, FirstMessage: "fix it"})
 	if err != nil {
 		t.Fatal(err)
 	}

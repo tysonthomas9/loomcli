@@ -60,7 +60,7 @@ func TestUsageShowsNewAgentTokens(t *testing.T) {
 	defer func() { cancel(); <-done }()
 
 	info, err := svc.Create(ctx, loomagent.CreateRequest{Envelope: loomagent.Envelope{RequestID: "c1"}, Preset: "lead",
-		Name: "nova", Repo: "/repo", Overrides: loomagent.Overrides{Harness: "opencode"}})
+		Name: "nova", Repo: "/repo", BaseRef: "main", Overrides: loomagent.Overrides{Harness: "opencode"}})
 	if err != nil {
 		t.Fatal(err)
 	}

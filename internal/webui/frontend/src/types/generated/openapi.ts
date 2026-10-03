@@ -2646,6 +2646,7 @@ export interface components {
       parent?: string;
       subject?: components["schemas"]["AgentV1Subject"];
       repo?: string;
+      /** @description The branch or commit the agent starts from. Required unless parent has a branch, which is then the default; a create without one is a 400 preset_invalid and writes no agent. */
       base_ref?: string;
       external_key?: string;
       first_message?: string;

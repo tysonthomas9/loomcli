@@ -4793,7 +4793,11 @@ components:
         parent: {type: string}
         subject: {$ref: "#/components/schemas/AgentV1Subject"}
         repo: {type: string}
-        base_ref: {type: string}
+        base_ref:
+          type: string
+          description: >-
+            The branch or commit the agent starts from. Required unless parent has a branch, which is then the
+            default; a create without one is a 400 preset_invalid and writes no agent.
         external_key: {type: string}
         first_message: {type: string}
     AgentV1Expect:

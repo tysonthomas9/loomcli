@@ -83,7 +83,7 @@ func (e *createEnv) events(t *testing.T, id, kind string) int {
 }
 
 func leadReq(id string) CreateRequest {
-	return CreateRequest{Envelope: Envelope{RequestID: id}, Preset: "lead", Name: "alpha", Repo: "/repo",
+	return CreateRequest{Envelope: Envelope{RequestID: id}, Preset: "lead", Name: "alpha", Repo: "/repo", BaseRef: "main",
 		Overrides: Overrides{Harness: "opencode"}}
 }
 
@@ -118,7 +118,7 @@ func TestCreateSpecJSONConfigRoundTrip(t *testing.T) {
 	e := newCreateEnv(t)
 	s := e.service(ServiceConfig{})
 	budget := 2.5
-	req := CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "lead@1", Name: "alpha", Repo: "/repo",
+	req := CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "lead@1", Name: "alpha", Repo: "/repo", BaseRef: "main",
 		Overrides: Overrides{Harness: "opencode", Model: "fake-model", Effort: "high", MaxBudgetUSD: &budget},
 		Persona:   &Persona{Text: "custom persona"}}
 	got, err := s.Create(ctx, req)
@@ -415,7 +415,7 @@ func TestCreateBridgeCapsFromHostOnly(t *testing.T) {
 		e := newCreateEnv(t)
 		s := e.service(ServiceConfig{Bridge: func(context.Context, Preset) (BridgeCaps, error) { return caps, nil }})
 		for j, preset := range []string{"daemon-worker", "pr-review-webhook"} {
-			req := CreateRequest{Envelope: Envelope{RequestID: preset}, Preset: preset, Name: preset, Repo: "/repo",
+			req := CreateRequest{Envelope: Envelope{RequestID: preset}, Preset: preset, Name: preset, Repo: "/repo", BaseRef: "main",
 				Overrides: Overrides{Harness: "opencode"}}
 			if preset == "daemon-worker" {
 				req.Overrides = ro
@@ -676,7 +676,7 @@ func TestHarnessResumeInstallsCurrentPolicy(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s := e.service(ServiceConfig{Bridge: hook})
-	req := CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "daemon-worker", Name: "w", Repo: "/repo",
+	req := CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "daemon-worker", Name: "w", Repo: "/repo", BaseRef: "main",
 		Overrides: Overrides{Harness: "opencode", ReadOnly: true, DeniedTools: []string{"edit"}}}
 	a, err := s.Create(ctx, req)
 	if err != nil {
@@ -749,7 +749,7 @@ func TestHarnessResumeInstallsCurrentPolicy(t *testing.T) {
 func TestCreateRefusesSharedBridgeFolder(t *testing.T) {
 	ctx := context.Background()
 	worker := func(id string) CreateRequest { // a preset with no bridge tools
-		return CreateRequest{Envelope: Envelope{RequestID: id}, Preset: "daemon-worker", Name: id, Repo: "/repo",
+		return CreateRequest{Envelope: Envelope{RequestID: id}, Preset: "daemon-worker", Name: id, Repo: "/repo", BaseRef: "main",
 			Overrides: Overrides{Harness: "opencode"}}
 	}
 	for name, c := range map[string]struct {
@@ -757,11 +757,11 @@ func TestCreateRefusesSharedBridgeFolder(t *testing.T) {
 		deleteFirst   bool
 		want          Code
 	}{
-		"lead then lead":         {leadReq("l1"), CreateRequest{Envelope: Envelope{RequestID: "l2"}, Preset: "lead", Name: "beta", Repo: "/repo", Overrides: Overrides{Harness: "opencode"}}, false, CodeWorktreeTaken},
+		"lead then lead":         {leadReq("l1"), CreateRequest{Envelope: Envelope{RequestID: "l2"}, Preset: "lead", Name: "beta", Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode"}}, false, CodeWorktreeTaken},
 		"lead then worker":       {leadReq("l1"), worker("w1"), false, CodeWorktreeTaken},
 		"worker then lead":       {worker("w1"), leadReq("l1"), false, CodeWorktreeTaken},
 		"worker then worker":     {worker("w1"), worker("w2"), false, ""},
-		"deleted lead then lead": {leadReq("l1"), CreateRequest{Envelope: Envelope{RequestID: "l2"}, Preset: "lead", Name: "beta", Repo: "/repo", Overrides: Overrides{Harness: "opencode"}}, true, ""},
+		"deleted lead then lead": {leadReq("l1"), CreateRequest{Envelope: Envelope{RequestID: "l2"}, Preset: "lead", Name: "beta", Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode"}}, true, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newCreateEnv(t)
@@ -813,3 +813,48 @@ func TestCreateUnwiredHarnessLeavesNoAgent(t *testing.T) {
 		t.Fatalf("message = %q", got.Message)
 	}
 }
+
+// CR1: a lead with no base_ref and no parent branch to start from is refused
+// before any side effect, not after its row is written.
+func TestCreateNeedsBaseRefBeforeRow(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	req := leadReq("r1")
+	req.BaseRef = ""
+	got := wantCode(t, mustFail(s.Create(ctx, req)), CodePresetInvalid)
+	if !strings.Contains(got.Message, "base_ref") {
+		t.Fatalf("message = %q", got.Message)
+	}
+	rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+	if len(rows) != 0 || len(e.ws.ensured) != 0 || len(e.h.specs) != 0 {
+		t.Fatalf("side effects: rows %d, ensures %d, opens %d", len(rows), len(e.ws.ensured), len(e.h.specs))
+	}
+}
+
+// CR1: a Create that fails after its row is written shows create_incomplete
+// at once, rather than sitting in creating with nothing to say why.
+func TestCreateFailureAfterRowShowsAttention(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{Launch: func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
+		return loomharness.Launch{}, errors.New("launch broke")
+	}})
+	if _, err := s.Create(ctx, leadReq("r1")); err == nil {
+		t.Fatal("Create succeeded")
+	}
+	rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+	if len(rows) != 1 || deref(rows[0].AttentionReason) != AttentionCreateIncomplete {
+		t.Fatalf("rows = %+v", rows)
+	}
+	a, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) // a retry finishes it and clears the Attention
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, _ := e.st.GetAgent(ctx, a.AgentID)
+	if row.State != StateIdle || row.AttentionReason != nil {
+		t.Fatalf("after retry: state %s attention %v", row.State, deref(row.AttentionReason))
+	}
+}
+
+func mustFail(_ AgentInfo, err error) error { return err }

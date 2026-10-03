@@ -67,7 +67,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (AgentInfo, err
 	if err != nil {
 		return AgentInfo{}, err
 	}
-	if a, err = s.finishCreate(ctx, a.AgentID); err != nil {
+	id := a.AgentID
+	if a, err = s.finishCreate(ctx, id); err != nil {
+		s.failed(ctx, id, AttentionCreateIncomplete, err) // a retry or Reconcile finishes it and clears this
 		return AgentInfo{}, err
 	}
 	return info(a), nil
@@ -122,9 +124,14 @@ func (s *Service) checkCreate(ctx context.Context, req CreateRequest) (Preset, s
 		return p, name, parent, err
 	}
 	if req.Parent != "" {
-		parent, err = s.live(ctx, req.Parent)
+		if parent, err = s.live(ctx, req.Parent); err != nil {
+			return p, name, parent, err
+		}
 	}
-	return p, name, parent, err
+	if req.BaseRef == "" && parent.Branch == nil { // a task starts from its lead's branch
+		return p, name, parent, invalid("Create needs a base_ref, the branch or commit the agent starts from")
+	}
+	return p, name, parent, nil
 }
 
 // insertCreate validates req, resolves its Config and inserts its row in

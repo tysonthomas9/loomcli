@@ -116,7 +116,7 @@ func TestSavedEffortSurvivesUnloadAndRestart(t *testing.T) {
 	s := e.service(ServiceConfig{})
 	pump(t, s, e.h, e.st)
 	info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: "alpha"}, Preset: "lead", Name: "alpha",
-		Repo: "/repo", Overrides: Overrides{Harness: "opencode", Effort: "low"}})
+		Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode", Effort: "low"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1781,6 +1781,7 @@ type AgentV1AskQuestion struct {
 
 // AgentV1CreateBody The Create body. For a bridge caller, parent is always the caller.
 type AgentV1CreateBody struct {
+	// BaseRef The branch or commit the agent starts from. Required unless parent has a branch, which is then the default; a create without one is a 400 preset_invalid and writes no agent.
 	BaseRef      *string `json:"base_ref,omitempty"`
 	ExternalKey  *string `json:"external_key,omitempty"`
 	FirstMessage *string `json:"first_message,omitempty"`

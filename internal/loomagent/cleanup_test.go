@@ -159,7 +159,7 @@ func TestHistoryPurgeRacesUnarchiveAndSend(t *testing.T) {
 		t.Fatal(err)
 	}
 	task, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: "t1"}, Preset: "daemon-worker", Name: "t1",
-		Repo: "/repo", Overrides: Overrides{Harness: "opencode"}})
+		Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode"}})
 	if err != nil {
 		t.Fatal(err)
 	}

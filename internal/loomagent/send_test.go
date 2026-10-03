@@ -277,7 +277,7 @@ func TestSendNewBackgroundAttemptCancelsExpiry(t *testing.T) {
 	daemon := ActorRef{Kind: "system", ID: "daemon"}
 	task := func(name string) (loomstore.Agent, loomharness.NativeRef) {
 		info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: name}, Preset: "daemon-worker", Name: name,
-			Repo: "/repo", Overrides: Overrides{Harness: "opencode"}})
+			Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode"}})
 		if err != nil {
 			t.Fatal(err)
 		}
