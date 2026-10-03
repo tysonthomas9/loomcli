@@ -682,3 +682,86 @@ func useLocalForge(t *testing.T, forge *fakeForge) {
 	}
 	t.Cleanup(func() { localPublishProvider, localFlagForTask = previousProvider, previousFlag })
 }
+
+func TestPublishLeadChangeLocalPublishesEachRepoOfCrossRepoLead(t *testing.T) {
+	api := newFixture(t)
+	app := newFixture(t)
+	ctx := context.Background()
+	entry, _, err := api.store.Begin(ctx, "workspace-W-app", "ensure_workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry, err = api.store.Advance(ctx, entry, "rows_written", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.store.CommitWorkspace(ctx, entry, []loomgit.WorkspaceRepo{{Workspace: "W", Repo: "app", Trunk: "develop"}}); err != nil {
+		t.Fatal(err)
+	}
+	configureLocalWorkspace(t, api)
+	handle, err := bootstrap.OpenStore(ctx, filepath.Dir(filepath.Dir(api.storePath)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handle.Store.Repos().Create(ctx, storepkg.RepoCreate{WorkspaceKey: "W", Name: "app", DefaultBranch: "develop"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.MutateStateCache(func(state *bootstrap.StateCache) error {
+		state.Workspaces["W"].Repos["app"] = app.repo
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.store.SaveWorkingAreas(ctx, []journal.WorkingArea{
+		{Workspace: "W", Lead: "L", Repo: "app", Path: app.repo, BaseSHA: app.base},
+		{Workspace: "W", Lead: "L", Repo: "repo", Path: api.repo, BaseSHA: api.base},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	shared := fixture{repo: app.repo, remote: app.remote, base: app.base, storePath: api.storePath, store: api.store}
+	apiRevision := stackRevision(t, api, "A", 1, api.base)
+	appRevision := stackRevision(t, shared, "B", 1, app.base)
+	// An in-place Apply records a second done row for the same change.
+	if err := api.store.SaveApplied(ctx, loomgit.AppliedLayer{RequestID: "apply-B1-again", Workspace: "W", Lead: "L", Change: "B",
+		Revision: appRevision.Number, OldTip: app.base, NewTip: appRevision.HeadSHA, Commits: []string{appRevision.HeadSHA}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.store.AdvanceApplied(ctx, "apply-B1-again", "prepared", "done"); err != nil {
+		t.Fatal(err)
+	}
+	for change, repo := range map[string]string{"A": "repo", "B": "app"} {
+		if _, err := api.store.DriverChange(ctx, "W", "task-"+change, repo, change); err != nil {
+			t.Fatal(err)
+		}
+	}
+	forge := &fakeForge{}
+	useLocalForge(t, forge)
+	apiPR, err := PublishLeadChangeLocal(ctx, "W", "L", "A")
+	if err != nil || apiPR.Revision.HeadSHA != apiRevision.HeadSHA || apiPR.AlreadyExists {
+		t.Fatalf("api publish = %+v, %v", apiPR, err)
+	}
+	appPR, err := PublishLeadChangeLocal(ctx, "W", "L", "B")
+	if err != nil || appPR.Revision.HeadSHA != appRevision.HeadSHA || appPR.AlreadyExists {
+		t.Fatalf("app publish = %+v, %v", appPR, err)
+	}
+	if len(forge.prs) != 2 || apiPR.PRNumber == appPR.PRNumber {
+		t.Fatalf("cross-repo PRs = %+v", forge.prs)
+	}
+	apiPublication, _, err := api.store.Publication(ctx, "W", "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appPublication, _, err := api.store.Publication(ctx, "W", "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if apiPublication.Repo != api.repo || appPublication.Repo != app.repo || apiPublication.StackID == appPublication.StackID {
+		t.Fatalf("publications = %+v / %+v", apiPublication, appPublication)
+	}
+	again, err := PublishLeadChangeLocal(ctx, "W", "L", "B")
+	if err != nil || !again.AlreadyExists || again.PRNumber != appPR.PRNumber || len(forge.prs) != 2 {
+		t.Fatalf("repeat app publish = %+v, %v; PRs=%+v", again, err, forge.prs)
+	}
+}

@@ -70,6 +70,12 @@ func (s *Service) AppliedLog(ctx context.Context, workspace, lead string) ([]loo
 	base := ""
 	if len(areas) > 0 {
 		base = areas[0].BaseSHA
+		for _, area := range areas {
+			if s.runner != nil && area.Path == s.runner.Path() {
+				base = area.BaseSHA
+				break
+			}
+		}
 	} else if len(tasks) > 0 {
 		base = tasks[0].OldTip
 	} else {

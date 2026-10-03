@@ -107,7 +107,10 @@ func PublishLeadChangeLocal(ctx context.Context, workspace, lead, change string)
 		return Result{}, err
 	}
 	defer func() { _ = store.Close() }()
-	repoName, err := repoNameForStack(ctx, store, workspace, lead, nil)
+	repoName, err := store.RepoForChange(ctx, workspace, change)
+	if errors.Is(err, journal.ErrNotFound) {
+		repoName, err = repoNameForStack(ctx, store, workspace, lead, nil)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -122,11 +125,11 @@ func PublishLeadChangeLocal(ctx context.Context, workspace, lead, change string)
 	if !slices.Contains(changes, change) {
 		return Result{}, fmt.Errorf("change %q is not in the lead's applied stack", change)
 	}
-	requested, err := taskStackChanges(ctx, store, workspace, lead)
+	requested, err := taskStackChanges(ctx, store, workspace, lead, repoName)
 	if err != nil {
 		return Result{}, err
 	}
-	stackID, err := recordedStackID(ctx, store, workspace, lead, changes)
+	stackID, err := recordedStackID(ctx, store, workspace, lead, repoName, changes)
 	if err != nil {
 		return Result{}, err
 	}
@@ -142,7 +145,7 @@ func PublishLeadChangeLocal(ctx context.Context, workspace, lead, change string)
 	return Result{}, errors.New("published stack omitted the requested change")
 }
 
-func recordedStackID(ctx context.Context, store *journal.SQLite, workspace, lead string, changes []string) (string, error) {
+func recordedStackID(ctx context.Context, store *journal.SQLite, workspace, lead, repoName string, changes []string) (string, error) {
 	for _, change := range changes {
 		publication, found, err := store.Publication(ctx, workspace, change)
 		if err != nil {
@@ -152,15 +155,35 @@ func recordedStackID(ctx context.Context, store *journal.SQLite, workspace, lead
 			return publication.StackID, nil
 		}
 	}
+	areas, err := store.WorkingAreas(ctx, workspace, lead)
+	if err != nil {
+		return "", err
+	}
+	if len(areas) > 1 {
+		// A cross-repo lead publishes one stack per repository.
+		return fmt.Sprintf("lead-%x", sha256.Sum256([]byte(lead+"\x00"+repoName))), nil
+	}
 	return LeadStackID(lead), nil
 }
 
-func taskStackChanges(ctx context.Context, store *journal.SQLite, workspace, lead string) ([]string, error) {
+// taskStackChanges lists the lead's applied task changes recorded for one repository.
+func taskStackChanges(ctx context.Context, store *journal.SQLite, workspace, lead, repoName string) ([]string, error) {
 	applied, err := store.AppliedLog(ctx, workspace, lead)
 	if err != nil {
 		return nil, err
 	}
-	return requestedFromApplied(applied), nil
+	requested := make([]string, 0, len(applied))
+	for _, change := range requestedFromApplied(applied) {
+		repo, err := store.RepoForChange(ctx, workspace, change)
+		if err != nil && !errors.Is(err, journal.ErrNotFound) {
+			return nil, err
+		}
+		if (err == nil && repo != repoName) || slices.Contains(requested, change) {
+			continue
+		}
+		requested = append(requested, change)
+	}
+	return requested, nil
 }
 
 func requestedFromApplied(applied []loomgit.AppliedLayer) []string {
