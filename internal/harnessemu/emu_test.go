@@ -664,3 +664,65 @@ func TestEmulatorModelHistoryAcrossRestart(t *testing.T) {
 		t.Fatalf("second request's messages = %v, want %v", req.Messages, want)
 	}
 }
+
+// TestEmulatorRejectEndsTheTurn (OC1): a rejected permission plays as
+// OpenCode b30c4d0's does: the call fails as declined, the execution ends
+// as a "shutdown" interrupt with no idle marker, and nothing runs. The
+// adapter's feed ends that turn as declined; the next prompt plays again.
+func TestEmulatorRejectEndsTheTurn(t *testing.T) {
+	ctx := context.Background()
+	sc := scenarios(t, map[string][]harnessemu.Turn{"agent-1": {
+		{Text: "never streamed", Tools: []harnessemu.Tool{{ID: "call_1", Name: "bash", Input: map[string]any{"command": "rm -rf build"}, Output: "ok",
+			Permission: map[string]any{"action": "bash", "resources": []string{"rm -rf build"}, "save": []string{"rm *"}}}}},
+		{Text: "next"},
+	}})
+	c, _ := emu(t, filepath.Join(t.TempDir(), "state.json"), sc)
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: t.TempDir(), Metadata: map[string]string{"agent_id": "agent-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(ref)
+	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r1"), Text: "go"}); err != nil {
+		t.Fatal(err)
+	}
+	got := until(t, f, func(e loomharness.Event) bool { return e.Type == loomharness.EventAskOpened })
+	if err := s.Reply(ctx, got[len(got)-1].AskID, loomharness.Reply{}); err != nil {
+		t.Fatal(err)
+	}
+	var failed *loomharness.Tool
+	for _, e := range until(t, f, completed) {
+		switch {
+		case e.Type == loomharness.EventItemCompleted && e.Tool != nil:
+			failed = e.Tool
+		case e.Type == loomharness.EventDelta:
+			t.Fatalf("the declined turn streamed %q", e.Text)
+		case e.Type == loomharness.EventTurnCompleted && (e.StopReason != "declined" || e.Error != ""):
+			t.Fatalf("turn end = %+v; want declined, no error", e)
+		}
+	}
+	if failed == nil || !failed.Failed || failed.Output != "The user declined this tool call" {
+		t.Fatalf("declined call = %+v", failed)
+	}
+	if st, err := s.Status(ctx); err != nil || st.Running {
+		t.Fatalf("Status = %+v, %v; want nothing running", st, err)
+	}
+	if ok, err := s.Interrupt(ctx); err != nil || ok {
+		t.Fatalf("Interrupt = %v, %v; want false", ok, err)
+	}
+	for _, e := range history(t, s, 0) {
+		if e.Type == loomharness.EventTurnCompleted {
+			t.Fatalf("history ends the declined turn: %+v; OpenCode writes no idle marker", e)
+		}
+	}
+	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r2"), Text: "again"}); err != nil {
+		t.Fatal(err)
+	}
+	if e := until(t, f, completed); e[len(e)-1].StopReason != "completed" {
+		t.Fatalf("next turn = %+v", e[len(e)-1])
+	}
+}

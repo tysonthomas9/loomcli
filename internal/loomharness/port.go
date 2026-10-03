@@ -247,7 +247,7 @@ type Event struct {
 	AskID      string
 	Text       string // for ask.opened: what it asks about (the command, file or diff, or the question)
 	Sender     string // the Loom slot sender of a message.delivered; loomagent sets it
-	StopReason string // completed | cancelled | failed, for turn.completed
+	StopReason string // completed | cancelled | declined (OpenCode, a rejected permission) | failed, for turn.completed
 	Error      string // for a failed turn.completed: the harness's reason, when it gives one
 	Usage      Usage  // for usage: this step's own counts, never a running total
 	Tool       *Tool  // for a tool item's item.started and item.completed: what the chat shows

@@ -391,3 +391,35 @@ func TestEventsAsksAndFailureText(t *testing.T) {
 		}
 	}
 }
+
+// OC1: a rejected permission makes OpenCode b30c4d0 interrupt its own step,
+// and with no stop reason the execution ends as a "shutdown" interrupt
+// (core/src/session/execution.ts terminal) that writes no idle marker. The
+// sequence below is the real build's, recorded by a reject on a shell ask.
+// After a reject that interrupt ends the turn as declined; a real shutdown
+// still ends nothing, and a reject's mark lasts only its own turn.
+func TestEventsDeclineEndsTheTurn(t *testing.T) {
+	m := newMapper(nil, nil)
+	var got []loomharness.Event
+	for _, raw := range []string{
+		ev(1, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in"}`),
+		ev(2, "session.tool.called", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","id":"call_1"}`),
+		live("permission.asked", `{"sessionID":"ses_a","id":"per_1","action":"shell","resources":["echo hi"]}`),
+		live("permission.replied", `{"sessionID":"ses_a","requestID":"per_1","reply":"reject"}`),
+		ev(3, "session.tool.failed", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","id":"call_1","error":{"type":"aborted","message":"The user declined this tool call"},"executed":false}`),
+		ev(4, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"shutdown"}`),
+		ev(5, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in2"}`),
+		ev(6, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"shutdown"}`),
+	} {
+		got = append(got, m.process([]byte(raw))...)
+	}
+	var ends []loomharness.Event
+	for _, e := range got {
+		if e.Type == loomharness.EventTurnCompleted {
+			ends = append(ends, e)
+		}
+	}
+	if len(ends) != 1 || ends[0].StopReason != "declined" || ends[0].TurnID != "msg_in" || ends[0].Error != "" {
+		t.Fatalf("turn ends = %+v; want one, the declined turn msg_in, with no error", ends)
+	}
+}

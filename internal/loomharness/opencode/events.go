@@ -143,6 +143,11 @@ func readSSE(r io.Reader, fn func([]byte) bool) {
 // (Session.turnOf); session.execution.started itself is not mapped. A
 // shutdown interrupt records no idle marker and the resumed execution
 // continues the same turn (session-message.ts:283-285), so it ends nothing.
+// A rejected permission is the exception: OpenCode then interrupts its own
+// step with no reason, so the execution also ends as a "shutdown" interrupt
+// with no idle marker (core/src/session/runner/step.ts, execution.ts
+// terminal), though nothing restarts and nothing runs. After a reject in
+// the session that interrupt ends the turn as declined.
 type mapper struct {
 	seq  map[string]int64
 	turn map[string]string // the open turn's id, per session
@@ -157,10 +162,12 @@ type mapper struct {
 	// tools holds a started tool call's name and input, by its item id,
 	// until the call ends: OpenCode's end event names neither.
 	tools map[string]loomharness.Tool
+	// declined marks a session whose open turn had a permission rejected.
+	declined map[string]bool
 }
 
 func newMapper(root func(string) string, lookup func(string, string) (string, string, bool)) *mapper {
-	return &mapper{seq: map[string]int64{}, turn: map[string]string{}, root: root, lookup: lookup, tools: map[string]loomharness.Tool{}}
+	return &mapper{seq: map[string]int64{}, turn: map[string]string{}, root: root, lookup: lookup, tools: map[string]loomharness.Tool{}, declined: map[string]bool{}}
 }
 
 // process maps one native event to the port events it releases, in order.
@@ -193,6 +200,7 @@ func (m *mapper) process(raw []byte) []loomharness.Event {
 	}
 	if e.Type == loomharness.EventTurnCompleted {
 		delete(m.turn, sid)
+		delete(m.declined, sid)
 	}
 	return append(out, e)
 }
@@ -257,6 +265,7 @@ type wireEvent struct {
 		Action    string          `json:"action"`    // permission.asked
 		Resources []string        `json:"resources"` // permission.asked
 		Message   string          `json:"message"`   // permission.asked
+		Reply     string          `json:"reply"`     // permission.replied: once | always | reject
 	} `json:"data"`
 }
 
@@ -476,10 +485,11 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 	case "session.step.ended":
 		e.Type, e.ItemID, e.Usage = loomharness.EventUsage, d.AssistantMessageID, d.Tokens.usage(d.Cost)
 	case "session.execution.interrupted":
-		if d.Reason == "shutdown" {
-			return false // the turn goes on after the restart
-		}
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
+		if d.Reason == "shutdown" {
+			e.StopReason = "declined"
+			return m.declined[sid] // else the turn goes on after the restart
+		}
 	case "session.execution.succeeded", "session.execution.failed":
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
 		e.Error = d.Error.text()
@@ -496,6 +506,9 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 		e.Type, e.AskID = loomharness.EventAskResolved, d.ID
 	case "permission.replied":
 		e.Type, e.AskID = loomharness.EventAskResolved, d.RequestID
+		if d.Reply == "reject" && m.declined != nil {
+			m.declined[sid] = true
+		}
 	case "session.synthetic":
 		e.Type, e.ItemID, e.Text = loomharness.EventTurnResumed, messageID(w.ID), d.Text
 		return d.Metadata.Notice == "restart"

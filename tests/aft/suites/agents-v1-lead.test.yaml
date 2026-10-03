@@ -872,3 +872,114 @@ tests:
           assert "Blue" in body, "the picked option never reached the lead"
           PY
         intent: "Check that both answers reached the lead"
+
+  - name: OC1 - Decline ends the turn as declined and the agent takes the next message, and Stop ends a turn OpenCode left running nothing
+    intent: An operator who declines an approval sees that turn end as declined instead of the agent staying busy forever, carries on with the next message, and Stop still ends a turn the harness no longer runs
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-oc1-${RUN_ID:-local}" }
+          body: { preset: pr-review-interactive, name: "agv1-oc1-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Oc1Id
+        intent: "Create an OpenCode agent whose preset asks before running a shell command"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Oc1Id")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          cmd = "echo AGV1-OC1-NEVER-RAN"
+          if scenarios:
+              # A reject plays as OpenCode b30c4d0's does; the third turn then
+              # ends the same way with no reject, so Loom sees no end and only
+              # Stop can end it.
+              turns = [{"tools": [{"id": "call_oc1_bash", "name": "shell", "input": {"command": cmd},
+                                   "output": "AGV1-OC1-NEVER-RAN",
+                                   "permission": {"action": "bash", "resources": [cmd], "save": ["echo *"]}}],
+                        "text": "AGV1-OC1-NEVER-SAID"},
+                       {"text": "AGV1-OC1-NEXT"},
+                       {"text": "AGV1-OC1-SUSPENDED", "suspend": True}]
+              json.dump({agent: turns}, open(scenarios, "w"))
+          else:
+              steps = [{"bash": cmd}, {"text": "AGV1-OC1-NEXT"}, {"bash": "sleep 120"}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that asks to run a shell command, a plain reply, and a third turn that stays busy, and open the agent's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the agent is ready"
+      - fill: { label: Message, value: "run the check" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=ask-card]');
+              return (c?.querySelector('[aria-label="Approval request"]')?.textContent || '').includes('echo AGV1-OC1-NEVER-RAN'); })()
+        budget: 90000
+        intent: "Wait until the approval card shows the command it asks to run"
+      - click: { role: button, name: Decline, exact: true }
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return !document.querySelector('[data-testid=ask-card]') && t.includes('Turn declined') &&
+                !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 60000
+        intent: "Wait until the card closes, the turn's note says it was declined and the composer no longer offers Stop"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Oc1Id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id" > "$AFT_WORK_DIR/agv1-oc1-agent.json"
+          python3 - "$AFT_WORK_DIR/agv1-oc1-agent.json" <<'PY'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          assert a["state"] == "idle" and a["running_turn_id"] is None, "after Decline: %s, running turn %s" % (a["state"], a["running_turn_id"])
+          PY
+        intent: "Check that the agent is idle with no running turn after Decline"
+      - fill: { label: Message, value: "carry on" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-OC1-NEXT')
+        budget: 60000
+        intent: "Wait until the agent answers the next message"
+      - fill: { label: Message, value: "one more" }
+      - press: Enter
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+        budget: 60000
+        intent: "Wait until the third turn runs and the composer offers Stop"
+      - run: |
+          set -e
+          [ -n "${AFT_EMU_SCENARIOS:-}" ] || exit 0
+          id="$(cat "$AFT_WORK_DIR/agv1Oc1Id")"
+          for _ in $(seq 1 120); do
+            if curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id/events?limit=500" | grep -q 'AGV1-OC1-SUSPENDED'; then exit 0; fi
+            sleep 0.5
+          done
+          echo "the third turn never streamed its text" >&2; exit 1
+        intent: "On the emulator, wait until the third turn streamed its text and its execution ended with no end Loom can see"
+      - click: { role: button, name: Stop, exact: true }
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('Turn cancelled') && !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 30000
+        intent: "Wait until Stop ends the turn and the Stop button goes away"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Oc1Id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id" > "$AFT_WORK_DIR/agv1-oc1-agent.json"
+          python3 - "$AFT_WORK_DIR/agv1-oc1-agent.json" <<'PY'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          assert a["state"] == "idle" and a["running_turn_id"] is None, "after Stop: %s, running turn %s" % (a["state"], a["running_turn_id"])
+          PY
+        intent: "Check that the agent is idle with no running turn after Stop"

@@ -62,12 +62,15 @@ type Turn struct {
 	DelayMS   int     `json:"delay_ms,omitempty"` // pause before each streamed delta
 	Tools     []Tool  `json:"tools,omitempty"`    // tool calls the turn ran first
 	Ask       bool    `json:"ask,omitempty"`      // ask Model when the turn plays
+	// Suspend ends the execution after the text as OpenCode b30c4d0 ends a
+	// declined one (Server.suspend), with no reject, so a feed sees no end.
+	Suspend bool `json:"suspend,omitempty"`
 }
 
 // Tool is one tool call a turn ran: its name and input, and its output, or
 // with Fail its error. With Permission, the call first asks that permission
 // (OpenCode's Permission.Request fields: action, resources, save, metadata)
-// and waits for its reply; a reject fails it. With Questions, it plays
+// and waits for its reply; a reject ends the turn (Server.decline). With Questions, it plays
 // OpenCode's question tool: it asks them as a form and waits, and its output
 // is the answers, one list per question.
 type Tool struct {
@@ -471,22 +474,12 @@ func (s *Server) play(sid string, r *run) {
 			return
 		}
 	}
-	for _, p := range []struct{ kind, text string }{{"reasoning", t.Reasoning}, {"text", t.Text}} {
-		if p.text == "" {
-			continue
-		}
-		part := map[string]any{"type": p.kind, "text": ""}
-		msg["content"] = append(msg["content"].([]map[string]any), part)
-		ord := map[string]any{"assistantMessageID": msg["id"], "ordinal": 0}
-		s.emit(sid, "session."+p.kind+".started", clone(ord))
-		for _, d := range strings.SplitAfter(p.text, " ") {
-			if !s.wait(sid, r, time.Duration(t.DelayMS)*time.Millisecond) {
-				return
-			}
-			part["text"] = part["text"].(string) + d
-			s.emit(sid, "session."+p.kind+".delta", with(ord, "delta", d))
-		}
-		s.emit(sid, "session."+p.kind+".ended", with(ord, "text", p.text))
+	if !s.playParts(sid, r, msg, t) {
+		return
+	}
+	if t.Suspend {
+		s.suspend(sid)
+		return
 	}
 	if t.Hold && !s.wait(sid, r, -1) {
 		return
@@ -500,6 +493,29 @@ func (s *Server) play(sid string, r *run) {
 		s.emit(sid, "session.step.ended", map[string]any{"assistantMessageID": msg["id"], "tokens": t.Tokens, "cost": t.Cost})
 	}
 	s.end(sid, outcome, map[string]any{"error": msg["error"]})
+}
+
+// playParts streams t's reasoning, then its text, into msg; false means r
+// stopped.
+func (s *Server) playParts(sid string, r *run, msg map[string]any, t Turn) bool {
+	for _, p := range []struct{ kind, text string }{{"reasoning", t.Reasoning}, {"text", t.Text}} {
+		if p.text == "" {
+			continue
+		}
+		part := map[string]any{"type": p.kind, "text": ""}
+		msg["content"] = append(msg["content"].([]map[string]any), part)
+		ord := map[string]any{"assistantMessageID": msg["id"], "ordinal": 0}
+		s.emit(sid, "session."+p.kind+".started", clone(ord))
+		for _, d := range strings.SplitAfter(p.text, " ") {
+			if !s.wait(sid, r, time.Duration(t.DelayMS)*time.Millisecond) {
+				return false
+			}
+			part["text"] = part["text"].(string) + d
+			s.emit(sid, "session."+p.kind+".delta", with(ord, "delta", d))
+		}
+		s.emit(sid, "session."+p.kind+".ended", with(ord, "text", p.text))
+	}
+	return true
 }
 
 // playTool plays one tool call as OpenCode b30c4d0 does: its input start
@@ -527,7 +543,8 @@ func (s *Server) playTool(sid string, r *run, msg map[string]any, tool Tool) boo
 			return false
 		}
 		if ans.(map[string]any)["decision"] == "reject" {
-			fail = "The user rejected permission to use this specific tool call."
+			s.decline(sid, msg, call, name, input)
+			return false
 		}
 	}
 	if len(tool.Questions) > 0 {
@@ -548,6 +565,29 @@ func (s *Server) playTool(sid string, r *run, msg map[string]any, tool Tool) boo
 	}
 	msg["content"] = append(msg["content"].([]map[string]any), map[string]any{"type": "tool", "id": tool.ID, "name": name, "state": state})
 	return true
+}
+
+// decline plays a rejected permission as OpenCode b30c4d0 does: the call
+// fails as declined and the step as interrupted, and the step interrupts
+// itself with no reason, so the execution ends as a "shutdown" interrupt
+// with no idle marker (core/src/session/runner/step.ts, execution.ts
+// terminal) and the session runs nothing more.
+func (s *Server) decline(sid string, msg, call map[string]any, name string, input map[string]any) {
+	e := map[string]any{"type": "aborted", "message": "The user declined this tool call"}
+	s.emit(sid, "session.tool.failed", with(with(call, "error", e), "executed", false))
+	part := map[string]any{"type": "tool", "id": call["id"], "name": name, "state": map[string]any{"status": "error", "input": input, "error": e}}
+	msg["content"] = append(msg["content"].([]map[string]any), part)
+	msg["error"] = map[string]any{"type": "aborted", "message": "Step interrupted"}
+	s.suspend(sid)
+}
+
+// suspend ends the running execution as a "shutdown" interrupt that writes
+// no idle marker, and runs nothing more. Not modeled: real OpenCode
+// also keeps the session claimed, so its next boot would resume the turn.
+func (s *Server) suspend(sid string) {
+	s.st.Sessions[sid].Running = nil
+	s.emit(sid, "session.execution.interrupted", map[string]any{"reason": "shutdown"})
+	s.save()
 }
 
 // wait unlocks for d (forever when d < 0); false means r stopped or was

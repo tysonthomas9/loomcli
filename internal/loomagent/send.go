@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
@@ -95,7 +96,7 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 	if req.Delivery == DeliveryInterrupt {
 		running := a.RunningTurnID != nil
 		interrupted = &running
-		if r, ok, err := s.interruptTurn(ctx, a, req, sender); ok || err != nil {
+		if r, ok, err := s.interruptTurn(ctx, &a, req, sender); ok || err != nil {
 			return r, err
 		}
 	}
@@ -120,8 +121,9 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 // under the agent lock. It returns done when the Send is complete: a retry
 // that raced the first, or an interrupt with no message, whose receipt it
 // stores. A message whose sender's slot is still handed is refused before
-// anything is interrupted, so a refused Send changes nothing.
-func (s *Service) interruptTurn(ctx context.Context, a loomstore.Agent, req SendRequest, sender string) (SendResult, bool, error) {
+// anything is interrupted, so a refused Send changes nothing. It reloads *a
+// when the interrupt ended the turn (endUnrunTurn).
+func (s *Service) interruptTurn(ctx context.Context, a *loomstore.Agent, req SendRequest, sender string) (SendResult, bool, error) {
 	if r, ok, err := s.receipt(ctx, req); ok || err != nil {
 		return r, true, err
 	}
@@ -136,8 +138,17 @@ func (s *Service) interruptTurn(ctx context.Context, a loomstore.Agent, req Send
 		}
 	}
 	if running {
-		if err := s.interrupt(ctx, a); err != nil {
+		if err := s.interrupt(ctx, *a); err != nil {
 			return SendResult{}, true, harnessErr(err)
+		}
+		ended, err := s.endUnrunTurn(ctx, *a)
+		if err != nil {
+			return SendResult{}, true, err
+		}
+		if ended {
+			if *a, err = s.live(ctx, a.AgentID); err != nil {
+				return SendResult{}, true, err
+			}
 		}
 	}
 	if req.Text != "" {
@@ -234,6 +245,28 @@ func senderOf(a ActorRef) string { return a.Kind + ":" + a.ID }
 func messageID(agentID, sender, requestID string) string {
 	sum := sha256.Sum256([]byte(agentID + "\x00" + sender + "\x00" + requestID))
 	return "msg_" + hex.EncodeToString(sum[:13])
+}
+
+// endUnrunTurn ends a's running turn after a Stop interrupted it if the
+// harness runs no turn and its history has no end for this one, as settle
+// does after a restart: an interrupt then stops nothing and no end would
+// ever come. OpenCode b30c4d0 leaves a turn so after a rejected permission
+// whose end the feed did not see. true means it ended the turn.
+func (s *Service) endUnrunTurn(ctx context.Context, a loomstore.Agent) (bool, error) {
+	sess, _, err := s.current(ctx, a)
+	if err != nil || sess == nil {
+		return false, err
+	}
+	st, err := sess.Status(ctx)
+	if errors.Is(err, loomharness.ErrSessionNotFound) {
+		return false, nil
+	} else if err != nil || st.Running {
+		return false, harnessErr(err)
+	}
+	if ended, err := endedNatively(ctx, sess, *a.RunningTurnID); err != nil || ended {
+		return false, harnessErr(err) // the feed applies its end
+	}
+	return true, s.endLostTurn(ctx, a, sess)
 }
 
 // sessionInterrupt is the default Interrupt hook (Send, Archive cancelled,
