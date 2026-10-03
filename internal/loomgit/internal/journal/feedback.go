@@ -295,14 +295,7 @@ func (s *SQLite) RecordFeedbackUpdate(ctx context.Context, update FeedbackUpdate
 	if err != nil {
 		return update, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO approval_follow(workspace,lead,change_id,revision,verdict_id)
-		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
-		update.Workspace, update.Lead, update.Change, update.Revision, id); err != nil {
-		return update, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO approval_publications(workspace,lead,change_id,revision,verdict_id)
-		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
-		update.Workspace, update.Lead, update.Change, update.Revision, id); err != nil {
+	if err := armFeedbackIntent(ctx, tx, update, id); err != nil {
 		return update, err
 	}
 	update.Status, update.Reason, update.VerdictID = FeedbackUpdatePushing, "", id
@@ -318,6 +311,20 @@ func (s *SQLite) RecordFeedbackUpdate(ctx context.Context, update FeedbackUpdate
 		return update, err
 	}
 	return update, tx.Commit()
+}
+
+// armFeedbackIntent records the follow that applies a fix-up into the lead's
+// working area and the intent to push it to the open PR, under verdict id.
+func armFeedbackIntent(ctx context.Context, tx *sql.Tx, update FeedbackUpdate, id int64) error {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO approval_follow(workspace,lead,change_id,revision,verdict_id)
+		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
+		update.Workspace, update.Lead, update.Change, update.Revision, id); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO approval_publications(workspace,lead,change_id,revision,verdict_id)
+		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
+		update.Workspace, update.Lead, update.Change, update.Revision, id)
+	return err
 }
 
 // RecordFeedbackNotPushed records that a fix-up revision is not pushed to its
