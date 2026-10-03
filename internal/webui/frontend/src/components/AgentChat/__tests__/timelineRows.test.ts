@@ -21,6 +21,22 @@ const thought = (key: string): ChatItem => ({
 });
 
 describe("timelineRows", () => {
+  it("marks a group failed when any call failed, not only the last", () => {
+    const [summary] = deriveTimelineRows(
+      [tool("1", "read"), tool("2", "read", "failed"), tool("3", "bash")],
+      new Set(),
+    );
+    expect(summary).toMatchObject({ kind: "work-toggle", hasFailure: true });
+    const rows = deriveTimelineRows(
+      [tool("1", "bash", "failed"), thought("t"), tool("2", "read")],
+      new Set(),
+    );
+    expect(rows.find((r) => r.kind === "work-toggle")).toMatchObject({
+      hiddenCount: 2,
+      hasFailure: true,
+    });
+  });
+
   it("summarizes a tool group by what the calls did", () => {
     expect(
       summarizeToolGroup([

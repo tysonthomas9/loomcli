@@ -187,7 +187,7 @@ function pushGroup(
         onlyToolEntries: true,
         summary: summarizeToolGroup(tools),
         action: summaryAction(tools),
-        hasFailure: entryFailed(tools[tools.length - 1]!),
+        hasFailure: tools.some(entryFailed),
       });
     }
     if (expanded) each(group);
@@ -204,7 +204,6 @@ function pushGroup(
     (entry) =>
       rows.push({ kind: "work", id: entry.key, entry, inGroup: false }),
   );
-  const last = group[group.length - 1]!;
   rows.push({
     kind: "work-toggle",
     id: `work-toggle:${group[0]!.key}`,
@@ -215,6 +214,6 @@ function pushGroup(
     onlyToolEntries: hidden.every(isTool),
     summary: null,
     action: null,
-    hasFailure: entryFailed(last) && hidden.some(entryFailed),
+    hasFailure: hidden.some(entryFailed),
   });
 }
