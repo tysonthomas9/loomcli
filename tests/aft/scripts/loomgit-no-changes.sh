@@ -120,7 +120,14 @@ PY
   ;;
 retry)
   # retry <ws> <file>: the same task runs again and this time writes <file>.
+  # The empty run closed the task (and possibly its epic); reopen both.
   task="$(cat "$work-task")"
+  for issue in "$task" "$(cat "$work-epic")"; do
+    state="$(curl -fsS "$api/issues/$issue" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["status"])')"
+    if [[ "$state" == closed ]]; then
+      curl -fsS -X POST "$api/issues/$issue/reopen" -H 'Content-Type: application/json' -d '{}' >/dev/null
+    fi
+  done
   curl -fsS -X PATCH "$api/issues/$task" -H 'Content-Type: application/json' \
     -d "{\"status\":\"open\",\"design\":\"STUB_CODEX_PATCH=$3\"}" >/dev/null
   run_epic
