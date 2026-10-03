@@ -408,9 +408,13 @@ export function CreateAgentModal({
     }
   };
 
-  const repoHint = crossRepo
-    ? "No repo selected — the agent gets workspace-wide scope."
-    : "Pick every repo this agent works in. Leave all unselected for workspace scope.";
+  // A lead always works in one repo; only the other templates may run with
+  // workspace scope.
+  const repoHint = isLead
+    ? "Pick the repo this lead works in."
+    : crossRepo
+      ? "No repo selected — the agent gets workspace-wide scope."
+      : "Pick every repo this agent works in. Leave all unselected for workspace scope.";
 
   return (
     <AetherModal
@@ -629,7 +633,9 @@ export function CreateAgentModal({
               >
                 {selectedKind === "background"
                   ? "No repos in this workspace yet — background agents need at least one repo; interactive agents run with workspace scope."
-                  : "No repos yet — add one from the sidebar first. This agent will run with workspace scope."}
+                  : isLead
+                    ? "No repos yet — add one from the sidebar first. A lead needs a repo to work in."
+                    : "No repos yet — add one from the sidebar first. This agent will run with workspace scope."}
               </p>
             ) : (
               <div

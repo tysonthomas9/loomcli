@@ -102,8 +102,30 @@ describe("CreateAgentModal", () => {
     });
     fireEvent.click(screen.getByTestId("create-agent-template-lead"));
     fireEvent.click(screen.getByRole("button", { name: /hello-world/ }));
+    expect(
+      screen.getByText("Pick the repo this lead works in."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/workspace-wide scope/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/workspace scope/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/pick a repo/i);
     expect(mockCreateLead).not.toHaveBeenCalled();
+  });
+
+  it("tells a lead it needs a repo when the workspace has none", () => {
+    render(
+      <CreateAgentModal
+        isOpen
+        workspaceId="E2E"
+        repos={[]}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+    expect(screen.getByTestId("create-agent-no-repos")).toHaveTextContent(
+      "No repos yet — add one from the sidebar first. A lead needs a repo to work in.",
+    );
+    expect(screen.queryByText(/workspace scope/i)).not.toBeInTheDocument();
   });
 });

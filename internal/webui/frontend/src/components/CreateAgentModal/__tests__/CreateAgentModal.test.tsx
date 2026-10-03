@@ -173,9 +173,11 @@ describe("CreateAgentModal: empty repository guidance", () => {
     );
   });
 
-  it("explains that interactive agents can run with workspace scope", () => {
+  it("explains that non-lead interactive agents can run with workspace scope", () => {
     renderModal({ repos: [] });
-    fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+    fireEvent.click(
+      screen.getByTestId("create-agent-template-interactive-pr-review"),
+    );
 
     expect(screen.getByTestId("create-agent-no-repos")).toHaveTextContent(
       "No repos yet — add one from the sidebar first. This agent will run with workspace scope.",
