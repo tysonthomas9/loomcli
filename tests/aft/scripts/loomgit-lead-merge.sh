@@ -148,7 +148,7 @@ approve_and_apply() {
 publish_stack() {
   local changes=()
   for layer in $(seq 1 "$(cat "$case_dir/layers")"); do changes+=("$(cat "$case_dir/change-$layer.id")"); done
-  LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" pr-stack lead-chain lead "${changes[@]}" --workspace "$workspace" > "$case_dir/publish.txt"
+  LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" pr-stack merge-chain lead "${changes[@]}" --workspace "$workspace" > "$case_dir/publish.txt"
   curl -fsS "$AFT_FAKE_GH_BASE/__pulls?workspace=$workspace" > "$case_dir/pulls-published.json"
   json "$case_dir/pulls-published.json" 'assert len(v)==int(sys.argv[2]), v' "${#changes[@]}"
 }
@@ -197,12 +197,12 @@ pr_status() { # pr_status <number> <json fields>
 
 case "$case_name" in
   request)
-    make_tasks lead-chain "$app_repo":lead-request-1.txt "$app_repo":lead-request-2.txt
+    make_tasks merge-chain "$app_repo":lead-request-1.txt "$app_repo":lead-request-2.txt
     approve_and_apply
     publish_stack
     target="$(cat "$case_dir/change-2.id")"
     curl -fsS -X POST "$api/agents/lead/git/merge-requests" -H 'Content-Type: application/json' \
-      -d "{\"stack_id\":\"lead-chain\",\"target\":\"$target\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" > "$case_dir/request.json"
+      -d "{\"stack_id\":\"merge-chain\",\"target\":\"$target\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" > "$case_dir/request.json"
     json "$case_dir/request.json" 'assert v["status"]=="pending" and v["requested_kind"]=="lead" and len(v["layers"])==2, v'
     request_id="$(json "$case_dir/request.json" 'print(v["id"])')"
     hold_unmerged 6 "0 0" "lead request alone"
@@ -216,7 +216,7 @@ case "$case_name" in
     test "$(merge_puts "$(pull_number 2)")" = 0
     agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$workspace/agents/lead" >/dev/null
     agent-browser --session "$AFT_SESSION" find role button click --name Git --exact >/dev/null
-    agent-browser --session "$AFT_SESSION" wait --text "asks to merge lead-chain up to $target" >/dev/null
+    agent-browser --session "$AFT_SESSION" wait --text "asks to merge merge-chain up to $target" >/dev/null
     agent-browser --session "$AFT_SESSION" screenshot "$case_dir/request-card.png" >/dev/null
     agent-browser --session "$AFT_SESSION" find role button click --name "Confirm merge up to $target" >/dev/null
     wait_merged "1 1" "human-confirmed merge"
@@ -226,7 +226,7 @@ case "$case_name" in
     ;;
 
   green)
-    make_tasks lead-chain "$app_repo":lead-green-1.txt "$app_repo":lead-green-2.txt
+    make_tasks merge-chain "$app_repo":lead-green-1.txt "$app_repo":lead-green-2.txt
     approve_and_apply
     publish_stack
     one="$(pull_number 1)"
@@ -248,21 +248,21 @@ case "$case_name" in
     ;;
 
   later)
-    make_tasks lead-chain "$app_repo":lead-later-a.txt "$app_repo":lead-later-b.txt "$app_repo":lead-later-c.txt
+    make_tasks merge-chain "$app_repo":lead-later-a.txt "$app_repo":lead-later-b.txt "$app_repo":lead-later-c.txt
     approve_and_apply
     publish_stack
     b="$(cat "$case_dir/change-2.id")"
     c="$(cat "$case_dir/change-3.id")"
-    printf 'merge %s\n' "$b" | loom merge-up-to lead-chain lead "$b" > "$case_dir/merge-b.txt"
+    printf 'merge %s\n' "$b" | loom merge-up-to merge-chain lead "$b" > "$case_dir/merge-b.txt"
     wait_merged "1 1 0" "merge up to B"
     for _ in $(seq 1 60); do
-      loom merge-up-to lead-chain lead "$b" --status > "$case_dir/status-b.txt" 2>&1 || true
+      loom merge-up-to merge-chain lead "$b" --status > "$case_dir/status-b.txt" 2>&1 || true
       grep -q '^merge: done' "$case_dir/status-b.txt" && break
       sleep 2
     done
     grep -q '^merge: done' "$case_dir/status-b.txt"
     set +e
-    printf 'merge %s\n' "$c" | loom merge-up-to lead-chain lead "$c" > "$case_dir/merge-c.txt" 2>&1
+    printf 'merge %s\n' "$c" | loom merge-up-to merge-chain lead "$c" > "$case_dir/merge-c.txt" 2>&1
     rc=$?
     set -e
     printf 'merge up to C after B exited %s:\n' "$rc"
