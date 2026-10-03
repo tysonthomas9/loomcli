@@ -164,6 +164,37 @@ describe("RevisionsSection Approve and merge (D29)", () => {
     expect(screen.queryByTestId("approve-merge")).toBeNull();
   });
 
+  it("asks again after a rebuild that was not clean, offering merge only on the new version", async () => {
+    const reason =
+      "the rebuild after the PRs below merged was not clean; approve again";
+    getTaskRevisions.mockResolvedValue([
+      {
+        ...open,
+        number: 3,
+        head_sha: "d".repeat(40),
+        verdict: undefined,
+        merge_status: "reapproval_required",
+        merge_reason: reason,
+      },
+      {
+        ...open,
+        number: 2,
+        verdict: "carried",
+        merge_status: "reapproval_required",
+        merge_reason: reason,
+      },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    await waitFor(() =>
+      expect(screen.getAllByTestId("merge-status")).toHaveLength(2),
+    );
+    for (const status of screen.getAllByTestId("merge-status")) {
+      expect(status).toHaveTextContent(`Not merged: ${reason}`);
+    }
+    // Only the rebuilt version, not yet reviewed, can be approved to merge.
+    expect(screen.getAllByTestId("approve-merge")).toHaveLength(1);
+  });
+
   it("reports someone else's push and offers no merge of a version it has not reviewed", async () => {
     getTaskRevisions.mockResolvedValue([
       {
