@@ -58,8 +58,14 @@ function prettyInput(input: string | undefined): string {
   }
 }
 
+/** Reasoning's first line as plain text: no emphasis, code or heading marks. */
 function firstLine(text: string, max = 120): string {
-  const line = text.trim().split("\n")[0] ?? "";
+  let line = (text.trim().split("\n")[0] ?? "").replace(/^#{1,6}\s+/, "");
+  for (let prev = ""; prev !== line; ) {
+    prev = line;
+    line = line.replace(/(\*\*|__|\*|_|`)(.+?)\1/g, "$2");
+  }
+  line = line.trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
@@ -215,7 +221,11 @@ export function WorkGroupToggleRow({
       }
       onClick={onToggle}
     >
-      <span className={styles.chevron} data-open={row.expanded}>
+      <span
+        className={styles.chevron}
+        data-lead="true"
+        data-open={row.expanded}
+      >
         <Icon name="chevron" />
       </span>
       <span className={styles.toggleText}>

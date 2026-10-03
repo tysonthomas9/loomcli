@@ -230,4 +230,28 @@ describe("AgentChat timeline (UI3)", () => {
     fireEvent.click(within(reasoning).getByRole("button"));
     expect(reasoning.querySelector("pre")).toHaveTextContent("let me see");
   });
+
+  it("previews reasoning as plain text and leads '+N previous' with its chevron", async () => {
+    await mount(agent());
+    deliver(
+      ev("item.completed", {
+        itemId: "r",
+        itemKind: "reasoning",
+        text: "**Planning the `ls` call**\n\nThen read it.",
+      }),
+      ev("item.completed", {
+        itemId: "m/tool/1",
+        itemKind: "tool",
+        tool: { name: "bash", input: '{"command":"ls"}', output: "a.go" },
+      }),
+    );
+    const more = screen.getByTestId("work-toggle");
+    // Real models (gpt-5.5 on OpenCode) title reasoning in bold: the
+    // preview drops the marks; the chevron sits before the label.
+    expect(more.firstElementChild).toHaveAttribute("data-lead", "true");
+    fireEvent.click(more);
+    const row = within(screen.getByTestId("reasoning")).getByRole("button");
+    expect(row).toHaveTextContent("ThinkingPlanning the ls call");
+    expect(row).not.toHaveTextContent("*");
+  });
 });

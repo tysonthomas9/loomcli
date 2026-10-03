@@ -104,6 +104,11 @@
   transition: transform 0.2s;
 }
 
+/* "+N previous" leads with its chevron, left-aligned as in T3. */
+.chevron[data-lead="true"] {
+  margin-left: 0;
+}
+
 .chevron .icon {
   width: 16px;
 }
