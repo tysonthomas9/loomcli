@@ -42,13 +42,20 @@ func (s *Service) catalog(ctx context.Context, harness string) ([]loomharness.Mo
 // some providers' models: while the catalog is empty a create naming a model
 // polls it for up to catalogWait; while it lacks the model, it polls until
 // catalogWarmUp after this service first listed the harness, then Resolve
-// refuses the unknown model. A create still waiting after catalogWait, which
-// keeps it well inside the API server's 30s write timeout, fails "model
-// catalog not ready, retry". A warm catalog is used at once.
+// refuses the unknown model. A create still waiting after catalogWait,
+// including on a hung listing, which keeps it well inside the API server's
+// 30s write timeout, fails "model catalog not ready, retry". A warm catalog
+// is used at once.
 func (s *Service) createModels(ctx context.Context, harness, model string) ([]string, error) {
 	deadline := time.Now().Add(s.catalogWait)
+	lctx, cancel := context.WithDeadline(ctx, deadline) // bounds a hung listing too
+	defer cancel()
+	notReady := &Error{Code: CodeHarnessUnavailable, Message: fmt.Sprintf("model catalog not ready on %s, retry", harness)}
 	for {
-		ids, err := s.models(ctx, harness)
+		ids, err := s.models(lctx, harness)
+		if err != nil && lctx.Err() != nil && ctx.Err() == nil {
+			return nil, notReady
+		}
 		if err != nil || ids == nil || model == "" || slices.Contains(ids, model) {
 			return ids, err
 		}
@@ -62,11 +69,14 @@ func (s *Service) createModels(ctx context.Context, harness, model string) ([]st
 			}
 		}
 		if !now.Before(deadline) {
-			return nil, &Error{Code: CodeHarnessUnavailable, Message: fmt.Sprintf("model catalog not ready on %s, retry", harness)}
+			return nil, notReady
 		}
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-lctx.Done():
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, notReady
 		case <-time.After(s.catalogPoll):
 		}
 	}

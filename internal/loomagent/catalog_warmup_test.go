@@ -157,3 +157,35 @@ func TestCreateIncompleteCatalogWaitCapped(t *testing.T) {
 		t.Fatalf("not-ready create left %d rows", len(as))
 	}
 }
+
+// hung never answers a catalog listing until its context ends.
+type hung struct{ *openRec }
+
+func (hung) Models(ctx context.Context) ([]loomharness.Model, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// MC1: a hung catalog listing is bounded by catalogWait too, and is "not
+// ready, retry" with no row.
+func TestCreateHungCatalogNotReady(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	s.harnesses["opencode"], s.catalogWait = hung{e.h}, 20*time.Millisecond
+	req := leadReq("r1")
+	req.Overrides.Model = "fake-model"
+	done := make(chan error, 1)
+	go func() { _, err := s.Create(ctx, req); done <- err }()
+	select {
+	case err := <-done:
+		if !isCode(err, CodeHarnessUnavailable) || !strings.Contains(err.Error(), "model catalog not ready") {
+			t.Fatalf("create on a hung catalog = %v, want harness_unavailable 'model catalog not ready'", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("create on a hung catalog did not return within 5s")
+	}
+	if as, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true}); len(as) != 0 {
+		t.Fatalf("not-ready create left %d rows", len(as))
+	}
+}
