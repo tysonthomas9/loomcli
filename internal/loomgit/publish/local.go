@@ -178,7 +178,7 @@ func taskStackChanges(ctx context.Context, store *journal.SQLite, workspace, lea
 		if err != nil && !errors.Is(err, journal.ErrNotFound) {
 			return nil, err
 		}
-		if err == nil && repo != repoName {
+		if (err == nil && repo != repoName) || slices.Contains(requested, change) {
 			continue
 		}
 		requested = append(requested, change)
