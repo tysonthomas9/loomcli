@@ -185,12 +185,13 @@ describe("RevisionsSection Approve and merge (D29)", () => {
       },
     ]);
     render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    // Only the newest revision is reviewable (older ones are in History).
     await waitFor(() =>
-      expect(screen.getAllByTestId("merge-status")).toHaveLength(2),
+      expect(screen.getAllByTestId("merge-status")).toHaveLength(1),
     );
-    for (const status of screen.getAllByTestId("merge-status")) {
-      expect(status).toHaveTextContent(`Not merged: ${reason}`);
-    }
+    expect(screen.getByTestId("merge-status")).toHaveTextContent(
+      `Not merged: ${reason}`,
+    );
     // Only the rebuilt version, not yet reviewed, can be approved to merge.
     expect(screen.getAllByTestId("approve-merge")).toHaveLength(1);
   });
@@ -213,7 +214,7 @@ describe("RevisionsSection Approve and merge (D29)", () => {
     expect(screen.queryByTestId("approve-merge")).toBeNull();
     expect(screen.queryByTestId("cancel-auto-merge")).toBeNull();
   });
-  it("shows a merged PR as merged on every revision, with no open-PR actions", async () => {
+  it("shows a merged PR as merged on the newest revision, with no open-PR actions", async () => {
     getTaskRevisions.mockResolvedValue([
       { ...open, number: 2, pr_state: "merged", merge_status: "merged" },
       {
@@ -226,8 +227,9 @@ describe("RevisionsSection Approve and merge (D29)", () => {
       },
     ]);
     render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    // Only the newest revision is listed here (older ones are in History).
     await waitFor(() =>
-      expect(screen.getAllByTestId("revision-pr")).toHaveLength(2),
+      expect(screen.getAllByTestId("revision-pr")).toHaveLength(1),
     );
     for (const pr of screen.getAllByTestId("revision-pr")) {
       expect(pr).toHaveTextContent("PR #3 was merged");
