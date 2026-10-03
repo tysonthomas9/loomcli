@@ -1,0 +1,77 @@
+# P1.25 (D29 4): a task whose agent changed nothing closes as "No changes"
+# with no review, no apply and no PR. The revision is kept as evidence. A
+# later attempt with changes is reviewed, applied and published normally.
+# Real TaskRuns record the revisions; the fake forge records any PR.
+suite: loomgit-no-changes
+classification: { area: reviews, feature: no-changes, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  set -e;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" setup E2E-WS-NOCHG stack;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" setup E2E-WS-NOCHG-TRUNK trunk
+teardown: >-
+  bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" teardown E2E-WS-NOCHG;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" teardown E2E-WS-NOCHG-TRUNK
+
+tests:
+  - name: stacked, an empty attempt closes as No changes and a later attempt is reviewed
+    intent: With stacked PRs, a task whose agent changed nothing gets no review, apply or PR; its retry with changes is approved, applied and published
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" empty E2E-WS-NOCHG
+        intent: A real TaskRun whose agent changes nothing records its revision
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" closed E2E-WS-NOCHG
+        intent: The revision is listed as no_changes; approve, reject, override and a lead approve are refused with no_changes; publishing is refused; nothing is applied and the forge has no PR or branch
+      - open: /ws/E2E-WS-NOCHG/kanban
+        intent: Load the workspace before following the task deep link
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: The board has mounted, so the workspace is loaded before the deep link
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-NOCHG/issues/$(cat "$AFT_WORK_DIR/E2E-WS-NOCHG-task")"
+        intent: Open the empty task's panel
+      - click: { role: tab, name: Changes, exact: true }
+      - expect: { visible: { testid: revision-no-changes } }
+      - wait: { text: "No changes" }
+      - expect: { notText: "Awaiting review" }
+      - wait:
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => ['Approve', 'Reject', 'Override'].includes(b.textContent)).length === 0"
+        intent: The empty attempt has no verdict buttons
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" retry E2E-WS-NOCHG nochg-stack.txt
+        intent: The same task runs again and writes a file; its new revision is not no_changes and the empty one is superseded
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-NOCHG/issues/$(cat "$AFT_WORK_DIR/E2E-WS-NOCHG-task")"
+        intent: Reopen the task panel after the retry
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: "Awaiting review" }
+      - wait: { text: nochg-stack.txt }
+      - wait:
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => b.textContent === 'Approve').length === 1"
+        intent: The attempt with changes is reviewable again
+      - click: { role: button, name: "History (1)", exact: true }
+      - wait: { text: "no changes" }
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" reviewed E2E-WS-NOCHG nochg-stack.txt
+        intent: Approving the attempt with changes applies it, and publishing opens exactly one PR with only its file
+
+  - name: PR per task, an empty attempt closes as No changes and a later attempt is reviewed
+    intent: In trunk mode the same rules hold; the retry gets its own PR to trunk
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" empty E2E-WS-NOCHG-TRUNK
+        intent: A real TaskRun whose agent changes nothing records its revision in the trunk-mode workspace
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" closed E2E-WS-NOCHG-TRUNK
+        intent: Every verdict and the publication are refused with nothing applied and no PR
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-NOCHG-TRUNK/issues/$(cat "$AFT_WORK_DIR/E2E-WS-NOCHG-TRUNK-task")"
+        intent: Open the empty task in trunk mode
+      - click: { role: tab, name: Changes, exact: true }
+      - expect: { visible: { testid: revision-no-changes } }
+      - expect: { notText: "Awaiting review" }
+      - wait:
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => ['Approve', 'Reject', 'Override'].includes(b.textContent)).length === 0"
+        intent: No verdict buttons in trunk mode either
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" retry E2E-WS-NOCHG-TRUNK nochg-trunk.txt
+        intent: The retry with changes records a reviewable revision
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" reviewed E2E-WS-NOCHG-TRUNK nochg-trunk.txt
+        intent: The retry is approved, applied and published as its own PR to trunk
