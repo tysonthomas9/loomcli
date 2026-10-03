@@ -969,10 +969,9 @@ tests:
       - click: { role: button, name: Stop, exact: true }
       - wait:
           fn: >-
-            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
-              return t.includes('Turn cancelled') && !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+            !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
         budget: 30000
-        intent: "Wait until Stop ends the turn and the Stop button goes away"
+        intent: "Wait until Stop ends the turn and the Stop button goes away (a turn Loom ends itself, with no end from the harness, shows no turn note)"
       - run: |
           set -e
           id="$(cat "$AFT_WORK_DIR/agv1Oc1Id")"
