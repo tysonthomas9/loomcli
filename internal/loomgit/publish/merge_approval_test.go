@@ -471,16 +471,23 @@ func TestApproveMergeNativeBackendMergesOnlyTheBottomPR(t *testing.T) {
 	if merge, _ = item.store.NativeMerge(ctx, "W", "feature"); merge.Phase != "done" {
 		t.Fatalf("native merge after A = %+v", merge)
 	}
-	// A finished merge gives way to B's approval, now the bottom. (This fixture
-	// does not adopt GitHub's restack of B, so the provider step itself is not
-	// asserted here; the AFT covers it.)
+	// A finished merge gives way to B's approval, now the bottom. GitHub moved
+	// B onto trunk; B's merge leaves out A, which already merged.
+	forge.prs[1].Base = "develop"
 	reconcileApprovals(t, item, forge)
 	if got := approval(t, item, "A"); got.Status != MergeApprovalMerged {
 		t.Fatalf("A = %+v", got)
 	}
 	merge, err = item.store.NativeMerge(ctx, "W", "feature")
-	if err != nil || merge.Target != "B" || merge.Authority != humanApprovalAuthority {
+	if err != nil || merge.Target != "B" || merge.Authority != humanApprovalAuthority ||
+		len(merge.Changes) != 1 || merge.Changes[0] != "B" {
 		t.Fatalf("B's native merge = %+v, %v", merge, err)
+	}
+	if got := approval(t, item, "B"); got.Status != MergeApprovalMerging {
+		t.Fatalf("B = %+v", got)
+	}
+	if len(forge.native.submitted) != 2 || forge.native.submitted[1] != forge.prs[1].Number {
+		t.Fatalf("submitted = %v", forge.native.submitted)
 	}
 }
 
