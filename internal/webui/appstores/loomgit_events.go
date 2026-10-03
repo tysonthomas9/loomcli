@@ -3,6 +3,7 @@ package appstores
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -106,5 +107,6 @@ func dispatchLoomGitEvents(ctx context.Context, path string, sink loomGitEventSi
 	if err := outbox.Dispatch(ctx, store, sink); err != nil {
 		return err
 	}
-	return publish.ReconcileEpicPublicationsAt(ctx, path)
+	epicErr := publish.ReconcileEpicPublicationsAt(ctx, path)
+	return errors.Join(epicErr, publish.ReconcileApprovalPublicationsAt(ctx, path))
 }
