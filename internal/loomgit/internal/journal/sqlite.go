@@ -105,6 +105,7 @@ func OpenSQLite(path string) (*SQLite, error) {
 		{"outbox delivery", createOutboxDeliverySchema},
 		{"driver changes", createDriverChanges},
 		{"local lineage", createLocalLineageSchema},
+		{"approval lineage", createApprovalLineageSchema},
 		{"revision completeness", createRevisionCompleteness},
 		{"review journal", createReviewSchema},
 		{"workspace creation journal", initWorkspaceCreationSchema},

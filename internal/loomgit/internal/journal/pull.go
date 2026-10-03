@@ -31,6 +31,9 @@ func (s *SQLite) CompletePull(ctx context.Context, requestID, workspace, lead, r
 			WHERE workspace=? AND lead=? AND change_id=? AND phase='done'`, workspace, lead, removed); err != nil {
 			return err
 		}
+		if err := spliceApprovalLineage(ctx, tx, workspace, lead, removed); err != nil {
+			return err
+		}
 	}
 	for _, layer := range layers {
 		if err := insertPulledLayer(ctx, tx, layer); err != nil {

@@ -137,6 +137,9 @@ func PublishLeadChangeLocal(ctx context.Context, workspace, lead, change string)
 	if err != nil {
 		return Result{}, err
 	}
+	if err := syncApprovalLineage(ctx, store, workspace, lead, repoName, requested); err != nil {
+		return Result{}, fmt.Errorf("record stack lineage: %w", err)
+	}
 	for _, result := range results {
 		if result.Revision.Change == change {
 			return result, nil
@@ -164,6 +167,25 @@ func recordedStackID(ctx context.Context, store *journal.SQLite, workspace, lead
 		return fmt.Sprintf("lead-%x", sha256.Sum256([]byte(lead+"\x00"+repoName))), nil
 	}
 	return LeadStackID(lead), nil
+}
+
+// syncApprovalLineage records the published order of a lead's stack, so
+// landing restacks the layer above a merged PR onto trunk (D29).
+func syncApprovalLineage(ctx context.Context, store *journal.SQLite, workspace, lead, repoName string, published []string) error {
+	applied, err := store.AppliedLog(ctx, workspace, lead)
+	if err != nil {
+		return err
+	}
+	newest := make(map[string]loomgit.AppliedLayer, len(applied))
+	for _, layer := range applied {
+		newest[layer.Change] = layer
+	}
+	layers := make([]journal.StackLayer, 0, len(published))
+	for _, change := range published {
+		layer := newest[change]
+		layers = append(layers, journal.StackLayer{Change: change, Revision: layer.Revision, Head: layer.NewTip})
+	}
+	return store.SyncApprovalLineage(ctx, workspace, lead, repoName, layers)
 }
 
 // taskStackChanges lists the lead's applied task changes recorded for one repository.
