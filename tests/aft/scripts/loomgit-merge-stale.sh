@@ -61,7 +61,7 @@ if [[ "$phase" == seed ]]; then
   read -r change revision head < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"],item["head_sha"])' "$case_dir/revisions.json")
   printf '%s\n' "$change" > "$case_dir/change.id"
   curl -fsS -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
-    -d "{\"head_sha\":\"$head\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$case_dir/approve.json"
+    -d "{\"head_sha\":\"$head\",\"verdict\":\"approve\",\"approve_only\":true,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$case_dir/approve.json"
   grep -q '"status":"applied"' "$case_dir/approve.json"
   test "$(git -C "$repo" rev-parse refs/heads/loom/ws/$workspace/interactive/lead)" = "$head"
   loom pr-stack stale-card lead "$change" --workspace "$workspace" > "$case_dir/publish-before.txt"
