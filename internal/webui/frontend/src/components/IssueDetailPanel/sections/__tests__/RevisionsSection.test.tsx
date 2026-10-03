@@ -345,17 +345,20 @@ describe("RevisionsSection", () => {
     );
   });
 
-  it("offers Create PR for an approved, applied change with no PR", async () => {
-    getTaskRevisions.mockResolvedValue([
-      { ...revision, verdict: "approve", applied: true },
-    ]);
-    createRevisionPR.mockResolvedValue(undefined);
-    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Create PR" }));
-    await waitFor(() =>
-      expect(createRevisionPR).toHaveBeenCalledWith("W", "lead-a", "C"),
-    );
-  });
+  it.each(["approve", "carried"])(
+    "offers Create PR for a %s, applied change with no PR",
+    async (verdict) => {
+      getTaskRevisions.mockResolvedValue([
+        { ...revision, verdict, applied: true },
+      ]);
+      createRevisionPR.mockResolvedValue(undefined);
+      render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Create PR" }));
+      await waitFor(() =>
+        expect(createRevisionPR).toHaveBeenCalledWith("W", "lead-a", "C"),
+      );
+    },
+  );
 
   it("shows the open PR and no Approve only once the PR exists", async () => {
     getTaskRevisions.mockResolvedValue([
