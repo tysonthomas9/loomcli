@@ -1,0 +1,643 @@
+/* Ported from T3 Code apps/web/src/index.css (the composer glass shell and
+   host, the theme's radius, message and message-action tokens) and the
+   Tailwind classes of apps/web/src/components/ChatView.tsx,
+   apps/web/src/components/chat/ChatComposer.tsx, ComposerPrimaryActions.tsx,
+   ChatHeader.tsx, MessagesTimeline.tsx and
+   apps/web/src/components/ComposerPromptEditor.tsx at commit 2daff8c25.
+   Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
+   Translated to a CSS module with Loom's theme tokens (dark by default,
+   [data-theme="light"] for light). */
+
+.chat {
+  --chat-column: 48rem; /* T3's max-w-3xl */
+  --chat-gutter: 20px; /* T3's sm:px-5 */
+  --chat-outline: color-mix(in srgb, var(--color-text-primary) 9%, transparent);
+  --chat-message-surface: var(--color-bg-hover);
+  --chat-composer-surface: var(--color-bg-card);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  color: var(--color-text-primary);
+}
+
+/* ChatHeader */
+.header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px var(--chat-gutter);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.titleWrap {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.renameButton {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.titleWrap:hover .renameButton,
+.renameButton:focus-visible {
+  opacity: 1;
+}
+
+.renameButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.renameButton:focus-visible,
+.titleInput:focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.titleInput {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-focus) 50%, transparent);
+}
+
+.headerMeta {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge,
+.statePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--chat-outline);
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.stateDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-status-idle);
+}
+
+.statePill[data-running="true"] .stateDot,
+.statePill[data-state="active"] .stateDot {
+  background: var(--color-status-working);
+}
+
+.statePill[data-state="waiting"] .stateDot,
+.statePill[data-state="creating"] .stateDot,
+.statePill[data-state="stopping"] .stateDot {
+  background: var(--color-status-dirty);
+}
+
+.statePill[data-state="finished"] .stateDot {
+  background: var(--color-status-done);
+}
+
+.statePill[data-state="archived"] .stateDot {
+  background: var(--color-status-pending);
+}
+
+/* The message column (ChatView + MessagesTimeline) */
+.scroller {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.transcript {
+  height: 100%;
+  margin: 0;
+  padding: 16px var(--chat-gutter) 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable both-edges;
+  list-style: none;
+}
+
+.emptyOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  pointer-events: none;
+}
+
+/* One timeline row: centred at the column width, T3's row spacing. */
+.row {
+  width: 100%;
+  max-width: var(--chat-column);
+  min-width: 0;
+  margin: 0 auto;
+  padding-bottom: 16px;
+  overflow-x: clip;
+}
+
+.row[data-kind="work"],
+.row[data-kind="agent-commentary"] {
+  padding-bottom: 8px;
+}
+
+.row[data-kind="working"] {
+  padding-bottom: 6px;
+}
+
+.scrollToEnd {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--chat-outline);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-bg-card) 85%, transparent);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-sm);
+}
+
+.scrollToEnd:hover {
+  color: var(--color-text-primary);
+}
+
+/* UserTimelineRow */
+.userRow {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.userBubble {
+  position: relative;
+  max-width: 80%;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 1rem; /* rounded-2xl */
+  background: var(--chat-message-surface);
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  line-height: 1.625;
+}
+
+.userBody[data-user-message-collapsed="true"] {
+  max-height: 11rem; /* max-h-44 */
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - 1.75rem),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - 1.75rem),
+    transparent
+  );
+}
+
+.userFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.userFooterEnd {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.collapseToggle {
+  height: 24px;
+  margin-left: -4px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.collapseToggle:hover {
+  background: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  color: var(--color-text-primary);
+}
+
+.userMeta,
+.messageMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.userMeta {
+  max-width: 80%;
+  justify-content: flex-end;
+  padding-right: 4px;
+}
+
+.userRow:hover .userMeta,
+.userMeta:focus-within,
+.agentMessage:hover .messageMeta,
+.messageMeta:focus-within {
+  opacity: 1;
+}
+
+/* AssistantTimelineRow */
+.agentMessage {
+  position: relative;
+  min-width: 0;
+  padding: 2px 4px;
+}
+
+.messageMeta {
+  margin-top: 6px;
+}
+
+/* The waiting message: a user bubble that has not been delivered yet. */
+.waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.waiting .userBubble {
+  border: 1px dashed var(--chat-outline);
+  background: transparent;
+}
+
+.waitingTitle {
+  margin-bottom: 4px;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.waitingActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.waitingActions button,
+.cancelButton {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--chat-outline);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.waitingActions button:hover,
+.cancelButton:hover {
+  background: var(--color-bg-hover);
+}
+
+/* Child cards and completion records (T3's AgentSpawnCtaRow look). */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--chat-outline);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-bg-card) 50%, transparent);
+  font-size: 0.8125rem;
+}
+
+.cardNote,
+.note {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.childLink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.childLink:hover .childName {
+  text-decoration: underline;
+}
+
+.childName {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* T3's turn-fold / working rows: a muted line over a hairline. */
+.turnEnd,
+.working {
+  padding: 4px 4px 8px;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--color-border-light) 60%, transparent);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  line-height: 1.625;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dock under the timeline: ask card, errors and the composer, aligned
+   to the message column. */
+.dock {
+  flex-shrink: 0;
+  padding: 4px var(--chat-gutter) 16px;
+}
+
+.dockColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: var(--chat-column);
+  margin: 0 auto;
+}
+
+/* T3's top drawer: the pending ask sits on the composer's top edge, inset
+   1.375rem per side and tucked 1rem under the card. */
+.askDrawer {
+  position: relative;
+  z-index: 0;
+  margin: 0 1.375rem calc(-1rem - 1px);
+}
+
+.askDrawer > [data-testid="ask-card"] {
+  padding: 10px 14px calc(10px + 1rem + 1px);
+  border-color: var(--chat-outline);
+  border-radius: 1rem 1rem 0 0;
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+/* ChatComposer: the glass host and surface (rounded-[22px], p-px). */
+.composer {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+
+.composerSurface {
+  border: 1px solid var(--chat-outline);
+  border-radius: 22px;
+  background: var(--chat-composer-surface);
+  box-shadow: inset 0 1px rgb(255 255 255 / 3%);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+:global([data-theme="light"]) .composerSurface {
+  box-shadow: 0 12px 28px -18px rgb(0 0 0 / 40%);
+}
+
+.composerSurface:focus-within {
+  border-color: color-mix(in srgb, var(--color-focus) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-focus) 15%, transparent);
+}
+
+.composerSurface[data-editing="true"] {
+  border-style: dashed;
+}
+
+.promptArea {
+  position: relative;
+  padding: 16px 16px 8px;
+}
+
+.prompt {
+  display: block;
+  width: 100%;
+  min-height: 70px;
+  max-height: 200px;
+  margin: 0;
+  padding: 0;
+  overflow-y: hidden;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.875rem;
+  line-height: 1.625;
+  resize: none;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.prompt::placeholder {
+  color: var(--color-text-muted);
+}
+
+.composerFooter {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 16px 16px;
+}
+
+.composerControls {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-left: -10px; /* T3's -ms-2.5 on the model picker trigger */
+}
+
+.composerActions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.sendButton,
+.stopButton {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    background-color 0.15s,
+    opacity 0.15s;
+}
+
+.sendButton {
+  background: var(--color-primary);
+  color: #fff;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--color-primary) 24%, transparent),
+    inset 0 1px rgb(255 255 255 / 16%);
+}
+
+.sendButton:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--color-primary) 90%,
+    var(--color-bg-card)
+  );
+  transform: scale(1.05);
+}
+
+.sendButton:disabled {
+  opacity: 0.3;
+  cursor: default;
+  box-shadow: none;
+}
+
+.stopButton {
+  background: color-mix(in srgb, var(--color-danger) 90%, transparent);
+  color: #fff;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--color-danger) 24%, transparent),
+    inset 0 1px rgb(255 255 255 / 16%);
+}
+
+.stopButton:hover {
+  background: var(--color-danger);
+  transform: scale(1.05);
+}
+
+.sendButton:focus-visible,
+.stopButton:focus-visible,
+.cancelButton:focus-visible,
+.collapseToggle:focus-visible,
+.scrollToEnd:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--radius-full);
+  animation: chatSpin 0.8s linear infinite;
+}
+
+@keyframes chatSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+
+  .sendButton:hover:not(:disabled),
+  .stopButton:hover {
+    transform: none;
+  }
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

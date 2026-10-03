@@ -1,4 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+// The page layout, message column and scroll-to-end are ported from T3 Code
+// apps/web/src/components/ChatView.tsx and
+// apps/web/src/components/chat/MessagesTimeline.tsx at commit 2daff8c25.
+// Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -9,6 +13,8 @@ import {
 } from "@/hooks";
 import type { ChatItem } from "@/hooks";
 import { AskCard } from "./AskCard";
+import { ChatComposer } from "./ChatComposer";
+import { ChatHeader } from "./ChatHeader";
 import { ChatMarkdown } from "./ChatMarkdown";
 import {
   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
@@ -16,6 +22,7 @@ import {
 } from "./ComposerModelControls";
 import { LONG_TEXT_LIMIT, LongText } from "./LongText";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { UserMessage, WorkingRow } from "./MessageRows";
 import {
   dismissThreadErrorBannerForSession,
   getThreadErrorBannerKey,
@@ -30,6 +37,7 @@ import {
   WorkGroupToggleRow,
 } from "./WorkRows";
 import styles from "./AgentChat.module.css";
+import page from "./ChatPage.module.css";
 
 export interface AgentChatProps {
   workspaceId: string;
@@ -44,8 +52,18 @@ export interface AgentChatProps {
  * label.
  */
 export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
-  const { agent, items, asks, error, send, clear, stop, respond, update } =
-    useAgentChat(workspaceId, agentId);
+  const {
+    agent,
+    items,
+    asks,
+    error,
+    send,
+    clear,
+    stop,
+    respond,
+    update,
+    runningSince,
+  } = useAgentChat(workspaceId, agentId);
   const compact = useNarrow(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX);
   const own = ownSender(useAuth().user?.id);
   const [draft, setDraft] = useState("");
@@ -63,6 +81,9 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   const bannerKey = getThreadErrorBannerKey(agentId, turnError);
   const [, setDismissed] = useState(0);
   const ask = asks[0]; // T3 shows the first open ask, with "1/N"
+  const running = !!agent?.running_turn_id;
+  const waiting = agent?.waiting_messages ?? [];
+  const scroll = useStickToEnd();
   const toggleGroup = (id: string) =>
     setExpandedGroups((g) => {
       const next = new Set(g);
@@ -75,6 +96,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
+    scroll.follow();
     send(text)
       .then(() => {
         setDraft("");
@@ -89,145 +111,205 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     setEditing(false);
   };
 
+  const empty = rows.length === 0 && waiting.length === 0 && !running;
+
   return (
-    <section className={styles.chat} aria-label="Agent chat">
-      <header className={styles.header}>
-        <span className={styles.name}>{agent?.name ?? agentId}</span>
-        {agent && (
-          <>
-            <span className={styles.label} data-testid="harness-label">
-              {agent.harness}
-            </span>
-            <span className={styles.state}>{agent.state}</span>
-            {agent.history_purge_failed_at && !agent.history_purged_at && (
-              <span className={styles.state} role="status">
-                History expiry incomplete
-              </span>
-            )}
-          </>
-        )}
-      </header>
-
-      <ol className={styles.transcript} data-testid="chat-transcript">
-        {rows.map((row) => (
-          <li
-            key={row.id}
-            className={
-              row.kind === "item" ? styles[row.item.kind] : styles.work
-            }
-          >
-            <Row row={row} workspaceId={workspaceId} onToggle={toggleGroup} />
-          </li>
-        ))}
-        {agent?.waiting_messages.map((w) => (
-          <li key={`waiting:${w.sender}`} className={styles.waiting}>
-            <div className={styles.waitingTitle}>
-              Waiting
-              {w.sender !== own && ` · from ${w.sender}`}
-            </div>
-            <LongText text={w.text} />
-            {w.sender === own && (
-              <div className={styles.waitingActions}>
-                <button
-                  onClick={() => {
-                    setDraft(w.text);
-                    setEditing(true);
-                  }}
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() =>
-                    clear()
-                      .then(() => editing && stopEditing())
-                      .catch(() => {})
-                  }
-                >
-                  Clear
-                </button>
-              </div>
-            )}
-          </li>
-        ))}
-      </ol>
-
-      <ThreadErrorBanner
-        error={
-          isThreadErrorBannerDismissedForSession(bannerKey) ? null : turnError
-        }
-        onDismiss={() => {
-          dismissThreadErrorBannerForSession(bannerKey);
-          setDismissed((n) => n + 1);
-        }}
+    <section className={page.chat} aria-label="Agent chat">
+      <ChatHeader
+        agentId={agentId}
+        agent={agent}
+        onRename={(name) => update({ name })}
       />
 
-      {ask && (
-        <AskCard
-          key={ask.id}
-          ask={ask}
-          pendingCount={asks.length}
-          onRespond={(body) => respond(ask.id, body)}
-          onStop={stop}
-        />
-      )}
+      <div className={page.scroller}>
+        <ol
+          ref={scroll.ref}
+          className={page.transcript}
+          data-testid="chat-transcript"
+          onScroll={scroll.onScroll}
+        >
+          {rows.map((row) => (
+            <li key={row.id} className={page.row} data-kind={rowKind(row)}>
+              <Row row={row} workspaceId={workspaceId} onToggle={toggleGroup} />
+            </li>
+          ))}
+          {running && (
+            <li className={page.row} data-kind="working">
+              <WorkingRow startedAt={runningSince} />
+            </li>
+          )}
+          {waiting.map((w) => (
+            <li
+              key={`waiting:${w.sender}`}
+              className={`${page.row} ${page.waiting}`}
+              data-kind="waiting"
+            >
+              <div className={page.userBubble}>
+                <div className={page.waitingTitle}>
+                  Waiting
+                  {w.sender !== own && ` · from ${w.sender}`}
+                </div>
+                <LongText text={w.text} />
+                {w.sender === own && (
+                  <div className={page.waitingActions}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraft(w.text);
+                        setEditing(true);
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        clear()
+                          .then(() => editing && stopEditing())
+                          .catch(() => {})
+                      }
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+        {empty && agent && (
+          <div className={page.emptyOverlay}>
+            Send a message to start the conversation.
+          </div>
+        )}
+        {!scroll.atEnd && (
+          <button
+            type="button"
+            className={page.scrollToEnd}
+            onClick={() => scroll.toEnd(true)}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+            Scroll to end
+          </button>
+        )}
+      </div>
 
-      {error && (
-        <div className={styles.error} role="alert">
-          {error}
-        </div>
-      )}
-
-      <form
-        ref={compact.ref}
-        className={styles.composer}
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <textarea
-          aria-label="Message"
-          className={styles.input}
-          value={draft}
-          placeholder={editing ? "Edit your waiting message" : "Message"}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (
-              e.key === "Enter" &&
-              !e.shiftKey &&
-              !e.nativeEvent.isComposing
-            ) {
-              e.preventDefault();
-              submit();
+      <div className={page.dock}>
+        <div className={page.dockColumn}>
+          <ThreadErrorBanner
+            error={
+              isThreadErrorBannerDismissedForSession(bannerKey)
+                ? null
+                : turnError
             }
-          }}
-        />
-        <div className={styles.composerFooter}>
-          <ComposerModelControls
-            workspaceId={workspaceId}
-            agent={agent}
-            compact={compact.narrow}
-            update={update}
+            onDismiss={() => {
+              dismissThreadErrorBannerForSession(bannerKey);
+              setDismissed((n) => n + 1);
+            }}
           />
-          <div className={styles.composerActions}>
-            {editing && (
-              <button type="button" onClick={stopEditing}>
-                Cancel
-              </button>
+
+          {error && (
+            <div className={page.error} role="alert">
+              {error}
+            </div>
+          )}
+
+          <div>
+            {ask && (
+              <div className={page.askDrawer}>
+                <AskCard
+                  key={ask.id}
+                  ask={ask}
+                  pendingCount={asks.length}
+                  onRespond={(body) => respond(ask.id, body)}
+                  onStop={stop}
+                />
+              </div>
             )}
-            {agent?.running_turn_id && (
-              <button type="button" onClick={() => void stop().catch(() => {})}>
-                Stop
-              </button>
-            )}
-            <button type="submit" disabled={sending || !draft.trim()}>
-              {editing ? "Save" : "Send"}
-            </button>
+            <ChatComposer
+              formRef={compact.ref}
+              draft={draft}
+              onDraftChange={setDraft}
+              editing={editing}
+              sending={sending}
+              running={running}
+              onSubmit={submit}
+              onCancelEdit={stopEditing}
+              onStop={() => void stop().catch(() => {})}
+              controls={
+                <ComposerModelControls
+                  workspaceId={workspaceId}
+                  agent={agent}
+                  compact={compact.narrow}
+                  update={update}
+                />
+              }
+            />
           </div>
         </div>
-      </form>
+      </div>
     </section>
   );
+}
+
+/** The row's spacing kind: T3 keeps work rows closer than messages. */
+function rowKind(row: TimelineRow): string {
+  return row.kind === "item" ? row.item.kind : "work";
+}
+
+/** Distance from the end, in px, that still counts as at the end. */
+const AT_END_SLOP_PX = 64;
+
+/**
+ * T3's live follow: the transcript opens at its end and stays there while
+ * new content arrives, unless the user scrolled up; then "Scroll to end"
+ * shows.
+ */
+function useStickToEnd() {
+  const ref = useRef<HTMLOListElement>(null);
+  const atEndRef = useRef(true);
+  const [atEnd, setAtEnd] = useState(true);
+  const toEnd = useCallback((smooth = false) => {
+    const el = ref.current;
+    if (!el) return;
+    atEndRef.current = true;
+    setAtEnd(true);
+    if (smooth && typeof el.scrollTo === "function")
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    else el.scrollTop = el.scrollHeight;
+  }, []);
+  const onScroll = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const end =
+      el.scrollHeight - el.scrollTop - el.clientHeight <= AT_END_SLOP_PX;
+    if (end === atEndRef.current) return;
+    atEndRef.current = end;
+    setAtEnd(end);
+  }, []);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof MutationObserver === "undefined") return;
+    toEnd();
+    const mo = new MutationObserver(() => {
+      if (atEndRef.current) el.scrollTop = el.scrollHeight;
+    });
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => mo.disconnect();
+  }, [toEnd]);
+  return { ref, atEnd, onScroll, toEnd, follow: () => toEnd() };
 }
 
 /** Whether the observed element is narrower than px (false until measured). */
@@ -251,12 +333,17 @@ function ChildLink({ ws, id, name }: { ws: string; id: string; name: string }) {
   const a = useRosterAgent(id);
   return (
     <Link
-      className={styles.childLink}
+      className={page.childLink}
       to={`/ws/${encodeURIComponent(ws)}/chat/${encodeURIComponent(id)}`}
     >
-      <span className={styles.name}>{a?.name ?? name}</span>
-      {a && <span className={styles.label}>{a.harness}</span>}
-      {a && <span className={styles.state}>{a.state}</span>}
+      <span className={page.childName}>{a?.name ?? name}</span>
+      {a && <span className={page.badge}>{a.harness}</span>}
+      {a && (
+        <span className={page.statePill} data-state={a.state}>
+          <span className={page.stateDot} aria-hidden="true" />
+          {a.state}
+        </span>
+      )}
     </Link>
   );
 }
@@ -302,7 +389,7 @@ function AgentMessage({
   const [all, setAll] = useState(false);
   const cut = !all && text.length > LONG_TEXT_LIMIT;
   return (
-    <div className={styles.agentMessage}>
+    <div className={page.agentMessage}>
       <ChatMarkdown
         text={cut ? text.slice(0, LONG_TEXT_LIMIT) + "…" : text}
         streaming={streaming}
@@ -313,7 +400,7 @@ function AgentMessage({
         </button>
       )}
       {!streaming && text.trim() && (
-        <div className={styles.messageMeta}>
+        <div className={page.messageMeta}>
           <MessageCopyButton text={text} />
         </div>
       )}
@@ -325,16 +412,16 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
   switch (item.kind) {
     case "child":
       return (
-        <div data-testid="child-card">
-          <div className={styles.note}>Child agent</div>
+        <div className={page.card} data-testid="child-card">
+          <div className={page.cardNote}>Child agent</div>
           <ChildLink ws={workspaceId} id={item.child} name={item.name} />
         </div>
       );
     case "completion": {
       const r = item.record;
       return (
-        <div data-testid="completion-record">
-          <div className={styles.note}>
+        <div className={page.card} data-testid="completion-record">
+          <div className={page.cardNote}>
             {/* Attempts count from 0; people count from 1. */}
             Attempt {r.attempt + 1} {r.outcome}
             {r.branch && ` · ${r.branch}`}
@@ -347,7 +434,7 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
     }
     case "turn_end":
       return (
-        <div className={styles.note}>
+        <div className={page.turnEnd}>
           Turn {item.reason}
           {item.error && (
             <div className={styles.text} data-testid="turn-end-error">
@@ -359,7 +446,7 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
     case "agent":
       return <AgentMessage text={item.text} streaming={!!item.streaming} />;
     case "user":
-      return <LongText text={item.text} />;
+      return <UserMessage text={item.text} />;
     // Tool calls and reasoning are work rows (see deriveTimelineRows).
     case "tool":
     case "reasoning":

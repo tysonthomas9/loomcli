@@ -31,8 +31,11 @@ export interface UseAgentChatReturn {
   /** Stops the running turn: an interrupt Send with no message (§9.2). */
   stop: () => Promise<void>;
   respond: (askId: string, body: RespondBody) => Promise<void>;
-  /** PATCHes the agent (model, effort, options); applies from the next turn. */
+  /** PATCHes the agent (name, model, effort, options); a model or effort
+   * change applies from the next turn. */
   update: (body: UpdateAgentBody) => Promise<void>;
+  /** When the running turn started (its saved turn.started), else null. */
+  runningSince: string | null;
 }
 
 const message = (err: unknown) =>
@@ -147,6 +150,36 @@ export function useAgentChat(
     [write, workspaceId, agentId],
   );
 
+  const runningTurn = agent?.running_turn_id ?? null;
+  const runningSince = useMemo(
+    () => turnStartedAt(events, runningTurn),
+    [events, runningTurn],
+  );
+
   const asks = (agent?.open_asks ?? []).filter((a) => !answered.has(a.id));
-  return { agent, items, asks, error, send, clear, stop, respond, update };
+  return {
+    agent,
+    items,
+    asks,
+    error,
+    send,
+    clear,
+    stop,
+    respond,
+    update,
+    runningSince,
+  };
+}
+
+/** The saved start time of turn turnId, or null when it is not in events. */
+export function turnStartedAt(
+  events: readonly AgentEvent[],
+  turnId: string | null,
+): string | null {
+  if (!turnId) return null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e?.kind === "turn.started" && e.turn_id === turnId) return e.created_at;
+  }
+  return null;
 }

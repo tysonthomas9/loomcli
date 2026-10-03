@@ -30,6 +30,14 @@ Ported files for the composer model, provider and effort pickers (UI2; internal/
 - `modelPickerSearch.ts`: from `apps/web/src/components/chat/modelPickerSearch.ts` and `packages/shared/src/searchRanking.ts`.
 - `ModelPicker.module.css`: from the Tailwind classes of the files above.
 
+Ported files for the chat page design (UI0; internal/webui/frontend/src/components/AgentChat/):
+
+- `ChatHeader.tsx`: from `apps/web/src/components/chat/ChatHeader.tsx` (the title, its inline rename and `resolveRenameCommit`; without the project breadcrumb, thread menu, project scripts, open-in and git actions).
+- `ChatComposer.tsx`: from `apps/web/src/components/chat/ChatComposer.tsx`, `apps/web/src/components/chat/ComposerPrimaryActions.tsx` and `apps/web/src/components/ComposerPromptEditor.tsx`.
+- `MessageRows.tsx`: from `UserTimelineRow`, `CollapsibleUserMessageBody`, `WorkingTimelineRow`, `WorkingTimer` and `formatWorkingTimer` in `apps/web/src/components/chat/MessagesTimeline.tsx`.
+- `ChatPage.module.css`: from `apps/web/src/index.css` (the composer glass shell and host, the theme's radius, message and message-action tokens) and the Tailwind classes of `apps/web/src/components/ChatView.tsx` and the files above.
+- `AgentChat.tsx` (the page layout, message column and scroll-to-end): from `apps/web/src/components/ChatView.tsx` and `apps/web/src/components/chat/MessagesTimeline.tsx`.
+
 Ported files (internal/loomharness/):
 
 - `codex/catalog.go`: from `apps/server/src/provider/Layers/CodexProvider.ts`.

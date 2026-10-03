@@ -89,7 +89,7 @@ export function AgentChatPage(): JSX.Element {
       switch (t) {
         case "chat":
           return (
-            <div className={styles.realTabBody} style={{ padding: 8 }}>
+            <div className={styles.realTabBody}>
               <AgentChat
                 key={agentId}
                 workspaceId={workspaceId}

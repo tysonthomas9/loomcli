@@ -1,125 +1,5 @@
-.chat {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  height: 100%;
-  color: var(--color-text-primary);
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.label,
-.state {
-  font-size: 12px;
-  padding: 1px 6px;
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  color: var(--color-text-muted);
-}
-
-.transcript {
-  flex: 1;
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.user,
-.agent,
-.waiting,
-.reasoning,
-.tool,
-.turn_end,
-.child,
-.completion {
-  max-width: 100%;
-  min-width: 0;
-}
-
-.child,
-.completion {
-  padding: 6px 10px;
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-}
-
-.childLink {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: inherit;
-}
-
-.user,
-.waiting {
-  align-self: flex-end;
-  max-width: 80%;
-  padding: 6px 10px;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-hover);
-}
-
-.waiting {
-  border: 1px dashed var(--color-border-light);
-}
-
-.waitingTitle,
-.askTitle {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.waitingActions,
-.askActions {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.note {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.work {
-  max-width: 100%;
-  min-width: 0;
-}
-
-.agentMessage {
-  min-width: 0;
-}
-
-/* T3's assistant meta row: the copy button shows on hover or focus. */
-.messageMeta {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.agentMessage:hover .messageMeta,
-.messageMeta:focus-within {
-  opacity: 1;
-}
+/* The page layout, header, messages and composer are in ChatPage.module.css
+   (ported from T3 Code). */
 
 /* Untrusted text: kept as text, and any unbroken run wraps. */
 .text {
@@ -131,47 +11,16 @@
 .showAll {
   display: block;
   margin-top: 4px;
-  font-size: 12px;
-}
-
-.askCard {
-  padding: 8px 10px;
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-card);
-}
-
-.askInput,
-.input {
-  flex: 1;
-  min-height: 2.5em;
-  resize: vertical;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
   font: inherit;
-}
-
-.error {
-  color: var(--color-danger);
   font-size: 12px;
-  overflow-wrap: anywhere;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
-.composer {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-/* T3's composer footer: model and effort pickers, then the actions. */
-.composerFooter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  min-width: 0;
-}
-
-.composerActions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
+.showAll:hover {
+  color: var(--color-text-primary);
 }
