@@ -75,7 +75,10 @@ diff)
   fi
   python3 - "$out" "$compare" "$file" "$expected" <<'PY'
 import json, sys
-data = json.load(open(sys.argv[1]))["data"]
+diffs = json.load(open(sys.argv[1]))["data"]
+# One entry per repo the task changed; these tasks change one repo.
+assert len(diffs) == 1, diffs
+data = diffs[0]
 assert data["compare"] == sys.argv[2], (data["compare"], sys.argv[2])
 paths = [f["path"] for f in data["files"]]
 assert paths == [sys.argv[3]], paths
