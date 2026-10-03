@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
@@ -29,6 +30,29 @@ func (s *Service) catalog(ctx context.Context, harness string) ([]loomharness.Mo
 		return nil, harnessErr(err)
 	}
 	return ms, nil
+}
+
+// createModels lists harness's model ids for a create of model. A harness
+// lists no models for a moment after its service boots (OpenCode), so while
+// the catalog is empty a create naming a model polls it for up to
+// catalogWait, then fails "model catalog not ready" rather than "unknown
+// model" (MC1). A loaded catalog is used at once.
+func (s *Service) createModels(ctx context.Context, harness, model string) ([]string, error) {
+	deadline := time.Now().Add(s.catalogWait)
+	for {
+		ids, err := s.models(ctx, harness)
+		if err != nil || ids == nil || len(ids) > 0 || model == "" {
+			return ids, err
+		}
+		if !time.Now().Before(deadline) {
+			return nil, &Error{Code: CodeHarnessUnavailable, Message: fmt.Sprintf("model catalog not ready on %s, retry", harness)}
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(s.catalogPoll):
+		}
+	}
 }
 
 // selection is the model and the whole option selection a's next turn

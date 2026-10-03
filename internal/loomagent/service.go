@@ -134,6 +134,9 @@ type Service struct {
 	// owed is set when a task_completed record could not be saved; the
 	// dispatcher retries the sweep while it is set.
 	owed atomic.Bool
+	// catalogWait bounds how long a create waits for a harness's model
+	// catalog to load after it boots, polling every catalogPoll (MC1).
+	catalogWait, catalogPoll time.Duration
 }
 
 // New returns a Service for cfg.
@@ -142,8 +145,8 @@ func New(cfg ServiceConfig) *Service {
 		resolveRepo: cfg.ResolveRepo, prepare: cfg.PrepareWorktree, target: cfg.Target,
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
 		retire: cfg.Retire, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
-		inputKey: cfg.InputKey,
-		locks:    map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
+		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
+		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
 	if cfg.RecoverFirst {
 		s.ready = make(chan struct{})
 		s.recovered = sync.OnceFunc(func() { close(s.ready) })

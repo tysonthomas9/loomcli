@@ -144,7 +144,7 @@ func (s *Service) insertCreate(ctx context.Context, req CreateRequest) (loomstor
 	if req.Overrides, err = s.withBackend(ctx, req.Overrides); err != nil {
 		return loomstore.Agent{}, err
 	}
-	models, err := s.models(ctx, req.Overrides.Harness)
+	models, err := s.createModels(ctx, req.Overrides.Harness, req.Overrides.Model)
 	if err != nil {
 		return loomstore.Agent{}, err
 	}
