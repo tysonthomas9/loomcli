@@ -19,10 +19,16 @@ type FollowResult struct {
 }
 
 func RecoverPending(ctx context.Context, store *journal.SQLite) error {
-	return recoverPendingWithConfig(ctx, store, config.LoadConfig)
+	return recoverPendingWithConfig(ctx, store, config.LoadConfig, nil)
 }
 
-func recoverPendingWithConfig(ctx context.Context, store *journal.SQLite, load func() (*config.LoomConfig, error)) error {
+// RecoverPendingExcept follows durable approvals for every lead except those
+// skip holds back, such as a lead whose pull could not be recovered.
+func RecoverPendingExcept(ctx context.Context, store *journal.SQLite, skip func(workspace, lead string) bool) error {
+	return recoverPendingWithConfig(ctx, store, config.LoadConfig, skip)
+}
+
+func recoverPendingWithConfig(ctx context.Context, store *journal.SQLite, load func() (*config.LoomConfig, error), skip func(string, string) bool) error {
 	targets, err := store.PendingApprovalTargets(ctx)
 	if err != nil {
 		return err
@@ -30,6 +36,9 @@ func recoverPendingWithConfig(ctx context.Context, store *journal.SQLite, load f
 	var cfg *config.LoomConfig
 	var failures []error
 	for _, target := range targets {
+		if skip != nil && skip(target.Workspace, target.Lead) {
+			continue
+		}
 		paused, err := store.FollowingPaused(ctx, target.Workspace, target.Lead)
 		if err != nil {
 			failures = append(failures, err)

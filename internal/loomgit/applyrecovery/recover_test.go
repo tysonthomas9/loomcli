@@ -398,3 +398,35 @@ func TestApplyRecoveryFailureHoldsBackOnlyItsLead(t *testing.T) {
 		t.Fatalf("broken lead changed: %+v, %v", open, err)
 	}
 }
+
+func TestReconcileJournalFailedPullHoldsBackSameLeadApproval(t *testing.T) {
+	ctx, journalStore, area, base, revision := bridgeApprovalFixture(t)
+	if _, err := review.SubmitForLead(ctx, journalStore, "W", revision.Change, revision.Number, revision.HeadSHA,
+		"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L"); err != nil {
+		t.Fatal(err)
+	}
+	// W/L has an interrupted pull whose working area is gone.
+	if err := journalStore.SavePullPlan(ctx, journal.PullPlan{RequestID: "stuck-pull", Workspace: "W", Lead: "L",
+		Repo: "missing-repo", BaseSHA: base}); err != nil {
+		t.Fatal(err)
+	}
+	err := workspacemgr.ReconcileJournal(ctx, memstore.New())
+	if err == nil || !strings.Contains(err.Error(), "recover pull for W/L") {
+		t.Fatalf("failed pull = %v", err)
+	}
+	if layers, err := journalStore.AppliedLog(ctx, "W", "L"); err != nil || len(layers) != 0 {
+		t.Fatalf("approval followed past a failed pull: %+v, %v", layers, err)
+	}
+	if got := recoveryGit(t, area.Path, "rev-parse", "HEAD"); got != base {
+		t.Fatalf("working area moved past a failed pull: %s", got)
+	}
+	if err := journalStore.DiscardPullPlan(ctx, "stuck-pull"); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspacemgr.ReconcileJournal(ctx, memstore.New()); err != nil {
+		t.Fatal(err)
+	}
+	if layers, err := journalStore.AppliedLog(ctx, "W", "L"); err != nil || len(layers) != 1 {
+		t.Fatalf("approval after the pull was repaired: %+v, %v", layers, err)
+	}
+}

@@ -49,8 +49,9 @@ func RecoverExcept(ctx context.Context, skip func(workspace, lead string) bool) 
 			failures = append(failures, fmt.Errorf("recover apply for %s/%s: %w", target.Workspace, target.Lead, err))
 		}
 	}
-	// Following stops by itself on a lead whose apply is still pending.
-	failures = append(failures, apply.RecoverPending(ctx, store))
+	// Following stops by itself on a lead whose apply is still pending, and
+	// skips leads held back here.
+	failures = append(failures, apply.RecoverPendingExcept(ctx, store, skip))
 	dir := os.Getenv("LOOM_EVENTS_DIR")
 	if dir == "" {
 		dir = filepath.Join(config.GetConfigDir(), "events")
