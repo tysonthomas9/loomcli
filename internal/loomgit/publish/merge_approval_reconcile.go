@@ -162,6 +162,11 @@ func restackPending(ctx context.Context, store *journal.SQLite, approval journal
 		if state.Status == "restack_conflict" || state.Status == "swap_held" {
 			return true, "the rebuild after the PRs below merged needs attention: " + state.Status, nil
 		}
+		if state.Status == "review_required" {
+			// The rebuild finished, but a rebuilt layer needs a new verdict, so
+			// its restack offer stays open; the change's newest revision decides.
+			return false, "", nil
+		}
 	}
 	offers, err := store.RestackOffers(ctx, approval.Workspace, approval.Change)
 	if err != nil {

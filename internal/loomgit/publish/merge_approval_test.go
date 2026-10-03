@@ -182,6 +182,38 @@ func TestApproveMergeAsksAgainAfterARebuildThatIsNotClean(t *testing.T) {
 	}
 }
 
+// A rebuild that is clean but not patch-equivalent stops its restack for a new
+// verdict, leaving the restack offer open; the approval then asks again instead
+// of waiting for a rebuild that has finished.
+func TestApproveMergeAsksAgainWhenTheRestackWaitsForANewVerdict(t *testing.T) {
+	item, forge, heads := mergeApprovalFixture(t, "loom")
+	ctx := context.Background()
+	if _, err := approveMerge(ctx, item.store, forge, "W", "L", "C", heads[2], tyson); err != nil {
+		t.Fatal(err)
+	}
+	offer := journal.RestackOffer{Workspace: "W", Change: "C", Predecessor: "B", Task: "task-C", Repo: item.repo,
+		Revision: 1, TrunkSHA: heads[1]}
+	if err := item.store.OfferRestack(ctx, offer); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt := rebuildRevision(t, item, "C", heads[2], false)
+	reconcileApprovals(t, item, forge)
+	if got := approval(t, item, "C"); got.Status != MergeApprovalWaiting || got.Reason != "rebuilding after the PRs below merged" {
+		t.Fatalf("C while its restack runs = %+v", got)
+	}
+	if err := item.store.RecordRestackReviewRequired(ctx, offer, "feature", "L", "C", rebuilt.Number); err != nil {
+		t.Fatal(err)
+	}
+	reconcileApprovals(t, item, forge)
+	got := approval(t, item, "C")
+	if got.Status != MergeApprovalReapproval || got.Reason != "the rebuild after the PRs below merged was not clean; approve again" {
+		t.Fatalf("C after its restack asked for a new verdict = %+v", got)
+	}
+	if _, err := item.store.LoomMerge(ctx, "W", "feature"); !errors.Is(err, sql.ErrNoRows) || forge.merged != 0 {
+		t.Fatalf("restack needing review merged: %v, merged = %d", err, forge.merged)
+	}
+}
+
 func TestApproveMergeCarriesThroughACleanRebuildAndWaitsForThePR(t *testing.T) {
 	item, forge, heads := mergeApprovalFixture(t, "loom")
 	ctx := context.Background()
