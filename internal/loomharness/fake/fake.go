@@ -65,6 +65,7 @@ type session struct {
 	key           string
 	model, dir    string
 	opts          []loomharness.Option
+	opened        string      // the model Open set, which a restart keeps
 	turnModels    []Selection // the model and options each turn started with
 	seq           int64
 	turns         int
@@ -156,7 +157,7 @@ func (h *Harness) Open(_ context.Context, spec loomharness.OpenSpec) (loomharnes
 	h.nextID++
 	ref := loomharness.NativeRef{Root: spec.Launch.Root, NativeID: "fake_ses_" + strconv.Itoa(h.nextID)}
 	h.byKey[spec.Key] = ref
-	h.sessions[ref] = &session{ref: ref, key: spec.Key, model: spec.Model, dir: spec.Dir, inputs: map[string]loomharness.Landed{},
+	h.sessions[ref] = &session{ref: ref, key: spec.Key, model: spec.Model, opened: spec.Model, dir: spec.Dir, inputs: map[string]loomharness.Landed{},
 		rules: slices.Clone(spec.Rules)}
 	return ref, h.open
 }
@@ -252,6 +253,9 @@ func (h *Harness) crash() {
 		if s.running {
 			s.crashed = true
 		}
+		// What SetModel set lives only in the runtime, as in codex and
+		// Claude: the session is back on its opened model with no options.
+		s.model, s.opts = s.opened, nil
 	}
 	for f := range h.feeds {
 		f.closeLocked()

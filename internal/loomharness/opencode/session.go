@@ -707,8 +707,16 @@ func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) 
 }
 
 // SetModel sets the session's "provider/model" from the next turn, with the
-// effort option as the model's variant (none is the model's default).
+// effort option as the model's variant (none is the model's default). An
+// empty model keeps the session's model, or the service default if it has
+// none, so options alone can be set again after a resume.
 func (s *Session) SetModel(ctx context.Context, model string, opts []loomharness.Option) error {
+	if model == "" {
+		var err error
+		if model, err = s.model(ctx); err != nil {
+			return err
+		}
+	}
 	provider, id, ok := strings.Cut(model, "/")
 	if !ok {
 		return &Error{Code: "bad_request", Message: "model " + model + " is not provider/model"}
@@ -718,6 +726,25 @@ func (s *Session) SetModel(ctx context.Context, model string, opts []loomharness
 		ref["variant"] = v
 	}
 	return s.c.call(ctx, "POST", s.path("/model"), map[string]any{"model": ref}, nil)
+}
+
+// model is the session's "provider/model", else the service default.
+func (s *Session) model(ctx context.Context) (string, error) {
+	var info struct{ Data struct{ Model *wireModel } }
+	if err := s.c.call(ctx, "GET", s.path(""), nil, &info); err != nil {
+		return "", err
+	}
+	if m := info.Data.Model; m != nil && m.ProviderID != "" && m.ID != "" {
+		return m.ProviderID + "/" + m.ID, nil
+	}
+	var def struct{ Data *wireModel }
+	if err := s.c.call(ctx, "GET", "/api/model/default", nil, &def); err != nil {
+		return "", err
+	}
+	if def.Data == nil || def.Data.ProviderID == "" || def.Data.ID == "" {
+		return "", &Error{Code: "bad_request", Message: "the session has no model and the service no default"}
+	}
+	return def.Data.ProviderID + "/" + def.Data.ID, nil
 }
 
 // Unload removes the session's bridge registration, which Resume makes

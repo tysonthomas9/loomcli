@@ -375,7 +375,10 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 		return loomharness.NativeRef{}, s.leftover(ctx, a.AgentID, a.Harness, ref, harnessErr(err))
 	}
 	createCrash("recorded")
-	return ref, s.owned(ctx, a.AgentID, a.Harness, ref)
+	if err := s.owned(ctx, a.AgentID, a.Harness, ref); err != nil {
+		return ref, err
+	}
+	return ref, s.reapply(ctx, a.Harness, ref, cfg, true)
 }
 
 // owned records ref, which Open returned, as a's working session; a

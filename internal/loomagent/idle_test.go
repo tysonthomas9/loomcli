@@ -104,3 +104,45 @@ func TestIdleUnloadAndRestart(t *testing.T) {
 		t.Fatalf("session %s ran %d turns; want the same session %s with 2 (u1 once, u2 once)", *got.HarnessSessionID, turnsRun(e, aref), aref.NativeID)
 	}
 }
+
+// TestSavedEffortSurvivesUnloadAndRestart: a create override's effort
+// reaches the first turn; a PATCHed effort, which a harness keeps only in
+// the live session, is set again when the session is resumed after an idle
+// unload and restart, so the next turn still runs at it.
+func TestSavedEffortSurvivesUnloadAndRestart(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	pump(t, s, e.h, e.st)
+	info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: "alpha"}, Preset: "lead", Name: "alpha",
+		Repo: "/repo", Overrides: Overrides{Harness: "opencode", Effort: "low"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := s.get(t, info.AgentID)
+	ref := loomharness.NativeRef{Root: *a.HarnessSessionRoot, NativeID: *a.HarnessSessionID}
+	effort := func(n int) string {
+		t.Helper()
+		eventually(t, "the turn ends", func() bool {
+			return len(fh.Turns(ref)) == n && s.get(t, a.AgentID).State == StateIdle
+		})
+		return loomharness.OptionValue(fh.Turns(ref)[n-1].Options, loomharness.OptionEffort)
+	}
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
+	if got := effort(1); got != "low" {
+		t.Fatalf("first turn effort %q, want the create override's low", got)
+	}
+	if _, err := s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "e1"}, AgentID: a.AgentID, Effort: "high"}); err != nil {
+		t.Fatal(err)
+	}
+	IdleSweep(ctx, at(t, s, a.AgentID, 1800), []*Service{s})
+	if loaded(s, ref) {
+		t.Fatal("the idle session was not unloaded")
+	}
+	pump(t, s, e.h, e.st) // the restart ended the old feed
+	mustSendMsg(t, s, sendReq(a.AgentID, "u2", "second", user))
+	if got := effort(2); got != "high" {
+		t.Fatalf("turn after unload and restart effort %q, want the saved high", got)
+	}
+}

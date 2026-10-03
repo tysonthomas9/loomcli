@@ -128,3 +128,24 @@ func merge(have, set []loomharness.Option) []loomharness.Option {
 	}
 	return out
 }
+
+// selected is cfg's saved option selection: its Options, else the effort a
+// create override set.
+func selected(cfg Config) []loomharness.Option {
+	if len(cfg.Options) > 0 || cfg.Effort == "" {
+		return cfg.Options
+	}
+	return []loomharness.Option{{ID: loomharness.OptionEffort, Value: cfg.Effort}}
+}
+
+// reapply sets cfg's saved model and options on harness's session ref, just
+// opened or resumed, so its next turn runs with them: a harness keeps them
+// only in the live session, which a restart or an idle unload drops. Open
+// already took the model, so after one only options are set.
+func (s *Service) reapply(ctx context.Context, harness string, ref loomharness.NativeRef, cfg Config, opened bool) error {
+	opts := selected(cfg)
+	if len(opts) == 0 && (opened || cfg.Model == "") {
+		return nil
+	}
+	return harnessErr(s.harnesses[harness].Session(ref).SetModel(ctx, cfg.Model, opts))
+}

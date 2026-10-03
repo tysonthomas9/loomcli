@@ -61,7 +61,7 @@ func (s *Service) switchHarness(ctx context.Context, a loomstore.Agent, req Upda
 		return failed(err)
 	}
 	beforeSwitchCommit()
-	cfg.Harness, cfg.Model, cfg.Options = req.Harness, model, nil // options belong to the old harness's models
+	cfg.Harness, cfg.Model, cfg.Effort, cfg.Options = req.Harness, model, "", nil // effort and options belong to the old harness's models
 	spec, err := json.Marshal(cfg)
 	if err != nil {
 		return failed(err)
@@ -159,6 +159,9 @@ func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agen
 		return a, err
 	}
 	s.markResumed(a.Harness, got)
+	if err := s.reapply(ctx, a.Harness, got, cfg, false); err != nil {
+		return a, err
+	}
 	if got == ref {
 		return a, nil
 	}

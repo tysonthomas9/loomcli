@@ -381,6 +381,13 @@ func TestContract(t *testing.T) {
 		if info.Model.ID != "m2" || info.Model.Variant != "high" || info.Location.Directory != moved {
 			t.Fatalf("session = %+v; want model m2 (high) in %s", info, moved)
 		}
+		// Options alone, as set again after a resume, keep the session's model.
+		if err := s.SetModel(ctx, "", []loomharness.Option{{ID: loomharness.OptionEffort, Value: "low"}}); err != nil {
+			t.Fatal(err)
+		}
+		if info := sessionInfo(t, a, ref); info.Model.ID != "m2" || info.Model.Variant != "low" {
+			t.Fatalf("session = %+v; want model m2 kept, at low", info)
+		}
 	})
 
 	t.Run("RestartKeepsUserService", func(t *testing.T) {
