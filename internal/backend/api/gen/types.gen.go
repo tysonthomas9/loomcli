@@ -3036,6 +3036,9 @@ type ReviewRevision struct {
 	// PrNumber Number of the change's open PR, once published.
 	PrNumber *int `json:"pr_number,omitempty"`
 
+	// PrState State of the change's PR, once published; one of open, merged or closed.
+	PrState *string `json:"pr_state,omitempty"`
+
 	// PrUrl URL of the change's open PR, once published.
 	PrUrl *string `json:"pr_url,omitempty"`
 

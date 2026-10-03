@@ -71,6 +71,8 @@ type TaskRevision struct {
 	PublishReason string `json:"publish_reason,omitempty"`
 	// PRHead is the open PR's head SHA; Approve and merge pins it (D29 (3)).
 	PRHead string `json:"pr_head,omitempty"`
+	// PRState is the PR's state: open, merged or closed.
+	PRState string `json:"pr_state,omitempty"`
 	// MergeAfter lists the open PRs below this one in its stack, bottom first;
 	// empty means the PR is the bottom and Approve merges it now.
 	MergeAfter []int `json:"merge_after,omitempty"`
@@ -161,6 +163,15 @@ func (l *Local) addPublishState(ctx context.Context, workspace string, i *TaskRe
 		if err := l.addMergeState(ctx, publication, i); err != nil {
 			return err
 		}
+		landed, err := l.store.IsLanded(ctx, workspace, i.ChangeID)
+		if err != nil {
+			return err
+		}
+		observation, _, err := l.store.ProviderObservation(ctx, workspace, i.ChangeID)
+		if err != nil {
+			return err
+		}
+		i.PRState = PRState(landed, observation.State, i.MergeStatus)
 	}
 	intent, found, err := l.store.LatestApprovalPublication(ctx, workspace, i.ChangeID, i.Number)
 	if err != nil || !found {
@@ -168,6 +179,19 @@ func (l *Local) addPublishState(ctx context.Context, workspace string, i *TaskRe
 	}
 	i.PublishStatus, i.PublishReason = intent.Status, intent.Reason
 	return nil
+}
+
+// PRState reports a published PR as merged once its change landed, the
+// provider reported it merged, or its Approve and merge finished; as closed
+// once the provider reported it closed without merging; otherwise as open.
+func PRState(landed bool, observed, mergeStatus string) string {
+	switch {
+	case landed || observed == "merged" || mergeStatus == "merged":
+		return "merged"
+	case observed == "closed" || observed == "dependency_abandoned":
+		return "closed"
+	}
+	return "open"
 }
 
 func (l *Local) addMergeState(ctx context.Context, publication journal.Publication, i *TaskRevision) error {

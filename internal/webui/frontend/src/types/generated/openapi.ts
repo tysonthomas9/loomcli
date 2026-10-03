@@ -3404,6 +3404,8 @@ export interface components {
       publish_reason?: string;
       /** @description Head SHA of the change's open PR; Approve and merge pins it. */
       pr_head?: string;
+      /** @description State of the change's PR, once published; one of open, merged or closed. */
+      pr_state?: string;
       /** @description Open PRs below this one in its stack, bottom first. Empty when it is the bottom PR (Approve and merge merges it now). */
       merge_after?: number[];
       /** @description State of the change's Approve and merge, if one was made; one of waiting, blocked, merging, merged, stale_subject, reapproval_required or cancelled. */

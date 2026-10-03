@@ -6602,6 +6602,9 @@ components:
         pr_head:
           type: string
           description: Head SHA of the change's open PR; Approve and merge pins it.
+        pr_state:
+          type: string
+          description: State of the change's PR, once published; one of open, merged or closed.
         merge_after:
           type: array
           items: {type: integer}
