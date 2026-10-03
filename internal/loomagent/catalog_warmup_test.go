@@ -139,7 +139,8 @@ func TestCreateIncompleteCatalogWarmUpBounded(t *testing.T) {
 }
 
 // MC1: one create waits catalogWait at most, even inside the warm-up window,
-// so it ends well before the API server's write timeout.
+// so it ends well before the API server's write timeout; the model may still
+// load, so it is "not ready, retry", not unknown, and leaves no row.
 func TestCreateIncompleteCatalogWaitCapped(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -148,7 +149,11 @@ func TestCreateIncompleteCatalogWaitCapped(t *testing.T) {
 	req := leadReq("r1")
 	req.Overrides.Model = "fake-model"
 	start := time.Now()
-	if _, err := s.Create(ctx, req); !isCode(err, CodePresetInvalid) || time.Since(start) > 5*time.Second {
-		t.Fatalf("create = %v after %s, want unknown model after about catalogWait", err, time.Since(start))
+	_, err := s.Create(ctx, req)
+	if !isCode(err, CodeHarnessUnavailable) || !strings.Contains(err.Error(), "model catalog not ready") || time.Since(start) > 5*time.Second {
+		t.Fatalf("create = %v after %s, want harness_unavailable 'model catalog not ready' after about catalogWait", err, time.Since(start))
+	}
+	if as, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true}); len(as) != 0 {
+		t.Fatalf("not-ready create left %d rows", len(as))
 	}
 }
