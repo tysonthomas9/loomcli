@@ -173,14 +173,8 @@ func Scan(ctx context.Context, integrity bool) (Snapshot, error) {
 	appendAreas(rows.Areas, knownPaths, &out)
 	appendRevisions(ctx, rows, runners, integrity, &out)
 	appendPublications(ctx, rows.Publications, runners, integrity, &out)
-	if err := markLandingAttention(ctx, store, &out); err != nil {
-		return out, err
-	}
 	appendMirrorRefs(ctx, rows.Mirrors, integrity, &out)
-	if err := appendLeadMergePolicies(ctx, store, &out); err != nil {
-		return out, err
-	}
-	if err := appendDependencyChecks(ctx, store, &out); err != nil {
+	if err := appendJournalFindings(ctx, store, &out); err != nil {
 		return out, err
 	}
 	for workspace, state := range local.Workspaces {
@@ -230,6 +224,18 @@ func appendPublications(ctx context.Context, publications []journal.Publication,
 		}
 		out.Entries = append(out.Entries, item)
 	}
+}
+
+// appendJournalFindings adds what the journal records about publications,
+// lead merge policy and dependency checks.
+func appendJournalFindings(ctx context.Context, store *journal.SQLite, out *Snapshot) error {
+	if err := markLandingAttention(ctx, store, out); err != nil {
+		return err
+	}
+	if err := appendLeadMergePolicies(ctx, store, out); err != nil {
+		return err
+	}
+	return appendDependencyChecks(ctx, store, out)
 }
 
 // markLandingAttention flags publications landing reconcile skips until repaired.

@@ -145,9 +145,15 @@ func TestWorkspaceRecoveryFailureStillRunsApplyAndLanding(t *testing.T) {
 	}
 	var ran []string
 	err = RunOnce(ctx, Handlers{
-		Workspace: RecoverFunc(func(context.Context) error { ran = append(ran, "workspace"); return errors.New("reconcile workspace W1: broken") }),
-		Apply:     RecoverFunc(func(context.Context) error { ran = append(ran, "apply"); return errors.New("recover apply for W1/L: broken") }),
-		Landing:   RecoverFunc(func(context.Context) error { ran = append(ran, "landing"); return nil }),
+		Workspace: RecoverFunc(func(context.Context) error {
+			ran = append(ran, "workspace")
+			return errors.New("reconcile workspace W1: broken")
+		}),
+		Apply: RecoverFunc(func(context.Context) error {
+			ran = append(ran, "apply")
+			return errors.New("recover apply for W1/L: broken")
+		}),
+		Landing: RecoverFunc(func(context.Context) error { ran = append(ran, "landing"); return nil }),
 	})
 	if len(ran) != 3 || ran[2] != "landing" {
 		t.Fatalf("handlers run = %v", ran)
