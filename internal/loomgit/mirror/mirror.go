@@ -228,6 +228,12 @@ func recordFailure(ctx context.Context, store Store, row journal.MirrorRecord, r
 	return errors.New(reason)
 }
 
+// SecretPathAdded returns a secret-pattern path that a commit in base..head
+// has and base does not (D18), or "" when there is none.
+func SecretPathAdded(ctx context.Context, runner *gitexec.Runner, base, head string) (string, error) {
+	return newSecretPath(ctx, runner, "", head, base)
+}
+
 func newSecretPath(ctx context.Context, runner *gitexec.Runner, ref, sha, base string) (string, error) {
 	if strings.HasSuffix(ref, "/capture") || strings.HasSuffix(ref, "/head") {
 		baseRef := ref[:strings.LastIndex(ref, "/")+1] + "base"
