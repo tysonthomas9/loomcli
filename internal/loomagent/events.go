@@ -173,6 +173,12 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 	f := fold{running: deref(a.RunningTurnID), asks: map[string]*Ask{}}
 	var rows []loomstore.Event
 	size := 0
+	// The history's usage rows get the cost the live feed gives them (an
+	// event saved here first is never saved again from the feed): each
+	// total's rise over the one before it, the first's over the newest saved
+	// total, which a repeat row (saved once already) leaves unused.
+	var lastTotal float64
+	baseline := false
 	for after := ""; ; {
 		page, err := sess.Messages(ctx, after, 100)
 		if err != nil {
@@ -185,6 +191,15 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 			}
 			if e, err = s.withText(ctx, a.AgentID, e); err != nil {
 				return err
+			}
+			if hasCostTotal(e) {
+				if !baseline {
+					if lastTotal, err = s.store.LastCostTotal(ctx, a.AgentID, ref.NativeID); err != nil {
+						return err
+					}
+					baseline = true
+				}
+				e, lastTotal = costOver(e, lastTotal), e.Usage.CostTotalUSD
 			}
 			r := nativeRow(a.AgentID, kind, e)
 			size += len(r.EventID) + len(r.Kind) + len(r.TurnID) + len(r.Payload) + f.add(e)
