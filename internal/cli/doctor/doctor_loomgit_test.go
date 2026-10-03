@@ -43,7 +43,7 @@ func TestDoctorReportsMissingProviderRef(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	schema := `CREATE TABLE workspace_repos(workspace TEXT,repo TEXT,trunk TEXT,workspace_branch TEXT,base_sha TEXT);
 	CREATE TABLE working_areas(workspace TEXT,lead TEXT,repo TEXT,path TEXT,branch TEXT,base_sha TEXT,mode TEXT);
-	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER);
+	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER,no_changes INTEGER);
 	CREATE TABLE change_publications(workspace TEXT,change_id TEXT,repo TEXT,branch TEXT,trunk TEXT,slug TEXT,head_sha TEXT,phase TEXT,pr_number INTEGER,pr_url TEXT);
 	CREATE TABLE mirror_refs(repo TEXT,ref TEXT,remote TEXT,sha TEXT,state TEXT,reason TEXT);`
 	if _, err := db.Exec(schema); err != nil {
@@ -72,7 +72,7 @@ func TestDoctorWarnsWhenDependencyStatusNotSynced(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	schema := `CREATE TABLE workspace_repos(workspace TEXT,repo TEXT,trunk TEXT,workspace_branch TEXT,base_sha TEXT);
 	CREATE TABLE working_areas(workspace TEXT,lead TEXT,repo TEXT,path TEXT,branch TEXT,base_sha TEXT,mode TEXT);
-	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER);
+	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER,no_changes INTEGER);
 	CREATE TABLE change_publications(workspace TEXT,change_id TEXT,repo TEXT,branch TEXT,trunk TEXT,slug TEXT,head_sha TEXT,phase TEXT,pr_number INTEGER,pr_url TEXT);
 	CREATE TABLE dependency_checks(workspace TEXT,change_id TEXT,repo TEXT,state TEXT,reason TEXT,synced INTEGER);
 	CREATE TABLE dependency_enforcement(repo TEXT,branch TEXT,state TEXT,reason TEXT);
@@ -99,7 +99,7 @@ func TestDoctorWarnsOnLandingAttention(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	schema := `CREATE TABLE workspace_repos(workspace TEXT,repo TEXT,trunk TEXT,workspace_branch TEXT,base_sha TEXT);
 	CREATE TABLE working_areas(workspace TEXT,lead TEXT,repo TEXT,path TEXT,branch TEXT,base_sha TEXT,mode TEXT);
-	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER);
+	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER,no_changes INTEGER);
 	CREATE TABLE change_publications(workspace TEXT,change_id TEXT,repo TEXT,branch TEXT,trunk TEXT,slug TEXT,head_sha TEXT,phase TEXT,pr_number INTEGER,pr_url TEXT);
 	CREATE TABLE landing_attention(workspace TEXT,change_id TEXT,reason TEXT);
 	INSERT INTO change_publications VALUES ('W1','A','repo','loom/ws/W1/change/A','main','owner/repo','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','done',4,'');
@@ -127,7 +127,7 @@ func TestDoctorWarnsOnUnhandledJournalRequest(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	schema := `CREATE TABLE workspace_repos(workspace TEXT,repo TEXT,trunk TEXT,workspace_branch TEXT,base_sha TEXT);
 	CREATE TABLE working_areas(workspace TEXT,lead TEXT,repo TEXT,path TEXT,branch TEXT,base_sha TEXT,mode TEXT);
-	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER);
+	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER,no_changes INTEGER);
 	CREATE TABLE change_publications(workspace TEXT,change_id TEXT,repo TEXT,branch TEXT,trunk TEXT,slug TEXT,head_sha TEXT,phase TEXT,pr_number INTEGER,pr_url TEXT);
 	CREATE TABLE journal_entries(id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, operation TEXT NOT NULL, phase TEXT NOT NULL, version INTEGER NOT NULL, fence INTEGER NOT NULL);
 	CREATE TABLE journal_results(request_id TEXT PRIMARY KEY, result BLOB NOT NULL);

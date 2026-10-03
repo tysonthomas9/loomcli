@@ -157,6 +157,31 @@ func TestHostBridgeRetainsCaptureFailureWithoutFreezingEmptyPatch(t *testing.T) 
 	}
 }
 
+// D29 (4): a completed attempt that changed nothing still records its
+// revision as evidence, marked no_changes, so the task closes without review.
+func TestHostBridgeFreezesCompletedEmptyAttemptAsNoChanges(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	repo := newPatchBackRepo(t)
+	base := repo.commitFile("file.txt", "old\n", "base")
+	executor := HostBridgeTaskExecutor{Store: memstore.New(), WorktreePath: repo.dir,
+		Command: hostBridgeHelperCommand(t, "success", base, "")}
+	result, err := executor.ExecuteTask(context.Background(), hostBridgeTaskExecRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := result.RuntimeMetadata
+	if result.Status != domain.TaskRunCompleted || meta["patch_back_status"] != "frozen" || meta["revision"] != "1" ||
+		meta["revision_no_changes"] != "true" || meta["revision_head_sha"] != base || meta["attempt_id"] == "" {
+		t.Fatalf("empty attempt result = %+v", result)
+	}
+	if len(result.ArtifactIDs) != 0 {
+		t.Fatalf("empty attempt created patch artifacts: %v", result.ArtifactIDs)
+	}
+	if repo.read("file.txt") != "old\n" {
+		t.Fatal("empty attempt changed the worktree")
+	}
+}
+
 func TestHostBridgeTaskExecutorFreezesDespiteLocalEdit(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

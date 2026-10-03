@@ -50,9 +50,12 @@ func RecordEpicRun(ctx context.Context, runs store.TaskRunStore, run *domain.Dri
 	if len(tasks) >= 10000 {
 		return errors.New("epic PR delivery task list exceeds limit")
 	}
-	changes, err := epicRunChanges(ctx, journalStore, run.WorkspaceKey, tasks)
+	changes, empty, err := epicRunChanges(ctx, journalStore, run.WorkspaceKey, tasks)
 	if err != nil {
 		return err
+	}
+	if len(changes) == 0 && empty {
+		return nil
 	}
 	if len(changes) == 0 {
 		return errors.New("epic PR delivery has no frozen task revisions")
@@ -61,8 +64,12 @@ func RecordEpicRun(ctx context.Context, runs store.TaskRunStore, run *domain.Dri
 		RunID: run.RunID, Lead: lead, Changes: changes})
 }
 
-func epicRunChanges(ctx context.Context, journalStore *journal.SQLite, workspace string, tasks []*domain.TaskRun) ([]string, error) {
+// epicRunChanges lists the changes the epic's PRs carry. A task whose attempt
+// changed nothing closed without review, so it is left out (it can never be
+// applied); empty reports that at least one such task was skipped.
+func epicRunChanges(ctx context.Context, journalStore *journal.SQLite, workspace string, tasks []*domain.TaskRun) ([]string, bool, error) {
 	var changes []string
+	empty := false
 	for _, task := range tasks {
 		if task.Status != domain.TaskRunCompleted {
 			continue
@@ -75,24 +82,28 @@ func epicRunChanges(ctx context.Context, journalStore *journal.SQLite, workspace
 			}
 		}
 		if attempt == "" {
-			return nil, fmt.Errorf("task run %s has no frozen attempt identity", task.TaskRunID)
+			return nil, false, fmt.Errorf("task run %s has no frozen attempt identity", task.TaskRunID)
 		}
 		revision, err := journalStore.RevisionByRequest(ctx, "driver:"+attempt)
 		if err != nil {
-			return nil, fmt.Errorf("task run %s has no frozen revision: %w", task.TaskRunID, err)
+			return nil, false, fmt.Errorf("task run %s has no frozen revision: %w", task.TaskRunID, err)
 		}
 		owner, err := journalStore.TaskForChange(ctx, workspace, revision.Change)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if revision.Workspace != workspace || owner != task.TaskID || !revision.Ready {
-			return nil, fmt.Errorf("task run %s frozen revision belongs to another task or is incomplete", task.TaskRunID)
+			return nil, false, fmt.Errorf("task run %s frozen revision belongs to another task or is incomplete", task.TaskRunID)
+		}
+		if revision.NoChanges {
+			empty = true
+			continue
 		}
 		if !slices.Contains(changes, revision.Change) {
 			changes = append(changes, revision.Change)
 		}
 	}
-	return changes, nil
+	return changes, empty, nil
 }
 
 func epicRemoteAttempt(runID, attempt string) bool {

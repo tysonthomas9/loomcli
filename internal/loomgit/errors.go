@@ -38,6 +38,7 @@ const (
 	CaptureFailed         = errcode.CaptureFailed
 	SecretPathRefused     = errcode.SecretPathRefused
 	WorkspaceUnsupported  = errcode.WorkspaceUnsupported
+	NoChanges             = errcode.NoChanges
 )
 
 var ErrorCodes = errcode.All
