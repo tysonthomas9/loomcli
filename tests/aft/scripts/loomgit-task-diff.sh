@@ -87,6 +87,25 @@ if sys.argv[4]:
     assert patch == open(sys.argv[4]).read(), (patch, open(sys.argv[4]).read())
 PY
   ;;
+revisions)
+  # revisions <ws> <name>: across several background reconcile passes, the
+  # applied task's newest revision stays the applied, reviewed one; no pass
+  # re-derives an empty "awaiting review" revision at the same head (P4.1c).
+  name="$3"
+  task="$(cat "$AFT_WORK_DIR/$workspace-$name-task")"
+  out="$AFT_WORK_DIR/$workspace-$name-revisions.json"
+  for _ in $(seq 1 5); do
+    curl -fsS "$api/issues/$task/revisions" > "$out"
+    python3 - "$out" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))["data"]
+heads = [r["head_sha"] for r in d]
+assert len(heads) == len(set(heads)), ("a revision repeats an earlier head", d)
+assert d[0]["applied"] and d[0].get("verdict"), ("newest revision is not the applied, reviewed one", d)
+PY
+    sleep 2
+  done
+  ;;
 *)
   echo "unknown phase $phase" >&2
   exit 2
