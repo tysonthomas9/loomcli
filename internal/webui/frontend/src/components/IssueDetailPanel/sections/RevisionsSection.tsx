@@ -242,7 +242,8 @@ export function RevisionsSection({
           follow[key] !== undefined
             ? follow[key] === "approved_waiting_for_working_area"
             : Boolean(revision.needs_working_area);
-        const prOpen = Boolean(revision.pr_number);
+        // Once the PR merged or closed, mergeState offers no open-PR actions.
+        const hasPR = Boolean(revision.pr_number);
         const approved =
           revision.verdict === "approve" ||
           revision.verdict === "override" ||
@@ -251,7 +252,7 @@ export function RevisionsSection({
           revision.verdict === "carried";
         // InWorkingArea: approved and applied with no PR yet (Approve only,
         // or Approve and create PR that could not publish).
-        const canCreatePR = approved && revision.applied && !prOpen;
+        const canCreatePR = approved && revision.applied && !hasPR;
         const merge = mergeState(revision, approved, decided);
         return (
           <div className={styles.revision} key={key}>
@@ -281,16 +282,16 @@ export function RevisionsSection({
               </div>
             )}
             {revision.applied && <div>Applied</div>}
-            {prOpen && (
+            {hasPR && (
               <div data-testid="revision-pr">
                 PR{" "}
                 <a href={revision.pr_url} target="_blank" rel="noreferrer">
                   #{revision.pr_number}
                 </a>{" "}
-                is open
+                {prStateText[prStateOf(revision)]}
               </div>
             )}
-            {!prOpen && revision.publish_reason && (
+            {!hasPR && revision.publish_reason && (
               <div data-testid="revision-publish-status">
                 {revision.publish_status === "not_published"
                   ? revision.publish_reason
@@ -332,7 +333,7 @@ export function RevisionsSection({
             )}
             <div className={styles.actions}>
               <span className={styles.split}>
-                {prOpen ? (
+                {hasPR ? (
                   merge.action !== "none" && (
                     <button
                       type="button"
@@ -358,7 +359,7 @@ export function RevisionsSection({
                   </button>
                 )}
                 {/* No "Approve only" once the PR is open (D29). */}
-                {!prOpen && (
+                {!hasPR && (
                   <button
                     type="button"
                     aria-label="More approve options"
@@ -371,7 +372,7 @@ export function RevisionsSection({
                     ▾
                   </button>
                 )}
-                {menu === key && !prOpen && !decided && (
+                {menu === key && !hasPR && !decided && (
                   <span role="menu" className={styles.menu}>
                     <button
                       type="button"
@@ -441,6 +442,20 @@ export function newestRevisions(revisions: ReviewRevision[]): ReviewRevision[] {
 
 const activeMerge = ["waiting", "blocked", "merging"];
 
+type PRState = "open" | "merged" | "closed";
+
+/** The PR's state from the server; an older server reports only open PRs. */
+function prStateOf(revision: ReviewRevision): PRState {
+  const state = revision.pr_state;
+  return state === "merged" || state === "closed" ? state : "open";
+}
+
+const prStateText: Record<PRState, string> = {
+  open: "is open",
+  merged: "was merged",
+  closed: "was closed",
+};
+
 /**
  * What a revision with an open PR offers (D29): Approve and merge on the
  * bottom PR, Approve, merge after #N on a higher one, and the state of an
@@ -478,11 +493,8 @@ export function mergeState(
     cancelled: "Auto-merge cancelled",
   };
   let action: "none" | "merge" | "verdict" = "none";
-  if (
-    revision.pr_number &&
-    !activeMerge.includes(status) &&
-    status !== "merged"
-  ) {
+  const open = Boolean(revision.pr_number) && prStateOf(revision) === "open";
+  if (open && !activeMerge.includes(status) && status !== "merged") {
     // After someone else pushed (stale_subject), only a new version that the
     // human has not decided yet can be approved to merge.
     if (!decided) action = "verdict";
@@ -497,6 +509,6 @@ export function mergeState(
     action,
     label,
     status: revision.pr_number ? (text[status] ?? "") : "",
-    canCancel: status === "waiting" || status === "blocked",
+    canCancel: open && (status === "waiting" || status === "blocked"),
   };
 }

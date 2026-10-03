@@ -182,4 +182,50 @@ describe("RevisionsSection Approve and merge (D29)", () => {
     expect(screen.queryByTestId("approve-merge")).toBeNull();
     expect(screen.queryByTestId("cancel-auto-merge")).toBeNull();
   });
+  it("shows a merged PR as merged on every revision, with no open-PR actions", async () => {
+    getTaskRevisions.mockResolvedValue([
+      { ...open, number: 2, pr_state: "merged", merge_status: "merged" },
+      {
+        ...open,
+        number: 1,
+        head_sha: "b".repeat(40),
+        verdict: "carried",
+        pr_state: "merged",
+        merge_status: "merged",
+      },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    await waitFor(() =>
+      expect(screen.getAllByTestId("revision-pr")).toHaveLength(2),
+    );
+    for (const pr of screen.getAllByTestId("revision-pr")) {
+      expect(pr).toHaveTextContent("PR #3 was merged");
+      expect(pr).not.toHaveTextContent("is open");
+    }
+    expect(screen.queryByTestId("approve-merge")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("approve-create-pr")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("approve-menu-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("create-pr")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cancel-auto-merge")).not.toBeInTheDocument();
+  });
+
+  it("shows a closed PR as closed and offers no merge or Cancel auto-merge", async () => {
+    getTaskRevisions.mockResolvedValue([
+      {
+        ...open,
+        verdict: undefined,
+        pr_state: "closed",
+        merge_status: "waiting",
+        merge_reason: "merges after #1",
+        merge_after: [1],
+      },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    expect(await screen.findByTestId("revision-pr")).toHaveTextContent(
+      "PR #3 was closed",
+    );
+    expect(screen.queryByTestId("approve-merge")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("approve-create-pr")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cancel-auto-merge")).not.toBeInTheDocument();
+  });
 });
