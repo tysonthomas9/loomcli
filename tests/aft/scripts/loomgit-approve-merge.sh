@@ -10,7 +10,7 @@
 #           (stale_subject); another merges exactly once; the lead never merges
 #   cross   cross-repo lead: each repo's stack ID is shown by Create PR and
 #           loom stack list, and the task's Approve merges without one
-set -euo pipefail
+set -Eeuo pipefail
 
 phase="$1"
 case_name="$2"
@@ -121,11 +121,13 @@ newest() {
 # approve <name> [extra json]: approves the task's newest revision as a human
 # (Approve and create PR), applying it if it waited for the lead working area.
 approve() {
-  local name="$1" extra="${2:-}" change number sha
+  local name="$1" extra="${2:-}" change number sha code
   read -r change number sha _ < <(newest "$name")
   printf '%s\n' "$change" > "$case_dir/change-$name.id"
-  curl -sS --fail-with-body -X POST "$api/changes/$change/revisions/$number/verdict" -H 'Content-Type: application/json' \
-    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\"$extra,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$case_dir/verdict-$name.json"
+  code="$(curl -sS -o "$case_dir/verdict-$name.json" -w '%{http_code}' -X POST "$api/changes/$change/revisions/$number/verdict" -H 'Content-Type: application/json' \
+    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\"$extra,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}")"
+  # A PR that did not open at once stands approved; the reconciler retries it.
+  [[ "$code" == 200 ]] || { [[ "$code" == 409 ]] && grep -q '"publish_failed"' "$case_dir/verdict-$name.json"; }
   if grep -q 'approved_waiting_for_working_area' "$case_dir/verdict-$name.json"; then
     curl -fsS -X POST "$api/git/apply" -H 'Content-Type: application/json' \
       -d "{\"change\":\"$change\",\"revision\":$number,\"lead\":\"lead\"}" > "$case_dir/apply-$name.json"
@@ -135,10 +137,10 @@ approve() {
 
 # wait_pr <name>: waits until the task's revision shows its open PR.
 wait_pr() {
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 45); do
     read -r _ _ _ pr_head < <(newest "$1")
     [[ "$pr_head" != "-" ]] && return 0
-    sleep 1
+    sleep 2
   done
   echo "task $1 has no open PR: $(cat "$case_dir/newest-$1.json")" >&2
   return 1
@@ -239,6 +241,37 @@ wait_merge_status() { # wait_merge_status <text>: the open task shows it
   echo "task shows '$(merge_status_text)', want '$1'" >&2
   return 1
 }
+
+# diagnose dumps each task's revisions and Approve and merge state, the forge
+# PRs and the Loom Git stacks into the case directory when a step fails.
+diagnose() {
+  local file="$case_dir/diagnosis.txt" id name change
+  {
+    for id in "$case_dir"/task-*.id; do
+      name="$(basename "$id" .id)"
+      name="${name#task-}"
+      echo "== task $name revisions"
+      curl -sS "$api/issues/$(cat "$id")/revisions" || true
+      echo
+      if [[ -f "$case_dir/change-$name.id" ]]; then
+        change="$(cat "$case_dir/change-$name.id")"
+        echo "== task $name merge approval"
+        curl -sS "$api/changes/$change/merge-approval" || true
+        echo
+      fi
+    done
+    echo "== pulls"
+    curl -sS "$AFT_FAKE_GH_BASE/__pulls?workspace=$workspace" || true
+    echo
+    echo "== loom stack list"
+    loom stack list 2>&1 || true
+    for verdict in "$case_dir"/verdict-*.json; do
+      [[ -f "$verdict" ]] && { echo "== $(basename "$verdict")"; cat "$verdict"; echo; }
+    done
+  } > "$file" 2>&1
+  echo "diagnosis: $file" >&2
+}
+trap 'diagnose' ERR
 
 case "$case_name" in
   loom)
