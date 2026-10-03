@@ -135,13 +135,9 @@ func followApprovals(ctx context.Context, store *journal.SQLite, cfg *config.Loo
 				waitingOnPredecessor = true
 				continue
 			}
-			applied, applyErr := applyApproval(ctx, store, cfg, approval)
-			if applyErr != nil {
-				result.Pending = append(result.Pending, approval.Change)
-				result.Paths = applied.Paths
-				return result, applyErr
+			if err := followOne(ctx, store, cfg, approval, &result); err != nil {
+				return result, err
 			}
-			result.Applied = append(result.Applied, approval.Change)
 			delete(remaining, approval.Change)
 			progress = true
 		}
@@ -156,6 +152,23 @@ func followApprovals(ctx context.Context, store *journal.SQLite, cfg *config.Loo
 		}
 	}
 	return result, nil
+}
+
+// followOne applies one ready approval. A spent request settles as superseded
+// without counting as applied; a newer approval re-arms the follow.
+func followOne(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig,
+	approval journal.PendingApproval, result *FollowResult) error {
+	applied, err := applyApproval(ctx, store, cfg, approval)
+	if errors.Is(err, ErrRequestSpent) {
+		return nil
+	}
+	if err != nil {
+		result.Pending = append(result.Pending, approval.Change)
+		result.Paths = applied.Paths
+		return err
+	}
+	result.Applied = append(result.Applied, approval.Change)
+	return nil
 }
 
 func latestApprovals(ctx context.Context, store *journal.SQLite, pending []journal.PendingApproval) (map[string]journal.PendingApproval, error) {
@@ -195,6 +208,12 @@ func applyApproval(ctx context.Context, store *journal.SQLite, cfg *config.LoomC
 	if !alreadyApplied {
 		result, err = applyLocalWithStore(ctx, Request{Workspace: approval.Workspace, Lead: approval.Lead,
 			Change: approval.Change, Revision: approval.Revision, RequestID: requestID}, store, cfg)
+	}
+	if errors.Is(err, ErrRequestSpent) {
+		if setErr := store.SetApprovalFollow(ctx, approval, "superseded", nil); setErr != nil {
+			return result, setErr
+		}
+		return result, err
 	}
 	if err != nil {
 		status := "conflict"

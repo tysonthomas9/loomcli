@@ -90,6 +90,14 @@ func scanVerdict(row interface{ Scan(...any) error }) (loomgit.Verdict, error) {
 const verdictColumns = `id, workspace, change_id, number, head_sha, kind, actor_kind, actor_id, reason, source_verdict_id`
 
 // RecordVerdict atomically rejects an incomplete or superseded source revision.
+// heldRevision matches a done layer on the follow's lead for its revision or a
+// revision derived from it.
+const heldRevision = `SELECT 1 FROM applied_layers a WHERE a.workspace=excluded.workspace
+	AND a.lead=excluded.lead AND a.change_id=excluded.change_id AND a.phase='done'
+	AND (a.revision=excluded.revision OR a.revision IN (SELECT r.number FROM change_revisions r
+		WHERE r.workspace=excluded.workspace AND r.change_id=excluded.change_id
+		AND r.kind='derived' AND r.derived_from_number=excluded.revision))`
+
 func (s *SQLite) RecordVerdict(ctx context.Context, v loomgit.Verdict) (loomgit.Verdict, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -183,13 +191,15 @@ func recordApprovalTargets(ctx context.Context, tx *sql.Tx, v loomgit.Verdict) e
 	if v.TargetLead == "" || (v.Kind != "approve" && v.Kind != "override" && v.Kind != "policy") {
 		return nil
 	}
-	// A new approval re-arms a follow that already applied once only when the
-	// lead no longer holds the change (it was unapplied since).
+	// The follow always points at the newest approval. It stays 'applied'
+	// only while the lead still holds this revision (or one derived from
+	// it); otherwise the newer approval re-arms it, whatever its status.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO approval_follow(workspace,lead,change_id,revision,verdict_id)
 		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO UPDATE SET
-		verdict_id=excluded.verdict_id,status='approved',paths='[]'
-		WHERE approval_follow.status='applied' AND NOT EXISTS (SELECT 1 FROM applied_layers a
-			WHERE a.workspace=excluded.workspace AND a.lead=excluded.lead AND a.change_id=excluded.change_id AND a.phase='done')`,
+		verdict_id=excluded.verdict_id,
+		status=CASE WHEN approval_follow.status='applied' AND EXISTS (`+heldRevision+`) THEN 'applied' ELSE 'approved' END,
+		paths=CASE WHEN approval_follow.status='applied' AND EXISTS (`+heldRevision+`) THEN approval_follow.paths ELSE '[]' END
+		WHERE excluded.verdict_id > approval_follow.verdict_id`,
 		v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
 		return err
 	}
