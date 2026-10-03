@@ -112,7 +112,7 @@ PY
   fi
   test "$(pulls)" = 0
   test -z "$(git --git-dir="$remote" for-each-ref "refs/heads/loom/ws/$workspace/")"
-  curl -fsS "$api/issues/$(cat "$work-task")/diff" | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; assert d["files"] == [], d'
+  curl -fsS "$api/issues/$(cat "$work-task")/diff" | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; assert len(d) == 1 and d[0]["files"] == [], d'
   ;;
 retry)
   # retry <ws> <file>: the same task runs again and this time writes <file>.
@@ -143,7 +143,7 @@ reviewed)
   grep -q '"created":true' "$work-publish-changed.json"
   test "$(pulls)" = 1
   curl -fsS "$api/issues/$(cat "$work-task")/diff" |
-    python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; assert [f["path"] for f in d["files"]] == [sys.argv[1]], d' "$3"
+    python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; assert len(d) == 1 and [f["path"] for f in d[0]["files"]] == [sys.argv[1]], d' "$3"
   ;;
 *)
   echo "unknown phase $phase" >&2
