@@ -102,7 +102,7 @@ func publishIntent(ctx context.Context, store *journal.SQLite, intent journal.Ap
 		outcome.Status = "superseded"
 		return outcome, true, finishIntent(ctx, store, intent, outcome)
 	}
-	applied, err := store.RevisionApplied(ctx, intent.Workspace, intent.Lead, intent.Change, intent.Revision)
+	applied, err := approvalApplied(ctx, store, intent)
 	if err != nil || !applied {
 		// Held (apply_pending, conflict, no working area): no PR until it applies.
 		return outcome, false, err
@@ -122,6 +122,22 @@ func publishIntent(ctx context.Context, store *journal.SQLite, intent journal.Ap
 	}
 	outcome.Status, outcome.PRURL, outcome.PRNumber = "published", result.PRURL, result.PRNumber
 	return outcome, true, finishIntent(ctx, store, intent, outcome)
+}
+
+// approvalApplied reports whether the approved revision, or a revision Apply
+// derived from it onto a moved working area (a higher number of the same
+// change), is applied in the lead's working area.
+func approvalApplied(ctx context.Context, store *journal.SQLite, intent journal.ApprovalPublication) (bool, error) {
+	layers, err := store.AppliedLog(ctx, intent.Workspace, intent.Lead)
+	if err != nil {
+		return false, err
+	}
+	for _, layer := range layers {
+		if layer.Change == intent.Change && layer.Revision >= intent.Revision {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func finishIntent(ctx context.Context, store *journal.SQLite, intent journal.ApprovalPublication, outcome ApprovalOutcome) error {

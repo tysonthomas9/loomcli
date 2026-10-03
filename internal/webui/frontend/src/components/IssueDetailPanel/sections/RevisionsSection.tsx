@@ -147,7 +147,9 @@ export function RevisionsSection({
         const approved =
           revision.verdict === "approve" ||
           revision.verdict === "override" ||
-          revision.verdict === "policy";
+          revision.verdict === "policy" ||
+          // A revision Apply derived onto a moved working area carries the approval.
+          revision.verdict === "carried";
         // InWorkingArea: approved and applied with no PR yet (Approve only,
         // or Approve and create PR that could not publish).
         const canCreatePR = approved && revision.applied && !prOpen;

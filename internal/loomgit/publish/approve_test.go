@@ -300,3 +300,23 @@ func TestSupersededApprovalClosesItsIntent(t *testing.T) {
 		t.Fatalf("superseded outcome = %+v, %v; PRs=%+v", outcomes, err, forge.prs)
 	}
 }
+
+func TestApprovalAppliedAsDerivedRevisionStillPublishes(t *testing.T) {
+	fx, forge := approvalFixture(t, "stack")
+	ctx := context.Background()
+	approved := appliedTask(t, fx, "A", fx.base)
+	if err := fx.store.AdvanceApplied(ctx, "apply-A1", "done", "prepared"); err != nil {
+		t.Fatal(err)
+	}
+	approveForLead(t, fx, approved, reviewer, true, "applied")
+	// Apply rebuilt the approval onto a moved working area: the layer holds
+	// a derived revision of the change, not the approved number.
+	derived := stackRevision(t, fx, "A", 2, fx.base)
+	if derived.Number <= approved.Number {
+		t.Fatalf("derived revision %d is not after approved %d", derived.Number, approved.Number)
+	}
+	outcomes, err := PublishApproved(ctx, "W", "L")
+	if err != nil || len(outcomes) != 1 || outcomes[0].Status != "published" || len(forge.prs) != 1 {
+		t.Fatalf("derived apply outcomes = %+v, %v; PRs=%+v", outcomes, err, forge.prs)
+	}
+}
