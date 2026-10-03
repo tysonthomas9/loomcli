@@ -234,6 +234,24 @@ describe("AgentChat timeline (UI3)", () => {
     expect(reasoning.querySelector("pre")).toHaveTextContent("let me see");
   });
 
+  it("keeps a completed tool completed when its start notice comes late", async () => {
+    await mount(agent({ running_turn_id: "t1" }));
+    deliver(
+      ev("item.completed", {
+        itemId: "m/tool/1",
+        itemKind: "tool",
+        tool: { name: "bash", input: '{"command":"ls"}', output: "a.go" },
+      }),
+    );
+    notice("tool.started", {
+      itemId: "m/tool/1",
+      itemKind: "tool",
+      tool: { name: "bash", input: '{"command":"ls"}' },
+    });
+    expect(screen.queryByTestId("tool-live")).toBeNull();
+    expect(screen.getByTestId("tool-group")).toHaveTextContent("Ran 1 command");
+  });
+
   it("previews reasoning as plain text and leads '+N previous' with its chevron", async () => {
     await mount(agent());
     deliver(

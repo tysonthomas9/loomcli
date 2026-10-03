@@ -155,7 +155,16 @@ export function chatItems(
     )
     .map(itemFor)
     .filter((i): i is ChatItem => i !== null);
+  // A notice can come after its item's saved completion (a subscriber
+  // replaying history gets saved rows before live notices): a completed
+  // item never shows live again.
+  const completed = new Set(
+    events
+      .filter((e) => e.kind === "item.completed")
+      .map((e) => payload(e).itemId),
+  );
   for (const [id, live] of streaming) {
+    if (completed.has(id)) continue;
     const key = `live:${id}`;
     if (live.kind === "tool")
       items.push({ key, kind: "tool", tool: live.tool, status: "running" });

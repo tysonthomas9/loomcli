@@ -1,6 +1,7 @@
 package loomagent
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -824,11 +825,25 @@ func TestToolCallsSavedWithToolAndStartsLiveForDeltas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A warm-up tool call. Once its saved completion arrives, the feed is
+	// up and each subscription has ended its replay and reads only live
+	// rows, so the next tool's start (live-only) and its saved completion
+	// arrive in the order they happened. Before that, a subscription still
+	// replaying can get a saved completion ahead of its start, and a feed
+	// still starting can miss the start and backfill the completion with a
+	// feed.gap; the chat model drops a start that comes after its item
+	// (agentChatModel). The warm-up's own start, if any, is skipped below.
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Tool: &loomharness.Tool{Name: "warm"}}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u0", "warm up", user))
+	recvKinds(t, withDeltas, "item.completed")
+	recvKinds(t, noDeltas, "item.completed")
+	eventually(t, "the warm-up turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+
 	long := strings.Repeat("x", maxToolText+10)
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Tool: &loomharness.Tool{Name: "bash", Input: `{"command":"ls"}`, Output: long, Failed: true}}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
 
-	rows := recv(t, withDeltas, 2)
+	rows := recvSkipGaps(t, withDeltas, 2)
 	if rows[0].Kind != KindToolStarted || rows[1].Kind != "item.completed" {
 		t.Fatalf("with deltas: %s, %s", rows[0].Kind, rows[1].Kind)
 	}
@@ -844,7 +859,7 @@ func TestToolCallsSavedWithToolAndStartsLiveForDeltas(t *testing.T) {
 		done.Tool.Output != long[:maxToolText]+"…" || done.Tool.Name != "bash" {
 		t.Fatalf("item.completed tool %+v", done.Tool)
 	}
-	if r := recv(t, noDeltas, 1); r[0].Kind != "item.completed" {
+	if r := recvSkipGaps(t, noDeltas, 1); r[0].Kind != "item.completed" {
 		t.Fatalf("without deltas: %s", r[0].Kind)
 	}
 }
@@ -894,5 +909,33 @@ func TestAskQuestionsAnswersAndTurnError(t *testing.T) {
 	var p struct{ StopReason, Error string }
 	if err := json.Unmarshal(kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)[0].Payload, &p); err != nil || p.StopReason != "failed" || p.Error != "model not found" {
 		t.Fatalf("turn_completed payload = %+v %v", p, err)
+	}
+}
+
+// recvSkipGaps receives n events, skipping feed.gap notices and the
+// warm-up tool's late start (see TestToolCallsSavedWithToolAndStartsLiveForDeltas).
+func recvSkipGaps(t *testing.T, s *Subscription, n int) []loomstore.Event {
+	t.Helper()
+	var out []loomstore.Event
+	for len(out) < n {
+		e := recv(t, s, 1)[0]
+		if e.Kind == KindFeedGap || bytes.Contains(e.Payload, []byte(`"name":"warm"`)) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// recvKinds receives until it has seen each of kinds, in any order,
+// skipping anything else.
+func recvKinds(t *testing.T, s *Subscription, kinds ...string) {
+	t.Helper()
+	want := map[string]bool{}
+	for _, k := range kinds {
+		want[k] = true
+	}
+	for len(want) > 0 {
+		delete(want, recv(t, s, 1)[0].Kind)
 	}
 }
