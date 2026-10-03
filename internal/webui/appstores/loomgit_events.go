@@ -96,6 +96,10 @@ func runLoomGitEvents(ctx context.Context, hub *realtime.Hub, logger *slog.Logge
 // reconcileApprovals retries Approve and create PR intents; tests replace it.
 var reconcileApprovals = publish.ReconcileApprovalPublicationsAt
 
+// reconcileFeedback applies review fix-ups of open PRs so the approval
+// reconciler pushes them (D29 (6)); tests replace it.
+var reconcileFeedback = publish.ReconcileFeedbackUpdatesAt
+
 func dispatchLoomGitEvents(ctx context.Context, path string, sink loomGitEventSink) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil
@@ -112,5 +116,6 @@ func dispatchLoomGitEvents(ctx context.Context, path string, sink loomGitEventSi
 		return err
 	}
 	epicErr := publish.ReconcileEpicPublicationsAt(ctx, path)
-	return errors.Join(epicErr, reconcileApprovals(ctx, path, stackstore.Declared()))
+	feedbackErr := reconcileFeedback(ctx, path)
+	return errors.Join(epicErr, feedbackErr, reconcileApprovals(ctx, path, stackstore.Declared()))
 }
