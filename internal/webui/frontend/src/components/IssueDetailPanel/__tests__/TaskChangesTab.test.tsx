@@ -107,8 +107,12 @@ describe("TaskChangesTab", () => {
 
   it("puts verdict buttons on the newest revision only", async () => {
     render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    expect(screen.getAllByRole("button", { name: "Approve" })).toHaveLength(1);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve and create PR" }),
+    );
+    expect(
+      screen.getAllByRole("button", { name: "Approve and create PR" }),
+    ).toHaveLength(1);
     await vi.waitFor(() =>
       expect(submitRevisionVerdict).toHaveBeenCalledWith(
         "W",
@@ -116,6 +120,7 @@ describe("TaskChangesTab", () => {
         "approve",
         "",
         "lead",
+        false,
       ),
     );
   });
@@ -128,7 +133,9 @@ describe("TaskChangesTab", () => {
     expect(
       await screen.findByText("Revision 2 against its base (not applied yet)"),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    );
     expect(
       await screen.findByText("Revision 2 against trunk"),
     ).toBeInTheDocument();
@@ -146,7 +153,9 @@ describe("TaskChangesTab", () => {
     expect(
       within(list).getByText(/replaced by a newer revision/),
     ).toBeInTheDocument();
-    expect(within(list).queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(
+      within(list).queryByRole("button", { name: "Approve and create PR" }),
+    ).toBeNull();
     fireEvent.click(within(list).getByRole("button", { name: "Revision 1" }));
     expect(await screen.findByText("+old-try")).toBeInTheDocument();
     expect(getRevisionDiff).toHaveBeenCalledWith("W", rev1);
@@ -154,7 +163,9 @@ describe("TaskChangesTab", () => {
       screen.getByText("Revision 1 (read-only history), against its base"),
     ).toBeInTheDocument();
     // Still one set of verdict buttons: the task's, never the old revision's.
-    expect(screen.getAllByRole("button", { name: "Approve" })).toHaveLength(1);
+    expect(
+      screen.getAllByRole("button", { name: "Approve and create PR" }),
+    ).toHaveLength(1);
     fireEvent.click(
       screen.getByRole("button", { name: "Back to the task diff" }),
     );
@@ -185,7 +196,7 @@ describe("TaskChangesTab", () => {
     ).toBeInTheDocument();
     expect(await screen.findAllByText("No changes")).toHaveLength(2);
     expect(screen.queryByText("Awaiting review")).toBeNull();
-    for (const name of ["Approve", "Reject", "Override"])
+    for (const name of ["Approve and create PR", "Reject", "Override"])
       expect(screen.queryByRole("button", { name })).toBeNull();
   });
 
@@ -195,7 +206,9 @@ describe("TaskChangesTab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "History (1)" }));
     const list = screen.getByRole("list", { name: "Revision history" });
     expect(within(list).getByText(/no changes/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    ).toBeEnabled();
   });
 
   it("shows the API error code when the diff fails", async () => {
@@ -271,10 +284,12 @@ describe("TaskChangesTab", () => {
       expect(within(zetaSection).queryByText("+alpha-code")).toBeNull();
       // Each repo's own revision gets its own, enabled verdict buttons.
       const zetaApprove = await within(zetaSection).findByRole("button", {
-        name: "Approve",
+        name: "Approve and create PR",
       });
       expect(
-        within(alphaSection).getAllByRole("button", { name: "Approve" }),
+        within(alphaSection).getAllByRole("button", {
+          name: "Approve and create PR",
+        }),
       ).toHaveLength(1);
       await vi.waitFor(() => expect(zetaApprove).toBeEnabled());
       fireEvent.click(zetaApprove);
@@ -285,6 +300,7 @@ describe("TaskChangesTab", () => {
           "approve",
           "",
           "lead",
+          false,
         ),
       );
     });
@@ -302,7 +318,7 @@ describe("TaskChangesTab", () => {
         name: "Repo zeta",
       });
       const approve = await within(zetaSection).findByRole("button", {
-        name: "Approve",
+        name: "Approve and create PR",
       });
       expect(approve).toBeDisabled();
       expect(within(zetaSection).getByText("Loading diff…")).toBeVisible();
@@ -325,12 +341,16 @@ describe("TaskChangesTab", () => {
       });
       expect(await within(zetaSection).findByText("+zeta-code")).toBeVisible();
       expect(
-        within(zetaSection).getByRole("button", { name: "Approve" }),
+        within(zetaSection).getByRole("button", {
+          name: "Approve and create PR",
+        }),
       ).toBeDisabled();
       const alphaSection = screen.getByRole("region", { name: "Repo alpha" });
       await vi.waitFor(() =>
         expect(
-          within(alphaSection).getByRole("button", { name: "Approve" }),
+          within(alphaSection).getByRole("button", {
+            name: "Approve and create PR",
+          }),
         ).toBeEnabled(),
       );
     });
@@ -368,7 +388,9 @@ describe("TaskChangesTab", () => {
           "Revision 1 against the layer below it in the stack",
         ),
       ).toBeVisible();
-      const approve = screen.getByRole("button", { name: "Approve" });
+      const approve = screen.getByRole("button", {
+        name: "Approve and create PR",
+      });
       expect(approve).toBeEnabled();
       expect(screen.queryByText("Revision 2")).toBeNull();
       expect(getTaskRevisions).toHaveBeenCalledTimes(1);
@@ -380,6 +402,7 @@ describe("TaskChangesTab", () => {
           "approve",
           "",
           "lead",
+          false,
         ),
       );
     });
@@ -395,14 +418,18 @@ describe("TaskChangesTab", () => {
         }),
       );
       render(<TaskChangesTab workspaceId="W" taskId="T" />);
-      fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Approve and create PR" }),
+      );
       // The verdict reloads the snapshot: revision 2 appears while the diff on
       // screen is still revision 1's.
       expect(await screen.findByText("Revision 2")).toBeVisible();
       expect(
         screen.getByText("Revision 1 against the layer below it in the stack"),
       ).toBeVisible();
-      expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "Approve and create PR" }),
+      ).toBeDisabled();
       releaseSecond([diffOf(2)]);
       expect(
         await screen.findByText(
@@ -410,7 +437,9 @@ describe("TaskChangesTab", () => {
         ),
       ).toBeVisible();
       await vi.waitFor(() =>
-        expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled(),
+        expect(
+          screen.getByRole("button", { name: "Approve and create PR" }),
+        ).toBeEnabled(),
       );
     });
   });

@@ -280,7 +280,7 @@ describe("RevisionsSection", () => {
       "Revision 2",
     );
     expect(screen.queryByText("Awaiting review")).not.toBeInTheDocument();
-    for (const name of ["Approve", "Reject", "Override", "Apply"])
+    for (const name of ["Approve and create PR", "Reject", "Override", "Apply"])
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     expect(submitRevisionVerdict).not.toHaveBeenCalled();
   });
@@ -294,8 +294,12 @@ describe("RevisionsSection", () => {
     expect(await screen.findByText("No changes")).toBeInTheDocument();
     expect(screen.getByText("Awaiting review")).toBeInTheDocument();
     expect(screen.getAllByTestId("revision-no-changes")).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Approve" })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(
+      screen.getAllByRole("button", { name: "Approve and create PR" }),
+    ).toHaveLength(1);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    );
     await waitFor(() =>
       expect(submitRevisionVerdict).toHaveBeenCalledWith(
         "W",
@@ -303,6 +307,7 @@ describe("RevisionsSection", () => {
         "approve",
         "",
         undefined,
+        false,
       ),
     );
   });
@@ -333,7 +338,9 @@ describe("RevisionsSection", () => {
     render(<RevisionsSection workspaceId="W" taskId="T" />);
     expect(await screen.findByText("Awaiting review")).toBeInTheDocument();
     expect(screen.queryByText("No changes")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    );
     await waitFor(() =>
       expect(submitRevisionVerdict).toHaveBeenCalledWith(
         "W",
@@ -341,6 +348,7 @@ describe("RevisionsSection", () => {
         "approve",
         "",
         undefined,
+        false,
       ),
     );
   });
