@@ -309,9 +309,63 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return TaskExecResult{}, err
 	}
 	if len(patch) == 0 {
-		return result, nil
+		return e.freezeNoChanges(ctx, req, runnerResult, result)
 	}
 	return e.finalizeAndFreezePatch(ctx, req, runnerResult, patch, result)
+}
+
+// freezeNoChanges keeps a completed attempt that changed nothing as evidence
+// (D29): its source revision equals its base, so the task closes as "No
+// changes" with no review, apply or PR. Failed or retained runs, and runs
+// without a host worktree or exact base, record nothing, as before.
+func (e HostBridgeTaskExecutor) freezeNoChanges(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
+	base := firstNonEmpty(runner.PatchBaseRef, runner.PatchBaseRefCamel, runner.BaseRef, runner.BaseRefCamel)
+	if result.Status != domain.TaskRunCompleted || strings.TrimSpace(e.WorktreePath) == "" || !fullCommitSHA(base) ||
+		result.RuntimeMetadata["patch_back_status"] == "retained" {
+		return result, nil
+	}
+	if result.RuntimeMetadata == nil {
+		result.RuntimeMetadata = map[string]string{}
+	}
+	repoName := firstNonEmpty(result.RuntimeMetadata["repo_name"], result.RuntimeMetadata["source_repo_id"])
+	if repoName == "" {
+		repoName = filepath.Base(e.WorktreePath)
+	}
+	attempt := taskCopyAttemptID(req.TaskRunID, req.SchedulerAttempt)
+	revision, err := driverfreeze.FreezeCapture(ctx, driverfreeze.CaptureRequest{
+		Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: repoName, Attempt: attempt,
+		Worktree: e.WorktreePath, Base: base, CaptureSHA: base, SourceRepo: result.RuntimeMetadata["source_repo_path"],
+		Outcome: string(result.Status), Complete: true,
+	})
+	if err != nil {
+		result.Status = domain.TaskRunFailed
+		if result.ExitCode == 0 {
+			result.ExitCode = 1
+		}
+		result.ErrorClass = "revision_freeze_failed"
+		result.ErrorMessage = err.Error()
+		result.RuntimeMetadata["patch_back_status"] = "retained"
+		return result, nil
+	}
+	result.RuntimeMetadata["patch_back_status"] = "frozen"
+	result.RuntimeMetadata["attempt_id"] = attempt
+	result.RuntimeMetadata["change_id"] = revision.Change
+	result.RuntimeMetadata["revision"] = strconv.Itoa(revision.Number)
+	result.RuntimeMetadata["revision_head_sha"] = revision.HeadSHA
+	result.RuntimeMetadata["revision_no_changes"] = strconv.FormatBool(revision.NoChanges)
+	return result, nil
+}
+
+func fullCommitSHA(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, c := range value {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {
