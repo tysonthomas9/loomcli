@@ -28,6 +28,16 @@ type Handlers struct {
 	Landing   Recoverer
 }
 
+// Handled reports whether reconcile has a recovery owner for a journal
+// operation. Status shows every other open request as needing attention.
+func Handled(operation string) bool {
+	switch operation {
+	case "ensure_workspace", "attach_workspace_repos", "apply":
+		return true
+	}
+	return false
+}
+
 // RunOnce classifies open journal entries before invoking any recovery owner.
 // Unhandled entries retain their fences for explicit repair. They name no
 // workspace, so they hold back workspace and apply recovery everywhere; landing

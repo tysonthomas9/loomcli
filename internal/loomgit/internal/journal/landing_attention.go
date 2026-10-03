@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 )
 
 // LandingAttention is a published change that landing reconcile cannot track
@@ -66,4 +68,17 @@ func (s *SQLite) LandingAttentions(ctx context.Context) ([]LandingAttention, err
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// UnfinishedEntries lists open journal requests for status. A journal written
+// before the journal table existed has none.
+func (s *SQLite) UnfinishedEntries(ctx context.Context) ([]loomgit.JournalEntry, error) {
+	var name string
+	err := s.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name='journal_entries'`).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	return s.OpenEntries(ctx)
 }
