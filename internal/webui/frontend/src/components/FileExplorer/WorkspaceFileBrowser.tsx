@@ -762,6 +762,19 @@ function FileBrowserInner({
     void refreshBranchDiffs();
   }, [refreshBranchDiffs, refreshGitStatus]);
 
+  // A hidden tab pane keeps this browser mounted, so catch up on the work an
+  // agent did meanwhile (its Changes count and groups) when it is shown again.
+  const wasActiveRef = useRef(isActive);
+  useEffect(() => {
+    const wasActive = wasActiveRef.current;
+    wasActiveRef.current = isActive;
+    if (isActive && !wasActive) {
+      void refreshCheckouts();
+      void refreshGitStatus();
+      void refreshBranchDiffs();
+    }
+  }, [isActive, refreshBranchDiffs, refreshCheckouts, refreshGitStatus]);
+
   useEffect(() => {
     const handleFocus = () => {
       void refreshCheckouts();

@@ -2391,6 +2391,44 @@ describe("WorkspaceFileBrowser", () => {
     ).toBeNull();
   });
 
+  it("re-reads an agent's changes when its hidden Files pane is shown (GT1)", async () => {
+    storeWorkingCompareMode();
+    const checkout = {
+      kind: "agent" as const,
+      agent: "agt_1",
+      repo: "loomcli",
+      exists: true,
+      change_count: 0,
+    };
+    mocks.listFileCheckouts.mockResolvedValue({ checkouts: [checkout] });
+    const agent = {
+      name: "agt_1",
+      repos: ["loomcli"],
+      repo_groups: [],
+      cross_repo: false,
+    };
+    const view = render(
+      <ExtraBrowserAgent.Provider value={agent}>
+        <WorkspaceFileBrowser mode="agent" agentName="agt_1" isActive={false} />
+      </ExtraBrowserAgent.Provider>,
+    );
+    expect(
+      await screen.findByRole("tab", { name: /Changes\s+0/ }),
+    ).toBeInTheDocument();
+
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [{ ...checkout, change_count: 2 }],
+    });
+    view.rerender(
+      <ExtraBrowserAgent.Provider value={agent}>
+        <WorkspaceFileBrowser mode="agent" agentName="agt_1" isActive />
+      </ExtraBrowserAgent.Provider>,
+    );
+    expect(
+      await screen.findByRole("tab", { name: /Changes\s+2/ }),
+    ).toBeInTheDocument();
+  });
+
   it("counts and groups an Agent API agent's uncommitted changes (GT1)", async () => {
     storeWorkingCompareMode();
     mocks.listFileCheckouts.mockResolvedValue({
