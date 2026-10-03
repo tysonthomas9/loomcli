@@ -110,6 +110,14 @@ func TestReadOnlyRunnerNeedsNoIdentityAndRejectsWrites(t *testing.T) {
 	if _, err := r.Run(context.Background(), "commit", "--allow-empty", "-m", "write"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("write allowed: %v", err)
 	}
+	// Only a commit's date may be shown; never git show's --output writer.
+	out := filepath.Join(dir, "written")
+	if _, err := r.Run(context.Background(), "show", "-s", "--format=%cI", "--output="+out); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("show --output allowed: %v", err)
+	}
+	if _, err := r.Run(context.Background(), "show", "HEAD"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("show allowed: %v", err)
+	}
 }
 
 func TestDefaultOptionsReadAllowlistedGlobalConfig(t *testing.T) {

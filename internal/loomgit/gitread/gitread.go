@@ -48,6 +48,7 @@ type Reader struct {
 		WorkspaceRepos(context.Context, string) ([]loomgit.WorkspaceRepo, error)
 	}
 	OpenRepo   func(string, string) (loomgit.RepoStore, error)
+	Tasks      TaskStore
 	FileBudget int
 }
 
@@ -276,7 +277,7 @@ func OpenLocal(repoPath func(string, string) string) (*Reader, func() error, err
 	if err != nil {
 		return nil, nil, err
 	}
-	r := &Reader{Revisions: store, Workspaces: store, OpenRepo: func(workspace, repo string) (loomgit.RepoStore, error) {
+	r := &Reader{Revisions: store, Workspaces: store, Tasks: store, OpenRepo: func(workspace, repo string) (loomgit.RepoStore, error) {
 		path := repoPath(workspace, repo)
 		if path == "" {
 			return nil, loomgit.NewError(loomgit.WorkspaceUnsupported, "local repo path is unavailable", nil)

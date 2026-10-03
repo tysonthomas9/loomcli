@@ -96,6 +96,10 @@ export function RevisionsSection({
     }
   }
 
+  // Review a task, not a revision: only each change's newest revision is
+  // reviewable here. Earlier ones are read-only under Changes → History.
+  const current = newestRevisions(revisions);
+
   return (
     <section
       className={styles.section}
@@ -106,7 +110,7 @@ export function RevisionsSection({
       {loading && <p>Loading revisions…</p>}
       {error && <p role="alert">{error}</p>}
       {!loading && revisions.length === 0 && <p>No revisions yet.</p>}
-      {revisions.map((revision) => {
+      {current.map((revision) => {
         const key = `${revision.change_id}:${revision.number}`;
         const disabled = Boolean(busy) || revision.incomplete;
         // The list reports the verdict for this exact revision head, so a new
@@ -199,4 +203,12 @@ export function RevisionsSection({
       })}
     </section>
   );
+}
+
+/** The newest revision of each change, in list order. */
+export function newestRevisions(revisions: ReviewRevision[]): ReviewRevision[] {
+  const newest = new Map<string, number>();
+  for (const r of revisions)
+    newest.set(r.change_id, Math.max(newest.get(r.change_id) ?? 0, r.number));
+  return revisions.filter((r) => newest.get(r.change_id) === r.number);
 }

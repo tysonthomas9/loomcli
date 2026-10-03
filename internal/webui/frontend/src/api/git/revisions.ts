@@ -71,3 +71,47 @@ export async function applyRevision(
   });
   if (error) throw apiErrorFromResponse(error, response);
 }
+
+export type RevisionDiff = components["schemas"]["RevisionDiff"];
+export type TaskDiff = components["schemas"]["TaskDiff"];
+
+/** One diff for the task: what its PR contains (or will contain). */
+export async function getTaskDiff(
+  workspaceId: string,
+  taskId: string,
+  lead?: string,
+): Promise<TaskDiff> {
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues/{id}/diff",
+    {
+      params: {
+        path: { ws: workspaceId, id: taskId },
+        ...(lead ? { query: { lead } } : {}),
+      },
+    },
+  );
+  if (error || !data) throw apiErrorFromResponse(error, response);
+  return data.data;
+}
+
+/** One recorded revision against its own base (read-only history). */
+export async function getRevisionDiff(
+  workspaceId: string,
+  revision: ReviewRevision,
+): Promise<RevisionDiff> {
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/changes/{change}/revisions/{r}/diff",
+    {
+      params: {
+        path: {
+          ws: workspaceId,
+          change: revision.change_id,
+          r: revision.number,
+        },
+        query: { repo: revision.repo },
+      },
+    },
+  );
+  if (error || !data) throw apiErrorFromResponse(error, response);
+  return data.data;
+}

@@ -2553,6 +2553,28 @@ describe("IssueDetailPanel", () => {
     });
   });
 
+  describe("Changes tab", () => {
+    it("follows Runs on a task and is absent elsewhere", () => {
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssue({ id: "t1", issue_type: "task" })}
+          onClose={() => {}}
+        />,
+      );
+      const names = screen.getAllByRole("tab").map((tab) => tab.textContent);
+      expect(names.slice(0, 3)).toEqual(["Details", "Runs", "Changes"]);
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssue({ id: "e1", issue_type: "epic" })}
+          onClose={() => {}}
+        />,
+      );
+      expect(screen.queryByRole("tab", { name: "Changes" })).toBeNull();
+    });
+  });
+
   describe("tab reset on issue change", () => {
     it("includes Runs tab on initial render", () => {
       const mockIssue = createTestIssue();

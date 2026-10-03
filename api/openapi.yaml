@@ -3475,6 +3475,85 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ReviewRevision"
+  /api/workspaces/{ws}/issues/{id}/diff:
+    get:
+      operationId: getTaskDiff
+      tags: [git]
+      summary: One diff for a task, the same as its PR
+      description: The task's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lead
+          in: query
+          required: false
+          description: Lead whose stack to compare in. Defaults to the lead that most recently applied the change.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task diff
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/TaskDiff"
+        "404":
+          description: The task has no revisions (error not_found) or the workspace has no revision journal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/workspaces/{ws}/changes/{change}/revisions/{r}/diff:
+    get:
+      operationId: getRevisionDiff
+      tags: [git]
+      summary: Diff of one recorded revision against its own base
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: change
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: r
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: repo
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Revision diff
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/RevisionDiff"
+        "400":
+          description: Missing or unknown repo (repo_selection_required).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/workspaces/{ws}/changes/{change}/feedback:
     get:
       operationId: listChangeFeedback
@@ -6471,10 +6550,13 @@ components:
           description: Zero until the captured revision is recorded.
     ReviewRevision:
       type: object
-      required: [change_id, number, head_sha, outcome, incomplete, applied, needs_working_area]
+      required: [change_id, repo, number, head_sha, outcome, incomplete, applied, needs_working_area, superseded]
       properties:
         change_id:
           type: string
+        repo:
+          type: string
+          description: Workspace repo name the revision diff route accepts.
         number:
           type: integer
         head_sha:
@@ -6491,6 +6573,53 @@ components:
         needs_working_area:
           type: boolean
           description: True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed.
+        superseded:
+          type: boolean
+          description: True when a newer source revision of the same change exists; verdicts on it are refused.
+        date:
+          type: string
+          description: Commit date (ISO 8601) of the revision head, when the repo is readable.
+    RevisionDiffFile:
+      type: object
+      required: [path, patchSize, truncated]
+      properties:
+        path:
+          type: string
+        patchSize:
+          type: integer
+        truncated:
+          type: boolean
+          description: True when the patch is too large to return; only path and size are sent.
+        patch:
+          type: string
+        hunks:
+          type: array
+          items:
+            type: string
+    RevisionDiff:
+      type: object
+      required: [revision, files]
+      properties:
+        revision:
+          type: integer
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/RevisionDiffFile"
+    TaskDiff:
+      allOf:
+        - $ref: "#/components/schemas/RevisionDiff"
+        - type: object
+          required: [change, repo, compare]
+          properties:
+            change:
+              type: string
+            repo:
+              type: string
+            compare:
+              type: string
+              enum: [layer, trunk, base]
+              description: "layer: against the layer below in the lead's stack; trunk: bottom layer; base: not applied, against the revision's own base."
     SessionResponse:
       type: object
       description: Session audit record from dto.SessionResponse

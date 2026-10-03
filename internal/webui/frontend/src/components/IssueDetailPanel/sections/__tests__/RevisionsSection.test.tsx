@@ -240,11 +240,10 @@ describe("RevisionsSection", () => {
     ]);
     render(<RevisionsSection workspaceId="W" taskId="T" />);
     expect(await screen.findByText("Awaiting review")).toBeInTheDocument();
-    for (const name of ["Approve", "Reject", "Override"]) {
-      const [decided, fresh] = screen.getAllByRole("button", { name });
-      expect(decided).toBeDisabled();
-      expect(fresh).toBeEnabled();
-    }
+    // Only the newest revision is reviewable; the older one moves to History.
+    expect(screen.queryByText("Revision 2")).not.toBeInTheDocument();
+    for (const name of ["Approve", "Reject", "Override"])
+      expect(screen.getByRole("button", { name })).toBeEnabled();
   });
 
   it("does not offer verdicts for an incomplete revision", async () => {

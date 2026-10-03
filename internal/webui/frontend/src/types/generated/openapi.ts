@@ -1780,6 +1780,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * One diff for a task, the same as its PR
+     * @description The task's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied.
+     */
+    get: operations["getTaskDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/changes/{change}/revisions/{r}/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Diff of one recorded revision against its own base */
+    get: operations["getRevisionDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/changes/{change}/feedback": {
     parameters: {
       query?: never;
@@ -3351,6 +3388,8 @@ export interface components {
     };
     ReviewRevision: {
       change_id: string;
+      /** @description Workspace repo name the revision diff route accepts. */
+      repo: string;
       number: number;
       head_sha: string;
       outcome: string;
@@ -3360,6 +3399,31 @@ export interface components {
       applied: boolean;
       /** @description True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed. */
       needs_working_area: boolean;
+      /** @description True when a newer source revision of the same change exists; verdicts on it are refused. */
+      superseded: boolean;
+      /** @description Commit date (ISO 8601) of the revision head, when the repo is readable. */
+      date?: string;
+    };
+    RevisionDiffFile: {
+      path: string;
+      patchSize: number;
+      /** @description True when the patch is too large to return; only path and size are sent. */
+      truncated: boolean;
+      patch?: string;
+      hunks?: string[];
+    };
+    RevisionDiff: {
+      revision: number;
+      files: components["schemas"]["RevisionDiffFile"][];
+    };
+    TaskDiff: components["schemas"]["RevisionDiff"] & {
+      change: string;
+      repo: string;
+      /**
+       * @description layer: against the layer below in the lead's stack; trunk: bottom layer; base: not applied, against the revision's own base.
+       * @enum {string}
+       */
+      compare: "layer" | "trunk" | "base";
     };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {
@@ -7819,6 +7883,84 @@ export interface operations {
             success: boolean;
             data: components["schemas"]["ReviewRevision"][];
           };
+        };
+      };
+    };
+  };
+  getTaskDiff: {
+    parameters: {
+      query?: {
+        /** @description Lead whose stack to compare in. Defaults to the lead that most recently applied the change. */
+        lead?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Task diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["TaskDiff"];
+          };
+        };
+      };
+      /** @description The task has no revisions (error not_found) or the workspace has no revision journal. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getRevisionDiff: {
+    parameters: {
+      query: {
+        repo: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+        r: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Revision diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["RevisionDiff"];
+          };
+        };
+      };
+      /** @description Missing or unknown repo (repo_selection_required). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };
