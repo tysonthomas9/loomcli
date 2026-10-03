@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -66,18 +67,27 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (AgentInfo, err
 		queued = err == nil
 	}
 	unlock()
-	if !queued { // the row is written: a retry or Reconcile finishes it and clears this
-		s.failed(ctx, a.AgentID, AttentionCreateIncomplete, err)
+	if !queued {
+		s.createFailed(ctx, a.AgentID, err)
 	}
 	if err != nil {
 		return AgentInfo{}, err
 	}
 	id := a.AgentID
 	if a, err = s.finishCreate(ctx, id); err != nil {
-		s.failed(ctx, id, AttentionCreateIncomplete, err) // a retry or Reconcile finishes it and clears this
+		s.createFailed(ctx, id, err)
 		return AgentInfo{}, err
 	}
 	return info(a), nil
+}
+
+// createFailed shows create_incomplete on agentID, whose Create failed after
+// its row was written; a retry or Reconcile finishes it and clears this. The
+// mark is saved even when the request was cancelled, within a bounded time.
+func (s *Service) createFailed(ctx context.Context, agentID string, err error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	s.failed(ctx, agentID, AttentionCreateIncomplete, err)
 }
 
 // sameCreate checks a Create replayed by ExternalKey against the agent it

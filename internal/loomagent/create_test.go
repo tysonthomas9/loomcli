@@ -938,3 +938,27 @@ func TestCreateQueueFirstFailureShowsAttention(t *testing.T) {
 			len(rows), rows[0].State, deref(rows[0].AttentionReason))
 	}
 }
+
+// A Create whose request is cancelled after its row is written still saves
+// create_incomplete: the mark does not use the cancelled request context.
+func TestCreateCancelAfterRowShowsAttention(t *testing.T) {
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	ctx, cancel := context.WithCancel(context.Background())
+	createCrash = func(p string) {
+		if p == "row" {
+			cancel()
+		}
+	}
+	t.Cleanup(func() { createCrash = func(string) {} })
+	req := leadReq("r1")
+	req.FirstMessage = "hello"
+	if _, err := s.Create(ctx, req); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Create = %v; want context.Canceled", err)
+	}
+	rows, _, _ := e.st.ListAgents(context.Background(), loomstore.AgentFilter{IncludeArchived: true})
+	if len(rows) != 1 || rows[0].State != StateCreating || deref(rows[0].AttentionReason) != AttentionCreateIncomplete {
+		t.Fatalf("rows = %d, state %s, Attention %v; want one creating row with create_incomplete",
+			len(rows), rows[0].State, deref(rows[0].AttentionReason))
+	}
+}
