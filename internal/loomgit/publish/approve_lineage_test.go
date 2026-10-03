@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -85,20 +86,12 @@ func wantDependents(t *testing.T, want map[string][]string) {
 	}
 }
 
-func TestApproveBuiltStackRecordsEachLayerOnTheOneBelowOnce(t *testing.T) {
+func TestApproveBuiltStackDependentsFollowPublishedOrder(t *testing.T) {
 	fx, forge, revisions := approvedStack(t, "loom")
 	ctx := context.Background()
 	want := map[string][]string{"A": {"task-B@repo"}, "B": {"task-C@repo"}, "C": {}}
 	wantDependents(t, want)
-	lineage, err := fx.store.ApprovalLineage(ctx, "W", "task-B", "repo")
-	if err != nil || lineage.PredecessorChange != "A" || lineage.PredecessorRevision != revisions[0].Number ||
-		lineage.BaseSHA != revisions[0].HeadSHA {
-		t.Fatalf("B lineage = %+v, %v", lineage, err)
-	}
-	if _, err := fx.store.ApprovalLineage(ctx, "W", "task-A", "repo"); !errors.Is(err, journal.ErrNotFound) {
-		t.Fatalf("bottom layer has lineage: %v", err)
-	}
-	// Re-publishing and re-approving the same stack never adds a second row.
+	// Re-publishing and re-approving the same stack never lists a task twice.
 	for range 2 {
 		if _, err := PublishLeadChangeLocal(ctx, "W", "L", "C"); err != nil {
 			t.Fatal(err)
@@ -112,7 +105,13 @@ func TestApproveBuiltStackRecordsEachLayerOnTheOneBelowOnce(t *testing.T) {
 	if len(forge.prs) != 3 {
 		t.Fatalf("republish opened PRs: %+v", forge.prs)
 	}
-	// Approve-built lineage never gates trunk publishing or approval following.
+	// A declared lineage to the same change is listed once.
+	if err := fx.store.RecordLocalLineage(ctx, journal.LocalLineage{Workspace: "W", Task: "task-C", Repo: "repo",
+		PredecessorChange: "B", PredecessorRevision: revisions[1].Number, BaseSHA: revisions[1].HeadSHA}); err != nil {
+		t.Fatal(err)
+	}
+	wantDependents(t, want)
+	// Approve-built order never gates trunk publishing or approval following.
 	if predecessor, err := fx.store.DependencyForChange(ctx, "W", "B"); err != nil || predecessor != "" {
 		t.Fatalf("declared dependency of B = %q, %v", predecessor, err)
 	}
@@ -121,7 +120,7 @@ func TestApproveBuiltStackRecordsEachLayerOnTheOneBelowOnce(t *testing.T) {
 	}
 }
 
-func TestTrunkModeApprovalRecordsNoStackLineage(t *testing.T) {
+func TestTrunkModeApprovalHasNoStackDependents(t *testing.T) {
 	fx, forge := approvalFixture(t, "trunk")
 	a := appliedTask(t, fx, "A", fx.base)
 	approveForLead(t, fx, a, reviewer, true, "applied")
@@ -131,32 +130,103 @@ func TestTrunkModeApprovalRecordsNoStackLineage(t *testing.T) {
 	if len(forge.prs) != 1 {
 		t.Fatalf("trunk PRs = %+v", forge.prs)
 	}
-	if _, err := fx.store.ApprovalLineage(context.Background(), "W", "T", "repo"); !errors.Is(err, journal.ErrNotFound) {
-		t.Fatalf("trunk approval recorded lineage: %v", err)
+	wantDependents(t, map[string][]string{"A": {}})
+}
+
+// A crash after the stack publication commits, before the approval intent
+// records its outcome, still leaves landing everything it needs.
+func TestApproveBuiltDependentsSurviveCrashAfterPublish(t *testing.T) {
+	fx, forge, _ := approvedStack(t, "loom")
+	ctx := context.Background()
+	d := appliedTask(t, fx, "D", git(t, fx.repo, "rev-parse", "HEAD"))
+	approveForLead(t, fx, d, reviewer, true, "applied")
+	previous := approvalPublishChange
+	approvalPublishChange = func(ctx context.Context, workspace, lead, change string) (Result, error) {
+		if _, err := previous(ctx, workspace, lead, change); err != nil {
+			return Result{}, err
+		}
+		return Result{}, errors.New("crash after publish")
+	}
+	t.Cleanup(func() { approvalPublishChange = previous })
+	if _, err := PublishApproved(ctx, "W", "L", nil); err == nil {
+		t.Fatal("injected crash did not surface")
+	}
+	if intent := intentStatus(t, fx, "D"); intent.Status != "pending" {
+		t.Fatalf("intent after crash = %+v", intent)
+	}
+	wantDependents(t, map[string][]string{"C": {"task-D@repo"}})
+	trunk := landBottom(t, fx, forge)
+	options := landing.Options{Dependents: landing.LocalDependents, Restack: RestackOffer}
+	if err := landing.ReconcileWithOptions(ctx, fx.store, forge, options); err != nil {
+		t.Fatal(err)
+	}
+	if publication, _, err := fx.store.Publication(ctx, "W", "B"); err != nil || publication.Trunk != "develop" {
+		t.Fatalf("B after crash and landing = %+v, %v (trunk %s)", publication, err, trunk)
 	}
 }
 
-func TestUnapplySplicesApproveBuiltLineage(t *testing.T) {
-	fx, _, revisions := approvedStack(t, "loom")
+// Two approvals published at the same time each publish the whole stack under
+// its lease; the dependents read the final publication records.
+func TestConcurrentApprovalsLeaveOneStackOrder(t *testing.T) {
+	fx, forge := approvalFixture(t, "stack")
+	ctx := context.Background()
+	a := appliedTask(t, fx, "A", fx.base)
+	approveForLead(t, fx, a, reviewer, true, "applied")
+	if _, err := PublishApproved(ctx, "W", "L", nil); err != nil {
+		t.Fatal(err)
+	}
+	b := appliedTask(t, fx, "B", a.HeadSHA)
+	c := appliedTask(t, fx, "C", b.HeadSHA)
+	approveForLead(t, fx, b, reviewer, true, "applied")
+	approveForLead(t, fx, c, reviewer, true, "applied")
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for index := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[index] = PublishApproved(ctx, "W", "L", nil)
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(forge.prs) != 3 || forge.prs[1].Base != forge.prs[0].Head || forge.prs[2].Base != forge.prs[1].Head {
+		t.Fatalf("concurrent approvals PRs = %+v", forge.prs)
+	}
+	wantDependents(t, map[string][]string{"A": {"task-B@repo"}, "B": {"task-C@repo"}, "C": {}})
+}
+
+func TestUnapplyDropsLayerFromApproveBuiltDependents(t *testing.T) {
+	fx, forge, _ := approvedStack(t, "loom")
 	ctx := context.Background()
 	if _, err := pull.UnapplyLocal(ctx, fx.repo, "B", "unapply-B"); err != nil {
 		t.Fatal(err)
 	}
+	// B left the stack at once; C's PR still sits on B's branch until republished.
+	wantDependents(t, map[string][]string{"A": {}, "B": {"task-C@repo"}})
+	if _, err := PublishLeadChangeLocal(ctx, "W", "L", "C"); err != nil {
+		t.Fatal(err)
+	}
+	if forge.prs[2].Base != forge.prs[0].Head {
+		t.Fatalf("C PR after republish = %+v", forge.prs[2])
+	}
 	wantDependents(t, map[string][]string{"A": {"task-C@repo"}, "B": {}})
-	if _, err := fx.store.ApprovalLineage(ctx, "W", "task-B", "repo"); !errors.Is(err, journal.ErrNotFound) {
-		t.Fatalf("unapplied B keeps lineage: %v", err)
-	}
-	lineage, err := fx.store.ApprovalLineage(ctx, "W", "task-C", "repo")
-	if err != nil || lineage.PredecessorChange != "A" || lineage.BaseSHA != revisions[0].HeadSHA {
-		t.Fatalf("C lineage after Unapply B = %+v, %v", lineage, err)
-	}
 	if _, err := pull.UnapplyLocal(ctx, fx.repo, "A", "unapply-A"); err != nil {
 		t.Fatal(err)
 	}
-	wantDependents(t, map[string][]string{"A": {}, "B": {}, "C": {}})
-	if _, err := fx.store.ApprovalLineage(ctx, "W", "task-C", "repo"); !errors.Is(err, journal.ErrNotFound) {
-		t.Fatalf("new bottom C keeps lineage: %v", err)
+	// C's PR still sits on A's: if A's PR merges, C must still be restacked.
+	wantDependents(t, map[string][]string{"A": {"task-C@repo"}})
+	if _, err := PublishLeadChangeLocal(ctx, "W", "L", "C"); err != nil {
+		t.Fatal(err)
 	}
+	if forge.prs[2].Base != "develop" {
+		t.Fatalf("C PR after A left = %+v", forge.prs[2])
+	}
+	wantDependents(t, map[string][]string{"A": {}, "C": {}})
 }
 
 // landBottom squash-merges A onto develop on the provider.
@@ -256,5 +326,22 @@ func TestLandingRestacksApproveBuiltStackNative(t *testing.T) {
 	}
 	if revision, err := fx.store.SourceRevision(ctx, "W", "C"); err != nil || revision <= revisions[2].Number {
 		t.Fatalf("C derived revision = %d, %v", revision, err)
+	}
+}
+
+// A stack declared with `loom stack` keeps only its declared lineage: its
+// publication order adds no dependents.
+func TestDeclaredStackPublicationAddsNoDependents(t *testing.T) {
+	fixture, _, _ := landingStackFixture(t, false, "loom")
+	ctx := context.Background()
+	if _, err := fixture.store.DriverChange(ctx, "W", "task-B", "repo", "B"); err != nil {
+		t.Fatal(err)
+	}
+	if publication, found, err := fixture.store.Publication(ctx, "W", "B"); err != nil || !found || publication.StackID != "feature-1" {
+		t.Fatalf("declared publication = %+v, %v", publication, err)
+	}
+	found, err := fixture.store.DependentsOf(ctx, "W", "A")
+	if err != nil || len(found) != 0 {
+		t.Fatalf("declared stack dependents = %+v, %v", found, err)
 	}
 }
