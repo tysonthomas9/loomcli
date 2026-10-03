@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/applyrecovery"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -371,4 +372,29 @@ func recoveryGit(t *testing.T, repo string, args ...string) string {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func TestApplyRecoveryFailureHoldsBackOnlyItsLead(t *testing.T) {
+	ctx, store, _, base := recoveryFixture(t)
+	defer func() { _ = store.Close() }()
+	// V/L sorts first and has no working area; W/L can recover.
+	for _, layer := range []loomgit.AppliedLayer{
+		{RequestID: "broken", Workspace: "V", Lead: "L", Change: "C", Revision: 1, OldTip: base, NewTip: base},
+		{RequestID: "healthy", Workspace: "W", Lead: "L", Change: "C", Revision: 1, OldTip: base, NewTip: base},
+	} {
+		if err := store.SaveApplied(ctx, layer); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := applyrecovery.Recover(ctx)
+	var coded *loomgit.Error
+	if !errors.As(err, &coded) || coded.Code() != string(loomgit.AttentionRequired) || !strings.Contains(err.Error(), "V/L") {
+		t.Fatalf("apply recovery = %v", err)
+	}
+	if open, err := store.OpenApplied(ctx, "W", "L"); err != nil || len(open) != 0 {
+		t.Fatalf("healthy lead still open: %+v, %v", open, err)
+	}
+	if open, err := store.OpenApplied(ctx, "V", "L"); err != nil || len(open) != 1 || open[0].Phase != "prepared" {
+		t.Fatalf("broken lead changed: %+v, %v", open, err)
+	}
 }

@@ -34,18 +34,16 @@ var (
 // workspace owner. Apply recovery is wired by its owner separately.
 func ReconcileJournal(ctx context.Context, s storepkg.Store) error {
 	var landingErr error
-	if err := reconcile.RunOnce(ctx, reconcile.Handlers{
+	journalErr := reconcile.RunOnce(ctx, reconcile.Handlers{
 		Workspace: reconcile.RecoverFunc(func(ctx context.Context) error { return Reconcile(ctx, s) }),
-		Apply:     reconcile.RecoverFunc(func(ctx context.Context) error { return recoverPullThenApply(ctx, applyrecovery.Recover) }),
+		Apply:     reconcile.RecoverFunc(func(ctx context.Context) error { return recoverPullThenApply(ctx, applyrecovery.RecoverExcept) }),
 		Landing: reconcile.RecoverFunc(func(ctx context.Context) error {
 			landingErr = landingPass(ctx)
 			return nil
 		}),
-	}); err != nil {
-		return err
-	}
+	})
 	nativeErr := nativePass(ctx)
-	return errors.Join(landingErr, nativeErr, abandonPass(ctx, s.AgentSessions()))
+	return errors.Join(journalErr, landingErr, nativeErr, abandonPass(ctx, s.AgentSessions()))
 }
 
 func landingOptions() landing.Options {
