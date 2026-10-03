@@ -181,7 +181,12 @@ if [[ "$case_name" == stack ]]; then
   pulls pulls-after-approve-only.json
   test "$(json "$case_dir/pulls-after-approve-only.json" 'len(d)')" = 2
   browser click '[data-testid="create-pr"]' >/dev/null
-  browser wait '[data-testid="revision-pr"]' >/dev/null
+  if ! browser wait '[data-testid="revision-pr"]' >/dev/null; then
+    browser eval "document.querySelector('[data-testid=\"revisions-section\"] [role=alert]')?.textContent" >&2 || true
+    curl -sS -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' \
+      -d "{\"change_id\":\"$(newest c | cut -d' ' -f1)\"}" >&2 || true
+    exit 1
+  fi
   wait_pulls 3
   python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert p[2]["base"]["ref"]==p[1]["head"]["ref"], p' "$case_dir/pulls-3.json"
   # PR C's head is C's layer commit, the top of the lead working area.
