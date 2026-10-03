@@ -24,6 +24,7 @@ import { useToast } from "@/hooks/ui";
 import { restartOnboarding } from "@/utils/onboardingState";
 import { requestCliSetup } from "@/utils/cliSetup";
 
+import { GitSettingsPanel } from "./GitSettingsPanel";
 import styles from "./SettingsView.module.css";
 
 export interface SettingsViewProps {
@@ -48,6 +49,7 @@ type SettingsCategory =
   | "agents"
   | "runtimes"
   | "integrations"
+  | "git"
   | "storage";
 
 const SETTINGS_CATEGORIES: {
@@ -79,6 +81,11 @@ const SETTINGS_CATEGORIES: {
     id: "integrations",
     label: "Integrations",
     description: "Connected services and credentials.",
+  },
+  {
+    id: "git",
+    label: "Git",
+    description: "Delivery mode and what the lead may do.",
   },
   {
     id: "storage",
@@ -132,6 +139,15 @@ function SettingsCategoryIcon({ category }: { category: SettingsCategory }) {
       return (
         <svg {...common}>
           <path d="M9 3v5M15 3v5M7 8h10v4a5 5 0 0 1-10 0V8ZM12 17v4" />
+        </svg>
+      );
+    case "git":
+      return (
+        <svg {...common}>
+          <circle cx="6" cy="6" r="2.2" />
+          <circle cx="6" cy="18" r="2.2" />
+          <circle cx="18" cy="9" r="2.2" />
+          <path d="M6 8.2v7.6M18 11.2c0 3.5-4 4-9.8 5.3" />
         </svg>
       );
     case "storage":
@@ -977,6 +993,21 @@ export function SettingsView({
               </div>
             </div>
           </div>
+
+          <GitSettingsPanel
+            workspaceId={workspaceId}
+            categoryHidden={categoryHidden("git")}
+            searchHidden={
+              !panelMatches(
+                "git",
+                "delivery mode",
+                "stacked prs",
+                "pr per task",
+                "lead may approve",
+                "lead may merge",
+              ) || undefined
+            }
+          />
 
           {/* FleetDB Redis */}
           <div

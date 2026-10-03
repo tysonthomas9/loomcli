@@ -365,6 +365,42 @@ func (e FilePartialReason) Valid() bool {
 	}
 }
 
+// Defines values for GitSettingsDeliveryMode.
+const (
+	GitSettingsDeliveryModeStack GitSettingsDeliveryMode = "stack"
+	GitSettingsDeliveryModeTrunk GitSettingsDeliveryMode = "trunk"
+)
+
+// Valid indicates whether the value is a known member of the GitSettingsDeliveryMode enum.
+func (e GitSettingsDeliveryMode) Valid() bool {
+	switch e {
+	case GitSettingsDeliveryModeStack:
+		return true
+	case GitSettingsDeliveryModeTrunk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitSettingsLeadMayMerge.
+const (
+	GitSettingsLeadMayMergeOff       GitSettingsLeadMayMerge = "off"
+	GitSettingsLeadMayMergeWhenGreen GitSettingsLeadMayMerge = "when_green"
+)
+
+// Valid indicates whether the value is a known member of the GitSettingsLeadMayMerge enum.
+func (e GitSettingsLeadMayMerge) Valid() bool {
+	switch e {
+	case GitSettingsLeadMayMergeOff:
+		return true
+	case GitSettingsLeadMayMergeWhenGreen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for IssueAgentState.
 const (
 	IssueAgentStateDead     IssueAgentState = "dead"
@@ -1493,6 +1529,63 @@ func (e GetScopedFileTreeParamsScope) Valid() bool {
 	}
 }
 
+// Defines values for UpdateGitSettingsJSONBodyActorKind.
+const (
+	Agent UpdateGitSettingsJSONBodyActorKind = "agent"
+	Human UpdateGitSettingsJSONBodyActorKind = "human"
+	Lead  UpdateGitSettingsJSONBodyActorKind = "lead"
+)
+
+// Valid indicates whether the value is a known member of the UpdateGitSettingsJSONBodyActorKind enum.
+func (e UpdateGitSettingsJSONBodyActorKind) Valid() bool {
+	switch e {
+	case Agent:
+		return true
+	case Human:
+		return true
+	case Lead:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateGitSettingsJSONBodyDeliveryMode.
+const (
+	UpdateGitSettingsJSONBodyDeliveryModeStack UpdateGitSettingsJSONBodyDeliveryMode = "stack"
+	UpdateGitSettingsJSONBodyDeliveryModeTrunk UpdateGitSettingsJSONBodyDeliveryMode = "trunk"
+)
+
+// Valid indicates whether the value is a known member of the UpdateGitSettingsJSONBodyDeliveryMode enum.
+func (e UpdateGitSettingsJSONBodyDeliveryMode) Valid() bool {
+	switch e {
+	case UpdateGitSettingsJSONBodyDeliveryModeStack:
+		return true
+	case UpdateGitSettingsJSONBodyDeliveryModeTrunk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UpdateGitSettingsJSONBodyLeadMayMerge.
+const (
+	UpdateGitSettingsJSONBodyLeadMayMergeOff       UpdateGitSettingsJSONBodyLeadMayMerge = "off"
+	UpdateGitSettingsJSONBodyLeadMayMergeWhenGreen UpdateGitSettingsJSONBodyLeadMayMerge = "when_green"
+)
+
+// Valid indicates whether the value is a known member of the UpdateGitSettingsJSONBodyLeadMayMerge enum.
+func (e UpdateGitSettingsJSONBodyLeadMayMerge) Valid() bool {
+	switch e {
+	case UpdateGitSettingsJSONBodyLeadMayMergeOff:
+		return true
+	case UpdateGitSettingsJSONBodyLeadMayMergeWhenGreen:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListIssuesParamsStatus.
 const (
 	ListIssuesParamsStatusBlocked    ListIssuesParamsStatus = "blocked"
@@ -2176,6 +2269,19 @@ type FileWriteRequest struct {
 	// Repo Optional repo qualifier, valid only when scope=agent.
 	Repo *string `json:"repo,omitempty"`
 }
+
+// GitSettings defines model for GitSettings.
+type GitSettings struct {
+	DeliveryMode          GitSettingsDeliveryMode `json:"delivery_mode"`
+	LeadMayApprovePublish bool                    `json:"lead_may_approve_publish"`
+	LeadMayMerge          GitSettingsLeadMayMerge `json:"lead_may_merge"`
+}
+
+// GitSettingsDeliveryMode defines model for GitSettings.DeliveryMode.
+type GitSettingsDeliveryMode string
+
+// GitSettingsLeadMayMerge defines model for GitSettings.LeadMayMerge.
+type GitSettingsLeadMayMerge string
 
 // HourlyBucket defines model for HourlyBucket.
 type HourlyBucket struct {
@@ -3744,6 +3850,26 @@ type GitApplyJSONBody struct {
 	Revision  int     `json:"revision"`
 }
 
+// UpdateGitSettingsJSONBody defines parameters for UpdateGitSettings.
+type UpdateGitSettingsJSONBody struct {
+	Actor struct {
+		Id   *string                            `json:"id,omitempty"`
+		Kind UpdateGitSettingsJSONBodyActorKind `json:"kind"`
+	} `json:"actor"`
+	DeliveryMode          *UpdateGitSettingsJSONBodyDeliveryMode `json:"delivery_mode,omitempty"`
+	LeadMayApprovePublish *bool                                  `json:"lead_may_approve_publish,omitempty"`
+	LeadMayMerge          *UpdateGitSettingsJSONBodyLeadMayMerge `json:"lead_may_merge,omitempty"`
+}
+
+// UpdateGitSettingsJSONBodyActorKind defines parameters for UpdateGitSettings.
+type UpdateGitSettingsJSONBodyActorKind string
+
+// UpdateGitSettingsJSONBodyDeliveryMode defines parameters for UpdateGitSettings.
+type UpdateGitSettingsJSONBodyDeliveryMode string
+
+// UpdateGitSettingsJSONBodyLeadMayMerge defines parameters for UpdateGitSettings.
+type UpdateGitSettingsJSONBodyLeadMayMerge string
+
 // ListIssuesParams defines parameters for ListIssues.
 type ListIssuesParams struct {
 	Status   *ListIssuesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
@@ -4003,6 +4129,9 @@ type FleetRegisterJSONRequestBody = FleetRegisterJSONBody
 
 // GitApplyJSONRequestBody defines body for GitApply for application/json ContentType.
 type GitApplyJSONRequestBody GitApplyJSONBody
+
+// UpdateGitSettingsJSONRequestBody defines body for UpdateGitSettings for application/json ContentType.
+type UpdateGitSettingsJSONRequestBody UpdateGitSettingsJSONBody
 
 // CreateIssueJSONRequestBody defines body for CreateIssue for application/json ContentType.
 type CreateIssueJSONRequestBody = CreateIssueRequest

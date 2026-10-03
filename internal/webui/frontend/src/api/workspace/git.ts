@@ -3,7 +3,7 @@
  * Uses raw fetch because most spec responses are untyped Record<string, never>.
  */
 
-import { get, post, patch, wsUrl } from "@/api/common";
+import { get, post, patch, put, wsUrl } from "@/api/common";
 
 // ============= Types =============
 
@@ -87,6 +87,28 @@ export async function gitMergeUpTo(
       heads: preview.layers.map((layer) => layer.head),
       actor: LOCAL_HUMAN,
     },
+  );
+}
+
+export interface GitSettings {
+  delivery_mode: "stack" | "trunk";
+  lead_may_approve_publish: boolean;
+  lead_may_merge: "off" | "when_green";
+}
+
+export async function getGitSettings(
+  workspaceId: string,
+): Promise<GitSettings> {
+  return get<GitSettings>(wsUrl(workspaceId, "/git/settings"));
+}
+
+export async function updateGitSettings(
+  workspaceId: string,
+  change: Partial<GitSettings>,
+): Promise<{ settings: GitSettings; warning: string }> {
+  return put<{ settings: GitSettings; warning: string }>(
+    wsUrl(workspaceId, "/git/settings"),
+    { ...change, actor: LOCAL_HUMAN },
   );
 }
 

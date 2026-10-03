@@ -67,4 +67,6 @@ func (m *Module) Register(mux *http.ServeMux) {
 		handleVerdictWithPublisher(w, r, m.epicPublish)
 	})
 	mux.HandleFunc("PUT /api/workspaces/{ws}/git/following/{lead}", handleFollowing)
+	mux.HandleFunc("GET /api/workspaces/{ws}/git/settings", handleGitSettings)
+	mux.HandleFunc("PUT /api/workspaces/{ws}/git/settings", handleGitSettings)
 }

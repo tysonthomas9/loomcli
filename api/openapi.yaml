@@ -2861,6 +2861,67 @@ paths:
               schema:
                 type: object
 
+  /api/workspaces/{ws}/git/settings:
+    get:
+      operationId: getGitSettings
+      tags: [git]
+      summary: Read the workspace Git settings (delivery mode, lead may approve, lead may merge)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Current Git settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitSettings"
+    put:
+      operationId: updateGitSettings
+      tags: [git]
+      summary: Change workspace Git settings; lead may approve and lead may merge are human only
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor]
+              properties:
+                delivery_mode:
+                  type: string
+                  enum: [stack, trunk]
+                lead_may_approve_publish:
+                  type: boolean
+                lead_may_merge:
+                  type: string
+                  enum: ["off", when_green]
+                actor:
+                  type: object
+                  required: [kind]
+                  properties:
+                    kind:
+                      type: string
+                      enum: [human, agent, lead]
+                    id:
+                      type: string
+      responses:
+        "200":
+          description: Updated Git settings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [settings, warning]
+                properties:
+                  settings:
+                    $ref: "#/components/schemas/GitSettings"
+                  warning:
+                    type: string
+        "403":
+          description: The actor may not change this setting
+
   /api/workspaces/{ws}/git/apply:
     post:
       operationId: gitApply
@@ -4759,6 +4820,18 @@ components:
         type: string
 
   schemas:
+    GitSettings:
+      type: object
+      required: [delivery_mode, lead_may_approve_publish, lead_may_merge]
+      properties:
+        delivery_mode:
+          type: string
+          enum: [stack, trunk]
+        lead_may_approve_publish:
+          type: boolean
+        lead_may_merge:
+          type: string
+          enum: ["off", when_green]
     MergeStackView:
       type: object
       required: [stack_id, target, backend, phase, layers]

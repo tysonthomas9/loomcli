@@ -35,6 +35,17 @@ vi.mock("@/hooks/workspace", async () => {
     useLocalSettings: vi.fn(),
     useWorkspaceDesignFormat: vi.fn(),
     useWorkspaceContext: vi.fn(),
+    useGitSettings: vi.fn(() => ({
+      settings: {
+        delivery_mode: "stack",
+        lead_may_approve_publish: true,
+        lead_may_merge: "off",
+      },
+      error: "",
+      warning: "",
+      isSaving: false,
+      update: vi.fn(),
+    })),
   };
 });
 
@@ -771,6 +782,19 @@ describe("SettingsView", () => {
       expect(
         screen.getByRole("heading", { name: "AI CLIs", level: 2 }),
       ).toBeInTheDocument();
+    });
+
+    it("shows the Git section under the Git category", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+      const gitPanel = screen.getByTestId("git-settings-panel");
+      expect(gitPanel).toHaveAttribute("data-category-hidden", "true");
+
+      fireEvent.click(screen.getByRole("button", { name: /^Git$/ }));
+
+      expect(gitPanel).not.toHaveAttribute("data-category-hidden");
+      expect(screen.getByTestId("git-delivery-mode")).toHaveValue("stack");
     });
   });
 

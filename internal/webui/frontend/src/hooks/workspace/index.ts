@@ -6,6 +6,8 @@ export { useBackendConfig } from "./useBackendConfig";
 export type { UseBackendConfigReturn } from "./useBackendConfig";
 
 export { useWorkspaceDesignFormat } from "./useWorkspaceDesignFormat";
+export { useGitSettings } from "./useGitSettings";
+export type { GitSettings } from "./useGitSettings";
 export type { UseWorkspaceDesignFormatReturn } from "./useWorkspaceDesignFormat";
 
 export { useDeleteWorkspaceAgent } from "./useDeleteWorkspaceAgent";

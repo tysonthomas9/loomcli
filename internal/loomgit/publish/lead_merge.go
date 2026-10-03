@@ -49,16 +49,8 @@ func (authority whenGreenMerge) AuthorizeMerge(ctx context.Context, request Stac
 // SetWorkspacePolicy changes lead_may_merge. Only a human may call it.
 func SetWorkspacePolicy(ctx context.Context, store *journal.SQLite, workspace, leadMayMerge string,
 	actor review.Actor, env []string) (string, error) {
-	if actor.Kind != "human" || strings.TrimSpace(actor.ID) == "" {
-		return "", loomgit.NewError(loomgit.MergeNotAuthorized, "only a human can change workspace policy", nil)
-	}
-	for _, entry := range env {
-		name, _, _ := strings.Cut(entry, "=")
-		for _, marker := range agentEnvMarkers {
-			if strings.HasPrefix(name, marker) {
-				return "", loomgit.NewError(loomgit.MergeNotAuthorized, "workspace policy change carries agent marker "+name, nil)
-			}
-		}
+	if err := requireHumanPolicyActor(actor, env); err != nil {
+		return "", err
 	}
 	if err := store.SetLeadMayMerge(ctx, workspace, leadMayMerge, actor.ID); err != nil {
 		return "", err
@@ -67,6 +59,23 @@ func SetWorkspacePolicy(ctx context.Context, store *journal.SQLite, workspace, l
 		return journal.LeadMayMergeWarning, nil
 	}
 	return "", nil
+}
+
+// requireHumanPolicyActor refuses a policy change that is not a human's or
+// that carries an agent runtime marker.
+func requireHumanPolicyActor(actor review.Actor, env []string) error {
+	if actor.Kind != "human" || strings.TrimSpace(actor.ID) == "" {
+		return loomgit.NewError(loomgit.MergeNotAuthorized, "only a human can change workspace policy", nil)
+	}
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		for _, marker := range agentEnvMarkers {
+			if strings.HasPrefix(name, marker) {
+				return loomgit.NewError(loomgit.MergeNotAuthorized, "workspace policy change carries agent marker "+name, nil)
+			}
+		}
+	}
+	return nil
 }
 
 func SetWorkspacePolicyLocal(ctx context.Context, workspace, leadMayMerge string, actor review.Actor, env []string) (string, error) {
