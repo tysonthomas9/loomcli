@@ -75,6 +75,20 @@ func install(ctx context.Context, runner *gitexec.Runner, ref, sha string) error
 }
 
 func installRevision(ctx context.Context, store loomgit.RevisionStore, runner *gitexec.Runner, r loomgit.Revision, head string) (loomgit.Revision, error) {
+	r, err := installRefs(ctx, runner, r, head)
+	if err != nil {
+		return r, err
+	}
+	r.Ready = true
+	if err := store.FinishRevision(ctx, r); err != nil {
+		return r, err
+	}
+	return r, nil
+}
+
+// installRefs points the revision's refs at its base and head; the revision
+// stays an unfinished reservation until the store finishes it.
+func installRefs(ctx context.Context, runner *gitexec.Runner, r loomgit.Revision, head string) (loomgit.Revision, error) {
 	baseRef, err := refname.RevisionBase(r.Workspace, r.Change, strconv.Itoa(r.Number))
 	if err != nil {
 		return r, err
@@ -89,10 +103,7 @@ func installRevision(ctx context.Context, store loomgit.RevisionStore, runner *g
 	if err := install(ctx, runner, headRef, head); err != nil {
 		return r, err
 	}
-	r.HeadSHA, r.Ready = head, true
-	if err := store.FinishRevision(ctx, r); err != nil {
-		return r, err
-	}
+	r.HeadSHA = head
 	return r, nil
 }
 
@@ -174,6 +185,18 @@ func ImportSource(ctx context.Context, store loomgit.RevisionStore, runner *gite
 // RecordDerived records a new revision of the same change for an applied or
 // rebuilt layer. Source refs are never updated.
 func RecordDerived(ctx context.Context, store loomgit.RevisionStore, runner *gitexec.Runner, in DerivedInput) (loomgit.Revision, error) {
+	r, err := PrepareDerived(ctx, store, runner, in)
+	if err != nil || r.Ready {
+		return r, err
+	}
+	r.Ready = true
+	return r, store.FinishRevision(ctx, r)
+}
+
+// PrepareDerived reserves a derived revision and installs its refs without
+// finishing it, so the caller can finish it atomically with the record that
+// holds it. A revision already finished for this request is returned ready.
+func PrepareDerived(ctx context.Context, store loomgit.RevisionStore, runner *gitexec.Runner, in DerivedInput) (loomgit.Revision, error) {
 	if err := validateNames(in.Workspace, in.Change); err != nil {
 		return loomgit.Revision{}, err
 	}
@@ -203,5 +226,5 @@ func RecordDerived(ctx context.Context, store loomgit.RevisionStore, runner *git
 	if err != nil || r.Ready {
 		return r, err
 	}
-	return installRevision(ctx, store, runner, r, in.HeadSHA)
+	return installRefs(ctx, runner, r, in.HeadSHA)
 }

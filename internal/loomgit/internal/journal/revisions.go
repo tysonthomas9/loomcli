@@ -68,6 +68,31 @@ func (s *SQLite) FinishRevision(ctx context.Context, r loomgit.Revision) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := finishRevision(ctx, tx, r); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// FinishRevisionWithLayer finishes a derived revision and journals the applied
+// layer that holds it in one transaction: if the layer is refused, the revision
+// stays an unfinished reservation instead of a ready revision with no layer.
+func (s *SQLite) FinishRevisionWithLayer(ctx context.Context, r loomgit.Revision, layer loomgit.AppliedLayer) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := finishRevision(ctx, tx, r); err != nil {
+		return err
+	}
+	if err := saveApplied(ctx, tx, layer); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func finishRevision(ctx context.Context, tx *sql.Tx, r loomgit.Revision) error {
 	result, err := tx.ExecContext(ctx, `UPDATE change_revisions SET head_sha = ?, ready = 1
 		WHERE workspace = ? AND change_id = ? AND number = ? AND request_id = ?
 		AND ready = 0 AND (head_sha = '' OR head_sha = ?)`, r.HeadSHA, r.Workspace, r.Change, r.Number, r.RequestID, r.HeadSHA)
@@ -104,7 +129,7 @@ func (s *SQLite) FinishRevision(ctx context.Context, r loomgit.Revision) error {
 		r.Workspace, r.Change, r.RequestID, r.BaseSHA, r.Number); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func queueRevisionEvent(ctx context.Context, tx *sql.Tx, revision loomgit.Revision) error {

@@ -31,6 +31,8 @@ type Store interface {
 	WorkingAreas(context.Context, string, string) ([]journal.WorkingArea, error)
 	OpenApplied(context.Context, string, string) ([]loomgit.AppliedLayer, error)
 	AppliedRequest(context.Context, string) (loomgit.AppliedLayer, bool, error)
+	FinishRevisionWithLayer(context.Context, loomgit.Revision, loomgit.AppliedLayer) error
+	RevisionByRequest(context.Context, string) (loomgit.Revision, error)
 }
 
 type Request struct {
@@ -52,6 +54,7 @@ type Service struct {
 	beforeIndexLock  func()
 	onIndexLocked    func()
 	beforeRecoverCAS func()
+	beforeSaveLayer  func()
 }
 
 func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
@@ -211,18 +214,15 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 	}
 	result := Result{HeadSHA: trial.HeadSHA, DroppedCommits: trial.DroppedCommits}
 	if layerBase != source.BaseSHA {
-		result.Derived, err = changeset.RecordDerived(ctx, s.store, s.runner, changeset.DerivedInput{
-			Workspace: in.Workspace, Change: in.Change, RequestID: in.RequestID + ":derived:" + old,
-			FromNumber: source.Number, Operation: "apply", BaseSHA: old,
-			HeadSHA: trial.HeadSHA, Outcome: source.Outcome,
-		})
-		if err != nil {
+		if trial, result.Derived, err = s.prepareDerived(ctx, in, source, old, trial); err != nil {
 			return Result{}, err
 		}
+		result.HeadSHA = trial.HeadSHA
 	}
 	if err := s.recordLayer(ctx, in, source, layerBase, trial, result.Derived); err != nil {
 		return Result{}, err
 	}
+	result.Derived.Ready = result.Derived.Number != 0
 	if err := s.install(ctx, branch, indexPath, old, trial.HeadSHA, in.RequestID, lockOwned, keepLock); err != nil {
 		return result, err
 	}
@@ -261,6 +261,42 @@ func (s *Service) settledRequest(ctx context.Context, in Request) (Result, bool,
 		// SaveApplied would refuse this request; fail before deriving anything.
 		return Result{}, true, loomgit.NewError(loomgit.Stale, "apply request already recorded in phase "+prior.Phase, nil)
 	}
+}
+
+// prepareDerived reserves the derived revision for a replay onto old. It is
+// left unfinished: it becomes ready only together with its layer.
+func (s *Service) prepareDerived(ctx context.Context, in Request, source loomgit.Revision, old string,
+	trial replay.Result) (replay.Result, loomgit.Revision, error) {
+	derivedID := in.RequestID + ":derived:" + old
+	trial, err := s.reuseReplay(ctx, derivedID, old, trial)
+	if err != nil {
+		return trial, loomgit.Revision{}, err
+	}
+	derived, err := changeset.PrepareDerived(ctx, s.store, s.runner, changeset.DerivedInput{
+		Workspace: in.Workspace, Change: in.Change, RequestID: derivedID,
+		FromNumber: source.Number, Operation: "apply", BaseSHA: old,
+		HeadSHA: trial.HeadSHA, Outcome: source.Outcome,
+	})
+	return trial, derived, err
+}
+
+// reuseReplay keeps a retried request on the commit an earlier pass already
+// replayed and reserved for the same base and tree, so the reservation (and
+// its refs) is finished instead of clashing with a fresh replay commit.
+func (s *Service) reuseReplay(ctx context.Context, derivedID, old string, trial replay.Result) (replay.Result, error) {
+	prior, err := s.store.RevisionByRequest(ctx, derivedID)
+	if errors.Is(err, journal.ErrNotFound) || (err == nil && (prior.BaseSHA != old || prior.SourceHeadSHA == trial.HeadSHA)) {
+		return trial, nil
+	}
+	if err != nil {
+		return trial, err
+	}
+	tree, err := git(ctx, s.runner, "rev-parse", trial.HeadSHA+"^{tree}")
+	if err != nil || tree != prior.TreeHash {
+		return trial, err
+	}
+	trial.HeadSHA = prior.SourceHeadSHA
+	return trial, nil
 }
 
 // revisionApplied reports whether the lead has a done layer for the requested
@@ -316,6 +352,12 @@ func (s *Service) recordLayer(ctx context.Context, in Request, source loomgit.Re
 			return err
 		}
 		layer.CommitDetails = append(layer.CommitDetails, attribution)
+	}
+	if s.beforeSaveLayer != nil {
+		s.beforeSaveLayer()
+	}
+	if derived.Number != 0 && !derived.Ready {
+		return s.store.FinishRevisionWithLayer(ctx, derived, layer)
 	}
 	return s.store.SaveApplied(ctx, layer)
 }

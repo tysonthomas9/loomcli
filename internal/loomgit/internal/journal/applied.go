@@ -35,6 +35,12 @@ func createAppliedSchema(db *sql.DB) error {
 
 // SaveApplied records the intended ref transition before the checkout is touched.
 func (s *SQLite) SaveApplied(ctx context.Context, a loomgit.AppliedLayer) error {
+	return saveApplied(ctx, s.db, a)
+}
+
+func saveApplied(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, a loomgit.AppliedLayer) error {
 	commits, err := json.Marshal(a.Commits)
 	if err != nil {
 		return err
@@ -47,7 +53,7 @@ func (s *SQLite) SaveApplied(ctx context.Context, a loomgit.AppliedLayer) error 
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO applied_layers
+	result, err := db.ExecContext(ctx, `INSERT INTO applied_layers
 		(request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,commit_details,phase)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET
 		workspace=excluded.workspace,lead=excluded.lead,change_id=excluded.change_id,
