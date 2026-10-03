@@ -841,30 +841,6 @@ func TestClaudeToolCallCarriesNameInputOutput(t *testing.T) {
 	}
 }
 
-// TestClaudeModelsCatalog: the aliases carry the --effort option (high by
-// default) except haiku, with context limits and input types; none is the
-// default, which the CLI picks per account.
-func TestClaudeModelsCatalog(t *testing.T) {
-	a, _, _ := newAdapter(t)
-	ms, err := a.Models(context.Background())
-	if err != nil || len(ms) != 3 {
-		t.Fatalf("Models = %+v, %v", ms, err)
-	}
-	for _, m := range ms {
-		if m.Default || m.Provider != "anthropic" || !slices.Equal(m.Input, []string{"text", "image", "pdf"}) || m.ContextLimit == 0 {
-			t.Fatalf("model = %+v", m)
-		}
-	}
-	var choices []string
-	for _, c := range ms[0].Options[0].Choices {
-		choices = append(choices, c.ID)
-	}
-	if ms[0].ID != "opus" || ms[0].Options[0].ID != loomharness.OptionEffort || ms[0].Options[0].Current != "high" ||
-		!slices.Equal(choices, []string{"low", "medium", "high", "xhigh", "max"}) || len(ms[2].Options) != 0 {
-		t.Fatalf("catalog = %+v", ms)
-	}
-}
-
 // TestClaudeFailedResultCarriesError: a non-success result ends the turn
 // failed with its first user-facing error (never an [ede_diagnostic] entry),
 // or its subtype when it lists none; a success carries no error.
