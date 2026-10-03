@@ -234,6 +234,37 @@ describe("AgentChat timeline (UI3)", () => {
     expect(reasoning.querySelector("pre")).toHaveTextContent("let me see");
   });
 
+  it("gives every work row T3's work spacing kind, not a message's", async () => {
+    await mount(agent({ running_turn_id: "t1" }));
+    notice("tool.started", {
+      itemId: "m/tool/1",
+      itemKind: "tool",
+      tool: { name: "bash", input: '{"command":"sleep 5"}' },
+    });
+    expect(screen.getByTestId("tool-live").closest("li")).toHaveAttribute(
+      "data-kind",
+      "work",
+    );
+    deliver(
+      ev("item.completed", { itemId: "r", itemKind: "reasoning", text: "x" }),
+      ev("item.completed", {
+        itemId: "m/tool/1",
+        itemKind: "tool",
+        tool: { name: "bash", input: '{"command":"sleep 5"}', output: "" },
+      }),
+      ev("item.completed", { itemKind: "message", text: "done" }),
+    );
+    for (const id of ["work-toggle", "tool-call"])
+      expect(screen.getByTestId(id).closest("li")).toHaveAttribute(
+        "data-kind",
+        "work",
+      );
+    expect(screen.getByText("done").closest("li")).not.toHaveAttribute(
+      "data-kind",
+      "work",
+    );
+  });
+
   it("keeps a completed tool completed when its start notice comes late", async () => {
     await mount(agent({ running_turn_id: "t1" }));
     deliver(

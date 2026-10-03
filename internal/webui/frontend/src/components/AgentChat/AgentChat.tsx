@@ -264,7 +264,11 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   );
 }
 
-/** The row's spacing kind: T3 keeps work rows closer than messages. */
+/**
+ * The row's spacing kind. Every work row (work, work-toggle, work-live and
+ * thinking) is "work", which gets T3's pb-2 (8px); messages and cards keep
+ * pb-4 (16px).
+ */
 function rowKind(row: TimelineRow): string {
   return row.kind === "item" ? row.item.kind : "work";
 }
