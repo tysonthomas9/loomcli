@@ -261,6 +261,50 @@ describe("RevisionsSection", () => {
       expect(screen.getByRole("button", { name })).toBeEnabled();
   });
 
+  it("shows why a spent approval was not applied and lets the reviewer approve again", async () => {
+    const reason =
+      "it was applied and later unapplied from this lead; approve again to apply it";
+    getTaskRevisions
+      .mockResolvedValueOnce([
+        {
+          ...revision,
+          verdict: "approve",
+          follow_status: "spent",
+          follow_reason: reason,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          ...revision,
+          verdict: "approve",
+          applied: true,
+          follow_status: "applied",
+        },
+      ]);
+    submitRevisionVerdict.mockResolvedValue("applied");
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    expect(
+      await screen.findByText(`Not applied: ${reason}`),
+    ).toBeInTheDocument();
+    const approve = screen.getByRole("button", {
+      name: "Approve and create PR",
+    });
+    expect(approve).toBeEnabled();
+    fireEvent.click(approve);
+    expect(await screen.findByText("Applied")).toBeInTheDocument();
+    expect(submitRevisionVerdict.mock.calls[0].slice(0, 5)).toEqual([
+      "W",
+      expect.objectContaining({ change_id: "C", number: 2 }),
+      "approve",
+      "",
+      "lead-a",
+    ]);
+    expect(screen.queryByText(/Not applied:/)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    ).toBeDisabled();
+  });
+
   it("does not offer verdicts for an incomplete revision", async () => {
     getTaskRevisions.mockResolvedValue([{ ...revision, incomplete: true }]);
     render(<RevisionsSection workspaceId="W" taskId="T" />);

@@ -2,6 +2,8 @@ package apply
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,5 +149,134 @@ func TestApprovalFollowsDependenciesInOrder(t *testing.T) {
 	if err != nil || len(result.Applied) != 2 || result.Applied[0] != "C1" || result.Applied[1] != "C2" ||
 		fixture.git(t, "rev-parse", "HEAD") != secondSHA {
 		t.Fatalf("dependencies were not added in order: %+v, %v", result, err)
+	}
+}
+
+// A re-approval of the same revision after Unapply re-arms the follow, so the
+// lead gets the change back instead of the approval being silently dropped.
+func TestReapprovalAfterUnapplyFollowsAgain(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	if _, err := fixture.store.DriverChange(ctx, "W", "T1", "repo", "C1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo",
+		Path: fixture.dir, Branch: "loom/ws/W/interactive/L", BaseSHA: fixture.base, Mode: "worktree"}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+		"W": {ID: "W", Repos: []config.RepoConfig{{Name: "repo", Path: fixture.dir}}},
+	}}
+	approve := func() {
+		t.Helper()
+		if _, err := review.SubmitForLead(ctx, fixture.store, "W", "C1", 1, fixture.source,
+			"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	approve()
+	if result, err := followWithStore(ctx, fixture.store, cfg, "W", "L"); err != nil || len(result.Applied) != 1 {
+		t.Fatalf("first follow: %+v, %v", result, err)
+	}
+	fixture.git(t, "reset", "-q", "--hard", fixture.base)
+	db, err := sql.Open("sqlite", fixture.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, `UPDATE applied_layers SET phase='unapplied' WHERE change_id='C1'`); err != nil {
+		t.Fatal(err)
+	}
+	approve()
+	result, err := followWithStore(ctx, fixture.store, cfg, "W", "L")
+	if err != nil || len(result.Applied) != 1 || fixture.git(t, "rev-parse", "HEAD") != fixture.source {
+		t.Fatalf("re-approval after Unapply was not followed: %+v, %v", result, err)
+	}
+}
+
+func followFixture(t *testing.T) (*fixture, *config.LoomConfig) {
+	t.Helper()
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.store.DriverChange(ctx, "W", "T1", "repo", "C1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo",
+		Path: f.dir, Branch: "loom/ws/W/interactive/L", BaseSHA: f.base, Mode: "worktree"}}); err != nil {
+		t.Fatal(err)
+	}
+	return f, &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+		"W": {ID: "W", Repos: []config.RepoConfig{{Name: "repo", Path: f.dir}}},
+	}}
+}
+
+func approveForLead(t *testing.T, f *fixture) int64 {
+	t.Helper()
+	v, err := review.SubmitForLead(context.Background(), f.store, "W", "C1", 1, f.source,
+		"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v.ID
+}
+
+// A follow whose request was unapplied before the follow was marked applied
+// settles as spent, with a reason, instead of being retried on every pass.
+func TestFollowSettlesUnappliedRequestAsSpent(t *testing.T) {
+	f, cfg := followFixture(t)
+	ctx := context.Background()
+	verdict := approveForLead(t, f)
+	if _, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: fmt.Sprintf("approval:%d", verdict)}); err != nil {
+		t.Fatal(err)
+	}
+	f.git(t, "reset", "-q", "--hard", f.base)
+	db, err := sql.Open("sqlite", f.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, `UPDATE applied_layers SET phase='unapplied' WHERE change_id='C1'`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := followWithStore(ctx, f.store, cfg, "W", "L")
+	if err != nil || len(result.Applied) != 0 || len(result.Pending) != 0 || len(result.Spent) != 1 ||
+		result.Spent[0].Change != "C1" || !strings.Contains(result.Spent[0].Reason, "unapplied") || f.git(t, "rev-parse", "HEAD") != f.base {
+		t.Fatalf("spent request: %+v, %v", result, err)
+	}
+	if status, reason, err := f.store.ApprovalFollowState(ctx, "W", "L", "C1", 1); err != nil || status != "spent" || reason != result.Spent[0].Reason {
+		t.Fatalf("follow state: %q %q, %v", status, reason, err)
+	}
+	if pending, err := f.store.PendingApprovals(ctx, "W", "L"); err != nil || len(pending) != 0 {
+		t.Fatalf("spent request still pending: %+v, %v", pending, err)
+	}
+	approveForLead(t, f)
+	result, err = followWithStore(ctx, f.store, cfg, "W", "L")
+	if err != nil || len(result.Applied) != 1 || f.git(t, "rev-parse", "HEAD") != f.source {
+		t.Fatalf("newer approval after a spent request: %+v, %v", result, err)
+	}
+	if status, reason, err := f.store.ApprovalFollowState(ctx, "W", "L", "C1", 1); err != nil || status != "applied" || reason != "" {
+		t.Fatalf("re-armed follow state: %q %q, %v", status, reason, err)
+	}
+}
+
+// A crash after Apply but before the follow is marked applied, then a newer
+// approval: the lead already holds the revision, so no second layer is added.
+func TestNewerApprovalOfHeldRevisionAddsNoSecondLayer(t *testing.T) {
+	f, cfg := followFixture(t)
+	ctx := context.Background()
+	verdict := approveForLead(t, f)
+	if _, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: fmt.Sprintf("approval:%d", verdict)}); err != nil {
+		t.Fatal(err)
+	}
+	approveForLead(t, f)
+	if _, err := followWithStore(ctx, f.store, cfg, "W", "L"); err != nil || f.git(t, "rev-parse", "HEAD") != f.source {
+		t.Fatalf("follow: %v", err)
+	}
+	layers, err := f.store.AppliedLog(ctx, "W", "L")
+	if err != nil || len(layers) != 1 {
+		t.Fatalf("held revision got a second layer: %+v, %v", layers, err)
+	}
+	if pending, err := f.store.PendingApprovals(ctx, "W", "L"); err != nil || len(pending) != 0 {
+		t.Fatalf("follow not settled: %+v, %v", pending, err)
 	}
 }

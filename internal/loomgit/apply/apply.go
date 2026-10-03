@@ -30,6 +30,9 @@ type Store interface {
 	AppliedLog(context.Context, string, string) ([]loomgit.AppliedLayer, error)
 	WorkingAreas(context.Context, string, string) ([]journal.WorkingArea, error)
 	OpenApplied(context.Context, string, string) ([]loomgit.AppliedLayer, error)
+	AppliedRequest(context.Context, string) (loomgit.AppliedLayer, bool, error)
+	FinishRevisionWithLayer(context.Context, loomgit.Revision, loomgit.AppliedLayer) error
+	RevisionByRequest(context.Context, string) (loomgit.Revision, error)
 }
 
 type Request struct {
@@ -51,6 +54,7 @@ type Service struct {
 	beforeIndexLock  func()
 	onIndexLocked    func()
 	beforeRecoverCAS func()
+	beforeSaveLayer  func()
 }
 
 func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
@@ -139,6 +143,11 @@ func (s *Service) Apply(ctx context.Context, in Request) (Result, error) {
 
 var errHeadMoved = errors.New("working area HEAD moved")
 
+// ErrRequestSpent is the cause of a Stale apply error for a request that can
+// never apply again: its layer was unapplied, or the request already applied
+// another revision or change. Retrying the same request cannot succeed.
+var ErrRequestSpent = errors.New("apply request is spent")
+
 func (s *Service) swap(ctx context.Context, in Request, source loomgit.Revision, old string, trial replay.Result) (Result, error) {
 	branch, err := git(ctx, s.runner, "symbolic-ref", "HEAD")
 	if err != nil {
@@ -186,6 +195,9 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 	if err != nil || actual != old {
 		return Result{}, errors.Join(errHeadMoved, err)
 	}
+	if done, settled, err := s.settledRequest(ctx, in); err != nil || settled {
+		return done, err
+	}
 	paths, err := s.pendingPaths(ctx, old, trial.HeadSHA)
 	if err != nil {
 		return Result{}, err
@@ -198,20 +210,25 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 		// The lead already holds this exact revision: it is the layer, not an empty derived one.
 		layerBase, trial = source.BaseSHA, replay.Result{HeadSHA: old}
 	}
+	if trial.HeadSHA == old {
+		// Nothing left to add (including a lead already at this revision): if a
+		// done layer holds this exact revision, there is nothing to record.
+		applied, err := s.revisionApplied(ctx, in)
+		if err != nil || applied {
+			return Result{HeadSHA: old}, err
+		}
+	}
 	result := Result{HeadSHA: trial.HeadSHA, DroppedCommits: trial.DroppedCommits}
 	if layerBase != source.BaseSHA {
-		result.Derived, err = changeset.RecordDerived(ctx, s.store, s.runner, changeset.DerivedInput{
-			Workspace: in.Workspace, Change: in.Change, RequestID: in.RequestID + ":derived:" + old,
-			FromNumber: source.Number, Operation: "apply", BaseSHA: old,
-			HeadSHA: trial.HeadSHA, Outcome: source.Outcome,
-		})
-		if err != nil {
+		if trial, result.Derived, err = s.prepareDerived(ctx, in, source, old, trial); err != nil {
 			return Result{}, err
 		}
+		result.HeadSHA = trial.HeadSHA
 	}
 	if err := s.recordLayer(ctx, in, source, layerBase, trial, result.Derived); err != nil {
 		return Result{}, err
 	}
+	result.Derived.Ready = result.Derived.Number != 0
 	if err := s.install(ctx, branch, indexPath, old, trial.HeadSHA, in.RequestID, lockOwned, keepLock); err != nil {
 		return result, err
 	}
@@ -219,6 +236,111 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 		_, _, err = review.CarryForward(ctx, s.store, s.runner, source, result.Derived, trial)
 	}
 	return result, err
+}
+
+// settledRequest checks, under the repository lock, whether another pass
+// already owns this request. A racing follow pass that read "not applied"
+// before the winner finished must not derive a revision from the new tip.
+func (s *Service) settledRequest(ctx context.Context, in Request) (Result, bool, error) {
+	prior, found, err := s.store.AppliedRequest(ctx, in.RequestID)
+	if err != nil || !found {
+		return Result{}, false, err
+	}
+	if prior.Workspace != in.Workspace || prior.Lead != in.Lead || prior.Change != in.Change {
+		return Result{}, true, loomgit.NewError(loomgit.Stale, "its apply request belongs to another change", ErrRequestSpent)
+	}
+	switch prior.Phase {
+	case "done":
+		same, err := s.fromSource(ctx, in, prior.Revision)
+		if err != nil {
+			return Result{}, true, err
+		}
+		if !same {
+			// The request already applied another revision; reusing it cannot apply this one.
+			return Result{}, true, loomgit.NewError(loomgit.Stale,
+				fmt.Sprintf("its apply request already applied revision %d, not %d", prior.Revision, in.Revision), ErrRequestSpent)
+		}
+		return Result{HeadSHA: prior.NewTip}, true, nil
+	case "not_applied":
+		return Result{}, false, nil
+	case "unapplied":
+		// The layer was applied and later removed: this request is used up.
+		return Result{}, true, loomgit.NewError(loomgit.Stale, "it was applied and later unapplied from this lead; approve again to apply it", ErrRequestSpent)
+	default:
+		// SaveApplied would refuse this request; fail before deriving anything.
+		return Result{}, true, loomgit.NewError(loomgit.Stale, "apply request already recorded in phase "+prior.Phase, nil)
+	}
+}
+
+// prepareDerived reserves the derived revision for a replay onto old. It is
+// left unfinished: it becomes ready only together with its layer.
+func (s *Service) prepareDerived(ctx context.Context, in Request, source loomgit.Revision, old string,
+	trial replay.Result) (replay.Result, loomgit.Revision, error) {
+	derivedID := in.RequestID + ":derived:" + old
+	trial, err := s.reuseReplay(ctx, derivedID, old, trial)
+	if err != nil {
+		return trial, loomgit.Revision{}, err
+	}
+	derived, err := changeset.PrepareDerived(ctx, s.store, s.runner, changeset.DerivedInput{
+		Workspace: in.Workspace, Change: in.Change, RequestID: derivedID,
+		FromNumber: source.Number, Operation: "apply", BaseSHA: old,
+		HeadSHA: trial.HeadSHA, Outcome: source.Outcome,
+	})
+	return trial, derived, err
+}
+
+// reuseReplay keeps a retried request on the commit an earlier pass already
+// replayed and reserved for the same base and tree, so the reservation (and
+// its refs) is finished instead of clashing with a fresh replay commit.
+func (s *Service) reuseReplay(ctx context.Context, derivedID, old string, trial replay.Result) (replay.Result, error) {
+	prior, err := s.store.RevisionByRequest(ctx, derivedID)
+	if errors.Is(err, journal.ErrNotFound) || (err == nil && (prior.BaseSHA != old || prior.SourceHeadSHA == trial.HeadSHA)) {
+		return trial, nil
+	}
+	if err != nil {
+		return trial, err
+	}
+	tree, err := git(ctx, s.runner, "rev-parse", trial.HeadSHA+"^{tree}")
+	if err != nil || tree != prior.TreeHash {
+		return trial, err
+	}
+	trial.HeadSHA = prior.SourceHeadSHA
+	return trial, nil
+}
+
+// revisionApplied reports whether the lead has a done layer for the requested
+// source revision (directly or as a revision derived from it).
+func (s *Service) revisionApplied(ctx context.Context, in Request) (bool, error) {
+	layers, err := s.store.AppliedLog(ctx, in.Workspace, in.Lead)
+	if err != nil {
+		return false, err
+	}
+	for _, layer := range layers {
+		if layer.Change != in.Change {
+			continue
+		}
+		if same, err := s.fromSource(ctx, in, layer.Revision); err != nil || same {
+			return same, err
+		}
+	}
+	return false, nil
+}
+
+// fromSource reports whether revision number is the requested revision or was
+// derived from it, following derived revisions of the same change back.
+func (s *Service) fromSource(ctx context.Context, in Request, number int) (bool, error) {
+	for number != in.Revision {
+		revision, err := s.store.GetRevision(ctx, in.Workspace, in.Change, number)
+		if err != nil {
+			return false, err
+		}
+		if revision.Kind != "derived" || (revision.DerivedFromChange != "" && revision.DerivedFromChange != in.Change) ||
+			revision.DerivedFromNumber < 1 || revision.DerivedFromNumber >= number {
+			return false, nil
+		}
+		number = revision.DerivedFromNumber
+	}
+	return true, nil
 }
 
 func (s *Service) recordLayer(ctx context.Context, in Request, source loomgit.Revision, old string,
@@ -239,6 +361,12 @@ func (s *Service) recordLayer(ctx context.Context, in Request, source loomgit.Re
 			return err
 		}
 		layer.CommitDetails = append(layer.CommitDetails, attribution)
+	}
+	if s.beforeSaveLayer != nil {
+		s.beforeSaveLayer()
+	}
+	if derived.Number != 0 && !derived.Ready {
+		return s.store.FinishRevisionWithLayer(ctx, derived, layer)
 	}
 	return s.store.SaveApplied(ctx, layer)
 }

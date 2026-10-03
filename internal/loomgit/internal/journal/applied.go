@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 )
@@ -30,6 +31,11 @@ func createAppliedSchema(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	// reason explains a settled follow (status 'spent') to the reviewer.
+	if _, err := db.Exec(`ALTER TABLE approval_follow ADD COLUMN reason TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
 	if err := createApprovalPublicationSchema(db); err != nil {
 		return err
 	}
@@ -38,6 +44,12 @@ func createAppliedSchema(db *sql.DB) error {
 
 // SaveApplied records the intended ref transition before the checkout is touched.
 func (s *SQLite) SaveApplied(ctx context.Context, a loomgit.AppliedLayer) error {
+	return saveApplied(ctx, s.db, a)
+}
+
+func saveApplied(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, a loomgit.AppliedLayer) error {
 	commits, err := json.Marshal(a.Commits)
 	if err != nil {
 		return err
@@ -50,7 +62,7 @@ func (s *SQLite) SaveApplied(ctx context.Context, a loomgit.AppliedLayer) error 
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO applied_layers
+	result, err := db.ExecContext(ctx, `INSERT INTO applied_layers
 		(request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,commit_details,phase)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(request_id) DO UPDATE SET
 		workspace=excluded.workspace,lead=excluded.lead,change_id=excluded.change_id,
@@ -183,7 +195,7 @@ type ApprovalTarget struct {
 
 func (s *SQLite) PendingApprovalTargets(ctx context.Context) ([]ApprovalTarget, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT workspace,lead FROM approval_follow
-		WHERE status NOT IN ('applied','superseded') ORDER BY workspace,lead`)
+		WHERE status NOT IN ('applied','superseded','spent') ORDER BY workspace,lead`)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +231,7 @@ func (s *SQLite) PendingApprovals(ctx context.Context, workspace, lead string) (
 		COALESCE(d.repo,''),COALESCE(l.predecessor_change,'')
 		FROM approval_follow a LEFT JOIN driver_changes d ON d.workspace=a.workspace AND d.change_id=a.change_id
 		LEFT JOIN local_lineage l ON l.workspace=d.workspace AND l.task_id=d.task_id AND l.repo=d.repo
-		WHERE a.workspace=? AND a.lead=? AND a.status NOT IN ('applied','superseded') ORDER BY a.verdict_id`, workspace, lead)
+		WHERE a.workspace=? AND a.lead=? AND a.status NOT IN ('applied','superseded','spent') ORDER BY a.verdict_id`, workspace, lead)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +255,18 @@ func (s *SQLite) ApprovalApplied(ctx context.Context, requestID string) (bool, e
 		return false, nil
 	}
 	return phase == "done", err
+}
+
+// AppliedRequest returns the layer recorded for requestID, if any.
+func (s *SQLite) AppliedRequest(ctx context.Context, requestID string) (loomgit.AppliedLayer, bool, error) {
+	layer := loomgit.AppliedLayer{RequestID: requestID}
+	err := s.db.QueryRowContext(ctx, `SELECT workspace,lead,change_id,revision,old_tip,new_tip,phase
+		FROM applied_layers WHERE request_id=?`, requestID).
+		Scan(&layer.Workspace, &layer.Lead, &layer.Change, &layer.Revision, &layer.OldTip, &layer.NewTip, &layer.Phase)
+	if errors.Is(err, sql.ErrNoRows) {
+		return loomgit.AppliedLayer{}, false, nil
+	}
+	return layer, err == nil, err
 }
 
 func (s *SQLite) PredecessorApplied(ctx context.Context, workspace, lead, change string) (bool, error) {
@@ -280,6 +304,40 @@ func (s *SQLite) ApprovalLeads(ctx context.Context, workspace, change string, re
 		leads = append(leads, lead)
 	}
 	return leads, rows.Err()
+}
+
+// SpendApprovalFollow settles a follow whose apply request can never apply
+// again (status 'spent'), with the reason the reviewer sees. Only a newer
+// approval re-arms it.
+func (s *SQLite) SpendApprovalFollow(ctx context.Context, approval PendingApproval, reason string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE approval_follow SET status='spent',paths='[]',reason=?
+		WHERE workspace=? AND lead=? AND change_id=? AND revision=? AND verdict_id=?`,
+		reason, approval.Workspace, approval.Lead, approval.Change, approval.Revision, approval.VerdictID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrStale
+	}
+	return nil
+}
+
+// ApprovalFollowState reports the follow status and reason for one revision's
+// approval in lead, or in the most recently approved lead when lead is empty.
+// It returns empty strings when the revision has no follow.
+func (s *SQLite) ApprovalFollowState(ctx context.Context, workspace, lead, change string, revision int) (string, string, error) {
+	var status, reason string
+	err := s.db.QueryRowContext(ctx, `SELECT status,reason FROM approval_follow
+		WHERE workspace=? AND (?='' OR lead=?) AND change_id=? AND revision=? ORDER BY verdict_id DESC LIMIT 1`,
+		workspace, lead, lead, change, revision).Scan(&status, &reason)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	return status, reason, err
 }
 
 func (s *SQLite) SetApprovalFollow(ctx context.Context, approval PendingApproval, status string, paths []string) error {
