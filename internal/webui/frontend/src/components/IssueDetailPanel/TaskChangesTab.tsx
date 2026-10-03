@@ -102,6 +102,7 @@ export function TaskChangesTab({
           taskId={taskId}
           lead={lead}
           newest={newest}
+          revisions={revisions}
           history={revisions.filter(
             (r) => r.change_id === newest.change_id && r !== newest,
           )}
@@ -121,6 +122,7 @@ function RepoChanges({
   taskId,
   lead,
   newest,
+  revisions,
   history,
   diff,
   diffsLoaded,
@@ -131,6 +133,7 @@ function RepoChanges({
   taskId: string;
   lead?: string | undefined;
   newest: ReviewRevision;
+  revisions: ReviewRevision[];
   history: ReviewRevision[];
   diff: TaskDiff | undefined;
   diffsLoaded: boolean;
@@ -139,9 +142,6 @@ function RepoChanges({
 }): JSX.Element {
   const [showHistory, setShowHistory] = useState(false);
   const [viewing, setViewing] = useState<ReviewRevision | null>(null);
-  // Verdicts decide on the code shown: only once this repo's diff has loaded,
-  // and only for the very revision the diff shows.
-  const shown = diff !== undefined && diff.revision === newest.number;
 
   return (
     <section
@@ -155,7 +155,10 @@ function RepoChanges({
           taskId={taskId}
           lead={lead}
           changeId={newest.change_id}
-          locked={!shown}
+          // Same snapshot as this tab, and verdicts only for the revision whose
+          // diff is on screen: a newer revision waits for its own diff.
+          revisions={revisions}
+          verdictsFor={diff?.revision ?? null}
           onChanged={onChanged}
         />
       </div>
