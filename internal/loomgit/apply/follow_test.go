@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,5 +148,47 @@ func TestApprovalFollowsDependenciesInOrder(t *testing.T) {
 	if err != nil || len(result.Applied) != 2 || result.Applied[0] != "C1" || result.Applied[1] != "C2" ||
 		fixture.git(t, "rev-parse", "HEAD") != secondSHA {
 		t.Fatalf("dependencies were not added in order: %+v, %v", result, err)
+	}
+}
+
+// A re-approval of the same revision after Unapply re-arms the follow, so the
+// lead gets the change back instead of the approval being silently dropped.
+func TestReapprovalAfterUnapplyFollowsAgain(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	if _, err := fixture.store.DriverChange(ctx, "W", "T1", "repo", "C1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo",
+		Path: fixture.dir, Branch: "loom/ws/W/interactive/L", BaseSHA: fixture.base, Mode: "worktree"}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+		"W": {ID: "W", Repos: []config.RepoConfig{{Name: "repo", Path: fixture.dir}}},
+	}}
+	approve := func() {
+		t.Helper()
+		if _, err := review.SubmitForLead(ctx, fixture.store, "W", "C1", 1, fixture.source,
+			"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	approve()
+	if result, err := followWithStore(ctx, fixture.store, cfg, "W", "L"); err != nil || len(result.Applied) != 1 {
+		t.Fatalf("first follow: %+v, %v", result, err)
+	}
+	fixture.git(t, "reset", "-q", "--hard", fixture.base)
+	db, err := sql.Open("sqlite", fixture.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, `UPDATE applied_layers SET phase='unapplied' WHERE change_id='C1'`); err != nil {
+		t.Fatal(err)
+	}
+	approve()
+	result, err := followWithStore(ctx, fixture.store, cfg, "W", "L")
+	if err != nil || len(result.Applied) != 1 || fixture.git(t, "rev-parse", "HEAD") != fixture.source {
+		t.Fatalf("re-approval after Unapply was not followed: %+v, %v", result, err)
 	}
 }

@@ -183,8 +183,13 @@ func recordApprovalTargets(ctx context.Context, tx *sql.Tx, v loomgit.Verdict) e
 	if v.TargetLead == "" || (v.Kind != "approve" && v.Kind != "override" && v.Kind != "policy") {
 		return nil
 	}
+	// A new approval re-arms a follow that already applied once only when the
+	// lead no longer holds the change (it was unapplied since).
 	if _, err := tx.ExecContext(ctx, `INSERT INTO approval_follow(workspace,lead,change_id,revision,verdict_id)
-		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
+		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO UPDATE SET
+		verdict_id=excluded.verdict_id,status='approved',paths='[]'
+		WHERE approval_follow.status='applied' AND NOT EXISTS (SELECT 1 FROM applied_layers a
+			WHERE a.workspace=excluded.workspace AND a.lead=excluded.lead AND a.change_id=excluded.change_id AND a.phase='done')`,
 		v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
 		return err
 	}

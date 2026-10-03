@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
@@ -187,5 +188,52 @@ func TestApplyReapprovalAfterUnapplyApplies(t *testing.T) {
 	}
 	if applied, err := f.store.RevisionApplied(ctx, "W", "L", "C1", 1); err != nil || !applied {
 		t.Fatalf("re-approved layer not done: %v, %v", applied, err)
+	}
+}
+
+// A refused layer write (a concurrent writer won the request) must not leave a
+// ready derived revision without its layer; the next pass finishes both.
+func TestApplyRefusedLayerLeavesNoReadyDerivedRevision(t *testing.T) {
+	f := newFixture(t)
+	tip := f.commit(t, "first-task", "first\n", "first task layer")
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", f.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	f.service.beforeSaveLayer = func() {
+		f.service.beforeSaveLayer = nil
+		if _, err := db.ExecContext(ctx, `INSERT INTO applied_layers
+			(request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,commit_details,phase)
+			VALUES ('approval:7','W','L','C1',1,?,?,'[]','[]','[]','done')`, tip, tip); err != nil {
+			t.Error(err)
+		}
+	}
+	request := Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: "approval:7"}
+	if _, err := f.service.Apply(ctx, request); !errors.Is(err, loomgit.NewError(loomgit.Stale, "", nil)) {
+		t.Fatalf("refused layer: %v", err)
+	}
+	if r, err := f.store.GetRevision(ctx, "W", "C1", 2); err == nil && r.Ready {
+		t.Fatalf("ready derived revision left without a layer: %+v", r)
+	}
+	if f.git(t, "rev-parse", "HEAD") != tip {
+		t.Fatal("checkout moved")
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE applied_layers SET phase='not_applied' WHERE request_id='approval:7'`); err != nil {
+		t.Fatal(err)
+	}
+	// Cross a commit-timestamp second so a fresh replay gets a different SHA
+	// than the one the first pass reserved.
+	time.Sleep(1100 * time.Millisecond)
+	got, err := f.service.Apply(ctx, request)
+	if err != nil || got.Derived.Number != 2 || !got.Derived.Ready {
+		t.Fatalf("next pass: %+v, %v", got, err)
+	}
+	if applied, err := f.store.RevisionApplied(ctx, "W", "L", "C1", 2); err != nil || !applied {
+		t.Fatalf("derived revision has no done layer: %v, %v", applied, err)
+	}
+	if r, err := f.store.GetRevision(ctx, "W", "C1", 2); err != nil || !r.Ready || r.HeadSHA != got.HeadSHA {
+		t.Fatalf("derived revision: %+v, %v", r, err)
 	}
 }
