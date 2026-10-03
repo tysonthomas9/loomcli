@@ -138,8 +138,14 @@ func publishIntent(ctx context.Context, store *journal.SQLite, stacks DeclaredSt
 	if err != nil {
 		return outcome, false, err
 	}
-	if follow == "superseded" {
+	switch follow {
+	case "superseded":
 		outcome.Status = "superseded"
+		return outcome, true, finishIntent(ctx, store, intent, outcome)
+	case "spent":
+		// A spent approval is never applied, so it never publishes either,
+		// even when a later revision of the change is in the working area.
+		outcome.Status, outcome.Reason = "not_published", "not published: approval was spent without being applied"
 		return outcome, true, finishIntent(ctx, store, intent, outcome)
 	}
 	applied, err := approvalApplied(ctx, store, intent)

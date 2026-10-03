@@ -486,3 +486,22 @@ func TestConcurrentVerdictAndReconcilePublishOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestSpentApprovalNeverPublishes(t *testing.T) {
+	fx, forge := approvalFixture(t, "stack")
+	ctx := context.Background()
+	// The change is in the working area, so only the spent follow status
+	// stands between this approval and a PR.
+	a := appliedTask(t, fx, "A", fx.base)
+	approveForLead(t, fx, a, reviewer, true, "spent")
+	outcomes, err := PublishApproved(ctx, "W", "L", nil)
+	if err != nil || len(outcomes) != 1 || outcomes[0].Status != "not_published" || len(forge.prs) != 0 {
+		t.Fatalf("spent outcome = %+v, %v; PRs=%+v", outcomes, err, forge.prs)
+	}
+	if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath, nil); err != nil || len(forge.prs) != 0 {
+		t.Fatalf("reconcile published a spent approval: %v; PRs=%+v", err, forge.prs)
+	}
+	if intent := intentStatus(t, fx, "A"); intent.Status != "not_published" {
+		t.Fatalf("spent intent = %+v", intent)
+	}
+}
