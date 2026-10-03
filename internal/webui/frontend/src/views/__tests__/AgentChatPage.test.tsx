@@ -27,16 +27,21 @@ vi.mock("@/components/AgentDetailPanel", () => ({
   ),
 }));
 
-vi.mock("@/components/FileExplorer", () => ({
-  WorkspaceFileBrowser: (p: {
-    agentName: string;
-    agent: { name: string; repos: string[] };
-  }) => (
-    <div data-testid="files">
-      files {p.agentName} {p.agent.repos.join(",")}
-    </div>
-  ),
-}));
+vi.mock("@/components/FileExplorer", async () => {
+  const { useContext } = await import("react");
+  const { ExtraBrowserAgent } =
+    await import("@/components/FileExplorer/browserAgents");
+  return {
+    WorkspaceFileBrowser: (p: { agentName: string }) => {
+      const agent = useContext(ExtraBrowserAgent);
+      return (
+        <div data-testid="files">
+          files {p.agentName} {agent?.name} {agent?.repos.join(",")}
+        </div>
+      );
+    },
+  };
+});
 
 vi.mock("@/hooks/agents", () => ({
   useRosterAgent: (id: string) => ({
@@ -107,7 +112,7 @@ describe("AgentChatPage", () => {
     expect(await screen.findByTestId("diff")).toHaveTextContent("diff agt_1");
     fireEvent.click(screen.getByRole("button", { name: "Files" }));
     expect(await screen.findByTestId("files")).toHaveTextContent(
-      "files agt_1 slack-clone",
+      "files agt_1 agt_1 slack-clone",
     );
   });
 

@@ -11,6 +11,7 @@ import { getAgent, type Agent } from "@/api/agentsv1";
 import type { WorkspaceAgentInfo } from "@/api/workspace";
 import { AgentChat } from "@/components/AgentChat";
 import { GitTab } from "@/components/AgentDetailPanel";
+import { ExtraBrowserAgent } from "@/components/FileExplorer/browserAgents";
 import { useRosterAgent } from "@/hooks/agents";
 import type { LoomAgentStatus } from "@/types";
 import { AgentEditorGroups, type AgentEditorTab } from "./AgentEditorGroups";
@@ -130,12 +131,13 @@ export function AgentChatPage(): JSX.Element {
                   <div className={styles.tabFallback}>Loading files…</div>
                 }
               >
-                <WorkspaceFileBrowser
-                  mode="agent"
-                  agentName={agentId}
-                  agent={filesAgent}
-                  isActive={isActive}
-                />
+                <ExtraBrowserAgent.Provider value={filesAgent}>
+                  <WorkspaceFileBrowser
+                    mode="agent"
+                    agentName={agentId}
+                    isActive={isActive}
+                  />
+                </ExtraBrowserAgent.Provider>
               </Suspense>
             </div>
           ) : (

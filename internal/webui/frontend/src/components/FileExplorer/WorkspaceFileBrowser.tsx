@@ -73,6 +73,7 @@ import {
   DeleteConfirmDialog,
   MoveToDialog,
 } from "./FileExplorerDialogs";
+import { useBrowserAgents } from "./browserAgents";
 import { SkillsBrowserOverlays } from "./skills";
 import { CapabilityNotices, CheckoutRepairOverlays } from "./overlays";
 import { FileExplorerEditorGroup } from "./FileExplorerEditorGroup";
@@ -155,19 +156,10 @@ import type {
 function FileBrowserInner({
   mode = "workspace",
   agentName,
-  agent,
   isActive = true,
 }: FileBrowserProps) {
-  const {
-    workspaceId,
-    agents: workspaceAgents,
-    repos,
-    workspace,
-  } = useWorkspaceContext();
-  const agents = useMemo(
-    () => (agent ? [...workspaceAgents, agent] : workspaceAgents),
-    [agent, workspaceAgents],
-  );
+  const { workspaceId, repos, workspace } = useWorkspaceContext();
+  const agents = useBrowserAgents();
   const caps = modeCapabilities(mode);
   const hasCheckouts = caps.checkouts;
   const eventContext = useEventContext();
@@ -1979,7 +1971,6 @@ function FileBrowserInner({
 export function WorkspaceFileBrowser({
   mode = "workspace",
   agentName,
-  agent,
   isActive = true,
 }: FileBrowserProps) {
   const { workspaceId } = useWorkspaceContext();
@@ -1998,7 +1989,6 @@ export function WorkspaceFileBrowser({
           <FileBrowserInner
             mode={mode}
             agentName={agentName}
-            agent={agent}
             isActive={isActive}
           />
         </FileBrowserStoreProvider>
