@@ -1,7 +1,7 @@
 import type { FileTreeInlineEdit, FileTreeNodeInfo } from "./FileTree";
 import type { RevisionViewState } from "./FileRevisionPane";
 import type { FileBrowserMode } from "./treeRoots";
-import type { FileIndexData } from "@/api/workspace";
+import type { FileIndexData, WorkspaceAgentInfo } from "@/api/workspace";
 import type { CheckoutRef } from "@/utils/fileExplorerRefs";
 import type { ExplorerRef, SkillsExplorerRef } from "@/utils/explorerRefs";
 
@@ -11,6 +11,8 @@ export type CompareMode = "branch" | "working";
 export interface FileBrowserProps {
   mode?: FileBrowserMode | undefined;
   agentName?: string | undefined;
+  /** In agent mode, an agent the workspace's agent list lacks (an Agent API agent). */
+  agent?: WorkspaceAgentInfo | undefined;
   isActive?: boolean | undefined;
 }
 

@@ -177,3 +177,69 @@ tests:
               return document.querySelectorAll('[data-testid=completion-record]').length === 2 &&
                 t.includes('make a child') && !t.includes('task_completed:'); })()
         intent: "Wait until, with both records delivered to the lead, the chat shows them only as the two records and no raw task_completed bubble"
+
+  - name: T7 agent page tabs - a lead and its child open on Chat | Info | Git | Diff | Files, and the child's Diff shows its commit after a reload
+    intent: An operator opens an Agent API lead and its child and sees the tabbed agent page with Chat in place of Terminal; the child's Git shows its own branch and its Diff shows the file it committed, and a reload on Diff keeps the tab and the diff
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-KIDS/v1/agents
+          headers: { Idempotency-Key: "agv1-kids-tabs-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-kids-tabs-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-kids-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: tabsLeadId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/kids-script" "agv1-kid3-${RUN_ID:-local}" AGV1-KIDS-TABS
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-KIDS/chat/$(cat "$AFT_WORK_DIR/tabsLeadId")"
+        intent: "Script the lead's agent_create call and open the lead"
+      - wait:
+          fn: >-
+            (() => { const tabs = Array.from(document.querySelectorAll('[data-testid=agent-editor-groups] button[draggable]')).map((b) => (b.textContent || '').trim());
+              const on = document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent;
+              return tabs.join('|') === 'Chat|Info|Git|Diff|Files' && on === 'Chat' &&
+                document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'; })()
+        intent: "Wait until the lead opens on Chat | Info | Git | Diff | Files with Chat selected and no Terminal"
+      - fill: { label: Message, value: "make a child" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const card = document.querySelector('[data-testid=child-card]')?.textContent || '';
+              return card.includes('agv1-kid3-${RUN_ID:-local}') && card.includes('finished'); })()
+        budget: 90000
+        intent: "Wait until the lead's chat shows its child finished"
+      - run: |
+          set -e
+          api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents"
+          kid="$(curl -sf "$api?parent=$(cat "$AFT_WORK_DIR/tabsLeadId")" | python3 -c 'import json,sys; print(json.load(sys.stdin)["agents"][0]["agent_id"])')"
+          wt="$(curl -sf "$api/$kid" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktree_path"])')"
+          echo "export const channels = ['general'];" > "$wt/channels.js"
+          git -C "$wt" add channels.js
+          git -C "$wt" -c user.email=e2e@x -c user.name=e2e commit -q -m "add channels"
+        intent: "Commit a file in the child's own worktree, as its task would"
+      - click: { selector: "[data-testid=child-card] a" }
+      - wait:
+          fn: >-
+            (() => { const tabs = Array.from(document.querySelectorAll('[data-testid=agent-editor-groups] button[draggable]')).map((b) => (b.textContent || '').trim());
+              const on = document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent;
+              return location.pathname.startsWith('/ws/E2E-AGV1-KIDS/chat/agt_') && tabs.join('|') === 'Chat|Info|Git|Diff|Files' && on === 'Chat' &&
+                (document.querySelector('[aria-label="Agent chat"] header')?.textContent || '').includes('agv1-kid3-${RUN_ID:-local}'); })()
+        intent: "Wait until the card opens the child on the same tabs with Chat selected"
+      - click: { role: button, name: "Git", exact: true }
+      - wait:
+          fn: >-
+            (document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '').includes('loom/agent/' + location.pathname.split('/').pop())
+        intent: "Wait until Git shows the child's own branch"
+      - click: { role: button, name: "Diff", exact: true }
+      - wait:
+          fn: >-
+            location.search === '?tab=diff' && (document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '').includes('channels.js')
+        intent: "Wait until Diff shows the child's committed file"
+      - reload: true
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent === 'Diff' &&
+            (document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '').includes('channels.js')
+        intent: "Wait until a reload reopens Diff with the child's file"

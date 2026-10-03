@@ -155,9 +155,19 @@ import type {
 function FileBrowserInner({
   mode = "workspace",
   agentName,
+  agent,
   isActive = true,
 }: FileBrowserProps) {
-  const { workspaceId, agents, repos, workspace } = useWorkspaceContext();
+  const {
+    workspaceId,
+    agents: workspaceAgents,
+    repos,
+    workspace,
+  } = useWorkspaceContext();
+  const agents = useMemo(
+    () => (agent ? [...workspaceAgents, agent] : workspaceAgents),
+    [agent, workspaceAgents],
+  );
   const caps = modeCapabilities(mode);
   const hasCheckouts = caps.checkouts;
   const eventContext = useEventContext();
@@ -1969,6 +1979,7 @@ function FileBrowserInner({
 export function WorkspaceFileBrowser({
   mode = "workspace",
   agentName,
+  agent,
   isActive = true,
 }: FileBrowserProps) {
   const { workspaceId } = useWorkspaceContext();
@@ -1987,6 +1998,7 @@ export function WorkspaceFileBrowser({
           <FileBrowserInner
             mode={mode}
             agentName={agentName}
+            agent={agent}
             isActive={isActive}
           />
         </FileBrowserStoreProvider>

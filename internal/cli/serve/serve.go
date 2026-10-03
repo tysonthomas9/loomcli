@@ -269,11 +269,15 @@ func startAgentAPI(ctx context.Context, cfg webui.ServerConfig) *agentwire.API {
 	return api
 }
 
-// wireAgentAPI mounts api on the server cfg configures and points its
-// bridges at the port the server actually binds, which is a fallback when
-// the configured one is taken.
+// wireAgentAPI mounts api on the server cfg configures, lets the agent git,
+// diff and file routes find its agents' worktrees, and points its bridges at
+// the port the server actually binds, which is a fallback when the
+// configured one is taken.
 func wireAgentAPI(cfg *webui.ServerConfig, api *agentwire.API) {
 	cfg.AgentAPIRoutes = api.Register
+	if g, ok := cfg.GitOps.(*opsimpl.GitOpsImpl); ok {
+		g.WithAgentAPI(api.Worktree)
+	}
 	bind := cfg.BindAddress
 	cfg.OnListen = func(port int) { api.SetAPIBase(agentAPIBase(bind, port)) }
 }

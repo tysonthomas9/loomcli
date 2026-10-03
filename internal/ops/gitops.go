@@ -77,6 +77,7 @@ type AgentWorktree struct {
 	Remote        string // git remote name (empty = "origin")
 	RepoName      string // workspace repo name
 	IsWorkspace   bool   // true if workspace mode
+	AgentAPI      bool   // an Agent API agent's worktree, not in the workspace's agent list
 }
 
 // GitPushResult contains the result of a push operation.

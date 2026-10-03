@@ -13,12 +13,19 @@ import {
 
 import styles from "./AgentEditorGroups.module.css";
 
-export type AgentEditorTab = "terminal" | "info" | "git" | "diff" | "files";
+export type AgentEditorTab =
+  | "terminal"
+  | "chat"
+  | "info"
+  | "git"
+  | "diff"
+  | "files";
 
 const ALL_TABS: AgentEditorTab[] = ["terminal", "info", "git", "diff", "files"];
 
 const TAB_LABELS: Record<AgentEditorTab, string> = {
   terminal: "Terminal",
+  chat: "Chat",
   info: "Info",
   git: "Git",
   diff: "Diff",
@@ -35,21 +42,24 @@ type DragPayload = {
   tab: AgentEditorTab;
 };
 
-function fallbackGroup(): EditorGroup {
-  return { tabs: ["terminal"], active: "terminal" };
-}
-
-function normalizeGroups(groups: EditorGroup[]): EditorGroup[] {
+function normalizeGroups(
+  groups: EditorGroup[],
+  first: AgentEditorTab,
+): EditorGroup[] {
   const kept = groups.filter((g) => g.tabs.length > 0);
-  if (kept.length === 0) return [fallbackGroup()];
+  if (kept.length === 0) return [{ tabs: [first], active: first }];
   return kept.map((g) => ({
     tabs: g.tabs,
     active: g.tabs.includes(g.active) ? g.active : g.tabs[0]!,
   }));
 }
 
-function initialGroups(): EditorGroup[] {
-  return [{ tabs: [...ALL_TABS], active: "terminal" }];
+function initialGroups(
+  tabs: AgentEditorTab[],
+  active: AgentEditorTab | undefined,
+): EditorGroup[] {
+  const first = active && tabs.includes(active) ? active : tabs[0]!;
+  return [{ tabs: [...tabs], active: first }];
 }
 
 /** Aether wireframe "columns" icon — split active tab into a right editor group. */
@@ -77,25 +87,43 @@ export interface AgentEditorGroupsProps {
   /** Resets layout when the selected agent changes. */
   resetKey: string | undefined;
   renderPane: (tab: AgentEditorTab, isActive: boolean) => ReactNode;
+  /** The tabs, in order; the first is the default. v5 agents get Terminal first. */
+  tabs?: AgentEditorTab[];
+  /** The tab to open on (for example from the URL); else the first tab. */
+  initialTab?: AgentEditorTab | undefined;
+  /** Called when the user picks a tab, so the page can remember it. */
+  onTabChange?: (tab: AgentEditorTab) => void;
 }
 
 export function AgentEditorGroups({
   resetKey,
   renderPane,
+  tabs = ALL_TABS,
+  initialTab,
+  onTabChange,
 }: AgentEditorGroupsProps): JSX.Element {
-  const [groups, setGroups] = useState<EditorGroup[]>(initialGroups);
+  const [groups, setGroups] = useState<EditorGroup[]>(() =>
+    initialGroups(tabs, initialTab),
+  );
   const dragRef = useRef<DragPayload | null>(null);
   const isSplit = groups.length > 1;
+  const firstTab = tabs[0]!;
 
+  // The layout resets when the agent changes, not when the opening tab does.
   useEffect(() => {
-    setGroups(initialGroups());
+    setGroups(initialGroups(tabs, initialTab));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);
 
-  const activate = useCallback((groupIndex: number, tab: AgentEditorTab) => {
-    setGroups((prev) =>
-      prev.map((g, i) => (i === groupIndex ? { ...g, active: tab } : g)),
-    );
-  }, []);
+  const activate = useCallback(
+    (groupIndex: number, tab: AgentEditorTab) => {
+      setGroups((prev) =>
+        prev.map((g, i) => (i === groupIndex ? { ...g, active: tab } : g)),
+      );
+      onTabChange?.(tab);
+    },
+    [onTabChange],
+  );
 
   const splitActiveTab = useCallback(() => {
     setGroups((prev) => {
@@ -113,32 +141,37 @@ export function AgentEditorGroups({
     });
   }, []);
 
-  const moveTab = useCallback((toGroup: number) => {
-    const payload = dragRef.current;
-    if (!payload) return;
-    const { fromGroup, tab } = payload;
-    if (fromGroup === toGroup) return;
+  const moveTab = useCallback(
+    (toGroup: number) => {
+      const payload = dragRef.current;
+      if (!payload) return;
+      const { fromGroup, tab } = payload;
+      if (fromGroup === toGroup) return;
 
-    setGroups((prev) =>
-      normalizeGroups(
-        prev.map((g, i) => {
-          if (i === fromGroup) {
-            const tabs = g.tabs.filter((t) => t !== tab);
-            const active = g.active === tab ? (tabs[0] ?? g.active) : g.active;
-            return { tabs, active };
-          }
-          if (i === toGroup) {
-            if (g.tabs.includes(tab)) {
-              return { ...g, active: tab };
+      setGroups((prev) =>
+        normalizeGroups(
+          prev.map((g, i) => {
+            if (i === fromGroup) {
+              const tabs = g.tabs.filter((t) => t !== tab);
+              const active =
+                g.active === tab ? (tabs[0] ?? g.active) : g.active;
+              return { tabs, active };
             }
-            return { tabs: [...g.tabs, tab], active: tab };
-          }
-          return g;
-        }),
-      ),
-    );
-    dragRef.current = null;
-  }, []);
+            if (i === toGroup) {
+              if (g.tabs.includes(tab)) {
+                return { ...g, active: tab };
+              }
+              return { tabs: [...g.tabs, tab], active: tab };
+            }
+            return g;
+          }),
+          firstTab,
+        ),
+      );
+      dragRef.current = null;
+    },
+    [firstTab],
+  );
 
   const handleDragStart = useCallback(
     (fromGroup: number, tab: AgentEditorTab) => {
