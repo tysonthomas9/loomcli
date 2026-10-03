@@ -542,6 +542,8 @@ tests:
           preview="$(ab eval "document.querySelector('$row')?.textContent || ''")"
           echo "reasoning row: $preview"
           case "$preview" in *Thinking*AGV1-UI3-THINKING*) ;; *) echo "no Thinking row with the reasoning preview" >&2; exit 1 ;; esac
+          # The row can sit under the composer; click it where it shows.
+          ab eval "document.querySelector('$row').scrollIntoView({ block: 'center' })" >/dev/null
           ab click "$row" >/dev/null
           body="$(ab eval "document.querySelector('[data-testid=reasoning] pre')?.textContent || ''")"
           echo "reasoning body: $body"
