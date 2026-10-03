@@ -225,3 +225,24 @@ func TestActiveDeclaredStack(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, id)
 }
+
+func TestEnsureStackRefusesReservedLeadPrefixForNewStacks(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	err := s.EnsureStack(ctx, sl.Stack{ID: "lead-feature", WorkspaceKey: ws, RepoName: "loomcli", RootBase: "main"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reserved")
+	_, getErr := s.GetStack(ctx, ws, "lead-feature")
+	assert.Error(t, getErr, "refused stack must not be stored")
+
+	// A stack recorded before the rule keeps working.
+	require.NoError(t, s.withLock(func(f *stacksFile) error {
+		f.Workspaces[ws] = &workspaceStacks{Stacks: map[string]*storedStack{
+			"lead-old": {Stack: sl.Stack{ID: "lead-old", WorkspaceKey: ws, RepoName: "loomcli", RootBase: "main"},
+				Nodes: map[string]*sl.Node{}},
+		}}
+		return nil
+	}))
+	require.NoError(t, s.EnsureStack(ctx, sl.Stack{ID: "lead-old", WorkspaceKey: ws, RepoName: "loomcli", RootBase: "develop"}))
+	require.NoError(t, s.EnsureStack(ctx, sl.Stack{ID: "feature-lead-x", WorkspaceKey: ws, RepoName: "loomcli", RootBase: "main"}))
+}
