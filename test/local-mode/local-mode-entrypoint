@@ -499,6 +499,38 @@ start_serve() {
   wait_for_url "http://127.0.0.1:${LOOM_PORT}/api/config" "loom serve"
 }
 
+# Real agent stacks: start OpenCode and wait for its model catalog before
+# "ready", so a create sent the moment the stack is up finds its model.
+# OpenCode's first catalog can be valid but incomplete, so wait until it lists
+# LOCAL_MODE_AGENTS_MODEL (or, unset, a default model). On timeout, warn with
+# the providers seen and come up anyway.
+warm_agent_models() {
+  if [ -z "${LOCAL_MODE_AGENTS_REAL:-}" ]; then
+    return 0
+  fi
+  url="http://127.0.0.1:${LOOM_PORT}/api/workspaces/${WORKSPACE}/v1/harnesses/opencode/models"
+  want="${LOCAL_MODE_AGENTS_MODEL:-}"
+  limit="${LOCAL_MODE_AGENTS_WARM_TIMEOUT:-90}"
+  start="$(date +%s)"
+  echo "[local-mode] warming OpenCode: waiting up to ${limit}s for ${want:-a default model}"
+  while :; do
+    catalog="$(curl -fsS --max-time 30 "$url" 2>/dev/null || true)"
+    elapsed=$(($(date +%s) - start))
+    if printf '%s' "$catalog" | jq -e --arg m "$want" \
+      'any(.providers[].models[]; if $m == "" then .is_default else .id == $m end)' >/dev/null 2>&1; then
+      count="$(printf '%s' "$catalog" | jq '[.providers[].models[]] | length')"
+      echo "[local-mode] OpenCode warm: ${count} models in ${elapsed}s"
+      return 0
+    fi
+    if [ "$elapsed" -ge "$limit" ]; then
+      providers="$(printf '%s' "$catalog" | jq -r '[.providers[].id] | join(", ")' 2>/dev/null || true)"
+      echo "[local-mode] WARNING: OpenCode catalog has no ${want:-default model} after ${elapsed}s; providers seen: ${providers:-none}" >&2
+      return 0
+    fi
+    sleep 1
+  done
+}
+
 workspace_daemon_pid() {
   ws_path="$1"
   pid_file="${ws_path}/.loom/daemon.pid"
@@ -608,6 +640,9 @@ trap 'cleanup; exit 0' INT TERM
 trap cleanup EXIT
 
 mkdir -p "${HOME:-/root}" "${LOOM_CONFIG_DIR:-/root/.loom}"
+# The healthcheck and `make local-mode-agents-up` wait for this marker.
+READY_MARKER=/tmp/local-mode-ready
+rm -f "$READY_MARKER"
 git config --global user.email "local-mode@fixture.local"
 git config --global user.name "local-mode"
 git config --global --add safe.directory "*" >/dev/null 2>&1 || true
@@ -626,7 +661,9 @@ register_agents
 start_serve
 create_second_workspace
 seed_tasks
+warm_agent_models
 
+touch "$READY_MARKER"
 echo "[local-mode] ready"
 echo "[local-mode] UI:  ${LOCAL_MODE_UI_URL:-http://localhost:8283}/ws/${WORKSPACE}/kanban"
 echo "[local-mode] API: ${LOCAL_MODE_API_URL:-http://localhost:8282}"

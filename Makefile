@@ -325,7 +325,13 @@ local-mode-agents-up: local-mode-frontend-dist
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS); \
-	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS); \
+	case " $(LOCAL_MODE_COMPOSE_UP_FLAGS) " in *" -d "*|*" --detach "*) ;; *) exit 0 ;; esac; \
+	echo "Waiting for loom-local to print [local-mode] ready..."; \
+	i=0; until $$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) exec -T loom-local test -e /tmp/local-mode-ready >/dev/null 2>&1; do \
+	  i=$$((i + 1)); [ $$i -le 300 ] || { echo "loom-local not ready after 300s; see its logs" >&2; exit 1; }; sleep 1; \
+	done; \
+	echo "STACK UP: http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/"
 
 local-mode-agents-down:
 	@test "$(LOCAL_MODE_COMPOSE_PROJECT)" != loomcli-local-mode || { echo "set LOCAL_MODE_COMPOSE_PROJECT to your own project; loomcli-local-mode is the dogfood stack" >&2; exit 1; }

@@ -178,6 +178,14 @@ from those providers. To set a default model, use `LOCAL_MODE_AGENTS_MODEL`
 (`provider/model`); otherwise OpenCode picks one. The fake-model mode stays
 the default for AFT and CI.
 
+Before printing `[local-mode] ready`, a real stack starts OpenCode and waits
+(up to `LOCAL_MODE_AGENTS_WARM_TIMEOUT`, default 90s) until its model catalog
+lists `LOCAL_MODE_AGENTS_MODEL`, or a default model when that is unset. It
+logs the model count and the time taken. On timeout it warns, naming the
+providers it saw, and comes up anyway. The `loom-local` healthcheck waits for
+that ready line, and with `-d` in `LOCAL_MODE_COMPOSE_UP_FLAGS`,
+`make local-mode-agents-up` returns only after it, printing `STACK UP`.
+
 ```sh
 LOCAL_MODE_AGENTS_REAL=1 LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-<you> \
 LOCAL_MODE_FLEETDB_PORT=8680 LOCAL_MODE_API_PORT=8682 LOCAL_MODE_UI_PORT=8683 \
