@@ -345,3 +345,27 @@ func TestDeclaredStackPublicationAddsNoDependents(t *testing.T) {
 		t.Fatalf("declared stack dependents = %+v, %v", found, err)
 	}
 }
+
+// The verifier's race: B publishes AB, C publishes ABC, then B's late publish
+// finishes. The stack order must still end as A, B, C.
+func TestLateApprovalPublishKeepsLaterLayer(t *testing.T) {
+	fx, forge := approvalFixture(t, "stack")
+	ctx := context.Background()
+	a := appliedTask(t, fx, "A", fx.base)
+	b := appliedTask(t, fx, "B", a.HeadSHA)
+	if _, err := PublishLeadChangeLocal(ctx, "W", "L", "B"); err != nil {
+		t.Fatal(err)
+	}
+	wantDependents(t, map[string][]string{"A": {"task-B@repo"}, "B": {}})
+	appliedTask(t, fx, "C", b.HeadSHA)
+	if _, err := PublishLeadChangeLocal(ctx, "W", "L", "C"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PublishLeadChangeLocal(ctx, "W", "L", "B"); err != nil {
+		t.Fatal(err)
+	}
+	if len(forge.prs) != 3 || forge.prs[2].Base != forge.prs[1].Head {
+		t.Fatalf("PRs after late B publish = %+v", forge.prs)
+	}
+	wantDependents(t, map[string][]string{"A": {"task-B@repo"}, "B": {"task-C@repo"}, "C": {}})
+}
