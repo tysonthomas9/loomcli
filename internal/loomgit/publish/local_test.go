@@ -723,6 +723,14 @@ func TestPublishLeadChangeLocalPublishesEachRepoOfCrossRepoLead(t *testing.T) {
 	shared := fixture{repo: app.repo, remote: app.remote, base: app.base, storePath: api.storePath, store: api.store}
 	apiRevision := stackRevision(t, api, "A", 1, api.base)
 	appRevision := stackRevision(t, shared, "B", 1, app.base)
+	// An in-place Apply records a second done row for the same change.
+	if err := api.store.SaveApplied(ctx, loomgit.AppliedLayer{RequestID: "apply-B1-again", Workspace: "W", Lead: "L", Change: "B",
+		Revision: appRevision.Number, OldTip: app.base, NewTip: appRevision.HeadSHA, Commits: []string{appRevision.HeadSHA}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.store.AdvanceApplied(ctx, "apply-B1-again", "prepared", "done"); err != nil {
+		t.Fatal(err)
+	}
 	for change, repo := range map[string]string{"A": "repo", "B": "app"} {
 		if _, err := api.store.DriverChange(ctx, "W", "task-"+change, repo, change); err != nil {
 			t.Fatal(err)
