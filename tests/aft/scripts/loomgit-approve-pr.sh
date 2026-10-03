@@ -211,10 +211,13 @@ if [[ "$case_name" == stack ]]; then
     if grep -q '"publish_status":"not_published"' "$case_dir/revisions-g-final.json"; then break; fi
     sleep 1
   done
-  python3 -c 'import json,sys; r=[i for i in json.load(open(sys.argv[1]))["data"] if i.get("publish_status")]; assert len(r)==1 and r[0]["publish_status"]=="not_published" and r[0]["publish_reason"]==sys.argv[2], r' \
+  # A revision Apply derived from the approved one reports the same outcome;
+  # the task shows it once, on the newest revision.
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; r=[i for i in d if i.get("publish_status")]; assert r and d[0] in r and all(i["publish_status"]=="not_published" and i["publish_reason"]==sys.argv[2] for i in r), r' \
     "$case_dir/revisions-g-final.json" "$reason"
   open_task g
   browser wait '[data-testid="revision-publish-status"]' >/dev/null
+  test "$(browser eval "document.querySelectorAll('[data-testid=\"revision-publish-status\"]').length")" = 1
   browser eval "document.querySelector('[data-testid=\"revision-publish-status\"]').textContent" | grep -qF "declared stack aft-declared is active"
   browser screenshot "$case_dir/stack-declared-not-published.png" >/dev/null
   sleep 3

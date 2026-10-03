@@ -260,9 +260,10 @@ merge_status_text() {
 wait_merge_status() { # wait_merge_status <text>: the open task shows it
   for _ in $(seq 1 30); do
     if merge_status_text | grep -qF "$1"; then return 0; fi
-    sleep 1
     browser eval "location.reload()" >/dev/null || true
     browser wait '[data-testid="revisions-section"]' >/dev/null || true
+    # The section renders before its revisions load; read after they have.
+    sleep 1
   done
   echo "task shows '$(merge_status_text)', want '$1'" >&2
   return 1
