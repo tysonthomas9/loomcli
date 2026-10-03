@@ -18,6 +18,8 @@ const api = vi.hoisted(() => ({
   getAgent: vi.fn(),
   updateAgent: vi.fn(),
   listHarnessModels: vi.fn(),
+  getCustomModels: vi.fn(),
+  setCustomModels: vi.fn(),
   streams: [] as { opts: AgentStreamOptions; events: AgentEvent[] }[],
   ids: 0,
 }));
@@ -30,6 +32,8 @@ vi.mock("@/api/agentsv1", () => ({
   getAgent: api.getAgent,
   updateAgent: api.updateAgent,
   listHarnessModels: api.listHarnessModels,
+  getCustomModels: api.getCustomModels,
+  setCustomModels: api.setCustomModels,
   sendMessage: vi.fn(),
   withdrawMessage: vi.fn(),
   respondToAsk: vi.fn(),
@@ -433,6 +437,106 @@ describe("composer model and effort pickers (UI2)", () => {
       ).toBeInTheDocument();
       view.unmount();
     }
+  });
+});
+
+describe("custom models (MCS3)", () => {
+  const withCustom = (ids: string[]): ModelCatalog => ({
+    ...CATALOG,
+    providers: [
+      ...CATALOG.providers,
+      {
+        id: "custom",
+        name: "Custom",
+        models: ids.map((id) => ({
+          id,
+          name: id,
+          context_limit: 0,
+          input: [],
+          is_default: false,
+          option_descriptors: [effort("medium", ["low", "medium", "high"])],
+          source: "custom" as const,
+        })),
+      },
+    ],
+  });
+
+  it("adds a custom model id in the Custom section, picks it and removes it", async () => {
+    api.getCustomModels.mockResolvedValue([]);
+    api.setCustomModels.mockImplementation((_ws, _h, ids: string[]) =>
+      Promise.resolve(ids),
+    );
+    await mount(agent());
+    fireEvent.click(modelButton());
+    const dialog = screen.getByRole("dialog", { name: "Choose a model" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Custom" }));
+    expect(
+      within(dialog).getByText("No custom models yet: add a model id above"),
+    ).toBeInTheDocument();
+
+    api.listHarnessModels.mockResolvedValue(withCustom(["openai/mine"]));
+    const input = within(dialog).getByRole("textbox", {
+      name: "Custom model id",
+    });
+    fireEvent.change(input, { target: { value: " openai/mine " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {});
+    expect(api.setCustomModels).toHaveBeenCalledWith("w1", "opencode", [
+      "openai/mine",
+    ]);
+    const row = await within(dialog).findByRole("option", {
+      name: /openai\/mine/,
+    });
+
+    api.getCustomModels.mockResolvedValue(["openai/mine"]);
+    api.listHarnessModels.mockResolvedValue(withCustom([]));
+    fireEvent.click(
+      within(row).getByRole("button", {
+        name: "Remove custom model openai/mine",
+      }),
+    );
+    await act(async () => {});
+    expect(api.setCustomModels).toHaveBeenLastCalledWith("w1", "opencode", []);
+    expect(api.updateAgent).not.toHaveBeenCalled();
+    expect(
+      within(dialog).queryByRole("option", { name: /openai\/mine/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("picks a custom model like any other", async () => {
+    api.listHarnessModels.mockResolvedValue(withCustom(["openai/mine"]));
+    await mount(agent());
+    fireEvent.click(modelButton());
+    const dialog = screen.getByRole("dialog", { name: "Choose a model" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Custom" }));
+    fireEvent.click(
+      within(dialog).getByRole("option", { name: /openai\/mine/ }),
+    );
+    expect(api.updateAgent).toHaveBeenCalledWith(
+      "w1",
+      "a1",
+      { model: "openai/mine" },
+      expect.any(String),
+    );
+  });
+
+  it("shows the server's error when an id is refused", async () => {
+    api.getCustomModels.mockResolvedValue([]);
+    api.setCustomModels.mockRejectedValue(
+      new Error('malformed model id "a//b"'),
+    );
+    await mount(agent());
+    fireEvent.click(modelButton());
+    const dialog = screen.getByRole("dialog", { name: "Choose a model" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Custom" }));
+    fireEvent.change(
+      within(dialog).getByRole("textbox", { name: "Custom model id" }),
+      { target: { value: "a//b" } },
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      'malformed model id "a//b"',
+    );
   });
 });
 

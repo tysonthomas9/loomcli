@@ -155,4 +155,12 @@ UPDATE agents SET attempt_after_seq = CASE
 WHERE attempt > 0;
 `, `
 ALTER TABLE agents ADD COLUMN history_purge_failed_at TEXT; -- set while a due R29 purge has failed (incomplete expiry); cleared when the purge succeeds or the deadline ends
+`, `
+CREATE TABLE custom_models (                -- model ids a workspace adds to a harness's catalog (MCS3)
+  workspace_id TEXT NOT NULL,
+  harness      TEXT NOT NULL,
+  model        TEXT NOT NULL,
+  pos          INTEGER NOT NULL,            -- the order they were set in
+  PRIMARY KEY (workspace_id, harness, model)
+);
 `}

@@ -75,6 +75,24 @@ func (e AgentV1HarnessInfoAccountKind) Valid() bool {
 	}
 }
 
+// Defines values for AgentV1ModelSource.
+const (
+	Custom  AgentV1ModelSource = "custom"
+	Harness AgentV1ModelSource = "harness"
+)
+
+// Valid indicates whether the value is a known member of the AgentV1ModelSource enum.
+func (e AgentV1ModelSource) Valid() bool {
+	switch e {
+	case Custom:
+		return true
+	case Harness:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentV1OptionDescriptorType.
 const (
 	Boolean AgentV1OptionDescriptorType = "boolean"
@@ -1827,6 +1845,13 @@ type AgentV1CreateBody struct {
 	Subject *AgentV1Subject `json:"subject,omitempty"`
 }
 
+// AgentV1CustomModels The model ids a workspace adds to a harness's catalog.
+type AgentV1CustomModels struct {
+	// Harness Set on responses
+	Harness *string  `json:"harness,omitempty"`
+	Models  []string `json:"models"`
+}
+
 // AgentV1Error Every Agent API error. code is a loomagent code (design v2 §12.1), empty for request errors such as a bad body.
 type AgentV1Error struct {
 	Allowed     *[]string `json:"allowed,omitempty"`
@@ -1900,7 +1925,13 @@ type AgentV1Model struct {
 	IsDefault         bool                      `json:"is_default"`
 	Name              string                    `json:"name"`
 	OptionDescriptors []AgentV1OptionDescriptor `json:"option_descriptors"`
+
+	// Source custom: a workspace custom model id the harness does not list
+	Source AgentV1ModelSource `json:"source"`
 }
+
+// AgentV1ModelSource custom: a workspace custom model id the harness does not list
+type AgentV1ModelSource string
 
 // AgentV1ModelCatalog defines model for AgentV1ModelCatalog.
 type AgentV1ModelCatalog struct {
@@ -4316,3 +4347,6 @@ type RespondAgentV1JSONRequestBody = AgentV1RespondBody
 
 // SendAgentV1JSONRequestBody defines body for SendAgentV1 for application/json ContentType.
 type SendAgentV1JSONRequestBody = AgentV1SendBody
+
+// SetHarnessCustomModelsV1JSONRequestBody defines body for SetHarnessCustomModelsV1 for application/json ContentType.
+type SetHarnessCustomModelsV1JSONRequestBody = AgentV1CustomModels

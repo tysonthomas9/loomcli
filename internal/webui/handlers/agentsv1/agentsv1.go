@@ -68,6 +68,8 @@ func (h *Handler) Register(mux *http.ServeMux, workspace middleware.Middleware,
 		"GET " + p + "presets/{name}":                  h.getPreset,
 		"GET " + p + "harnesses/{harness}":             h.getHarness,
 		"GET " + p + "harnesses/{harness}/models":      h.listModels,
+		"GET " + p + "harnesses/{harness}/custom":      getCustomModels,
+		"PUT " + p + "harnesses/{harness}/custom":      putCustomModels,
 		"POST " + p + "github/read":                    h.githubRead,
 	} {
 		mux.Handle(pattern, workspace(h.serve(fn)))

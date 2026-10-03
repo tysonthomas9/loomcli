@@ -2509,6 +2509,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/v1/harnesses/{harness}/custom": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the model ids this workspace adds to a harness's catalog
+     * @description Custom model ids are listed in GET /harnesses/{harness}/models under the "custom" provider with source custom (unless the harness lists them itself), take the harness's generic options, and are always accepted on Create and PATCH without model_unverified.
+     */
+    get: operations["getHarnessCustomModelsV1"];
+    /**
+     * Replace the model ids this workspace adds to a harness's catalog
+     * @description Repeats are dropped; a malformed id is a 400 preset_invalid. An empty list removes them all.
+     */
+    put: operations["setHarnessCustomModelsV1"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/v1/presets": {
     parameters: {
       query?: never;
@@ -2739,6 +2763,17 @@ export interface components {
       input: string[];
       is_default: boolean;
       option_descriptors: components["schemas"]["AgentV1OptionDescriptor"][];
+      /**
+       * @description custom: a workspace custom model id the harness does not list
+       * @enum {string}
+       */
+      source: "harness" | "custom";
+    };
+    /** @description The model ids a workspace adds to a harness's catalog. */
+    AgentV1CustomModels: {
+      /** @description Set on responses */
+      harness?: string;
+      models: string[];
     };
     /** @description One option a model takes. current_value is the value used when none is set. */
     AgentV1OptionDescriptor: {
@@ -9352,6 +9387,62 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AgentV1ModelCatalog"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  getHarnessCustomModelsV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description opencode, codex or claude */
+        harness: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The custom model ids */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1CustomModels"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  setHarnessCustomModelsV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description opencode, codex or claude */
+        harness: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgentV1CustomModels"];
+      };
+    };
+    responses: {
+      /** @description The saved custom model ids */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1CustomModels"];
         };
       };
       default: components["responses"]["AgentV1Error"];

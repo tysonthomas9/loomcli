@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { listHarnessModels } from "@/api/agentsv1";
+import {
+  getCustomModels,
+  listHarnessModels,
+  setCustomModels,
+} from "@/api/agentsv1";
 import type {
   Agent,
   CatalogModel,
@@ -17,6 +21,26 @@ export interface PickerModel extends CatalogModel {
 export interface PickerProvider {
   id: string;
   name: string;
+}
+
+/** The section workspace custom model ids are listed and added in (MCS3). */
+export const CUSTOM_PROVIDER: PickerProvider = { id: "custom", name: "Custom" };
+
+/**
+ * The catalog's providers, then Custom when the catalog lists none of its
+ * own, so a custom model id can be added from the picker. A catalog with no
+ * providers yet (OpenCode still starting) gets none, so the picker still
+ * opens on a real provider once they load.
+ */
+export function pickerProviders(
+  catalog: ModelCatalog | null,
+): PickerProvider[] {
+  const ps = (catalog?.providers ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+  }));
+  if (ps.length === 0 || ps.some((p) => p.id === CUSTOM_PROVIDER.id)) return ps;
+  return [...ps, CUSTOM_PROVIDER];
 }
 
 /** The catalog's models in catalog order, each with its provider. */
@@ -115,6 +139,9 @@ export interface UseAgentModelReturn {
   disabledReason: string | null;
   /** Reads the catalog again (the picker does on opening). */
   refresh: () => void;
+  /** Adds or removes a workspace custom model id, then reads the catalog again. */
+  addCustomModel: (id: string) => Promise<void>;
+  removeCustomModel: (id: string) => Promise<void>;
 }
 
 /**
@@ -169,9 +196,25 @@ export function useAgentModel(
   }, [workspaceId, harness, reads]);
 
   const models = useMemo(() => catalogModels(catalog), [catalog]);
-  const providers = useMemo(
-    () => (catalog?.providers ?? []).map((p) => ({ id: p.id, name: p.name })),
-    [catalog],
+  const providers = useMemo(() => pickerProviders(catalog), [catalog]);
+  // Read-modify-write of the harness's custom ids; a failure rejects for
+  // the picker to show.
+  const editCustom = useCallback(
+    async (edit: (ids: string[]) => string[]) => {
+      if (!harness) return;
+      const ids = await getCustomModels(workspaceId, harness);
+      await setCustomModels(workspaceId, harness, edit(ids));
+      refresh();
+    },
+    [workspaceId, harness, refresh],
+  );
+  const addCustomModel = useCallback(
+    (id: string) => editCustom((ids) => [...ids, id]),
+    [editCustom],
+  );
+  const removeCustomModel = useCallback(
+    (id: string) => editCustom((ids) => ids.filter((x) => x !== id)),
+    [editCustom],
   );
   const { model, traitsModel } = useMemo(
     () => resolveAgentModel(models, agent?.model ?? null),
@@ -199,5 +242,7 @@ export function useAgentModel(
     descriptors,
     disabledReason,
     refresh,
+    addCustomModel,
+    removeCustomModel,
   };
 }

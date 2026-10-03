@@ -34,6 +34,14 @@ type Model struct {
 	Input             []string           `json:"input"`
 	IsDefault         bool               `json:"is_default"`
 	OptionDescriptors []OptionDescriptor `json:"option_descriptors"`
+	Source            string             `json:"source"` // harness, or custom: a workspace custom model id (MCS3)
+}
+
+// CustomModels is GET and PUT /harnesses/{harness}/custom: the model ids this
+// workspace adds to the harness's catalog (MCS3). A PUT replaces them.
+type CustomModels struct {
+	Harness string   `json:"harness"`
+	Models  []string `json:"models"`
 }
 
 // OptionDescriptor is one option a model takes: a select with its options,
@@ -80,9 +88,28 @@ func (h *Handler) listModels(_ http.ResponseWriter, r *http.Request, s *loomagen
 	return http.StatusOK, out, nil
 }
 
+func getCustomModels(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	harness := r.PathValue("harness")
+	ids, err := s.CustomModels(r.Context(), harness)
+	return http.StatusOK, CustomModels{Harness: harness, Models: ids}, err
+}
+
+func putCustomModels(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	var body CustomModels
+	if _, err := envelope(w, r, &body); err != nil {
+		return 0, nil, err
+	}
+	harness := r.PathValue("harness")
+	ids, err := s.SetCustomModels(r.Context(), harness, body.Models)
+	return http.StatusOK, CustomModels{Harness: harness, Models: ids}, err
+}
+
 func modelOut(m loomharness.Model) Model {
 	out := Model{ID: m.ID, Name: m.Name, ContextLimit: m.ContextLimit, Input: m.Input, IsDefault: m.Default,
-		OptionDescriptors: []OptionDescriptor{}}
+		OptionDescriptors: []OptionDescriptor{}, Source: "harness"}
+	if m.Custom {
+		out.Source = "custom"
+	}
 	if out.Input == nil {
 		out.Input = []string{}
 	}

@@ -5,10 +5,16 @@
 // of T3's provider instances); a plain listbox with arrow-key highlight in
 // place of Base UI's combobox and LegendList; favorites and recent models
 // are kept in localStorage; no locked-provider mode, legacy section or jump
-// shortcuts; CSS modules in place of Tailwind.
+// shortcuts; CSS modules in place of Tailwind. MCS3: the Custom section
+// adds workspace custom model ids and its rows remove them (T3 keeps them in
+// settings as customModels).
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { PickerModel, PickerProvider } from "@/hooks/agents/useAgentModel";
+import {
+  CUSTOM_PROVIDER,
+  type PickerModel,
+  type PickerProvider,
+} from "@/hooks/agents/useAgentModel";
 import {
   buildModelPickerSearchText,
   scoreModelPickerSearch,
@@ -22,6 +28,62 @@ import {
 import { ProviderIcon } from "./ProviderIcon";
 import styles from "./ModelPicker.module.css";
 
+const CUSTOM_SECTION = providerSection(CUSTOM_PROVIDER.id);
+
+const errorText = (err: unknown) =>
+  err instanceof Error ? err.message : String(err);
+
+/** Adds a custom model id; a refused one shows the server's error. */
+function AddCustomModel({ onAdd }: { onAdd: (id: string) => Promise<void> }) {
+  const [id, setId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const add = () => {
+    const v = id.trim();
+    if (!v || busy) return;
+    setBusy(true);
+    setError(null);
+    onAdd(v)
+      .then(() => setId(""))
+      .catch((err) => setError(errorText(err)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    // A div, not a form: the picker sits inside the composer's form.
+    <div className={styles.customForm} data-model-picker-custom-form="true">
+      <div className={styles.customRow}>
+        <input
+          className={styles.customInput}
+          placeholder="provider/model id"
+          aria-label="Custom model id"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        <button
+          type="button"
+          onClick={add}
+          className={styles.customAdd}
+          disabled={busy || !id.trim()}
+        >
+          Add
+        </button>
+      </div>
+      {error && (
+        <div className={styles.customError} role="alert">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const ModelPickerContent = memo(function ModelPickerContent(props: {
   harness: string;
   models: readonly PickerModel[];
@@ -30,8 +92,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   modelId: string | null;
   onSelect: (modelId: string) => void;
   onRequestClose: () => void;
+  onAddCustom?: ((id: string) => Promise<void>) | undefined;
+  onRemoveCustom?: ((id: string) => Promise<void>) | undefined;
 }) {
-  const { harness, models, providers, modelId, onSelect } = props;
+  const { harness, models, providers, modelId, onSelect, onRemoveCustom } =
+    props;
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const { prefs, toggleFavorite, addRecent } = useModelPickerPrefs();
   const keyOf = (m: PickerModel) => modelPrefKey(harness, m.id);
   const favorites = useMemo(() => new Set(prefs.favorites), [prefs.favorites]);
@@ -177,6 +243,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             }}
           />
         </div>
+        {!searching && section === CUSTOM_SECTION && props.onAddCustom && (
+          <AddCustomModel onAdd={props.onAddCustom} />
+        )}
+        {removeError && (
+          <div className={styles.customError} role="alert">
+            {removeError}
+          </div>
+        )}
         <ul
           ref={listRef}
           id="model-picker-list"
@@ -214,6 +288,32 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     <span>{m.providerName}</span>
                   </div>
                 </div>
+                {m.source === "custom" && onRemoveCustom && (
+                  <button
+                    type="button"
+                    className={styles.favoriteButton}
+                    aria-label={`Remove custom model ${m.id}`}
+                    title="Remove custom model"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRemoveError(null);
+                      onRemoveCustom(m.id).catch((err) =>
+                        setRemoveError(errorText(err)),
+                      );
+                    }}
+                  >
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                    >
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                )}
                 <button
                   type="button"
                   className={styles.favoriteButton}
@@ -251,7 +351,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 ? "No favorites yet: star a model to add it"
                 : section === "recent"
                   ? "No recent models"
-                  : "No models found"}
+                  : section === CUSTOM_SECTION
+                    ? "No custom models yet: add a model id above"
+                    : "No models found"}
           </div>
         )}
       </div>

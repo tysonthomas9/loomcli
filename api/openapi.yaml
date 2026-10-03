@@ -4555,6 +4555,38 @@ paths:
         "200": {description: The catalog, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1ModelCatalog"}}}}
         default: {$ref: "#/components/responses/AgentV1Error"}
 
+  /api/workspaces/{ws}/v1/harnesses/{harness}/custom:
+    get:
+      operationId: getHarnessCustomModelsV1
+      tags: [agents-v1]
+      summary: Get the model ids this workspace adds to a harness's catalog
+      description: >-
+        Custom model ids are listed in GET /harnesses/{harness}/models under the "custom" provider with source custom
+        (unless the harness lists them itself), take the harness's generic options, and are always accepted on Create
+        and PATCH without model_unverified.
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: harness, in: path, required: true, schema: {type: string}, description: "opencode, codex or claude"}
+      responses:
+        "200": {description: The custom model ids, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1CustomModels"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+    put:
+      operationId: setHarnessCustomModelsV1
+      tags: [agents-v1]
+      summary: Replace the model ids this workspace adds to a harness's catalog
+      description: Repeats are dropped; a malformed id is a 400 preset_invalid. An empty list removes them all.
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: harness, in: path, required: true, schema: {type: string}, description: "opencode, codex or claude"}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1CustomModels"}}}
+      responses:
+        "200": {description: The saved custom model ids, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1CustomModels"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
   /api/workspaces/{ws}/v1/presets:
     get:
       operationId: listAgentPresetsV1
@@ -4877,7 +4909,7 @@ components:
         models: {type: array, items: {$ref: "#/components/schemas/AgentV1Model"}}
     AgentV1Model:
       type: object
-      required: [id, name, context_limit, input, is_default, option_descriptors]
+      required: [id, name, context_limit, input, is_default, option_descriptors, source]
       properties:
         id: {type: string}
         name: {type: string}
@@ -4885,6 +4917,14 @@ components:
         input: {type: array, items: {type: string}, description: "text, image and/or pdf"}
         is_default: {type: boolean}
         option_descriptors: {type: array, items: {$ref: "#/components/schemas/AgentV1OptionDescriptor"}}
+        source: {type: string, enum: [harness, custom], description: "custom: a workspace custom model id the harness does not list"}
+    AgentV1CustomModels:
+      type: object
+      description: The model ids a workspace adds to a harness's catalog.
+      required: [models]
+      properties:
+        harness: {type: string, description: Set on responses}
+        models: {type: array, items: {type: string}}
     AgentV1OptionDescriptor:
       type: object
       description: One option a model takes. current_value is the value used when none is set.

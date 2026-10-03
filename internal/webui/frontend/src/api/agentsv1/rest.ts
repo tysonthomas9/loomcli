@@ -2,11 +2,12 @@
 // the caller's RequestID as Idempotency-Key: make one per user action with
 // newRequestId() and reuse it on retry.
 
-import { get, post, patch, del, wsUrl } from "../common/client";
+import { get, post, patch, put, del, wsUrl } from "../common/client";
 import type {
   Agent,
   AgentList,
   CreateAgentBody,
+  CustomModels,
   Delivery,
   EventPage,
   ModelCatalog,
@@ -174,3 +175,18 @@ export const getPreset = (ws: string, name: string) =>
 /** The harness's connected providers and models, with each model's options. */
 export const listHarnessModels = (ws: string, harness: string) =>
   get<ModelCatalog>(v1(ws, `/harnesses/${encodeURIComponent(harness)}/models`));
+
+const customPath = (ws: string, harness: string) =>
+  v1(ws, `/harnesses/${encodeURIComponent(harness)}/custom`);
+
+/** The model ids this workspace adds to the harness's catalog (MCS3). */
+export const getCustomModels = (ws: string, harness: string) =>
+  get<CustomModels>(customPath(ws, harness)).then((r) => r.models);
+
+/** Replaces the workspace's custom model ids for the harness. */
+export const setCustomModels = (
+  ws: string,
+  harness: string,
+  models: string[],
+) =>
+  put<CustomModels>(customPath(ws, harness), { models }).then((r) => r.models);

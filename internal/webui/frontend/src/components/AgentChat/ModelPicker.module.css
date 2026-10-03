@@ -348,6 +348,49 @@
   text-align: center;
 }
 
+/* MCS3: the Custom section's add form. */
+.customForm {
+  padding: 6px 8px 0;
+}
+
+.customRow {
+  display: flex;
+  gap: 6px;
+}
+
+.customInput {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+}
+
+.customAdd {
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.customAdd:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.customError {
+  padding: 4px 8px 0;
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
+}
+
 /* ModelPickerSidebar: a w-11 icon rail. */
 .rail {
   display: flex;

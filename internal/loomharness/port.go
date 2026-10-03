@@ -153,6 +153,7 @@ type Model struct {
 	Input        []string // text | image | pdf
 	Default      bool     // the model a session gets with none chosen
 	Options      []OptionDescriptor
+	Custom       bool // a workspace custom model id the harness does not list (MCS3)
 }
 
 // Option types.

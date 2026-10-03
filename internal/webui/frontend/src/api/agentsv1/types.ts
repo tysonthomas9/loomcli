@@ -226,12 +226,20 @@ export interface CatalogModel {
   input: string[]; // text | image | pdf
   is_default: boolean;
   option_descriptors: OptionDescriptor[];
+  /** custom: a workspace custom model id the harness does not list (MCS3). */
+  source: "harness" | "custom";
 }
 
 export interface ModelProvider {
   id: string;
   name: string;
   models: CatalogModel[];
+}
+
+/** GET and PUT /v1/harnesses/{harness}/custom: the workspace's custom model ids. */
+export interface CustomModels {
+  harness?: string;
+  models: string[];
 }
 
 /** GET /v1/harnesses/{harness}/models. */

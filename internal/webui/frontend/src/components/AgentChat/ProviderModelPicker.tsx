@@ -31,6 +31,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   onModelChange: (modelId: string) => void;
   /** Called on opening, e.g. to read the catalog again. */
   onOpen?: () => void;
+  /** Add or remove a workspace custom model id (the Custom section). */
+  onAddCustom?: (id: string) => Promise<void>;
+  onRemoveCustom?: (id: string) => Promise<void>;
 }) {
   const { open, setOpen, rootRef } = useComposerPopover();
   const disabled = Boolean(props.disabledReason);
@@ -76,6 +79,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             providers={props.providers}
             modelId={props.model?.id ?? props.modelId}
             onRequestClose={() => setOpen(false)}
+            onAddCustom={props.onAddCustom}
+            onRemoveCustom={props.onRemoveCustom}
             onSelect={(id) => {
               setOpen(false);
               if (id !== props.model?.id) props.onModelChange(id);

@@ -19,7 +19,8 @@ func (s *Service) Models(ctx context.Context, harness string) ([]loomharness.Mod
 	return s.catalog(ctx, harness)
 }
 
-// catalog lists harness's models, or nil when it is not wired.
+// catalog lists harness's models, or nil when it is not wired, then the
+// workspace's custom model ids it does not list (MCS3).
 func (s *Service) catalog(ctx context.Context, harness string) ([]loomharness.Model, error) {
 	h, ok := s.harnesses[harness]
 	if !ok {
@@ -34,7 +35,71 @@ func (s *Service) catalog(ctx context.Context, harness string) ([]loomharness.Mo
 		s.listed[harness] = time.Now()
 	}
 	s.mu.Unlock()
-	return ms, nil
+	custom, err := s.store.CustomModels(ctx, s.workspaceID, harness)
+	if err != nil {
+		return nil, err
+	}
+	return withCustom(ms, custom), nil
+}
+
+// withCustom appends to ms each custom id it does not list, as a Custom model
+// of the "custom" provider with the harness's generic options: those of its
+// default model, else of its first (pick validates against the same).
+func withCustom(ms []loomharness.Model, custom []string) []loomharness.Model {
+	var generic []loomharness.OptionDescriptor
+	if len(ms) > 0 {
+		generic = ms[0].Options
+	}
+	if i := slices.IndexFunc(ms, func(m loomharness.Model) bool { return m.Default }); i >= 0 {
+		generic = ms[i].Options
+	}
+	out := slices.Clip(ms) // never append into the harness's array
+	for _, id := range custom {
+		if !slices.ContainsFunc(ms, func(m loomharness.Model) bool { return m.ID == id }) {
+			out = append(out, loomharness.Model{ID: id, Name: id, Provider: "custom", ProviderName: "Custom",
+				Options: generic, Custom: true})
+		}
+	}
+	return out
+}
+
+// CustomModels returns the model ids this workspace adds to harness's
+// catalog (MCS3).
+func (s *Service) CustomModels(ctx context.Context, harness string) ([]string, error) {
+	if err := s.knownHarness(harness); err != nil {
+		return nil, err
+	}
+	return s.store.CustomModels(ctx, s.workspaceID, harness)
+}
+
+// knownHarness refuses a harness that is neither wired nor one of Harnesses.
+func (s *Service) knownHarness(harness string) error {
+	if _, ok := s.harnesses[harness]; ok || slices.Contains(Harnesses, harness) {
+		return nil
+	}
+	return invalid(fmt.Sprintf("unknown harness %q", harness), Harnesses...)
+}
+
+// SetCustomModels replaces this workspace's custom model ids for harness
+// (MCS3), dropping repeats. A custom id is always accepted on Create and
+// Update, never unverified; a malformed one is preset_invalid.
+func (s *Service) SetCustomModels(ctx context.Context, harness string, ids []string) ([]string, error) {
+	if err := s.knownHarness(harness); err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, id := range ids {
+		if id == "" {
+			return nil, invalid("custom model id is empty")
+		}
+		if err := checkModelID(id); err != nil {
+			return nil, err
+		}
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out, s.store.SetCustomModels(ctx, s.workspaceID, harness, out)
 }
 
 // createModels lists harness's model ids for a create of model (MC1, MCS1).
