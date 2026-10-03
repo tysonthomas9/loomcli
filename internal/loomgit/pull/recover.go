@@ -32,13 +32,34 @@ func Recover(ctx context.Context) error {
 		return err
 	}
 	options := gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}}
+	// A failed plan holds back only its own lead; later plans for that lead wait.
+	var failures []error
+	blocked := map[string]bool{}
 	for _, plan := range plans {
+		key := plan.Workspace + "\x00" + plan.Lead
+		if blocked[key] {
+			continue
+		}
 		if err := recoverPlan(ctx, store, options, plan); err != nil {
-			return err
+			blocked[key] = true
+			failures = append(failures, &PlanError{Workspace: plan.Workspace, Lead: plan.Lead, Err: err})
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
+
+// PlanError is a pull plan recovery could not finish. Apply recovery for the
+// same lead waits for it; other leads continue.
+type PlanError struct {
+	Workspace, Lead string
+	Err             error
+}
+
+func (e *PlanError) Error() string {
+	return fmt.Sprintf("recover pull for %s/%s: %v", e.Workspace, e.Lead, e.Err)
+}
+
+func (e *PlanError) Unwrap() error { return e.Err }
 
 func recoverPlan(ctx context.Context, store *journal.SQLite, options gitexec.Options, plan journal.PullPlan) error {
 	path, err := pullAreaPath(ctx, store, plan)

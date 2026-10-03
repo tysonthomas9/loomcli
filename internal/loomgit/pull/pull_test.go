@@ -370,3 +370,35 @@ func runInterruptedPullChild(t *testing.T) {
 	}
 	t.Fatal("pull returned without interruption")
 }
+
+func TestPullRecoveryFailureHoldsBackOnlyItsLead(t *testing.T) {
+	fixture := newFixture(t)
+	ctx := context.Background()
+	trunk := preparePull(t, fixture)
+	if _, err := fixture.apply(t); err != nil {
+		t.Fatal(err)
+	}
+	advanceTrunk(t, fixture, trunk, "trunk")
+	// W1/L's plan comes first and its working area is gone.
+	if err := fixture.store.SavePullPlan(ctx, journal.PullPlan{RequestID: "w1-pull", Workspace: "W1", Lead: "L",
+		Repo: "repo", BaseSHA: fixture.base}); err != nil {
+		t.Fatal(err)
+	}
+	fixture.service.beforeCompletePull = func() error { return errors.New("interrupted after swap") }
+	if _, err := fixture.service.Pull(ctx, PullRequest{Workspace: "W", Lead: "L", Repo: "repo", RequestID: "pull-recover"}); err == nil {
+		t.Fatal("expected injected interruption")
+	}
+	fixture.service.beforeCompletePull = nil
+	err := Recover(ctx)
+	var failed *PlanError
+	if !errors.As(err, &failed) || failed.Workspace != "W1" || failed.Lead != "L" {
+		t.Fatalf("pull recovery = %v", err)
+	}
+	log, err := fixture.service.appliedLog(ctx, "W", "L", fixture.git(t, "rev-parse", "HEAD"))
+	if err != nil || len(log) != 1 || log[0].Change != "C1" {
+		t.Fatalf("other lead's recovered layers = %+v, %v", log, err)
+	}
+	if plans, err := fixture.store.PendingPullPlans(ctx, "W1", "L"); err != nil || len(plans) != 1 {
+		t.Fatalf("failed lead's plan = %+v, %v", plans, err)
+	}
+}

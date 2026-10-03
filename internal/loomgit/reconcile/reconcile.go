@@ -29,7 +29,9 @@ type Handlers struct {
 }
 
 // RunOnce classifies open journal entries before invoking any recovery owner.
-// Unhandled entries retain their fences for explicit repair.
+// Unhandled entries retain their fences for explicit repair. They name no
+// workspace, so they hold back workspace and apply recovery everywhere; landing
+// still runs, and one owner's failure never skips the next owner.
 func RunOnce(ctx context.Context, handlers Handlers) error {
 	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
@@ -47,6 +49,7 @@ func RunOnce(ctx context.Context, handlers Handlers) error {
 		return err
 	}
 	var workspaceOpen bool
+	var failures []error
 	for _, entry := range entries {
 		switch entry.Operation {
 		case "ensure_workspace", "attach_workspace_repos":
@@ -59,21 +62,19 @@ func RunOnce(ctx context.Context, handlers Handlers) error {
 				continue
 			}
 		}
-		return loomgit.NewError(loomgit.AttentionRequired,
-			fmt.Sprintf("journal request %q has no recovery handler for %q", entry.RequestID, entry.Operation), nil)
+		failures = append(failures, loomgit.NewError(loomgit.AttentionRequired,
+			fmt.Sprintf("journal request %q has no recovery handler for %q", entry.RequestID, entry.Operation), nil))
 	}
-	if workspaceOpen {
-		if err := handlers.Workspace.Recover(ctx); err != nil {
-			return err
+	if len(failures) == 0 {
+		if workspaceOpen {
+			failures = append(failures, handlers.Workspace.Recover(ctx))
 		}
-	}
-	if handlers.Apply != nil {
-		if err := handlers.Apply.Recover(ctx); err != nil {
-			return err
+		if handlers.Apply != nil {
+			failures = append(failures, handlers.Apply.Recover(ctx))
 		}
 	}
 	if handlers.Landing != nil {
-		return handlers.Landing.Recover(ctx)
+		failures = append(failures, handlers.Landing.Recover(ctx))
 	}
-	return nil
+	return errors.Join(failures...)
 }

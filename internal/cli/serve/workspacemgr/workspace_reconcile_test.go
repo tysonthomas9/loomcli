@@ -2,6 +2,7 @@ package workspacemgr
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	_ "modernc.org/sqlite"
 )
 
 func TestReconcileJournalLandingUsesRecordedDependents(t *testing.T) {
@@ -291,5 +293,49 @@ func TestReconcileJournalRunsLaterPassesAfterLandingError(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "landing W1/A: broken") || !strings.Contains(err.Error(), "native broken") {
 		t.Fatalf("aggregated error = %v", err)
+	}
+}
+
+func TestReconcileJournalBadJournalEntryStillRunsLaterPasses(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	journalPath := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(journalPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(journalPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previousLanding, previousNative, previousAbandon := landingPass, nativePass, abandonPass
+	t.Cleanup(func() { landingPass, nativePass, abandonPass = previousLanding, previousNative, previousAbandon })
+	var ran []string
+	landingPass = func(context.Context) error { ran = append(ran, "landing"); return nil }
+	nativePass = func(context.Context) error { ran = append(ran, "native"); return nil }
+	abandonPass = func(context.Context, store.AgentSessionStore) error { ran = append(ran, "abandon"); return nil }
+	ctx := context.Background()
+	if err := ReconcileJournal(ctx, memstore.New()); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`INSERT INTO journal_entries (id,request_id,operation,phase,version,fence) VALUES ('bad','bad','from-a-newer-loom','started',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	ran = nil
+	err = ReconcileJournal(ctx, memstore.New())
+	if strings.Join(ran, ",") != "landing,native,abandon" {
+		t.Fatalf("passes run with a bad journal entry = %v", ran)
+	}
+	var coded *loomgit.Error
+	if !errors.As(err, &coded) || coded.Code() != string(loomgit.AttentionRequired) {
+		t.Fatalf("bad journal entry = %v", err)
+	}
+	var phase string
+	var version, fence int
+	if err := db.QueryRow(`SELECT phase,version,fence FROM journal_entries WHERE id='bad'`).Scan(&phase, &version, &fence); err != nil ||
+		phase != "started" || version != 1 || fence != 1 {
+		t.Fatalf("bad entry changed: %s %d %d, %v", phase, version, fence, err)
 	}
 }
