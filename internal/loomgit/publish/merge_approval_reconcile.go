@@ -315,9 +315,28 @@ func followNativeApprovalMerge(ctx context.Context, store *journal.SQLite, forge
 	approval.DispatchHead = after.DispatchHead
 	request, err := approvalMergeRequest(ctx, store, forge, approval, publication)
 	if err == nil {
+		// GitHub merges the native prefix up to the target, so the layers below
+		// that already merged are not part of it.
+		request.Changes, err = unlandedChanges(ctx, store, approval.Workspace, request.Changes)
+	}
+	if err == nil {
 		err = GitHubStackBackend{Store: store}.MergeUpTo(ctx, request, approval.Change)
 	}
 	return blockOnCodedError(ctx, store, approval, err)
+}
+
+func unlandedChanges(ctx context.Context, store *journal.SQLite, workspace string, changes []string) ([]string, error) {
+	open := make([]string, 0, len(changes))
+	for _, change := range changes {
+		landed, err := store.IsLanded(ctx, workspace, change)
+		if err != nil {
+			return nil, err
+		}
+		if !landed {
+			open = append(open, change)
+		}
+	}
+	return open, nil
 }
 
 func reconcileApprovalNative(ctx context.Context, store *journal.SQLite, forge mergeApprovalForge) error {
