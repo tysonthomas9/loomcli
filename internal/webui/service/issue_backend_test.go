@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,8 @@ type fakeIssueBackend struct {
 	// Per-method canned returns and capture slots.
 	getResult           *backend.IssueDetailData
 	getErr              error
+	getByID             map[string]*backend.IssueDetailData // optional per-ID override of getResult
+	getErrByID          map[string]error                    // optional per-ID override of getErr
 	getCalls            []string
 	listResult          []backend.IssueData
 	listErr             error
@@ -105,6 +108,12 @@ func (f *fakeIssueBackend) Get(_ context.Context, id string) (*backend.IssueDeta
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.getCalls = append(f.getCalls, id)
+	if err, ok := f.getErrByID[id]; ok {
+		return nil, err
+	}
+	if detail, ok := f.getByID[id]; ok {
+		return detail, nil
+	}
 	return f.getResult, f.getErr
 }
 
@@ -711,10 +720,9 @@ func TestClaimIssue_Backend_BlockedIssue_MapsTo409AndDoesNotClaim(t *testing.T) 
 	}
 }
 
-func TestClaimIssue_Backend_AllReadyWorkBlockers_MapTo409AndDoNotClaim(t *testing.T) {
+func TestClaimIssue_Backend_DirectBlockers_MapTo409AndDoNotClaim(t *testing.T) {
 	blockingTypes := []string{
 		"blocks",
-		"parent-child",
 		"conditional-blocks",
 		"waits-for",
 	}
@@ -824,6 +832,364 @@ func TestClaimIssue_Backend_ClosedBlockingDependency_AllowsClaim(t *testing.T) {
 	}
 	if len(fb.claimCalls) != 1 {
 		t.Fatalf("expected claim call, got %+v", fb.claimCalls)
+	}
+}
+
+// claimTestIssue builds an issue detail for ancestor-walk claim tests.
+func claimTestIssue(id, parent string, deps ...backend.DependencyData) *backend.IssueDetailData {
+	now := time.Now().UTC()
+	return &backend.IssueDetailData{
+		IssueData: backend.IssueData{
+			ID: id, Title: id, Status: "open", Priority: 1, Parent: parent, CreatedAt: now, UpdatedAt: now,
+		},
+		Dependencies: deps,
+	}
+}
+
+func claimTestDep(issueID, dependsOnID, depType, status string) backend.DependencyData {
+	return backend.DependencyData{IssueID: issueID, DependsOnID: dependsOnID, Type: depType, Status: status}
+}
+
+// assertClaimRejected asserts a 409 with the given message fragment and that
+// no claim (or any other mutation) reached the backend.
+func assertClaimRejected(t *testing.T, fb *fakeIssueBackend, err error, wantMsg string) {
+	t.Helper()
+	var sErr *ServiceError
+	if !errors.As(err, &sErr) || sErr.Kind != KindConflict {
+		t.Fatalf("expected ConflictError, got %v", err)
+	}
+	if !strings.Contains(sErr.Message, wantMsg) {
+		t.Fatalf("conflict message = %q, want it to contain %q", sErr.Message, wantMsg)
+	}
+	if len(fb.claimCalls) != 0 {
+		t.Fatalf("rejected issue should not be claimed, got calls %+v", fb.claimCalls)
+	}
+	if len(fb.updateCalls) != 0 || len(fb.removeDepParams) != 0 || len(fb.addDepParams) != 0 {
+		t.Fatalf("rejected claim should not mutate: updates=%+v removeDeps=%+v addDeps=%+v",
+			fb.updateCalls, fb.removeDepParams, fb.addDepParams)
+	}
+}
+
+// assertClaimSucceeded asserts the claim reached the backend for id and that
+// the parent relation was left untouched.
+func assertClaimSucceeded(t *testing.T, fb *fakeIssueBackend, err error, id string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("ClaimIssue: %v", err)
+	}
+	if len(fb.claimCalls) != 1 || fb.claimCalls[0].id != id {
+		t.Fatalf("expected 1 claim call for %s, got %+v", id, fb.claimCalls)
+	}
+	if len(fb.removeDepParams) != 0 || len(fb.addDepParams) != 0 {
+		t.Fatalf("claim must not modify dependencies: removeDeps=%+v addDeps=%+v", fb.removeDepParams, fb.addDepParams)
+	}
+	for _, u := range fb.updateCalls {
+		if u.params.Parent != nil {
+			t.Fatalf("claim must not modify parent, got update %+v", u)
+		}
+	}
+}
+
+func TestClaimIssue_Backend_OpenParentWithoutBlockers_AllowsClaim(t *testing.T) {
+	tests := []struct {
+		name  string
+		child *backend.IssueDetailData
+	}{
+		{
+			name:  "parent via dep edge",
+			child: claimTestIssue("i-1", "", claimTestDep("i-1", "epic-1", "parent-child", "open")),
+		},
+		{
+			name:  "parent via parent field",
+			child: claimTestIssue("i-1", "epic-1"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fb := &fakeIssueBackend{
+				getByID: map[string]*backend.IssueDetailData{
+					"i-1":    tt.child,
+					"epic-1": claimTestIssue("epic-1", "", claimTestDep("i-1", "epic-1", "parent-child", "open")),
+				},
+			}
+			svc := newServiceWithFake(fb)
+			_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+			assertClaimSucceeded(t, fb, err, "i-1")
+			if len(fb.getCalls) < 2 || fb.getCalls[1] != "epic-1" {
+				t.Fatalf("expected ancestor walk to Get epic-1, got %v", fb.getCalls)
+			}
+		})
+	}
+}
+
+func TestClaimIssue_Backend_OpenBlockerWithOpenParent_Rejects(t *testing.T) {
+	fb := &fakeIssueBackend{
+		getByID: map[string]*backend.IssueDetailData{
+			"i-1": claimTestIssue("i-1", "",
+				claimTestDep("i-1", "epic-1", "parent-child", "open"),
+				claimTestDep("i-1", "blocker-1", "blocks", "open"),
+			),
+			"epic-1": claimTestIssue("epic-1", ""),
+		},
+	}
+	svc := newServiceWithFake(fb)
+	_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+	assertClaimRejected(t, fb, err, "issue is blocked by open dependency blocker-1")
+}
+
+func TestClaimIssue_Backend_AncestorWithOpenBlocker_Rejects(t *testing.T) {
+	tests := []struct {
+		name     string
+		issues   map[string]*backend.IssueDetailData
+		ancestor string
+	}{
+		{
+			name: "parent via dep edge",
+			issues: map[string]*backend.IssueDetailData{
+				"i-1":    claimTestIssue("i-1", "", claimTestDep("i-1", "epic-1", "parent-child", "open")),
+				"epic-1": claimTestIssue("epic-1", "", claimTestDep("epic-1", "blocker-1", "blocks", "open")),
+			},
+			ancestor: "epic-1",
+		},
+		{
+			name: "parent via parent field",
+			issues: map[string]*backend.IssueDetailData{
+				"i-1":    claimTestIssue("i-1", "epic-1"),
+				"epic-1": claimTestIssue("epic-1", "", claimTestDep("epic-1", "blocker-1", "blocks", "open")),
+			},
+			ancestor: "epic-1",
+		},
+		{
+			name: "grandparent",
+			issues: map[string]*backend.IssueDetailData{
+				"i-1":    claimTestIssue("i-1", "", claimTestDep("i-1", "epic-1", "parent-child", "open")),
+				"epic-1": claimTestIssue("epic-1", "root-1"),
+				"root-1": claimTestIssue("root-1", "", claimTestDep("root-1", "blocker-1", "waits-for", "in_progress")),
+			},
+			ancestor: "root-1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fb := &fakeIssueBackend{getByID: tt.issues}
+			svc := newServiceWithFake(fb)
+			_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+			assertClaimRejected(t, fb, err, "issue is blocked by open dependency blocker-1 of ancestor "+tt.ancestor)
+		})
+	}
+}
+
+func TestClaimIssue_Backend_ClosedBlockers_AllowClaim(t *testing.T) {
+	tests := []struct {
+		name   string
+		issues map[string]*backend.IssueDetailData
+	}{
+		{
+			name: "closed blocker on self",
+			issues: map[string]*backend.IssueDetailData{
+				"i-1":    claimTestIssue("i-1", "epic-1", claimTestDep("i-1", "blocker-1", "blocks", "closed")),
+				"epic-1": claimTestIssue("epic-1", ""),
+			},
+		},
+		{
+			name: "closed blocker on parent",
+			issues: map[string]*backend.IssueDetailData{
+				"i-1":    claimTestIssue("i-1", "", claimTestDep("i-1", "epic-1", "parent-child", "open")),
+				"epic-1": claimTestIssue("epic-1", "", claimTestDep("epic-1", "blocker-1", "blocks", "closed")),
+			},
+		},
+		{
+			name: "closed blocker on grandparent",
+			issues: map[string]*backend.IssueDetailData{
+				"i-1":    claimTestIssue("i-1", "epic-1"),
+				"epic-1": claimTestIssue("epic-1", "root-1"),
+				"root-1": claimTestIssue("root-1", "", claimTestDep("root-1", "blocker-1", "conditional-blocks", "CLOSED")),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fb := &fakeIssueBackend{getByID: tt.issues}
+			svc := newServiceWithFake(fb)
+			_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+			assertClaimSucceeded(t, fb, err, "i-1")
+		})
+	}
+}
+
+func TestClaimIssue_Backend_ParentCycle_Rejects(t *testing.T) {
+	tests := []struct {
+		name   string
+		issues map[string]*backend.IssueDetailData
+		at     string
+	}{
+		{
+			name: "two-node cycle back to self",
+			issues: map[string]*backend.IssueDetailData{
+				"i-1":    claimTestIssue("i-1", "epic-1"),
+				"epic-1": claimTestIssue("epic-1", "i-1"),
+			},
+			at: "i-1",
+		},
+		{
+			name: "cycle among ancestors",
+			issues: map[string]*backend.IssueDetailData{
+				"i-1": claimTestIssue("i-1", "", claimTestDep("i-1", "a-1", "parent-child", "open")),
+				"a-1": claimTestIssue("a-1", "a-2"),
+				"a-2": claimTestIssue("a-2", "a-1"),
+			},
+			at: "a-1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fb := &fakeIssueBackend{getByID: tt.issues}
+			svc := newServiceWithFake(fb)
+			_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+			assertClaimRejected(t, fb, err, "issue parent chain contains a cycle at "+tt.at)
+		})
+	}
+}
+
+func TestClaimIssue_Backend_AncestorDepthLimit(t *testing.T) {
+	// buildChain returns i-1 whose parent chain is a-1 ... a-<ancestors>, with
+	// the topmost ancestor carrying an open blocker when blockTop is set.
+	buildChain := func(ancestors int, blockTop bool) map[string]*backend.IssueDetailData {
+		issues := map[string]*backend.IssueDetailData{
+			"i-1": claimTestIssue("i-1", "a-1"),
+		}
+		for i := 1; i <= ancestors; i++ {
+			id := fmt.Sprintf("a-%d", i)
+			parent := ""
+			if i < ancestors {
+				parent = fmt.Sprintf("a-%d", i+1)
+			}
+			var deps []backend.DependencyData
+			if blockTop && i == ancestors {
+				deps = append(deps, claimTestDep(id, "blocker-1", "blocks", "open"))
+			}
+			issues[id] = claimTestIssue(id, parent, deps...)
+		}
+		return issues
+	}
+
+	t.Run("chain at limit without blockers allows claim", func(t *testing.T) {
+		fb := &fakeIssueBackend{getByID: buildChain(maxClaimAncestorDepth, false)}
+		svc := newServiceWithFake(fb)
+		_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+		assertClaimSucceeded(t, fb, err, "i-1")
+	})
+
+	t.Run("blocker at limit rejects", func(t *testing.T) {
+		fb := &fakeIssueBackend{getByID: buildChain(maxClaimAncestorDepth, true)}
+		svc := newServiceWithFake(fb)
+		_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+		assertClaimRejected(t, fb, err, fmt.Sprintf("blocked by open dependency blocker-1 of ancestor a-%d", maxClaimAncestorDepth))
+	})
+
+	t.Run("chain beyond limit with hidden blocker rejects", func(t *testing.T) {
+		fb := &fakeIssueBackend{getByID: buildChain(maxClaimAncestorDepth+10, true)}
+		svc := newServiceWithFake(fb)
+		_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+		assertClaimRejected(t, fb, err, fmt.Sprintf("issue parent chain exceeds %d ancestors at a-%d", maxClaimAncestorDepth, maxClaimAncestorDepth))
+	})
+}
+
+func TestClaimIssue_Backend_NotFoundParent_AllowsClaim(t *testing.T) {
+	fb := &fakeIssueBackend{
+		getByID: map[string]*backend.IssueDetailData{
+			"i-1": claimTestIssue("i-1", "", claimTestDep("i-1", "gone-1", "parent-child", "open")),
+		},
+		getErrByID: map[string]error{
+			"gone-1": backend.ErrNotFound("Get", "issue not found"),
+		},
+	}
+	svc := newServiceWithFake(fb)
+	_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+	assertClaimSucceeded(t, fb, err, "i-1")
+}
+
+func TestClaimIssue_Backend_AncestorGetError_MapsAndDoesNotClaim(t *testing.T) {
+	fb := &fakeIssueBackend{
+		getByID: map[string]*backend.IssueDetailData{
+			"i-1": claimTestIssue("i-1", "epic-1"),
+		},
+		getErrByID: map[string]error{
+			"epic-1": backend.ErrUnavailable("Get", "backend down", errors.New("boom")),
+		},
+	}
+	svc := newServiceWithFake(fb)
+	_, err := svc.ClaimIssue(context.Background(), ClaimIssueParams{IssueID: "i-1"})
+	if err == nil {
+		t.Fatal("expected error when ancestor lookup fails")
+	}
+	if len(fb.claimCalls) != 0 {
+		t.Fatalf("claim should not proceed on ancestor lookup failure, got %+v", fb.claimCalls)
+	}
+}
+
+func TestFirstOpenClaimBlocker(t *testing.T) {
+	tests := []struct {
+		name   string
+		deps   []backend.DependencyData
+		wantID string
+		wantOK bool
+	}{
+		{name: "no deps"},
+		{name: "open parent-child is not a blocker", deps: []backend.DependencyData{claimTestDep("i", "p", "parent-child", "open")}},
+		{name: "open related is not a blocker", deps: []backend.DependencyData{claimTestDep("i", "r", "related", "open")}},
+		{name: "open blocks", deps: []backend.DependencyData{claimTestDep("i", "b", "blocks", "open")}, wantID: "b", wantOK: true},
+		{name: "open conditional-blocks", deps: []backend.DependencyData{claimTestDep("i", "b", "conditional-blocks", "open")}, wantID: "b", wantOK: true},
+		{name: "open waits-for", deps: []backend.DependencyData{claimTestDep("i", "b", "waits-for", "in_progress")}, wantID: "b", wantOK: true},
+		{name: "closed blocks (case-insensitive)", deps: []backend.DependencyData{claimTestDep("i", "b", "blocks", "Closed")}},
+		{name: "empty status counts as open", deps: []backend.DependencyData{claimTestDep("i", "b", "blocks", "")}, wantID: "b", wantOK: true},
+		{name: "missing depends_on id", deps: []backend.DependencyData{claimTestDep("i", "", "blocks", "open")}, wantID: "unknown", wantOK: true},
+		{
+			name: "skips parent-child and closed, returns first open blocker",
+			deps: []backend.DependencyData{
+				claimTestDep("i", "p", "parent-child", "open"),
+				claimTestDep("i", "b1", "blocks", "closed"),
+				claimTestDep("i", "b2", "waits-for", "open"),
+				claimTestDep("i", "b3", "blocks", "open"),
+			},
+			wantID: "b2", wantOK: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, gotOK := firstOpenClaimBlocker(tt.deps)
+			if gotID != tt.wantID || gotOK != tt.wantOK {
+				t.Fatalf("firstOpenClaimBlocker() = (%q, %v), want (%q, %v)", gotID, gotOK, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestClaimParentID(t *testing.T) {
+	tests := []struct {
+		name   string
+		detail *backend.IssueDetailData
+		want   string
+	}{
+		{name: "no parent", detail: claimTestIssue("i", "")},
+		{name: "parent field", detail: claimTestIssue("i", "p1"), want: "p1"},
+		{
+			name:   "parent field wins over dep edge",
+			detail: claimTestIssue("i", "p1", claimTestDep("i", "p2", "parent-child", "open")),
+			want:   "p1",
+		},
+		{name: "outgoing parent-child edge", detail: claimTestIssue("i", "", claimTestDep("i", "p2", "parent-child", "open")), want: "p2"},
+		{name: "edge with empty issue_id", detail: claimTestIssue("i", "", claimTestDep("", "p2", "parent-child", "open")), want: "p2"},
+		{name: "incoming parent-child edge ignored", detail: claimTestIssue("i", "", claimTestDep("child-1", "i", "parent-child", "open"))},
+		{name: "non parent-child edge ignored", detail: claimTestIssue("i", "", claimTestDep("i", "b", "blocks", "open"))},
+		{name: "edge with empty depends_on ignored", detail: claimTestIssue("i", "", claimTestDep("i", "", "parent-child", "open"))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := claimParentID(tt.detail); got != tt.want {
+				t.Fatalf("claimParentID() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

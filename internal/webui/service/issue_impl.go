@@ -403,6 +403,14 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 	return out, nil
 }
 
+// maxClaimAncestorDepth bounds the parent-chain walk in ensureClaimable. It
+// matches fleet-db's maxTransitiveDepth for parent-child blocking propagation.
+const maxClaimAncestorDepth = 50
+
+// ensureClaimable rejects a claim when the ready view would exclude the issue:
+// an open direct blocker on the issue itself, or inherited blockage from an
+// ancestor with an open direct blocker. A parent-child edge alone is
+// structural containment and never blocks.
 func ensureClaimable(ctx context.Context, be backend.IssueBackend, issueID string) *ServiceError {
 	detail, err := be.Get(ctx, issueID)
 	if err != nil {
@@ -414,12 +422,74 @@ func ensureClaimable(ctx context.Context, be backend.IssueBackend, issueID strin
 	if blockerID, ok := firstOpenClaimBlocker(detail.Dependencies); ok {
 		return ErrConflict(fmt.Sprintf("issue is blocked by open dependency %s", blockerID))
 	}
-	return nil
+	return ensureAncestorsUnblocked(ctx, be, detail)
 }
 
+// ensureAncestorsUnblocked walks the parent chain and rejects the claim when
+// any ancestor has an open direct blocker. Containment cycles and chains
+// deeper than maxClaimAncestorDepth fail safe.
+func ensureAncestorsUnblocked(ctx context.Context, be backend.IssueBackend, detail *backend.IssueDetailData) *ServiceError {
+	visited := map[string]bool{detail.ID: true}
+	current := detail
+	for depth := 0; depth < maxClaimAncestorDepth; depth++ {
+		parentID := claimParentID(current)
+		if parentID == "" {
+			return nil
+		}
+		if visited[parentID] {
+			return ErrConflict(fmt.Sprintf("issue parent chain contains a cycle at %s", parentID))
+		}
+		visited[parentID] = true
+
+		parent, err := be.Get(ctx, parentID)
+		if err != nil {
+			if backend.IsKind(err, backend.KindNotFound) {
+				// A dangling parent link carries no blockers to inherit.
+				return nil
+			}
+			return translateBackendError(err)
+		}
+		if parent == nil {
+			return nil
+		}
+		if blockerID, ok := firstOpenClaimBlocker(parent.Dependencies); ok {
+			return ErrConflict(fmt.Sprintf("issue is blocked by open dependency %s of ancestor %s", blockerID, parentID))
+		}
+		current = parent
+	}
+	if claimParentID(current) == "" {
+		return nil
+	}
+	// Fail safe: an unresolved chain deeper than the walk limit could hide a
+	// blocked ancestor, so it must not become claimable.
+	return ErrConflict(fmt.Sprintf("issue parent chain exceeds %d ancestors at %s", maxClaimAncestorDepth, current.ID))
+}
+
+// claimParentID returns the containment parent of an issue, preferring the
+// projected parent field and falling back to its outgoing parent-child edge.
+func claimParentID(detail *backend.IssueDetailData) string {
+	if detail.Parent != "" {
+		return detail.Parent
+	}
+	for _, dep := range detail.Dependencies {
+		if entity.DependencyType(dep.Type) != entity.DepParentChild {
+			continue
+		}
+		if dep.IssueID != "" && dep.IssueID != detail.ID {
+			continue
+		}
+		if dep.DependsOnID != "" {
+			return dep.DependsOnID
+		}
+	}
+	return ""
+}
+
+// firstOpenClaimBlocker returns the first unclosed direct blocker. It uses the
+// same IsDirectBlocker predicate as the ready view so ready and claim agree.
 func firstOpenClaimBlocker(deps []backend.DependencyData) (string, bool) {
 	for _, dep := range deps {
-		if !entity.DependencyType(dep.Type).AffectsReadyWork() {
+		if !entity.DependencyType(dep.Type).IsDirectBlocker() {
 			continue
 		}
 		if strings.EqualFold(dep.Status, "closed") {

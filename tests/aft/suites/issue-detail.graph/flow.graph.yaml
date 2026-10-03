@@ -17,6 +17,7 @@ imports:
   - transitions/lifecycle.yaml
   - transitions/navigation.yaml
   - transitions/dependencies.yaml
+  - transitions/claim.yaml
 
 start: browser-ready
 
@@ -29,6 +30,7 @@ graph:
 
   create-form-ready:
     create-open-issue: detail-panel-ready
+    create-claim-epic: claim-epic-panel-ready
 
   detail-panel-ready:
     edit-description: description-saved
@@ -110,6 +112,34 @@ graph:
   dependency-recorded:
     reload-blocked-board: blocked-on-board
 
+  blocked-on-board:
+    cli-claim-refused-for-blocked-child: blocked-child-claim-refused
+
+  # Claim under an epic (STACKED-PRS-29): the human builds the epic and child in
+  # the UI; the claim is a `loom data claim` CLI step (see transitions/claim.yaml).
+  claim-epic-panel-ready:
+    open-child-form-under-epic: claim-child-form-ready
+
+  claim-child-form-ready:
+    create-epic-child: epic-child-panel-ready
+
+  epic-child-panel-ready:
+    cli-claims-ready-child: in-progress-detail
+    close-epic-child-panel: issue-card-ready
+    create-epic-blocker: epic-blocker-panel-ready
+
+  epic-blocker-panel-ready:
+    open-epic-from-lane: epic-panel-for-dependency
+
+  epic-panel-for-dependency:
+    add-epic-blocking-dependency: epic-dependency-recorded
+
+  epic-dependency-recorded:
+    reload-epic-blocked-board: child-blocked-by-epic-on-board
+
+  child-blocked-by-epic-on-board:
+    cli-claim-refused-under-blocked-epic: epic-child-claim-refused
+
 coverage:
   strategy: transition
   goldenJourneys:
@@ -129,3 +159,18 @@ coverage:
         - start-work
         - set-status-closed
         - return-to-closed-board
+
+    # Pins the blocker claim to the epic prefix; coverage may route it either way.
+    - name: cli-claim-refused-blocked-child-under-open-epic
+      path:
+        - open-kanban
+        - open-create-modal
+        - create-claim-epic
+        - open-child-form-under-epic
+        - create-epic-child
+        - close-epic-child-panel
+        - create-blocker-issue
+        - reopen-original-from-blocker
+        - add-blocking-dependency
+        - reload-blocked-board
+        - cli-claim-refused-for-blocked-child

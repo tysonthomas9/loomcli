@@ -26,6 +26,34 @@ blocks:
         with: { title: "{{title}}", description: "{{description}}" }
       - click: { testid: create-issue-submit }
 
+  close-detail-panel-with-keyboard:
+    steps:
+      - press: Escape
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'closed'
+        intent: Wait until the detail panel closes after the keyboard dismissal.
+
+  add-blocking-dependency-through-picker:
+    params: [blocker]
+    steps:
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid add-dependency-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=dependency-search-input]')" | grep -q true && exit 0;
+          done; echo "add dependency click never opened the dependency search"; exit 1
+        intent: A human retries the add-dependency control until its mounted search input opens.
+      - fill:
+          testid: dependency-search-input
+          value: "{{blocker}}"
+      - wait:
+          fn: >-
+            document.querySelectorAll("[data-testid^='search-result-']").length === 1
+        intent: Wait until the dependency picker returns exactly the case-specific blocker result.
+      - click:
+          selector: "[data-testid^='search-result-']"
+
   blank-browser-ready:
     steps:
       - expect: { url: "about:blank" }

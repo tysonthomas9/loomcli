@@ -12,7 +12,9 @@ list_open_ids() {
     # include_blocked=true routes through the kanban list path, which merges the
     # deferred overlay — the plain list hides deferred issues, so without it a
     # deferred issue survives this sweep AND the emptiness check below.
-    curl -sf "$base/api/workspaces/$ws/issues?include_blocked=true" | python3 -c '
+    # limit=1000 (the server max): the default page drops the newest issues once
+    # a run has created more than one page, which leaks them into later suites.
+    curl -sf "$base/api/workspaces/$ws/issues?include_blocked=true&limit=1000" | python3 -c '
 import json, sys
 
 payload = json.load(sys.stdin)
