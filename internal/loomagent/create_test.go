@@ -863,3 +863,49 @@ func TestCreateFailureAfterRowShowsAttention(t *testing.T) {
 }
 
 func mustFail(_ AgentInfo, err error) error { return err }
+
+// A reconcile that saw a Create in flight (its row not yet past step 1) and
+// failed to finish it must not flag the agent once that Create has finished:
+// create_incomplete is raised only on an agent still creating.
+func TestLateCreateIncompleteSkipsFinishedAgent(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	a, err := s.Create(ctx, leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.failed(ctx, a.AgentID, AttentionCreateIncomplete, errors.New("loomagent: was not fully inserted; retry its Create"))
+	if row, _ := e.st.GetAgent(ctx, a.AgentID); row.AttentionReason != nil {
+		t.Fatalf("Attention = %q on a created agent", *row.AttentionReason)
+	}
+}
+
+// The other order: a reconcile flags create_incomplete while a Create is in
+// flight (row inserted, step 1 not yet recorded); the Create then finishes
+// and clears it, leaving no stale Attention on the idle agent.
+func TestCreateClearsCreateIncompleteRaisedInFlight(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	createCrash = func(p string) {
+		if p != "row" {
+			return
+		}
+		rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+		_, err := s.finishCreate(ctx, rows[0].AgentID) // what Reconcile does with a creating row
+		s.failed(ctx, rows[0].AgentID, AttentionCreateIncomplete, err)
+		if r, _ := e.st.GetAgent(ctx, rows[0].AgentID); deref(r.AttentionReason) != AttentionCreateIncomplete {
+			t.Errorf("in flight: Attention = %v; want create_incomplete raised", deref(r.AttentionReason))
+		}
+	}
+	t.Cleanup(func() { createCrash = func(string) {} })
+	a, err := s.Create(ctx, leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, _ := e.st.GetAgent(ctx, a.AgentID)
+	if row.State != StateIdle || row.AttentionReason != nil {
+		t.Fatalf("after Create: state %s Attention %v; want idle with none", row.State, deref(row.AttentionReason))
+	}
+}

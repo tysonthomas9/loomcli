@@ -155,6 +155,9 @@ func (s *Service) flag(ctx context.Context, agentID, reason string) error {
 	if err != nil || a.AttentionReason != nil {
 		return err
 	}
+	if reason == AttentionCreateIncomplete && a.State != StateCreating {
+		return nil // a Create in flight when its failure was seen has since finished
+	}
 	_, err = s.raiseAttention(ctx, a, reason)
 	return err
 }
