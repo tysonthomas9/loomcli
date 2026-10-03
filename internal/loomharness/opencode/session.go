@@ -277,9 +277,12 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 // (session/projector.ts:584-590, committed with the event in bus.ts:380-402)
 // and re-reads that row at every permission check (permission.ts:158-175),
 // so they also survive a server restart. The session's Always grants
-// (grant) go in after rules, then rules' deny rules again: OpenCode applies
-// the last matching rule (core/src/permission.ts:87-97), so a grant beats
-// Loom's asks and Loom's denies still beat a grant.
+// (grant) go in after rules, then rules' explicit deny rules again: OpenCode
+// applies the last matching rule (core/src/permission.ts:87-97), so a grant
+// beats Loom's asks and Loom's explicit denies still beat a grant. A deny
+// before every allow and ask rule is a default those rules already override
+// (pr-review-interactive's leading "* *" deny); applied again it would deny
+// every action, so it is not.
 func (s *Session) install(ctx context.Context, rules []map[string]string) error {
 	s.c.rulesMu.Lock()
 	grants := s.c.grants[s.ref.NativeID]
@@ -287,8 +290,11 @@ func (s *Session) install(ctx context.Context, rules []map[string]string) error 
 	native := rules
 	if len(grants) > 0 {
 		native = append(slices.Clone(rules), grants...)
+		explicit := false
 		for _, r := range rules {
-			if r["effect"] == "deny" {
+			if r["effect"] != "deny" {
+				explicit = true
+			} else if explicit {
 				native = append(native, r)
 			}
 		}

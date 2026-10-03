@@ -1310,6 +1310,44 @@ func TestProtocolAlwaysGrantOutlivesTheTurn(t *testing.T) {
 	}
 }
 
+// TestProtocolAlwaysGrantUnderADefaultDeny: pr-review-interactive's rules
+// start with a catch-all deny that the later allow and ask rules override.
+// An Always grant beats the ask, and only deny rules after an allow or ask
+// rule (explicit denies) are applied again after it: the leading default
+// deny is not, or it would deny every action and OpenCode would drop the
+// shell tool.
+func TestProtocolAlwaysGrantUnderADefaultDeny(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	rules := []loomharness.PermissionRule{
+		{Action: "*", Resource: "*", Effect: "deny"},
+		{Action: "read", Resource: "*", Effect: "allow"},
+		{Action: "bash", Resource: "*", Effect: "ask"},
+		{Action: "bash", Resource: "wc -c*", Effect: "deny"},
+	}
+	a, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(a)
+	st.perms["per_1"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"wc -l a"}, Save: []string{"wc *"}}
+	if err := s.Reply(ctx, "per_1", loomharness.Reply{Allow: true, Always: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ action, resource, want string }{
+		{"shell", "wc -l b", "allow"}, // the grant
+		{"shell", "wc -c b", "deny"},  // an explicit deny still wins
+		{"shell", "rm x", "ask"},      // the rest of shell still asks
+		{"read", "README.md", "allow"},
+		{"edit", "README.md", "deny"}, // the default deny still covers what nothing allows
+	} {
+		if got := st.effect(a.NativeID, c.action, c.resource); got != c.want {
+			t.Errorf("%s %s after Always = %s; want %s", c.action, c.resource, got, c.want)
+		}
+	}
+}
+
 // TestProtocolAlwaysGrantRollsBack (codex, 11588cd1e and 863aa26b5): a
 // grant PATCH that commits and then answers 500 leaves an unknown outcome.
 // When Reply can put the rules back, the ask stays open and asks again.
