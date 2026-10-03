@@ -3480,7 +3480,7 @@ paths:
       operationId: getTaskDiff
       tags: [git]
       summary: One diff for a task, the same as its PR
-      description: The task's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied.
+      description: The task's newest revision against the layer below it in the lead's stack (trunk for the bottom layer), or against its own base while it is not applied or the workspace delivers a PR per task.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: id
@@ -6619,7 +6619,7 @@ components:
             compare:
               type: string
               enum: [layer, trunk, base]
-              description: "layer: against the layer below in the lead's stack; trunk: bottom layer; base: not applied, against the revision's own base."
+              description: "layer: against the layer below in the lead's stack; trunk: bottom layer, or PR-per-task (trunk) mode where the revision is its own PR to trunk; base: not applied, against the revision's own base."
     SessionResponse:
       type: object
       description: Session audit record from dto.SessionResponse

@@ -23,7 +23,7 @@ import { newestRevisions, RevisionsSection } from "./sections/RevisionsSection";
 
 const COMPARE_LABEL: Record<TaskDiff["compare"], string> = {
   layer: "against the layer below it in the stack",
-  trunk: "against trunk (bottom of the stack)",
+  trunk: "against trunk",
   base: "against its base (not applied yet)",
 };
 
