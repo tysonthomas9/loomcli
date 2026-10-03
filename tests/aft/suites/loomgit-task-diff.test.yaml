@@ -63,13 +63,13 @@ tests:
       - wait: { text: taskdiff-mid.txt }
       - expect: { notText: taskdiff-low.txt }
       - wait:
-          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => b.textContent === 'Approve').length === 1"
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => b.textContent === 'Approve and create PR').length === 1"
         intent: Only the task's newest revision has verdict buttons
       - click: { role: button, name: "History (1)", exact: true }
       - click: { role: button, name: "Revision 1", exact: true }
       - wait: { text: "Revision 1 (read-only history), against its base" }
       - wait:
-          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => b.textContent === 'Approve').length === 1"
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => b.textContent === 'Approve and create PR').length === 1"
         intent: The old revision's diff opens read-only; the only verdict buttons still belong to the newest revision
 
   - name: with a PR per task, each task compares with trunk

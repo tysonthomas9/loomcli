@@ -54,7 +54,7 @@ approve)
   read -r change number sha < <(curl -fsS "$api/issues/$task/revisions" |
     python3 -c 'import json,sys; r=json.load(sys.stdin)["data"][0]; print(r["change_id"], r["number"], r["head_sha"])')
   curl -fsS -X POST "$api/changes/$change/revisions/$number/verdict" -H 'Content-Type: application/json' \
-    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" \
+    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"approve_only\":true,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" \
     > "$AFT_WORK_DIR/$workspace-$name-verdict.json"
   grep -q '"status":"applied"' "$AFT_WORK_DIR/$workspace-$name-verdict.json"
   git -C "$repo" rev-parse "$lead_ref" > "$AFT_WORK_DIR/$workspace-$name-tip"

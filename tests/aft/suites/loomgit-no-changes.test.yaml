@@ -35,7 +35,7 @@ tests:
       - wait: { text: "No changes" }
       - expect: { notText: "Awaiting review" }
       - wait:
-          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => ['Approve', 'Reject', 'Override'].includes(b.textContent)).length === 0"
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => ['Approve', 'Approve and create PR', 'Reject', 'Override'].includes(b.textContent)).length === 0"
         intent: The empty attempt has no verdict buttons
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" retry E2E-WS-NOCHG nochg-stack.txt
         intent: The same task runs again and writes a file; its new revision is not no_changes and the empty one is superseded
@@ -47,7 +47,7 @@ tests:
       - wait: { text: "Awaiting review" }
       - wait: { text: nochg-stack.txt }
       - wait:
-          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => b.textContent === 'Approve').length === 1"
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => b.textContent === 'Approve and create PR').length === 1"
         intent: The attempt with changes is reviewable again
       - click: { role: button, name: "History (1)", exact: true }
       - wait: { text: "no changes" }
@@ -74,7 +74,7 @@ tests:
       - expect: { visible: { testid: revision-no-changes } }
       - expect: { notText: "Awaiting review" }
       - wait:
-          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => ['Approve', 'Reject', 'Override'].includes(b.textContent)).length === 0"
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => ['Approve', 'Approve and create PR', 'Reject', 'Override'].includes(b.textContent)).length === 0"
         intent: No verdict buttons in trunk mode either
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-no-changes.sh" retry E2E-WS-NOCHG-TRUNK nochg-trunk.txt
         intent: The retry with changes records a reviewable revision

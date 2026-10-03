@@ -146,7 +146,7 @@ reviewed)
   # then published as the task's PR, which contains only <file>.
   read -r change number sha < <(newest "$work-revisions.json")
   curl -fsS -X POST "$api/changes/$change/revisions/$number/verdict" -H 'Content-Type: application/json' \
-    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$work-approve.json"
+    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"approve_only\":true,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$work-approve.json"
   grep -q '"status":"applied"' "$work-approve.json"
   test "$(git -C "$repo" rev-parse "$lead_ref")" != "$(cat "$work-trunk")"
   curl -fsS -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' \
