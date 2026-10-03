@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -255,7 +256,9 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 			return loomharness.NativeRef{}, err
 		}
 	}
-	s.c.dropGrants(s.ref.NativeID)
+	if !s.c.samePolicy(s.ref.NativeID, native) {
+		s.c.dropGrants(s.ref.NativeID)
+	}
 	if err := s.install(ctx, native); err != nil {
 		return loomharness.NativeRef{}, err
 	}
@@ -299,12 +302,27 @@ func (s *Session) install(ctx context.Context, rules []map[string]string) error 
 	return nil
 }
 
-// dropGrants ends a session's Always grants: they last until Loom opens or
-// resumes the session again, like codex's and Claude's session grants.
+// dropGrants ends a session's Always grants: they last until Loom opens the
+// session again or resumes it under a changed policy, or quarantines it, and
+// live in this process only, like codex's and Claude's session grants.
 func (c *Client) dropGrants(id string) {
 	c.rulesMu.Lock()
 	defer c.rulesMu.Unlock()
 	delete(c.grants, id)
+}
+
+// samePolicy reports whether this process installed rules as session id's
+// policy and the session is not quarantined: Loom resumes the session before
+// every hand-over, so such a Resume is the same session going on, and keeps
+// its Always grants.
+func (c *Client) samePolicy(id string, rules []map[string]string) bool {
+	c.rulesMu.Lock()
+	defer c.rulesMu.Unlock()
+	if _, held := c.held[id]; held {
+		return false
+	}
+	prev, ok := c.rules[id]
+	return ok && slices.EqualFunc(prev, rules, maps.Equal)
 }
 
 // grant makes an "always allow" reply to permission ask id last for this

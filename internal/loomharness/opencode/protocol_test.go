@@ -1200,7 +1200,8 @@ func (st *store) effect(sid, action, resource string) string {
 // the ask "once" (never OpenCode's project-wide "always") and adds a grant
 // for the ask's save patterns to that session's rules only. A later matching
 // request in the session is allowed, Loom's deny rules still win, another
-// session is unaffected, every Prompt keeps the grant and Resume ends it.
+// session is unaffected, every Prompt keeps the grant and a Resume of the
+// quarantined session ends it.
 // Always on a question or on an ask with no save patterns is an explicit
 // error and leaves the ask open, as does a failed grant install (with its
 // restore failing too, the session then refuses prompts until Resume).
@@ -1274,6 +1275,39 @@ func TestProtocolReplyAlwaysIsSessionScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("after Resume", a.NativeID, "git log", "ask")
+}
+
+// TestProtocolAlwaysGrantOutlivesTheTurn: Loom resumes the session before
+// every hand-over (each new message), so an Always grant stays through a
+// Resume that installs the same rules, and only a Resume under a changed
+// policy drops it.
+func TestProtocolAlwaysGrantOutlivesTheTurn(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	rules := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}}
+	a, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(a)
+	st.perms["per_1"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"wc -l a"}, Save: []string{"wc *"}}
+	if err := s.Reply(ctx, "per_1", loomharness.Reply{Allow: true, Always: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.effect(a.NativeID, "shell", "wc -l b"); got != "allow" {
+		t.Fatalf("after a Resume with the same rules: wc -l b = %s; want allow (the grant lasts the session)", got)
+	}
+	changed := append(slices.Clone(rules), loomharness.PermissionRule{Action: "bash", Resource: "rm *", Effect: "deny"})
+	if _, err := s.Resume(ctx, loomharness.Launch{}, changed); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.effect(a.NativeID, "shell", "wc -l b"); got != "ask" {
+		t.Fatalf("after a Resume with changed rules: wc -l b = %s; want ask (a new policy drops the grant)", got)
+	}
 }
 
 // TestProtocolAlwaysGrantRollsBack (codex, 11588cd1e and 863aa26b5): a
