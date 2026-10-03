@@ -9,35 +9,92 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
+// readOnlyGitOps resolves "agt_1" as an Agent API agent's worktree and
+// records every git or gh call; Reset really resets, so a reset that gets
+// through shows in the worktree.
+type readOnlyGitOps struct {
+	ops.GitOps
+	wt    *ops.AgentWorktree
+	calls *[]string
+}
+
+func (g readOnlyGitOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, error) {
+	if name != g.wt.Name {
+		return nil, ops.ErrAgentWorktreeNotFound
+	}
+	return g.wt, nil
+}
+
+func (g readOnlyGitOps) call(name string) { *g.calls = append(*g.calls, name) }
+
+func (g readOnlyGitOps) Push(_, _, _, _ string) (*ops.GitPushResult, error) {
+	g.call("push")
+	return &ops.GitPushResult{}, nil
+}
+
+func (g readOnlyGitOps) Pull(_, _, _, _ string) (*ops.GitPullResult, error) {
+	g.call("pull")
+	return &ops.GitPullResult{}, nil
+}
+
+func (g readOnlyGitOps) GetCurrentBranch(string) (string, error) {
+	g.call("current-branch")
+	return g.wt.Branch, nil
+}
+
+func (g readOnlyGitOps) CheckGhInstalled() error {
+	g.call("gh")
+	return nil
+}
+
+func (g readOnlyGitOps) CreatePR(_, _, _, _ string) (*ops.GitPRResult, error) {
+	g.call("pr")
+	return &ops.GitPRResult{}, nil
+}
+
+func (g readOnlyGitOps) SetRepoDefaultBranch(_, _, _ string) error {
+	g.call("target")
+	return nil
+}
+
+func (g readOnlyGitOps) Reset(path, _, target string, _, _ bool) (*ops.GitResetResult, error) {
+	g.call("reset")
+	for _, args := range [][]string{{"reset", "-q", "--hard", target}, {"clean", "-qfd"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = path
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return nil, errors.New(string(out))
+		}
+	}
+	return &ops.GitResetResult{}, nil
+}
+
+func (g readOnlyGitOps) Status(_, _ string) (*ops.GitStatusResult, error) {
+	g.call("status")
+	return &ops.GitStatusResult{}, nil
+}
+
 // An Agent API agent's worktree is read-only through the v5 agent git and
-// file routes (3.2t): every mutating route answers 403 and leaves the
-// worktree's HEAD, branch and untracked files as they were.
+// file routes (3.2t): every mutating route answers 403 before any git or gh
+// call and leaves the worktree's HEAD, branch and untracked files as they
+// were.
 func TestAgentAPIWorktreeIsReadOnly(t *testing.T) {
 	ctx := context.Background()
-	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	wt := agentAPIGitWorktree(t)
-	pathWithoutGh(t)
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	const id = "agt_0123456789abcdef0123456789abcdef"
-	g := opsimpl.NewGitOps().WithStore(st).WithAgentAPI(func(_ context.Context, ws, name string) (*ops.AgentWorktree, bool) {
-		if ws != "WS1" || name != id {
-			return nil, false
-		}
-		return &ops.AgentWorktree{Name: id, Path: wt, Branch: "loom/agent/" + id, DefaultBranch: "main", RepoName: "repo", AgentAPI: true}, true
-	})
-	agents := NewAgentService(g, nil, nil, st)
-	files := NewFileService(g)
+	const id = "agt_1"
+	wt := agentAPIGitWorktree(t, "loom/agent/"+id)
+	var calls []string
+	agents := NewAgentService(readOnlyGitOps{
+		wt:    &ops.AgentWorktree{Name: id, Path: wt, Branch: "loom/agent/" + id, DefaultBranch: "main", RepoName: "repo-a", AgentAPI: true},
+		calls: &calls,
+	}, nil, nil, nil)
+	wsRoot := t.TempDir()
+	files := NewFileService(agentAPIFileOps{root: wt, scopedMockFileOps: scopedMockFileOps{wsRoot: wsRoot,
+		wsData: &ops.WorkspaceData{ID: "WS1", Path: wsRoot, Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a"}}}}})
 	before := worktreeState(t, wt)
 
 	routes := []struct {
@@ -73,8 +130,12 @@ func TestAgentAPIWorktreeIsReadOnly(t *testing.T) {
 	}
 	for _, r := range routes {
 		t.Run(r.name, func(t *testing.T) {
+			calls = nil
 			if got := statusOf(r.call()); got != 403 {
 				t.Fatalf("status = %d, want 403", got)
+			}
+			if len(calls) != 0 {
+				t.Fatalf("git/gh calls before the refusal: %v", calls)
 			}
 			if after := worktreeState(t, wt); after != before {
 				t.Fatalf("worktree changed:\nbefore %s\nafter  %s", before, after)
@@ -104,7 +165,7 @@ func statusOf(err error) int {
 
 // agentAPIGitWorktree is a repo on the agent branch one commit ahead of
 // main, with an untracked file.
-func agentAPIGitWorktree(t *testing.T) string {
+func agentAPIGitWorktree(t *testing.T, branch string) string {
 	t.Helper()
 	dir := t.TempDir()
 	git := func(args ...string) string {
@@ -121,27 +182,12 @@ func agentAPIGitWorktree(t *testing.T) string {
 	writeTestFile(t, filepath.Join(dir, "a.txt"), "a\n")
 	git("add", "a.txt")
 	git("commit", "-q", "-m", "base")
-	git("checkout", "-q", "-b", "loom/agent/agt_0123456789abcdef0123456789abcdef")
+	git("checkout", "-q", "-b", branch)
 	writeTestFile(t, filepath.Join(dir, "b.txt"), "b\n")
 	git("add", "b.txt")
 	git("commit", "-q", "-m", "work")
 	writeTestFile(t, filepath.Join(dir, "scratch.txt"), "keep\n")
 	return dir
-}
-
-// pathWithoutGh leaves git on PATH and drops gh, as in the local-mode
-// container, so a gh check ahead of the guard shows up as a 503.
-func pathWithoutGh(t *testing.T) {
-	t.Helper()
-	gitBin, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	if err := os.Symlink(gitBin, filepath.Join(bin, "git")); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin)
 }
 
 func writeTestFile(t *testing.T, path, content string) {
