@@ -49,6 +49,7 @@ tests:
         intent: Load the workspace before following the task deep link
       - wait:
           fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: The board has mounted, so the workspace is loaded before the deep link
       - run: >-
           agent-browser --session "$AFT_SESSION" open
           "$AFT_BASE_URL/ws/E2E-WS-TASKDIFF/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TASKDIFF-mid-task")"
