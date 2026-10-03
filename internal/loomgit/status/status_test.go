@@ -402,3 +402,81 @@ func TestScanShowsUnenforcedCrossRepoDelivery(t *testing.T) {
 		t.Fatalf("dependent delivery = %+v", change)
 	}
 }
+
+func TestScanShowsLandingAttention(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	path := filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	for _, workspace := range []string{"W1", "W2"} {
+		publication := journal.Publication{Workspace: workspace, Change: "A", Repo: "repo", Branch: "loom/ws/" + workspace + "/change/A",
+			Trunk: "main", Slug: "owner/repo", Head: strings.Repeat("a", 40)}
+		if err := store.BeginPublication(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		publication.Phase, publication.PRNumber = "done", 4
+		if err := store.AdvancePublication(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reason := "publication mismatch: owned PR 4 does not match published change A"
+	if _, err := store.RecordLandingAttention(ctx, "W1", "A", reason); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := Scan(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]Entry{}
+	for _, entry := range snapshot.Entries {
+		if entry.Kind == "publication" {
+			states[entry.Workspace] = entry
+		}
+	}
+	if got := states["W1"]; got.State != "attention_required" || got.Reason != reason || got.NextAction == "" {
+		t.Fatalf("mismatched publication entry = %+v", got)
+	}
+	if got := states["W2"]; got.State != "done" {
+		t.Fatalf("healthy publication entry = %+v", got)
+	}
+}
+
+func TestScanShowsUnhandledJournalRequest(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	path := filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	for _, entry := range [][2]string{{"from-newer-loom", "unknown-operation"}, {"workspace-create:W2", "ensure_workspace"}} {
+		if _, _, err := store.Begin(ctx, entry[0], entry[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot, err := Scan(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var journals []Entry
+	for _, entry := range snapshot.Entries {
+		if entry.Kind == "journal" {
+			journals = append(journals, entry)
+		}
+	}
+	if len(journals) != 1 || journals[0].ID != "from-newer-loom" || journals[0].State != "attention_required" ||
+		!strings.Contains(journals[0].Reason, `no recovery handler for "unknown-operation"`) || journals[0].NextAction == "" {
+		t.Fatalf("unhandled journal entries = %+v", journals)
+	}
+}

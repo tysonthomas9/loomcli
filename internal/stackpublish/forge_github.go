@@ -298,7 +298,7 @@ func (g *GitHubForge) do(ctx context.Context, method, path string, body any) (in
 }
 
 func (g *GitHubForge) apiErr(method, path string, status int, data []byte) error {
-	return fmt.Errorf("github %s %s: %d: %s", method, path, status, strings.TrimSpace(scrubSecrets(string(data))))
+	return markNotFound(status, fmt.Errorf("github %s %s: %d: %s", method, path, status, strings.TrimSpace(scrubSecrets(string(data)))))
 }
 
 func (g *GitHubForge) ListStackPRs(ctx context.Context, owner, repo, headPrefix string) ([]PR, error) {

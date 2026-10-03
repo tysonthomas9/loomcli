@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/reconcile"
 )
 
 const MaxChangedEntries = 5000
@@ -174,10 +175,7 @@ func Scan(ctx context.Context, integrity bool) (Snapshot, error) {
 	appendRevisions(ctx, rows, runners, integrity, &out)
 	appendPublications(ctx, rows.Publications, runners, integrity, &out)
 	appendMirrorRefs(ctx, rows.Mirrors, integrity, &out)
-	if err := appendLeadMergePolicies(ctx, store, &out); err != nil {
-		return out, err
-	}
-	if err := appendDependencyChecks(ctx, store, &out); err != nil {
+	if err := appendJournalFindings(ctx, store, &out); err != nil {
 		return out, err
 	}
 	for workspace, state := range local.Workspaces {
@@ -227,6 +225,59 @@ func appendPublications(ctx context.Context, publications []journal.Publication,
 		}
 		out.Entries = append(out.Entries, item)
 	}
+}
+
+// appendJournalFindings adds what the journal records about publications,
+// lead merge policy and dependency checks.
+func appendJournalFindings(ctx context.Context, store *journal.SQLite, out *Snapshot) error {
+	if err := markLandingAttention(ctx, store, out); err != nil {
+		return err
+	}
+	if err := appendUnhandledJournal(ctx, store, out); err != nil {
+		return err
+	}
+	if err := appendLeadMergePolicies(ctx, store, out); err != nil {
+		return err
+	}
+	return appendDependencyChecks(ctx, store, out)
+}
+
+// appendUnhandledJournal shows open journal requests no recovery owner can
+// take. They name no workspace, so workspace and apply recovery wait for them.
+func appendUnhandledJournal(ctx context.Context, store *journal.SQLite, out *Snapshot) error {
+	entries, err := store.UnfinishedEntries(ctx)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if reconcile.Handled(entry.Operation) {
+			continue
+		}
+		out.Entries = append(out.Entries, Entry{Kind: "journal", ID: entry.RequestID, State: "attention_required",
+			Reason:     fmt.Sprintf("journal request %q has no recovery handler for %q; workspace and apply recovery wait", entry.RequestID, entry.Operation),
+			NextAction: "finish or repair the request with the Loom version that wrote it"})
+	}
+	return nil
+}
+
+// markLandingAttention flags publications landing reconcile skips until repaired.
+func markLandingAttention(ctx context.Context, store *journal.SQLite, out *Snapshot) error {
+	attentions, err := store.LandingAttentions(ctx)
+	if err != nil || len(attentions) == 0 {
+		return err
+	}
+	reasons := make(map[string]string, len(attentions))
+	for _, attention := range attentions {
+		reasons[attention.Workspace+"\x00"+attention.Change] = attention.Reason
+	}
+	for i := range out.Entries {
+		item := &out.Entries[i]
+		if reason, ok := reasons[item.Workspace+"\x00"+item.ID]; ok && item.Kind == "publication" {
+			item.State, item.Reason = "attention_required", reason
+			item.NextAction = "republish the change or restore its PR; landing skips it until then"
+		}
+	}
+	return nil
 }
 
 // appendDependencyChecks shows loom/dependencies per change and whether each

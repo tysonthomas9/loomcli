@@ -21,6 +21,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/applyrecovery"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/outbox"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
@@ -371,4 +372,61 @@ func recoveryGit(t *testing.T, repo string, args ...string) string {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func TestApplyRecoveryFailureHoldsBackOnlyItsLead(t *testing.T) {
+	ctx, store, _, base := recoveryFixture(t)
+	defer func() { _ = store.Close() }()
+	// V/L sorts first and has no working area; W/L can recover.
+	for _, layer := range []loomgit.AppliedLayer{
+		{RequestID: "broken", Workspace: "V", Lead: "L", Change: "C", Revision: 1, OldTip: base, NewTip: base},
+		{RequestID: "healthy", Workspace: "W", Lead: "L", Change: "C", Revision: 1, OldTip: base, NewTip: base},
+	} {
+		if err := store.SaveApplied(ctx, layer); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := applyrecovery.Recover(ctx)
+	var coded *loomgit.Error
+	if !errors.As(err, &coded) || coded.Code() != string(loomgit.AttentionRequired) || !strings.Contains(err.Error(), "V/L") {
+		t.Fatalf("apply recovery = %v", err)
+	}
+	if open, err := store.OpenApplied(ctx, "W", "L"); err != nil || len(open) != 0 {
+		t.Fatalf("healthy lead still open: %+v, %v", open, err)
+	}
+	if open, err := store.OpenApplied(ctx, "V", "L"); err != nil || len(open) != 1 || open[0].Phase != "prepared" {
+		t.Fatalf("broken lead changed: %+v, %v", open, err)
+	}
+}
+
+func TestReconcileJournalFailedPullHoldsBackSameLeadApproval(t *testing.T) {
+	ctx, journalStore, area, base, revision := bridgeApprovalFixture(t)
+	if _, err := review.SubmitForLead(ctx, journalStore, "W", revision.Change, revision.Number, revision.HeadSHA,
+		"approve", "", review.Actor{Kind: "human", ID: "reviewer"}, "L"); err != nil {
+		t.Fatal(err)
+	}
+	// W/L has an interrupted pull whose working area is gone.
+	if err := journalStore.SavePullPlan(ctx, journal.PullPlan{RequestID: "stuck-pull", Workspace: "W", Lead: "L",
+		Repo: "missing-repo", BaseSHA: base}); err != nil {
+		t.Fatal(err)
+	}
+	err := workspacemgr.ReconcileJournal(ctx, memstore.New())
+	if err == nil || !strings.Contains(err.Error(), "recover pull for W/L") {
+		t.Fatalf("failed pull = %v", err)
+	}
+	if layers, err := journalStore.AppliedLog(ctx, "W", "L"); err != nil || len(layers) != 0 {
+		t.Fatalf("approval followed past a failed pull: %+v, %v", layers, err)
+	}
+	if got := recoveryGit(t, area.Path, "rev-parse", "HEAD"); got != base {
+		t.Fatalf("working area moved past a failed pull: %s", got)
+	}
+	if err := journalStore.DiscardPullPlan(ctx, "stuck-pull"); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspacemgr.ReconcileJournal(ctx, memstore.New()); err != nil {
+		t.Fatal(err)
+	}
+	if layers, err := journalStore.AppliedLog(ctx, "W", "L"); err != nil || len(layers) != 1 {
+		t.Fatalf("approval after the pull was repaired: %+v, %v", layers, err)
+	}
 }

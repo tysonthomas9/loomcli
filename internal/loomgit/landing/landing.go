@@ -32,6 +32,22 @@ type Store interface {
 	OfferRestack(context.Context, journal.RestackOffer) error
 	OpenRestackOffers(context.Context) ([]journal.RestackOffer, error)
 	CompleteRestackOffer(context.Context, journal.RestackOffer, int) error
+	RecordLandingAttention(context.Context, string, string, string) (bool, error)
+	ClearLandingAttention(context.Context, string, string) (bool, error)
+}
+
+// errPublicationMismatch marks a published change whose owned PR no longer
+// matches it, errPRMissing one whose PR the provider no longer has, and
+// errTrunkUnavailable one whose repository trunk could not be fetched. Only
+// those changes wait; reconcile continues for the rest.
+var (
+	errPublicationMismatch = errors.New("publication mismatch")
+	errPRMissing           = errors.New("published PR not found on provider")
+	errTrunkUnavailable    = errors.New("trunk unavailable")
+)
+
+func needsAttention(err error) bool {
+	return errors.Is(err, errPublicationMismatch) || errors.Is(err, errPRMissing) || errors.Is(err, errTrunkUnavailable)
 }
 
 type Dependent struct {
@@ -69,6 +85,9 @@ type fetchedPublication struct {
 	trunkSHA    string
 	trunkRef    string
 	runner      *gitexec.Runner
+	// err is set when the trunk could not be fetched; landing is not decided
+	// without a fresh trunk.
+	err error
 }
 
 func RunOnce(ctx context.Context) error {
@@ -124,37 +143,72 @@ func ReconcileWithOptions(ctx context.Context, store Store, forge Forge, options
 	if err != nil {
 		return err
 	}
+	// One change's failure must not stall landing for every other workspace.
+	var failures []error
 	for _, item := range fetched {
-		status, err := store.LandingStatus(ctx, item.publication.Workspace, item.publication.Change)
+		err := item.err
+		if err == nil {
+			err = reconcilePublication(ctx, store, forge, item, publications, options)
+		}
+		if needsAttention(err) {
+			err = recordAttention(ctx, store, item.publication, err)
+		} else if err == nil {
+			err = clearAttention(ctx, store, item.publication)
+		}
 		if err != nil {
-			return err
-		}
-		if status.State != "landed" && status.State != "dependency_abandoned" {
-			if err := detect(ctx, store, forge, item, publications); err != nil {
-				return err
-			}
-		}
-		status, err = store.LandingStatus(ctx, item.publication.Workspace, item.publication.Change)
-		if err != nil {
-			return err
-		}
-		if status.State == "landed" {
-			if err := offerDependents(ctx, store, item, options); err != nil {
-				return err
-			}
+			failures = append(failures, fmt.Errorf("landing %s/%s: %w", item.publication.Workspace, item.publication.Change, err))
 		}
 	}
 	if err := propagateClosure(ctx, store, publications); err != nil {
-		return err
+		return errors.Join(append(failures, err)...)
 	}
-	var dependencyErr error
 	if options.Predecessors != nil {
-		dependencyErr = reconcileDependencies(ctx, store, forge, publications, options.Predecessors)
+		failures = append(failures, reconcileDependencies(ctx, store, forge, publications, options.Predecessors))
 	}
 	if options.Restack != nil {
-		return errors.Join(dependencyErr, runRestacks(ctx, store, forge, options.Restack))
+		failures = append(failures, runRestacks(ctx, store, forge, options.Restack))
 	}
-	return dependencyErr
+	return errors.Join(failures...)
+}
+
+func reconcilePublication(ctx context.Context, store Store, forge Forge, item fetchedPublication, publications []journal.Publication, options Options) error {
+	status, err := store.LandingStatus(ctx, item.publication.Workspace, item.publication.Change)
+	if err != nil {
+		return err
+	}
+	if status.State != "landed" && status.State != "dependency_abandoned" {
+		if err := detect(ctx, store, forge, item, publications); err != nil {
+			return err
+		}
+	}
+	status, err = store.LandingStatus(ctx, item.publication.Workspace, item.publication.Change)
+	if err != nil {
+		return err
+	}
+	if status.State == "landed" {
+		return offerDependents(ctx, store, item, options)
+	}
+	return nil
+}
+
+// recordAttention keeps a change that needs repair visible in status and
+// doctor, logging only when its reason changes.
+func recordAttention(ctx context.Context, store Store, publication journal.Publication, reason error) error {
+	recorded, err := store.RecordLandingAttention(ctx, publication.Workspace, publication.Change, reason.Error())
+	if err != nil || !recorded {
+		return err
+	}
+	slog.Warn("landing needs attention", "workspace", publication.Workspace, "change", publication.Change,
+		"pr", publication.PRNumber, "err", reason)
+	return nil
+}
+
+func clearAttention(ctx context.Context, store Store, publication journal.Publication) error {
+	cleared, err := store.ClearLandingAttention(ctx, publication.Workspace, publication.Change)
+	if err == nil && cleared {
+		slog.Info("landing attention cleared", "workspace", publication.Workspace, "change", publication.Change, "pr", publication.PRNumber)
+	}
+	return err
 }
 
 func fetchPublications(ctx context.Context, store Store, publications []journal.Publication, includeLanded bool) ([]fetchedPublication, error) {
@@ -175,26 +229,36 @@ func fetchPublications(ctx context.Context, store Store, publications []journal.
 			fetched = append(fetched, existing)
 			continue
 		}
-		runner, err := gitexec.New(publication.Repo, gitexec.Options{
-			FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"},
-		})
-		if err != nil {
-			return nil, err
-		}
-		if _, err := runner.Run(ctx, "fetch", "origin", trunk); err != nil {
-			return nil, fmt.Errorf("fetch trunk for %s: %w", publication.Change, err)
-		}
-		trunkRef := "origin/" + trunk
-		out, err := runner.Run(ctx, "rev-parse", "--verify", trunkRef+"^{commit}")
-		if err != nil {
-			return nil, fmt.Errorf("resolve fetched trunk for %s: %w", publication.Change, err)
-		}
-		item := fetchedPublication{publication: publication,
-			trunkSHA: strings.TrimSpace(string(out)), trunkRef: trunkRef, runner: runner}
+		item := fetchTrunk(ctx, publication, trunk)
 		byTrunk[key] = item
 		fetched = append(fetched, item)
 	}
 	return fetched, nil
+}
+
+// fetchTrunk fetches one repository trunk. A failure only holds back the
+// changes that land on it.
+func fetchTrunk(ctx context.Context, publication journal.Publication, trunk string) fetchedPublication {
+	item := fetchedPublication{publication: publication}
+	runner, err := gitexec.New(publication.Repo, gitexec.Options{
+		FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"},
+	})
+	if err != nil {
+		item.err = fmt.Errorf("%w: open %s: %w", errTrunkUnavailable, publication.Repo, err)
+		return item
+	}
+	if _, err := runner.Run(ctx, "fetch", "origin", trunk); err != nil {
+		item.err = fmt.Errorf("%w: fetch %s in %s: %w", errTrunkUnavailable, trunk, publication.Repo, err)
+		return item
+	}
+	item.trunkRef = "origin/" + trunk
+	out, err := runner.Run(ctx, "rev-parse", "--verify", item.trunkRef+"^{commit}")
+	if err != nil {
+		item.err = fmt.Errorf("%w: resolve fetched %s in %s: %w", errTrunkUnavailable, trunk, publication.Repo, err)
+		return item
+	}
+	item.trunkSHA, item.runner = strings.TrimSpace(string(out)), runner
+	return item
 }
 
 // targetTrunk follows a stacked PR's predecessors to the bottom layer's trunk,
@@ -256,11 +320,14 @@ func ownedPull(ctx context.Context, forge Forge, publication journal.Publication
 		return stackpublish.PR{}, err
 	}
 	pull, err := forge.PullByNumber(ctx, owner, repo, publication.PRNumber)
+	if errors.Is(err, stackpublish.ErrNotFound) {
+		return stackpublish.PR{}, fmt.Errorf("%w: owned PR %d for change %s", errPRMissing, publication.PRNumber, publication.Change)
+	}
 	if err != nil {
 		return stackpublish.PR{}, err
 	}
 	if pull.Number != publication.PRNumber || pull.Head != publication.Branch {
-		return stackpublish.PR{}, fmt.Errorf("owned PR %d does not match published change %s", publication.PRNumber, publication.Change)
+		return stackpublish.PR{}, fmt.Errorf("%w: owned PR %d does not match published change %s", errPublicationMismatch, publication.PRNumber, publication.Change)
 	}
 	return pull, nil
 }
@@ -343,14 +410,15 @@ func runRestacks(ctx context.Context, store Store, forge Forge, restack func(con
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, offer := range offers {
 		derivedRevision, err := restack(ctx, offer, forge)
-		if err != nil {
-			return err
+		if err == nil {
+			err = store.CompleteRestackOffer(ctx, offer, derivedRevision)
 		}
-		if err := store.CompleteRestackOffer(ctx, offer, derivedRevision); err != nil {
-			return err
+		if err != nil {
+			failures = append(failures, fmt.Errorf("restack %s/%s: %w", offer.Workspace, offer.Change, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

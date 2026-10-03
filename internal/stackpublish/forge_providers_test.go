@@ -2,6 +2,7 @@ package stackpublish
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -167,5 +168,27 @@ func TestBitbucketDependencyEnforcement(t *testing.T) {
 	})
 	if got, err := forge.DependencyEnforcement(context.Background(), "owner", "repo", "main", 0); err != nil || got != "not_enforced" {
 		t.Fatalf("generic passing-builds rule = %q, %v; want not_enforced", got, err)
+	}
+}
+
+func TestPullByNumberMarksMissingPRNotFound(t *testing.T) {
+	ctx := context.Background()
+	routes := func(path string) map[string]cannedResponse {
+		return map[string]cannedResponse{"GET " + path + "/2": {http.StatusInternalServerError, `{"message":"boom"}`}}
+	}
+	server, _ := cannedServer(t, routes("/repos/owner/repo/pulls"))
+	github := NewGitHubForge("token", server.Client(), server.URL)
+	gitlab, _ := newCannedGitLab(t, routes(gitlabProjectPath+"/merge_requests"))
+	bitbucket, _ := newCannedBitbucket(t, routes(bitbucketRepoPath+"/pullrequests"))
+	for name, forge := range map[string]interface {
+		PullByNumber(context.Context, string, string, int) (PR, error)
+	}{"github": github, "gitlab": gitlab, "bitbucket": bitbucket} {
+		_, err := forge.PullByNumber(ctx, "owner", "repo", 9)
+		if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "404") {
+			t.Fatalf("%s missing PR = %v", name, err)
+		}
+		if _, err := forge.PullByNumber(ctx, "owner", "repo", 2); err == nil || errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s server error marked not found: %v", name, err)
+		}
 	}
 }

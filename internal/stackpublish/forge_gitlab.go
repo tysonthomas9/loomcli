@@ -58,7 +58,7 @@ func providerCall(ctx context.Context, client *http.Client, token, method, targe
 }
 
 func providerErr(provider, token, method, target string, code int, data []byte) error {
-	return fmt.Errorf("%s %s %s: %d: %s", provider, method, target, code, strings.TrimSpace(scrubSecrets(string(data), token)))
+	return markNotFound(code, fmt.Errorf("%s %s %s: %d: %s", provider, method, target, code, strings.TrimSpace(scrubSecrets(string(data), token))))
 }
 
 // call decodes a response with the expected status into out; any other status
