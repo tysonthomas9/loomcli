@@ -57,7 +57,8 @@ if [[ "$phase" == teardown ]]; then
 fi
 
 # Run each named task through the real TaskRun workflow until it records a
-# revision. With chain, each task is stacked on the previous one.
+# revision. With chain, each task depends on the previous one. No `loom stack`
+# stack is declared: Approve and create PR publishes through the lead's stack.
 run_tasks() {
   local chain="$1"
   shift
@@ -70,16 +71,12 @@ run_tasks() {
     json "$case_dir/task-$name.json" 'd["data"]["id"]' > "$case_dir/task-$name.id"
   done
   if [[ "$chain" == chain ]]; then
-    loom stack init aft-approve --repo approve-repo --base main >/dev/null
     previous=""
     for name in "$@"; do
       task="$(cat "$case_dir/task-$name.id")"
-      if [[ -z "$previous" ]]; then
-        loom stack add "$task" --stack aft-approve >/dev/null
-      else
+      if [[ -n "$previous" ]]; then
         curl -fsS -X POST "$api/issues/$task/dependencies" -H 'Content-Type: application/json' \
           -d "{\"depends_on_id\":\"$previous\",\"dep_type\":\"blocks\"}" >/dev/null
-        loom stack add "$task" --stack aft-approve --after "$previous" >/dev/null
       fi
       previous="$task"
     done
@@ -194,6 +191,30 @@ if [[ "$case_name" == stack ]]; then
   sleep 3
   pulls pulls-final.json
   test "$(json "$case_dir/pulls-final.json" 'len(d)')" = 3
+
+  # G: a `loom stack` stack is declared for the repo. Approve and create PR
+  # applies G but never opens a PR in a second, parallel stack; the task says
+  # why, once, with no retries.
+  run_tasks none g
+  loom stack init aft-declared --repo approve-repo --base main >/dev/null
+  loom stack add "$(cat "$case_dir/task-g.id")" --stack aft-declared >/dev/null
+  test "$(verdict g human aft-operator)" = 200
+  applied_if_waiting g "$case_dir/verdict-g-human.json"
+  reason="not published: declared stack aft-declared is active; publish it with loom stack"
+  for _ in $(seq 1 30); do
+    curl -fsS "$api/issues/$(cat "$case_dir/task-g.id")/revisions" > "$case_dir/revisions-g-final.json"
+    if grep -q '"publish_status":"not_published"' "$case_dir/revisions-g-final.json"; then break; fi
+    sleep 1
+  done
+  python3 -c 'import json,sys; r=[i for i in json.load(open(sys.argv[1]))["data"] if i.get("publish_status")]; assert len(r)==1 and r[0]["publish_status"]=="not_published" and r[0]["publish_reason"]==sys.argv[2], r' \
+    "$case_dir/revisions-g-final.json" "$reason"
+  open_task g
+  browser wait '[data-testid="revision-publish-status"]' >/dev/null
+  browser eval "document.querySelector('[data-testid=\"revision-publish-status\"]').textContent" | grep -qF "declared stack aft-declared is active"
+  browser screenshot "$case_dir/stack-declared-not-published.png" >/dev/null
+  sleep 3
+  pulls pulls-declared.json
+  test "$(json "$case_dir/pulls-declared.json" 'len(d)')" = 3
   exit 0
 fi
 
