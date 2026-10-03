@@ -5,13 +5,13 @@ teardown: >-
   bash "$AFT_TESTS_DIR/scripts/loomgit-approve-pr.sh" teardown stack || true;
   bash "$AFT_TESTS_DIR/scripts/loomgit-approve-pr.sh" teardown trunk || true
 tests:
-  - name: Stacked PRs - Approve and create PR opens the next PR of the stack; Approve only waits for Create PR
-    intent: Three stacked tasks are approved over the API, with Approve and create PR, and with Approve only then Create PR; each PR is based on the one below
+  - name: Stacked PRs - Approve and create PR opens the next PR of the stack; Approve only waits for Create PR; a declared stack opens none
+    intent: Three stacked tasks are approved over the API, with Approve and create PR, and with Approve only then Create PR; each PR is based on the one below. With a loom stack declared for the repo, Approve and create PR applies but opens no parallel PR
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-pr.sh" setup stack
         intent: Create a disposable repository, workspace and lead through the product API
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-pr.sh" run stack
-        intent: Approve three stacked tasks through the API and the browser and compare their PRs on the fake forge
+        intent: Approve three stacked tasks through the API and the browser and compare their PRs on the fake forge, then approve a task beside a declared loom stack and see no PR open
   - name: PR per task - each approval opens its own PR to trunk; lead approval follows Lead may approve
     intent: In trunk mode a human approval and a lead approval each open their own PR to trunk, and the lead is refused with the policy off
     steps:
