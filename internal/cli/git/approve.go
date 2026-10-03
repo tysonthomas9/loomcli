@@ -35,7 +35,7 @@ func runApprove(cmd *cobra.Command, args []string) error {
 	if err != nil || number < 1 {
 		return fmt.Errorf("revision must be a positive number")
 	}
-	resolver, err := approveResolver()
+	resolver, err := resolverFor(approveWorkspace, approveResolver)
 	if err != nil {
 		return err
 	}

@@ -61,11 +61,11 @@ func init() {
 		Long:    "Trunk mode publishes one PR per change against trunk. Add a feature-flag:<name> label to a task to name its flag in the PR body.",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resolver, err := cli.NewResolver()
+			selected, _ := cmd.Flags().GetString("workspace")
+			resolver, err := resolverFor(selected, cli.NewResolver)
 			if err != nil {
 				return err
 			}
-			selected, _ := cmd.Flags().GetString("workspace")
 			if selected != "" {
 				if err := resolver.SetWorkspace(selected); err != nil {
 					return err
@@ -87,7 +87,7 @@ func init() {
 	}
 	deliveryModeCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(deliveryModeCmd)
-	leadMayMergeCmd.Flags().StringP("workspace", "W", "", "Workspace to operate on")
+	leadMayMergeCmd.Flags().StringVarP(&prStackWorkspace, "workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(leadMayMergeCmd)
 }
 
@@ -105,14 +105,9 @@ branch protection and adds no review requirement of its own. Only a human can ch
 }
 
 func runLeadMayMerge(cmd *cobra.Command, args []string) error {
-	resolver, err := cli.NewResolver()
+	resolver, err := resolvePRStackWorkspace()
 	if err != nil {
 		return err
-	}
-	if selected, _ := cmd.Flags().GetString("workspace"); selected != "" {
-		if err := resolver.SetWorkspace(selected); err != nil {
-			return err
-		}
 	}
 	workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
 	if len(args) == 1 {
@@ -328,6 +323,26 @@ func runPRStack(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// resolverFor returns the fallback resolver when no workspace is selected.
+// With a selection it skips active-workspace resolution, so -W works when no
+// workspace is active; the caller then calls SetWorkspace(selected).
+func resolverFor(selected string, fallback func() (*cli.Resolver, error)) (*cli.Resolver, error) {
+	if selected == "" {
+		return fallback()
+	}
+	return allWorkspacesResolver()
+}
+
+// allWorkspacesResolver loads every configured workspace without requiring an
+// active one, for commands that select or iterate workspaces themselves.
+func allWorkspacesResolver() (*cli.Resolver, error) {
+	cfg, err := config.LoadConfigCached()
+	if err != nil {
+		return nil, err
+	}
+	return &cli.Resolver{Mode: cli.ModeWorkspace, Config: cfg}, nil
+}
+
 func resolvePRStackWorkspace() (*cli.Resolver, error) {
 	if prStackWorkspace == "" {
 		return prStackResolver()
@@ -344,7 +359,7 @@ func resolvePRStackWorkspace() (*cli.Resolver, error) {
 }
 
 func runPR(cmd *cobra.Command, args []string) error {
-	resolver, err := cli.NewResolver()
+	resolver, err := resolverFor(prWorkspace, cli.NewResolver)
 	if err != nil {
 		return err
 	}

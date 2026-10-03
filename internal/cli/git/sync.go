@@ -71,7 +71,7 @@ func runWorkspaceSync(deps *cli.Deps, pushOnly, pullOnly bool, ws string) error 
 }
 
 func runWorkspaceSyncWithConfirmation(deps *cli.Deps, pushOnly, pullOnly bool, ws string, confirmation *confirmationSession) error {
-	resolver, err := cli.NewResolver()
+	resolver, err := allWorkspacesResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
 		os.Exit(1)
