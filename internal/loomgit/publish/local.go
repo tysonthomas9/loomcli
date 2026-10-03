@@ -2,7 +2,6 @@ package publish
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -40,7 +39,7 @@ var localPublishProvider = func() (Forge, string, string) { return nil, "", "" }
 var localFlagForTask = taskFeatureFlag
 
 func LeadStackID(lead string) string {
-	return fmt.Sprintf("lead-%x", sha256.Sum256([]byte(lead)))
+	return journal.LeadStackID(lead)
 }
 
 func DeliveryModeLocal(ctx context.Context, workspace string) (string, error) {
@@ -161,7 +160,7 @@ func recordedStackID(ctx context.Context, store *journal.SQLite, workspace, lead
 	}
 	if len(areas) > 1 {
 		// A cross-repo lead publishes one stack per repository.
-		return fmt.Sprintf("lead-%x", sha256.Sum256([]byte(lead+"\x00"+repoName))), nil
+		return journal.LeadRepoStackID(lead, repoName), nil
 	}
 	return LeadStackID(lead), nil
 }

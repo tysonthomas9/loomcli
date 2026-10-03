@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/atomicfile"
@@ -258,6 +259,11 @@ func sortedNodes(st *storedStack) []sl.Node {
 
 // EnsureStack creates the stack header if absent, or updates its mutable fields
 // (RootBase, DefaultCommitMode) if present.
+// ReservedLeadStackPrefix starts the stack IDs Loom gives each lead's stack of
+// approved tasks (D29). A new declared stack may not use it, so a declared
+// stack can never take a lead's stack ID; stacks that already exist are kept.
+const ReservedLeadStackPrefix = "lead-"
+
 func (s *LocalStore) EnsureStack(_ context.Context, in sl.Stack) error {
 	if in.WorkspaceKey == "" || in.ID == "" {
 		return errors.New("stackstore: stack workspaceKey and id are required")
@@ -277,6 +283,10 @@ func (s *LocalStore) EnsureStack(_ context.Context, in sl.Stack) error {
 			}
 			st.Stack.UpdatedAt = now
 			return nil
+		}
+		if strings.HasPrefix(string(in.ID), ReservedLeadStackPrefix) {
+			return fmt.Errorf("stackstore: stack id %q is reserved: ids starting with %q name a lead's approved stack; choose another id",
+				in.ID, ReservedLeadStackPrefix)
 		}
 		in.CreatedAt = now
 		in.UpdatedAt = now
