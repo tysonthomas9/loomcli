@@ -9,15 +9,29 @@ tests:
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" setup loom
         intent: Create a disposable repository, workspace and lead through the product API
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run loom
-        intent: Approve four stacked tasks, then drive Approve and merge through the API and the task page and compare merges on the fake forge
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run loom open
+        intent: Run four stacked tasks and approve each, opening one stacked PR per task
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run loom wait
+        intent: Approve and merge B and D above the bottom; both show "merges after", and Cancel auto-merge in the task stops D
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run loom blocked
+        intent: Approve and merge the bottom PR A while a required check is pending; it is blocked and nothing merges
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run loom merge
+        intent: The required check passes and A merges
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run loom follow
+        intent: B merges after its restack, each PR merged once, while C and D stay open
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run loom next
+        intent: C is now the bottom; Approve and merge in the task page merges it and D stays open
   - name: Native stack - the approved PR above the bottom merges after the bottom PR
     intent: With GitHub native stacks, Approve and merge of the upper PR waits; Approve and merge of the bottom PR merges it, and the upper PR follows
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" setup native
         intent: Create a disposable repository, workspace and lead through the product API
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run native
-        intent: Approve two stacked tasks, approve both to merge top first, and see both merge in order on the fake forge
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run native open
+        intent: Run two stacked tasks and approve each, opening a native stack of two PRs
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run native merge
+        intent: Approve and merge B (waits after A), then A, which merges
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run native follow
+        intent: B merges after A and the task shows Merged
   - name: PR per task - a pushed PR is not merged, a clean one merges once, the lead never merges
     intent: In trunk mode the lead's Approve and merge is refused; a PR someone else pushed to after the human looked shows "Not merged" (stale_subject); another PR merges exactly once
     steps:

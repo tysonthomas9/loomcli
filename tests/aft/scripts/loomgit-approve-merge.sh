@@ -14,6 +14,7 @@ set -Eeuo pipefail
 
 phase="$1"
 case_name="$2"
+stage="${3:-}"
 case_dir="$AFT_WORK_DIR/approve-merge-$case_name"
 upper="$(printf '%s' "$case_name" | tr '[:lower:]' '[:upper:]')"
 workspace="E2E-WS-APPROVEMERGE-$upper"
@@ -166,7 +167,7 @@ approval_state() {
 
 wait_state() { # wait_state <name> <status> [reason substring]
   local got=""
-  for _ in $(seq 1 60); do
+  for _ in $(seq 1 40); do
     got="$(approval_state "$1")"
     if [[ "${got%%|*}" == "$2" && "${got#*|}" == *"${3:-}"* ]]; then return 0; fi
     sleep 2
@@ -192,7 +193,7 @@ merged() { # merged <name>: 1 when the task's PR is merged on the fake forge
 wait_merged() { # wait_merged <name>...
   local name
   for name in "$@"; do
-    for _ in $(seq 1 60); do
+    for _ in $(seq 1 45); do
       [[ "$(merged "$name")" == 1 ]] && break
       sleep 2
     done
@@ -245,7 +246,7 @@ wait_merge_status() { # wait_merge_status <text>: the open task shows it
 # diagnose dumps each task's revisions and Approve and merge state, the forge
 # PRs and the Loom Git stacks into the case directory when a step fails.
 diagnose() {
-  local file="$case_dir/diagnosis.txt" id name change
+  local file="$case_dir/diagnosis.txt" id name change stack
   {
     for id in "$case_dir"/task-*.id; do
       name="$(basename "$id" .id)"
@@ -256,8 +257,15 @@ diagnose() {
       if [[ -f "$case_dir/change-$name.id" ]]; then
         change="$(cat "$case_dir/change-$name.id")"
         echo "== task $name merge approval"
-        curl -sS "$api/changes/$change/merge-approval" || true
+        curl -sS "$api/changes/$change/merge-approval" > "$case_dir/diag-approval-$name.json" || true
+        cat "$case_dir/diag-approval-$name.json"
         echo
+        stack="$(json "$case_dir/diag-approval-$name.json" 'print(v.get("data",{}).get("stack_id",""))' 2>/dev/null || true)"
+        if [[ -n "$stack" ]]; then
+          echo "== task $name merge machine"
+          curl -sS "$api/agents/lead/git/merge-up-to?stack_id=$stack&target=$change" || true
+          echo
+        fi
       fi
     done
     echo "== pulls"
@@ -275,75 +283,99 @@ trap 'diagnose' ERR
 
 case "$case_name" in
   loom)
-    run_tasks chain a:"${repos[0]}" b:"${repos[0]}" c:"${repos[0]}" d:"${repos[0]}"
-    for name in a b c d; do approve "$name"; wait_pr "$name"; done
-    pa="$(pull_of a)"; pb="$(pull_of b)"; pc="$(pull_of c)"
-
-    # B is above A: its approval waits and names the PR below.
-    test "$(merge_approve b)" = 200
-    wait_state b waiting "merges after #$pa"
-    open_task b
-    wait_merge_status "Approved, merges after #$pa"
-    test "$(browser eval "document.querySelectorAll('[data-testid=\"approve-menu-toggle\"]').length")" = 0
-    browser screenshot "$case_dir/loom-merges-after.png" >/dev/null
-
-    # D waits too; Cancel auto-merge in the task stops it for good.
-    test "$(merge_approve d)" = 200
-    wait_state d waiting "merges after #$pa, #$pb, #$pc"
-    open_task d
-    wait_merge_status "Approved, merges after #$pa, #$pb, #$pc"
-    browser click '[data-testid="cancel-auto-merge"]' >/dev/null
-    wait_merge_status "Auto-merge cancelled"
-    browser wait '[data-testid="approve-merge"]' >/dev/null
-    browser screenshot "$case_dir/loom-cancelled.png" >/dev/null
-    wait_state d cancelled "auto-merge cancelled"
-
-    # A is the bottom, but a required check is pending: blocked, retried.
-    pr_status "$pa" '"checks":"PENDING","merge_state":"BLOCKED"'
-    test "$(merge_approve a)" = 200
-    wait_state a blocked "waiting for required checks"
-    open_task a
-    wait_merge_status "merge blocked: waiting for required checks"
-    browser screenshot "$case_dir/loom-blocked.png" >/dev/null
-    hold_unmerged 6 a b
-    test "$(merge_puts "$pa")" = 0
-
-    # The check passes: A merges, then B after its restack, each once; C and
-    # D stay open.
-    pr_status "$pa" '"checks":"SUCCESS","merge_state":"CLEAN"'
-    wait_merged a b
-    wait_state a merged
-    wait_state b merged
-    test "$(merge_puts "$pa")" -le 1
-    test "$(merge_puts "$pb")" -le 1
-    hold_unmerged 4 c d
-
-    # C is now the bottom: Approve and merge in the task merges it.
-    open_task c
-    browser wait '[data-testid="approve-merge"]:not([disabled])' >/dev/null
-    browser eval "document.querySelector('[data-testid=\"approve-merge\"]').textContent" | grep -qx '"*Approve and merge"*'
-    browser screenshot "$case_dir/loom-approve-and-merge.png" >/dev/null
-    browser click '[data-testid="approve-merge"]' >/dev/null
-    wait_merged c
-    wait_merge_status "Merged"
-    browser screenshot "$case_dir/loom-merged.png" >/dev/null
-    hold_unmerged 4 d
+    # Each AFT run step has a 120 s limit, so the journey runs in stages that
+    # share state through the case directory.
+    case "$stage" in
+      open)
+        run_tasks chain a:"${repos[0]}" b:"${repos[0]}" c:"${repos[0]}" d:"${repos[0]}"
+        for name in a b c d; do approve "$name"; wait_pr "$name"; done
+        ;;
+      wait)
+        pa="$(pull_of a)"; pb="$(pull_of b)"; pc="$(pull_of c)"
+        # B is above A: its approval waits and names the PR below.
+        test "$(merge_approve b)" = 200
+        wait_state b waiting "merges after #$pa"
+        open_task b
+        wait_merge_status "Approved, merges after #$pa"
+        test "$(browser eval "document.querySelectorAll('[data-testid=\"approve-menu-toggle\"]').length")" = 0
+        browser screenshot "$case_dir/loom-merges-after.png" >/dev/null
+        # D waits too; Cancel auto-merge in the task stops it for good.
+        test "$(merge_approve d)" = 200
+        wait_state d waiting "merges after #$pa, #$pb, #$pc"
+        open_task d
+        wait_merge_status "Approved, merges after #$pa, #$pb, #$pc"
+        browser click '[data-testid="cancel-auto-merge"]' >/dev/null
+        wait_merge_status "Auto-merge cancelled"
+        browser wait '[data-testid="approve-merge"]' >/dev/null
+        browser screenshot "$case_dir/loom-cancelled.png" >/dev/null
+        wait_state d cancelled "auto-merge cancelled"
+        ;;
+      blocked)
+        pa="$(pull_of a)"
+        # A is the bottom, but a required check is pending: blocked, retried.
+        pr_status "$pa" '"checks":"PENDING","merge_state":"BLOCKED"'
+        test "$(merge_approve a)" = 200
+        wait_state a blocked "waiting for required checks"
+        open_task a
+        wait_merge_status "merge blocked: waiting for required checks"
+        browser screenshot "$case_dir/loom-blocked.png" >/dev/null
+        hold_unmerged 6 a b
+        test "$(merge_puts "$pa")" = 0
+        ;;
+      merge)
+        # The check passes: A merges.
+        pr_status "$(pull_of a)" '"checks":"SUCCESS","merge_state":"CLEAN"'
+        wait_merged a
+        wait_state a merged
+        ;;
+      follow)
+        # B merges after its restack, each PR once; C and D stay open.
+        wait_merged b
+        wait_state b merged
+        test "$(merge_puts "$(pull_of a)")" -le 1
+        test "$(merge_puts "$(pull_of b)")" -le 1
+        hold_unmerged 4 c d
+        ;;
+      next)
+        # C is now the bottom: Approve and merge in the task merges it.
+        open_task c
+        browser wait '[data-testid="approve-merge"]:not([disabled])' >/dev/null
+        browser eval "document.querySelector('[data-testid=\"approve-merge\"]').textContent" | grep -qx '"*Approve and merge"*'
+        browser screenshot "$case_dir/loom-approve-and-merge.png" >/dev/null
+        browser click '[data-testid="approve-merge"]' >/dev/null
+        wait_merged c
+        wait_merge_status "Merged"
+        browser screenshot "$case_dir/loom-merged.png" >/dev/null
+        hold_unmerged 4 d
+        ;;
+      *) echo "unknown stage $stage" >&2; exit 2 ;;
+    esac
     ;;
 
   native)
-    run_tasks chain a:"${repos[0]}" b:"${repos[0]}"
-    for name in a b; do approve "$name"; wait_pr "$name"; done
-    pa="$(pull_of a)"
-    test "$(merge_approve b)" = 200
-    wait_state b waiting "merges after #$pa"
-    hold_unmerged 4 a b
-    test "$(merge_approve a)" = 200
-    wait_merged a b
-    wait_state a merged
-    wait_state b merged
-    open_task b
-    wait_merge_status "Merged"
-    browser screenshot "$case_dir/native-merged.png" >/dev/null
+    case "$stage" in
+      open)
+        run_tasks chain a:"${repos[0]}" b:"${repos[0]}"
+        for name in a b; do approve "$name"; wait_pr "$name"; done
+        ;;
+      merge)
+        pa="$(pull_of a)"
+        test "$(merge_approve b)" = 200
+        wait_state b waiting "merges after #$pa"
+        hold_unmerged 4 a b
+        test "$(merge_approve a)" = 200
+        wait_merged a
+        wait_state a merged
+        ;;
+      follow)
+        wait_merged b
+        wait_state b merged
+        open_task b
+        wait_merge_status "Merged"
+        browser screenshot "$case_dir/native-merged.png" >/dev/null
+        ;;
+      *) echo "unknown stage $stage" >&2; exit 2 ;;
+    esac
     ;;
 
   trunk)
