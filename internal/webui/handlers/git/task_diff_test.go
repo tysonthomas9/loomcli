@@ -107,6 +107,12 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 			VALUES (?,'W','lead',?,?,?,?,'[]','[]','done')`, "req-"+string(rune('a'+i)), layer.rev.Change, layer.rev.Number, layer.old, layer.tip)
 	}
 
+	// LOOSE's first revision is applied in another lead; its newest is not, so
+	// the task diff is the newest revision against its own base.
+	run(`INSERT INTO working_areas (workspace,lead,repo,path,branch,base_sha,mode) VALUES ('W','other','repo',?,'other',?,'interactive')`, repo, trunk)
+	run(`INSERT INTO applied_layers (request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,phase)
+		VALUES ('req-loose','W','other',?,?,?,?,'[]','[]','done')`, loose.Change, loose.Number, trunk, loose.HeadSHA)
+
 	open := func() (*gitread.Reader, func() error, error) {
 		return gitread.OpenLocal(func(string, string) string { return repo })
 	}
