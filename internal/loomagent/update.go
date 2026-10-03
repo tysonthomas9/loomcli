@@ -50,21 +50,17 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (AgentInfo, err
 	if req.Expect != nil && req.Expect.SpecVersion != nil && *req.Expect.SpecVersion != a.SpecVersion {
 		return AgentInfo{}, &Error{Code: CodeSpecVersionMismatch, Message: fmt.Sprintf("spec version is %d", a.SpecVersion)}
 	}
-	choosing := req.Model != "" || req.Effort != "" || len(req.Options) > 0
-	if a.Mode == "single_task" && a.State != StateFinished && (choosing || req.Harness != "") {
-		return AgentInfo{}, &Error{Code: CodeAgentBusy, Message: "only the name of an unfinished single task can change"}
+	if err := checkUpdate(a, req); err != nil {
+		return AgentInfo{}, err
 	}
 	if req.Harness != "" && req.Harness != a.Harness {
-		if req.Effort != "" || len(req.Options) > 0 {
-			return AgentInfo{}, invalid("set effort and options after the harness switch, from the new harness's catalog")
-		}
 		return s.switchHarness(ctx, a, req)
 	}
 	to := a.SpecOf()
 	if req.Name != "" {
 		to.Name = req.Name
 	}
-	if choosing {
+	if req.Model != "" || req.Effort != "" || len(req.Options) > 0 {
 		if err := s.choose(ctx, a, req, &to); err != nil {
 			return AgentInfo{}, err
 		}
@@ -102,6 +98,19 @@ func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstor
 	return a, s.appendEvent(ctx, a.AgentID, kind, kind+":v"+strconv.FormatInt(a.SpecVersion, 10),
 		map[string]any{"name": a.Name, "model": deref(a.Model), "from_harness": from, "harness": a.Harness,
 			"spec_version": a.SpecVersion})
+}
+
+// checkUpdate refuses a change of anything but the name of an unfinished
+// single task, and effort or options together with a harness switch.
+func checkUpdate(a loomstore.Agent, req UpdateRequest) error {
+	options := req.Effort != "" || len(req.Options) > 0
+	if a.Mode == "single_task" && a.State != StateFinished && (options || req.Model != "" || req.Harness != "") {
+		return &Error{Code: CodeAgentBusy, Message: "only the name of an unfinished single task can change"}
+	}
+	if options && req.Harness != "" && req.Harness != a.Harness {
+		return invalid("set effort and options after the harness switch, from the new harness's catalog")
+	}
+	return nil
 }
 
 // choose applies req's model and options to to and to a's session from its
