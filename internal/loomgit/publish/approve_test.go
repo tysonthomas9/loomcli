@@ -558,14 +558,14 @@ func TestReapprovalRearmsIntentThatOpenedNoPR(t *testing.T) {
 		fx, forge := approvalFixture(t, "stack")
 		ctx := context.Background()
 		a := appliedTask(t, fx, "A", fx.base)
-		first := approveForLead(t, fx, a, reviewer, true, "spent")
+		approveForLead(t, fx, a, reviewer, true, "spent")
 		if outcomes, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(outcomes) != 1 || outcomes[0].Status != "not_published" {
 			t.Fatalf("spent outcome = %+v, %v", outcomes, err)
 		}
-		reapprove(t, fx, a)
+		again := reapprove(t, fx, a)
 		// The re-approval applies the revision again.
 		if err := fx.store.SetApprovalFollow(ctx, journal.PendingApproval{Workspace: "W", Lead: "L", Change: a.Change,
-			Revision: a.Number, VerdictID: int(first.ID)}, "applied", nil); err != nil {
+			Revision: a.Number, VerdictID: int(again.ID)}, "applied", nil); err != nil {
 			t.Fatal(err)
 		}
 		outcomes, err := PublishApproved(ctx, "W", "L", nil)
