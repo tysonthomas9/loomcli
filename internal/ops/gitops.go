@@ -145,6 +145,7 @@ type GitPRResult struct {
 	Created       bool   `json:"created"`
 	AlreadyExists bool   `json:"already_exists"`
 	NoCommits     bool   `json:"no_commits"`
+	StackID       string `json:"stack_id,omitempty"`
 }
 
 // GitResetResult contains the result of a reset operation.

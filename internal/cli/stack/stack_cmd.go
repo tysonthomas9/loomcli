@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/githubtoken"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -159,13 +160,18 @@ func listCmd() *cobra.Command {
 			if jsonOut {
 				return cmdstore.WriteJSON(stacks)
 			}
-			if len(stacks) == 0 {
+			published, err := publishedStacks(cmd.Context(), ws)
+			if err != nil {
+				return err
+			}
+			if len(stacks) == 0 && len(published) == 0 {
 				fmt.Println("no stacks")
 				return nil
 			}
 			for _, s := range stacks {
 				fmt.Printf("%s  repo=%s base=%s\n", s.ID, s.RepoName, s.RootBase)
 			}
+			printPublishedStacks(published)
 			return nil
 		},
 	}
@@ -454,4 +460,22 @@ func baseOrRoot(n sl.Node, root string) string {
 		return root
 	}
 	return n.BaseTaskID
+}
+
+// publishedStacks reads the Loom Git stacks Create PR and Approve recorded, so
+// a cross-repo lead's per-repo stack IDs are visible for merge-up-to.
+var publishedStacks = publish.PublishedStacksLocal
+
+func printPublishedStacks(stacks []publish.PublishedStack) {
+	for _, stack := range stacks {
+		var layers []string
+		for _, layer := range stack.Layers {
+			entry := fmt.Sprintf("#%d", layer.PRNumber)
+			if layer.Landed {
+				entry += "(merged)"
+			}
+			layers = append(layers, entry)
+		}
+		fmt.Printf("%s  repo=%s loom-git PRs=%s\n", stack.StackID, stack.Repo, strings.Join(layers, ","))
+	}
 }
