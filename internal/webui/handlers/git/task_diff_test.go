@@ -75,6 +75,8 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	low := freeze("LOW", "low", trunk, func() { write("f", "one\n2\n3\n") })
 	top := freeze("TOP", "top", trunk, func() { write("top", "top\n") })
 	loose := freeze("LOOSE", "loose1", trunk, func() { write("loose", "a\n") })
+	// UP is applied above the lead's own commit, which is not a task layer.
+	up := freeze("UP", "up", trunk, func() { write("up", "up\n") })
 	retried := freeze("LOOSE", "loose2", trunk, func() { write("loose", "b\n") })
 
 	// Lead stack: LOW, MID (rebuilt on LOW), TOP.
@@ -85,6 +87,10 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	midTip := commit("mid")
 	write("top", "top\n")
 	topTip := commit("top")
+	write("own", "lead edit\n")
+	ownTip := commit("own")
+	write("up", "up\n")
+	upTip := commit("up")
 
 	db, err := sql.Open("sqlite", storePath)
 	if err != nil {
@@ -102,7 +108,7 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	for i, layer := range []struct {
 		rev      loomgit.Revision
 		old, tip string
-	}{{low, trunk, lowTip}, {mid, lowTip, midTip}, {top, midTip, topTip}} {
+	}{{low, trunk, lowTip}, {mid, lowTip, midTip}, {top, midTip, topTip}, {up, ownTip, upTip}} {
 		run(`INSERT INTO applied_layers (request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,phase)
 			VALUES (?,'W','lead',?,?,?,?,'[]','[]','done')`, "req-"+string(rune('a'+i)), layer.rev.Change, layer.rev.Number, layer.old, layer.tip)
 	}
@@ -125,7 +131,7 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	taskDiff := func(task string) gitread.TaskDiff {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/workspaces/W/issues/"+task+"/diff", nil))
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/workspaces/W/issues/"+task, nil))
 		var body struct {
 			Success bool             `json:"success"`
 			Data    gitread.TaskDiff `json:"data"`
@@ -149,9 +155,12 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 		task, compare, want string
 		rev                 loomgit.Revision
 	}{
-		{"MID", "layer", prDiff(lowTip, midTip), mid},
-		{"LOW", "trunk", prDiff(trunk, lowTip), low},
-		{"LOOSE", "base", prDiff(retried.BaseSHA, retried.HeadSHA), retried},
+		{"MID/diff", "layer", prDiff(lowTip, midTip), mid},
+		{"MID/diff?lead=lead", "layer", prDiff(lowTip, midTip), mid},
+		{"LOW/diff", "trunk", prDiff(trunk, lowTip), low},
+		{"LOW/diff?lead=lead", "trunk", prDiff(trunk, lowTip), low},
+		{"UP/diff", "layer", prDiff(ownTip, upTip), up},
+		{"LOOSE/diff", "base", prDiff(retried.BaseSHA, retried.HeadSHA), retried},
 	}
 	for _, tc := range cases {
 		got := taskDiff(tc.task)
@@ -171,7 +180,7 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	// PR per task (trunk mode): every task's PR is its own revision on trunk,
 	// so the middle task no longer compares with the layer below.
 	run(`INSERT INTO workspace_settings (workspace,delivery_mode) VALUES ('W','trunk')`)
-	if got := taskDiff("MID"); got.Compare != "trunk" || patches(got) != prDiff(mid.BaseSHA, mid.HeadSHA) {
+	if got := taskDiff("MID/diff"); got.Compare != "trunk" || patches(got) != prDiff(mid.BaseSHA, mid.HeadSHA) {
 		t.Fatalf("trunk mode MID: compare=%q patch=%q", got.Compare, patches(got))
 	}
 	run(`UPDATE workspace_settings SET delivery_mode='stack' WHERE workspace='W'`)
