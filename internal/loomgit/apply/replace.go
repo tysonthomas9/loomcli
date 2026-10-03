@@ -35,7 +35,9 @@ type pullPlans interface {
 // has two layers and its stack stays linear. An unfinished restack is handed
 // to the replacer too, which recovers it before deciding.
 func (s *Service) replaceExisting(ctx context.Context, in Request) (Result, bool, error) {
-	if s.runner == nil {
+	if s.runner == nil || layerReplacer == nil {
+		// Without the pull package linked in there is no layer replace; Apply
+		// keeps its plain behavior.
 		return Result{}, false, nil
 	}
 	pending := false
@@ -51,13 +53,18 @@ func (s *Service) replaceExisting(ctx context.Context, in Request) (Result, bool
 		if err != nil {
 			return Result{}, true, err
 		}
-		if !hasLayer(layers, in.Change) {
+		layer, found := lastLayer(layers, in.Change)
+		if !found {
 			return Result{}, false, nil
 		}
-	}
-	if layerReplacer == nil {
-		return Result{}, true, loomgit.NewError(loomgit.AttentionRequired,
-			"the change already has a layer and layer replace is unavailable", nil)
+		// A layer that already holds this revision is Apply's own repeat case.
+		held, err := DerivesFrom(ctx, s.store, in.Workspace, in.Change, layer.Revision, in.Revision)
+		if err != nil {
+			return Result{}, true, err
+		}
+		if held {
+			return Result{}, false, nil
+		}
 	}
 	result, err := layerReplacer(ctx, s.store, s.repo, s.runner, in)
 	if errors.Is(err, ErrNoLayer) {
@@ -66,13 +73,13 @@ func (s *Service) replaceExisting(ctx context.Context, in Request) (Result, bool
 	return result, true, err
 }
 
-func hasLayer(layers []loomgit.AppliedLayer, change string) bool {
-	for _, layer := range layers {
-		if layer.Change == change {
-			return true
+func lastLayer(layers []loomgit.AppliedLayer, change string) (loomgit.AppliedLayer, bool) {
+	for index := len(layers) - 1; index >= 0; index-- {
+		if layers[index].Change == change {
+			return layers[index], true
 		}
 	}
-	return false
+	return loomgit.AppliedLayer{}, false
 }
 
 // DerivesFrom reports whether revision number of change is revision want or
