@@ -51,6 +51,30 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 	}
 }
 
+// Defines values for AgentV1HarnessInfoAccountKind.
+const (
+	ApiKey       AgentV1HarnessInfoAccountKind = "api_key"
+	Bedrock      AgentV1HarnessInfoAccountKind = "bedrock"
+	Subscription AgentV1HarnessInfoAccountKind = "subscription"
+	Unknown      AgentV1HarnessInfoAccountKind = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AgentV1HarnessInfoAccountKind enum.
+func (e AgentV1HarnessInfoAccountKind) Valid() bool {
+	switch e {
+	case ApiKey:
+		return true
+	case Bedrock:
+		return true
+	case Subscription:
+		return true
+	case Unknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentV1OptionDescriptorType.
 const (
 	Boolean AgentV1OptionDescriptorType = "boolean"
@@ -1837,6 +1861,26 @@ type AgentV1Expect struct {
 	SubjectVersion *string `json:"subject_version,omitempty"`
 }
 
+// AgentV1HarnessInfo defines model for AgentV1HarnessInfo.
+type AgentV1HarnessInfo struct {
+	// AccountKind Absent until the first good probe
+	AccountKind *AgentV1HarnessInfoAccountKind `json:"account_kind,omitempty"`
+
+	// AccountLabel e.g. Claude Max Subscription; absent when unknown
+	AccountLabel *string `json:"account_label,omitempty"`
+
+	// CapabilitiesSupported false when the harness has no capability probe
+	CapabilitiesSupported bool   `json:"capabilities_supported"`
+	Harness               string `json:"harness"`
+
+	// ProbedAt When the last good probe ran; absent before one
+	ProbedAt      *time.Time            `json:"probed_at,omitempty"`
+	SlashCommands []AgentV1SlashCommand `json:"slash_commands"`
+}
+
+// AgentV1HarnessInfoAccountKind Absent until the first good probe
+type AgentV1HarnessInfoAccountKind string
+
 // AgentV1List defines model for AgentV1List.
 type AgentV1List struct {
 	Agents []AgentV1 `json:"agents"`
@@ -1982,6 +2026,13 @@ type AgentV1SendResult struct {
 	Replaced    bool    `json:"replaced"`
 	State       string  `json:"state"`
 	TurnId      *string `json:"turn_id,omitempty"`
+}
+
+// AgentV1SlashCommand defines model for AgentV1SlashCommand.
+type AgentV1SlashCommand struct {
+	ArgumentHint *string `json:"argument_hint,omitempty"`
+	Description  *string `json:"description,omitempty"`
+	Name         string  `json:"name"`
 }
 
 // AgentV1Subject What an agent works on, for example a PR at a head SHA.

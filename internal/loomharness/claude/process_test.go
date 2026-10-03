@@ -61,13 +61,15 @@ func fakeClaude() {
 			id, resume = args[i+1], a == "--resume"
 		}
 	}
-	path := filepath.Join(root, "projects", "fake", id+".jsonl")
-	if _, err := os.Stat(path); (err == nil || os.Getenv("LOOM_FAKE_CLAUDE_IN_USE") == id) && !resume {
-		fmt.Fprintf(os.Stderr, "Error: Session ID %s is already in use.\n", id)
-		os.Exit(1)
+	if id != "" { // the capability probe has no session
+		path := filepath.Join(root, "projects", "fake", id+".jsonl")
+		if _, err := os.Stat(path); (err == nil || os.Getenv("LOOM_FAKE_CLAUDE_IN_USE") == id) && !resume {
+			fmt.Fprintf(os.Stderr, "Error: Session ID %s is already in use.\n", id)
+			os.Exit(1)
+		}
+		_ = os.MkdirAll(filepath.Dir(path), 0o755)
+		_ = os.WriteFile(path, nil, 0o600)
 	}
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	_ = os.WriteFile(path, nil, 0o600)
 	out := json.NewEncoder(os.Stdout)
 	inited, running, n := false, false, 0
 	sc := bufio.NewScanner(os.Stdin)
@@ -76,6 +78,7 @@ func fakeClaude() {
 			Type, UUID string
 			RequestID  string `json:"request_id"`
 			Message    struct{ Content string }
+			Request    struct{ Subtype string }
 		}
 		_ = json.Unmarshal(sc.Bytes(), &in)
 		switch in.Type {
@@ -105,6 +108,14 @@ func fakeClaude() {
 			// total_cost_usd is this process's running total, as Claude's.
 			_ = out.Encode(map[string]any{"type": "result", "subtype": "success", "session_id": id, "total_cost_usd": 0.25 * float64(n)})
 		case "control_request":
+			if in.Request.Subtype == "initialize" { // the capability probe
+				if os.Getenv("LOOM_FAKE_CLAUDE_INIT_FAIL") == "1" {
+					os.Exit(2)
+				}
+				_ = out.Encode(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success",
+					"request_id": in.RequestID, "response": json.RawMessage(os.Getenv("LOOM_FAKE_CLAUDE_INIT"))}})
+				continue
+			}
 			_ = out.Encode(map[string]any{"type": "control_response",
 				"response": map[string]any{"subtype": "success", "request_id": in.RequestID}})
 			if running {

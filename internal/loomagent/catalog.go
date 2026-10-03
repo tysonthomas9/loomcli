@@ -204,3 +204,20 @@ func (s *Service) reapply(ctx context.Context, harness string, ref loomharness.N
 	}
 	return harnessErr(s.harnesses[harness].Session(ref).SetModel(ctx, cfg.Model, opts))
 }
+
+// Capabilities is harness's last capability probe. supported is false for a
+// harness without a probe; caps is nil before its first good probe.
+func (s *Service) Capabilities(harness string) (caps *loomharness.Capabilities, supported bool, err error) {
+	h, ok := s.harnesses[harness]
+	if !ok {
+		return nil, false, s.unavailable(harness)
+	}
+	r, ok := h.(loomharness.CapabilityReporter)
+	if !ok {
+		return nil, false, nil
+	}
+	if c, ok := r.Capabilities(); ok {
+		return &c, true, nil
+	}
+	return nil, true, nil
+}

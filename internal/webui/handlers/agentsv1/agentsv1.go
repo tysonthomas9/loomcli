@@ -66,6 +66,7 @@ func (h *Handler) Register(mux *http.ServeMux, workspace middleware.Middleware,
 		"GET " + p + "agents/{id}/events":              listEvents,
 		"GET " + p + "presets":                         h.listPresets,
 		"GET " + p + "presets/{name}":                  h.getPreset,
+		"GET " + p + "harnesses/{harness}":             h.getHarness,
 		"GET " + p + "harnesses/{harness}/models":      h.listModels,
 		"POST " + p + "github/read":                    h.githubRead,
 	} {

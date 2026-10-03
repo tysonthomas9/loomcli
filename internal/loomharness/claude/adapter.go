@@ -25,6 +25,8 @@ type Adapter struct {
 	mu       sync.Mutex
 	sessions map[loomharness.NativeRef]*Session // by root and native id
 	feeds    map[*feed]struct{}
+	caps     loomharness.Capabilities // the last good capability probe
+	probed   bool
 }
 
 var _ loomharness.Harness = (*Adapter)(nil)

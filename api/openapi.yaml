@@ -4521,6 +4521,23 @@ paths:
               schema: {$ref: "#/components/schemas/AgentV1Event"}
         default: {$ref: "#/components/responses/AgentV1Error"}
 
+  /api/workspaces/{ws}/v1/harnesses/{harness}:
+    get:
+      operationId: getHarnessV1
+      tags: [agents-v1]
+      summary: Get a harness's last background capability probe
+      description: >-
+        The account kind and label and the slash commands from the harness's own periodic probe (Claude: every
+        5 minutes, without sending a prompt). A harness without a probe returns capabilities_supported false;
+        probed_at is absent until the first good probe. Never carries an email, key or token.
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: harness, in: path, required: true, schema: {type: string}, description: "opencode, codex or claude"}
+      responses:
+        "200": {description: The probe result, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1HarnessInfo"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
   /api/workspaces/{ws}/v1/harnesses/{harness}/models:
     get:
       operationId: listHarnessModelsV1
@@ -4827,6 +4844,23 @@ components:
       properties:
         id: {type: string}
         value: {description: "A string, or a boolean for a boolean option"}
+    AgentV1HarnessInfo:
+      type: object
+      required: [harness, capabilities_supported, slash_commands]
+      properties:
+        harness: {type: string}
+        capabilities_supported: {type: boolean, description: false when the harness has no capability probe}
+        account_kind: {type: string, enum: [subscription, api_key, bedrock, unknown], description: Absent until the first good probe}
+        account_label: {type: string, description: "e.g. Claude Max Subscription; absent when unknown"}
+        slash_commands: {type: array, items: {$ref: "#/components/schemas/AgentV1SlashCommand"}}
+        probed_at: {type: string, format: date-time, description: When the last good probe ran; absent before one}
+    AgentV1SlashCommand:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        description: {type: string}
+        argument_hint: {type: string}
     AgentV1ModelCatalog:
       type: object
       required: [harness, providers]

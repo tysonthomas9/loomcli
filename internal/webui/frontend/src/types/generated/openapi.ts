@@ -2469,6 +2469,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/v1/harnesses/{harness}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get a harness's last background capability probe
+     * @description The account kind and label and the slash commands from the harness's own periodic probe (Claude: every 5 minutes, without sending a prompt). A harness without a probe returns capabilities_supported false; probed_at is absent until the first good probe. Never carries an email, key or token.
+     */
+    get: operations["getHarnessV1"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/v1/harnesses/{harness}/models": {
     parameters: {
       query?: never;
@@ -2673,6 +2693,29 @@ export interface components {
       id: string;
       /** @description A string, or a boolean for a boolean option */
       value: unknown;
+    };
+    AgentV1HarnessInfo: {
+      harness: string;
+      /** @description false when the harness has no capability probe */
+      capabilities_supported: boolean;
+      /**
+       * @description Absent until the first good probe
+       * @enum {string}
+       */
+      account_kind?: "subscription" | "api_key" | "bedrock" | "unknown";
+      /** @description e.g. Claude Max Subscription; absent when unknown */
+      account_label?: string;
+      slash_commands: components["schemas"]["AgentV1SlashCommand"][];
+      /**
+       * Format: date-time
+       * @description When the last good probe ran; absent before one
+       */
+      probed_at?: string;
+    };
+    AgentV1SlashCommand: {
+      name: string;
+      description?: string;
+      argument_hint?: string;
     };
     AgentV1ModelCatalog: {
       harness: string;
@@ -9257,6 +9300,32 @@ export interface operations {
         };
         content: {
           "text/event-stream": components["schemas"]["AgentV1Event"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  getHarnessV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description opencode, codex or claude */
+        harness: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The probe result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1HarnessInfo"];
         };
       };
       default: components["responses"]["AgentV1Error"];
