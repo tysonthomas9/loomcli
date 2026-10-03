@@ -307,8 +307,10 @@ case "$case_name" in
         test "$(pr_head b)" != "$before_b"
         test "$(revision_field a "$number" verdict)" = feedback
         test "$(human_verdicts a)" = "$humans"
-        # One layer per task: A's PR has exactly one commit above main.
-        test "$(git --git-dir="$remote" rev-list --count "main..refs/heads/$(pr_ref a)")" = 1
+        # One layer per task: A's PR is its task commit plus the fix-up, and
+        # B's PR sits directly on A's new head.
+        test "$(git --git-dir="$remote" rev-list --count "main..refs/heads/$(pr_ref a)")" = 2
+        test "$(git --git-dir="$remote" rev-parse "$(pr_head b)^")" = "$(pr_head a)"
         open_task a
         wait_text feedback-status "Pushed to PR #$(pull_of a) automatically"
         test "$(browser eval "document.querySelectorAll('[data-testid=\"approve-create-pr\"]').length")" = 0
