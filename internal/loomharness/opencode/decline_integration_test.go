@@ -86,4 +86,21 @@ func TestDeclineEndsTheTurn(t *testing.T) {
 	if ok, err := s.Interrupt(ctx); err != nil || ok {
 		t.Fatalf("Interrupt after the reject = %v, %v; want false, nothing runs", ok, err)
 	}
+	// The next input is its own turn: OpenCode wrote no idle marker, so
+	// history must end the declined turn at its declined step.
+	key := PromptID("agent-1", "r2")
+	if err := s.Prompt(ctx, loomharness.Input{Key: key, Text: "carry on"}); err != nil {
+		t.Fatal(err)
+	}
+	var next string
+	events.wait(t, "the next turn's start with its own input", func(e loomharness.Event) bool {
+		if e.Session.NativeID == ref.NativeID && e.Type == loomharness.EventTurnStarted && e.InputKey == key {
+			next = e.TurnID
+			return true
+		}
+		return false
+	})
+	events.wait(t, "the next turn's end", func(e loomharness.Event) bool {
+		return e.TurnID == next && e.Type == loomharness.EventTurnCompleted && e.StopReason == "completed"
+	})
 }

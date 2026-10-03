@@ -551,7 +551,10 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 			e.TurnID = turn
 			out.Events = append(out.Events, e)
 		}
-		if m.Type == "idle" {
+		if m.declined() { // no idle marker follows: end the turn as the feed does
+			out.Events = append(out.Events, loomharness.Event{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: turn, StopReason: "declined", Time: m.created()})
+		}
+		if m.Type == "idle" || m.declined() {
 			turn = ""
 		}
 	}
@@ -616,7 +619,8 @@ func (s *Session) pendingAsks(ctx context.Context, ref loomharness.NativeRef, tu
 }
 
 // turnOf finds the turn holding stored message anchor: the first message
-// that maps to an event after the newest idle marker before anchor, and its
+// that maps to an event after the newest idle marker (or declined step,
+// which ends its turn with none) before anchor, and its
 // InputKey when that message is a user input. found is false when anchor is
 // itself the turn's first such message, or is not stored.
 func (s *Session) turnOf(ctx context.Context, anchor string) (id, key string, found bool, err error) {
@@ -631,7 +635,7 @@ func (s *Session) turnOf(ctx context.Context, anchor string) (id, key string, fo
 			return "", "", false, err
 		}
 		for _, m := range page.Data {
-			if m.Type == "idle" {
+			if m.Type == "idle" || m.declined() {
 				return id, key, found, nil
 			}
 			if m.opens() {
@@ -885,6 +889,21 @@ func (m message) opens() bool {
 		return m.Metadata.Notice == "restart"
 	case "assistant":
 		return len(m.Content) > 0 || m.usage()
+	}
+	return false
+}
+
+// declinedCall is the error OpenCode b30c4d0 gives a tool call whose
+// permission was rejected (core/src/session/runner/step.ts).
+const declinedCall = "The user declined this tool call"
+
+// declined: the step's tool call was declined, which ends the turn with no
+// idle marker (see mapper).
+func (m message) declined() bool {
+	for _, c := range m.Content {
+		if c.Type == "tool" && c.State.Error != nil && c.State.Error.Message == declinedCall {
+			return true
+		}
 	}
 	return false
 }

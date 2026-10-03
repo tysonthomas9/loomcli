@@ -714,10 +714,16 @@ func TestEmulatorRejectEndsTheTurn(t *testing.T) {
 	if ok, err := s.Interrupt(ctx); err != nil || ok {
 		t.Fatalf("Interrupt = %v, %v; want false", ok, err)
 	}
+	// OpenCode stores no idle marker; the adapter's history ends the turn
+	// at its declined step instead.
+	var ends []string
 	for _, e := range history(t, s, 0) {
 		if e.Type == loomharness.EventTurnCompleted {
-			t.Fatalf("history ends the declined turn: %+v; OpenCode writes no idle marker", e)
+			ends = append(ends, e.StopReason)
 		}
+	}
+	if len(ends) != 1 || ends[0] != "declined" {
+		t.Fatalf("history turn ends = %v; want [declined]", ends)
 	}
 	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r2"), Text: "again"}); err != nil {
 		t.Fatal(err)

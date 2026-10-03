@@ -423,3 +423,76 @@ func TestEventsDeclineEndsTheTurn(t *testing.T) {
 		t.Fatalf("turn ends = %+v; want one, the declined turn msg_in, with no error", ends)
 	}
 }
+
+// OC1: a declined turn writes no idle marker, so in OpenCode's history the
+// declined assistant message (its tool call "The user declined this tool
+// call") closes the turn. The next input opens its own turn, live and in
+// history, with its own InputKey, and history ends the declined turn as the
+// feed does.
+func TestEventsTurnAfterADeclineIsItsOwn(t *testing.T) {
+	st := newStore()
+	st.streams = [][]string{{
+		ev(1, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in"}`),
+		live("permission.replied", `{"sessionID":"ses_a","requestID":"per_1","reply":"reject"}`),
+		ev(2, "session.tool.failed", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","id":"call_1","error":{"type":"aborted","message":"The user declined this tool call"}}`),
+		ev(3, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"shutdown"}`),
+		ev(4, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in2"}`),
+		ev(5, "session.execution.succeeded", `{"sessionID":"ses_a"}`),
+	}}
+	declined := map[string]any{"type": "tool", "id": "call_1", "name": "shell",
+		"state": map[string]any{"status": "error", "error": map[string]string{"type": "aborted", "message": "The user declined this tool call"}}}
+	st.messages["ses_a"] = []map[string]any{
+		{"id": "msg_in", "type": "user"},
+		{"id": "msg_a1", "type": "assistant", "content": []map[string]any{declined}, "error": map[string]string{"type": "aborted", "message": "Step interrupted"}},
+		{"id": "msg_in2", "type": "user"},
+		{"id": "msg_idle", "type": "idle", "outcome": "succeeded"},
+	}
+	c := fakeServer(t, st)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var got []string
+	for len(got) < 7 {
+		select {
+		case e := <-f.Events():
+			got = append(got, fmt.Sprintf("%s %s %s %s", e.Type, e.TurnID, e.InputKey, e.StopReason))
+		case <-ctx.Done():
+			t.Fatalf("timed out after %d events:\n%s", len(got), strings.Join(got, "\n"))
+		}
+	}
+	want := []string{
+		"turn.started msg_in msg_in ",
+		"message.delivered msg_in msg_in ",
+		"ask.resolved msg_in  ",
+		"item.completed msg_in  ",
+		"turn.completed msg_in  declined",
+		"turn.started msg_in2 msg_in2 ",
+		"message.delivered msg_in2 msg_in2 ",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("live events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	page, err := c.Session(loomharness.NativeRef{NativeID: "ses_a"}).Messages(ctx, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hist []string
+	for _, e := range page.Events {
+		if e.Type == loomharness.EventTurnStarted || e.Type == loomharness.EventTurnCompleted {
+			hist = append(hist, fmt.Sprintf("%s %s %s %s", e.Type, e.TurnID, e.InputKey, e.StopReason))
+		}
+	}
+	wantHist := []string{
+		"turn.started msg_in msg_in ",
+		"turn.completed msg_in  declined",
+		"turn.started msg_in2 msg_in2 ",
+		"turn.completed msg_in2  completed",
+	}
+	if strings.Join(hist, "\n") != strings.Join(wantHist, "\n") {
+		t.Fatalf("history turns:\n%s\nwant:\n%s", strings.Join(hist, "\n"), strings.Join(wantHist, "\n"))
+	}
+}
