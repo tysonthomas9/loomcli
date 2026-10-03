@@ -1,0 +1,87 @@
+kind: graph-transitions
+version: 1
+flow: issue-detail
+group: claim
+
+# STACKED-PRS-29 (PR #786): the claim endpoint must accept a ready child of an
+# open epic and refuse a child with an open blocker or a blocked epic.
+#
+# Every claim below is an API step because no UI control calls
+# POST /issues/{id}/claim: the old Start Work button is no longer mounted, and
+# the panel's agent picker sets status through PATCH and starts an agent, which
+# claims through the driver path and never reaches this endpoint's check.
+# The lookup before each claim is also an API step: the agent needs the
+# server-assigned id of the task the human created in the UI.
+
+transitions:
+  agent-claims-ready-child:
+    intent: An agent finds the ready child task under the open epic and claims it through the claim API.
+    actor: agent
+    via: api
+    steps:
+      # API: the agent looks up the id of the human-created child (oldest open task on this path).
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues?status=open&type=task&limit=100"
+          status: 200
+          assert:
+            - path: "data.0.title"
+              equals: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
+          save:
+            - { from: "data.0.id", as: "claimChildId" }
+        intent: "An agent looks up the open child task the human created under the epic"
+      # API: no UI control calls the claim endpoint (Start Work removed; the agent picker claims via a different path).
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:claimChildId}/claim"
+          status: 200
+          assert:
+            - path: "success"
+              equals: true
+        intent: "An agent claims the ready child task under the open epic"
+
+  agent-claim-refused-for-blocked-child:
+    intent: An agent tries to claim the child task that has an open blocker and is refused.
+    actor: agent
+    via: api
+    steps:
+      # API: the agent looks up the id of the human-created child (created before its blocker).
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues?status=open&type=task&limit=100"
+          status: 200
+          assert:
+            - path: "data.0.title"
+              equals: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
+          save:
+            - { from: "data.0.id", as: "blockedChildId" }
+        intent: "An agent looks up the open child task that the human blocked"
+      # API: no UI control calls the claim endpoint (Start Work removed; the agent picker claims via a different path).
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:blockedChildId}/claim"
+          status: 409
+        intent: "An agent is refused the claim on the child task with an open blocker"
+
+  agent-claim-refused-under-blocked-epic:
+    intent: An agent tries to claim the child task whose epic has an open blocker and is refused.
+    actor: agent
+    via: api
+    steps:
+      # API: the agent looks up the id of the human-created child (created before the epic's blocker).
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues?status=open&type=task&limit=100"
+          status: 200
+          assert:
+            - path: "data.0.title"
+              equals: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
+          save:
+            - { from: "data.0.id", as: "epicBlockedChildId" }
+        intent: "An agent looks up the open child task under the blocked epic"
+      # API: no UI control calls the claim endpoint (Start Work removed; the agent picker claims via a different path).
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:epicBlockedChildId}/claim"
+          status: 409
+        intent: "An agent is refused the claim on the child task whose epic is blocked"

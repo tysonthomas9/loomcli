@@ -18,3 +18,19 @@ transitions:
     steps:
       - click:
           selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+
+  close-epic-child-panel:
+    intent: A human closes the auto-opened child panel with the keyboard and returns to the child's card under the epic.
+    actor: human
+    via: ui
+    steps:
+      - press: Escape
+
+  open-epic-from-lane:
+    intent: A human closes the blocker panel and opens the epic from its swim-lane title on the board.
+    actor: human
+    via: ui
+    steps:
+      - use: close-detail-panel-with-keyboard
+      - click:
+          selector: "button[data-testid=lane-title-button][aria-label$=': aft issue detail epic ${RUN_ID:-local}-${AFT_CASE_ID}']"

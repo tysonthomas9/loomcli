@@ -297,7 +297,8 @@ Product-correctness (`tests/aft/suites/`):
   shared-trunk Home operator queue (ranking, approval, unblock, revision review, and live plus
   rehydrated activity), board delivery, reconnect catch-up, and agent-driven lifecycle transitions.
 - `issue-create-ui`, `issue-detail`, `issue-detail.graph`, `comments`, and `markdown-safety`
-  — human creation, the split graph pilot for complete detail-panel UI journeys,
+  — human creation, the split graph pilot for complete detail-panel UI journeys
+  (including agent claims of a child task under an open or blocked epic),
   field/comment editing, API readbacks, activity ordering, and safe rendering.
 - `dependencies-graph`, `filters`, `views`, `table-bulk`, and `pages` — dependency/graph
   behavior, URL filtering, route/view switching, bulk actions, and page contracts.
@@ -316,8 +317,6 @@ Surface wiring (`tests/aft/surface-suites/`):
 - `design-format-legacy` — legacy inline-HTML auto-detect and sanitization.
 - `api-contracts` — standalone health/config/readiness contract probes.
 - `pr-contracts` — PR reviewer endpoint degraded-mode status and error-code contracts.
-- `claim-under-epic-contracts` — claim API accepts a ready child of an open epic and rejects
-  children with an open blocker or a blocked parent.
 
 Suites that create issues declare `teardown: scripts/close-open-issues.sh`, so every
 suite starts against an empty board. Cross-step state goes through `$AFT_WORK_DIR`.

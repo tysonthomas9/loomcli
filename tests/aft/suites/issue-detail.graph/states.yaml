@@ -263,7 +263,8 @@ states:
       - expect: { count: { selector: "[data-testid=activity-comment]", equals: 1 } }
 
   in-progress-detail:
-    intent: The open panel reflects the human's in-progress status change.
+    intent: The open panel reflects the in-progress status set by the human or by an agent's claim.
+    join: true
     assert:
       - wait:
           fn: >-
@@ -409,6 +410,7 @@ states:
 
   issue-card-ready:
     intent: The auto-opened panel is closed and the created issue remains selectable on the board.
+    join: true
     assert:
       - wait:
           fn: >-
@@ -482,7 +484,6 @@ states:
 
   blocked-on-board:
     intent: A fresh board renders the original issue in Blocked and no longer in Ready.
-    terminal: true
     assert:
       - wait:
           fn: >-
@@ -491,4 +492,122 @@ states:
       - expect:
           count:
             selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            equals: 0
+
+  blocked-child-claim-refused:
+    intent: After the refused claim the board still shows the blocked task in Blocked and not In Progress.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=blocked] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID} (blocked) (backlog)']").length === 1
+        intent: Wait until the board still renders the blocked task in Blocked.
+      - expect:
+          count:
+            selector: "section[data-status=in_progress] article[aria-label^='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            equals: 0
+
+  claim-epic-panel-ready:
+    intent: The newly created epic is loaded in the slide-over panel with its empty Epic Progress section.
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const panel = document.querySelector('[data-testid=issue-detail-panel]');
+              return panel?.getAttribute('data-state') === 'open' &&
+                panel?.getAttribute('data-loading') === 'false' &&
+                document.querySelector('[data-testid=issue-header]')?.textContent.includes('aft issue detail epic ${RUN_ID:-local}-${AFT_CASE_ID}');
+            })()
+        intent: Wait until the epic panel is ready.
+      - expect: { visible: { testid: epic-rollup } }
+
+  claim-child-form-ready:
+    intent: The New Issue form is open again and offers this path's epic as a parent.
+    assert:
+      - use: new-issue-form-ready
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=create-issue-epic] option'))
+              .some((option) => option.textContent === 'aft issue detail epic ${RUN_ID:-local}-${AFT_CASE_ID}')
+        intent: Wait until the Epic field lists this path's epic.
+      - expect: { visible: { testid: create-issue-epic } }
+
+  epic-child-panel-ready:
+    intent: The child task is open in the editable panel and its card sits in Ready inside the epic's swim lane.
+    assert:
+      - use: editable-issue-panel-ready
+        with: { title: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}" }
+      - wait:
+          fn: >-
+            document.querySelectorAll("[data-testid^='swim-lane-lane-epic-']:has(button[data-testid=lane-title-button][aria-label$=': aft issue detail epic ${RUN_ID:-local}-${AFT_CASE_ID}']) section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']").length === 1
+        intent: Wait until the board shows the child as ready inside the epic's lane.
+      - expect:
+          count:
+            selector: "[data-testid^='swim-lane-lane-epic-']:has(button[data-testid=lane-title-button][aria-label$=': aft issue detail epic ${RUN_ID:-local}-${AFT_CASE_ID}']) section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            equals: 1
+
+  epic-blocker-panel-ready:
+    intent: The newly created epic blocker task is loaded in the slide-over panel.
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const panel = document.querySelector('[data-testid=issue-detail-panel]');
+              return panel?.getAttribute('data-state') === 'open' &&
+                panel?.getAttribute('data-loading') === 'false' &&
+                document.querySelector('[data-testid=issue-header]')?.textContent.includes('aft issue detail epic blocker ${RUN_ID:-local}-${AFT_CASE_ID}');
+            })()
+        intent: Wait until the epic blocker panel is ready.
+      - expect: { visible: { testid: issue-header } }
+
+  epic-panel-for-dependency:
+    intent: The epic panel is open again and ready for a dependency edit.
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const panel = document.querySelector('[data-testid=issue-detail-panel]');
+              const header = document.querySelector('[data-testid=issue-header]')?.textContent || '';
+              return panel?.getAttribute('data-state') === 'open' &&
+                panel?.getAttribute('data-loading') === 'false' &&
+                header.includes('aft issue detail epic ${RUN_ID:-local}-${AFT_CASE_ID}') &&
+                !header.includes('blocker');
+            })()
+        intent: Wait until the epic panel is open instead of the blocker panel.
+      - expect: { visible: { testid: add-dependency-button } }
+
+  epic-dependency-recorded:
+    intent: The epic's dependency picker closes without an error and lists the blocker under Blocked By.
+    assert:
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=add-dependency-form]') &&
+              !document.querySelector('[data-testid=dependency-error]') &&
+              (document.querySelector('[data-testid=issue-detail-panel]')?.textContent || '').includes('aft issue detail epic blocker ${RUN_ID:-local}-${AFT_CASE_ID}')
+        intent: Wait until the dependency form closes and the epic lists its blocker.
+      - expect: { visible: { testid: add-dependency-button } }
+
+  child-blocked-by-epic-on-board:
+    intent: A fresh board moves the child of the blocked epic out of Ready and into Blocked.
+    assert:
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=blocked] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID} (backlog)']").length === 1
+        intent: Wait until the fresh board renders the child of the blocked epic in Blocked.
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            equals: 0
+
+  epic-child-claim-refused:
+    intent: After the refused claim the child of the blocked epic stays open in Blocked and not In Progress.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=blocked] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID} (backlog)']").length === 1
+        intent: Wait until the board still renders the child of the blocked epic in Blocked.
+      - expect:
+          count:
+            selector: "section[data-status=in_progress] article[aria-label^='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
             equals: 0

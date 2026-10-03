@@ -28,3 +28,52 @@ transitions:
         with:
           title: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
           description: "Initial issue detail description ${RUN_ID:-local}-${AFT_CASE_ID}."
+
+  create-claim-epic:
+    intent: A human creates this path's epic through the New Issue form and reaches its auto-opened detail panel.
+    actor: human
+    via: ui
+    steps:
+      - use: fill-new-issue-form
+        with:
+          title: "aft issue detail epic ${RUN_ID:-local}-${AFT_CASE_ID}"
+          description: "Epic for claim case ${RUN_ID:-local}-${AFT_CASE_ID}."
+      - select: { testid: create-issue-type, value: epic }
+      - click: { testid: create-issue-submit }
+
+  open-child-form-under-epic:
+    intent: A human closes the epic panel and opens the New Issue form again to add a child task.
+    actor: human
+    via: ui
+    steps:
+      - use: close-detail-panel-with-keyboard
+      - use: open-new-issue-form
+
+  create-epic-child:
+    intent: A human creates this path's task under the open epic by choosing the epic in the New Issue form.
+    actor: human
+    via: ui
+    steps:
+      - use: fill-new-issue-form
+        with:
+          title: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
+          description: "Initial issue detail description ${RUN_ID:-local}-${AFT_CASE_ID}."
+      - select: { testid: create-issue-type, value: task }
+      - select:
+          testid: create-issue-epic
+          value: "aft issue detail epic ${RUN_ID:-local}-${AFT_CASE_ID}"
+      - click: { testid: create-issue-submit }
+
+  create-epic-blocker:
+    intent: A human closes the child panel and creates a separate open task that will block the epic.
+    actor: human
+    via: ui
+    steps:
+      - use: close-detail-panel-with-keyboard
+      - use: open-new-issue-form
+      - use: fill-new-issue-form
+        with:
+          title: "aft issue detail epic blocker ${RUN_ID:-local}-${AFT_CASE_ID}"
+          description: "Blocker for the epic in claim case ${RUN_ID:-local}-${AFT_CASE_ID}."
+      - select: { testid: create-issue-type, value: task }
+      - click: { testid: create-issue-submit }
