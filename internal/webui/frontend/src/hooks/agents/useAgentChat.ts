@@ -5,9 +5,16 @@ import {
   newRequestId,
   respondToAsk,
   sendMessage,
+  updateAgent,
   withdrawMessage,
 } from "@/api/agentsv1";
-import type { Agent, AgentEvent, Ask, RespondBody } from "@/api/agentsv1";
+import type {
+  Agent,
+  AgentEvent,
+  Ask,
+  RespondBody,
+  UpdateAgentBody,
+} from "@/api/agentsv1";
 import { ApiError } from "@/types/common";
 import { REFRESH_KINDS, addDelta, chatItems, settle } from "./agentChatModel";
 import type { ChatItem, Streaming } from "./agentChatModel";
@@ -24,6 +31,8 @@ export interface UseAgentChatReturn {
   /** Stops the running turn: an interrupt Send with no message (§9.2). */
   stop: () => Promise<void>;
   respond: (askId: string, body: RespondBody) => Promise<void>;
+  /** PATCHes the agent (model, effort, options); applies from the next turn. */
+  update: (body: UpdateAgentBody) => Promise<void>;
 }
 
 const message = (err: unknown) =>
@@ -132,6 +141,12 @@ export function useAgentChat(
     [write, workspaceId, agentId],
   );
 
+  const update = useCallback(
+    (body: UpdateAgentBody) =>
+      write(() => updateAgent(workspaceId, agentId, body, newRequestId())),
+    [write, workspaceId, agentId],
+  );
+
   const asks = (agent?.open_asks ?? []).filter((a) => !answered.has(a.id));
-  return { agent, items, asks, error, send, clear, stop, respond };
+  return { agent, items, asks, error, send, clear, stop, respond, update };
 }

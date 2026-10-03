@@ -157,6 +157,21 @@
 
 .composer {
   display: flex;
+  flex-direction: column;
   gap: 6px;
-  align-items: flex-end;
+}
+
+/* T3's composer footer: model and effort pickers, then the actions. */
+.composerFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.composerActions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
 }

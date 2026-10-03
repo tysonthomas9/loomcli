@@ -29,6 +29,9 @@ vi.mock("@/api/agentsv1", () => ({
   sendMessage: api.sendMessage,
   withdrawMessage: api.withdrawMessage,
   respondToAsk: api.respondToAsk,
+  updateAgent: () => Promise.resolve({}),
+  listHarnessModels: (_ws: string, harness: string) =>
+    Promise.resolve({ harness, providers: [] }),
   newRequestId: () => `req-${++api.ids}`,
   AgentEventStream: class {
     events: AgentEvent[] = [];

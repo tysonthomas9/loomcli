@@ -1,0 +1,447 @@
+/*
+ * Ported from T3 Code's Tailwind classes in apps/web/src/components/chat/
+ * (ComposerControl, ProviderModelPicker, ModelPickerContent, ModelListRow,
+ * ModelPickerSidebar, TraitsPicker, CompactComposerControlsMenu,
+ * ProviderInstanceIcon) at commit 2daff8c25. Copyright (c) 2026 T3 Tools
+ * Inc. MIT License; see THIRD_PARTY_NOTICES.md. Changes: CSS modules with
+ * Loom's theme tokens in place of Tailwind and T3's tokens.
+ */
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* ComposerControl: h-7 ghost button, px-2.5, secondary label colour. */
+.control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  min-height: 28px;
+  min-width: 0;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.control:hover:not(:disabled),
+.control[aria-expanded="true"] {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.control:focus-visible,
+.compactButton:focus-visible,
+.railButton:focus-visible,
+.menuItem:focus-visible,
+.favoriteButton:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin: 0 -2px;
+  color: var(--color-text-muted);
+}
+
+.pickerTrigger {
+  max-width: 224px;
+  justify-content: space-between;
+}
+
+.pickerTriggerCompact {
+  max-width: 168px;
+  justify-content: space-between;
+}
+
+.triggerLabel {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.disabledReason {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* Popovers open above the composer, aligned to their trigger's start. */
+.popoverRoot {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.popover,
+.menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: var(--z-dropdown);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.menu {
+  min-width: 180px;
+  max-width: 260px;
+  padding: 4px;
+}
+
+.menuLabel {
+  padding: 6px 8px 4px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+
+.menuDivider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--color-border-light);
+}
+
+.menuItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--color-bg-hover);
+}
+
+.menuItem[aria-checked="true"] {
+  background: var(--color-bg-active);
+  font-weight: 600;
+}
+
+.menuItemLine {
+  display: flex;
+  align-items: center;
+}
+
+.menuItemDescription {
+  max-width: 224px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+}
+
+.compactButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.compactButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.compactButton:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+/* ModelPickerContent: h-86.5 (346px) by w-90 (360px), rail + list. */
+.pickerContent {
+  display: flex;
+  flex-direction: row;
+  width: min(360px, 90vw);
+  height: 346px;
+  max-height: 60vh;
+  overflow: hidden;
+}
+
+.pickerMain {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--color-border-light);
+  background: var(--color-bg-subtle);
+}
+
+.searchRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 8px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.searchRow:focus-within {
+  border-bottom-color: var(--color-focus);
+}
+
+.searchGlyph {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  outline: none;
+}
+
+.modelList {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 4px 6px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.modelRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 2px;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.modelRow[data-highlighted] {
+  background: var(--color-bg-hover);
+}
+
+.modelRow[aria-selected="true"] {
+  background: var(--color-bg-active);
+}
+
+.modelText {
+  flex: 1;
+  min-width: 0;
+}
+
+.modelNameLine {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.modelName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+}
+
+.modelProvider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.favoriteButton {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-right: -4px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  opacity: 0.64;
+  cursor: pointer;
+}
+
+.favoriteButton svg {
+  width: 13px;
+  height: 13px;
+}
+
+.modelRow:hover .favoriteButton,
+.favoriteButton:hover {
+  opacity: 1;
+}
+
+.favoriteButton[data-favorite] {
+  color: #eab308;
+  opacity: 1;
+}
+
+.empty {
+  padding: 24px 8px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-align: center;
+}
+
+/* ModelPickerSidebar: a w-11 icon rail. */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 44px;
+  flex-shrink: 0;
+  padding: 4px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  background: var(--color-bg-card);
+}
+
+.railButton {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.railButton:hover {
+  background: var(--color-bg-hover);
+}
+
+.railButton[data-selected] {
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+/* T3's selected indicator: a bar on the rail's inner edge. */
+.railButton[data-selected]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -4px;
+  width: 3px;
+  height: 20px;
+  border-radius: 999px 0 0 999px;
+  background: var(--color-primary);
+  transform: translateY(-50%);
+}
+
+.railGlyph {
+  width: 18px;
+  height: 18px;
+}
+
+.railDivider {
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+/* ProviderInstanceIcon. */
+.providerIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-primary);
+}
+
+.icon_sm {
+  width: 12px;
+  height: 12px;
+}
+
+.icon_md {
+  width: 16px;
+  height: 16px;
+}
+
+.icon_lg {
+  width: 20px;
+  height: 20px;
+}
+
+.providerGlyph {
+  width: 100%;
+  height: 100%;
+}
+
+.providerInitials {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.icon_sm .providerInitials {
+  font-size: 7px;
+}

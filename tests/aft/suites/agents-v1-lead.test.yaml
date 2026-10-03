@@ -577,3 +577,88 @@ tests:
           assert '"reasoning_effort": "high"' in json.dumps(turn[-1]), turn[-1]
           PY
         intent: "Check that the turn after the PATCH reached the model at effort high"
+
+  - name: UI2 the composer's model and effort pickers show the lead's model, set effort through PATCH, keep it after a reload and the next turn uses it
+    intent: An operator opens a lead's chat, sees its model and effort in the composer bar, finds the model by provider and by search, picks High effort, reloads and still sees High, and the lead's next reply runs at effort high
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-ui2-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-ui2-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Ui2Id
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui2Id")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Open the lead's chat"
+      - wait:
+          fn: >-
+            (() => { const m = document.querySelector('[data-chat-provider-model-picker]');
+              const t = document.querySelector('[data-chat-traits-picker]');
+              return !!m && !m.disabled && (m.textContent || '').includes('Emulator') &&
+                !!t && (t.textContent || '').includes('Medium'); })()
+        intent: "Wait until the composer bar shows the catalog's default model and its default effort"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+      - wait:
+          fn: >-
+            (() => { const d = document.querySelector('[data-model-picker-content]');
+              const rail = d?.querySelector('[data-model-picker-provider="provider:emu"]');
+              const opt = d?.querySelector('[role=option][aria-selected=true]');
+              return !!rail && rail.getAttribute('aria-label') === 'Emulator' && (opt?.textContent || '').includes('Emulator'); })()
+        intent: "Wait until the picker shows the Emulator provider in its rail with the current model selected"
+      - fill: { label: "Search models", value: "emul" }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-model-picker-content] [role=option]').length === 1
+        intent: "Wait until searching finds the one Emulator model"
+      - press: Escape
+      - click: { selector: "[data-chat-traits-picker]" }
+      - click: { role: menuitemradio, name: High, exact: true }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-chat-traits-picker]')?.textContent || '').includes('High')
+        intent: "Wait until the effort control shows High"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui2Id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id" > "$AFT_WORK_DIR/agv1-ui2-agent.json"
+          python3 - "$AFT_WORK_DIR/agv1-ui2-agent.json" <<'PY'
+          import json, sys
+          spec = json.loads(json.load(open(sys.argv[1]))["spec_json"])
+          assert {"ID": "effort", "Value": "high"} in spec.get("Options", []), spec
+          PY
+        intent: "Check that the pick was saved on the agent through PATCH"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('[data-chat-traits-picker]')?.textContent || '').includes('High') &&
+            (document.querySelector('[data-chat-provider-model-picker]')?.textContent || '').includes('Emulator')
+        intent: "Wait until a reload still shows the model and High effort"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-UI2-REPLY"}]}' >/dev/null
+        intent: "Script the next reply"
+      - fill: { label: Message, value: "ui2 effort turn" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI2-REPLY')
+        budget: 90000
+        intent: "Wait until the reply streams into the transcript"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-ui2-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-ui2-requests.json" <<'PY'
+          import json, sys
+          reqs = json.load(open(sys.argv[1]))["requests"]
+          turn = [r for r in reqs if "ui2 effort turn" in json.dumps(r)]
+          assert turn, f"the message never reached the model: {reqs}"
+          assert '"reasoning_effort": "high"' in json.dumps(turn[-1]), turn[-1]
+          PY
+        intent: "Check that the turn after the pick reached the model at effort high"

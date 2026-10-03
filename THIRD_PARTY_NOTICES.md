@@ -14,6 +14,18 @@ Ported files (internal/webui/frontend/src/components/AgentChat/):
 - `timelineRows.ts`: from `apps/web/src/components/chat/MessagesTimeline.logic.ts`.
 - `WorkRows.tsx`, `Timeline.module.css`: from `apps/web/src/components/chat/MessagesTimeline.tsx` and `apps/web/src/index.css`.
 
+Ported files for the composer model, provider and effort pickers (UI2; internal/webui/frontend/src/components/AgentChat/):
+
+- `ProviderModelPicker.tsx`: from `apps/web/src/components/chat/ProviderModelPicker.tsx`.
+- `ModelPickerContent.tsx`: from `apps/web/src/components/chat/ModelPickerContent.tsx` and `apps/web/src/components/chat/ModelListRow.tsx`.
+- `ModelPickerSidebar.tsx`: from `apps/web/src/components/chat/ModelPickerSidebar.tsx`.
+- `TraitsPicker.tsx`: from `apps/web/src/components/chat/TraitsPicker.tsx`.
+- `ComposerControl.tsx`: from `apps/web/src/components/chat/ComposerControl.tsx`.
+- `CompactComposerControlsMenu.tsx`: from `apps/web/src/components/chat/CompactComposerControlsMenu.tsx` (without its plan/build mode and access groups).
+- `ProviderIcon.tsx`: from `apps/web/src/components/chat/ProviderInstanceIcon.tsx`, `apps/web/src/components/chat/providerIconUtils.ts` and the OpenAI, ClaudeAI and OpenCode glyphs in `apps/web/src/components/Icons.tsx`.
+- `modelPickerSearch.ts`: from `apps/web/src/components/chat/modelPickerSearch.ts` and `packages/shared/src/searchRanking.ts`.
+- `ModelPicker.module.css`: from the Tailwind classes of the files above.
+
 Ported files (internal/loomharness/):
 
 - `codex/catalog.go`: from `apps/server/src/provider/Layers/CodexProvider.ts`.

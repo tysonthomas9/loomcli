@@ -1,10 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { ownSender, useAgentChat, useRosterAgent } from "@/hooks";
 import type { ChatItem } from "@/hooks";
 import { AskCard } from "./AskCard";
 import { ChatMarkdown } from "./ChatMarkdown";
+import {
+  COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
+  ComposerModelControls,
+} from "./ComposerModelControls";
 import { LONG_TEXT_LIMIT, LongText } from "./LongText";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { deriveTimelineRows, type TimelineRow } from "./timelineRows";
@@ -29,8 +33,9 @@ export interface AgentChatProps {
  * label.
  */
 export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
-  const { agent, items, asks, error, send, clear, stop, respond } =
+  const { agent, items, asks, error, send, clear, stop, respond, update } =
     useAgentChat(workspaceId, agentId);
+  const compact = useNarrow(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX);
   const own = ownSender(useAuth().user?.id);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
@@ -145,6 +150,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
       )}
 
       <form
+        ref={compact.ref}
         className={styles.composer}
         onSubmit={(e) => {
           e.preventDefault();
@@ -168,22 +174,48 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
             }
           }}
         />
-        {editing && (
-          <button type="button" onClick={stopEditing}>
-            Cancel
-          </button>
-        )}
-        {agent?.running_turn_id && (
-          <button type="button" onClick={() => void stop().catch(() => {})}>
-            Stop
-          </button>
-        )}
-        <button type="submit" disabled={sending || !draft.trim()}>
-          {editing ? "Save" : "Send"}
-        </button>
+        <div className={styles.composerFooter}>
+          <ComposerModelControls
+            workspaceId={workspaceId}
+            agent={agent}
+            compact={compact.narrow}
+            update={update}
+          />
+          <div className={styles.composerActions}>
+            {editing && (
+              <button type="button" onClick={stopEditing}>
+                Cancel
+              </button>
+            )}
+            {agent?.running_turn_id && (
+              <button type="button" onClick={() => void stop().catch(() => {})}>
+                Stop
+              </button>
+            )}
+            <button type="submit" disabled={sending || !draft.trim()}>
+              {editing ? "Save" : "Send"}
+            </button>
+          </div>
+        </div>
       </form>
     </section>
   );
+}
+
+/** Whether the observed element is narrower than px (false until measured). */
+function useNarrow(px: number) {
+  const ref = useRef<HTMLFormElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => {
+      if (e) setNarrow(e.contentRect.width < px);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [px]);
+  return { ref, narrow };
 }
 
 /** A child's chat link, with its live state from the sidebar's roster. */
