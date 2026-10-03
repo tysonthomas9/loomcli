@@ -82,18 +82,9 @@ func (s *Service) replaceLocked(ctx context.Context, request RestackRequest, old
 	if err := s.discardOrphanReplace(ctx, request); err != nil {
 		return err
 	}
-	onto, err := s.replaceOnto(ctx, request.Workspace, target, revision)
+	trial, err := s.replaceTrial(ctx, request.Workspace, target, revision, result)
 	if err != nil {
 		return err
-	}
-	trial, err := replay.New(s.repo).TrialMerge(ctx, revision.BaseSHA, revision.HeadSHA, onto)
-	if err != nil {
-		return err
-	}
-	if trial.ConflictCommit != "" {
-		result.Paths = trial.ConflictingPaths
-		return loomgit.NewError(loomgit.Conflict, strings.Join(trial.ConflictingPaths, ", ")+
-			"; revision "+fmt.Sprint(revision.Number)+" of "+target.Change+" conflicts with its layer", nil)
 	}
 	pullRequest := PullRequest{Workspace: request.Workspace, Lead: request.Lead, Repo: request.Repo, RequestID: request.RequestID}
 	replaced := pulledLayer{source: revision, trial: trial, base: target.OldTip, original: target, operation: "apply", replaced: true,
@@ -107,6 +98,26 @@ func (s *Service) replaceLocked(ctx context.Context, request RestackRequest, old
 	setRestackOperations(above, "", nil)
 	rebuilt := append([]pulledLayer{replaced}, above...)
 	return s.installRestack(ctx, request, pullRequest, old, base, rebuilt, result)
+}
+
+// replaceTrial trial-merges revision onto where its layer is rebuilt; a
+// conflict is returned with its paths and installs nothing.
+func (s *Service) replaceTrial(ctx context.Context, workspace string, target loomgit.AppliedLayer,
+	revision loomgit.Revision, result *PullResult) (replay.Result, error) {
+	onto, err := s.replaceOnto(ctx, workspace, target, revision)
+	if err != nil {
+		return replay.Result{}, err
+	}
+	trial, err := replay.New(s.repo).TrialMerge(ctx, revision.BaseSHA, revision.HeadSHA, onto)
+	if err != nil {
+		return replay.Result{}, err
+	}
+	if trial.ConflictCommit != "" {
+		result.Paths = trial.ConflictingPaths
+		return replay.Result{}, loomgit.NewError(loomgit.Conflict, strings.Join(trial.ConflictingPaths, ", ")+
+			"; revision "+fmt.Sprint(revision.Number)+" of "+target.Change+" conflicts with its layer", nil)
+	}
+	return trial, nil
 }
 
 // replaceOnto picks where revision's commits are replayed: onto the layer's
