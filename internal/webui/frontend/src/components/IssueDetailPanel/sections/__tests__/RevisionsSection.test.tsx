@@ -268,6 +268,28 @@ describe("RevisionsSection", () => {
     expect(submitRevisionVerdict).not.toHaveBeenCalled();
   });
 
+  it("closes only the empty repo of a multi-repo task", async () => {
+    getTaskRevisions.mockResolvedValue([
+      { ...revision, change_id: "API", repo: "api", no_changes: true },
+      { ...revision, change_id: "APP", repo: "app", head_sha: "c".repeat(40) },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" />);
+    expect(await screen.findByText("No changes")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting review")).toBeInTheDocument();
+    expect(screen.getAllByTestId("revision-no-changes")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Approve" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() =>
+      expect(submitRevisionVerdict).toHaveBeenCalledWith(
+        "W",
+        expect.objectContaining({ change_id: "APP" }),
+        "approve",
+        "",
+        undefined,
+      ),
+    );
+  });
+
   it("reviews a later attempt with changes normally after an empty one", async () => {
     getTaskRevisions.mockResolvedValue([
       { ...revision, number: 3, head_sha: "b".repeat(40) },
