@@ -258,6 +258,9 @@ func TestReconcileInterruptedTurnsAndHandedMessages(t *testing.T) {
 		if deref(bg.AttentionReason) != AttentionDeliveryUnknown || slotState(t, s, bg.AgentID, "u1") != loomstore.SlotHanded || turnsRun(e, refs[1]) != 0 {
 			t.Fatalf("%s: B Attention %q slot %s turns %d", when, deref(bg.AttentionReason), slotState(t, s, bg.AgentID, "u1"), turnsRun(e, refs[1]))
 		}
+		if n := len(kinds(rows(t, s, cg.AgentID, 0), EventTurnCompleted)); n != 1 {
+			t.Fatalf("%s: C has %d turn ends; want 1, its rerun's", when, n)
+		}
 		if turnsRun(e, refs[2]) != 1 || cg.AttentionReason != nil {
 			t.Fatalf("%s: C turns %d Attention %q", when, turnsRun(e, refs[2]), deref(cg.AttentionReason))
 		}

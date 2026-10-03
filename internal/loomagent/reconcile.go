@@ -181,12 +181,15 @@ func endedNatively(ctx context.Context, sess loomharness.Session, running string
 // whose history has no end: it was cut off while Loom was down. Its handed
 // message is checked first; one that never landed goes back in line, and
 // one whose fate is unknown shows Attention delivery_unknown and the turn
-// stays until a user acts.
+// stays until a user acts. The end of a turn that ran is saved as a native
+// end would be (same EventID), so the chat shows the turn's note and keeps
+// it on a reload.
 func (s *Service) endLostTurn(ctx context.Context, a loomstore.Agent, sess loomharness.Session) error {
 	slots, err := s.store.Slots(ctx, a.AgentID)
 	if err != nil {
 		return err
 	}
+	requeued := false
 	for _, sl := range slots {
 		if sl.State != loomstore.SlotHanded {
 			continue
@@ -203,7 +206,15 @@ func (s *Service) endLostTurn(ctx context.Context, a loomstore.Agent, sess loomh
 			if err := s.store.Requeue(ctx, a.AgentID, sl.Sender, sl.RequestID); err != nil {
 				return err
 			}
+			requeued = true
 		}
 	}
-	return s.turnCompleted(ctx, a, loomharness.Event{TurnID: *a.RunningTurnID, StopReason: "cancelled"})
+	end := loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: *a.RunningTurnID, StopReason: "cancelled",
+		Session: loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}}
+	if !requeued { // an input that never landed ran no turn: it runs again, with its own end
+		if _, err := s.events.Append(ctx, nativeRow(a.AgentID, EventTurnCompleted, end)); err != nil {
+			return err
+		}
+	}
+	return s.turnCompleted(ctx, a, end)
 }

@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -43,8 +44,9 @@ func (s suspendedSession) Interrupt(ctx context.Context) (bool, error) {
 
 // TestSendInterruptEndsASuspendedTurn (OC1): Stop on a running turn the
 // harness no longer runs, and whose history has no end, ends that turn as
-// cancelled, with its open ask, so the agent goes idle instead of staying
-// active with nothing to stop.
+// cancelled, with its open ask, and saves that end, so the agent goes idle
+// and the chat shows the turn's note, instead of staying active with nothing
+// to stop.
 func TestSendInterruptEndsASuspendedTurn(t *testing.T) {
 	e := newCreateEnv(t)
 	h := &suspender{Harness: fake.New()}
@@ -56,6 +58,7 @@ func TestSendInterruptEndsASuspendedTurn(t *testing.T) {
 
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
 	eventually(t, "t1's ask open", func() bool { return s.get(t, a.AgentID).State == StateWaiting })
+	turn := deref(s.get(t, a.AgentID).RunningTurnID)
 	h.on.Store(true)
 	stop := mustSendMsg(t, s, interruptReq(a.AgentID, "stop1", "", user))
 	if stop.Interrupted == nil || !*stop.Interrupted {
@@ -65,5 +68,11 @@ func TestSendInterruptEndsASuspendedTurn(t *testing.T) {
 	if got.State != StateIdle || got.RunningTurnID != nil || len(s.openAsks(a.AgentID)) != 0 {
 		t.Fatalf("after Stop: state %s, running %v, %d open asks; want idle, no turn, no asks",
 			got.State, deref(got.RunningTurnID), len(s.openAsks(a.AgentID)))
+	}
+	// OC2: the end is saved, so the chat shows the turn's note and keeps it on
+	// a reload.
+	ends := kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)
+	if len(ends) != 1 || ends[0].TurnID != turn || !strings.Contains(string(ends[0].Payload), `"stopReason":"cancelled"`) {
+		t.Fatalf("saved turn ends = %+v; want one for %s, cancelled", ends, turn)
 	}
 }
