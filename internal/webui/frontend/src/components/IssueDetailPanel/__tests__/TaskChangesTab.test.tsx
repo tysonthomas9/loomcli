@@ -311,4 +311,83 @@ describe("TaskChangesTab", () => {
       );
     });
   });
+
+  describe("verdicts only for the revision whose diff is shown", () => {
+    const first = {
+      ...base,
+      number: 1,
+      head_sha: "1".repeat(40),
+      superseded: false,
+    };
+    const second = {
+      ...base,
+      number: 2,
+      head_sha: "2".repeat(40),
+      superseded: false,
+    };
+    const diffOf = (revision: number) => ({
+      ...taskDiff,
+      revision,
+      files: [taskDiff.files[0]],
+    });
+
+    it("renders the verdicts from the tab's own revisions snapshot, not a newer fetch", async () => {
+      // A second revisions fetch would already see revision 2, whose diff is
+      // not on screen.
+      getTaskRevisions
+        .mockResolvedValueOnce([first])
+        .mockResolvedValue([second, first]);
+      getTaskDiff.mockResolvedValue([diffOf(1)]);
+      render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
+      expect(
+        await screen.findByText(
+          "Revision 1 against the layer below it in the stack",
+        ),
+      ).toBeVisible();
+      const approve = screen.getByRole("button", { name: "Approve" });
+      expect(approve).toBeEnabled();
+      expect(screen.queryByText("Revision 2")).toBeNull();
+      expect(getTaskRevisions).toHaveBeenCalledTimes(1);
+      fireEvent.click(approve);
+      await vi.waitFor(() =>
+        expect(submitRevisionVerdict).toHaveBeenCalledWith(
+          "W",
+          first,
+          "approve",
+          "",
+          "lead",
+        ),
+      );
+    });
+
+    it("keeps a newer revision's verdicts disabled until its own diff has loaded", async () => {
+      getTaskRevisions
+        .mockResolvedValueOnce([first])
+        .mockResolvedValue([second, first]);
+      let releaseSecond: (value: unknown) => void = () => {};
+      getTaskDiff.mockResolvedValueOnce([diffOf(1)]).mockReturnValueOnce(
+        new Promise((resolve) => {
+          releaseSecond = resolve;
+        }),
+      );
+      render(<TaskChangesTab workspaceId="W" taskId="T" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+      // The verdict reloads the snapshot: revision 2 appears while the diff on
+      // screen is still revision 1's.
+      expect(await screen.findByText("Revision 2")).toBeVisible();
+      expect(
+        screen.getByText("Revision 1 against the layer below it in the stack"),
+      ).toBeVisible();
+      expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+      releaseSecond([diffOf(2)]);
+      expect(
+        await screen.findByText(
+          "Revision 2 against the layer below it in the stack",
+        ),
+      ).toBeVisible();
+      await vi.waitFor(() =>
+        expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled(),
+      );
+    });
+  });
 });

@@ -14,7 +14,8 @@ export function RevisionsSection({
   lead,
   onChanged,
   changeId,
-  locked = false,
+  revisions: snapshot,
+  verdictsFor,
 }: {
   workspaceId: string;
   taskId: string;
@@ -23,9 +24,20 @@ export function RevisionsSection({
   onChanged?: (() => void) | undefined;
   /** Show only this change (one repo of a cross-repo task). */
   changeId?: string | undefined;
-  /** Disable verdicts, e.g. until the diff they decide on has loaded. */
-  locked?: boolean | undefined;
+  /**
+   * Render this revisions list instead of fetching one. The caller reloads it
+   * (via onChanged) after a verdict, so the buttons and the diff the caller
+   * shows always come from the same snapshot.
+   */
+  revisions?: ReviewRevision[] | undefined;
+  /**
+   * The revision number whose diff is on screen: verdicts are enabled for that
+   * exact revision only, and for none while it is null (no diff shown yet).
+   * Undefined: no diff gating.
+   */
+  verdictsFor?: number | null | undefined;
 }): JSX.Element {
+  const controlled = snapshot !== undefined;
   const [revisions, setRevisions] = useState<ReviewRevision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -35,6 +47,11 @@ export function RevisionsSection({
   const [follow, setFollow] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    if (snapshot) {
+      setRevisions(snapshot);
+      setLoading(false);
+      return;
+    }
     let active = true;
     setLoading(true);
     getTaskRevisions(workspaceId, taskId, lead)
@@ -56,7 +73,7 @@ export function RevisionsSection({
     return () => {
       active = false;
     };
-  }, [workspaceId, taskId, lead]);
+  }, [workspaceId, taskId, lead, snapshot]);
 
   async function decide(
     revision: ReviewRevision,
@@ -75,7 +92,8 @@ export function RevisionsSection({
         lead,
       );
       if (status) setFollow((prev) => ({ ...prev, [key]: status }));
-      setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      if (!controlled)
+        setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
       onChanged?.();
       setOverride("");
       setReason("");
@@ -95,7 +113,8 @@ export function RevisionsSection({
       await applyRevision(workspaceId, revision, lead);
       setFollow((prev) => ({ ...prev, [key]: "" }));
       // Applied state comes from the server's applied log, never browser state.
-      setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      if (!controlled)
+        setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
       onChanged?.();
     } catch (err) {
       // 404: the lead agent does not exist, so Apply cannot open its area.
@@ -125,7 +144,10 @@ export function RevisionsSection({
       {!loading && revisions.length === 0 && <p>No revisions yet.</p>}
       {current.map((revision) => {
         const key = `${revision.change_id}:${revision.number}`;
-        const disabled = Boolean(busy) || revision.incomplete || locked;
+        const disabled =
+          Boolean(busy) ||
+          revision.incomplete ||
+          (verdictsFor !== undefined && revision.number !== verdictsFor);
         // The list reports the verdict for this exact revision head, so a new
         // derived revision has none and offers the buttons again.
         const decided = Boolean(revision.verdict);
