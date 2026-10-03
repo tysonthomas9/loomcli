@@ -252,3 +252,47 @@ func TestNoChangesRevisionRefusesVerdictsAndDelivery(t *testing.T) {
 		return err
 	}(), loomgit.RevisionSuperseded)
 }
+
+// D29: the task view shows only each change's newest revision. When Apply
+// rebuilds an approved revision as a derived one, the derived revision reports
+// its source's Approve and create PR outcome, so the reason stays visible.
+func TestDerivedRevisionReportsItsSourcesPublishOutcome(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	if _, err := s.DriverChange(ctx, "W", "T", "repo", "C"); err != nil {
+		t.Fatal(err)
+	}
+	src := revision(t, s, "1source", "source")
+	v, err := s.RecordVerdict(ctx, loomgit.Verdict{Workspace: "W", Change: "C", Number: src.Number, HeadSHA: src.HeadSHA,
+		Kind: "approve", ActorKind: "human", ActorID: "reviewer", TargetLead: "L", Publish: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const reason = "not published: declared stack S is active; publish it with loom stack"
+	if err := s.SetApprovalPublication(ctx, journal.ApprovalPublication{Workspace: "W", Lead: "L", Change: "C",
+		Revision: src.Number, VerdictID: int(v.ID), Status: "not_published", Reason: reason}); err != nil {
+		t.Fatal(err)
+	}
+	derived, err := s.ReserveRevision(ctx, loomgit.Revision{Workspace: "W", Change: "C", RequestID: "2derived", Kind: "derived",
+		Operation: "rebase", Outcome: "completed", BaseSHA: strings.Repeat("d", 40), TreeHash: strings.Repeat("e", 40),
+		SourceHeadSHA: src.HeadSHA, DerivedFromChange: "C", DerivedFromNumber: src.Number})
+	if err != nil {
+		t.Fatal(err)
+	}
+	derived.HeadSHA = strings.Repeat("2", 40)
+	if err := s.FinishRevision(ctx, derived); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Local{store: s}).TaskRevisionsForLead(ctx, "W", "T", "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range got {
+		if r.PublishStatus != "not_published" || r.PublishReason != reason {
+			t.Fatalf("revision %d publish = %q %q, want the source's outcome; all: %+v", r.Number, r.PublishStatus, r.PublishReason, got)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("revisions = %+v", got)
+	}
+}

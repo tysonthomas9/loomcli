@@ -118,7 +118,7 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 				return nil, err
 			}
 		}
-		if err := l.addPublishState(ctx, workspace, &i); err != nil {
+		if err := l.addPublishState(ctx, workspace, &i, statusSource(r)); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -159,7 +159,18 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, journal.ErrNotFound) || errors.Is(err, os.ErrNotExist)
 }
 
-func (l *Local) addPublishState(ctx context.Context, workspace string, i *TaskRevision) error {
+// statusSource names the revision whose approval state a derived revision
+// reports. Apply's rebuild of an approved revision has no approval or publish
+// intent of its own, and the task view shows only each change's newest
+// revision, so it shows its source's outcome. Zero means none.
+func statusSource(r loomgit.Revision) int {
+	if r.Kind == "derived" && r.DerivedFromChange == r.Change && r.DerivedFromNumber > 0 {
+		return r.DerivedFromNumber
+	}
+	return 0
+}
+
+func (l *Local) addPublishState(ctx context.Context, workspace string, i *TaskRevision, source int) error {
 	publication, found, err := l.store.Publication(ctx, workspace, i.ChangeID)
 	if err != nil {
 		return err
@@ -168,6 +179,9 @@ func (l *Local) addPublishState(ctx context.Context, workspace string, i *TaskRe
 		i.PRURL, i.PRNumber = publication.PRURL, publication.PRNumber
 	}
 	intent, found, err := l.store.LatestApprovalPublication(ctx, workspace, i.ChangeID, i.Number)
+	if err == nil && !found && source > 0 {
+		intent, found, err = l.store.LatestApprovalPublication(ctx, workspace, i.ChangeID, source)
+	}
 	if err != nil || !found {
 		return err
 	}
