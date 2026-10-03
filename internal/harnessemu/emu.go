@@ -241,10 +241,10 @@ var modelClient = &http.Client{Timeout: 30 * time.Second}
 // call holds the turn until it is interrupted: the emulator runs no other
 // tools. It runs without the lock, after the prompt is answered, as in
 // OpenCode, so a tool may call back into this service (a child's session).
-func (s *Server) ask(msgs []map[string]any, servers map[string]map[string]any) Turn {
+func (s *Server) ask(msgs []map[string]any, servers map[string]map[string]any, effort string) Turn {
 	var tools []Tool
 	for {
-		t, calls := s.complete(msgs)
+		t, calls := s.complete(msgs, effort)
 		t.Tools = tools
 		if t.Fail != "" || len(calls) == 0 {
 			return t
@@ -274,9 +274,15 @@ type toolCall struct {
 	} `json:"function"`
 }
 
-// complete runs one chat completion: its text and its tool calls.
-func (s *Server) complete(msgs []map[string]any) (Turn, []toolCall) {
-	b, _ := json.Marshal(map[string]any{"model": "m", "stream": true, "messages": msgs})
+// complete runs one chat completion: its text and its tool calls. effort,
+// the session model's variant, goes as reasoning_effort, as OpenCode sends an
+// openai-compatible model's variant.
+func (s *Server) complete(msgs []map[string]any, effort string) (Turn, []toolCall) {
+	req := map[string]any{"model": "m", "stream": true, "messages": msgs}
+	if effort != "" {
+		req["reasoning_effort"] = effort
+	}
+	b, _ := json.Marshal(req)
 	resp, err := modelClient.Post(s.Model+"/chat/completions", "application/json", bytes.NewReader(b))
 	if err != nil {
 		return Turn{Fail: err.Error()}, nil
@@ -401,8 +407,10 @@ func (s *Server) turn(sid string, r *run) (Turn, bool) {
 	loc, _ := ss.Info["location"].(map[string]any)
 	dir, _ := loc["directory"].(string)
 	servers := maps.Clone(s.mcp[dir])
+	model, _ := ss.Info["model"].(map[string]any)
+	effort, _ := model["variant"].(string)
 	s.mu.Unlock()
-	t := s.ask(msgs, servers)
+	t := s.ask(msgs, servers, effort)
 	s.mu.Lock()
 	select {
 	case <-s.quit:
@@ -563,8 +571,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, _ *http.Request) {
 		reply(w, 200, map[string]any{"pid": os.Getpid(), "version": Version})
 	})
+	// One model with the low, medium and high variants OpenCode gives an
+	// openai-compatible model, so the Agent API catalog has an effort option.
+	model := map[string]any{"id": "emu", "providerID": "emu", "name": "Emulator",
+		"capabilities": map[string]any{"input": []string{"text"}}, "limit": map[string]int{"context": 200000},
+		"variants": []map[string]string{{"id": "low"}, {"id": "medium"}, {"id": "high"}}}
 	mux.HandleFunc("GET /api/model", func(w http.ResponseWriter, _ *http.Request) {
-		reply(w, 200, map[string]any{"data": []map[string]string{{"id": "emu", "providerID": "emu", "name": "Emulator"}}})
+		reply(w, 200, map[string]any{"data": []any{model}})
+	})
+	mux.HandleFunc("GET /api/model/default", func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, map[string]any{"data": model})
+	})
+	mux.HandleFunc("GET /api/provider", func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, map[string]any{"data": []map[string]string{{"id": "emu", "name": "Emulator"}}})
 	})
 	mux.HandleFunc("GET /api/agent", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"data": agents(r.URL.Query().Get("location[directory]"))})

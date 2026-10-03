@@ -99,3 +99,59 @@ func TestEmulatorCodeModeRunsBridgeTool(t *testing.T) {
 		t.Fatalf("model requests = %v", bodies)
 	}
 }
+
+// The OpenCode adapter reads the emulator's model catalog (its model's
+// variants are the effort option), and a variant set with SetModel goes to
+// the fake model as reasoning_effort from the next turn only.
+func TestEmulatorModelCatalogAndVariant(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var bodies []string
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer model.Close()
+	s, err := harnessemu.New(filepath.Join(t.TempDir(), "state.json"), "", "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Model = model.URL
+	srv := httptest.NewServer(s.Handler())
+	defer func() { s.Close(); srv.Close() }()
+	a := &opencode.Adapter{Client: opencode.NewClient(srv.URL, "pw")}
+	ms, err := a.Models(ctx)
+	if err != nil || len(ms) != 1 || ms[0].ID != "emu/emu" || !ms[0].Default || ms[0].ProviderName != "Emulator" ||
+		len(ms[0].Options) != 1 || len(ms[0].Options[0].Choices) != 3 {
+		t.Fatalf("Models = %+v, %v", ms, err)
+	}
+	c := a.Client
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "lead", Dir: t.TempDir(), Metadata: map[string]string{"agent_id": "lead"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := func(key string) {
+		if err := c.Session(ref).Prompt(ctx, loomharness.Input{Key: opencode.PromptID("lead", key), Text: key}); err != nil {
+			t.Fatal(err)
+		}
+		until(t, f, func(e loomharness.Event) bool { return completed(e) && e.Session.NativeID == ref.NativeID })
+	}
+	turn("r1")
+	if err := c.Session(ref).SetModel(ctx, "emu/emu", []loomharness.Option{{ID: loomharness.OptionEffort, Value: "high"}}); err != nil {
+		t.Fatal(err)
+	}
+	turn("r2")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 || strings.Contains(bodies[0], "reasoning_effort") || !strings.Contains(bodies[1], `"reasoning_effort":"high"`) {
+		t.Fatalf("model requests = %v", bodies)
+	}
+}

@@ -504,3 +504,76 @@ tests:
               return (t?.querySelector('[data-testid=tool-group]')?.textContent || '').includes('Ran 1 command and read 1 file') &&
                 !!t.querySelector('table') && !!t.querySelector('[data-testid=chat-codeblock][data-language=go]'); })()
         intent: "Wait until a reload replays the summary row, the table and the code block from saved events"
+
+  - name: UI1 the model catalog lists the lead's models with effort, and PATCH effort is checked and used by the next turn
+    intent: An operator (or the UI's picker) reads OpenCode's model catalog, sets the lead's reasoning effort, sees a bad value refused with the allowed ones, and the lead's next reply runs at that effort
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-effort-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-effort-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1EffortId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/harnesses/opencode/models" > "$AFT_WORK_DIR/agv1-models.json"
+          python3 - "$AFT_WORK_DIR/agv1-models.json" <<'PY'
+          import json, sys
+          cat = json.load(open(sys.argv[1]))
+          assert cat["harness"] == "opencode" and cat["providers"], cat
+          models = [m for p in cat["providers"] for m in p["models"]]
+          default = [m for m in models if m["is_default"]]
+          assert len(default) == 1, f"want one default model: {models}"
+          effort = [d for d in default[0]["option_descriptors"] if d["id"] == "effort"]
+          assert effort and effort[0]["type"] == "select", default[0]
+          ids = [o["id"] for o in effort[0]["options"]]
+          assert "high" in ids, ids
+          assert default[0]["context_limit"] > 0 and "text" in default[0]["input"], default[0]
+          PY
+        intent: "Check that the catalog lists a default model whose effort option offers high"
+      - api:
+          method: PATCH
+          path: "/api/workspaces/E2E-AGV1-LEAD/v1/agents/${var:agv1EffortId}"
+          headers: { Idempotency-Key: "agv1-effort-bad-${RUN_ID:-local}" }
+          body: { effort: ultra-max }
+          status: 400
+          assert:
+            - path: code
+              equals: preset_invalid
+        intent: "Check that an effort the model does not offer is refused as preset_invalid"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1EffortId")"
+          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-effort-high-${RUN_ID:-local}" -d '{"effort":"high"}' > "$AFT_WORK_DIR/agv1-effort.json"
+          grep -q '\\"Options\\":\[{\\"ID\\":\\"effort\\",\\"Value\\":\\"high\\"}\]' "$AFT_WORK_DIR/agv1-effort.json"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-EFFORT-REPLY"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Set the lead's effort to high, script the next reply and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat labels the lead's harness as opencode"
+      - fill: { label: Message, value: "think hard" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-EFFORT-REPLY')
+        budget: 90000
+        intent: "Wait until the reply streams into the transcript"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-effort-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-effort-requests.json" <<'PY'
+          import json, sys
+          reqs = json.load(open(sys.argv[1]))["requests"]
+          turn = [r for r in reqs if "think hard" in json.dumps(r)]
+          assert turn, f"the message never reached the model: {reqs}"
+          assert '"reasoning_effort": "high"' in json.dumps(turn[-1]), turn[-1]
+          PY
+        intent: "Check that the turn after the PATCH reached the model at effort high"
