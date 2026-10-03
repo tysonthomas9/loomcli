@@ -242,6 +242,18 @@ func (s *SQLite) ApprovalApplied(ctx context.Context, requestID string) (bool, e
 	return phase == "done", err
 }
 
+// AppliedRequest returns the layer recorded for requestID, if any.
+func (s *SQLite) AppliedRequest(ctx context.Context, requestID string) (loomgit.AppliedLayer, bool, error) {
+	layer := loomgit.AppliedLayer{RequestID: requestID}
+	err := s.db.QueryRowContext(ctx, `SELECT workspace,lead,change_id,revision,old_tip,new_tip,phase
+		FROM applied_layers WHERE request_id=?`, requestID).
+		Scan(&layer.Workspace, &layer.Lead, &layer.Change, &layer.Revision, &layer.OldTip, &layer.NewTip, &layer.Phase)
+	if errors.Is(err, sql.ErrNoRows) {
+		return loomgit.AppliedLayer{}, false, nil
+	}
+	return layer, err == nil, err
+}
+
 func (s *SQLite) PredecessorApplied(ctx context.Context, workspace, lead, change string) (bool, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM applied_layers WHERE workspace=? AND lead=?

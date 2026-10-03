@@ -30,6 +30,8 @@ type Store interface {
 	AppliedLog(context.Context, string, string) ([]loomgit.AppliedLayer, error)
 	WorkingAreas(context.Context, string, string) ([]journal.WorkingArea, error)
 	OpenApplied(context.Context, string, string) ([]loomgit.AppliedLayer, error)
+	AppliedRequest(context.Context, string) (loomgit.AppliedLayer, bool, error)
+	PredecessorApplied(context.Context, string, string, string) (bool, error)
 }
 
 type Request struct {
@@ -186,6 +188,9 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 	if err != nil || actual != old {
 		return Result{}, errors.Join(errHeadMoved, err)
 	}
+	if done, settled, err := s.settledRequest(ctx, in); err != nil || settled {
+		return done, err
+	}
 	paths, err := s.pendingPaths(ctx, old, trial.HeadSHA)
 	if err != nil {
 		return Result{}, err
@@ -197,6 +202,13 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 	if old == source.HeadSHA {
 		// The lead already holds this exact revision: it is the layer, not an empty derived one.
 		layerBase, trial = source.BaseSHA, replay.Result{HeadSHA: old}
+	}
+	if layerBase != source.BaseSHA && trial.HeadSHA == old {
+		// Nothing left to add: if this change is already applied here, the lead holds it.
+		applied, err := s.store.PredecessorApplied(ctx, in.Workspace, in.Lead, in.Change)
+		if err != nil || applied {
+			return Result{HeadSHA: old}, err
+		}
 	}
 	result := Result{HeadSHA: trial.HeadSHA, DroppedCommits: trial.DroppedCommits}
 	if layerBase != source.BaseSHA {
@@ -219,6 +231,28 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 		_, _, err = review.CarryForward(ctx, s.store, s.runner, source, result.Derived, trial)
 	}
 	return result, err
+}
+
+// settledRequest checks, under the repository lock, whether another pass
+// already owns this request. A racing follow pass that read "not applied"
+// before the winner finished must not derive a revision from the new tip.
+func (s *Service) settledRequest(ctx context.Context, in Request) (Result, bool, error) {
+	prior, found, err := s.store.AppliedRequest(ctx, in.RequestID)
+	if err != nil || !found {
+		return Result{}, false, err
+	}
+	if prior.Workspace != in.Workspace || prior.Lead != in.Lead || prior.Change != in.Change {
+		return Result{}, true, loomgit.NewError(loomgit.Stale, "apply request belongs to another change", nil)
+	}
+	switch prior.Phase {
+	case "done":
+		return Result{HeadSHA: prior.NewTip}, true, nil
+	case "not_applied":
+		return Result{}, false, nil
+	default:
+		// SaveApplied would refuse this request; fail before deriving anything.
+		return Result{}, true, loomgit.NewError(loomgit.Stale, "apply request already recorded in phase "+prior.Phase, nil)
+	}
 }
 
 func (s *Service) recordLayer(ctx context.Context, in Request, source loomgit.Revision, old string,
