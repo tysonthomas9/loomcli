@@ -29,7 +29,7 @@ type Adapter struct {
 	// starts holds each thread's turn.started until the turn's user item
 	// gives it the input's key (codex sends turn/started first).
 	starts map[loomharness.NativeRef]loomharness.Event
-	// next holds a thread's model and cwd from SetModel and Move until a
+	// next holds a thread's model, effort and cwd from SetModel and Move until a
 	// turn/start sends them.
 	next map[loomharness.NativeRef]override
 
@@ -38,7 +38,7 @@ type Adapter struct {
 }
 
 // override is what a thread's next turn/start sets.
-type override struct{ model, dir string }
+type override struct{ model, effort, dir string }
 
 // opening is what Open is idempotent by.
 type opening struct{ root, dir, key string }
@@ -248,7 +248,7 @@ func (a *Adapter) Models(ctx context.Context) ([]loomharness.Model, error) {
 			return nil, fmt.Errorf("codex model/list: %w", err)
 		}
 		for _, m := range page.Data {
-			out = append(out, loomharness.Model{ID: m.Model, Name: m.DisplayName})
+			out = append(out, catalogModel(m))
 		}
 		if page.NextCursor == nil || len(page.Data) == 0 {
 			return out, nil

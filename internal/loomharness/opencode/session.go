@@ -706,13 +706,18 @@ func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) 
 	return s.c.call(ctx, "POST", s.path("/permission/"+id+"/reply"), body, nil)
 }
 
-// SetModel sets the session's "provider/model" from the next turn.
-func (s *Session) SetModel(ctx context.Context, model string) error {
+// SetModel sets the session's "provider/model" from the next turn, with the
+// effort option as the model's variant (none is the model's default).
+func (s *Session) SetModel(ctx context.Context, model string, opts []loomharness.Option) error {
 	provider, id, ok := strings.Cut(model, "/")
 	if !ok {
 		return &Error{Code: "bad_request", Message: "model " + model + " is not provider/model"}
 	}
-	return s.c.call(ctx, "POST", s.path("/model"), map[string]any{"model": map[string]string{"providerID": provider, "id": id}}, nil)
+	ref := map[string]string{"providerID": provider, "id": id}
+	if v := loomharness.OptionValue(opts, loomharness.OptionEffort); v != "" {
+		ref["variant"] = v
+	}
+	return s.c.call(ctx, "POST", s.path("/model"), map[string]any{"model": ref}, nil)
 }
 
 // Unload removes the session's bridge registration, which Resume makes

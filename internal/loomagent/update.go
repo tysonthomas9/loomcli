@@ -1,6 +1,7 @@
 package loomagent
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,16 +23,21 @@ const (
 )
 
 // UpdateRequest is the Update input (design v2 §4.6). Empty fields are left
-// unchanged. Expect.SpecVersion is optional for Name and Model and required
-// for Harness.
+// unchanged. Expect.SpecVersion is optional for Name, Model and options and
+// required for Harness.
 type UpdateRequest struct {
 	Envelope
 	AgentID, Name, Model, Harness string
+	// Effort is shorthand for the effort option. Options set the model's
+	// options by id, keeping the others; both apply from the next turn.
+	Effort  string
+	Options []loomharness.Option
 }
 
-// Update changes an agent's name, model or harness. Every accepted change
-// bumps the spec version; a retry with the last applied RequestID returns the
-// current agent. A single task that is not finished may change only its name.
+// Update changes an agent's name, model and its options, or harness. Every
+// accepted change bumps the spec version; a retry with the last applied
+// RequestID returns the current agent. A single task that is not finished
+// may change only its name.
 func (s *Service) Update(ctx context.Context, req UpdateRequest) (AgentInfo, error) {
 	defer s.lockReady(ctx, req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
@@ -44,26 +50,26 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (AgentInfo, err
 	if req.Expect != nil && req.Expect.SpecVersion != nil && *req.Expect.SpecVersion != a.SpecVersion {
 		return AgentInfo{}, &Error{Code: CodeSpecVersionMismatch, Message: fmt.Sprintf("spec version is %d", a.SpecVersion)}
 	}
-	if a.Mode == "single_task" && a.State != StateFinished && (req.Model != "" || req.Harness != "") {
+	choosing := req.Model != "" || req.Effort != "" || len(req.Options) > 0
+	if a.Mode == "single_task" && a.State != StateFinished && (choosing || req.Harness != "") {
 		return AgentInfo{}, &Error{Code: CodeAgentBusy, Message: "only the name of an unfinished single task can change"}
 	}
 	if req.Harness != "" && req.Harness != a.Harness {
+		if req.Effort != "" || len(req.Options) > 0 {
+			return AgentInfo{}, invalid("set effort and options after the harness switch, from the new harness's catalog")
+		}
 		return s.switchHarness(ctx, a, req)
 	}
 	to := a.SpecOf()
 	if req.Name != "" {
 		to.Name = req.Name
 	}
-	if req.Model != "" {
-		if err := s.checkModel(ctx, a.Harness, req.Model); err != nil {
-			return AgentInfo{}, err
-		}
-		to.Model = &req.Model
-		if err := s.setModel(ctx, a, req.Model); err != nil {
+	if choosing {
+		if err := s.choose(ctx, a, req, &to); err != nil {
 			return AgentInfo{}, err
 		}
 	}
-	if to.Name == a.Name && deref(to.Model) == deref(a.Model) {
+	if to.Name == a.Name && deref(to.Model) == deref(a.Model) && to.SpecJSON == a.SpecJSON {
 		return info(a), nil
 	}
 	a, err = s.commitSpec(ctx, a, to, req.RequestID, KindAgentUpdated)
@@ -98,6 +104,34 @@ func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstor
 			"spec_version": a.SpecVersion})
 }
 
+// choose applies req's model and options to to and to a's session from its
+// next turn. The options are saved in the spec's Options; a model change
+// keeps those the new model takes.
+func (s *Service) choose(ctx context.Context, a loomstore.Agent, req UpdateRequest, to *loomstore.AgentSpec) error {
+	cfg, err := loadConfig(a)
+	if err != nil {
+		return err
+	}
+	target, opts, err := s.selection(ctx, a.Harness, cmp.Or(req.Model, deref(a.Model)), cfg.Options, req)
+	if err != nil {
+		return err
+	}
+	if req.Model != "" {
+		to.Model = &req.Model
+	}
+	if !slices.Equal(opts, cfg.Options) {
+		cfg.Options = opts
+		b, err := json.Marshal(cfg)
+		if err != nil {
+			return err
+		}
+		to.SpecJSON = string(b)
+	} else if req.Model == "" {
+		return nil
+	}
+	return s.setModel(ctx, a, target, opts)
+}
+
 // checkModel refuses a model missing from harness's catalog. An unwired
 // harness skips the check.
 func (s *Service) checkModel(ctx context.Context, harness, model string) error {
@@ -110,13 +144,9 @@ func (s *Service) checkModel(ctx context.Context, harness, model string) error {
 
 // models lists harness's model ids, or nil when it is not wired.
 func (s *Service) models(ctx context.Context, harness string) ([]string, error) {
-	h, ok := s.harnesses[harness]
-	if !ok {
-		return nil, nil
-	}
-	ms, err := h.Models(ctx)
-	if err != nil {
-		return nil, harnessErr(err)
+	ms, err := s.catalog(ctx, harness)
+	if err != nil || ms == nil {
+		return nil, err
 	}
 	ids := []string{}
 	for _, m := range ms {
@@ -125,13 +155,13 @@ func (s *Service) models(ctx context.Context, harness string) ([]string, error) 
 	return ids, nil
 }
 
-// setModel applies model to a's current session from its next turn.
-func (s *Service) setModel(ctx context.Context, a loomstore.Agent, model string) error {
+// setModel applies model and opts to a's current session from its next turn.
+func (s *Service) setModel(ctx context.Context, a loomstore.Agent, model string, opts []loomharness.Option) error {
 	sess, _, err := s.current(ctx, a)
 	if err != nil || sess == nil {
 		return err
 	}
-	return harnessErr(sess.SetModel(ctx, model))
+	return harnessErr(sess.SetModel(ctx, model, opts))
 }
 
 // current returns a's current native session and ref, or nil when a has

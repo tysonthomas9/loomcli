@@ -37,12 +37,6 @@ func New(cfg Config) *Adapter {
 // Name is the harness name.
 func (a *Adapter) Name() string { return "claude" }
 
-// Models lists the model aliases `claude --model` accepts; the CLI has no
-// model list.
-func (a *Adapter) Models(context.Context) ([]loomharness.Model, error) {
-	return []loomharness.Model{{ID: "opus", Name: "Opus"}, {ID: "sonnet", Name: "Sonnet"}, {ID: "haiku", Name: "Haiku"}}, nil
-}
-
 // Health checks the installed version: refused below the minimum, a warning
 // above the last tested one. It starts no session. The version child gets
 // the same GitHub-token-free environment as a launch.
@@ -291,7 +285,7 @@ type Session struct {
 var _ loomharness.Session = (*Session)(nil)
 
 // Prompt sends one input when idle, launching the process if none runs. A
-// model or worktree changed since the running process started takes effect
+// model, effort or worktree changed since the running process started takes effect
 // here, at the turn boundary, by relaunching with --resume.
 func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 	s.mu.Lock()
@@ -304,7 +298,7 @@ func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 	if proc != nil && proc.Busy() {
 		return loomharness.ErrBusy
 	}
-	if proc != nil && (proc.spec.Dir != spec.Dir || proc.spec.Model != spec.Model) {
+	if proc != nil && (proc.spec.Dir != spec.Dir || proc.spec.Model != spec.Model || proc.spec.Effort != spec.Effort) {
 		if err := proc.Close(ctx); err != nil {
 			return err
 		}
@@ -373,11 +367,11 @@ func (s *Session) Status(context.Context) (loomharness.Status, error) {
 }
 
 // SetModel takes effect from the next turn: the next Prompt relaunches with
-// --model and --resume.
-func (s *Session) SetModel(_ context.Context, model string) error {
+// --model, --effort and --resume.
+func (s *Session) SetModel(_ context.Context, model string, opts []loomharness.Option) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.spec.Model = model
+	s.spec.Model, s.spec.Effort = model, loomharness.OptionValue(opts, loomharness.OptionEffort)
 	return nil
 }
 

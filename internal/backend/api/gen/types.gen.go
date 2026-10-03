@@ -51,6 +51,24 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 	}
 }
 
+// Defines values for AgentV1OptionDescriptorType.
+const (
+	Boolean AgentV1OptionDescriptorType = "boolean"
+	Select  AgentV1OptionDescriptorType = "select"
+)
+
+// Valid indicates whether the value is a known member of the AgentV1OptionDescriptorType enum.
+func (e AgentV1OptionDescriptorType) Valid() bool {
+	switch e {
+	case Boolean:
+		return true
+	case Select:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentV1PermissionRuleEffect.
 const (
 	AgentV1PermissionRuleEffectAllow AgentV1PermissionRuleEffect = "allow"
@@ -1807,6 +1825,62 @@ type AgentV1List struct {
 	Next string `json:"next"`
 }
 
+// AgentV1Model defines model for AgentV1Model.
+type AgentV1Model struct {
+	// ContextLimit Tokens; 0 when unknown
+	ContextLimit int64  `json:"context_limit"`
+	Id           string `json:"id"`
+
+	// Input text, image and/or pdf
+	Input             []string                  `json:"input"`
+	IsDefault         bool                      `json:"is_default"`
+	Name              string                    `json:"name"`
+	OptionDescriptors []AgentV1OptionDescriptor `json:"option_descriptors"`
+}
+
+// AgentV1ModelCatalog defines model for AgentV1ModelCatalog.
+type AgentV1ModelCatalog struct {
+	Harness   string                 `json:"harness"`
+	Providers []AgentV1ModelProvider `json:"providers"`
+}
+
+// AgentV1ModelProvider One connected provider and its models.
+type AgentV1ModelProvider struct {
+	Id     string         `json:"id"`
+	Models []AgentV1Model `json:"models"`
+	Name   string         `json:"name"`
+}
+
+// AgentV1OptionChoice defines model for AgentV1OptionChoice.
+type AgentV1OptionChoice struct {
+	Description *string `json:"description,omitempty"`
+	Id          string  `json:"id"`
+	IsDefault   *bool   `json:"is_default,omitempty"`
+	Label       string  `json:"label"`
+}
+
+// AgentV1OptionDescriptor One option a model takes. current_value is the value used when none is set.
+type AgentV1OptionDescriptor struct {
+	// CurrentValue A string, or a boolean for a boolean option
+	CurrentValue interface{}                 `json:"current_value,omitempty"`
+	Description  *string                     `json:"description,omitempty"`
+	Id           string                      `json:"id"`
+	Label        string                      `json:"label"`
+	Options      *[]AgentV1OptionChoice      `json:"options,omitempty"`
+	Type         AgentV1OptionDescriptorType `json:"type"`
+}
+
+// AgentV1OptionDescriptorType defines model for AgentV1OptionDescriptor.Type.
+type AgentV1OptionDescriptorType string
+
+// AgentV1OptionValue One chosen model option.
+type AgentV1OptionValue struct {
+	Id string `json:"id"`
+
+	// Value A string, or a boolean for a boolean option
+	Value interface{} `json:"value"`
+}
+
 // AgentV1Overrides A Create's per-agent changes to its preset.
 type AgentV1Overrides struct {
 	AllowedTools *[]string `json:"allowed_tools,omitempty"`
@@ -1894,13 +1968,16 @@ type AgentV1Subject struct {
 	Version *string `json:"version,omitempty"`
 }
 
-// AgentV1UpdateBody Empty fields are unchanged.
+// AgentV1UpdateBody Empty fields are unchanged. effort is shorthand for the effort option; options set the model's options by id, keeping the others. Model, effort and options apply from the next turn and are checked against the harness catalog (an unknown model, option or value is a 400 preset_invalid listing the allowed values).
 type AgentV1UpdateBody struct {
+	Effort *string `json:"effort,omitempty"`
+
 	// Expect Optional version checks on a write.
-	Expect  *AgentV1Expect `json:"expect,omitempty"`
-	Harness *string        `json:"harness,omitempty"`
-	Model   *string        `json:"model,omitempty"`
-	Name    *string        `json:"name,omitempty"`
+	Expect  *AgentV1Expect        `json:"expect,omitempty"`
+	Harness *string               `json:"harness,omitempty"`
+	Model   *string               `json:"model,omitempty"`
+	Name    *string               `json:"name,omitempty"`
+	Options *[]AgentV1OptionValue `json:"options,omitempty"`
 }
 
 // AgentV1WaitingMessage One sender's message waiting for the agent.

@@ -586,7 +586,7 @@ func TestCodexSetModelAndMove(t *testing.T) {
 	if err := s.Move(ctx, filepath.Join(dir, "gone")); err == nil {
 		t.Fatal("Move to a missing dir succeeded")
 	}
-	if err := s.SetModel(ctx, "gpt-5.5"); err != nil {
+	if err := s.SetModel(ctx, "gpt-5.5", []loomharness.Option{{ID: loomharness.OptionEffort, Value: "xhigh"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Move(ctx, dir); err != nil {
@@ -603,12 +603,42 @@ func TestCodexSetModelAndMove(t *testing.T) {
 	}
 	var got []string
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
-		var p struct{ Model, Cwd *string }
+		var p struct{ Model, Effort, Cwd *string }
 		_ = json.Unmarshal([]byte(line), &p)
-		got = append(got, fmt.Sprint(deref(p.Model), "|", deref(p.Cwd)))
+		got = append(got, fmt.Sprint(deref(p.Model), "|", deref(p.Effort), "|", deref(p.Cwd)))
 	}
-	if want := []string{"gpt-5.5|" + dir, "|"}; !slices.Equal(got, want) {
-		t.Fatalf("turn/start model|cwd %q, want %q", got, want)
+	if want := []string{"gpt-5.5|xhigh|" + dir, "||"}; !slices.Equal(got, want) {
+		t.Fatalf("turn/start model|effort|cwd %q, want %q", got, want)
+	}
+}
+
+// TestCodexModelsCatalog: model/list maps to the catalog shape, its
+// supported reasoning efforts becoming the effort option with codex's
+// default as current; a model with none has no options.
+func TestCodexModelsCatalog(t *testing.T) {
+	a := newAdapter(t, newFixture(t, "codex-cli 0.157.1"))
+	ms, err := a.Models(context.Background())
+	if err != nil || len(ms) != 2 {
+		t.Fatalf("Models = %+v, %v", ms, err)
+	}
+	m := ms[0]
+	if m.ID != "gpt-5.5" || m.Name != "GPT-5.5" || !m.Default || m.Provider != "codex" || !slices.Equal(m.Input, []string{"text", "image"}) {
+		t.Fatalf("model = %+v", m)
+	}
+	if len(m.Options) != 1 {
+		t.Fatalf("options = %+v", m.Options)
+	}
+	d := m.Options[0]
+	var ids []string
+	for _, c := range d.Choices {
+		ids = append(ids, c.ID+"/"+c.Label+"/"+fmt.Sprint(c.Default))
+	}
+	if d.ID != loomharness.OptionEffort || d.Type != loomharness.OptionSelect || d.Current != "medium" ||
+		!slices.Equal(ids, []string{"low/Low/false", "medium/Medium/true", "xhigh/Extra High/false"}) || d.Choices[0].Description != "Fast" {
+		t.Fatalf("effort = %+v (%q)", d, ids)
+	}
+	if ms[1].Default || len(ms[1].Options) != 0 || !slices.Equal(ms[1].Input, []string{"text", "image"}) {
+		t.Fatalf("mini = %+v", ms[1])
 	}
 }
 

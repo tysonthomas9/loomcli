@@ -37,11 +37,11 @@ func (*stub) HasInput(context.Context, string) (Landed, error) { return LandedUn
 func (*stub) Messages(context.Context, string, int) (MessagePage, error) {
 	return MessagePage{}, nil
 }
-func (*stub) Status(context.Context) (Status, error) { return Status{}, nil }
-func (*stub) SetModel(context.Context, string) error { return nil }
-func (*stub) Move(context.Context, string) error     { return nil }
-func (*stub) Unload(context.Context) error           { return nil }
-func (*stub) Close(context.Context) error            { return nil }
+func (*stub) Status(context.Context) (Status, error)           { return Status{}, nil }
+func (*stub) SetModel(context.Context, string, []Option) error { return nil }
+func (*stub) Move(context.Context, string) error               { return nil }
+func (*stub) Unload(context.Context) error                     { return nil }
+func (*stub) Close(context.Context) error                      { return nil }
 
 var (
 	_ Harness = (*stub)(nil)

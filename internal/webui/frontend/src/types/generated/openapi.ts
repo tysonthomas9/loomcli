@@ -2346,7 +2346,7 @@ export interface paths {
     delete: operations["deleteAgentV1"];
     options?: never;
     head?: never;
-    /** Rename an agent or change its model or harness */
+    /** Rename an agent or change its model, effort and options, or harness */
     patch: operations["updateAgentV1"];
     trace?: never;
   };
@@ -2461,6 +2461,26 @@ export interface paths {
     };
     /** Subscribe to agent events over SSE (one-time token auth) */
     get: operations["streamAgentEventsV1"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/v1/harnesses/{harness}/models": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List a harness's connected providers and their models with capabilities
+     * @description Each model carries its context limit, input types, whether it is the harness default, and the options it takes in T3 Code's generic option-descriptor shape (select or boolean; effort is the reasoning-effort select). PATCH /agents/{id} takes a model id from here as model and option values as effort or options.
+     */
+    get: operations["listHarnessModelsV1"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2622,12 +2642,60 @@ export interface components {
       spec_version?: number;
       subject_version?: string;
     };
-    /** @description Empty fields are unchanged. */
+    /** @description Empty fields are unchanged. effort is shorthand for the effort option; options set the model's options by id, keeping the others. Model, effort and options apply from the next turn and are checked against the harness catalog (an unknown model, option or value is a 400 preset_invalid listing the allowed values). */
     AgentV1UpdateBody: {
       name?: string;
       model?: string;
+      effort?: string;
+      options?: components["schemas"]["AgentV1OptionValue"][] | null;
       harness?: string;
       expect?: components["schemas"]["AgentV1Expect"];
+    };
+    /** @description One chosen model option. */
+    AgentV1OptionValue: {
+      id: string;
+      /** @description A string, or a boolean for a boolean option */
+      value: unknown;
+    };
+    AgentV1ModelCatalog: {
+      harness: string;
+      providers: components["schemas"]["AgentV1ModelProvider"][];
+    };
+    /** @description One connected provider and its models. */
+    AgentV1ModelProvider: {
+      id: string;
+      name: string;
+      models: components["schemas"]["AgentV1Model"][];
+    };
+    AgentV1Model: {
+      id: string;
+      name: string;
+      /**
+       * Format: int64
+       * @description Tokens; 0 when unknown
+       */
+      context_limit: number;
+      /** @description text, image and/or pdf */
+      input: string[];
+      is_default: boolean;
+      option_descriptors: components["schemas"]["AgentV1OptionDescriptor"][];
+    };
+    /** @description One option a model takes. current_value is the value used when none is set. */
+    AgentV1OptionDescriptor: {
+      id: string;
+      label: string;
+      description?: string;
+      /** @enum {string} */
+      type: "select" | "boolean";
+      options?: components["schemas"]["AgentV1OptionChoice"][];
+      /** @description A string, or a boolean for a boolean option */
+      current_value?: unknown;
+    };
+    AgentV1OptionChoice: {
+      id: string;
+      label: string;
+      description?: string;
+      is_default?: boolean;
     };
     AgentV1ArchiveBody: {
       /** @description Defaults to done */
@@ -9168,6 +9236,32 @@ export interface operations {
         };
         content: {
           "text/event-stream": components["schemas"]["AgentV1Event"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  listHarnessModelsV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description opencode, codex or claude */
+        harness: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The catalog */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1ModelCatalog"];
         };
       };
       default: components["responses"]["AgentV1Error"];

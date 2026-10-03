@@ -32,6 +32,9 @@ func TestAgentWireMatchesOpenAPI(t *testing.T) {
 		{Event{}, gen.AgentV1Event{}}, {EventPage{}, gen.AgentV1EventPage{}},
 		{PermissionRule{}, gen.AgentV1PermissionRule{}}, {Preset{}, gen.AgentV1Preset{}},
 		{PresetList{}, gen.AgentV1PresetList{}}, {Error{}, gen.AgentV1Error{}},
+		{ModelCatalog{}, gen.AgentV1ModelCatalog{}}, {ModelProvider{}, gen.AgentV1ModelProvider{}},
+		{Model{}, gen.AgentV1Model{}}, {OptionDescriptor{}, gen.AgentV1OptionDescriptor{}},
+		{OptionChoice{}, gen.AgentV1OptionChoice{}}, {OptionValue{}, gen.AgentV1OptionValue{}},
 	} {
 		if w, g := fields(p[0]), fields(p[1]); !slices.Equal(w, g) {
 			t.Errorf("%T fields %v; openapi %T has %v", p[0], w, p[1], g)

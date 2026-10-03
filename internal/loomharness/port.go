@@ -42,10 +42,12 @@ type Session interface {
 	HasInput(ctx context.Context, key string) (Landed, error)
 	Messages(ctx context.Context, after string, limit int) (MessagePage, error) // catch-up read
 	Status(ctx context.Context) (Status, error)
-	SetModel(ctx context.Context, model string) error // from the next turn
-	Move(ctx context.Context, dir string) error       // at a turn boundary
-	Unload(ctx context.Context) error                 // free an idle session
-	Close(ctx context.Context) error                  // stop this runtime; native history is kept
+	// SetModel sets the model and its options from the next turn; opts is
+	// the session's whole option selection, replacing what it had.
+	SetModel(ctx context.Context, model string, opts []Option) error
+	Move(ctx context.Context, dir string) error // at a turn boundary
+	Unload(ctx context.Context) error           // free an idle session
+	Close(ctx context.Context) error            // stop this runtime; native history is kept
 }
 
 // NativeRef is a provider-native session or thread ID plus the root it lives
@@ -123,10 +125,58 @@ type Status struct {
 	LastTurnInterrupt bool // the newest finished turn was interrupted
 }
 
-// Model is one model the harness offers.
+// Model is one model the harness offers, with its capabilities in T3 Code's
+// generic shape: each option the model takes is a descriptor, and a selection
+// is a list of {ID, Value}.
 type Model struct {
-	ID   string
-	Name string
+	ID           string
+	Name         string
+	Provider     string // the provider id, e.g. "openai"; the harness name when it has one provider
+	ProviderName string
+	ContextLimit int64    // tokens; 0 when unknown
+	Input        []string // text | image | pdf
+	Default      bool     // the model a session gets with none chosen
+	Options      []OptionDescriptor
+}
+
+// Option types.
+const (
+	OptionSelect  = "select"
+	OptionBoolean = "boolean"
+)
+
+// OptionEffort is the reasoning-effort option every harness names the same way.
+const OptionEffort = "effort"
+
+// OptionDescriptor is one option a model takes. A select lists its Choices;
+// a boolean takes "true" or "false". Current is the value used when none is set.
+type OptionDescriptor struct {
+	ID, Label, Description string
+	Type                   string // select | boolean
+	Choices                []OptionChoice
+	Current                string
+}
+
+// OptionChoice is one value of a select option.
+type OptionChoice struct {
+	ID, Label, Description string
+	Default                bool
+}
+
+// Option is one chosen option value; a boolean's Value is "true" or "false".
+type Option struct {
+	ID    string
+	Value string
+}
+
+// OptionValue returns the value of option id in opts, or "".
+func OptionValue(opts []Option, id string) string {
+	for _, o := range opts {
+		if o.ID == id {
+			return o.Value
+		}
+	}
+	return ""
 }
 
 // Health reports the installed version and the version check result.

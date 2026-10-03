@@ -56,6 +56,7 @@ type ProcessSpec struct {
 	Launch    loomharness.Launch // the agent's profile root and env (LaunchFor)
 	Dir       string             // the agent's worktree
 	Model     string
+	Effort    string // --effort; empty is the CLI's default
 }
 
 // SessionID reserves the Claude session UUID for an Open key. It is derived,
@@ -217,6 +218,9 @@ func (p *Process) start(ctx context.Context, resume bool) error {
 	}
 	if p.spec.Model != "" {
 		args = append(args, "--model", p.spec.Model)
+	}
+	if p.spec.Effort != "" {
+		args = append(args, "--effort", p.spec.Effort)
 	}
 	cmd := exec.Command(p.cfg.Bin, append(args, p.cfg.Args...)...) //nolint:gosec // G204: the configured claude binary.
 	cmd.Dir, cmd.Env = p.spec.Dir, env

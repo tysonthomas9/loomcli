@@ -14,6 +14,12 @@ Ported files (internal/webui/frontend/src/components/AgentChat/):
 - `timelineRows.ts`: from `apps/web/src/components/chat/MessagesTimeline.logic.ts`.
 - `WorkRows.tsx`, `Timeline.module.css`: from `apps/web/src/components/chat/MessagesTimeline.tsx` and `apps/web/src/index.css`.
 
+Ported files (internal/loomharness/):
+
+- `codex/catalog.go`: from `apps/server/src/provider/Layers/CodexProvider.ts`.
+- `opencode/catalog.go`: from `apps/server/src/provider/Layers/OpenCodeProvider.ts`.
+- `claude/catalog.go`: from `apps/server/src/provider/Layers/ClaudeProvider.ts`.
+
 ```
 MIT License
 

@@ -4381,7 +4381,7 @@ paths:
     patch:
       operationId: updateAgentV1
       tags: [agents-v1]
-      summary: Rename an agent or change its model or harness
+      summary: Rename an agent or change its model, effort and options, or harness
       security: [{BearerAuth: []}, {AgentBridgeToken: []}]
       parameters:
         - $ref: "#/components/parameters/AgentV1IdempotencyKey"
@@ -4519,6 +4519,23 @@ paths:
           content:
             text/event-stream:
               schema: {$ref: "#/components/schemas/AgentV1Event"}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
+  /api/workspaces/{ws}/v1/harnesses/{harness}/models:
+    get:
+      operationId: listHarnessModelsV1
+      tags: [agents-v1]
+      summary: List a harness's connected providers and their models with capabilities
+      description: >-
+        Each model carries its context limit, input types, whether it is the harness default, and the options it
+        takes in T3 Code's generic option-descriptor shape (select or boolean; effort is the reasoning-effort select).
+        PATCH /agents/{id} takes a model id from here as model and option values as effort or options.
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: harness, in: path, required: true, schema: {type: string}, description: "opencode, codex or claude"}
+      responses:
+        "200": {description: The catalog, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1ModelCatalog"}}}}
         default: {$ref: "#/components/responses/AgentV1Error"}
 
   /api/workspaces/{ws}/v1/presets:
@@ -4764,12 +4781,67 @@ components:
         subject_version: {type: string}
     AgentV1UpdateBody:
       type: object
-      description: Empty fields are unchanged.
+      description: >-
+        Empty fields are unchanged. effort is shorthand for the effort option; options set the model's options by id,
+        keeping the others. Model, effort and options apply from the next turn and are checked against the harness
+        catalog (an unknown model, option or value is a 400 preset_invalid listing the allowed values).
       properties:
         name: {type: string}
         model: {type: string}
+        effort: {type: string}
+        options: {type: [array, "null"], items: {$ref: "#/components/schemas/AgentV1OptionValue"}}
         harness: {type: string}
         expect: {$ref: "#/components/schemas/AgentV1Expect"}
+    AgentV1OptionValue:
+      type: object
+      description: One chosen model option.
+      required: [id, value]
+      properties:
+        id: {type: string}
+        value: {description: "A string, or a boolean for a boolean option"}
+    AgentV1ModelCatalog:
+      type: object
+      required: [harness, providers]
+      properties:
+        harness: {type: string}
+        providers: {type: array, items: {$ref: "#/components/schemas/AgentV1ModelProvider"}}
+    AgentV1ModelProvider:
+      type: object
+      description: One connected provider and its models.
+      required: [id, name, models]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        models: {type: array, items: {$ref: "#/components/schemas/AgentV1Model"}}
+    AgentV1Model:
+      type: object
+      required: [id, name, context_limit, input, is_default, option_descriptors]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        context_limit: {type: integer, format: int64, description: Tokens; 0 when unknown}
+        input: {type: array, items: {type: string}, description: "text, image and/or pdf"}
+        is_default: {type: boolean}
+        option_descriptors: {type: array, items: {$ref: "#/components/schemas/AgentV1OptionDescriptor"}}
+    AgentV1OptionDescriptor:
+      type: object
+      description: One option a model takes. current_value is the value used when none is set.
+      required: [id, label, type]
+      properties:
+        id: {type: string}
+        label: {type: string}
+        description: {type: string}
+        type: {type: string, enum: [select, boolean]}
+        options: {type: array, items: {$ref: "#/components/schemas/AgentV1OptionChoice"}}
+        current_value: {description: "A string, or a boolean for a boolean option"}
+    AgentV1OptionChoice:
+      type: object
+      required: [id, label]
+      properties:
+        id: {type: string}
+        label: {type: string}
+        description: {type: string}
+        is_default: {type: boolean}
     AgentV1ArchiveBody:
       type: object
       properties:

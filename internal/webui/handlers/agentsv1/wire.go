@@ -79,11 +79,16 @@ func (b CreateBody) request() loomagent.CreateRequest {
 }
 
 // UpdateBody is the PATCH /agents/{id} body; empty fields are unchanged.
+// effort is shorthand for the effort option; options set the model's
+// options by id (GET /harnesses/{harness}/models lists them), keeping the
+// others. Both apply from the next turn.
 type UpdateBody struct {
-	Name    string  `json:"name"`
-	Model   string  `json:"model"`
-	Harness string  `json:"harness"`
-	Expect  *Expect `json:"expect"`
+	Name    string        `json:"name"`
+	Model   string        `json:"model"`
+	Effort  string        `json:"effort"`
+	Options []OptionValue `json:"options"`
+	Harness string        `json:"harness"`
+	Expect  *Expect       `json:"expect"`
 }
 
 // ArchiveBody is the optional archive body; reason defaults to done.

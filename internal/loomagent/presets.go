@@ -120,6 +120,7 @@ type Config struct {
 	Harness        string
 	Model          string
 	Effort         string
+	Options        []loomharness.Option `json:",omitempty"` // the model options Update set (UI1)
 	MaxBudgetUSD   *float64
 	MaxRunDuration *int
 	Open           loomharness.PresetConfig

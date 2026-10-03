@@ -64,6 +64,8 @@ type session struct {
 	ref           loomharness.NativeRef
 	key           string
 	model, dir    string
+	opts          []loomharness.Option
+	turnModels    []Selection // the model and options each turn started with
 	seq           int64
 	turns         int
 	history       []loomharness.Event
@@ -105,8 +107,29 @@ func (h *Harness) Script(key string, turns ...Turn) {
 
 func (h *Harness) Name() string { return "fake" }
 
+// Models offers fake-model, whose effort is low, medium (the default) or high.
 func (h *Harness) Models(context.Context) ([]loomharness.Model, error) {
-	return []loomharness.Model{{ID: "fake-model", Name: "Fake model"}}, nil
+	return []loomharness.Model{{ID: "fake-model", Name: "Fake model", Provider: "fake", ProviderName: "Fake",
+		ContextLimit: 1000, Input: []string{"text"}, Default: true,
+		Options: []loomharness.OptionDescriptor{{ID: loomharness.OptionEffort, Label: "Reasoning", Type: loomharness.OptionSelect,
+			Current: "medium", Choices: []loomharness.OptionChoice{{ID: "low", Label: "Low"},
+				{ID: "medium", Label: "Medium", Default: true}, {ID: "high", Label: "High"}}}}}}, nil
+}
+
+// Selection is the model and options a turn started with.
+type Selection struct {
+	Model   string
+	Options []loomharness.Option
+}
+
+// Turns returns the model and options each turn on ref started with, oldest first.
+func (h *Harness) Turns(ref loomharness.NativeRef) []Selection {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if s, ok := h.sessions[ref]; ok {
+		return slices.Clone(s.turnModels)
+	}
+	return nil
 }
 
 func (h *Harness) Health(context.Context) (loomharness.Health, error) {
@@ -403,6 +426,7 @@ func (x *sessionHandle) Prompt(_ context.Context, in loomharness.Input) error {
 		return nil
 	}
 	s.turns++
+	s.turnModels = append(s.turnModels, Selection{s.model, slices.Clone(s.opts)})
 	s.turn, s.turnID, s.step = t, s.ref.NativeID+"/turn_"+strconv.Itoa(s.turns), 0
 	s.running, s.lastInterrupt = true, false
 	s.inputs[in.Key] = loomharness.LandedFound
@@ -502,8 +526,8 @@ func (x *sessionHandle) Status(context.Context) (loomharness.Status, error) {
 	return st, nil
 }
 
-func (x *sessionHandle) SetModel(_ context.Context, model string) error {
-	return x.idle(func(s *session) { s.model = model }, false)
+func (x *sessionHandle) SetModel(_ context.Context, model string, opts []loomharness.Option) error {
+	return x.idle(func(s *session) { s.model, s.opts = model, slices.Clone(opts) }, false)
 }
 
 func (x *sessionHandle) Move(_ context.Context, dir string) error {

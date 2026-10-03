@@ -174,7 +174,7 @@ func TestClaudeSetModelAndMoveAtTurnBoundary(t *testing.T) {
 	prompt(t, s, "hang")
 	until(t, feed, loomharness.EventTurnStarted)
 	dir := t.TempDir()
-	if err := s.SetModel(ctx, "sonnet"); err != nil {
+	if err := s.SetModel(ctx, "sonnet", []loomharness.Option{{ID: loomharness.OptionEffort, Value: "xhigh"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Move(ctx, dir); err != nil {
@@ -197,6 +197,10 @@ func TestClaudeSetModelAndMoveAtTurnBoundary(t *testing.T) {
 	until(t, feed, loomharness.EventTurnCompleted)
 	got := launches(t, f.dumpPath)
 	cwd, _ := filepath.EvalSymlinks(dir)
+	effort := slices.Index(got[len(got)-1].Args, "--effort")
+	if effort < 0 || got[len(got)-1].Args[effort+1] != "xhigh" || slices.Contains(got[0].Args, "--effort") {
+		t.Fatalf("want --effort xhigh on the relaunch only; got %v then %v", got[0].Args, got[len(got)-1].Args)
+	}
 	if len(got) != 2 || !slices.Contains(got[1].Args, "sonnet") || !slices.Contains(got[1].Args, "--resume") ||
 		!slices.Contains(got[1].Args, ref.NativeID) || got[1].Cwd != cwd {
 		t.Fatalf("want a --resume %s relaunch with sonnet in %s; got %d launches, last %v in %s", ref.NativeID, cwd, len(got), got[len(got)-1].Args, got[len(got)-1].Cwd)
@@ -834,5 +838,29 @@ func TestClaudeToolCallCarriesNameInputOutput(t *testing.T) {
 		if got[i].Type != w.typ || got[i].Tool == nil || *got[i].Tool != w.tool {
 			t.Errorf("event %d: %s %+v, want %s %+v", i, got[i].Type, got[i].Tool, w.typ, w.tool)
 		}
+	}
+}
+
+// TestClaudeModelsCatalog: the aliases carry the --effort option (high by
+// default) except haiku, with context limits and input types; none is the
+// default, which the CLI picks per account.
+func TestClaudeModelsCatalog(t *testing.T) {
+	a, _, _ := newAdapter(t)
+	ms, err := a.Models(context.Background())
+	if err != nil || len(ms) != 3 {
+		t.Fatalf("Models = %+v, %v", ms, err)
+	}
+	for _, m := range ms {
+		if m.Default || m.Provider != "anthropic" || !slices.Equal(m.Input, []string{"text", "image", "pdf"}) || m.ContextLimit == 0 {
+			t.Fatalf("model = %+v", m)
+		}
+	}
+	var choices []string
+	for _, c := range ms[0].Options[0].Choices {
+		choices = append(choices, c.ID)
+	}
+	if ms[0].ID != "opus" || ms[0].Options[0].ID != loomharness.OptionEffort || ms[0].Options[0].Current != "high" ||
+		!slices.Equal(choices, []string{"low", "medium", "high", "xhigh", "max"}) || len(ms[2].Options) != 0 {
+		t.Fatalf("catalog = %+v", ms)
 	}
 }

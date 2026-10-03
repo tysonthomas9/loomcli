@@ -65,6 +65,7 @@ func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 	if o.model != "" {
 		params.Model = &o.model
 	}
+	params.Effort = o.effort
 	if o.dir != "" {
 		params.Cwd = &o.dir
 	}
@@ -235,12 +236,12 @@ func (s *Session) Resume(context.Context, loomharness.Launch, []loomharness.Perm
 }
 
 // SetModel takes effect from the next turn: the next Prompt's turn/start
-// sets it, and codex keeps it for later turns.
-func (s *Session) SetModel(_ context.Context, model string) error {
+// sets the model and the effort option, and codex keeps both for later turns.
+func (s *Session) SetModel(_ context.Context, model string, opts []loomharness.Option) error {
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
 	o := s.a.next[s.ref]
-	o.model = model
+	o.model, o.effort = model, loomharness.OptionValue(opts, loomharness.OptionEffort)
 	s.a.next[s.ref] = o
 	return nil
 }

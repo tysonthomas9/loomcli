@@ -61,7 +61,7 @@ func (s *Service) switchHarness(ctx context.Context, a loomstore.Agent, req Upda
 		return failed(err)
 	}
 	beforeSwitchCommit()
-	cfg.Harness, cfg.Model = req.Harness, model
+	cfg.Harness, cfg.Model, cfg.Options = req.Harness, model, nil // options belong to the old harness's models
 	spec, err := json.Marshal(cfg)
 	if err != nil {
 		return failed(err)

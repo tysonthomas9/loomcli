@@ -66,6 +66,7 @@ func (h *Handler) Register(mux *http.ServeMux, workspace middleware.Middleware,
 		"GET " + p + "agents/{id}/events":              listEvents,
 		"GET " + p + "presets":                         h.listPresets,
 		"GET " + p + "presets/{name}":                  h.getPreset,
+		"GET " + p + "harnesses/{harness}/models":      h.listModels,
 		"POST " + p + "github/read":                    h.githubRead,
 	} {
 		mux.Handle(pattern, workspace(h.serve(fn)))
@@ -169,9 +170,14 @@ func update(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, 
 	if err != nil {
 		return 0, nil, err
 	}
+	opts, err := options(body.Options)
+	if err != nil {
+		return 0, nil, err
+	}
 	a, err := s.Update(r.Context(), loomagent.UpdateRequest{
 		Envelope: loomagent.Envelope{RequestID: id, Expect: body.Expect.expect()},
 		AgentID:  r.PathValue("id"), Name: body.Name, Model: body.Model, Harness: body.Harness,
+		Effort: body.Effort, Options: opts,
 	})
 	return http.StatusOK, agentOut(a), err
 }

@@ -115,7 +115,7 @@ func TestAdapterContract(t *testing.T) {
 		}
 	})
 	t.Run("Model", func(t *testing.T) {
-		if err := s.SetModel(ctx, "sonnet"); err != nil {
+		if err := s.SetModel(ctx, "sonnet", nil); err != nil {
 			t.Fatal(err)
 		}
 		_, got := turn(t, "Reply with exactly the word MODEL.")

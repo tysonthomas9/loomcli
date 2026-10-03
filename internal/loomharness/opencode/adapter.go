@@ -113,25 +113,6 @@ func (a *Adapter) Session(ref loomharness.NativeRef) loomharness.Session {
 	return a.Client.Session(ref)
 }
 
-// Models lists the models the server offers as "provider/model" ids.
-func (a *Adapter) Models(ctx context.Context) ([]loomharness.Model, error) {
-	var r struct {
-		Data []struct {
-			ID         string `json:"id"`
-			ProviderID string `json:"providerID"`
-			Name       string `json:"name"`
-		} `json:"data"`
-	}
-	if err := a.call(ctx, "GET", "/api/model", nil, &r); err != nil {
-		return nil, err
-	}
-	out := make([]loomharness.Model, len(r.Data))
-	for i, m := range r.Data {
-		out[i] = loomharness.Model{ID: m.ProviderID + "/" + m.ID, Name: m.Name}
-	}
-	return out, nil
-}
-
 // Health checks the installed version (refused below the minimum) and
 // reports harness_unavailable after repeated failed connects. It never
 // starts a service.

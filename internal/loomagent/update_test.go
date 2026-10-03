@@ -413,3 +413,58 @@ func TestHarnessResumeChangedRootSameID(t *testing.T) {
 		t.Fatalf("Get exposes the session root: %v, %v", got.HarnessSessionRoot, err)
 	}
 }
+
+// TestUpdateEffortAppliesOnNextTurn: PATCH effort (or options) is checked
+// against the harness catalog, saved in the spec and used by the session's
+// next turn, never the one before; an unknown option or value is
+// preset_invalid and changes nothing.
+func TestUpdateEffortAppliesOnNextTurn(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateIdle)
+	sess := e.fa.Session(e.old)
+	if err := sess.Prompt(ctx, loomharness.Input{Key: "k1", Text: "before"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "r1"}, AgentID: "a1", Effort: "high"})
+	if err != nil || got.SpecVersion != 2 {
+		t.Fatalf("effort = %+v, %v", got, err)
+	}
+	cfg, err := loadConfig(e.s.get(t, "a1"))
+	if err != nil || len(cfg.Options) != 1 || cfg.Options[0] != (loomharness.Option{ID: "effort", Value: "high"}) {
+		t.Fatalf("saved options = %+v, %v", cfg.Options, err)
+	}
+	if err := sess.Prompt(ctx, loomharness.Input{Key: "k2", Text: "after"}); err != nil {
+		t.Fatal(err)
+	}
+	turns := e.fa.Turns(e.old)
+	if len(turns) != 2 || len(turns[0].Options) != 0 || turns[1].Model != "fake-model" ||
+		loomharness.OptionValue(turns[1].Options, "effort") != "high" {
+		t.Fatalf("turns = %+v; want the second turn on fake-model with effort high", turns)
+	}
+
+	for _, req := range []UpdateRequest{
+		{AgentID: "a1", Effort: "ultra"},
+		{AgentID: "a1", Options: []loomharness.Option{{ID: "speed", Value: "fast"}}},
+		{AgentID: "a1", Model: "nope", Effort: "low"},
+	} {
+		perr := wantCode(t, func() error { _, err := e.s.Update(ctx, req); return err }(), CodePresetInvalid)
+		if perr.Message == "" || len(perr.Allowed) == 0 {
+			t.Fatalf("%+v: error %+v lacks a message or the allowed values", req, perr)
+		}
+	}
+	if a := e.s.get(t, "a1"); a.SpecVersion != 2 {
+		t.Fatalf("a refused update changed the agent: spec version %d", a.SpecVersion)
+	}
+	if got, err = e.s.Update(ctx, UpdateRequest{AgentID: "a1", Options: []loomharness.Option{{ID: "effort", Value: "high"}}}); err != nil || got.SpecVersion != 2 {
+		t.Fatalf("same effort again = %+v, %v; want a no-op", got, err)
+	}
+	_, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{Expect: &Expect{SpecVersion: &got.SpecVersion}}, AgentID: "a1", Harness: "fb", Effort: "low"})
+	wantCode(t, err, CodePresetInvalid)
+	got, err = e.s.Update(ctx, switchReq("r2", 2, "fb"))
+	if err != nil || got.Harness != "fb" {
+		t.Fatalf("switch = %+v, %v", got, err)
+	}
+	if cfg, _ := loadConfig(e.s.get(t, "a1")); len(cfg.Options) != 0 {
+		t.Fatalf("options survived the harness switch: %+v", cfg.Options)
+	}
+}
