@@ -162,7 +162,7 @@ func listCmd() *cobra.Command {
 				return err
 			}
 			if jsonOut {
-				return cmdstore.WriteJSON(stackListEntries(stacks, published))
+				return cmdstore.WriteJSON(stackListEntries(ws, stacks, published))
 			}
 			if len(stacks) == 0 && len(published) == 0 {
 				fmt.Println("no stacks")
@@ -466,25 +466,35 @@ func baseOrRoot(n sl.Node, root string) string {
 // a cross-repo lead's per-repo stack IDs are visible for merge-up-to.
 var publishedStacks = publish.PublishedStacksLocal
 
-// stackListEntry is one row of `loom stack list --json`: a stack declared with
-// `loom stack init` (source "declared") or a Loom Git stack recorded by Create
-// PR or Approve (source "published"), the same stacks the text output lists.
-type stackListEntry struct {
-	ID     string                        `json:"id"`
-	Repo   string                        `json:"repo"`
-	Source string                        `json:"source"`
-	Base   string                        `json:"base,omitempty"`
-	Slug   string                        `json:"slug,omitempty"`
-	Layers []publish.PublishedStackLayer `json:"layers,omitempty"`
+// declaredStackEntry is a stack declared with `loom stack init` in `loom stack
+// list --json`: every key of the stack record, plus source "declared".
+type declaredStackEntry struct {
+	sl.Stack
+	Source string `json:"source"`
 }
 
-func stackListEntries(stacks []sl.Stack, published []publish.PublishedStack) []stackListEntry {
-	entries := make([]stackListEntry, 0, len(stacks)+len(published))
+// publishedStackEntry is a Loom Git stack recorded by Create PR or Approve. It
+// uses the declared-stack key names where they apply, plus source "published",
+// the provider slug and the PR layers, bottom first.
+type publishedStackEntry struct {
+	ID           string                        `json:"id"`
+	WorkspaceKey string                        `json:"workspaceKey"`
+	RepoName     string                        `json:"repoName"`
+	Source       string                        `json:"source"`
+	Slug         string                        `json:"slug,omitempty"`
+	Layers       []publish.PublishedStackLayer `json:"layers"`
+}
+
+// stackListEntries lists the same stacks as the text output: declared stacks
+// first, then the published ones.
+func stackListEntries(workspace string, stacks []sl.Stack, published []publish.PublishedStack) []any {
+	entries := make([]any, 0, len(stacks)+len(published))
 	for _, stack := range stacks {
-		entries = append(entries, stackListEntry{ID: string(stack.ID), Repo: stack.RepoName, Source: "declared", Base: stack.RootBase})
+		entries = append(entries, declaredStackEntry{Stack: stack, Source: "declared"})
 	}
 	for _, stack := range published {
-		entries = append(entries, stackListEntry{ID: stack.StackID, Repo: stack.Repo, Source: "published", Slug: stack.Slug, Layers: stack.Layers})
+		entries = append(entries, publishedStackEntry{ID: stack.StackID, WorkspaceKey: workspace, RepoName: stack.Repo,
+			Source: "published", Slug: stack.Slug, Layers: stack.Layers})
 	}
 	return entries
 }
