@@ -483,8 +483,14 @@ export function mergeState(
     !activeMerge.includes(status) &&
     status !== "merged"
   ) {
+    // After someone else pushed (stale_subject), only a new version that the
+    // human has not decided yet can be approved to merge.
     if (!decided) action = "verdict";
-    else if (approved && revision.head_sha === revision.pr_head)
+    else if (
+      approved &&
+      status !== "stale_subject" &&
+      revision.head_sha === revision.pr_head
+    )
       action = "merge";
   }
   return {

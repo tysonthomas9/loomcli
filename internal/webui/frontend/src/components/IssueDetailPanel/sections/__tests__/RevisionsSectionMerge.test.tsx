@@ -149,6 +149,21 @@ describe("RevisionsSection Approve and merge (D29)", () => {
     expect(approveRevisionMerge).not.toHaveBeenCalled();
   });
 
+  it("offers no second merge of the version someone else pushed over", async () => {
+    getTaskRevisions.mockResolvedValue([
+      {
+        ...open,
+        merge_status: "stale_subject",
+        merge_reason: "someone else pushed to the PR after it was approved",
+      },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    expect(
+      await screen.findByText(/Not merged: someone else pushed/),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("approve-merge")).toBeNull();
+  });
+
   it("reports someone else's push and offers no merge of a version it has not reviewed", async () => {
     getTaskRevisions.mockResolvedValue([
       {
