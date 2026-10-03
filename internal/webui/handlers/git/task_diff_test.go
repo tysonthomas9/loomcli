@@ -24,16 +24,19 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	configDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", configDir)
 	repo := t.TempDir()
-	git := func(args ...string) string {
+	// other is a second repo of the same workspace, for a task with code in both.
+	other := t.TempDir()
+	gitIn := func(dir string, args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", args...) //nolint:norawexec // Real temporary repository builds the lead stack.
-		cmd.Dir = repo
+		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 		return strings.TrimSpace(string(out))
 	}
+	git := func(args ...string) string { t.Helper(); return gitIn(repo, args...) }
 	write := func(name, content string) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0600); err != nil {
@@ -52,21 +55,25 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	write("f", "1\n2\n3\n")
 	trunk := commit("trunk")
 	storePath := filepath.Join(configDir, "loomgit", "store.db")
-	freeze := func(task, attempt, base string, change func()) loomgit.Revision {
+	freezeIn := func(dir, repoName, task, attempt, base string, change func()) loomgit.Revision {
 		t.Helper()
-		git("checkout", "-q", "--detach", base)
+		gitIn(dir, "checkout", "-q", "--detach", base)
 		change()
-		git("add", "-A")
-		patch := git("diff", "--cached", "--binary", base)
-		git("reset", "-q", "--hard")
+		gitIn(dir, "add", "-A")
+		patch := gitIn(dir, "diff", "--cached", "--binary", base)
+		gitIn(dir, "reset", "-q", "--hard")
 		rev, err := driverfreeze.FreezeAt(context.Background(), storePath, driverfreeze.Request{
-			Workspace: "W", Task: task, Repo: "repo", Attempt: attempt, Worktree: repo, Base: base,
+			Workspace: "W", Task: task, Repo: repoName, Attempt: attempt, Worktree: dir, Base: base,
 			Patch: []byte(patch + "\n"), Outcome: "completed", AuthorKind: "agent", AuthorID: "worker",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return rev
+	}
+	freeze := func(task, attempt, base string, change func()) loomgit.Revision {
+		t.Helper()
+		return freezeIn(repo, "repo", task, attempt, base, change)
 	}
 	// The middle task started on trunk and changes line 3.
 	mid := freeze("MID", "mid", trunk, func() { write("f", "1\n2\nthree\n") })
@@ -78,6 +85,23 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	// UP is applied above the lead's own commit, which is not a task layer.
 	up := freeze("UP", "up", trunk, func() { write("up", "up\n") })
 	retried := freeze("LOOSE", "loose2", trunk, func() { write("loose", "b\n") })
+	// CROSS has code in two repos: one change per repo, both at revision 1.
+	// "alpha" sorts first although its change is frozen second.
+	gitIn(other, "init", "-q", "-b", "main")
+	gitIn(other, "config", "user.name", "Test")
+	gitIn(other, "config", "user.email", "test@example.test")
+	writeOther := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(other, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeOther("g", "alpha\n")
+	gitIn(other, "add", "-A")
+	gitIn(other, "commit", "-qm", "alpha trunk")
+	otherTrunk := gitIn(other, "rev-parse", "HEAD")
+	crossRepo := freeze("CROSS", "cross-repo", trunk, func() { write("cross", "in repo\n") })
+	crossAlpha := freezeIn(other, "alpha", "CROSS", "cross-alpha", otherTrunk, func() { writeOther("g", "alpha changed\n") })
 
 	// Lead stack: LOW, MID (rebuilt on LOW), TOP.
 	git("checkout", "-q", "-b", "lead", trunk)
@@ -104,6 +128,7 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 		}
 	}
 	run(`INSERT INTO workspace_repos (workspace,repo,trunk,workspace_branch,base_sha) VALUES ('W','repo','main','lead',?)`, trunk)
+	run(`INSERT INTO workspace_repos (workspace,repo,trunk,workspace_branch,base_sha) VALUES ('W','alpha','main','lead',?)`, otherTrunk)
 	run(`INSERT INTO working_areas (workspace,lead,repo,path,branch,base_sha,mode) VALUES ('W','lead','repo',?,'lead',?,'interactive')`, repo, trunk)
 	for i, layer := range []struct {
 		rev      loomgit.Revision
@@ -120,7 +145,12 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 		VALUES ('req-loose','W','other',?,?,?,?,'[]','[]','done')`, loose.Change, loose.Number, trunk, loose.HeadSHA)
 
 	open := func() (*gitread.Reader, func() error, error) {
-		return gitread.OpenLocal(func(string, string) string { return repo })
+		return gitread.OpenLocal(func(_, name string) string {
+			if name == "alpha" {
+				return other
+			}
+			return repo
+		})
 	}
 	previousReader := openRevisionReader
 	openRevisionReader = open
@@ -128,18 +158,27 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/diff", handleTaskDiff(open))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
-	taskDiff := func(task string) gitread.TaskDiff {
+	taskDiffs := func(task string) []gitread.TaskDiff {
 		t.Helper()
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/workspaces/W/issues/"+task, nil))
 		var body struct {
-			Success bool             `json:"success"`
-			Data    gitread.TaskDiff `json:"data"`
+			Success bool               `json:"success"`
+			Data    []gitread.TaskDiff `json:"data"`
 		}
 		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil || !body.Success {
 			t.Fatalf("%s diff: %d %s", task, rec.Code, rec.Body.String())
 		}
 		return body.Data
+	}
+	// A single-repo task has exactly one entry.
+	taskDiff := func(task string) gitread.TaskDiff {
+		t.Helper()
+		diffs := taskDiffs(task)
+		if len(diffs) != 1 {
+			t.Fatalf("%s: %d repo diffs, want 1", task, len(diffs))
+		}
+		return diffs[0]
 	}
 	patches := func(d gitread.TaskDiff) string {
 		var out []string
@@ -175,6 +214,17 @@ func TestTaskDiffMatchesPRDiffPerLayer(t *testing.T) {
 	// the PR diff above is not the revision's base diff.
 	if own := prDiff(mid.BaseSHA, mid.HeadSHA); own == prDiff(lowTip, midTip) {
 		t.Fatal("fixture does not distinguish the layer diff from the revision diff")
+	}
+
+	// A cross-repo task shows every repo's diff, ordered by repo name, never
+	// one arbitrary repo's: each verdict must have its own repo's code shown.
+	cross := taskDiffs("CROSS/diff")
+	gitOther := func(args ...string) string { t.Helper(); return gitIn(other, args...) }
+	wantAlpha := gitOther("diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--no-color", "--patch", otherTrunk, crossAlpha.HeadSHA) + "\n"
+	if len(cross) != 2 ||
+		cross[0].Repo != "alpha" || cross[0].Change != crossAlpha.Change || cross[0].Compare != "base" || patches(cross[0]) != wantAlpha ||
+		cross[1].Repo != "repo" || cross[1].Change != crossRepo.Change || cross[1].Compare != "base" || patches(cross[1]) != prDiff(trunk, crossRepo.HeadSHA) {
+		t.Fatalf("cross-repo task diffs: %+v", cross)
 	}
 
 	// PR per task (trunk mode): every task's PR is its own revision on trunk,

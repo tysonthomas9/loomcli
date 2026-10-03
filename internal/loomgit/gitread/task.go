@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
@@ -20,8 +21,9 @@ type TaskStore interface {
 	DeliveryMode(context.Context, string) (string, error)
 }
 
-// TaskDiff is one task's reviewable diff: its newest revision against the
-// layer below it in the lead's stack (what its PR contains), else its base.
+// TaskDiff is one repo's reviewable diff for a task: that repo's newest
+// revision against the layer below it in the lead's stack (what its PR
+// contains), else its base.
 // In trunk mode each task's PR is its own revision on trunk, so it is always
 // the revision against its base.
 type TaskDiff struct {
@@ -33,17 +35,47 @@ type TaskDiff struct {
 	Compare string `json:"compare"`
 }
 
-// TaskDiff resolves the task's newest revision and diffs it the way its PR
-// shows it. An empty lead uses the lead that most recently applied the change.
-func (r *Reader) TaskDiff(ctx context.Context, workspace, task, lead string) (TaskDiff, error) {
+// TaskDiffs resolves the task's newest revision in each repo and diffs each
+// the way its PR shows it, ordered by repo name. A task gets one change per
+// repo, so a cross-repo task has one entry per repo. An empty lead uses the
+// lead that most recently applied each change.
+func (r *Reader) TaskDiffs(ctx context.Context, workspace, task, lead string) ([]TaskDiff, error) {
 	revisions, err := r.Tasks.ListTaskRevisions(ctx, workspace, task)
 	if err != nil {
-		return TaskDiff{}, err
+		return nil, err
 	}
 	if len(revisions) == 0 {
-		return TaskDiff{}, journal.ErrNotFound
+		return nil, journal.ErrNotFound
 	}
-	newest := revisions[0]
+	newest := map[string]loomgit.Revision{}
+	for _, rev := range revisions {
+		if current, ok := newest[rev.Change]; !ok || rev.Number > current.Number {
+			newest[rev.Change] = rev
+		}
+	}
+	mode, err := r.Tasks.DeliveryMode(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TaskDiff, 0, len(newest))
+	for _, rev := range newest {
+		diff, err := r.taskDiff(ctx, workspace, lead, mode, rev)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, diff)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Repo != out[j].Repo {
+			return out[i].Repo < out[j].Repo
+		}
+		return out[i].Change < out[j].Change
+	})
+	return out, nil
+}
+
+// taskDiff diffs one change's newest revision against the layer below it.
+func (r *Reader) taskDiff(ctx context.Context, workspace, lead, mode string, newest loomgit.Revision) (TaskDiff, error) {
 	repoName, err := r.Tasks.RepoForChange(ctx, workspace, newest.Change)
 	if err != nil {
 		return TaskDiff{}, err
@@ -54,10 +86,6 @@ func (r *Reader) TaskDiff(ctx context.Context, workspace, task, lead string) (Ta
 	}
 	out := TaskDiff{Change: newest.Change, Repo: repoName, Compare: "base"}
 	from, to, err := r.pair(ctx, repo, newest)
-	if err != nil {
-		return TaskDiff{}, err
-	}
-	mode, err := r.Tasks.DeliveryMode(ctx, workspace)
 	if err != nil {
 		return TaskDiff{}, err
 	}
