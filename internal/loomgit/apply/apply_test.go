@@ -23,6 +23,7 @@ type fixture struct {
 	store        *journal.SQLite
 	service      *Service
 	base, source string
+	dbPath       string
 }
 
 func newFixture(t *testing.T) *fixture { return fixtureWithSource(t, nil) }
@@ -39,7 +40,8 @@ func fixtureWithSource(t *testing.T, extend func(*testing.T, *fixture)) *fixture
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := journal.OpenSQLite(filepath.Join(t.TempDir(), "journal.sqlite"))
+	dbPath := filepath.Join(t.TempDir(), "journal.sqlite")
+	store, err := journal.OpenSQLite(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +50,7 @@ func fixtureWithSource(t *testing.T, extend func(*testing.T, *fixture)) *fixture
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{dir: dir, runner: runner, store: store, service: New(store, repo, runner)}
+	f := &fixture{dir: dir, runner: runner, store: store, service: New(store, repo, runner), dbPath: dbPath}
 	f.commit(t, "base", "base\n", "base")
 	f.base = f.git(t, "rev-parse", "HEAD")
 	f.git(t, "checkout", "-q", "-b", "source")
