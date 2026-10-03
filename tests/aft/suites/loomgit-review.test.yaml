@@ -151,7 +151,7 @@ tests:
     intent: A fresh product workspace and interactive lead both create working areas, so no supported product path reaches approved_waiting_for_working_area without modifying journal state; activate when one exists
     steps:
       - run: >-
-          python3 -c 'import sqlite3,sys; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); assert db.execute("select count(*) from working_areas where workspace=? and lead=?",("E2E-WS-REVIEW","lead")).fetchone()[0] == 0' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db"
+          python3 -c 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1],timeout=10); assert db.execute("select count(*) from working_areas where workspace=? and lead=?",("E2E-WS-REVIEW","lead")).fetchone()[0] == 0' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db"
         intent: Require a real product-created workspace with a lead but no working area
       - wait: { text: "Approved: Apply to create the lead working area" }
       - click: { role: button, name: Apply, exact: true }
