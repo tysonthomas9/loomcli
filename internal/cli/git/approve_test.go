@@ -50,7 +50,12 @@ func stubApprovePublish(t *testing.T, publisher func(context.Context, string, st
 		approveLocal, approveResolver, publishApprovedLocal = oldApprove, oldResolver, oldPublish
 		approveWorkspace, approveLead, approveOnly = oldWorkspace, oldLead, oldOnly
 	})
-	publishApprovedLocal = publisher
+	publishApprovedLocal = func(ctx context.Context, workspace, lead string, stacks publish.DeclaredStacks) ([]publish.ApprovalOutcome, error) {
+		if stacks == nil {
+			t.Fatal("approve did not pass the declared stacks to publish")
+		}
+		return publisher(ctx, workspace, lead)
+	}
 	approveWorkspace, approveLead = "", "lead-1"
 	approveResolver = func() (*cli.Resolver, error) {
 		return &cli.Resolver{Workspace: "workspace", Config: &config.LoomConfig{

@@ -154,10 +154,10 @@ func TestVerdictApproveAndCreatePROpensPRUnlessApproveOnly(t *testing.T) {
 	var publishCalls int
 	var outcome publish.ApprovalOutcome
 	var publishErr error
-	publishApproved = func(_ context.Context, workspace, lead string) ([]publish.ApprovalOutcome, error) {
+	publishApproved = func(_ context.Context, workspace, lead string, stacks publish.DeclaredStacks) ([]publish.ApprovalOutcome, error) {
 		publishCalls++
-		if workspace != "W" || lead != "lead" {
-			t.Fatalf("publish target = %s/%s", workspace, lead)
+		if workspace != "W" || lead != "lead" || stacks == nil {
+			t.Fatalf("publish target = %s/%s, declared stacks %v", workspace, lead, stacks)
 		}
 		return []publish.ApprovalOutcome{outcome}, publishErr
 	}

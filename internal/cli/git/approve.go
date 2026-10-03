@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
 var approveWorkspace string
@@ -68,7 +69,7 @@ func runApprove(cmd *cobra.Command, args []string) error {
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Approved and added to the lead working area")
 		return err
 	}
-	outcomes, publishErr := publishApprovedLocal(cmd.Context(), workspace.ID, approveLead)
+	outcomes, publishErr := publishApprovedLocal(cmd.Context(), workspace.ID, approveLead, stackstore.Declared())
 	for _, outcome := range outcomes {
 		if outcome.Change != args[0] {
 			continue

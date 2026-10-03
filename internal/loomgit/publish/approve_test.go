@@ -11,6 +11,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
+	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
 var reviewer = review.Actor{Kind: "human", ID: "reviewer"}
@@ -95,7 +97,7 @@ func TestApproveAndCreatePROpensNextLayerOfStack(t *testing.T) {
 	}
 	c := appliedTask(t, fx, "C", b.HeadSHA)
 	approveForLead(t, fx, c, reviewer, true, "applied")
-	outcomes, err := PublishApproved(ctx, "W", "L")
+	outcomes, err := PublishApproved(ctx, "W", "L", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +113,7 @@ func TestApproveAndCreatePROpensNextLayerOfStack(t *testing.T) {
 	if intent := intentStatus(t, fx, "C"); intent.Status != "published" || intent.PRNumber != 3 {
 		t.Fatalf("intent = %+v", intent)
 	}
-	again, err := PublishApproved(ctx, "W", "L")
+	again, err := PublishApproved(ctx, "W", "L", nil)
 	if err != nil || len(again) != 0 || len(forge.prs) != 3 {
 		t.Fatalf("second publish = %+v, %v; PRs=%+v", again, err, forge.prs)
 	}
@@ -121,7 +123,7 @@ func TestApproveAndCreatePRFirstTaskTargetsTrunk(t *testing.T) {
 	fx, forge := approvalFixture(t, "stack")
 	a := appliedTask(t, fx, "A", fx.base)
 	approveForLead(t, fx, a, reviewer, true, "applied")
-	if _, err := PublishApproved(context.Background(), "W", "L"); err != nil {
+	if _, err := PublishApproved(context.Background(), "W", "L", nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(forge.prs) != 1 || forge.prs[0].Base != "develop" {
@@ -133,7 +135,7 @@ func TestApproveAndCreatePRInTrunkModeOpensOwnPRToTrunk(t *testing.T) {
 	fx, forge := approvalFixture(t, "trunk")
 	a := appliedTask(t, fx, "A", fx.base)
 	approveForLead(t, fx, a, reviewer, true, "applied")
-	outcomes, err := PublishApproved(context.Background(), "W", "L")
+	outcomes, err := PublishApproved(context.Background(), "W", "L", nil)
 	if err != nil || len(outcomes) != 1 || outcomes[0].Status != "published" {
 		t.Fatalf("trunk outcomes = %+v, %v", outcomes, err)
 	}
@@ -168,7 +170,7 @@ func TestLeadApprovalOpensPROnlyUnderPolicy(t *testing.T) {
 	if verdict.Kind != "policy" {
 		t.Fatalf("lead verdict = %+v", verdict)
 	}
-	if _, err := PublishApproved(ctx, "W", "L"); err != nil {
+	if _, err := PublishApproved(ctx, "W", "L", nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(forge.prs) != 1 {
@@ -189,7 +191,7 @@ func TestHeldApplyOpensNoPRUntilItApplies(t *testing.T) {
 			Revision: a.Number, VerdictID: int(verdict.ID)}, held, nil); err != nil {
 			t.Fatal(err)
 		}
-		if outcomes, err := PublishApproved(ctx, "W", "L"); err != nil || len(outcomes) != 0 || len(forge.prs) != 0 {
+		if outcomes, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(outcomes) != 0 || len(forge.prs) != 0 {
 			t.Fatalf("%s approval published: %+v, %v; PRs=%+v", held, outcomes, err, forge.prs)
 		}
 	}
@@ -203,7 +205,7 @@ func TestHeldApplyOpensNoPRUntilItApplies(t *testing.T) {
 		Revision: a.Number, VerdictID: int(verdict.ID)}, "applied", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath); err != nil {
+	if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(forge.prs) != 1 || intentStatus(t, fx, "A").Status != "published" {
@@ -221,7 +223,7 @@ func TestPublishFailureAfterApplyRetriesOnceWithoutDuplicates(t *testing.T) {
 	a := appliedTask(t, fx, "A", fx.base)
 	approveForLead(t, fx, a, reviewer, true, "applied")
 	forge.createError = errors.New("provider down")
-	outcomes, err := PublishApproved(ctx, "W", "L")
+	outcomes, err := PublishApproved(ctx, "W", "L", nil)
 	if err == nil || len(outcomes) != 1 || outcomes[0].Status != "pending" || !strings.Contains(outcomes[0].Reason, "provider down") {
 		t.Fatalf("failed publish = %+v, %v", outcomes, err)
 	}
@@ -230,12 +232,12 @@ func TestPublishFailureAfterApplyRetriesOnceWithoutDuplicates(t *testing.T) {
 	}
 	forge.createError = nil
 	creates := forge.creates
-	if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath); err != nil || forge.creates != creates {
+	if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath, nil); err != nil || forge.creates != creates {
 		t.Fatalf("reconcile retried inside the back-off: %v, creates %d -> %d", err, creates, forge.creates)
 	}
 	now = now.Add(publishRetryDelay)
 	for range 3 {
-		if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath); err != nil {
+		if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -259,13 +261,13 @@ func TestApproveWithoutProviderAppliesAndSaysNotPublished(t *testing.T) {
 	t.Cleanup(func() { approvalPublishChange = previousPublish })
 	a := appliedTask(t, fx, "A", fx.base)
 	approveForLead(t, fx, a, reviewer, true, "applied")
-	outcomes, err := PublishApproved(ctx, "W", "L")
+	outcomes, err := PublishApproved(ctx, "W", "L", nil)
 	if err != nil || len(outcomes) != 1 || outcomes[0].Status != "not_published" ||
 		!strings.HasPrefix(outcomes[0].Reason, NoProviderReason) {
 		t.Fatalf("no-provider outcome = %+v, %v", outcomes, err)
 	}
 	for range 3 {
-		if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath); err != nil {
+		if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -282,7 +284,7 @@ func TestApproveOnlyRecordsNoPublishIntent(t *testing.T) {
 	ctx := context.Background()
 	a := appliedTask(t, fx, "A", fx.base)
 	approveForLead(t, fx, a, reviewer, false, "applied")
-	if outcomes, err := PublishApproved(ctx, "W", "L"); err != nil || len(outcomes) != 0 || len(forge.prs) != 0 {
+	if outcomes, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(outcomes) != 0 || len(forge.prs) != 0 {
 		t.Fatalf("Approve only published: %+v, %v; PRs=%+v", outcomes, err, forge.prs)
 	}
 	if _, found, _ := fx.store.LatestApprovalPublication(ctx, "W", "A", a.Number); found {
@@ -295,7 +297,7 @@ func TestSupersededApprovalClosesItsIntent(t *testing.T) {
 	ctx := context.Background()
 	a := appliedTask(t, fx, "A", fx.base)
 	approveForLead(t, fx, a, reviewer, true, "superseded")
-	outcomes, err := PublishApproved(ctx, "W", "L")
+	outcomes, err := PublishApproved(ctx, "W", "L", nil)
 	if err != nil || len(outcomes) != 1 || outcomes[0].Status != "superseded" || len(forge.prs) != 0 {
 		t.Fatalf("superseded outcome = %+v, %v; PRs=%+v", outcomes, err, forge.prs)
 	}
@@ -315,8 +317,102 @@ func TestApprovalAppliedAsDerivedRevisionStillPublishes(t *testing.T) {
 	if derived.Number <= approved.Number {
 		t.Fatalf("derived revision %d is not after approved %d", derived.Number, approved.Number)
 	}
-	outcomes, err := PublishApproved(ctx, "W", "L")
+	outcomes, err := PublishApproved(ctx, "W", "L", nil)
 	if err != nil || len(outcomes) != 1 || outcomes[0].Status != "published" || len(forge.prs) != 1 {
 		t.Fatalf("derived apply outcomes = %+v, %v; PRs=%+v", outcomes, err, forge.prs)
+	}
+}
+
+// declareStack declares stack id for W/repo containing task, the way
+// `loom stack init` and `loom stack add` do.
+func declareStack(t *testing.T, id, task string) *stackstore.LocalStore {
+	t.Helper()
+	ctx := context.Background()
+	stacks := stackstore.New(t.TempDir())
+	if err := stacks.EnsureStack(ctx, sl.Stack{ID: sl.StackID(id), WorkspaceKey: "W", RepoName: "repo", RootBase: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stacks.AddNode(ctx, "W", sl.StackID(id), task, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	return stacks
+}
+
+func TestDeclaredStackDoesNotOpenParallelPR(t *testing.T) {
+	for _, mode := range []string{"stack", "trunk"} {
+		t.Run(mode, func(t *testing.T) {
+			fx, forge := approvalFixture(t, mode)
+			ctx := context.Background()
+			now := time.Unix(1_700_000_000, 0)
+			previousNow := approvalNow
+			approvalNow = func() time.Time { return now }
+			t.Cleanup(func() { approvalNow = previousNow })
+			stacks := declareStack(t, "declared-feature", "task-A")
+			a := appliedTask(t, fx, "A", fx.base)
+			approveForLead(t, fx, a, reviewer, true, "applied")
+			outcomes, err := PublishApproved(ctx, "W", "L", stacks)
+			want := "not published: declared stack declared-feature is active; publish it with loom stack"
+			if err != nil || len(outcomes) != 1 || outcomes[0].Status != "not_published" || outcomes[0].Reason != want {
+				t.Fatalf("declared-stack outcome = %+v, %v", outcomes, err)
+			}
+			for range 3 {
+				now = now.Add(publishRetryDelay)
+				if err := ReconcileApprovalPublicationsAt(ctx, fx.storePath, stacks); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(forge.prs) != 0 || forge.creates != 0 {
+				t.Fatalf("auto-publish opened a parallel stack: %+v", forge.prs)
+			}
+			if publication, found, err := fx.store.Publication(ctx, "W", "A"); err != nil || found {
+				t.Fatalf("journal recorded a publication beside the declared stack: %+v, %v", publication, err)
+			}
+			if intent := intentStatus(t, fx, "A"); intent.Status != "not_published" || intent.Reason != want {
+				t.Fatalf("declared-stack intent = %+v", intent)
+			}
+			if applied, err := fx.store.RevisionApplied(ctx, "W", "L", "A", a.Number); err != nil || !applied {
+				t.Fatalf("declared-stack approval did not stay applied: %v, %v", applied, err)
+			}
+		})
+	}
+}
+
+func TestFinishedDeclaredStackDoesNotHoldPublish(t *testing.T) {
+	fx, forge := approvalFixture(t, "stack")
+	ctx := context.Background()
+	stacks := declareStack(t, "done-feature", "task-old")
+	if err := stacks.UpdateNode(ctx, "W", "done-feature", "task-old", func(n *sl.Node) error {
+		n.State = sl.NodeStateMerged
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := appliedTask(t, fx, "A", fx.base)
+	approveForLead(t, fx, a, reviewer, true, "applied")
+	outcomes, err := PublishApproved(ctx, "W", "L", stacks)
+	if err != nil || len(outcomes) != 1 || outcomes[0].Status != "published" || len(forge.prs) != 1 {
+		t.Fatalf("finished declared stack held the PR: %+v, %v; PRs=%+v", outcomes, err, forge.prs)
+	}
+}
+
+type failingStacks struct{}
+
+func (failingStacks) ActiveDeclaredStack(context.Context, string, string) (string, error) {
+	return "", errors.New("stacks.json unreadable")
+}
+
+func TestDeclaredStackLookupFailureKeepsIntentOpen(t *testing.T) {
+	fx, forge := approvalFixture(t, "stack")
+	ctx := context.Background()
+	a := appliedTask(t, fx, "A", fx.base)
+	approveForLead(t, fx, a, reviewer, true, "applied")
+	if _, err := PublishApproved(ctx, "W", "L", failingStacks{}); err == nil || len(forge.prs) != 0 {
+		t.Fatalf("lookup failure published or hid the error: %v; PRs=%+v", err, forge.prs)
+	}
+	if intent := intentStatus(t, fx, "A"); intent.Status != "pending" {
+		t.Fatalf("lookup failure settled the intent: %+v", intent)
+	}
+	if _, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(forge.prs) != 1 {
+		t.Fatalf("intent did not publish once the lookup recovered: %v; PRs=%+v", err, forge.prs)
 	}
 }
