@@ -167,12 +167,14 @@ var agentWait = 5 * time.Second
 // nativeActions maps Loom's permission actions to the actions OpenCode
 // b30c4d0 asserts: packages/core/src/tool/plugin/shell.ts asserts "shell";
 // edit.ts, write.ts and patch.ts assert "edit"; file-access.ts asserts
-// "read" and grep.ts and glob.ts assert "grep" and "glob", which only read.
+// "read" and grep.ts and glob.ts assert "grep" and "glob", which only read;
+// subagent.ts asserts "subagent" on the agent it starts.
 var nativeActions = map[string][]string{
-	"*":    {"*"},
-	"read": {"read", "grep", "glob"},
-	"edit": {"edit"},
-	"bash": {"shell"},
+	"*":        {"*"},
+	"read":     {"read", "grep", "glob"},
+	"edit":     {"edit"},
+	"bash":     {"shell"},
+	"subagent": {"subagent"},
 }
 
 // nativeRules renders Loom rules as OpenCode rules, keeping their order

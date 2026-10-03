@@ -471,6 +471,9 @@ func loadConfig(a loomstore.Agent) (Config, error) {
 // bridge registration for cfg's preset. Stored capabilities are never read.
 // A registration error (required wiring absent, or a bridge outage) stops
 // the launch: nothing is loosened and no other credentials are tried.
+// The preset's current Subagents decides subagentDeny, so an existing agent
+// gets a changed flag at its next Open or Resume; the stored flag counts
+// only for a preset no longer served.
 func (s *Service) policy(ctx context.Context, cfg Config) ([]loomharness.PermissionRule, error) {
 	caps, err := s.bridge(ctx, cfg.Preset)
 	if err != nil {
@@ -479,6 +482,13 @@ func (s *Service) policy(ctx context.Context, cfg Config) ([]loomharness.Permiss
 	rules := slices.Clone(cfg.Rules)
 	if caps.HasGitHubRead && caps.HasPublish {
 		rules = append(rules, publishDenies...)
+	}
+	subagents := cfg.Preset.Subagents
+	if p, err := s.presets.Get(ctx, cfg.Preset.Name); err == nil {
+		subagents = p.Subagents
+	}
+	if !subagents {
+		rules = append(rules, subagentDeny)
 	}
 	return rules, nil
 }

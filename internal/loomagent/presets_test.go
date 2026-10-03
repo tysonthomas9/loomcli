@@ -278,3 +278,45 @@ func TestPolicyBridgeCapsNotSetFromJSON(t *testing.T) {
 		t.Fatalf("encoded request = %s, %v", out, err)
 	}
 }
+
+// TestPolicySubagentDeny (SA1): a lead delegates through Loom child agents,
+// so its compiled policy ends with the subagent deny; task and
+// daemon-worker keep the harness's own subagent tool. An existing lead whose
+// stored preset still allowed it gets the deny from the current preset; a
+// preset no longer served keeps its stored flag.
+func TestPolicySubagentDeny(t *testing.T) {
+	ctx := context.Background()
+	s := newCreateEnv(t).service(ServiceConfig{})
+	compiled := func(cfg Config) []loomharness.PermissionRule {
+		t.Helper()
+		rules, err := s.policy(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rules
+	}
+	for _, c := range []struct {
+		preset string
+		deny   bool
+	}{{"lead", true}, {"task", false}, {"daemon-worker", false}} {
+		p := mustPreset(t, c.preset)
+		cfg, err := Resolve(p, CreateRequest{Preset: c.preset, Overrides: Overrides{Harness: "opencode"}}, "opencode", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules := compiled(cfg)
+		last := rules[len(rules)-1] == subagentDeny
+		has := slices.ContainsFunc(rules, func(r loomharness.PermissionRule) bool { return r.Action == "subagent" })
+		if last != c.deny || has != c.deny || p.Subagents == c.deny {
+			t.Errorf("%s: Subagents %v, rules %+v; want the subagent deny last = %v", c.preset, p.Subagents, rules, c.deny)
+		}
+	}
+	stored := Config{Preset: Preset{Name: "lead", Subagents: true}, Rules: allowAll}
+	if rules := compiled(stored); rules[len(rules)-1] != subagentDeny {
+		t.Errorf("existing lead stored with Subagents: rules %+v; want the current preset's subagent deny", rules)
+	}
+	gone := Config{Preset: Preset{Name: "retired-preset", Subagents: true}, Rules: allowAll}
+	if rules := compiled(gone); !slices.Equal(rules, allowAll) {
+		t.Errorf("unserved preset with Subagents: rules %+v; want its stored rules only", rules)
+	}
+}

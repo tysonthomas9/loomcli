@@ -152,7 +152,7 @@ func TestCreateSpecJSONConfigRoundTrip(t *testing.T) {
 		t.Fatalf("replay = %v, %v; want %s", again.AgentID, err, got.AgentID)
 	}
 	check(got.AgentID)
-	if spec := e.h.specs[0]; !reflect.DeepEqual(spec.Rules, want.Rules) || spec.Preset.Persona != "custom persona" {
+	if spec := e.h.specs[0]; !reflect.DeepEqual(spec.Rules, append(slices.Clone(want.Rules), subagentDeny)) || spec.Preset.Persona != "custom persona" {
 		t.Fatalf("Open got %+v", spec)
 	}
 }
@@ -546,7 +546,12 @@ func specOf(t *testing.T, e *createEnv, id string) Config {
 	return cfg
 }
 
+// hasPublishDenies reports whether rules end with the gh and git push denies,
+// before any subagent deny (which policy appends last).
 func hasPublishDenies(rules []loomharness.PermissionRule) bool {
+	if n := len(rules); n > 0 && rules[n-1] == subagentDeny {
+		rules = rules[:n-1]
+	}
 	return len(rules) >= 2 && slices.Equal(rules[len(rules)-2:], publishDenies)
 }
 

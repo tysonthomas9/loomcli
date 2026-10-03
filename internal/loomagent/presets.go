@@ -27,7 +27,7 @@ type Preset struct {
 	// Rules are evaluated last match wins. Background presets never use ask.
 	Rules       []loomharness.PermissionRule
 	Tools       []string // Loom agent tools served by the bridge
-	Subagents   bool     // a read-only harness helper is allowed
+	Subagents   bool     // the harness's own subagent tool is allowed; false denies it (subagentDeny)
 	Overridable []string // persona, max_budget_usd, max_run_duration, tools
 }
 
@@ -49,14 +49,22 @@ var publishDenies = []loomharness.PermissionRule{
 	{Action: "bash", Resource: "git push*", Effect: "deny"},
 }
 
+// subagentDeny ends the compiled policy of a preset without Subagents, so
+// its agent delegates through Loom child agents (agent_create), never the
+// harness's own subagent tool, which runs inside its session with no Loom
+// agent (design v2 §10). It follows allow rules, so OpenCode's Always grants
+// never re-allow it (Session.install).
+var subagentDeny = loomharness.PermissionRule{Action: "subagent", Resource: "*", Effect: "deny"}
+
 var presets = []Preset{
 	{Name: "lead", Version: 1, Mode: "persistent", RoleKind: "interactive", OwnerKind: "user",
-		Persona: "You are a lead agent. You own one feature, work in your worktree and delegate to task agents.",
-		Rules:   allowAll, Tools: []string{"agent_create", "agent_list", "agent_get", "agent_send", "agent_archive", "github_read"},
-		Subagents: true, Overridable: []string{"persona", "max_budget_usd"}},
+		Persona: "You are a lead agent. You own one feature, work in your worktree and delegate to task agents. " +
+			"Whenever you are asked to start, call or delegate to an agent, create a Loom agent with loom.agent_create.",
+		Rules: allowAll, Tools: []string{"agent_create", "agent_list", "agent_get", "agent_send", "agent_archive", "github_read"},
+		Overridable: []string{"persona", "max_budget_usd"}},
 	{Name: "task", Version: 1, Mode: "single_task", RoleKind: "worker", OwnerKind: "parent", ExternalKeyFmt: "task:<ticket>",
 		Persona: "You are a task agent. Do the brief in your worktree and commit the result.",
-		Rules:   allowAll, Overridable: []string{"persona", "max_budget_usd", "max_run_duration"}},
+		Rules:   allowAll, Subagents: true, Overridable: []string{"persona", "max_budget_usd", "max_run_duration"}},
 	{Name: "pr-review-webhook", Version: 1, Mode: "single_task", RoleKind: "worker", OwnerKind: "workspace", ExternalKeyFmt: "pr-review:<owner>/<repo>#<n>@<sha>",
 		Persona: "You review a pull request at a pinned head and post the review with review_post.",
 		Rules: []loomharness.PermissionRule{
@@ -72,7 +80,7 @@ var presets = []Preset{
 		}, Subagents: true},
 	{Name: "daemon-worker", Version: 1, Mode: "single_task", RoleKind: "worker", OwnerKind: "workspace", ExternalKeyFmt: "issue:<id>",
 		Persona: "You are a worker. Resolve the issue in your worktree.",
-		Rules:   allowAll, Overridable: []string{"persona", "max_budget_usd", "max_run_duration", "tools"}},
+		Rules:   allowAll, Subagents: true, Overridable: []string{"persona", "max_budget_usd", "max_run_duration", "tools"}},
 }
 
 func init() {

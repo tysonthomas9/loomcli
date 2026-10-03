@@ -659,6 +659,7 @@ func TestProtocolPolicyTranslation(t *testing.T) {
 		{Action: "read", Resource: "*", Effect: "allow"},
 		{Action: "bash", Resource: "gh *", Effect: "deny"},
 		{Action: "edit", Resource: "*", Effect: "ask"},
+		{Action: "subagent", Resource: "*", Effect: "deny"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -667,7 +668,7 @@ func TestProtocolPolicyTranslation(t *testing.T) {
 	for _, r := range got {
 		flat = append(flat, r["action"]+":"+r["resource"]+":"+r["effect"])
 	}
-	want := []string{"*:*:deny", "read:*:allow", "grep:*:allow", "glob:*:allow", "shell:gh *:deny", "edit:*:ask"}
+	want := []string{"*:*:deny", "read:*:allow", "grep:*:allow", "glob:*:allow", "shell:gh *:deny", "edit:*:ask", "subagent:*:deny"}
 	if strings.Join(flat, ",") != strings.Join(want, ",") {
 		t.Fatalf("native rules = %v; want %v (order kept)", flat, want)
 	}
@@ -1346,6 +1347,51 @@ func TestProtocolAlwaysGrantUnderADefaultDeny(t *testing.T) {
 			t.Errorf("%s %s after Always = %s; want %s", c.action, c.resource, got, c.want)
 		}
 	}
+}
+
+// TestProtocolAlwaysGrantKeepsTheSubagentDeny (SA1): a lead's policy ends
+// with a subagent deny after its allow rules, an explicit deny, so it is
+// applied again after the session's Always grants: no grant, even one on
+// the subagent action itself, re-enables OpenCode's subagent tool, before
+// or after a Resume that keeps the grants.
+func TestProtocolAlwaysGrantKeepsTheSubagentDeny(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	rules := []loomharness.PermissionRule{
+		{Action: "read", Resource: "*", Effect: "allow"},
+		{Action: "edit", Resource: "*", Effect: "allow"},
+		{Action: "bash", Resource: "*", Effect: "allow"},
+		{Action: "subagent", Resource: "*", Effect: "deny"},
+	}
+	a, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(a)
+	st.perms["per_1"] = permReq{Session: a.NativeID, Action: "external_directory", Resources: []string{"/tmp/x"}, Save: []string{"/tmp/*"}}
+	st.perms["per_2"] = permReq{Session: a.NativeID, Action: "subagent", Resources: []string{"general"}, Save: []string{"*"}}
+	for _, id := range []string{"per_1", "per_2"} {
+		if err := s.Reply(ctx, id, loomharness.Reply{Allow: true, Always: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(when string) {
+		t.Helper()
+		if got := st.effect(a.NativeID, "external_directory", "/tmp/y"); got != "allow" {
+			t.Fatalf("%s: external_directory /tmp/y = %s; want allow (the grant holds)", when, got)
+		}
+		for _, agent := range []string{"general", "explore"} {
+			if got := st.effect(a.NativeID, "subagent", agent); got != "deny" {
+				t.Fatalf("%s: subagent %s = %s; want deny (the lead's deny beats every grant)", when, agent, got)
+			}
+		}
+	}
+	check("after Always")
+	if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err != nil {
+		t.Fatal(err)
+	}
+	check("after a Resume with the same rules")
 }
 
 // TestProtocolAlwaysGrantRollsBack (codex, 11588cd1e and 863aa26b5): a
