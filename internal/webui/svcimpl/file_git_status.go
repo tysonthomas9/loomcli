@@ -135,10 +135,11 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 	if err != nil {
 		return nil, err
 	}
-	wsRoot := ws.Path
-	checkouts := workspaceFileCheckouts(wsID, wsRoot, ws)
-	inspectable := presentGitCheckouts(wsRoot, checkouts)
-	items := s.inspectWorkspaceCheckouts(ctx, inspectable, true)
+	checkouts := workspaceFileCheckouts(wsID, ws.Path, ws)
+	inspectable := presentGitCheckouts(ws.Path, checkouts)
+	apiCheckouts := s.agentAPICheckouts(ctx, wsID, ws)
+	checkouts = append(checkouts, apiCheckouts...)
+	items := s.inspectWorkspaceCheckouts(ctx, append(inspectable, apiCheckouts...), true)
 	byPath := make(map[string]workspaceGitInspection, len(items))
 	for _, item := range items {
 		byPath[item.checkout.path] = item
@@ -151,9 +152,8 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 			Agent: checkout.agent,
 			Repo:  checkout.repo,
 		}
-		if checkoutPathPresent(wsRoot, checkout.path) {
+		if inspection, present := byPath[checkout.path]; present {
 			item.Exists = true
-			inspection := byPath[checkout.path]
 			if inspection.err != nil {
 				item.StatusError = true
 				item.Error = inspection.err.Error()
@@ -179,6 +179,34 @@ func (s *fileServiceImpl) ListFileCheckouts(ctx context.Context, wsID string) (*
 	result.Checkouts = out
 	sortCheckoutErrors(result.Errors)
 	return result, nil
+}
+
+// agentAPIWorktreeLister lists a workspace's Agent API agents' worktrees.
+type agentAPIWorktreeLister interface {
+	ListAgentAPIWorktrees(ctx context.Context, workspaceID string) []*ops.AgentWorktree
+}
+
+// agentAPICheckouts are the checked-out worktrees of wsID's Agent API agents,
+// for the checkout list only: they live outside the workspace folder, and
+// their git and file write routes stay refused (3.2t). A listed v5 agent of
+// the same name wins, as in agent-scope resolution.
+func (s *fileServiceImpl) agentAPICheckouts(ctx context.Context, wsID string, ws *ops.WorkspaceData) []gitStatusCheckout {
+	lister, ok := s.fileOps.(agentAPIWorktreeLister)
+	if !ok {
+		return nil
+	}
+	var out []gitStatusCheckout
+	for _, wt := range lister.ListAgentAPIWorktrees(ctx, wsID) {
+		if wt == nil || agentTargetExists(ws, wt.Name) || validateAgentName(wt.Name) != nil || validateGitCheckoutRoot(wt.Path) != nil {
+			continue
+		}
+		path, err := filepath.Abs(wt.Path)
+		if err != nil {
+			continue
+		}
+		out = append(out, gitStatusCheckout{kind: "agent", agent: wt.Name, repo: wt.RepoName, path: path})
+	}
+	return out
 }
 
 func presentGitCheckouts(wsRoot string, checkouts []gitStatusCheckout) []gitStatusCheckout {

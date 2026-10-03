@@ -45,3 +45,45 @@ func TestFileServiceImpl_AgentScopeServesAgentAPIWorktree(t *testing.T) {
 		t.Fatal("an unlisted v5 worktree was served")
 	}
 }
+
+// ListAgentAPIWorktrees lists agt_1's worktree as the workspace's only Agent
+// API agent.
+func (m agentAPIFileOps) ListAgentAPIWorktrees(_ context.Context, ws string) []*ops.AgentWorktree {
+	if ws != "ws" {
+		return nil
+	}
+	return []*ops.AgentWorktree{{Name: "agt_1", Path: m.root, RepoName: "repo-a", AgentAPI: true}}
+}
+
+// The Files browser's checkout list includes an Agent API agent's worktree,
+// outside the workspace folder, with its uncommitted change count, so its
+// Changes badge and Working tree show its edits (GT1). It stays read-only.
+func TestFileServiceImpl_ListFileCheckouts_IncludesAgentAPIAgents(t *testing.T) {
+	ctx := context.Background()
+	wsRoot, root := t.TempDir(), t.TempDir()
+	initGitRepo(t, root)
+	mustWrite(t, filepath.Join(root, "README.md"), "one\n")
+	commitAll(t, root)
+	mustWrite(t, filepath.Join(root, "README.md"), "two\n")
+	mustWrite(t, filepath.Join(root, "notes.txt"), "new\n")
+	svc := NewFileService(agentAPIFileOps{root: root, scopedMockFileOps: scopedMockFileOps{wsRoot: wsRoot,
+		wsData: &ops.WorkspaceData{ID: "ws", Path: wsRoot, Repos: []ops.WorkspaceRepo{{Name: "repo-a"}},
+			Agents: []ops.WorkspaceAgentInfo{{Name: "agent-a"}}}}})
+
+	result, err := svc.ListFileCheckouts(ctx, "ws")
+	if err != nil {
+		t.Fatalf("ListFileCheckouts: %v", err)
+	}
+	var got *service.FileCheckout
+	for i, c := range result.Checkouts {
+		if c.Agent == "agt_1" {
+			got = &result.Checkouts[i]
+		}
+	}
+	if got == nil || got.Kind != "agent" || got.Repo != "repo-a" || !got.Exists || got.ChangeCount != 2 || got.Branch == "" {
+		t.Fatalf("agt_1 checkout = %+v in %+v", got, result.Checkouts)
+	}
+	if _, err := svc.RepairCheckout(ctx, "ws", service.FileCheckoutRepairRequest{Scope: "agent", Target: "agt_1"}); err == nil {
+		t.Fatal("repaired an Agent API agent's checkout")
+	}
+}

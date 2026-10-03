@@ -41,3 +41,25 @@ func TestResolveAgentWorktree_FallsBackToAgentAPI(t *testing.T) {
 		t.Fatalf("Agent API asked %v", asked)
 	}
 }
+
+// The Files browser lists Agent API agents' worktrees through the lister the
+// serve wiring sets; without it there are none (GT1).
+func TestListAgentAPIWorktrees(t *testing.T) {
+	ctx := context.Background()
+	if got := NewGitOps().ListAgentAPIWorktrees(ctx, "WS1"); got != nil {
+		t.Fatalf("unwired ListAgentAPIWorktrees = %v", got)
+	}
+	want := &ops.AgentWorktree{Name: "agt_1", Path: "/wt/api/agt_1", RepoName: "api", AgentAPI: true}
+	g := NewGitOps().WithAgentAPIWorktrees(func(_ context.Context, ws string) []*ops.AgentWorktree {
+		if ws != "WS1" {
+			return nil
+		}
+		return []*ops.AgentWorktree{want}
+	})
+	if got := g.ListAgentAPIWorktrees(ctx, "WS1"); len(got) != 1 || got[0] != want {
+		t.Fatalf("ListAgentAPIWorktrees(WS1) = %v", got)
+	}
+	if got := g.ListAgentAPIWorktrees(ctx, ""); got != nil {
+		t.Fatalf("ListAgentAPIWorktrees(\"\") = %v", got)
+	}
+}

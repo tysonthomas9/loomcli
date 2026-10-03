@@ -45,6 +45,12 @@ func TestWorktree(t *testing.T) {
 	if !ok || got.Path != wt || got.Branch != branch || got.DefaultBranch != base || got.RepoName != "app" || !got.AgentAPI {
 		t.Fatalf("Worktree(a1) = %+v, %v", got, ok)
 	}
+	if all := a.Worktrees(ctx, "ws"); len(all) != 1 || all[0].Name != "a1" || all[0].Path != wt || !all[0].AgentAPI {
+		t.Fatalf("Worktrees(ws) = %+v; want only a1's", all)
+	}
+	if all := a.Worktrees(ctx, "other"); len(all) != 0 {
+		t.Fatalf("Worktrees(other) = %+v", all)
+	}
 	for _, c := range []struct{ ws, id string }{{"other", "a1"}, {"ws", "a2"}, {"ws", "missing"}} {
 		if _, ok := a.Worktree(ctx, c.ws, c.id); ok {
 			t.Fatalf("Worktree(%s, %s) found one", c.ws, c.id)
@@ -55,5 +61,8 @@ func TestWorktree(t *testing.T) {
 	}
 	if _, ok := a.Worktree(ctx, "ws", "a1"); ok {
 		t.Fatal("found a deleted agent's worktree")
+	}
+	if all := a.Worktrees(ctx, "ws"); len(all) != 0 {
+		t.Fatalf("Worktrees listed a deleted agent's worktree: %+v", all)
 	}
 }

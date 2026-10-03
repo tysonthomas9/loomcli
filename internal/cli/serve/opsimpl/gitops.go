@@ -24,8 +24,9 @@ import (
 
 // GitOpsImpl implements ops.GitOps using the cli package git functions.
 type GitOpsImpl struct {
-	store    store.Store
-	agentAPI AgentAPIWorktree
+	store        store.Store
+	agentAPI     AgentAPIWorktree
+	agentAPIList AgentAPIWorktrees
 }
 
 // NewGitOps creates a new GitOps implementation.

@@ -2391,6 +2391,50 @@ describe("WorkspaceFileBrowser", () => {
     ).toBeNull();
   });
 
+  it("counts and groups an Agent API agent's uncommitted changes (GT1)", async () => {
+    storeWorkingCompareMode();
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "agt_1",
+          repo: "loomcli",
+          exists: true,
+          change_count: 2,
+        },
+      ],
+    });
+    mocks.gitStatusScoped.mockResolvedValue({
+      status: { "README.md": " M", "notes.txt": "??" },
+      partial: false,
+      limit_hit: false,
+      errors: [],
+    });
+    render(
+      <ExtraBrowserAgent.Provider
+        value={{
+          name: "agt_1",
+          repos: ["loomcli"],
+          repo_groups: [],
+          cross_repo: false,
+        }}
+      >
+        <WorkspaceFileBrowser mode="agent" agentName="agt_1" />
+      </ExtraBrowserAgent.Provider>,
+    );
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+2/ }));
+    expect(
+      await screen.findByRole("tab", { name: /Working tree/ }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("agt_1 · loomcli · 2")).toBeInTheDocument();
+    expect(mocks.gitStatusScoped).toHaveBeenCalledWith("ws-1", {
+      scope: "agent",
+      target: "agt_1",
+      repo: "loomcli",
+    });
+  });
+
   it("shows capability loading and fail-closed retry states", async () => {
     mocks.capabilities = { read: true, write: false, sensitive: false };
     mocks.capabilitiesLoading = true;

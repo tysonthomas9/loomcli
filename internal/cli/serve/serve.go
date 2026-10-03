@@ -276,7 +276,7 @@ func startAgentAPI(ctx context.Context, cfg webui.ServerConfig) *agentwire.API {
 func wireAgentAPI(cfg *webui.ServerConfig, api *agentwire.API) {
 	cfg.AgentAPIRoutes = api.Register
 	if g, ok := cfg.GitOps.(*opsimpl.GitOpsImpl); ok {
-		g.WithAgentAPI(api.Worktree)
+		g.WithAgentAPI(api.Worktree).WithAgentAPIWorktrees(api.Worktrees)
 	}
 	bind := cfg.BindAddress
 	cfg.OnListen = func(port int) { api.SetAPIBase(agentAPIBase(bind, port)) }

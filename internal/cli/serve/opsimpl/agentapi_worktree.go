@@ -11,12 +11,32 @@ import (
 // ok is false when there is none.
 type AgentAPIWorktree func(ctx context.Context, ws, id string) (wt *ops.AgentWorktree, ok bool)
 
+// AgentAPIWorktrees lists the checked-out worktrees of workspace ws's Agent
+// API agents.
+type AgentAPIWorktrees func(ctx context.Context, ws string) []*ops.AgentWorktree
+
 // WithAgentAPI lets agent-scoped git, diff and file reads resolve Agent API
 // agents too, so their agent page has Git, Diff and Files tabs. A v5 agent of
 // the same name still wins.
 func (g *GitOpsImpl) WithAgentAPI(fn AgentAPIWorktree) *GitOpsImpl {
 	g.agentAPI = fn
 	return g
+}
+
+// WithAgentAPIWorktrees lets the Files browser's checkout list include Agent
+// API agents' worktrees, read-only.
+func (g *GitOpsImpl) WithAgentAPIWorktrees(fn AgentAPIWorktrees) *GitOpsImpl {
+	g.agentAPIList = fn
+	return g
+}
+
+// ListAgentAPIWorktrees lists the checked-out worktrees of workspaceID's Agent
+// API agents; none when the Agent API is not wired.
+func (g *GitOpsImpl) ListAgentAPIWorktrees(ctx context.Context, workspaceID string) []*ops.AgentWorktree {
+	if g == nil || g.agentAPIList == nil || workspaceID == "" {
+		return nil
+	}
+	return g.agentAPIList(ctx, workspaceID)
 }
 
 // ResolveAgentWorktree resolves an agent name to its worktree info: a v5
