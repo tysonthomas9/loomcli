@@ -1,0 +1,95 @@
+# P2.18 (D29 "review a task, not a revision"): the task panel's Changes tab
+# shows one diff per task, the same as its PR, with older revisions read-only
+# under History. Real TaskRuns record the revisions (the deterministic Codex
+# fixture only writes the file); verdicts go through the product route.
+suite: loomgit-task-diff
+classification: { area: reviews, feature: task-diff, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  set -e;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh" setup E2E-WS-TASKDIFF stack;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh" setup E2E-WS-TASKDIFF-TRUNK trunk
+teardown: >-
+  bash "$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh" teardown E2E-WS-TASKDIFF;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh" teardown E2E-WS-TASKDIFF-TRUNK
+
+tests:
+  - name: stacked tasks each show the diff their PR contains
+    intent: The bottom layer compares with trunk, a layer applied after the one below moved compares with that layer, and an unapplied task compares with its own base
+    steps:
+      - run: >-
+          set -e;
+          s="$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh";
+          bash "$s" run E2E-WS-TASKDIFF low taskdiff-low.txt;
+          bash "$s" run E2E-WS-TASKDIFF mid taskdiff-mid.txt
+        intent: Two real TaskRuns record revisions on trunk before either is approved
+      - run: >-
+          set -e;
+          s="$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh";
+          bash "$s" approve E2E-WS-TASKDIFF low;
+          bash "$s" approve E2E-WS-TASKDIFF mid
+        intent: Approving applies low as the bottom layer, then mid on top of it after its base moved
+      - run: >-
+          bash "$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh" run E2E-WS-TASKDIFF loose taskdiff-loose.txt
+        intent: A third task records a revision that is never approved
+      - run: >-
+          set -e;
+          s="$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh";
+          bash "$s" diff E2E-WS-TASKDIFF low trunk taskdiff-low.txt trunk low-tip;
+          bash "$s" diff E2E-WS-TASKDIFF mid layer taskdiff-mid.txt low-tip mid-tip;
+          bash "$s" diff E2E-WS-TASKDIFF loose base taskdiff-loose.txt
+        intent: Each task diff equals Git's diff between the layer below (or trunk) and the task's layer; the unapplied task uses its base
+      - run: >-
+          set -e;
+          task="$(cat "$AFT_WORK_DIR/E2E-WS-TASKDIFF-mid-task")";
+          curl -fsS "$AFT_BASE_URL/api/workspaces/E2E-WS-TASKDIFF/issues/$task/revisions" > "$AFT_WORK_DIR/taskdiff-mid-revisions.json";
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert len(d) >= 2, d; assert all(r["repo"] == "e2e-ws-taskdiff-repo" for r in d), d; assert not d[0]["superseded"], d; assert all(r["date"] for r in d), d' "$AFT_WORK_DIR/taskdiff-mid-revisions.json"
+        intent: The revisions list names the repo the diff route accepts, a date, and leaves the newest revision unsuperseded
+      - open: /ws/E2E-WS-TASKDIFF/kanban
+        intent: Load the workspace before following the task deep link
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-TASKDIFF/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TASKDIFF-mid-task")"
+        intent: Open the middle task's panel
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: "against the layer below it in the stack" }
+      - expect: { visible: { testid: task-changes-tab } }
+      - wait: { text: taskdiff-mid.txt }
+      - expect: { notText: taskdiff-low.txt }
+      - wait:
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => b.textContent === 'Approve').length === 1"
+        intent: Only the task's newest revision has verdict buttons
+      - click: { role: button, name: "History (1)", exact: true }
+      - click: { role: button, name: "Revision 1", exact: true }
+      - wait: { text: "Revision 1 (read-only history), against its base" }
+      - wait:
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].filter(b => b.textContent === 'Approve').length === 1"
+        intent: The old revision's diff opens read-only; the only verdict buttons still belong to the newest revision
+
+  - name: with a PR per task, each task compares with trunk
+    intent: In trunk mode a task's PR is its own revision on trunk, so a task applied over another still shows only its own change against trunk
+    steps:
+      - run: >-
+          set -e;
+          s="$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh";
+          bash "$s" run E2E-WS-TASKDIFF-TRUNK first taskdiff-first.txt;
+          bash "$s" run E2E-WS-TASKDIFF-TRUNK second taskdiff-second.txt;
+          bash "$s" approve E2E-WS-TASKDIFF-TRUNK first;
+          bash "$s" approve E2E-WS-TASKDIFF-TRUNK second
+        intent: Two real TaskRuns are approved and applied in the trunk-mode workspace
+      - run: >-
+          set -e;
+          s="$AFT_TESTS_DIR/scripts/loomgit-task-diff.sh";
+          bash "$s" diff E2E-WS-TASKDIFF-TRUNK first trunk taskdiff-first.txt;
+          bash "$s" diff E2E-WS-TASKDIFF-TRUNK second trunk taskdiff-second.txt
+        intent: Both task diffs compare with trunk and name only their own file
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-TASKDIFF-TRUNK/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TASKDIFF-TRUNK-second-task")"
+        intent: Open the second task in trunk mode
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: "against trunk" }
+      - wait: { text: taskdiff-second.txt }
+      - expect: { notText: taskdiff-first.txt }
