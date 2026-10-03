@@ -157,12 +157,12 @@ func listCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if jsonOut {
-				return cmdstore.WriteJSON(stacks)
-			}
 			published, err := publishedStacks(cmd.Context(), ws)
 			if err != nil {
 				return err
+			}
+			if jsonOut {
+				return cmdstore.WriteJSON(stackListEntries(stacks, published))
 			}
 			if len(stacks) == 0 && len(published) == 0 {
 				fmt.Println("no stacks")
@@ -465,6 +465,29 @@ func baseOrRoot(n sl.Node, root string) string {
 // publishedStacks reads the Loom Git stacks Create PR and Approve recorded, so
 // a cross-repo lead's per-repo stack IDs are visible for merge-up-to.
 var publishedStacks = publish.PublishedStacksLocal
+
+// stackListEntry is one row of `loom stack list --json`: a stack declared with
+// `loom stack init` (source "declared") or a Loom Git stack recorded by Create
+// PR or Approve (source "published"), the same stacks the text output lists.
+type stackListEntry struct {
+	ID     string                        `json:"id"`
+	Repo   string                        `json:"repo"`
+	Source string                        `json:"source"`
+	Base   string                        `json:"base,omitempty"`
+	Slug   string                        `json:"slug,omitempty"`
+	Layers []publish.PublishedStackLayer `json:"layers,omitempty"`
+}
+
+func stackListEntries(stacks []sl.Stack, published []publish.PublishedStack) []stackListEntry {
+	entries := make([]stackListEntry, 0, len(stacks)+len(published))
+	for _, stack := range stacks {
+		entries = append(entries, stackListEntry{ID: string(stack.ID), Repo: stack.RepoName, Source: "declared", Base: stack.RootBase})
+	}
+	for _, stack := range published {
+		entries = append(entries, stackListEntry{ID: stack.StackID, Repo: stack.Repo, Source: "published", Slug: stack.Slug, Layers: stack.Layers})
+	}
+	return entries
+}
 
 func printPublishedStacks(stacks []publish.PublishedStack) {
 	for _, stack := range stacks {
