@@ -1541,6 +1541,24 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/git/settings": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the workspace Git settings (delivery mode, lead may approve, lead may merge) */
+    get: operations["getGitSettings"];
+    /** Change workspace Git settings; lead may approve and lead may merge are human only */
+    put: operations["updateGitSettings"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/git/apply": {
     parameters: {
       query?: never;
@@ -2484,6 +2502,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    GitSettings: {
+      /** @enum {string} */
+      delivery_mode: "stack" | "trunk";
+      lead_may_approve_publish: boolean;
+      /** @enum {string} */
+      lead_may_merge: "off" | "when_green";
+    };
     MergeStackView: {
       stack_id: string;
       target: string;
@@ -7114,6 +7139,77 @@ export interface operations {
         content: {
           "application/json": Record<string, never>;
         };
+      };
+    };
+  };
+  getGitSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current Git settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GitSettings"];
+        };
+      };
+    };
+  };
+  updateGitSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @enum {string} */
+          delivery_mode?: "stack" | "trunk";
+          lead_may_approve_publish?: boolean;
+          /** @enum {string} */
+          lead_may_merge?: "off" | "when_green";
+          actor: {
+            /** @enum {string} */
+            kind: "human" | "agent" | "lead";
+            id?: string;
+          };
+        };
+      };
+    };
+    responses: {
+      /** @description Updated Git settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            settings: components["schemas"]["GitSettings"];
+            warning: string;
+          };
+        };
+      };
+      /** @description The actor may not change this setting */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
