@@ -95,6 +95,8 @@ describe("TaskChangesTab", () => {
     expect(getTaskDiff).toHaveBeenCalledTimes(1);
     expect(getRevisionDiff).not.toHaveBeenCalled();
     expect(screen.getByText("+task")).toBeInTheDocument();
+    // The patch's trailing newline is not rendered as an empty line.
+    expect(document.querySelectorAll('[data-type="context"]')).toHaveLength(0);
     const files = screen.getByRole("complementary", { name: "Changed files" });
     expect(within(files).getAllByRole("button")).toHaveLength(2);
     fireEvent.click(within(files).getByRole("button", { name: "big.bin" }));
@@ -116,6 +118,21 @@ describe("TaskChangesTab", () => {
         "lead",
       ),
     );
+  });
+
+  it("reloads the task diff after a verdict applies the revision", async () => {
+    getTaskDiff
+      .mockResolvedValueOnce({ ...taskDiff, compare: "base" })
+      .mockResolvedValue({ ...taskDiff, compare: "trunk" });
+    render(<TaskChangesTab workspaceId="W" taskId="T" />);
+    expect(
+      await screen.findByText("Revision 2 against its base (not applied yet)"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(
+      await screen.findByText("Revision 2 against trunk"),
+    ).toBeInTheDocument();
+    expect(getTaskDiff).toHaveBeenCalledTimes(2);
   });
 
   it("lists older revisions read-only under History with their own diffs", async () => {

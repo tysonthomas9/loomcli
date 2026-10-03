@@ -45,14 +45,19 @@ export function TaskChangesTab({
   const [error, setError] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const [viewing, setViewing] = useState<ReviewRevision | null>(null);
+  const [version, setVersion] = useState(0);
+
+  // A different task starts clean; a reload after a verdict keeps the view.
+  useEffect(() => {
+    setRevisions(null);
+    setDiff(null);
+    setShowHistory(false);
+    setViewing(null);
+  }, [workspaceId, taskId, lead]);
 
   useEffect(() => {
     let active = true;
-    setRevisions(null);
-    setDiff(null);
     setError("");
-    setShowHistory(false);
-    setViewing(null);
     getTaskRevisions(workspaceId, taskId, lead)
       .then(async (items) => {
         if (!active) return;
@@ -67,7 +72,7 @@ export function TaskChangesTab({
     return () => {
       active = false;
     };
-  }, [workspaceId, taskId, lead]);
+  }, [workspaceId, taskId, lead, version]);
 
   if (error) {
     return (
@@ -93,6 +98,7 @@ export function TaskChangesTab({
           workspaceId={workspaceId}
           taskId={taskId}
           lead={lead}
+          onChanged={() => setVersion((v) => v + 1)}
         />
       </div>
       {viewing ? (
@@ -230,7 +236,8 @@ function DiffFiles({ files }: { files: DiffFile[] }): JSX.Element {
             ) : (
               <DiffFileViewer
                 patch={{
-                  patch: selected.patch ?? "",
+                  // A trailing newline would render as an empty context line.
+                  patch: (selected.patch ?? "").replace(/\n$/, ""),
                   is_binary: false,
                   is_too_large: false,
                   ...lineStats(selected.patch ?? ""),
