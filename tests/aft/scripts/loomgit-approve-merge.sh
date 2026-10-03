@@ -10,6 +10,9 @@
 #           (stale_subject); another merges exactly once; the lead never merges
 #   cross   cross-repo lead: each repo's stack ID is shown by Create PR and
 #           loom stack list, and the task's Approve merges without one
+#   unclean Loom stack: the PR below lands with another trunk commit that
+#           changes the waiting PR's patch; its restack is clean but not
+#           patch-equivalent, so its approval is dropped and the task asks again
 set -Eeuo pipefail
 
 phase="$1"
@@ -50,6 +53,10 @@ if [[ "$phase" == setup ]]; then
     git -C "$remote" symbolic-ref HEAD refs/heads/main
     git init -q -b main "$repo"
     printf 'base %s\n' "$name" > "$repo/README.md"
+    if [[ "$case_name" == unclean ]]; then
+      seq -f 'shared line %g' 1 10 > "$repo/shared.txt"
+      git -C "$repo" add shared.txt
+    fi
     git -C "$repo" add README.md
     git -C "$repo" -c user.name=AFT -c user.email=aft@example.test commit -q -m base
     git -C "$repo" config core.sshCommand "sh $AFT_TESTS_DIR/fixtures/fake-github/git-ssh-bridge.sh $remote"
@@ -75,21 +82,24 @@ if [[ "$phase" == teardown ]]; then
   exit 0
 fi
 
-# run_tasks <chain|none> <name:repo>... runs one real task per argument through
-# the epic runner until each has a reviewable revision. With chain, each task
-# depends on the one before it, so their PRs form one stack.
+# run_tasks <chain|none> <name:repo[:design]>... runs one real task per argument
+# through the epic runner until each has a reviewable revision. With chain, each
+# task depends on the one before it, so their PRs form one stack. The task
+# writes approve-merge-<name>.txt unless a stub design is given.
 run_tasks() {
   local chain="$1"
   shift
   curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' \
     -d "{\"title\":\"approve-merge epic $case_name $RUN_ID\",\"issue_type\":\"epic\",\"priority\":2}" > "$case_dir/epic.json"
-  local epic previous="" spec name repo task
+  local epic previous="" spec name repo task design
   epic="$(json "$case_dir/epic.json" 'print(v["data"]["id"])')"
   for spec in "$@"; do
     name="${spec%%:*}"
     repo="${spec#*:}"
-    python3 -c 'import json,sys; print(json.dumps({"title":"approve-merge "+sys.argv[1]+" "+sys.argv[2],"issue_type":"task","priority":2,"parent":sys.argv[3],"source_repo":sys.argv[4],"design":"STUB_CODEX_PATCH=approve-merge-"+sys.argv[1]+".txt"}))' \
-      "$name" "$RUN_ID" "$epic" "$repo" |
+    design="STUB_CODEX_PATCH=approve-merge-$name.txt"
+    if [[ "$repo" == *:* ]]; then design="${repo#*:}"; repo="${repo%%:*}"; fi
+    python3 -c 'import json,sys; print(json.dumps({"title":"approve-merge "+sys.argv[1]+" "+sys.argv[2],"issue_type":"task","priority":2,"parent":sys.argv[3],"source_repo":sys.argv[4],"design":sys.argv[5]}))' \
+      "$name" "$RUN_ID" "$epic" "$repo" "$design" |
       curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$case_dir/task-$name.json"
     task="$(json "$case_dir/task-$name.json" 'print(v["data"]["id"])')"
     printf '%s\n' "$task" > "$case_dir/task-$name.id"
@@ -228,6 +238,21 @@ open_task() {
   browser wait '[data-testid="revisions-section"]' >/dev/null
 }
 
+# pr_merged_everywhere: every revision of the open task shows its PR as merged
+# and none still says it is open.
+pr_merged_everywhere() {
+  local texts=""
+  for _ in $(seq 1 15); do
+    texts="$(browser eval "[...document.querySelectorAll('[data-testid=\"revision-pr\"]')].map(e => e.textContent).join('|')")"
+    if [[ "$texts" == *"was merged"* && "$texts" != *"is open"* ]]; then return 0; fi
+    sleep 1
+    browser eval "location.reload()" >/dev/null || true
+    browser wait '[data-testid="revisions-section"]' >/dev/null || true
+  done
+  echo "task PR lines '$texts', want merged and none open" >&2
+  return 1
+}
+
 merge_status_text() {
   browser eval "document.querySelector('[data-testid=\"merge-status\"]')?.textContent || ''"
 }
@@ -345,8 +370,62 @@ case "$case_name" in
         browser click '[data-testid="approve-merge"]' >/dev/null
         wait_merged c
         wait_merge_status "Merged"
+        pr_merged_everywhere
         browser screenshot "$case_dir/loom-merged.png" >/dev/null
         hold_unmerged 4 d
+        ;;
+      *) echo "unknown stage $stage" >&2; exit 2 ;;
+    esac
+    ;;
+
+  unclean)
+    case "$stage" in
+      open)
+        # B appends to a file A leaves alone, so B's patch has context lines.
+        run_tasks chain a:"${repos[0]}" b:"${repos[0]}":STUB_CODEX_APPEND=shared.txt
+        for name in a b; do approve "$name"; wait_pr "$name"; done
+        ;;
+      wait)
+        pa="$(pull_of a)"
+        test "$(merge_approve b)" = 200
+        wait_state b waiting "merges after #$pa"
+        read -r _ approved _ _ < <(newest b)
+        printf '%s\n' "$approved" > "$case_dir/approved-b.number"
+        # A will land together with another trunk commit that edits a line
+        # inside B's patch context but not next to B's change: B's restack
+        # replays cleanly, yet its patch is no longer the one the human saw.
+        ahead="$(json "$case_dir/pulls-now.json" 'print([x for x in v if x["number"]==int(sys.argv[2])][0]["head"]["sha"])' "$pa")"
+        land="$case_dir/land"
+        git clone -q "$case_dir/${repos[0]}.git" "$land"
+        git -C "$land" checkout -q "$ahead"
+        python3 -c 'import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("shared line 8\n","shared line 8, edited on trunk\n"))' "$land/shared.txt"
+        git -C "$land" -c user.name=AFT -c user.email=aft@example.test commit -qam "trunk edit landed with A"
+        git -C "$land" push -q origin "HEAD:refs/heads/aft-land-a"
+        pr_status "$pa" "\"land_sha\":\"$(git -C "$land" rev-parse HEAD)\""
+        open_task b
+        wait_merge_status "Approved, merges after #$pa"
+        browser screenshot "$case_dir/unclean-merges-after.png" >/dev/null
+        ;;
+      merge)
+        test "$(merge_approve a)" = 200
+        wait_merged a
+        wait_state a merged
+        ;;
+      reapprove)
+        # B's restack was not patch-equivalent: the approval is dropped, B does
+        # not merge, and the task asks for approval of the new version.
+        pb="$(pull_of b)"
+        wait_state b reapproval_required "not clean; approve again"
+        read -r _ number _ _ < <(newest b)
+        test "$number" -gt "$(cat "$case_dir/approved-b.number")"
+        hold_unmerged 4 b
+        test "$(merge_puts "$pb")" = 0
+        json "$case_dir/newest-b.json" 'r=max(v["data"],key=lambda i:i["number"]); assert r.get("verdict") not in ("carried","approve"), r'
+        open_task b
+        wait_merge_status "Not merged: the rebuild after the PRs below merged was not clean; approve again"
+        # Only the rebuilt version, not yet reviewed, offers Approve and merge.
+        test "$(browser eval "document.querySelectorAll('[data-testid=\"approve-merge\"]').length")" = 1
+        browser screenshot "$case_dir/unclean-approve-again.png" >/dev/null
         ;;
       *) echo "unknown stage $stage" >&2; exit 2 ;;
     esac
@@ -372,6 +451,7 @@ case "$case_name" in
         wait_state b merged
         open_task b
         wait_merge_status "Merged"
+        pr_merged_everywhere
         browser screenshot "$case_dir/native-merged.png" >/dev/null
         ;;
       *) echo "unknown stage $stage" >&2; exit 2 ;;
@@ -412,6 +492,7 @@ case "$case_name" in
     test "$(merge_puts "$pe")" = 1
     open_task e
     wait_merge_status "Merged"
+    pr_merged_everywhere
     browser screenshot "$case_dir/trunk-merged.png" >/dev/null
     ;;
 
@@ -430,6 +511,9 @@ case "$case_name" in
     loom stack list > "$case_dir/stack-list.txt"
     grep -E "^$stack_two  repo=${repos[1]} loom-git PRs=#[0-9]+" "$case_dir/stack-list.txt"
     grep -E "  repo=${repos[0]} loom-git PRs=#[0-9]+" "$case_dir/stack-list.txt" | grep -v "^$stack_two "
+    # The JSON output lists the same per-repo stacks for scripts.
+    loom stack list --json > "$case_dir/stack-list.json"
+    json "$case_dir/stack-list.json" 'p={e["repoName"]:e for e in v if e["source"]=="published"}; assert set(p)=={sys.argv[2],sys.argv[3]}, v; assert p[sys.argv[3]]["id"]==sys.argv[4], v; assert all(e["layers"] and e["layers"][0]["pr_number"] for e in p.values()), v' "${repos[0]}" "${repos[1]}" "$stack_two"
 
     # The task's Approve and merge needs no stack ID: each repo's PR merges
     # through its own stack.

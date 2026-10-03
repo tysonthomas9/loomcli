@@ -2,7 +2,7 @@ suite: loomgit-approve-merge
 classification: { area: reviews, feature: approve-merges-bottom, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: >-
-  for c in loom native trunk cross; do bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" teardown "$c" || true; done
+  for c in loom unclean native trunk cross; do bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" teardown "$c" || true; done
 tests:
   - name: Loom stack - Approve and merge waits above the bottom, blocks on checks, merges after the restack, and can be cancelled
     intent: A human approves to merge open PRs of a four-task Loom stack. A PR above the bottom shows "merges after #N"; the bottom is blocked while a required check is pending and merges once it passes; the waiting PR then merges after its restack; Cancel auto-merge stops another; Approve and merge in the task merges the next bottom PR
@@ -20,7 +20,20 @@ tests:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run loom follow
         intent: B merges after its restack, each PR merged once, while C and D stay open
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run loom next
-        intent: C is now the bottom; Approve and merge in the task page merges it and D stays open
+        intent: C is now the bottom; Approve and merge in the task page merges it, every revision shows its PR as merged rather than open, and D stays open
+  - name: Loom stack - an approval does not carry through a restack that changes the patch
+    intent: D26. B is approved to merge after A. A lands together with another trunk commit that edits a line in B's patch context, so B's restack replays cleanly but is not patch-equivalent. B's approval is dropped, B does not merge, and the task asks for approval of the new version
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" setup unclean
+        intent: Create a disposable repository with a shared file, a workspace and a lead through the product API
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run unclean open
+        intent: Run two stacked tasks, B appending to the shared file, and approve each, opening two stacked PRs
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run unclean wait
+        intent: Approve and merge B, which shows "merges after" A; A is set to land with a trunk commit inside B's patch context
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run unclean merge
+        intent: Approve and merge A, which merges
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run unclean reapprove
+        intent: B's restack is not patch-equivalent, so B is not merged and the task asks for approval again
   - name: Native stack - the approved PR above the bottom merges after the bottom PR
     intent: With GitHub native stacks, Approve and merge of the upper PR waits; Approve and merge of the bottom PR merges it, and the upper PR follows
     steps:
@@ -31,7 +44,7 @@ tests:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run native merge
         intent: Approve and merge B (waits after A), then A, which merges
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run native follow
-        intent: B merges after A and the task shows Merged
+        intent: B merges after A and the task shows Merged, with its PR shown as merged rather than open
   - name: PR per task - a pushed PR is not merged, a clean one merges once, the lead never merges
     intent: In trunk mode the lead's Approve and merge is refused; a PR someone else pushed to after the human looked shows "Not merged" (stale_subject); another PR merges exactly once
     steps:
@@ -40,7 +53,7 @@ tests:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" run trunk
         intent: Approve two tasks to their own PRs, push to one PR behind the human's back, and approve both to merge
   - name: Cross-repo lead - each repo's stack ID is visible and the task's Approve merges without one
-    intent: A cross-repo lead has one Loom Git stack per repository. Create PR returns the repo's stack ID and loom stack list shows each stack with its repo; Approve and merge of each task merges its PR without naming a stack
+    intent: A cross-repo lead has one Loom Git stack per repository. Create PR returns the repo's stack ID and loom stack list, as text and as JSON, shows each stack with its repo; Approve and merge of each task merges its PR without naming a stack
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-approve-merge.sh" setup cross
         intent: Create two disposable repositories in one workspace through the product API

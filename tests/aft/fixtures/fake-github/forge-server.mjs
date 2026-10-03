@@ -162,9 +162,13 @@ const server = createServer(async (request, response) => {
       const numbers = stack ? stack.numbers.slice(0, stack.numbers.indexOf(merge.number) + 1) : [merge.number];
       const target = pulls.find((item) => item.number === merge.number);
       const sha = currentPull(target).head.sha;
+      // land_sha (set through /__pr_status) lands the PR with another trunk
+      // commit on top of it, as a merge queue would; it must descend from sha.
+      const landed = (prStatus.get(target.number) || {}).land_sha || sha;
       if (remoteFor(target.repo)) {
         try {
-          execFileSync("git", [`--git-dir=${remoteFor(target.repo)}`, "update-ref", "refs/heads/main", sha]);
+          if (landed !== sha) execFileSync("git", [`--git-dir=${remoteFor(target.repo)}`, "merge-base", "--is-ancestor", sha, landed]);
+          execFileSync("git", [`--git-dir=${remoteFor(target.repo)}`, "update-ref", "refs/heads/main", landed]);
         } catch (error) {
           return send(response, 409, { message: `merge head ${sha} is not in ${remoteFor(target.repo)}: ${String(error.stderr || error.message).trim()}` });
         }
