@@ -86,11 +86,15 @@ tests:
           bash "$s" diff E2E-WS-TASKDIFF-TRUNK first trunk taskdiff-first.txt;
           bash "$s" diff E2E-WS-TASKDIFF-TRUNK second trunk taskdiff-second.txt
         intent: Both task diffs compare with trunk and name only their own file
+      # The UI check uses the first task: it is applied straight onto trunk, so
+      # nothing derives a newer revision of it. The second task's applied
+      # revision can be re-derived by background reconcile into a newer, empty
+      # revision, which the tab then correctly shows as "No changes".
       - run: >-
           agent-browser --session "$AFT_SESSION" open
-          "$AFT_BASE_URL/ws/E2E-WS-TASKDIFF-TRUNK/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TASKDIFF-TRUNK-second-task")"
-        intent: Open the second task in trunk mode
+          "$AFT_BASE_URL/ws/E2E-WS-TASKDIFF-TRUNK/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TASKDIFF-TRUNK-first-task")"
+        intent: Open the first task in trunk mode
       - click: { role: tab, name: Changes, exact: true }
-      - wait: { text: "against trunk" }
-      - wait: { text: taskdiff-second.txt }
-      - expect: { notText: taskdiff-first.txt }
+      - wait: { text: "Revision 1 against trunk" }
+      - wait: { text: taskdiff-first.txt }
+      - expect: { notText: taskdiff-second.txt }
