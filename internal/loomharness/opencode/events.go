@@ -319,20 +319,23 @@ func (f form) questions() []loomharness.Question {
 
 // value is answers (option labels or text) as this field's form value.
 func (fl formField) value(answers []string) any {
-	for i, a := range answers {
+	vals := make([]string, 0, len(answers))
+	for _, a := range answers {
 		for _, o := range fl.Options {
 			if o.Label == a {
-				answers[i] = o.Value
+				a = o.Value
+				break
 			}
 		}
+		vals = append(vals, a)
 	}
 	first := ""
-	if len(answers) > 0 {
-		first = answers[0]
+	if len(vals) > 0 {
+		first = vals[0]
 	}
 	switch fl.Type {
 	case "multiselect":
-		return answers
+		return vals
 	case "number", "integer":
 		if n, err := strconv.ParseFloat(first, 64); err == nil {
 			return n
