@@ -31,7 +31,6 @@ type Store interface {
 	WorkingAreas(context.Context, string, string) ([]journal.WorkingArea, error)
 	OpenApplied(context.Context, string, string) ([]loomgit.AppliedLayer, error)
 	AppliedRequest(context.Context, string) (loomgit.AppliedLayer, bool, error)
-	PredecessorApplied(context.Context, string, string, string) (bool, error)
 }
 
 type Request struct {
@@ -204,8 +203,8 @@ func (s *Service) swapLocked(ctx context.Context, in Request, source loomgit.Rev
 		layerBase, trial = source.BaseSHA, replay.Result{HeadSHA: old}
 	}
 	if layerBase != source.BaseSHA && trial.HeadSHA == old {
-		// Nothing left to add: if this change is already applied here, the lead holds it.
-		applied, err := s.store.PredecessorApplied(ctx, in.Workspace, in.Lead, in.Change)
+		// Nothing left to add: if this exact revision is already applied here, the lead holds it.
+		applied, err := s.revisionApplied(ctx, in)
 		if err != nil || applied {
 			return Result{HeadSHA: old}, err
 		}
@@ -246,6 +245,15 @@ func (s *Service) settledRequest(ctx context.Context, in Request) (Result, bool,
 	}
 	switch prior.Phase {
 	case "done":
+		same, err := s.fromSource(ctx, in, prior.Revision)
+		if err != nil {
+			return Result{}, true, err
+		}
+		if !same {
+			// The request already applied another revision; reusing it cannot apply this one.
+			return Result{}, true, loomgit.NewError(loomgit.Stale,
+				fmt.Sprintf("apply request already applied revision %d, not %d", prior.Revision, in.Revision), nil)
+		}
 		return Result{HeadSHA: prior.NewTip}, true, nil
 	case "not_applied":
 		return Result{}, false, nil
@@ -253,6 +261,41 @@ func (s *Service) settledRequest(ctx context.Context, in Request) (Result, bool,
 		// SaveApplied would refuse this request; fail before deriving anything.
 		return Result{}, true, loomgit.NewError(loomgit.Stale, "apply request already recorded in phase "+prior.Phase, nil)
 	}
+}
+
+// revisionApplied reports whether the lead has a done layer for the requested
+// source revision (directly or as a revision derived from it).
+func (s *Service) revisionApplied(ctx context.Context, in Request) (bool, error) {
+	layers, err := s.store.AppliedLog(ctx, in.Workspace, in.Lead)
+	if err != nil {
+		return false, err
+	}
+	for _, layer := range layers {
+		if layer.Change != in.Change {
+			continue
+		}
+		if same, err := s.fromSource(ctx, in, layer.Revision); err != nil || same {
+			return same, err
+		}
+	}
+	return false, nil
+}
+
+// fromSource reports whether revision number is the requested revision or was
+// derived from it, following derived revisions of the same change back.
+func (s *Service) fromSource(ctx context.Context, in Request, number int) (bool, error) {
+	for number != in.Revision {
+		revision, err := s.store.GetRevision(ctx, in.Workspace, in.Change, number)
+		if err != nil {
+			return false, err
+		}
+		if revision.Kind != "derived" || (revision.DerivedFromChange != "" && revision.DerivedFromChange != in.Change) ||
+			revision.DerivedFromNumber < 1 || revision.DerivedFromNumber >= number {
+			return false, nil
+		}
+		number = revision.DerivedFromNumber
+	}
+	return true, nil
 }
 
 func (s *Service) recordLayer(ctx context.Context, in Request, source loomgit.Revision, old string,

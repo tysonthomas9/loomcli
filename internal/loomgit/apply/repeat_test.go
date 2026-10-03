@@ -2,10 +2,12 @@ package apply
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 )
 
 func requireNoRevision(t *testing.T, f *fixture, number int) {
@@ -89,4 +91,101 @@ func TestApplyRacingFollowPassOnFastForwardSettles(t *testing.T) {
 		t.Fatalf("losing verdict pass: %+v, %v", second, err)
 	}
 	requireNoRevision(t, f, 2)
+}
+
+// newSourceRevision records and approves another source revision of C1 whose
+// head is a commit on top of parent writing body to the file "change".
+func newSourceRevision(t *testing.T, f *fixture, parent, body, message string) loomgit.Revision {
+	t.Helper()
+	ctx := context.Background()
+	lead := f.git(t, "symbolic-ref", "--short", "HEAD")
+	f.git(t, "checkout", "-q", "--detach", parent)
+	head := f.commit(t, "change", body, message+"\n\nLoom-Change-Id: C1")
+	f.git(t, "checkout", "-q", lead)
+	r, err := f.store.ReserveRevision(ctx, loomgit.Revision{
+		Workspace: "W", Change: "C1", RequestID: "source:" + head, Kind: "source", Operation: "snapshot",
+		Outcome: "completed", BaseSHA: f.base, TreeHash: f.git(t, "rev-parse", head+"^{tree}"), SourceHeadSHA: head,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.HeadSHA = head
+	if err := f.store.FinishRevision(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := review.Submit(ctx, f.store, "W", "C1", r.Number, head, "approve", "", review.Actor{Kind: "human", ID: "reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// Verifier probe: a request that applied r1 must not report r2 as applied.
+func TestApplyReusedRequestForNewerRevisionIsNotSkipped(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: "approval:1"}); err != nil {
+		t.Fatal(err)
+	}
+	r2 := newSourceRevision(t, f, f.source, "change v2\n", "fix-up")
+	_, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: r2.Number, RequestID: "approval:1"})
+	if !errors.Is(err, loomgit.NewError(loomgit.Stale, "", nil)) {
+		t.Fatalf("reused request for r%d: %v", r2.Number, err)
+	}
+	if f.git(t, "rev-parse", "HEAD") != f.source {
+		t.Fatal("checkout moved on a refused request")
+	}
+	requireNoRevision(t, f, r2.Number+1)
+	got, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: r2.Number, RequestID: "approval:2"})
+	if err != nil || f.git(t, "show", "HEAD:change") != "change v2" {
+		t.Fatalf("fix-up revision was not applied: %+v, %v", got, err)
+	}
+}
+
+// A fix-up revision whose replay adds nothing is still a different revision:
+// it is applied (as a dropped-commit layer), not reported as already applied.
+func TestApplyEmptyReplayOfAnotherRevisionIsNotSkipped(t *testing.T) {
+	f := newFixture(t)
+	f.commit(t, "first-task", "first\n", "first task layer")
+	ctx := context.Background()
+	first, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: "approval:1"})
+	if err != nil || first.Derived.Number != 2 {
+		t.Fatalf("first apply: %+v, %v", first, err)
+	}
+	recapture := newSourceRevision(t, f, f.base, "change\n", "re-capture")
+	got, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: recapture.Number, RequestID: "approval:3"})
+	if err != nil || got.Derived.Number == 0 || got.Derived.DerivedFromNumber != recapture.Number {
+		t.Fatalf("re-captured revision skipped: %+v, %v", got, err)
+	}
+	applied, err := f.store.RevisionApplied(ctx, "W", "L", "C1", got.Derived.Number)
+	if err != nil || !applied {
+		t.Fatalf("re-captured revision has no applied layer: %v, %v", applied, err)
+	}
+}
+
+// After Unapply, a new approval of the same revision applies it again.
+func TestApplyReapprovalAfterUnapplyApplies(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: "approval:1"}); err != nil {
+		t.Fatal(err)
+	}
+	f.git(t, "reset", "-q", "--hard", f.base)
+	db, err := sql.Open("sqlite", f.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, `UPDATE applied_layers SET phase='unapplied' WHERE request_id='approval:1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: "approval:1"}); !errors.Is(err, loomgit.NewError(loomgit.Stale, "", nil)) {
+		t.Fatalf("unapplied request reported as applied: %v", err)
+	}
+	got, err := f.service.Apply(ctx, Request{Workspace: "W", Lead: "L", Change: "C1", Revision: 1, RequestID: "approval:2"})
+	if err != nil || got.HeadSHA != f.source || f.git(t, "rev-parse", "HEAD") != f.source {
+		t.Fatalf("re-approval after Unapply: %+v, %v", got, err)
+	}
+	if applied, err := f.store.RevisionApplied(ctx, "W", "L", "C1", 1); err != nil || !applied {
+		t.Fatalf("re-approved layer not done: %v, %v", applied, err)
+	}
 }
