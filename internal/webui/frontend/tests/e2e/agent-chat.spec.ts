@@ -328,3 +328,57 @@ test("feed.gap pages the missed event once; a late replay is not shown twice", a
   const texts = await transcript(page).locator("li").allInnerTexts();
   expect(texts).toEqual(["before", "missed", "after"]);
 });
+
+// T3's ChatMarkdown wrapper is "text-sm leading-relaxed text-foreground/80",
+// and its list items sit 0.25rem apart (index.css .chat-markdown li + li).
+test("agent text takes T3's markdown type, colour and list gap in light and dark", async ({
+  page,
+}) => {
+  await open(
+    page,
+    mock({
+      events: [
+        ev("item.completed", {
+          itemKind: "message",
+          text: "## Plan\n\nSome `code` here.\n\n- one\n- two\n\n> quoted",
+        }),
+      ],
+    }),
+  );
+  const md = transcript(page).getByTestId("chat-markdown");
+  await expect(md.getByRole("listitem")).toHaveCount(2);
+  for (const theme of ["dark", "light"]) {
+    const m = await md.evaluate((el, t) => {
+      document.documentElement.dataset.theme = t;
+      // [r, g, b] in 0-255 and alpha, from rgb(), rgba() or color(srgb ...).
+      const parse = (c: string) => {
+        const n = (c.match(/[\d.]+/g) ?? []).map(Number);
+        const srgb = c.startsWith("color(");
+        const rgb = n.slice(0, 3).map((v) => Math.round(srgb ? v * 255 : v));
+        return { rgb, alpha: n.length > 3 ? n[3] : 1 };
+      };
+      const cs = getComputedStyle(el);
+      const [li1, li2] = el.querySelectorAll("li");
+      return {
+        fontSize: cs.fontSize,
+        lineHeight: cs.lineHeight,
+        color: parse(cs.color),
+        heading: parse(getComputedStyle(el.querySelector("h2")!).color),
+        code: parse(getComputedStyle(el.querySelector("p code")!).color),
+        liGap:
+          li2!.getBoundingClientRect().top -
+          li1!.getBoundingClientRect().bottom,
+        quoteStyle: getComputedStyle(el.querySelector("blockquote")!).fontStyle,
+      };
+    }, theme);
+    expect(m.fontSize, theme).toBe("14px");
+    expect(m.lineHeight, theme).toBe("22.75px");
+    // The text is the foreground at 80%; headings and inline code are solid.
+    expect(m.color.alpha, theme).toBeCloseTo(0.8, 2);
+    expect(m.heading.alpha, theme).toBe(1);
+    expect(m.color.rgb, theme).toEqual(m.heading.rgb);
+    expect(m.code.alpha, theme).toBe(1);
+    expect(m.liGap, theme).toBeCloseTo(4, 1);
+    expect(m.quoteStyle, theme).toBe("normal");
+  }
+});

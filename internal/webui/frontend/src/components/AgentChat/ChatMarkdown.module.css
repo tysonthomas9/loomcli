@@ -1,11 +1,20 @@
 /* Ported from T3 Code apps/web/src/index.css (.chat-markdown rules) at commit
    2daff8c25. Copyright (c) 2026 T3 Tools Inc. MIT License; see
-   THIRD_PARTY_NOTICES.md. Translated to a CSS module with Loom's theme tokens. */
+   THIRD_PARTY_NOTICES.md. Translated to a CSS module with Loom's theme tokens.
+   T3 resets every element with Tailwind's preflight; Loom's global
+   styles/base.css does not, so the rules below also undo its li, blockquote,
+   link and code rules where T3's differ. */
 
+/* T3's wrapper: "chat-markdown w-full min-w-0 text-sm leading-relaxed
+   text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word]". */
 .markdown {
+  width: 100%;
   min-width: 0;
+  font-size: 0.875rem;
+  line-height: 1.625;
+  color: color-mix(in srgb, var(--color-text-primary) 80%, transparent);
   overflow-wrap: anywhere;
-  line-height: 1.5;
+  word-break: break-word;
   /* Token colors (One Light), as in the file editor. */
   --tk-keyword: #a626a4;
   --tk-string: #50a14f;
@@ -56,6 +65,7 @@
   margin: 1.25rem 0 0.5rem;
   font-weight: 600;
   line-height: 1.3;
+  color: var(--color-text-primary);
 }
 
 .markdown h1 {
@@ -76,6 +86,10 @@
   font-size: 0.875rem;
 }
 
+.markdown h6 {
+  color: var(--color-text-muted);
+}
+
 .markdown ul {
   padding-left: 1.25rem;
   list-style-type: disc;
@@ -84,6 +98,31 @@
 .markdown ol {
   padding-left: 1.25rem;
   list-style-type: decimal;
+}
+
+.markdown ol > li::marker {
+  font-variant-numeric: tabular-nums;
+}
+
+.markdown ul ul {
+  list-style-type: circle;
+}
+
+.markdown ul ul ul {
+  list-style-type: square;
+}
+
+.markdown ol ol {
+  list-style-type: lower-alpha;
+}
+
+.markdown ol ol ol {
+  list-style-type: lower-roman;
+}
+
+/* T3's 4px between items; base.css's li margin-bottom would add 8px more. */
+.markdown li {
+  margin-bottom: 0;
 }
 
 .markdown li + li {
@@ -100,14 +139,50 @@
   vertical-align: middle;
 }
 
+.markdown img {
+  display: inline-block;
+}
+
 .markdown a {
   color: var(--color-primary);
+  text-decoration: none;
+}
+
+/* T3's dotted hover underline, not base.css's solid one. */
+.markdown a:hover,
+.markdown a:focus-visible {
+  text-decoration: none;
+  background-image: radial-gradient(
+    circle,
+    currentcolor 0.75px,
+    transparent 1px
+  );
+  background-position: left bottom;
+  background-repeat: repeat-x;
+  background-size: 4px 2px;
 }
 
 .markdown blockquote {
   border-left: 2px solid var(--color-border-light);
   padding-left: 0.8rem;
   color: var(--color-text-muted);
+  font-style: normal;
+}
+
+.markdown :global(section[data-footnotes]) {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--color-border-light);
+  padding-top: 0.75rem;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.markdown :global(section[data-footnotes]) ol {
+  margin: 0;
+}
+
+.markdown :global(section[data-footnotes]) li + li {
+  margin-top: 0.35rem;
 }
 
 .markdown :not(pre) > code {
@@ -115,6 +190,7 @@
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   padding: 0.1rem 0.35rem;
+  color: var(--color-text-primary);
   font-family: var(--font-family-mono);
   font-size: 0.75rem;
 }
@@ -127,20 +203,34 @@
   background: var(--color-bg-tertiary);
   padding: 0.8rem 0.9rem;
   font-family: var(--font-family-mono);
-  font-size: 0.8125rem;
+  /* Preflight's 1em: code blocks match the 14px text, as in T3. */
+  font-size: 1em;
   scrollbar-width: thin;
+  scrollbar-color: color-mix(
+      in srgb,
+      var(--color-border-light) 78%,
+      transparent
+    )
+    transparent;
 }
 
 .markdown pre code {
   font-family: inherit;
+  font-size: inherit;
 }
 
+/* T3: "my-[0.65rem] overflow-hidden rounded-[var(--radius)] border
+   border-border/70 bg-secondary leading-snug dark:border-transparent". */
 .codeblock {
   overflow: hidden;
   border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
+  border-radius: 0.625rem;
   background: var(--color-bg-tertiary);
-  line-height: 1.4;
+  line-height: 1.375;
+}
+
+:global([data-theme="dark"]) .codeblock {
+  border-color: transparent;
 }
 
 .codeblockHeader {
@@ -150,7 +240,7 @@
   gap: 8px;
   padding: 6px 6px 0 12px;
   user-select: none;
-  color: var(--color-text-muted);
+  color: color-mix(in srgb, var(--color-text-primary) 72%, transparent);
 }
 
 .codeblockLanguage {
@@ -181,7 +271,7 @@
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-text-muted);
+  color: color-mix(in srgb, var(--color-text-primary) 72%, transparent);
   font-size: 0.6875rem;
   cursor: pointer;
 }
@@ -217,14 +307,16 @@
 }
 
 .markdown thead th {
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--color-border-light) 60%, transparent);
   padding-block: 0.55rem;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .markdown tbody td {
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--color-border-light) 60%, transparent);
 }
 
 .tableContainer[data-expanded="false"] th,
