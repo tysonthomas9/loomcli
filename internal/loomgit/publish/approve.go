@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
 )
 
 // ApprovalOutcome is what Approve and create PR did for one approved change.
@@ -96,7 +97,7 @@ func publishApprovals(ctx context.Context, store *journal.SQLite, stacks Declare
 		if !immediate && intent.AttemptedAt > 0 && approvalNow().Sub(time.Unix(intent.AttemptedAt, 0)) < publishRetryDelay {
 			continue
 		}
-		outcome, attempted, err := publishIntent(ctx, store, stacks, intent)
+		outcome, attempted, err := publishIntentOnce(ctx, store, stacks, intent)
 		if attempted {
 			outcomes = append(outcomes, outcome)
 		}
@@ -105,6 +106,30 @@ func publishApprovals(ctx context.Context, store *journal.SQLite, stacks Declare
 		}
 	}
 	return outcomes, errors.Join(failures...)
+}
+
+// publishIntentOnce publishes one intent at a time across processes: the
+// verdict request, `loom git approve` and the background reconciler can all
+// reach the same intent. A publisher that waited for another re-reads the
+// intent and returns its outcome instead of publishing it again.
+func publishIntentOnce(ctx context.Context, store *journal.SQLite, stacks DeclaredStacks, intent journal.ApprovalPublication) (ApprovalOutcome, bool, error) {
+	var outcome ApprovalOutcome
+	var attempted bool
+	err := stacklock.With(stacklock.ForEpicReconcile(ctx), intent.Workspace, "approval:"+intent.Change, func(locked context.Context) error {
+		current, found, err := store.LatestApprovalPublication(locked, intent.Workspace, intent.Change, intent.Revision)
+		if err != nil {
+			return err
+		}
+		if found && current.Status != "pending" && current.Status != "waiting" {
+			outcome, attempted = ApprovalOutcome{Change: current.Change, Status: current.Status, Reason: current.Reason,
+				PRURL: current.PRURL, PRNumber: current.PRNumber}, true
+			return nil
+		}
+		var publishErr error
+		outcome, attempted, publishErr = publishIntent(locked, store, stacks, intent)
+		return publishErr
+	})
+	return outcome, attempted, err
 }
 
 func publishIntent(ctx context.Context, store *journal.SQLite, stacks DeclaredStacks, intent journal.ApprovalPublication) (ApprovalOutcome, bool, error) {

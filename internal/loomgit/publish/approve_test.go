@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/layout/refname"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/stacklock"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
@@ -414,5 +416,73 @@ func TestDeclaredStackLookupFailureKeepsIntentOpen(t *testing.T) {
 	}
 	if _, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(forge.prs) != 1 {
 		t.Fatalf("intent did not publish once the lookup recovered: %v; PRs=%+v", err, forge.prs)
+	}
+}
+
+// TestConcurrentVerdictAndReconcilePublishOnce races the verdict request's
+// publish against the background reconciler for the same intent. The
+// reconciler enters publish first and holds the door open for a second
+// publisher; only one may ever publish, and the verdict request still reports
+// the PR the reconciler opened.
+func TestConcurrentVerdictAndReconcilePublishOnce(t *testing.T) {
+	for _, mode := range []string{"trunk", "stack"} {
+		t.Run(mode, func(t *testing.T) {
+			fx, forge := approvalFixture(t, mode)
+			ctx := context.Background()
+			a := appliedTask(t, fx, "A", fx.base)
+			approveForLead(t, fx, a, reviewer, true, "applied")
+			var mu, real sync.Mutex
+			inside, calls := 0, 0
+			second, entered := make(chan struct{}), make(chan struct{})
+			previous := approvalPublishChange
+			approvalPublishChange = func(ctx context.Context, workspace, lead, change string) (Result, error) {
+				mu.Lock()
+				calls++
+				inside++
+				if inside == 2 {
+					close(second)
+				}
+				first := calls == 1
+				mu.Unlock()
+				if first {
+					close(entered)
+					select {
+					case <-second:
+					// Outlast a stack lock's ordinary wait: the waiting publisher
+					// must not give up and fail the verdict request.
+					case <-time.After(stacklock.WaitLimit(context.Background()) + 500*time.Millisecond):
+					}
+				}
+				defer func() { mu.Lock(); inside--; mu.Unlock() }()
+				// The fixture's embedded fleet-db admits one opener at a time;
+				// the server shares one. Only the entry into publish races.
+				real.Lock()
+				defer real.Unlock()
+				return previous(ctx, workspace, lead, change)
+			}
+			t.Cleanup(func() { approvalPublishChange = previous })
+
+			var verdictOutcomes []ApprovalOutcome
+			var verdictErr, reconcileErr error
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() { defer wg.Done(); reconcileErr = ReconcileApprovalPublicationsAt(ctx, fx.storePath, nil) }()
+			<-entered
+			go func() { defer wg.Done(); verdictOutcomes, verdictErr = PublishApproved(ctx, "W", "L", nil) }()
+			wg.Wait()
+
+			if verdictErr != nil || reconcileErr != nil {
+				t.Fatalf("a concurrent publish of the same approval failed: verdict %v, reconcile %v", verdictErr, reconcileErr)
+			}
+			if calls != 1 {
+				t.Fatalf("the same approval was published %d times", calls)
+			}
+			if len(forge.prs) != 1 {
+				t.Fatalf("PRs = %+v", forge.prs)
+			}
+			if len(verdictOutcomes) != 1 || verdictOutcomes[0].Status != "published" || verdictOutcomes[0].PRNumber != forge.prs[0].Number {
+				t.Fatalf("verdict outcome = %+v", verdictOutcomes)
+			}
+		})
 	}
 }
