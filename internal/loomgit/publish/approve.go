@@ -27,6 +27,20 @@ type ApprovalOutcome struct {
 // Git provider: the change stays applied and no publish is retried.
 const NoProviderReason = "not published: no provider"
 
+// DeclaredStacks finds a stack declared with `loom stack init/add` that is
+// still active for a workspace repository, returning its ID or "". Callers
+// pass the stack store; this package does not import it.
+type DeclaredStacks interface {
+	ActiveDeclaredStack(ctx context.Context, workspace, repo string) (string, error)
+}
+
+// declaredStackReason is the terminal outcome of an approval whose repository
+// has an active declared stack: auto-publish never opens a second, parallel
+// stack beside it.
+func declaredStackReason(stack string) string {
+	return "not published: declared stack " + stack + " is active; publish it with loom stack"
+}
+
 // publishRetryDelay spaces background retries after a failed publish, such as
 // a provider that is down, so the reconciler does not hammer it.
 const publishRetryDelay = 30 * time.Second
@@ -40,8 +54,9 @@ var (
 // PublishApproved opens the PR of every change whose Approve and create PR
 // approval is now applied in lead's working area (D29). In stack mode the PR
 // is the next layer of the lead's stack; in trunk mode it is its own PR to
-// trunk. An approval whose apply is held publishes nothing until it applies.
-func PublishApproved(ctx context.Context, workspace, lead string) ([]ApprovalOutcome, error) {
+// trunk. An approval whose apply is held publishes nothing until it applies,
+// and one whose repository has an active declared stack publishes nothing.
+func PublishApproved(ctx context.Context, workspace, lead string, stacks DeclaredStacks) ([]ApprovalOutcome, error) {
 	if workspace == "" || lead == "" {
 		return nil, errors.New("workspace and lead are required")
 	}
@@ -50,12 +65,12 @@ func PublishApproved(ctx context.Context, workspace, lead string) ([]ApprovalOut
 		return nil, err
 	}
 	defer func() { _ = store.Close() }()
-	return publishApprovals(ctx, store, workspace, lead, true)
+	return publishApprovals(ctx, store, stacks, workspace, lead, true)
 }
 
 // ReconcileApprovalPublicationsAt retries open Approve and create PR intents
 // in every workspace, for approvals that applied later or whose publish failed.
-func ReconcileApprovalPublicationsAt(ctx context.Context, path string) error {
+func ReconcileApprovalPublicationsAt(ctx context.Context, path string, stacks DeclaredStacks) error {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	} else if err != nil {
@@ -66,11 +81,11 @@ func ReconcileApprovalPublicationsAt(ctx context.Context, path string) error {
 		return err
 	}
 	defer func() { _ = store.Close() }()
-	_, err = publishApprovals(ctx, store, "", "", false)
+	_, err = publishApprovals(ctx, store, stacks, "", "", false)
 	return err
 }
 
-func publishApprovals(ctx context.Context, store *journal.SQLite, workspace, lead string, immediate bool) ([]ApprovalOutcome, error) {
+func publishApprovals(ctx context.Context, store *journal.SQLite, stacks DeclaredStacks, workspace, lead string, immediate bool) ([]ApprovalOutcome, error) {
 	intents, err := store.OpenApprovalPublications(ctx, workspace, lead)
 	if err != nil {
 		return nil, err
@@ -81,7 +96,7 @@ func publishApprovals(ctx context.Context, store *journal.SQLite, workspace, lea
 		if !immediate && intent.AttemptedAt > 0 && approvalNow().Sub(time.Unix(intent.AttemptedAt, 0)) < publishRetryDelay {
 			continue
 		}
-		outcome, attempted, err := publishIntent(ctx, store, intent)
+		outcome, attempted, err := publishIntent(ctx, store, stacks, intent)
 		if attempted {
 			outcomes = append(outcomes, outcome)
 		}
@@ -92,7 +107,7 @@ func publishApprovals(ctx context.Context, store *journal.SQLite, workspace, lea
 	return outcomes, errors.Join(failures...)
 }
 
-func publishIntent(ctx context.Context, store *journal.SQLite, intent journal.ApprovalPublication) (ApprovalOutcome, bool, error) {
+func publishIntent(ctx context.Context, store *journal.SQLite, stacks DeclaredStacks, intent journal.ApprovalPublication) (ApprovalOutcome, bool, error) {
 	outcome := ApprovalOutcome{Change: intent.Change}
 	follow, err := store.ApprovalFollowStatus(ctx, intent.Workspace, intent.Lead, intent.Change, intent.Revision)
 	if err != nil {
@@ -106,6 +121,13 @@ func publishIntent(ctx context.Context, store *journal.SQLite, intent journal.Ap
 	if err != nil || !applied {
 		// Held (apply_pending, conflict, no working area): no PR until it applies.
 		return outcome, false, err
+	}
+	if stack, err := declaredStack(ctx, store, stacks, intent); err != nil || stack != "" {
+		if err != nil {
+			return outcome, false, err
+		}
+		outcome.Status, outcome.Reason = "not_published", declaredStackReason(stack)
+		return outcome, true, finishIntent(ctx, store, intent, outcome)
 	}
 	if reason := approvalProviderMissing(ctx, store, intent.Workspace, intent.Change); reason != "" {
 		outcome.Status, outcome.Reason = "not_published", NoProviderReason+" ("+reason+")"
@@ -138,6 +160,19 @@ func approvalApplied(ctx context.Context, store *journal.SQLite, intent journal.
 		}
 	}
 	return false, nil
+}
+
+// declaredStack returns the active declared stack of the approved change's
+// repository, or "" when there is none.
+func declaredStack(ctx context.Context, store *journal.SQLite, stacks DeclaredStacks, intent journal.ApprovalPublication) (string, error) {
+	if stacks == nil {
+		return "", nil
+	}
+	repo, err := store.RepoForChange(ctx, intent.Workspace, intent.Change)
+	if err != nil {
+		return "", err
+	}
+	return stacks.ActiveDeclaredStack(ctx, intent.Workspace, repo)
 }
 
 func finishIntent(ctx context.Context, store *journal.SQLite, intent journal.ApprovalPublication, outcome ApprovalOutcome) error {

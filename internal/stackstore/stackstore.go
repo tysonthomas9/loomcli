@@ -83,6 +83,13 @@ func Default() (*LocalStore, error) {
 	return &LocalStore{dir: dir}, nil
 }
 
+// Declared returns the per-user store for reading declared stacks, or nil (no
+// stacks) when there is no loom directory.
+func Declared() *LocalStore {
+	s, _ := Default()
+	return s
+}
+
 func (s *LocalStore) path() string { return filepath.Join(s.dir, "stacks.json") }
 
 func (s *LocalStore) load() (*stacksFile, error) {
@@ -150,6 +157,47 @@ func (f *stacksFile) stack(ws string, id sl.StackID) (*storedStack, bool) {
 }
 
 // reads ----------------------------------------------------------------------
+
+// ActiveDeclaredStack returns the ID of a stack declared with `loom stack
+// init/add` for repo in workspace ws that is still active: it has no units
+// yet, or at least one unit that is neither merged nor closed. It returns ""
+// when there is none. A nil store has no stacks.
+func (s *LocalStore) ActiveDeclaredStack(_ context.Context, ws, repo string) (string, error) {
+	if s == nil {
+		return "", nil
+	}
+	f, err := s.load()
+	if err != nil {
+		return "", err
+	}
+	w := f.Workspaces[ws]
+	if w == nil {
+		return "", nil
+	}
+	var active []string
+	for id, st := range w.Stacks {
+		if st.Stack.RepoName == repo && stackActive(st) {
+			active = append(active, id)
+		}
+	}
+	if len(active) == 0 {
+		return "", nil
+	}
+	sort.Strings(active)
+	return active[0], nil
+}
+
+func stackActive(st *storedStack) bool {
+	if len(st.Nodes) == 0 {
+		return true
+	}
+	for _, n := range st.Nodes {
+		if n.State != sl.NodeStateMerged && n.State != sl.NodeStateClosed {
+			return true
+		}
+	}
+	return false
+}
 
 func (s *LocalStore) GetStack(_ context.Context, ws string, id sl.StackID) (*sl.Stack, error) {
 	f, err := s.load()

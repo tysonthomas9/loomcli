@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -152,7 +153,7 @@ func writeApprovalResponse(w http.ResponseWriter, req *http.Request, verdict loo
 // publishVerdict opens the PR an Approve and create PR verdict asked for once
 // its change is applied; a held apply leaves the intent for the reconciler.
 func publishVerdict(ctx context.Context, verdict loomgit.Verdict, lead string) (publish.ApprovalOutcome, error) {
-	outcomes, err := publishApproved(ctx, verdict.Workspace, lead)
+	outcomes, err := publishApproved(ctx, verdict.Workspace, lead, stackstore.Declared())
 	for _, outcome := range outcomes {
 		if outcome.Change == verdict.Change {
 			if err != nil && outcome.Status != "pending" {
