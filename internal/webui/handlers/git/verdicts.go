@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
@@ -106,18 +107,18 @@ func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local
 			})
 			return
 		}
-		if len(followed.Pending) > 0 {
-			paused, err := store.FollowingPaused(req.Context(), verdict.Workspace, lead)
-			if err != nil {
-				writeReviewError(w, err)
-				return
-			}
-			status = "approved_waiting_for_dependency"
-			if paused {
-				status = "approved_paused"
-			}
-		} else {
-			status = "applied"
+		var reason string
+		var err error
+		if status, reason, err = followStatus(req.Context(), store, verdict, lead, followed); err != nil {
+			writeReviewError(w, err)
+			return
+		}
+		if status == "spent" {
+			// Never applied: report why, and never publish it.
+			handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": verdict, "status": status, "reason": reason})
+			return
+		}
+		if status == "applied" {
 			if err := publisher(req.Context(), verdict.Workspace, lead); err != nil {
 				handler.WriteJSON(w, http.StatusConflict, map[string]any{"success": false,
 					"error": "publish_failed", "message": err.Error(), "status": status})
@@ -166,6 +167,40 @@ func publishVerdict(ctx context.Context, verdict loomgit.Verdict, lead string) (
 	// Not published yet (held, or the journal could not be read): the
 	// reconciler retries it, so the approval itself still succeeded.
 	return publish.ApprovalOutcome{}, nil
+}
+
+var approvalFollowState = func(ctx context.Context, store *review.Local, workspace, lead, change string, revision int) (string, string, error) {
+	if store == nil {
+		return "", "", nil
+	}
+	return store.ApprovalFollowState(ctx, workspace, lead, change, revision)
+}
+
+// followStatus reports what following did for this verdict's change. It is
+// "applied" only when the change was applied now or its follow is still
+// applied; a spent follow reports its reason; otherwise the approval waits.
+func followStatus(ctx context.Context, store *review.Local, verdict loomgit.Verdict, lead string,
+	followed apply.FollowResult) (string, string, error) {
+	if slices.Contains(followed.Applied, verdict.Change) {
+		return "applied", "", nil
+	}
+	for _, spent := range followed.Spent {
+		if spent.Change == verdict.Change {
+			return "spent", spent.Reason, nil
+		}
+	}
+	if len(followed.Pending) > 0 {
+		paused, err := store.FollowingPaused(ctx, verdict.Workspace, lead)
+		if err != nil || !paused {
+			return "approved_waiting_for_dependency", "", err
+		}
+		return "approved_paused", "", nil
+	}
+	state, reason, err := approvalFollowState(ctx, store, verdict.Workspace, lead, verdict.Change, verdict.Number)
+	if err != nil || (state != "applied" && state != "spent") {
+		return "approved", "", err
+	}
+	return state, reason, nil
 }
 
 func handleFollowing(w http.ResponseWriter, req *http.Request) {

@@ -221,8 +221,8 @@ func approveForLead(t *testing.T, f *fixture) int64 {
 }
 
 // A follow whose request was unapplied before the follow was marked applied
-// settles as superseded instead of being retried on every reconcile pass.
-func TestFollowSettlesUnappliedRequestAsSuperseded(t *testing.T) {
+// settles as spent, with a reason, instead of being retried on every pass.
+func TestFollowSettlesUnappliedRequestAsSpent(t *testing.T) {
 	f, cfg := followFixture(t)
 	ctx := context.Background()
 	verdict := approveForLead(t, f)
@@ -239,8 +239,12 @@ func TestFollowSettlesUnappliedRequestAsSuperseded(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := followWithStore(ctx, f.store, cfg, "W", "L")
-	if err != nil || len(result.Applied) != 0 || len(result.Pending) != 0 || f.git(t, "rev-parse", "HEAD") != f.base {
+	if err != nil || len(result.Applied) != 0 || len(result.Pending) != 0 || len(result.Spent) != 1 ||
+		result.Spent[0].Change != "C1" || !strings.Contains(result.Spent[0].Reason, "unapplied") || f.git(t, "rev-parse", "HEAD") != f.base {
 		t.Fatalf("spent request: %+v, %v", result, err)
+	}
+	if status, reason, err := f.store.ApprovalFollowState(ctx, "W", "L", "C1", 1); err != nil || status != "spent" || reason != result.Spent[0].Reason {
+		t.Fatalf("follow state: %q %q, %v", status, reason, err)
 	}
 	if pending, err := f.store.PendingApprovals(ctx, "W", "L"); err != nil || len(pending) != 0 {
 		t.Fatalf("spent request still pending: %+v, %v", pending, err)
@@ -249,6 +253,9 @@ func TestFollowSettlesUnappliedRequestAsSuperseded(t *testing.T) {
 	result, err = followWithStore(ctx, f.store, cfg, "W", "L")
 	if err != nil || len(result.Applied) != 1 || f.git(t, "rev-parse", "HEAD") != f.source {
 		t.Fatalf("newer approval after a spent request: %+v, %v", result, err)
+	}
+	if status, reason, err := f.store.ApprovalFollowState(ctx, "W", "L", "C1", 1); err != nil || status != "applied" || reason != "" {
+		t.Fatalf("re-armed follow state: %q %q, %v", status, reason, err)
 	}
 }
 

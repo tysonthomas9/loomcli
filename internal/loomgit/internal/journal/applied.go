@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 )
@@ -28,6 +29,11 @@ func createAppliedSchema(db *sql.DB) error {
 		paths BLOB NOT NULL DEFAULT '[]', PRIMARY KEY(workspace, lead, change_id, revision)
 	);`)
 	if err != nil {
+		return err
+	}
+	// reason explains a settled follow (status 'spent') to the reviewer.
+	if _, err := db.Exec(`ALTER TABLE approval_follow ADD COLUMN reason TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
 		return err
 	}
 	if err := createApprovalPublicationSchema(db); err != nil {
@@ -189,7 +195,7 @@ type ApprovalTarget struct {
 
 func (s *SQLite) PendingApprovalTargets(ctx context.Context) ([]ApprovalTarget, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT workspace,lead FROM approval_follow
-		WHERE status NOT IN ('applied','superseded') ORDER BY workspace,lead`)
+		WHERE status NOT IN ('applied','superseded','spent') ORDER BY workspace,lead`)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +231,7 @@ func (s *SQLite) PendingApprovals(ctx context.Context, workspace, lead string) (
 		COALESCE(d.repo,''),COALESCE(l.predecessor_change,'')
 		FROM approval_follow a LEFT JOIN driver_changes d ON d.workspace=a.workspace AND d.change_id=a.change_id
 		LEFT JOIN local_lineage l ON l.workspace=d.workspace AND l.task_id=d.task_id AND l.repo=d.repo
-		WHERE a.workspace=? AND a.lead=? AND a.status NOT IN ('applied','superseded') ORDER BY a.verdict_id`, workspace, lead)
+		WHERE a.workspace=? AND a.lead=? AND a.status NOT IN ('applied','superseded','spent') ORDER BY a.verdict_id`, workspace, lead)
 	if err != nil {
 		return nil, err
 	}
@@ -298,6 +304,40 @@ func (s *SQLite) ApprovalLeads(ctx context.Context, workspace, change string, re
 		leads = append(leads, lead)
 	}
 	return leads, rows.Err()
+}
+
+// SpendApprovalFollow settles a follow whose apply request can never apply
+// again (status 'spent'), with the reason the reviewer sees. Only a newer
+// approval re-arms it.
+func (s *SQLite) SpendApprovalFollow(ctx context.Context, approval PendingApproval, reason string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE approval_follow SET status='spent',paths='[]',reason=?
+		WHERE workspace=? AND lead=? AND change_id=? AND revision=? AND verdict_id=?`,
+		reason, approval.Workspace, approval.Lead, approval.Change, approval.Revision, approval.VerdictID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrStale
+	}
+	return nil
+}
+
+// ApprovalFollowState reports the follow status and reason for one revision's
+// approval in lead, or in the most recently approved lead when lead is empty.
+// It returns empty strings when the revision has no follow.
+func (s *SQLite) ApprovalFollowState(ctx context.Context, workspace, lead, change string, revision int) (string, string, error) {
+	var status, reason string
+	err := s.db.QueryRowContext(ctx, `SELECT status,reason FROM approval_follow
+		WHERE workspace=? AND (?='' OR lead=?) AND change_id=? AND revision=? ORDER BY verdict_id DESC LIMIT 1`,
+		workspace, lead, lead, change, revision).Scan(&status, &reason)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	return status, reason, err
 }
 
 func (s *SQLite) SetApprovalFollow(ctx context.Context, approval PendingApproval, status string, paths []string) error {

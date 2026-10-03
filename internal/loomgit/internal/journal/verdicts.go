@@ -198,7 +198,8 @@ func recordApprovalTargets(ctx context.Context, tx *sql.Tx, v loomgit.Verdict) e
 		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO UPDATE SET
 		verdict_id=excluded.verdict_id,
 		status=CASE WHEN approval_follow.status='applied' AND EXISTS (`+heldRevision+`) THEN 'applied' ELSE 'approved' END,
-		paths=CASE WHEN approval_follow.status='applied' AND EXISTS (`+heldRevision+`) THEN approval_follow.paths ELSE '[]' END
+		paths=CASE WHEN approval_follow.status='applied' AND EXISTS (`+heldRevision+`) THEN approval_follow.paths ELSE '[]' END,
+		reason=CASE WHEN approval_follow.status='applied' AND EXISTS (`+heldRevision+`) THEN approval_follow.reason ELSE '' END
 		WHERE excluded.verdict_id > approval_follow.verdict_id`,
 		v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
 		return err

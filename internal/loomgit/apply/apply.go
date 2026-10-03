@@ -247,7 +247,7 @@ func (s *Service) settledRequest(ctx context.Context, in Request) (Result, bool,
 		return Result{}, false, err
 	}
 	if prior.Workspace != in.Workspace || prior.Lead != in.Lead || prior.Change != in.Change {
-		return Result{}, true, loomgit.NewError(loomgit.Stale, "apply request belongs to another change", ErrRequestSpent)
+		return Result{}, true, loomgit.NewError(loomgit.Stale, "its apply request belongs to another change", ErrRequestSpent)
 	}
 	switch prior.Phase {
 	case "done":
@@ -258,14 +258,14 @@ func (s *Service) settledRequest(ctx context.Context, in Request) (Result, bool,
 		if !same {
 			// The request already applied another revision; reusing it cannot apply this one.
 			return Result{}, true, loomgit.NewError(loomgit.Stale,
-				fmt.Sprintf("apply request already applied revision %d, not %d", prior.Revision, in.Revision), ErrRequestSpent)
+				fmt.Sprintf("its apply request already applied revision %d, not %d", prior.Revision, in.Revision), ErrRequestSpent)
 		}
 		return Result{HeadSHA: prior.NewTip}, true, nil
 	case "not_applied":
 		return Result{}, false, nil
 	case "unapplied":
 		// The layer was applied and later removed: this request is used up.
-		return Result{}, true, loomgit.NewError(loomgit.Stale, "apply request was unapplied", ErrRequestSpent)
+		return Result{}, true, loomgit.NewError(loomgit.Stale, "it was applied and later unapplied from this lead; approve again to apply it", ErrRequestSpent)
 	default:
 		// SaveApplied would refuse this request; fail before deriving anything.
 		return Result{}, true, loomgit.NewError(loomgit.Stale, "apply request already recorded in phase "+prior.Phase, nil)

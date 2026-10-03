@@ -47,6 +47,12 @@ func (l *Local) SetFollowingPaused(ctx context.Context, workspace, lead string, 
 	return l.store.SetFollowingPaused(ctx, workspace, lead, paused)
 }
 
+// ApprovalFollowState reports the follow status and reason of a revision's
+// approval in lead (or the latest approved lead when lead is empty).
+func (l *Local) ApprovalFollowState(ctx context.Context, workspace, lead, change string, revision int) (string, string, error) {
+	return l.store.ApprovalFollowState(ctx, workspace, lead, change, revision)
+}
+
 func (l *Local) WorkingAreas(ctx context.Context, workspace, lead string) ([]journal.WorkingArea, error) {
 	return l.store.WorkingAreas(ctx, workspace, lead)
 }
@@ -61,6 +67,11 @@ type TaskRevision struct {
 	Incomplete bool   `json:"incomplete"`
 	Verdict    string `json:"verdict,omitempty"`
 	Applied    bool   `json:"applied"`
+	// FollowStatus is the lead follow state of this revision's approval
+	// ("spent" when its apply can never run; approve again to re-arm), with
+	// the reviewer-facing reason.
+	FollowStatus string `json:"follow_status,omitempty"`
+	FollowReason string `json:"follow_reason,omitempty"`
 	// NeedsWorkingArea marks an approved, unapplied revision whose target lead
 	// has no working area yet, so the UI can offer Apply after a reload.
 	NeedsWorkingArea bool `json:"needs_working_area"`
@@ -114,6 +125,9 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 			return nil, err
 		}
 		if v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy" {
+			if i.FollowStatus, i.FollowReason, err = l.store.ApprovalFollowState(ctx, workspace, lead, r.Change, r.Number); err != nil {
+				return nil, err
+			}
 			if i.NeedsWorkingArea, err = l.needsWorkingArea(ctx, workspace, lead, r.Change, r.Number); err != nil {
 				return nil, err
 			}
