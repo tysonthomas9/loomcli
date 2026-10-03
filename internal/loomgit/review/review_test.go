@@ -201,3 +201,38 @@ func TestCancelledIncompleteRevisionCannotBeApprovedOrPublished(t *testing.T) {
 	}(), loomgit.CaptureIncomplete)
 	codeIs(t, RequireVerdict(ctx, s, "W", "C", r.Number, r.HeadSHA, "publish", ""), loomgit.CaptureIncomplete)
 }
+
+// The revisions list exposes a spent follow and its reason, so the reviewer
+// sees why an approved revision is not applied; a newer approval re-arms it.
+func TestTaskRevisionsExposeSpentFollow(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	if _, err := s.DriverChange(ctx, "W", "T", "repo", "C"); err != nil {
+		t.Fatal(err)
+	}
+	r := revision(t, s, "1source", "source")
+	actor := Actor{Kind: "human", ID: "reviewer"}
+	v, err := SubmitForLead(ctx, s, "W", "C", r.Number, r.HeadSHA, "approve", "", actor, "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const reason = "it was applied and later unapplied from this lead; approve again to apply it"
+	if err := s.SpendApprovalFollow(ctx, journal.PendingApproval{Workspace: "W", Lead: "L", Change: "C",
+		Revision: r.Number, VerdictID: int(v.ID)}, reason); err != nil {
+		t.Fatal(err)
+	}
+	local := &Local{store: s}
+	for _, lead := range []string{"L", ""} {
+		got, err := local.TaskRevisionsForLead(ctx, "W", "T", lead)
+		if err != nil || len(got) != 1 || got[0].FollowStatus != "spent" || got[0].FollowReason != reason || got[0].Applied {
+			t.Fatalf("lead %q: %+v, %v", lead, got, err)
+		}
+	}
+	if _, err := SubmitForLead(ctx, s, "W", "C", r.Number, r.HeadSHA, "approve", "", actor, "L"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := local.TaskRevisionsForLead(ctx, "W", "T", "L")
+	if err != nil || len(got) != 1 || got[0].FollowStatus != "approved" || got[0].FollowReason != "" {
+		t.Fatalf("re-approved: %+v, %v", got, err)
+	}
+}

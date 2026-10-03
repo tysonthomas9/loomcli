@@ -6488,6 +6488,12 @@ components:
         applied:
           type: boolean
           description: True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
+        follow_status:
+          type: string
+          description: Lead follow state of this revision's approval (approved, applied, conflict, apply_pending, superseded, spent). "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled); approving again re-arms it.
+        follow_reason:
+          type: string
+          description: Reviewer-facing reason for a spent follow.
         needs_working_area:
           type: boolean
           description: True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed.
