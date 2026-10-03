@@ -598,3 +598,69 @@ func TestEmulatorAsksAndFailureReason(t *testing.T) {
 		t.Fatalf("failed turn = %+v", e)
 	}
 }
+
+// TestEmulatorModelHistoryAcrossRestart: a model turn sends the session's
+// whole conversation, its earlier assistant replies included, as OpenCode
+// does, and a restarted emulator still sends it from the saved state.
+func TestEmulatorModelHistoryAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var bodies []string
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		reply := fmt.Sprintf("REPLY-%d", len(bodies))
+		mu.Unlock()
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"`+reply+`"}}]}`+"\n\ndata: [DONE]\n\n")
+	}))
+	defer model.Close()
+	state := filepath.Join(t.TempDir(), "state.json")
+	start := func() (*opencode.Client, loomharness.Feed, func()) {
+		s, err := harnessemu.New(state, "", "pw")
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.Model = model.URL
+		srv := httptest.NewServer(s.Handler())
+		c := opencode.NewClient(srv.URL, "pw")
+		f, err := c.Feed(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c, f, func() { f.Close(); s.Close(); srv.Close() }
+	}
+	c, f, stop := start()
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "h", Dir: t.TempDir(), Metadata: map[string]string{"agent_id": "h"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := func(c *opencode.Client, f loomharness.Feed, r, text string) {
+		if err := c.Session(ref).Prompt(ctx, loomharness.Input{Key: opencode.PromptID("h", r), Text: text}); err != nil {
+			t.Fatal(err)
+		}
+		until(t, f, func(e loomharness.Event) bool { return completed(e) && e.Session.NativeID == ref.NativeID })
+	}
+	turn(c, f, "r1", "before")
+	stop()
+	c, f, stop = start()
+	defer stop()
+	if _, err := c.Session(ref).Resume(ctx, loomharness.Launch{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	turn(c, f, "r2", "after")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("model requests = %v", bodies)
+	}
+	var req struct{ Messages []map[string]any }
+	if err := json.Unmarshal([]byte(bodies[1]), &req); err != nil {
+		t.Fatal(err)
+	}
+	want := []map[string]any{{"role": "user", "content": "before"}, {"role": "assistant", "content": "REPLY-1"}, {"role": "user", "content": "after"}}
+	if fmt.Sprint(req.Messages) != fmt.Sprint(want) {
+		t.Fatalf("second request's messages = %v, want %v", req.Messages, want)
+	}
+}

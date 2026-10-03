@@ -244,8 +244,8 @@ func (s *Server) next(ss *session, text string) Turn {
 
 var modelClient = &http.Client{Timeout: 30 * time.Second}
 
-// ask sends the session's user texts to the fake model's chat completions,
-// as OpenCode would, and plays its reply. A Code Mode call of an MCP tool
+// ask sends the session's user texts and earlier replies to the fake model's
+// chat completions, as OpenCode would, and plays its reply. A Code Mode call of an MCP tool
 // on one of servers runs it and asks again with its result; any other tool
 // call holds the turn until it is interrupted: the emulator runs no other
 // tools. It runs without the lock, after the prompt is answered, as in
@@ -409,8 +409,13 @@ func (s *Server) turn(sid string, r *run) (Turn, bool) {
 	ss := s.st.Sessions[sid]
 	msgs := []map[string]any{}
 	for _, m := range ss.Messages {
-		if m["type"] == "user" {
+		switch m["type"] {
+		case "user":
 			msgs = append(msgs, map[string]any{"role": "user", "content": m["text"]})
+		case "assistant":
+			if text := replyText(m); text != "" {
+				msgs = append(msgs, map[string]any{"role": "assistant", "content": text})
+			}
 		}
 	}
 	loc, _ := ss.Info["location"].(map[string]any)
@@ -428,6 +433,21 @@ func (s *Server) turn(sid string, r *run) (Turn, bool) {
 	}
 	ss = s.st.Sessions[sid]
 	return t, ss != nil && ss.Running == r
+}
+
+// replyText is an assistant message's text parts, as OpenCode sends an earlier
+// reply back to the model; its content is typed once loaded from the state.
+func replyText(m map[string]any) string {
+	var parts []struct{ Type, Text string }
+	b, _ := json.Marshal(m["content"])
+	_ = json.Unmarshal(b, &parts)
+	var out strings.Builder
+	for _, p := range parts {
+		if p.Type == "text" {
+			out.WriteString(p.Text)
+		}
+	}
+	return out.String()
 }
 
 // play streams turn r of session sid. Every change happens under the lock
