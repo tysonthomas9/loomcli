@@ -369,3 +369,27 @@ func TestLateApprovalPublishKeepsLaterLayer(t *testing.T) {
 	}
 	wantDependents(t, map[string][]string{"A": {"task-B@repo"}, "B": {"task-C@repo"}, "C": {}})
 }
+
+// A declared stack is not a lead stack even when its name starts with "lead-";
+// only the lead's exact stack ID reads publication order as dependents.
+func TestOnlyTheLeadsExactStackIDAddsDependents(t *testing.T) {
+	for stackID, want := range map[string][]string{"lead-feature": {}, LeadStackID("L"): {"task-B"}} {
+		fixture := newFixture(t)
+		ctx := context.Background()
+		first := stackRevision(t, fixture, "A", 1, fixture.base)
+		stackRevision(t, fixture, "B", 1, first.HeadSHA)
+		request := fixture.request()
+		request.forge = &fakeForge{}
+		if _, err := publishStack(ctx, fixture.store, StackRequest{Request: request, StackID: stackID,
+			Changes: []string{"A", "B"}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.store.DriverChange(ctx, "W", "task-B", "repo", "B"); err != nil {
+			t.Fatal(err)
+		}
+		found, err := fixture.store.DependentsOf(ctx, "W", "A")
+		if err != nil || len(found) != len(want) || (len(want) == 1 && found[0].Task != want[0]) {
+			t.Fatalf("stack %s dependents = %+v, %v; want %v", stackID, found, err, want)
+		}
+	}
+}
