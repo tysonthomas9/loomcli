@@ -144,7 +144,11 @@ describe("AgentChat timeline (UI3)", () => {
     await mount(agent());
     deliver(ev("item.completed", { itemKind: "message", text: "**done**" }));
     expect(screen.getByText("done").tagName).toBe("STRONG");
-    fireEvent.click(screen.getByRole("button", { name: "Copy message" }));
+    // The copy action is an icon: the message's text is the message only.
+    const copy = screen.getByRole("button", { name: "Copy message" });
+    expect(copy).toHaveTextContent(/^$/);
+    expect(copy.closest("li")).toHaveTextContent(/^done$/);
+    fireEvent.click(copy);
     expect(writeText).toHaveBeenCalledWith("**done**");
   });
 

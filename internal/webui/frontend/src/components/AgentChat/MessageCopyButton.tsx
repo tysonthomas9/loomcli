@@ -1,7 +1,8 @@
 // Ported from T3 Code apps/web/src/components/chat/MessageCopyButton.tsx at
 // commit 2daff8c25. Copyright (c) 2026 T3 Tools Inc. MIT License; see
-// THIRD_PARTY_NOTICES.md. Changes: a plain button with a "Copied" state in
-// place of T3's tooltip, anchored toast and icon set.
+// THIRD_PARTY_NOTICES.md. Changes: an icon button (inline copy and check
+// glyphs, as T3's lucide icons) with a "Copied" label in place of T3's
+// tooltip and anchored toast.
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import styles from "./ChatMarkdown.module.css";
@@ -53,7 +54,26 @@ export const MessageCopyButton = memo(function MessageCopyButton({
       disabled={copied}
       onClick={() => copy(text)}
     >
-      {copied ? "Copied" : "Copy"}
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {copied ? (
+          <path d="M20 6 9 17l-5-5" />
+        ) : (
+          <>
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </>
+        )}
+      </svg>
     </button>
   );
 });
