@@ -330,6 +330,12 @@ func resolverFor(selected string, fallback func() (*cli.Resolver, error)) (*cli.
 	if selected == "" {
 		return fallback()
 	}
+	return allWorkspacesResolver()
+}
+
+// allWorkspacesResolver loads every configured workspace without requiring an
+// active one, for commands that select or iterate workspaces themselves.
+func allWorkspacesResolver() (*cli.Resolver, error) {
 	cfg, err := config.LoadConfigCached()
 	if err != nil {
 		return nil, err

@@ -184,7 +184,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 }
 
 func pullAllWorkspaces(deps *cli.Deps, sourceBranch string) error {
-	resolver, err := cli.NewResolver()
+	resolver, err := allWorkspacesResolver()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating resolver: %v\n", err)
 		os.Exit(1)
