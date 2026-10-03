@@ -447,3 +447,36 @@ func TestScanShowsLandingAttention(t *testing.T) {
 		t.Fatalf("healthy publication entry = %+v", got)
 	}
 }
+
+func TestScanShowsUnhandledJournalRequest(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	path := filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := journal.OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	ctx := context.Background()
+	for _, entry := range [][2]string{{"from-newer-loom", "unknown-operation"}, {"workspace-create:W2", "ensure_workspace"}} {
+		if _, _, err := store.Begin(ctx, entry[0], entry[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot, err := Scan(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var journals []Entry
+	for _, entry := range snapshot.Entries {
+		if entry.Kind == "journal" {
+			journals = append(journals, entry)
+		}
+	}
+	if len(journals) != 1 || journals[0].ID != "from-newer-loom" || journals[0].State != "attention_required" ||
+		!strings.Contains(journals[0].Reason, `no recovery handler for "unknown-operation"`) || journals[0].NextAction == "" {
+		t.Fatalf("unhandled journal entries = %+v", journals)
+	}
+}

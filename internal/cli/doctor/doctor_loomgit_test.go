@@ -113,3 +113,31 @@ func TestDoctorWarnsOnLandingAttention(t *testing.T) {
 		t.Fatalf("doctor hid a landing attention: %+v", result)
 	}
 }
+
+func TestDoctorWarnsOnUnhandledJournalRequest(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	path := filepath.Join(os.Getenv("LOOM_CONFIG_DIR"), "loomgit", "store.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	schema := `CREATE TABLE workspace_repos(workspace TEXT,repo TEXT,trunk TEXT,workspace_branch TEXT,base_sha TEXT);
+	CREATE TABLE working_areas(workspace TEXT,lead TEXT,repo TEXT,path TEXT,branch TEXT,base_sha TEXT,mode TEXT);
+	CREATE TABLE change_revisions(workspace TEXT,change_id TEXT,request_id TEXT,number INTEGER,kind TEXT,operation TEXT,outcome TEXT,base_sha TEXT,head_sha TEXT,tree_hash TEXT,source_head_sha TEXT,derived_from_change TEXT,derived_from_number INTEGER,ready INTEGER,incomplete INTEGER);
+	CREATE TABLE change_publications(workspace TEXT,change_id TEXT,repo TEXT,branch TEXT,trunk TEXT,slug TEXT,head_sha TEXT,phase TEXT,pr_number INTEGER,pr_url TEXT);
+	CREATE TABLE journal_entries(id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, operation TEXT NOT NULL, phase TEXT NOT NULL, version INTEGER NOT NULL, fence INTEGER NOT NULL);
+	CREATE TABLE journal_results(request_id TEXT PRIMARY KEY, result BLOB NOT NULL);
+	INSERT INTO journal_entries VALUES ('bad','bad','from-a-newer-loom','started',1,1);`
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	result := checkLoomGitInventory(context.Background(), false)
+	if result.Status != StatusWarn || !strings.Contains(result.Detail, "journal / bad: attention_required") ||
+		!strings.Contains(result.Detail, `no recovery handler for "from-a-newer-loom"`) {
+		t.Fatalf("doctor hid an unhandled journal request: %+v", result)
+	}
+}
