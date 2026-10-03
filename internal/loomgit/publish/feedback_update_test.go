@@ -194,6 +194,27 @@ func taskView(t *testing.T, change string, number int) review.TaskRevision {
 	return review.TaskRevision{}
 }
 
+// newestView is the change's newest revision, the one the task view shows.
+func newestView(t *testing.T, change string) review.TaskRevision {
+	t.Helper()
+	local, err := review.OpenLocal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = local.Close() }()
+	revisions, err := local.TaskRevisionsForLead(context.Background(), "W", "task-"+change, "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newest review.TaskRevision
+	for _, revision := range revisions {
+		if revision.ChangeID == change && revision.Number > newest.Number {
+			newest = revision
+		}
+	}
+	return newest
+}
+
 func humanVerdicts(t *testing.T, fx fixture, change string, number int) int {
 	t.Helper()
 	revision, err := fx.store.GetRevision(context.Background(), "W", change, number)
@@ -250,6 +271,11 @@ func TestFixupUpdatesOpenStackPRWithoutApprove(t *testing.T) {
 	}
 	if view := taskView(t, "A", fix.Number); view.FeedbackStatus != FeedbackPushed || view.Verdict != "feedback" || view.PRNumber != 1 {
 		t.Fatalf("task view of the pushed fix-up = %+v", view)
+	}
+	// The task view shows only the change's newest revision (P2.18); it says
+	// the fix-up was pushed even when the replaced layer is a derived revision.
+	if view := newestView(t, "A"); view.FeedbackStatus != FeedbackPushed {
+		t.Fatalf("newest revision of the fixed-up change = %+v", view)
 	}
 	// The pushed head stays approvable for Approve and merge.
 	if err := requireApprovableHead(ctx, fx.store, "W", "A", headA, headA); err != nil {

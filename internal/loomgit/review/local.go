@@ -155,7 +155,7 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 		if err := l.addPublishState(ctx, workspace, &i, statusSource(r)); err != nil {
 			return nil, err
 		}
-		if err := l.addFeedbackState(ctx, workspace, &i); err != nil {
+		if err := l.addFeedbackState(ctx, workspace, &i, statusSource(r)); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -266,8 +266,13 @@ func (l *Local) addMergeState(ctx context.Context, publication journal.Publicati
 }
 
 // addFeedbackState reports how a review fix-up's automatic PR update stands.
-func (l *Local) addFeedbackState(ctx context.Context, workspace string, i *TaskRevision) error {
+// The layer a fix-up replaced may be rebuilt as a derived revision, which
+// reports its source fix-up's update (see statusSource).
+func (l *Local) addFeedbackState(ctx context.Context, workspace string, i *TaskRevision, source int) error {
 	state, found, err := l.store.FeedbackUpdateFor(ctx, workspace, i.ChangeID, i.Number)
+	if err == nil && !found && source > 0 {
+		state, found, err = l.store.FeedbackUpdateFor(ctx, workspace, i.ChangeID, source)
+	}
 	if err != nil || !found {
 		return err
 	}
