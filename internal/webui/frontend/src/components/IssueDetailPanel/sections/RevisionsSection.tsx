@@ -495,12 +495,14 @@ export function mergeState(
   let action: "none" | "merge" | "verdict" = "none";
   const open = Boolean(revision.pr_number) && prStateOf(revision) === "open";
   if (open && !activeMerge.includes(status) && status !== "merged") {
-    // After someone else pushed (stale_subject), only a new version that the
+    // After someone else pushed (stale_subject), or a rebuild that was not
+    // patch-equivalent (reapproval_required), only a new version that the
     // human has not decided yet can be approved to merge.
     if (!decided) action = "verdict";
     else if (
       approved &&
       status !== "stale_subject" &&
+      status !== "reapproval_required" &&
       revision.head_sha === revision.pr_head
     )
       action = "merge";
