@@ -37,3 +37,9 @@
   background: var(--bg-color, #fff);
   border: 1px solid var(--border-color, #ddd);
 }
+
+.mergeStatus {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}

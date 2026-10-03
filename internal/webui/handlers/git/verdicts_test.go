@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
@@ -210,5 +211,39 @@ func TestVerdictApproveAndCreatePROpensPRUnlessApproveOnly(t *testing.T) {
 	code, response = post(map[string]any{"verdict": "reject", "reason": "no"})
 	if code != 200 || response["status"] != "recorded" || publishCalls != 3 {
 		t.Fatalf("reject = %d %v, publish calls %d", code, response, publishCalls)
+	}
+}
+
+func TestVerdictApproveAndMergeRecordsTheMergeAtTheApprovedHead(t *testing.T) {
+	change, head, number := freezeTaskRevision(t)
+	previousFollow, previousArea, previousApprove := followApproved, hasWorkingArea, approveMerge
+	t.Cleanup(func() { followApproved, hasWorkingArea, approveMerge = previousFollow, previousArea, previousApprove })
+	hasWorkingArea = func(context.Context, *review.Local, string, string) (bool, error) { return false, nil }
+	var merged []string
+	approveMerge = func(_ context.Context, workspace, lead, approved, at string, actor publish.MergeActor) (publish.MergeApprovalView, error) {
+		if actor.Kind != "human" {
+			return publish.MergeApprovalView{}, loomgit.NewError(loomgit.MergeNotAuthorized, "only a human can approve a merge", nil)
+		}
+		merged = append(merged, workspace+"/"+lead+"/"+approved+"@"+at)
+		return publish.MergeApprovalView{Status: "waiting"}, nil
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", handleVerdict)
+	post := func(body string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest("POST", "/api/workspaces/W/changes/"+change+"/revisions/"+strconv.Itoa(number)+"/verdict", strings.NewReader(body)))
+		return recorder
+	}
+	response := post(`{"head_sha":"` + head + `","verdict":"approve","merge":true,"actor":{"kind":"human","id":"user"}}`)
+	if response.Code != 200 || len(merged) != 1 || merged[0] != "W/lead/"+change+"@"+head {
+		t.Fatalf("Approve and merge = %d %s, merges %v", response.Code, response.Body.String(), merged)
+	}
+	response = post(`{"head_sha":"` + head + `","verdict":"approve","merge":true,"lead":"L","actor":{"kind":"lead","id":"L"}}`)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "merge_approval_failed") || len(merged) != 1 {
+		t.Fatalf("lead Approve and merge = %d %s", response.Code, response.Body.String())
+	}
+	response = post(`{"head_sha":"` + head + `","verdict":"approve","actor":{"kind":"human","id":"user"}}`)
+	if response.Code != 200 || len(merged) != 1 {
+		t.Fatalf("plain approve recorded a merge: %v", merged)
 	}
 }

@@ -33,6 +33,7 @@ export async function submitRevisionVerdict(
   reason: string,
   lead?: string,
   approveOnly?: boolean,
+  merge?: boolean,
 ): Promise<string | undefined> {
   const { data, error, response } = await api.POST(
     "/api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict",
@@ -50,6 +51,7 @@ export async function submitRevisionVerdict(
         reason,
         ...(lead ? { lead } : {}),
         ...(approveOnly ? { approve_only: true } : {}),
+        ...(merge ? { merge: true } : {}),
         actor: { kind: "human", id: "local-user" },
       },
     },
@@ -130,6 +132,44 @@ export async function createRevisionPR(
     {
       params: { path: { ws: workspaceId, name: lead } },
       body: { change_id: changeId },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+}
+
+/**
+ * Approve and merge a task's open PR at the head the user sees (D29). The
+ * bottom PR merges now; a higher one waits for the PRs below it.
+ */
+export async function approveRevisionMerge(
+  workspaceId: string,
+  revision: ReviewRevision,
+  lead: string,
+): Promise<void> {
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/changes/{change}/merge-approval",
+    {
+      params: { path: { ws: workspaceId, change: revision.change_id } },
+      body: {
+        lead,
+        head_sha: revision.pr_head ?? revision.head_sha,
+        actor: { kind: "human", id: "local-user" },
+      },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+}
+
+/** Cancel auto-merge: drop a pending Approve and merge. */
+export async function cancelRevisionMerge(
+  workspaceId: string,
+  changeId: string,
+): Promise<void> {
+  const { error, response } = await api.DELETE(
+    "/api/workspaces/{ws}/changes/{change}/merge-approval",
+    {
+      params: { path: { ws: workspaceId, change: changeId } },
+      body: { actor: { kind: "human", id: "local-user" } },
     },
   );
   if (error) throw apiErrorFromResponse(error, response);

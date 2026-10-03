@@ -2625,11 +2625,17 @@ paths:
                 change_id: {type: string}
       responses:
         "200":
-          description: PR created
+          description: PR created. In stack mode `stack_id` names the Loom Git stack the PR joined (one per repository for a cross-repo lead), for `loom git merge-up-to`.
           content:
             application/json:
               schema:
                 type: object
+                properties:
+                  url: {type: string}
+                  created: {type: boolean}
+                  already_exists: {type: boolean}
+                  no_commits: {type: boolean}
+                  stack_id: {type: string}
 
   /api/workspaces/{ws}/agents/{name}/git/merge-up-to:
     get:
@@ -3652,6 +3658,9 @@ paths:
                 approve_only:
                   type: boolean
                   description: Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29).
+                merge:
+                  type: boolean
+                  description: Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29).
                 actor:
                   type: object
                   required: [kind, id]
@@ -3668,6 +3677,89 @@ paths:
             application/json:
               schema:
                 type: object
+
+  /api/workspaces/{ws}/changes/{change}/merge-approval:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: change
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getMergeApproval
+      tags: [git]
+      summary: Show a change's Approve and merge state
+      responses:
+        "200":
+          description: Merge approval state and the open PRs below it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeApprovalResponse"
+    post:
+      operationId: approveMerge
+      tags: [git]
+      summary: Approve and merge a change's open PR
+      description: Records a human's merge approval pinned to the PR head they saw. The bottom PR of its stack (or a trunk-mode PR) merges now through the stack's backend, respecting branch protection; a higher PR waits and merges once every PR below has merged and its rebuild carried the approval (D26, D29). A lead never merges this way.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lead, head_sha, actor]
+              properties:
+                lead: {type: string}
+                head_sha: {type: string}
+                actor:
+                  type: object
+                  required: [kind, id]
+                  properties:
+                    kind:
+                      type: string
+                      description: human, agent or lead; only a human can approve a merge.
+                    id:
+                      type: string
+      responses:
+        "200":
+          description: Recorded; `data.status` says whether it is merging, waiting or blocked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeApprovalResponse"
+        "409":
+          description: Refused (not a human, the PR changed, no open PR, or another approval is active).
+    delete:
+      operationId: cancelMergeApproval
+      tags: [git]
+      summary: Cancel auto-merge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor]
+              properties:
+                actor:
+                  type: object
+                  required: [kind, id]
+                  properties:
+                    kind:
+                      type: string
+                      description: human, agent or lead; only a human can approve a merge.
+                    id:
+                      type: string
+      responses:
+        "200":
+          description: Cancelled, or nothing was pending.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeApprovalResponse"
+        "409":
+          description: The merge has already started.
 
   /api/workspaces/{ws}/files/stat:
     get:
@@ -6606,6 +6698,22 @@ components:
         publish_reason:
           type: string
           description: Why the PR is not open yet, such as "not published - no provider" or the last publish error.
+        pr_head:
+          type: string
+          description: Head SHA of the change's open PR; Approve and merge pins it.
+        pr_state:
+          type: string
+          description: State of the change's PR, once published; one of open, merged or closed.
+        merge_after:
+          type: array
+          items: {type: integer}
+          description: Open PRs below this one in its stack, bottom first. Empty when it is the bottom PR (Approve and merge merges it now).
+        merge_status:
+          type: string
+          description: State of the change's Approve and merge, if one was made; one of waiting, blocked, merging, merged, stale_subject, reapproval_required or cancelled.
+        merge_reason:
+          type: string
+          description: Why the approved merge has not happened, such as "merges after #1, #2" or "required checks are failing".
     RevisionDiffFile:
       type: object
       required: [path, patchSize, truncated]
@@ -6647,6 +6755,29 @@ components:
               type: string
               enum: [layer, trunk, base]
               description: "layer: against the layer below in the lead's stack; trunk: bottom layer, or PR-per-task (trunk) mode where the revision is its own PR to trunk; base: not applied, against the revision's own base."
+    MergeApprovalView:
+      type: object
+      required: [change, status, head]
+      properties:
+        change: {type: string}
+        status:
+          type: string
+          description: Empty when no Approve and merge was made; otherwise waiting, blocked, merging, merged, stale_subject, reapproval_required or cancelled.
+        reason: {type: string}
+        head: {type: string}
+        stack_id: {type: string}
+        pr_number: {type: integer}
+        pr_url: {type: string}
+        merge_after:
+          type: array
+          items: {type: integer}
+    MergeApprovalResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean}
+        data:
+          $ref: "#/components/schemas/MergeApprovalView"
     SessionResponse:
       type: object
       description: Session audit record from dto.SessionResponse

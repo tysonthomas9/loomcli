@@ -1868,6 +1868,32 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/changes/{change}/merge-approval": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+      };
+      cookie?: never;
+    };
+    /** Show a change's Approve and merge state */
+    get: operations["getMergeApproval"];
+    put?: never;
+    /**
+     * Approve and merge a change's open PR
+     * @description Records a human's merge approval pinned to the PR head they saw. The bottom PR of its stack (or a trunk-mode PR) merges now through the stack's backend, respecting branch protection; a higher PR waits and merges once every PR below has merged and its rebuild carried the approval (D26, D29). A lead never merges this way.
+     */
+    post: operations["approveMerge"];
+    /** Cancel auto-merge */
+    delete: operations["cancelMergeApproval"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/files/stat": {
     parameters: {
       query?: never;
@@ -3425,6 +3451,16 @@ export interface components {
         | "superseded";
       /** @description Why the PR is not open yet, such as "not published - no provider" or the last publish error. */
       publish_reason?: string;
+      /** @description Head SHA of the change's open PR; Approve and merge pins it. */
+      pr_head?: string;
+      /** @description State of the change's PR, once published; one of open, merged or closed. */
+      pr_state?: string;
+      /** @description Open PRs below this one in its stack, bottom first. Empty when it is the bottom PR (Approve and merge merges it now). */
+      merge_after?: number[];
+      /** @description State of the change's Approve and merge, if one was made; one of waiting, blocked, merging, merged, stale_subject, reapproval_required or cancelled. */
+      merge_status?: string;
+      /** @description Why the approved merge has not happened, such as "merges after */
+      merge_reason?: string;
     };
     RevisionDiffFile: {
       path: string;
@@ -3446,6 +3482,21 @@ export interface components {
        * @enum {string}
        */
       compare: "layer" | "trunk" | "base";
+    };
+    MergeApprovalView: {
+      change: string;
+      /** @description Empty when no Approve and merge was made; otherwise waiting, blocked, merging, merged, stale_subject, reapproval_required or cancelled. */
+      status: string;
+      reason?: string;
+      head: string;
+      stack_id?: string;
+      pr_number?: number;
+      pr_url?: string;
+      merge_after?: number[];
+    };
+    MergeApprovalResponse: {
+      success: boolean;
+      data: components["schemas"]["MergeApprovalView"];
     };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {
@@ -6936,13 +6987,19 @@ export interface operations {
       };
     };
     responses: {
-      /** @description PR created */
+      /** @description PR created. In stack mode `stack_id` names the Loom Git stack the PR joined (one per repository for a cross-repo lead), for `loom git merge-up-to`. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": {
+            url?: string;
+            created?: boolean;
+            already_exists?: boolean;
+            no_commits?: boolean;
+            stack_id?: string;
+          };
         };
       };
     };
@@ -8066,6 +8123,8 @@ export interface operations {
           lead?: string;
           /** @description Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29). */
           approve_only?: boolean;
+          /** @description Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29). */
+          merge?: boolean;
           actor: {
             /** @enum {string} */
             kind: "human" | "agent" | "lead";
@@ -8083,6 +8142,114 @@ export interface operations {
         content: {
           "application/json": Record<string, never>;
         };
+      };
+    };
+  };
+  getMergeApproval: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Merge approval state and the open PRs below it. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeApprovalResponse"];
+        };
+      };
+    };
+  };
+  approveMerge: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          lead: string;
+          head_sha: string;
+          actor: {
+            /** @description human, agent or lead; only a human can approve a merge. */
+            kind: string;
+            id: string;
+          };
+        };
+      };
+    };
+    responses: {
+      /** @description Recorded; `data.status` says whether it is merging, waiting or blocked. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeApprovalResponse"];
+        };
+      };
+      /** @description Refused (not a human, the PR changed, no open PR, or another approval is active). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  cancelMergeApproval: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          actor: {
+            /** @description human, agent or lead; only a human can approve a merge. */
+            kind: string;
+            id: string;
+          };
+        };
+      };
+    };
+    responses: {
+      /** @description Cancelled, or nothing was pending. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeApprovalResponse"];
+        };
+      };
+      /** @description The merge has already started. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
