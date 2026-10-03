@@ -36,13 +36,24 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const keyOf = (m: PickerModel) => modelPrefKey(harness, m.id);
   const favorites = useMemo(() => new Set(prefs.favorites), [prefs.favorites]);
   const current = models.find((m) => m.id === modelId);
-  const [section, setSection] = useState<PickerSection>(() => {
+  const openingSection = (): PickerSection => {
     if (models.some((m) => favorites.has(modelPrefKey(harness, m.id)))) {
       return "favorites";
     }
     const p = current?.providerId ?? providers[0]?.id;
     return p ? providerSection(p) : "favorites";
-  });
+  };
+  const [section, setSection] = useState<PickerSection>(openingSection);
+  // Opened before the catalog listed any provider: once it does, open on
+  // the section it would have opened on, unless one was picked meanwhile.
+  const sectionPicked = useRef(false);
+  const hadProviders = useRef(providers.length > 0);
+  useEffect(() => {
+    if (hadProviders.current || providers.length === 0) return;
+    hadProviders.current = true;
+    if (!sectionPicked.current) setSection(openingSection());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on the first providers
+  }, [providers]);
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -117,6 +128,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           selected={section}
           providers={providers}
           onSelect={(s) => {
+            sectionPicked.current = true;
             setSection(s);
             searchRef.current?.focus({ preventScroll: true });
           }}

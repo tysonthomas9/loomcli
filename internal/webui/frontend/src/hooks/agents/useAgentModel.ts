@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { listHarnessModels } from "@/api/agentsv1";
 import type {
   Agent,
@@ -96,6 +96,13 @@ export function modelControlsDisabledReason(
   return null;
 }
 
+/**
+ * The waits before reading the catalog again while it lists no providers
+ * or fails (about 30 s in all): OpenCode lists none until its service is
+ * up, which on a fresh stack is after the chat first reads it.
+ */
+export const CATALOG_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+
 export interface UseAgentModelReturn {
   catalog: ModelCatalog | null;
   catalogError: string | null;
@@ -106,12 +113,15 @@ export interface UseAgentModelReturn {
   /** The model's option descriptors with the saved choices applied. */
   descriptors: OptionDescriptor[];
   disabledReason: string | null;
+  /** Reads the catalog again (the picker does on opening). */
+  refresh: () => void;
 }
 
 /**
  * The agent's model catalog (its harness's GET /harnesses/{h}/models) and
  * the current model and options, from the agent as Get returns it, so they
- * survive a reload.
+ * survive a reload. A catalog with no providers, or a failed read, is read
+ * again a few times (CATALOG_RETRY_DELAYS_MS), keeping what it has.
  */
 export function useAgentModel(
   workspaceId: string,
@@ -120,22 +130,43 @@ export function useAgentModel(
   const harness = agent?.harness;
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [reads, setReads] = useState(0);
+  const refresh = useCallback(() => setReads((n) => n + 1), []);
+
+  useEffect(() => {
+    setCatalog(null);
+    setCatalogError(null);
+  }, [workspaceId, harness]);
 
   useEffect(() => {
     if (!harness) return;
     let live = true;
-    setCatalog(null);
-    setCatalogError(null);
-    listHarnessModels(workspaceId, harness)
-      .then((c) => live && setCatalog(c))
-      .catch((err) => {
-        if (live)
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = (attempt: number) => {
+      const retry = () => {
+        const delay = CATALOG_RETRY_DELAYS_MS[attempt];
+        if (delay !== undefined)
+          timer = setTimeout(() => read(attempt + 1), delay);
+      };
+      listHarnessModels(workspaceId, harness)
+        .then((c) => {
+          if (!live) return;
+          setCatalog(c);
+          setCatalogError(null);
+          if (c.providers.length === 0) retry();
+        })
+        .catch((err) => {
+          if (!live) return;
           setCatalogError(err instanceof Error ? err.message : String(err));
-      });
+          retry();
+        });
+    };
+    read(0);
     return () => {
       live = false;
+      clearTimeout(timer);
     };
-  }, [workspaceId, harness]);
+  }, [workspaceId, harness, reads]);
 
   const models = useMemo(() => catalogModels(catalog), [catalog]);
   const providers = useMemo(
@@ -167,5 +198,6 @@ export function useAgentModel(
     model,
     descriptors,
     disabledReason,
+    refresh,
   };
 }

@@ -321,6 +321,77 @@ describe("composer model and effort pickers (UI2)", () => {
     );
   });
 
+  describe("a catalog read before the harness is up (no providers yet)", () => {
+    const EMPTY: ModelCatalog = { harness: "opencode", providers: [] };
+    const effortOnly = () =>
+      agent({ spec_json: '{"Options":[{"ID":"effort","Value":"high"}]}' });
+    const advance = (ms: number) =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("retries until the providers appear, then shows the model and saved effort", async () => {
+      api.listHarnessModels
+        .mockResolvedValueOnce(EMPTY)
+        .mockResolvedValueOnce(EMPTY)
+        .mockResolvedValue(CATALOG);
+      await mount(effortOnly());
+      expect(modelButton()).toHaveAccessibleName("Model: Default model");
+      await advance(30_000);
+      expect(api.listHarnessModels).toHaveBeenCalledTimes(3);
+      expect(modelButton()).toHaveAccessibleName("Model: GPT-5.5");
+      expect(
+        screen.getByRole("button", { name: "Variant: High" }),
+      ).toBeInTheDocument();
+    });
+
+    it("recovers when the first read fails", async () => {
+      api.listHarnessModels
+        .mockRejectedValueOnce(new Error("harness starting"))
+        .mockResolvedValue(CATALOG);
+      await mount(effortOnly());
+      await advance(0);
+      expect(modelButton()).toBeDisabled();
+      await advance(30_000);
+      expect(modelButton()).toBeEnabled();
+      expect(modelButton()).toHaveAccessibleName("Model: GPT-5.5");
+      expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    });
+
+    it("stops retrying after about 30 seconds", async () => {
+      api.listHarnessModels.mockResolvedValue(EMPTY);
+      await mount(effortOnly());
+      await advance(40_000);
+      const calls = api.listHarnessModels.mock.calls.length;
+      expect(calls).toBeGreaterThan(1);
+      expect(calls).toBeLessThanOrEqual(6);
+      await advance(120_000);
+      expect(api.listHarnessModels).toHaveBeenCalledTimes(calls);
+    });
+
+    it("reads the catalog again when the picker opens", async () => {
+      api.listHarnessModels.mockResolvedValue(EMPTY);
+      await mount(effortOnly());
+      await advance(40_000);
+      api.listHarnessModels.mockResolvedValue(CATALOG);
+      fireEvent.click(modelButton());
+      await advance(0);
+      expect(modelButton()).toHaveAccessibleName("Model: GPT-5.5");
+      expect(
+        within(screen.getByRole("dialog")).getByRole("option", {
+          name: /GPT-5.5 Mini/,
+        }),
+      ).toBeInTheDocument();
+    });
+  });
+
   it("moves effort into the More composer controls menu on a narrow composer", async () => {
     vi.stubGlobal(
       "ResizeObserver",

@@ -29,6 +29,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /** A hint on the trigger, e.g. that a change applies from the next turn. */
   hint?: string | null;
   onModelChange: (modelId: string) => void;
+  /** Called on opening, e.g. to read the catalog again. */
+  onOpen?: () => void;
 }) {
   const { open, setOpen, rootRef } = useComposerPopover();
   const disabled = Boolean(props.disabledReason);
@@ -47,7 +49,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         }
         disabled={disabled}
         title={props.disabledReason ?? props.hint ?? label}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (!open) props.onOpen?.();
+          setOpen(!open);
+        }}
       >
         {props.model && (
           <ProviderIcon

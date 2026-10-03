@@ -29,7 +29,7 @@ export function ComposerModelControls({
   compact: boolean;
   update: (body: UpdateAgentBody) => Promise<void>;
 }) {
-  const { models, providers, model, descriptors, disabledReason } =
+  const { models, providers, model, descriptors, disabledReason, refresh } =
     useAgentModel(workspaceId, agent);
   if (!agent) return null;
   const hint = agent.running_turn_id ? "Applies from the next turn" : null;
@@ -50,6 +50,7 @@ export function ComposerModelControls({
         disabledReason={disabledReason}
         hint={hint}
         onModelChange={onModelChange}
+        onOpen={refresh}
       />
       {compact ? (
         descriptors.length > 0 && (
