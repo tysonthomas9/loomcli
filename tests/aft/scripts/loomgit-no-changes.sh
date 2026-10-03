@@ -50,6 +50,7 @@ setup)
   git -C "$repo" config core.sshCommand "sh $AFT_TESTS_DIR/fixtures/fake-github/git-ssh-bridge.sh $remote"
   git -C "$repo" remote add origin git@github.com:owner/repo.git
   git -C "$repo" push -q origin main
+  git -C "$repo" rev-parse main > "$work-trunk"
   curl -fsS -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json' \
     -d "{\"name\":\"$lower\",\"type\":\"empty\",\"repos\":[\"$repo\"]}" >/dev/null
   if [[ "${3:-stack}" == trunk ]]; then
@@ -106,8 +107,11 @@ PY
     cat "$work-publish.json" >&2
     exit 1
   fi
-  if git -C "$repo" show-ref --verify --quiet "$lead_ref"; then
-    echo "the empty revision was applied to the lead working area" >&2
+  # The workspace creates the lead's working area at trunk; nothing may be
+  # applied on top of it.
+  lead_tip="$(git -C "$repo" rev-parse --verify --quiet "$lead_ref" || true)"
+  if [[ -n "$lead_tip" && "$lead_tip" != "$(cat "$work-trunk")" ]]; then
+    echo "the empty revision was applied to the lead working area: $lead_tip" >&2
     exit 1
   fi
   test "$(pulls)" = 0
@@ -137,7 +141,7 @@ reviewed)
   curl -fsS -X POST "$api/changes/$change/revisions/$number/verdict" -H 'Content-Type: application/json' \
     -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$work-approve.json"
   grep -q '"status":"applied"' "$work-approve.json"
-  git -C "$repo" show-ref --verify --quiet "$lead_ref"
+  test "$(git -C "$repo" rev-parse "$lead_ref")" != "$(cat "$work-trunk")"
   curl -fsS -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' \
     -d "{\"change_id\":\"$change\"}" > "$work-publish-changed.json"
   grep -q '"created":true' "$work-publish-changed.json"
