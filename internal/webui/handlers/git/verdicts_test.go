@@ -144,7 +144,9 @@ func freezeTaskRevision(t *testing.T) (string, string, int) {
 func TestVerdictApproveAndCreatePROpensPRUnlessApproveOnly(t *testing.T) {
 	change, head, number := freezeTaskRevision(t)
 	previousFollow, previousArea, previousPublish := followApproved, hasWorkingArea, publishApproved
-	t.Cleanup(func() { followApproved, hasWorkingArea, publishApproved = previousFollow, previousArea, previousPublish })
+	t.Cleanup(func() {
+		followApproved, hasWorkingArea, publishApproved = previousFollow, previousArea, previousPublish
+	})
 	hasWorkingArea = func(context.Context, *review.Local, string, string) (bool, error) { return true, nil }
 	followApproved = func(context.Context, string, string) (apply.FollowResult, error) {
 		return apply.FollowResult{Applied: []string{change}}, nil
