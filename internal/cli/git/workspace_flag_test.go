@@ -23,9 +23,7 @@ import (
 func TestGitCommandsSelectWorkspaceWithoutActiveWorkspace(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "repo")
-	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	createGitRepo(t, repoDir)
 	setupWorkspaceConfig(t, &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
 		"selected": {Path: root, Repos: []config.RepoConfig{{Name: "repo", Path: repoDir}}},
 	}})
@@ -124,6 +122,24 @@ func TestGitCommandsSelectWorkspaceWithoutActiveWorkspace(t *testing.T) {
 			if got != tc.want || (tc.out != "" && output.String() != tc.out) {
 				t.Fatalf("%s (flag %s): backend got %q want %q, output %q", tc.name, position, got, tc.want, output.String())
 			}
+		}
+	}
+
+	// Commands that act on every workspace need no active workspace either.
+	oldAll, oldYes := pullAll, syncYes
+	t.Cleanup(func() { pullAll, syncYes = oldAll, oldYes })
+	for _, tc := range []struct {
+		cmd  *cobra.Command
+		args []string
+	}{{pullCmd, []string{"--all"}}, {syncCmd, []string{"--yes"}}} {
+		pullAll, syncYes, got = false, false, ""
+		tc.cmd.SetArgs(tc.args)
+		tc.cmd.SetContext(context.Background())
+		err := tc.cmd.Execute()
+		tc.cmd.SetArgs(nil)
+		pullAll, syncYes = false, false
+		if err != nil || got != repoDir {
+			t.Fatalf("%s %v: err=%v backend got %q want %q", tc.cmd.Name(), tc.args, err, got, repoDir)
 		}
 	}
 }
