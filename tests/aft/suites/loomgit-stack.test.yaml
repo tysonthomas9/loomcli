@@ -104,7 +104,7 @@ tests:
           done;
           git -C "$repo" show "$lead:stack-x.txt" >/dev/null;
           change="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["change_id"])' "$AFT_WORK_DIR/stack-x-revisions.json")";
-          python3 -c 'import sqlite3,sys; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); assert db.execute("select count(*) from applied_layers where workspace=? and lead=? and change_id=? and phase=?",("E2E-WS-STACK","lead",sys.argv[2],"done")).fetchone()[0] == 1' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$change"
+          python3 -c 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1],timeout=10); assert db.execute("select count(*) from applied_layers where workspace=? and lead=? and change_id=? and phase=?",("E2E-WS-STACK","lead",sys.argv[2],"done")).fetchone()[0] == 1' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$change"
         intent: UI approval alone applies X into the lead ref and durable AppliedLog
       - run: >-
           agent-browser --session "$AFT_SESSION" open
@@ -121,7 +121,7 @@ tests:
           done;
           git -C "$repo" show "$lead:stack-y.txt" >/dev/null;
           change="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["change_id"])' "$AFT_WORK_DIR/stack-y-revisions.json")";
-          python3 -c 'import sqlite3,sys; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); assert db.execute("select count(*) from applied_layers where workspace=? and lead=? and change_id=? and phase=?",("E2E-WS-STACK","lead",sys.argv[2],"done")).fetchone()[0] == 1' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$change"
+          python3 -c 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1],timeout=10); assert db.execute("select count(*) from applied_layers where workspace=? and lead=? and change_id=? and phase=?",("E2E-WS-STACK","lead",sys.argv[2],"done")).fetchone()[0] == 1' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$change"
         intent: UI approval alone applies Y into the lead ref and durable AppliedLog
       - run: >-
           test -f "$AFT_WORK_DIR/stack-repo/README.md";
@@ -156,11 +156,11 @@ tests:
           for attempt in $(seq 1 45); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-STACK/issues/$y/revisions" > "$AFT_WORK_DIR/stack-y-after-merge.json";
             count="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["data"]))' "$AFT_WORK_DIR/stack-y-after-merge.json")";
-            derived="$(python3 -c 'import sqlite3,sys; db=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); row=db.execute("select o.derived_revision from restack_offers o join change_revisions r on r.workspace=o.workspace and r.change_id=o.change_id and r.number=o.derived_revision where o.workspace=? and o.task_id=? and r.kind=? and r.operation=?",("E2E-WS-STACK",sys.argv[2],"derived","restack")).fetchone(); print(row[0] if row else 0)' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$y")";
+            derived="$(python3 -c 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1],timeout=10); row=db.execute("select o.derived_revision from restack_offers o join change_revisions r on r.workspace=o.workspace and r.change_id=o.change_id and r.number=o.derived_revision where o.workspace=? and o.task_id=? and r.kind=? and r.operation=?",("E2E-WS-STACK",sys.argv[2],"derived","restack")).fetchone(); print(row[0] if row else 0)' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$y")";
             test "$count" -ge 2 && test "$derived" -ge 2 && exit 0;
             sleep 2;
           done;
-          python3 -c 'import sqlite3,sys; source=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); target=sqlite3.connect(sys.argv[2]); source.backup(target)' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$AFT_WORK_DIR/stack-store-on-restack-timeout.db";
+          python3 -c 'import sqlite3,sys; source=sqlite3.connect(sys.argv[1],timeout=10); target=sqlite3.connect(sys.argv[2]); source.backup(target)' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db" "$AFT_WORK_DIR/stack-store-on-restack-timeout.db";
           cp "$AFT_TESTS_DIR/reports/server.log" "$AFT_WORK_DIR/stack-server-on-restack-timeout.log";
           echo 'Landing did not derive Y revision'; exit 1
         intent: Require a durable Y restack offer linked to a derived revision after X lands
