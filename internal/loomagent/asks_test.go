@@ -538,6 +538,36 @@ func TestReplayAppliesMissedEvents(t *testing.T) {
 	}
 }
 
+// TestReplayEndsTurnStartedAfterItsRead: a backfill whose agent row was read
+// before a Send prompted (it showed no running turn) but whose history read
+// came after the whole turn ran still ends that turn: the fold's running
+// turn is the agent's under the lock, not the stale row's. Else, with the
+// feed subscribed after the turn's events, nothing would end it and the
+// agent would stay active.
+func TestReplayEndsTurnStartedAfterItsRead(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	a, _ := newLead(t, e, s, "alpha")
+	stale := s.get(t, a.AgentID) // the backfill's ListAgents row: no running turn
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Delta: "done"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	if ag := s.get(t, a.AgentID); ag.RunningTurnID == nil || ag.State != StateActive {
+		t.Fatalf("after the Send: turn %v state %s; want a running turn, active", ag.RunningTurnID, ag.State)
+	}
+	if err := s.replay(ctx, "opencode", stale); err != nil {
+		t.Fatal(err)
+	}
+	ag := s.get(t, a.AgentID)
+	if ag.RunningTurnID != nil || ag.State != StateIdle {
+		t.Fatalf("turn %v state %s; want the turn ended, idle", deref(ag.RunningTurnID), ag.State)
+	}
+	if n := len(kinds(rows(t, s, a.AgentID, 0), EventIdle)); n != 1 {
+		t.Fatalf("agent.idle rows = %d; want 1", n)
+	}
+}
+
 // TestReplayRetryConverges: after a replay fails (page 2 does not read, or
 // its write fails) or crashes between its commit and its apply, a retry in
 // the same process or after a restart ends exactly as an uninterrupted

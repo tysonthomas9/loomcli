@@ -170,7 +170,7 @@ func (s *Service) flag(ctx context.Context, agentID, reason string) error {
 func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent) error {
 	ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: *a.HarnessSessionID}
 	sess := s.harnesses[harness].Session(ref)
-	f := fold{running: deref(a.RunningTurnID), asks: map[string]*Ask{}}
+	f := newFold()
 	var rows []loomstore.Event
 	size := 0
 	// The history's usage rows get the cost the live feed gives them (an
@@ -218,31 +218,46 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 	return s.applyFold(ctx, a.AgentID, f)
 }
 
-// fold is the net effect of a replayed history on its agent, which had
-// running as its running turn (an input key until turn.started names it).
+// fold is the net effect of a replayed history on its agent. It keeps every
+// input's delivery and turn and every turn's end, not only the running
+// turn's: which turn runs is read under the agent's lock when the fold is
+// applied (resolve), since a Send may prompt, and its whole turn reach the
+// history, after the replay read its agent but before it read the history.
 type fold struct {
-	running   string
-	turn      string // the turn a turn.started (or, with no turn.started, as in codex history, its message.delivered) named for running's input
-	delivered bool   // running's input was delivered
-	ended     *loomharness.Event
-	asks      map[string]*Ask // the history's open asks
+	delivered map[string]string            // each delivered input key: the first turn a delivery named for it (codex history has no turn.started), or ""
+	started   map[string]string            // each input key: the turn its last turn.started named
+	ended     map[string]loomharness.Event // each ended turn ID: its last turn.completed
+	asks      map[string]*Ask              // the history's open asks
+}
+
+func newFold() fold {
+	return fold{delivered: map[string]string{}, started: map[string]string{}, ended: map[string]loomharness.Event{}, asks: map[string]*Ask{}}
 }
 
 // add folds in e and returns the bytes it added to the fold.
 func (f *fold) add(e loomharness.Event) int {
 	switch e.Type {
 	case loomharness.EventMessageDelivered:
-		f.delivered = f.delivered || (f.running != "" && e.InputKey == f.running)
-		if f.delivered && f.turn == "" && e.InputKey == f.running {
-			f.turn = e.TurnID
+		if e.InputKey == "" {
+			return 0
+		}
+		turn, ok := f.delivered[e.InputKey]
+		switch {
+		case !ok:
+			f.delivered[e.InputKey] = e.TurnID
+			return len(e.InputKey) + len(e.TurnID)
+		case turn == "":
+			f.delivered[e.InputKey] = e.TurnID
+			return len(e.TurnID)
 		}
 	case loomharness.EventTurnStarted:
-		if f.running != "" && e.InputKey == f.running && e.TurnID != "" {
-			f.turn = e.TurnID
+		if e.InputKey != "" && e.TurnID != "" {
+			f.started[e.InputKey] = e.TurnID
+			return len(e.InputKey) + len(e.TurnID)
 		}
 	case loomharness.EventTurnCompleted:
-		if e.TurnID != "" && (e.TurnID == f.turn || e.TurnID == f.running) {
-			f.ended = &e
+		if e.TurnID != "" {
+			f.ended[e.TurnID] = e
 			return len(e.TurnID) + len(e.StopReason) + len(e.Error)
 		}
 	case loomharness.EventAskOpened:
@@ -260,6 +275,26 @@ func (f *fold) add(e loomharness.Event) int {
 		delete(f.asks, e.AskID)
 	}
 	return 0
+}
+
+// resolve is the fold's effect on running, the agent's running turn (an
+// input key until turn.started names it): whether its input was delivered,
+// the turn a turn.started (else its delivery) named for it, and that turn's
+// end, if the history has it.
+func (f fold) resolve(running string) (delivered bool, turn string, ended *loomharness.Event) {
+	if running == "" {
+		return false, "", nil
+	}
+	turn, delivered = f.delivered[running]
+	if t, ok := f.started[running]; ok {
+		turn = t
+	}
+	for _, id := range []string{turn, running} {
+		if e, ok := f.ended[id]; ok && id != "" {
+			return delivered, turn, &e
+		}
+	}
+	return delivered, turn, nil
 }
 
 // applyFold applies a committed replay's net effect to agentID: a
@@ -287,21 +322,23 @@ func (s *Service) applyFold(ctx context.Context, agentID string, f fold) error {
 	if err := s.loseOpen(ctx, a, f.asks); err != nil {
 		return err
 	}
-	if f.delivered {
-		if err := s.delivered(ctx, a, f.running); err != nil {
+	running := deref(a.RunningTurnID)
+	delivered, turn, ended := f.resolve(running)
+	if delivered {
+		if err := s.delivered(ctx, a, running); err != nil {
 			return err
 		}
 	}
-	if f.turn != "" {
-		if err := s.turnStarted(ctx, a, loomharness.Event{TurnID: f.turn, InputKey: f.running}); err != nil {
+	if turn != "" {
+		if err := s.turnStarted(ctx, a, loomharness.Event{TurnID: turn, InputKey: running}); err != nil {
 			return err
 		}
 		if a, err = s.live(ctx, agentID); err != nil {
 			return err
 		}
 	}
-	if f.ended != nil {
-		return s.turnCompleted(ctx, a, *f.ended)
+	if ended != nil {
+		return s.turnCompleted(ctx, a, *ended)
 	}
 	return s.syncWaiting(ctx, a)
 }

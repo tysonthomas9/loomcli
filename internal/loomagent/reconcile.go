@@ -161,7 +161,7 @@ func (s *Service) settle(ctx context.Context, agentID string) error {
 // no turn running, has the end of running (a turn ID, or an input key until
 // turn.started names the turn).
 func endedNatively(ctx context.Context, sess loomharness.Session, running string) (bool, error) {
-	f := fold{running: running, asks: map[string]*Ask{}}
+	f := newFold()
 	for after := ""; ; {
 		page, err := sess.Messages(ctx, after, 100)
 		if err != nil {
@@ -171,7 +171,8 @@ func endedNatively(ctx context.Context, sess loomharness.Session, running string
 			f.add(e)
 		}
 		if after = page.Next; after == "" {
-			return f.ended != nil, nil
+			_, _, ended := f.resolve(running)
+			return ended != nil, nil
 		}
 	}
 }
