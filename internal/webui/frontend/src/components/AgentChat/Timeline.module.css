@@ -1,0 +1,189 @@
+/* Ported from T3 Code apps/web/src/components/chat/MessagesTimeline.tsx
+   (work-entry row classes) and apps/web/src/index.css (live-activity-focus)
+   at commit 2daff8c25. Copyright (c) 2026 T3 Tools Inc. MIT License; see
+   THIRD_PARTY_NOTICES.md. Translated to a CSS module with Loom's theme tokens. */
+
+.entry {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--radius-md);
+  padding: 2px;
+}
+
+.entryRow,
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 24px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.5;
+  user-select: none;
+}
+
+.toggle {
+  width: 100%;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.entryRow[data-expandable="true"] {
+  cursor: pointer;
+}
+
+.entryRow[data-expandable="true"]:hover,
+.toggle:hover {
+  background: var(--color-bg-hover);
+}
+
+.entryRow:focus-visible,
+.toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.icon[data-icon="failed"] {
+  color: var(--color-danger);
+}
+
+.heading {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.heading[data-failed="true"] {
+  color: var(--color-danger);
+}
+
+.preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
+.count,
+.status {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.toggleText {
+  font-weight: 500;
+}
+
+.chevron {
+  display: inline-flex;
+  margin-left: auto;
+  transition: transform 0.2s;
+}
+
+.chevron .icon {
+  width: 16px;
+}
+
+.chevron[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+.body {
+  margin: 4px 0 0 28px;
+  padding: 2px 0 0 12px;
+  border-left: 1px solid var(--color-border-light);
+  cursor: default;
+}
+
+.bodyLabel {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.pre {
+  max-height: 16rem;
+  margin: 2px 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  user-select: text;
+}
+
+.pre[data-failed="true"] {
+  color: var(--color-danger);
+}
+
+.live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 4px;
+  font-size: 13px;
+}
+
+/* T3's live-activity-focus: a highlight sweeps across the label. */
+.liveLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  background: linear-gradient(
+      to right,
+      var(--color-text-muted) 0%,
+      var(--color-text-primary) 50%,
+      var(--color-text-muted) 100%
+    )
+    0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: live-activity-focus 2.2s linear infinite;
+}
+
+@keyframes live-activity-focus {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveLabel {
+    animation: none;
+    -webkit-text-fill-color: currentcolor;
+  }
+}

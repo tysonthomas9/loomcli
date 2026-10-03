@@ -26,6 +26,7 @@ type Step struct {
 	Crash    bool               // the harness process dies here, mid-turn
 	Gap      bool               // the live Feed misses this step's event (it gets feed.gap); Messages still has it
 	Usage    *loomharness.Usage // emits a usage event with these counts
+	Tool     *loomharness.Tool  // emits a tool call's item.started (name and input) and item.completed
 }
 
 // Turn is one scripted turn.
@@ -275,6 +276,12 @@ func (h *Harness) run(s *session) {
 			return
 		case st.Usage != nil:
 			h.emit(s, loomharness.Event{Type: loomharness.EventUsage, Usage: *st.Usage}, !st.Gap)
+		case st.Tool != nil:
+			id := s.turnID + "/tool/" + strconv.Itoa(s.step)
+			started := loomharness.Tool{Name: st.Tool.Name, Input: st.Tool.Input}
+			done := *st.Tool
+			h.emit(s, loomharness.Event{Type: loomharness.EventItemStarted, ItemID: id, ItemKind: "tool", Tool: &started}, !st.Gap)
+			h.emit(s, loomharness.Event{Type: loomharness.EventItemCompleted, ItemID: id, ItemKind: "tool", Tool: &done}, !st.Gap)
 		default:
 			h.emit(s, loomharness.Event{Type: loomharness.EventDelta, ItemID: s.turnID + "/msg", ItemKind: "message", Text: st.Delta}, !st.Gap)
 		}

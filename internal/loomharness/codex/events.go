@@ -102,6 +102,86 @@ type item struct {
 	Text     string          `json:"text"`     // agentMessage
 	Summary  []string        `json:"summary"`  // reasoning
 	Content  json.RawMessage `json:"content"`  // userMessage: [{type, text}]
+
+	// Tool items (toolKinds).
+	Status           string          `json:"status"`
+	Command          string          `json:"command"`          // commandExecution
+	AggregatedOutput string          `json:"aggregatedOutput"` // commandExecution
+	ExitCode         *int            `json:"exitCode"`         // commandExecution
+	Changes          []fileChange    `json:"changes"`          // fileChange
+	Server           string          `json:"server"`           // mcpToolCall
+	Tool             string          `json:"tool"`             // mcpToolCall, dynamicToolCall
+	Arguments        json.RawMessage `json:"arguments"`        // mcpToolCall, dynamicToolCall
+	Result           *struct {
+		Content []textPart `json:"content"`
+	} `json:"result"` // mcpToolCall
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"` // mcpToolCall
+	ContentItems []textPart `json:"contentItems"` // dynamicToolCall
+	Success      *bool      `json:"success"`      // dynamicToolCall
+	Query        string     `json:"query"`        // webSearch
+}
+
+type fileChange struct {
+	Path string `json:"path"`
+	Diff string `json:"diff"`
+}
+
+// textPart is a text content part; other part types carry no text.
+type textPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func joinText(parts []textPart) string {
+	var out []string
+	for _, p := range parts {
+		if p.Text != "" {
+			out = append(out, p.Text)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// tool is a tool item as the chat shows it. Its name follows the item type;
+// a started item carries no output.
+func (it item) tool(started bool) *loomharness.Tool {
+	enc := func(v any) string { b, _ := json.Marshal(v); return string(b) }
+	var t loomharness.Tool
+	switch it.Type {
+	case "commandExecution":
+		t = loomharness.Tool{Name: "command", Input: enc(map[string]string{"command": it.Command}), Output: it.AggregatedOutput,
+			Failed: it.Status == "failed" || it.Status == "declined" || (it.ExitCode != nil && *it.ExitCode != 0)}
+	case "fileChange":
+		paths := make([]string, len(it.Changes))
+		diffs := make([]string, len(it.Changes))
+		for i, c := range it.Changes {
+			paths[i], diffs[i] = c.Path, c.Diff
+		}
+		t = loomharness.Tool{Name: "edit", Input: enc(map[string][]string{"files": paths}), Output: strings.Join(diffs, "\n"),
+			Failed: it.Status == "failed" || it.Status == "declined"}
+	case "mcpToolCall":
+		t = loomharness.Tool{Name: it.Server + "/" + it.Tool, Input: string(it.Arguments), Failed: it.Error != nil || it.Status == "failed"}
+		if it.Result != nil {
+			t.Output = joinText(it.Result.Content)
+		}
+		if it.Error != nil {
+			t.Output = it.Error.Message
+		}
+	case "dynamicToolCall":
+		t = loomharness.Tool{Name: it.Tool, Input: string(it.Arguments), Output: joinText(it.ContentItems),
+			Failed: (it.Success != nil && !*it.Success) || it.Status == "failed"}
+	case "webSearch":
+		t = loomharness.Tool{Name: "web_search", Input: enc(map[string]string{"query": it.Query})}
+	}
+	if t.Input == "null" {
+		t.Input = ""
+	}
+	if started {
+		t.Output, t.Failed = "", false
+	}
+	return &t
 }
 
 // toolKinds are the ThreadItem types Loom shows as tool items.
@@ -149,7 +229,7 @@ func itemEvent(e loomharness.Event, raw protocol.ThreadItem, started, isLive boo
 			e.Text = strings.Join(it.Summary, "\n")
 		}
 	case toolKinds[it.Type]:
-		e.ItemKind = "tool"
+		e.ItemKind, e.Tool = "tool", it.tool(started)
 	case it.Type == "collabAgentToolCall" || it.Type == "subAgentActivity":
 		e.Type = loomharness.EventSubagentStarted
 		return e, started && isLive

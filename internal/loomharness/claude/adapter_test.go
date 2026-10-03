@@ -797,3 +797,42 @@ func kindsOf(es []loomharness.Event, typ loomharness.EventType) []loomharness.Ev
 	}
 	return out
 }
+
+// TestClaudeToolCallCarriesNameInputOutput: a streamed tool_use starts with
+// its name; its whole block gives the input; its tool_result completes it
+// with the result text and is_error.
+func TestClaudeToolCallCarriesNameInputOutput(t *testing.T) {
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	var got []loomharness.Event
+	for _, f := range []string{
+		`{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_t"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}}}`,
+		`{"type":"assistant","message":{"id":"msg_t","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"a.go"}]}]}}`,
+		`{"type":"assistant","message":{"id":"msg_u","content":[{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"x"}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"no such file","is_error":true}]}}`,
+	} {
+		for _, e := range m.frame([]byte(f)) {
+			if e.ItemKind == "tool" {
+				got = append(got, e)
+			}
+		}
+	}
+	want := []struct {
+		typ  loomharness.EventType
+		tool loomharness.Tool
+	}{
+		{loomharness.EventItemStarted, loomharness.Tool{Name: "Bash"}},
+		{loomharness.EventItemCompleted, loomharness.Tool{Name: "Bash", Input: `{"command":"ls"}`, Output: "a.go"}},
+		{loomharness.EventItemStarted, loomharness.Tool{Name: "Read", Input: `{"file_path":"x"}`}},
+		{loomharness.EventItemCompleted, loomharness.Tool{Name: "Read", Input: `{"file_path":"x"}`, Output: "no such file", Failed: true}},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d tool events, want %d: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].Type != w.typ || got[i].Tool == nil || *got[i].Tool != w.tool {
+			t.Errorf("event %d: %s %+v, want %s %+v", i, got[i].Type, got[i].Tool, w.typ, w.tool)
+		}
+	}
+}

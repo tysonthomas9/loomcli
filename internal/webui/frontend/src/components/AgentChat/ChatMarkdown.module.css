@@ -1,0 +1,290 @@
+/* Ported from T3 Code apps/web/src/index.css (.chat-markdown rules) at commit
+   2daff8c25. Copyright (c) 2026 T3 Tools Inc. MIT License; see
+   THIRD_PARTY_NOTICES.md. Translated to a CSS module with Loom's theme tokens. */
+
+.markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  /* Token colors (One Light), as in the file editor. */
+  --tk-keyword: #a626a4;
+  --tk-string: #50a14f;
+  --tk-number: #986801;
+  --tk-comment: #a0a1a7;
+  --tk-function: #4078f2;
+  --tk-type: #c18401;
+  --tk-property: #e45649;
+  --tk-meta: #a0a1a7;
+}
+
+:global([data-theme="dark"]) .markdown {
+  /* One Dark. */
+  --tk-keyword: #c678dd;
+  --tk-string: #98c379;
+  --tk-number: #d19a66;
+  --tk-comment: #7f848e;
+  --tk-function: #61afef;
+  --tk-type: #e5c07b;
+  --tk-property: #e06c75;
+  --tk-meta: #7f848e;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre,
+.tableContainer,
+.codeblock {
+  margin: 0.65rem 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 1.25rem 0 0.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.markdown h1 {
+  font-size: 1.25rem;
+}
+
+.markdown h2 {
+  font-size: 1.125rem;
+}
+
+.markdown h3 {
+  font-size: 1rem;
+}
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 0.875rem;
+}
+
+.markdown ul {
+  padding-left: 1.25rem;
+  list-style-type: disc;
+}
+
+.markdown ol {
+  padding-left: 1.25rem;
+  list-style-type: decimal;
+}
+
+.markdown li + li {
+  margin-top: 0.25rem;
+}
+
+/* GitHub-style task lists: the checkbox replaces the list marker. */
+.markdown :global(li.task-list-item) {
+  list-style-type: none;
+}
+
+.markdown :global(li.task-list-item) input[type="checkbox"] {
+  margin: 0 0.35em 0.15em -1.25rem;
+  vertical-align: middle;
+}
+
+.markdown a {
+  color: var(--color-primary);
+}
+
+.markdown blockquote {
+  border-left: 2px solid var(--color-border-light);
+  padding-left: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.markdown :not(pre) > code {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  padding: 0.1rem 0.35rem;
+  font-family: var(--font-family-mono);
+  font-size: 0.75rem;
+}
+
+.markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-tertiary);
+  padding: 0.8rem 0.9rem;
+  font-family: var(--font-family-mono);
+  font-size: 0.8125rem;
+  scrollbar-width: thin;
+}
+
+.markdown pre code {
+  font-family: inherit;
+}
+
+.codeblock {
+  overflow: hidden;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-tertiary);
+  line-height: 1.4;
+}
+
+.codeblockHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 6px 0 12px;
+  user-select: none;
+  color: var(--color-text-muted);
+}
+
+.codeblockLanguage {
+  font-family: var(--font-family-mono);
+  font-size: 0.6875rem;
+}
+
+.codeblock pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.codeblock[data-wrap="true"] pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.chromeAction {
+  padding: 1px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  cursor: pointer;
+}
+
+.chromeAction:hover,
+.chromeAction[aria-pressed="true"] {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.chromeAction:disabled {
+  cursor: default;
+}
+
+.tableScroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: collapse;
+  overflow-wrap: normal;
+  word-break: normal;
+  font-size: 0.75rem;
+}
+
+.markdown th,
+.markdown td {
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+}
+
+.markdown thead th {
+  border-bottom: 1px solid var(--color-border-light);
+  padding-block: 0.55rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.markdown tbody td {
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.tableContainer[data-expanded="false"] th,
+.tableContainer[data-expanded="false"] td {
+  overflow: hidden;
+  max-width: 24rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tableContainer[data-expanded="true"] td {
+  max-width: 24rem;
+  overflow-wrap: anywhere;
+}
+
+.tableActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+  user-select: none;
+}
+
+.tkKeyword {
+  color: var(--tk-keyword);
+}
+
+.tkString {
+  color: var(--tk-string);
+}
+
+.tkNumber {
+  color: var(--tk-number);
+}
+
+.tkComment {
+  color: var(--tk-comment);
+  font-style: italic;
+}
+
+.tkFunction {
+  color: var(--tk-function);
+}
+
+.tkType {
+  color: var(--tk-type);
+}
+
+.tkProperty {
+  color: var(--tk-property);
+}
+
+.tkMeta {
+  color: var(--tk-meta);
+}
+
+.tkInserted {
+  color: var(--color-success);
+}
+
+.tkDeleted {
+  color: var(--color-danger);
+}

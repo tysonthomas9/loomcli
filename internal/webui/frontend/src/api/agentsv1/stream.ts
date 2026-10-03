@@ -28,7 +28,7 @@ export interface AgentStreamOptions {
   history?: AgentHistory;
   /** Newly merged saved events, from paging or the stream. */
   onEvents?: (events: AgentEvent[]) => void;
-  /** Live-only notices: delta and feed.gap (seq 0). */
+  /** Live-only notices: delta, tool.started and feed.gap (seq 0). */
   onNotice?: (notice: AgentEvent) => void;
   /** After each catch-up; refresh the agent list and open agents (§9.5 step 4). */
   onResync?: () => void;

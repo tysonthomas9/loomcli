@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -312,5 +313,52 @@ func TestReadSSE(t *testing.T) {
 	readSSE(strings.NewReader("data: 1\n\ndata: 2\n\n"), func(b []byte) bool { first = append(first, string(b)); return false })
 	if len(first) != 1 {
 		t.Fatalf("readSSE went on after fn returned false: %q", first)
+	}
+}
+
+// TestEventsToolCallCarriesNameInputOutput: a tool call's start carries its
+// name and input, and its end adds the output, or the error when it failed;
+// a catch-up read of the stored message gives the same tool data.
+func TestEventsToolCallCarriesNameInputOutput(t *testing.T) {
+	m := newMapper(nil, nil)
+	var got []loomharness.Event
+	for _, raw := range []string{
+		live("session.tool.input.started", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_1","name":"bash"}`),
+		live("session.tool.called", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_1","input":{"command":"ls"},"executed":true}`),
+		live("session.tool.success", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_1","content":[{"type":"text","text":"a.go\nb.go"}],"executed":true}`),
+		live("session.tool.input.started", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_2","name":"read"}`),
+		live("session.tool.called", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_2","input":{"filePath":"x"},"executed":true}`),
+		live("session.tool.failed", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_2","error":{"type":"tool","message":"no such file"},"executed":true}`),
+	} {
+		if e, ok := m.mapEvent([]byte(raw)); ok {
+			got = append(got, e)
+		}
+	}
+	want := []loomharness.Tool{
+		{Name: "bash", Input: `{"command":"ls"}`},
+		{Name: "bash", Input: `{"command":"ls"}`, Output: "a.go\nb.go"},
+		{Name: "read", Input: `{"filePath":"x"}`},
+		{Name: "read", Input: `{"filePath":"x"}`, Output: "no such file", Failed: true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d events, want %d: %+v", len(got), len(want), got)
+	}
+	for i, e := range got {
+		if e.ItemKind != "tool" || e.Tool == nil || *e.Tool != want[i] {
+			t.Errorf("event %d: %s %+v, want tool %+v", i, e.Type, e.Tool, want[i])
+		}
+	}
+
+	msg := message{ID: "msg_a1", Type: "assistant", Finish: "stop"}
+	if err := json.Unmarshal([]byte(`{"content":[
+		{"type":"tool","id":"call_1","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"a.go\nb.go"}]}},
+		{"type":"tool","id":"call_2","name":"read","state":{"status":"error","input":{"filePath":"x"},"error":{"type":"tool","message":"no such file"}}}]}`), &msg); err != nil {
+		t.Fatal(err)
+	}
+	stored := msg.events(loomharness.NativeRef{NativeID: "s"})
+	for i, e := range stored[:2] {
+		if e.Tool == nil || *e.Tool != *got[2*i+1].Tool || e.ItemID != got[2*i+1].ItemID {
+			t.Errorf("catch-up %d: %s %+v, live %s %+v", i, e.ItemID, e.Tool, got[2*i+1].ItemID, got[2*i+1].Tool)
+		}
 	}
 }

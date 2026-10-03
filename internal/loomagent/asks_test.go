@@ -799,3 +799,51 @@ func TestRespondQuarantinedLosesAsk(t *testing.T) {
 		check("after a replay")
 	}
 }
+
+// TestToolCallsSavedWithToolAndStartsLiveForDeltas: a tool call's
+// item.completed is saved with its tool data, its input and output cut to
+// maxToolText; its start is a live tool.started notice only a Subscribe
+// that asked for deltas gets.
+func TestToolCallsSavedWithToolAndStartsLiveForDeltas(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := startFeed(s, e)
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	req := SubscribeRequest{AgentIDs: []string{a.AgentID}, Cursors: map[string]int64{a.AgentID: 0},
+		Kinds: []string{"item.completed"}, Deltas: true}
+	withDeltas, err := s.Subscribe(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Deltas = false
+	noDeltas, err := s.Subscribe(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", maxToolText+10)
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Tool: &loomharness.Tool{Name: "bash", Input: `{"command":"ls"}`, Output: long, Failed: true}}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+
+	rows := recv(t, withDeltas, 2)
+	if rows[0].Kind != KindToolStarted || rows[1].Kind != "item.completed" {
+		t.Fatalf("with deltas: %s, %s", rows[0].Kind, rows[1].Kind)
+	}
+	var started, done struct {
+		ItemKind string            `json:"itemKind"`
+		Tool     *loomharness.Tool `json:"tool"`
+	}
+	if json.Unmarshal(rows[0].Payload, &started) != nil || started.ItemKind != "tool" || started.Tool == nil ||
+		*started.Tool != (loomharness.Tool{Name: "bash", Input: `{"command":"ls"}`}) {
+		t.Fatalf("tool.started payload %s", rows[0].Payload)
+	}
+	if json.Unmarshal(rows[1].Payload, &done) != nil || done.Tool == nil || !done.Tool.Failed ||
+		done.Tool.Output != long[:maxToolText]+"…" || done.Tool.Name != "bash" {
+		t.Fatalf("item.completed tool %+v", done.Tool)
+	}
+	if r := recv(t, noDeltas, 1); r[0].Kind != "item.completed" {
+		t.Fatalf("without deltas: %s", r[0].Kind)
+	}
+}

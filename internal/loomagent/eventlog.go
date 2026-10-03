@@ -147,12 +147,13 @@ type Subscription struct {
 }
 
 // Notify sends a live-only notice (Seq 0, never saved) to subscriptions that
-// take them: a delta to its agent's, a feed.gap (AgentID "") to all.
+// take them: a delta or tool start to its agent's, a feed.gap (AgentID "")
+// to all.
 func (l *EventLog) Notify(e loomstore.Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for s := range l.subs {
-		if !s.notes || (e.AgentID != "" && !s.agents[e.AgentID]) || (e.Kind == KindDelta && !s.deltas) {
+		if !s.notes || (e.AgentID != "" && !s.agents[e.AgentID]) || ((e.Kind == KindDelta || e.Kind == KindToolStarted) && !s.deltas) {
 			continue
 		}
 		select {

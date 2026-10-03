@@ -16,6 +16,9 @@ import (
 const (
 	KindDelta   = "delta"
 	KindFeedGap = "feed.gap"
+	// KindToolStarted is a tool call that started; like a delta, only a
+	// Subscribe that asks for deltas gets it.
+	KindToolStarted = "tool.started"
 )
 
 // Ask is one open harness ask (design v2 §4.10). Loom keeps open asks in

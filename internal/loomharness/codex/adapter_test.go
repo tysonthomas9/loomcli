@@ -19,6 +19,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/codex/protocol"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -931,5 +932,36 @@ func TestCodexIdleUnloadAndRestart(t *testing.T) {
 	}
 	if err := a.Session(used).Prompt(ctx, loomharness.Input{Key: "k2", Text: "again"}); err != nil {
 		t.Fatalf("Prompt after Restart: %v", err)
+	}
+}
+
+// TestCodexToolItemsCarryNameInputOutput: each tool item type maps to the
+// same tool shape; a started item has no output, and a non-zero exit, an
+// MCP error or an unsuccessful dynamic call is a failure.
+func TestCodexToolItemsCarryNameInputOutput(t *testing.T) {
+	for _, c := range []struct {
+		item    string
+		started bool
+		want    loomharness.Tool
+	}{
+		{`{"type":"commandExecution","id":"c1","command":"ls","status":"inProgress","commandActions":[],"cwd":"/r"}`, true,
+			loomharness.Tool{Name: "command", Input: `{"command":"ls"}`}},
+		{`{"type":"commandExecution","id":"c1","command":"ls","status":"completed","aggregatedOutput":"a.go","exitCode":0,"commandActions":[],"cwd":"/r"}`, false,
+			loomharness.Tool{Name: "command", Input: `{"command":"ls"}`, Output: "a.go"}},
+		{`{"type":"commandExecution","id":"c2","command":"false","status":"failed","aggregatedOutput":"","exitCode":1,"commandActions":[],"cwd":"/r"}`, false,
+			loomharness.Tool{Name: "command", Input: `{"command":"false"}`, Failed: true}},
+		{`{"type":"fileChange","id":"f1","status":"completed","changes":[{"path":"a.go","kind":{"type":"update"},"diff":"@@ -1 +1 @@"}]}`, false,
+			loomharness.Tool{Name: "edit", Input: `{"files":["a.go"]}`, Output: "@@ -1 +1 @@"}},
+		{`{"type":"mcpToolCall","id":"m1","server":"loom","tool":"agent_list","arguments":{"all":true},"status":"failed","error":{"message":"denied"}}`, false,
+			loomharness.Tool{Name: "loom/agent_list", Input: `{"all":true}`, Output: "denied", Failed: true}},
+		{`{"type":"dynamicToolCall","id":"d1","tool":"x","arguments":{},"status":"completed","success":true,"contentItems":[{"type":"inputText","text":"ok"}]}`, false,
+			loomharness.Tool{Name: "x", Input: `{}`, Output: "ok"}},
+		{`{"type":"webSearch","id":"w1","query":"loom"}`, false,
+			loomharness.Tool{Name: "web_search", Input: `{"query":"loom"}`}},
+	} {
+		e, ok := itemEvent(loomharness.Event{}, protocol.ThreadItem(c.item), c.started, true)
+		if !ok || e.ItemKind != "tool" || e.Tool == nil || *e.Tool != c.want {
+			t.Errorf("%s: %v %+v, want %+v", c.item, ok, e.Tool, c.want)
+		}
 	}
 }

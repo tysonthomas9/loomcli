@@ -52,6 +52,11 @@ export type {
 export { useAgentChat } from "./useAgentChat";
 export type { UseAgentChatReturn } from "./useAgentChat";
 export { ownSender } from "./agentChatModel";
-export type { ChatItem, TaskCompleted } from "./agentChatModel";
+export type {
+  ChatItem,
+  TaskCompleted,
+  ToolCall,
+  ToolStatus,
+} from "./agentChatModel";
 export { useAgentRoster, useRosterAgent } from "./useAgentRoster";
 export { childrenByParent } from "./agentRoster";

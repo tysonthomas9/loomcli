@@ -183,6 +183,18 @@ type Event struct {
 	Sender     string // the Loom slot sender of a message.delivered; loomagent sets it
 	StopReason string // completed | cancelled | failed, for turn.completed
 	Usage      Usage  // for usage: this step's own counts, never a running total
+	Tool       *Tool  // for a tool item's item.started and item.completed: what the chat shows
+}
+
+// Tool is a tool call as the chat shows it, the same for every harness: the
+// harness's tool name, its input as text (JSON when the input is structured)
+// and, once it completed, its output text and whether it failed. An
+// item.started carries what is known when the call starts.
+type Tool struct {
+	Name   string `json:"name,omitempty"`
+	Input  string `json:"input,omitempty"`
+	Output string `json:"output,omitempty"`
+	Failed bool   `json:"failed,omitempty"`
 }
 
 // Usage is one step's token counts, and its cost where the harness reports one.

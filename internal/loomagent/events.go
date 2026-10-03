@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -349,6 +350,8 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 		}
 	} else if e.Type == loomharness.EventDelta {
 		s.events.Notify(nativeRow(id, KindDelta, e))
+	} else if e.Type == loomharness.EventItemStarted && e.ItemKind == "tool" {
+		s.events.Notify(nativeRow(id, KindToolStarted, e))
 	}
 	return true, s.HarnessEvent(ctx, id, e)
 }
@@ -405,24 +408,51 @@ func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 	}
 	u := e.Usage // a usage step's own counts; a row without them reads as zero
 	b, _ := json.Marshal(struct {
-		Session          string  `json:"session"`
-		ItemID           string  `json:"itemId,omitempty"`
-		ItemKind         string  `json:"itemKind,omitempty"`
-		InputKey         string  `json:"inputKey,omitempty"`
-		AskID            string  `json:"askId,omitempty"`
-		Text             string  `json:"text,omitempty"`
-		Sender           string  `json:"sender,omitempty"`
-		StopReason       string  `json:"stopReason,omitempty"`
-		InputTokens      int64   `json:"inputTokens,omitempty"`
-		OutputTokens     int64   `json:"outputTokens,omitempty"`
-		CacheReadTokens  int64   `json:"cacheReadTokens,omitempty"`
-		CacheWriteTokens int64   `json:"cacheWriteTokens,omitempty"`
-		CostUSD          float64 `json:"costUsd,omitempty"`
-		CostTotalUSD     float64 `json:"costTotalUsd,omitempty"`
+		Session          string            `json:"session"`
+		ItemID           string            `json:"itemId,omitempty"`
+		ItemKind         string            `json:"itemKind,omitempty"`
+		InputKey         string            `json:"inputKey,omitempty"`
+		AskID            string            `json:"askId,omitempty"`
+		Text             string            `json:"text,omitempty"`
+		Sender           string            `json:"sender,omitempty"`
+		StopReason       string            `json:"stopReason,omitempty"`
+		InputTokens      int64             `json:"inputTokens,omitempty"`
+		OutputTokens     int64             `json:"outputTokens,omitempty"`
+		CacheReadTokens  int64             `json:"cacheReadTokens,omitempty"`
+		CacheWriteTokens int64             `json:"cacheWriteTokens,omitempty"`
+		CostUSD          float64           `json:"costUsd,omitempty"`
+		CostTotalUSD     float64           `json:"costTotalUsd,omitempty"`
+		Tool             *loomharness.Tool `json:"tool,omitempty"`
 	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.Sender, e.StopReason,
-		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSD, u.CostTotalUSD})
+		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSD, u.CostTotalUSD, capTool(e.Tool)})
 	return loomstore.Event{AgentID: agentID, Kind: kind, TurnID: e.TurnID, Payload: b,
 		EventID: kind + ":" + e.Session.Root + ":" + e.Session.NativeID + ":" + key}
+}
+
+// maxToolText is how much of a tool call's input and of its output a row
+// keeps; the chat shows a tool's text only when the row is expanded.
+const maxToolText = 16 << 10
+
+// capTool is t with its input and output cut to maxToolText bytes, at a rune
+// boundary, marked with a trailing "…".
+func capTool(t *loomharness.Tool) *loomharness.Tool {
+	if t == nil {
+		return nil
+	}
+	c := *t
+	c.Input, c.Output = capText(c.Input), capText(c.Output)
+	return &c
+}
+
+func capText(s string) string {
+	if len(s) <= maxToolText {
+		return s
+	}
+	cut := maxToolText
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 // emit saves a Loom event in agent_events, then publishes it on the Bus (the

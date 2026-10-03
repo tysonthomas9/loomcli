@@ -3,6 +3,7 @@ package claude
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,27 +20,58 @@ import (
 type mapper struct {
 	ref             loomharness.NativeRef
 	seq             int64
-	turnID          string // "" between turns
-	msgID           string // the streaming assistant message
-	open            int    // the open content block's index
-	toolMsg         map[string]string
-	pending         map[string]bool // prompted keys not yet delivered
-	handed          string          // the prompted key no turn has started for yet
-	cancelled       bool            // Loom interrupted the running turn
+	turnID          string                      // "" between turns
+	msgID           string                      // the streaming assistant message
+	open            int                         // the open content block's index
+	toolMsg         map[string]string           // tool_use id -> its message, until its result
+	tools           map[string]loomharness.Tool // tool_use id -> its name and input, until its result
+	pending         map[string]bool             // prompted keys not yet delivered
+	handed          string                      // the prompted key no turn has started for yet
+	cancelled       bool                        // Loom interrupted the running turn
 	lastInterrupted bool
 	usage           loomharness.Usage // the running turn's steps so far
 }
 
 func newMapper(ref loomharness.NativeRef) *mapper {
-	return &mapper{ref: ref, toolMsg: map[string]string{}, pending: map[string]bool{}}
+	return &mapper{ref: ref, toolMsg: map[string]string{}, tools: map[string]loomharness.Tool{}, pending: map[string]bool{}}
 }
 
 type block struct {
-	Type      string `json:"type"`
-	ID        string `json:"id"`
-	Text      string `json:"text"`
-	Thinking  string `json:"thinking"`
-	ToolUseID string `json:"tool_use_id"`
+	Type      string          `json:"type"`
+	ID        string          `json:"id"`
+	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
+	ToolUseID string          `json:"tool_use_id"`
+	Name      string          `json:"name"`     // tool_use
+	Input     json.RawMessage `json:"input"`    // tool_use
+	Content   json.RawMessage `json:"content"`  // tool_result: a string or text blocks
+	IsError   bool            `json:"is_error"` // tool_result
+}
+
+// result is a tool_result's content as text: a plain string, or its text
+// blocks joined.
+func (b block) result() string {
+	var s string
+	if json.Unmarshal(b.Content, &s) == nil {
+		return s
+	}
+	var parts []block
+	_ = json.Unmarshal(b.Content, &parts)
+	var text []string
+	for _, p := range parts {
+		if p.Type == "text" {
+			text = append(text, p.Text)
+		}
+	}
+	return strings.Join(text, "\n")
+}
+
+// input is a tool_use's input as text; a streamed start has none yet.
+func (b block) input() string {
+	if len(b.Input) == 0 || string(b.Input) == "{}" || string(b.Input) == "null" {
+		return ""
+	}
+	return string(b.Input)
 }
 
 type wireFrame struct {
@@ -145,8 +177,11 @@ func (m *mapper) delivered(keys []string, emit func(loomharness.Event)) {
 func (m *mapper) toolResults(blocks []block, emit func(loomharness.Event)) {
 	for _, b := range blocks {
 		if msg, ok := m.toolMsg[b.ToolUseID]; ok && b.Type == "tool_result" {
+			t := m.tools[b.ToolUseID]
+			t.Output, t.Failed = b.result(), b.IsError
 			delete(m.toolMsg, b.ToolUseID)
-			emit(loomharness.Event{Type: loomharness.EventItemCompleted, ItemKind: "tool", ItemID: msg + "/tool/" + b.ToolUseID})
+			delete(m.tools, b.ToolUseID)
+			emit(loomharness.Event{Type: loomharness.EventItemCompleted, ItemKind: "tool", ItemID: msg + "/tool/" + b.ToolUseID, Tool: &t})
 		}
 	}
 }
@@ -166,7 +201,7 @@ func (m *mapper) stream(f wireFrame, emit func(loomharness.Event)) {
 	case "content_block_start":
 		m.open = ev.Index
 		if kind, id := m.item(m.msgID, ev.Index, ev.ContentBlock); id != "" {
-			emit(loomharness.Event{Type: loomharness.EventItemStarted, ItemKind: kind, ItemID: id})
+			emit(loomharness.Event{Type: loomharness.EventItemStarted, ItemKind: kind, ItemID: id, Tool: m.tool(ev.ContentBlock)})
 		}
 	case "content_block_delta":
 		switch ev.Delta.Type {
@@ -195,9 +230,10 @@ func (m *mapper) assistant(msg string, blocks []block, emit func(loomharness.Eve
 		case "thinking":
 			emit(loomharness.Event{Type: loomharness.EventItemCompleted, ItemKind: "reasoning", ItemID: partItem(msg, "reasoning", index), Text: b.Thinking})
 		case "tool_use":
-			if _, seen := m.toolMsg[b.ID]; !seen {
-				kind, id := m.item(msg, index, b)
-				emit(loomharness.Event{Type: loomharness.EventItemStarted, ItemKind: kind, ItemID: id})
+			_, seen := m.toolMsg[b.ID]
+			kind, id := m.item(msg, index, b) // the whole block: its input is final
+			if !seen {
+				emit(loomharness.Event{Type: loomharness.EventItemStarted, ItemKind: kind, ItemID: id, Tool: m.tool(b)})
 			}
 		}
 	}
@@ -232,9 +268,21 @@ func (m *mapper) item(msg string, index int, b block) (kind, id string) {
 		return "reasoning", partItem(msg, "reasoning", index)
 	case "tool_use":
 		m.toolMsg[b.ID] = msg
+		if t := m.tools[b.ID]; b.input() != "" || t.Name == "" {
+			m.tools[b.ID] = loomharness.Tool{Name: b.Name, Input: b.input()}
+		}
 		return "tool", msg + "/tool/" + b.ID
 	}
 	return "", ""
+}
+
+// tool is the started tool call b names, or nil for any other block.
+func (m *mapper) tool(b block) *loomharness.Tool {
+	if b.Type != "tool_use" {
+		return nil
+	}
+	t := m.tools[b.ID]
+	return &t
 }
 
 // exited ends the turn state when the process died; events in between are

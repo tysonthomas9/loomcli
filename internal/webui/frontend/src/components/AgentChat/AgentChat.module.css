@@ -93,11 +93,32 @@
   margin-top: 4px;
 }
 
-.reasoning,
-.tool,
 .note {
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.work {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.agentMessage {
+  min-width: 0;
+}
+
+/* T3's assistant meta row: the copy button shows on hover or focus. */
+.messageMeta {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.agentMessage:hover .messageMeta,
+.messageMeta:focus-within {
+  opacity: 1;
 }
 
 /* Untrusted text: kept as text, and any unbroken run wraps. */

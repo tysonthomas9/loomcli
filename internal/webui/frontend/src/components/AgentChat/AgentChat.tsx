@@ -1,10 +1,19 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { ownSender, useAgentChat, useRosterAgent } from "@/hooks";
 import type { ChatItem } from "@/hooks";
 import { AskCard } from "./AskCard";
-import { LongText } from "./LongText";
+import { ChatMarkdown } from "./ChatMarkdown";
+import { LONG_TEXT_LIMIT, LongText } from "./LongText";
+import { MessageCopyButton } from "./MessageCopyButton";
+import { deriveTimelineRows, type TimelineRow } from "./timelineRows";
+import {
+  LiveWorkEntryRow,
+  ThinkingActivityRow,
+  WorkEntryRow,
+  WorkGroupToggleRow,
+} from "./WorkRows";
 import styles from "./AgentChat.module.css";
 
 export interface AgentChatProps {
@@ -26,6 +35,19 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
   const [sending, setSending] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const rows = useMemo(
+    () => deriveTimelineRows(items, expandedGroups),
+    [items, expandedGroups],
+  );
+  const toggleGroup = (id: string) =>
+    setExpandedGroups((g) => {
+      const next = new Set(g);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
 
   // An edit is another Send that replaces the waiting text (§9.2).
   const submit = () => {
@@ -66,9 +88,14 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
       </header>
 
       <ol className={styles.transcript} data-testid="chat-transcript">
-        {items.map((item) => (
-          <li key={item.key} className={styles[item.kind]}>
-            <Item item={item} workspaceId={workspaceId} />
+        {rows.map((row) => (
+          <li
+            key={row.id}
+            className={
+              row.kind === "item" ? styles[row.item.kind] : styles.work
+            }
+          >
+            <Row row={row} workspaceId={workspaceId} onToggle={toggleGroup} />
           </li>
         ))}
         {agent?.waiting_messages.map((w) => (
@@ -174,6 +201,66 @@ function ChildLink({ ws, id, name }: { ws: string; id: string; name: string }) {
   );
 }
 
+function Row({
+  row,
+  workspaceId,
+  onToggle,
+}: {
+  row: TimelineRow;
+  workspaceId: string;
+  onToggle: (groupId: string) => void;
+}) {
+  switch (row.kind) {
+    case "item":
+      return <Item item={row.item} workspaceId={workspaceId} />;
+    case "work":
+      return <WorkEntryRow entry={row.entry} inGroup={row.inGroup} />;
+    case "work-toggle":
+      return (
+        <WorkGroupToggleRow row={row} onToggle={() => onToggle(row.groupId)} />
+      );
+    case "work-live":
+      return (
+        <LiveWorkEntryRow row={row} onToggle={() => onToggle(row.groupId)} />
+      );
+    case "thinking":
+      return <ThinkingActivityRow />;
+  }
+}
+
+/**
+ * An agent message as markdown, cut like LongText until the user expands
+ * it, with a copy button once it is complete.
+ */
+function AgentMessage({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming: boolean;
+}) {
+  const [all, setAll] = useState(false);
+  const cut = !all && text.length > LONG_TEXT_LIMIT;
+  return (
+    <div className={styles.agentMessage}>
+      <ChatMarkdown
+        text={cut ? text.slice(0, LONG_TEXT_LIMIT) + "…" : text}
+        streaming={streaming}
+      />
+      {cut && (
+        <button className={styles.showAll} onClick={() => setAll(true)}>
+          Show all ({text.length.toLocaleString()} characters)
+        </button>
+      )}
+      {!streaming && text.trim() && (
+        <div className={styles.messageMeta}>
+          <MessageCopyButton text={text} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
   switch (item.kind) {
     case "child":
@@ -200,15 +287,13 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
     }
     case "turn_end":
       return <div className={styles.note}>Turn {item.reason}</div>;
+    case "agent":
+      return <AgentMessage text={item.text} streaming={!!item.streaming} />;
+    case "user":
+      return <LongText text={item.text} />;
+    // Tool calls and reasoning are work rows (see deriveTimelineRows).
     case "tool":
     case "reasoning":
-      return (
-        <details>
-          <summary>{item.kind === "tool" ? "Tool call" : "Reasoning"}</summary>
-          <LongText text={item.text} />
-        </details>
-      );
-    default:
-      return <LongText text={item.text} />;
+      return null;
   }
 }

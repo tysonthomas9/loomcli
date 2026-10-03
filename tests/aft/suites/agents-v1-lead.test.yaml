@@ -418,3 +418,89 @@ tests:
             !document.querySelector('[data-testid=create-agent-name-error]') &&
             document.querySelector('[data-testid=create-agent-submit]')?.disabled === false
         intent: "Wait until a valid name clears the message and enables Create"
+
+  - name: UI3 - the lead chat shows grouped tool calls with input, output and error, a markdown table and a highlighted code block
+    intent: An operator watches a lead run a command and a failing read, sees one summary row for both calls that expands to each call's input and output with the failure marked, and reads the reply's table as a table and its Go code as a highlighted block, before and after a reload
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-ui3-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-ui3-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Ui3Id
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui3Id")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          reply = ("Files:\n\n| Name | Lines |\n| --- | ---: |\n| README.md | 1 |\n\n"
+                   "```go\nfunc main() {\n\treturn\n}\n```\n\nAGV1-UI3-REPLY")
+          if scenarios:
+              # The emulator runs no tools itself: the turn's calls and their results are scripted.
+              turn = {"tools": [
+                  {"id": "call_ui3_ls", "name": "shell", "input": {"command": "ls"}, "output": "README.md"},
+                  {"id": "call_ui3_read", "name": "read", "input": {"filePath": "missing-ui3.txt"},
+                   "output": "", "fail": "File not found: missing-ui3.txt"}], "text": reply}
+              json.dump({agent: [turn]}, open(scenarios, "w"))
+          else:
+              steps = [{"tool_calls": [{"name": "shell", "arguments": {"command": "ls"}},
+                                       {"name": "read", "arguments": {"filePath": "missing-ui3.txt"}}]},
+                       {"text": reply}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that runs ls, reads a missing file and replies with a table and Go code, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "show me the files" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              const g = t?.querySelector('[data-testid=tool-group]');
+              return !!g && g.textContent.includes('Ran 1 command and read 1 file') && g.textContent.includes('Tool calls (2)') &&
+                (t.textContent || '').indexOf('AGV1-UI3-REPLY') > (t.textContent || '').indexOf('Ran 1 command'); })()
+        budget: 90000
+        intent: "Wait until both calls show as one summary row, before the reply"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              const cells = Array.from(t?.querySelectorAll('table td') || []).map((c) => c.textContent);
+              const code = t?.querySelector('[data-testid=chat-codeblock][data-language=go]');
+              return cells.includes('README.md') && cells.includes('1') && !(t.textContent || '').includes('| Name |') &&
+                !!code && (code.textContent || '').includes('func main()') && !!code.querySelector('pre code span'); })()
+        intent: "Wait until the reply's table renders as a table and its Go code as a highlighted code block"
+      - click: { testid: tool-group }
+      - wait:
+          fn: >-
+            (() => { const calls = Array.from(document.querySelectorAll('[data-testid=tool-call]'));
+              return calls.length === 2 && calls[0].dataset.status === 'completed' && (calls[0].textContent || '').includes('ls') &&
+                calls[1].dataset.status === 'failed' && !!calls[1].querySelector('[aria-label="Tool call failed"]'); })()
+        intent: "Wait until the group expands to the ls call and the failed read"
+      - click: { selector: "[data-testid=tool-call] [role=button]", first: true }
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=tool-call]')?.textContent || '';
+              return c.includes('Input') && c.includes('"command": "ls"') && c.includes('Output') && c.includes('README.md'); })()
+        intent: "Wait until the ls call shows its input and output"
+      - click: { selector: "[data-testid=tool-call][data-status=failed] [role=button]" }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=tool-call][data-status=failed]')?.textContent || '').includes('Error')
+        intent: "Wait until the failed read shows its error"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              return (t?.querySelector('[data-testid=tool-group]')?.textContent || '').includes('Ran 1 command and read 1 file') &&
+                !!t.querySelector('table') && !!t.querySelector('[data-testid=chat-codeblock][data-language=go]'); })()
+        intent: "Wait until a reload replays the summary row, the table and the code block from saved events"

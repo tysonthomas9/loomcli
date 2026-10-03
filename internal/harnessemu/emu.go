@@ -60,14 +60,18 @@ type Turn struct {
 	Tokens    Tokens  `json:"tokens"`             // the step's usage
 	Cost      float64 `json:"cost,omitempty"`     // the step's cost
 	DelayMS   int     `json:"delay_ms,omitempty"` // pause before each streamed delta
-	Tools     []Tool  `json:"tools,omitempty"`    // MCP tool calls the turn ran first
+	Tools     []Tool  `json:"tools,omitempty"`    // tool calls the turn ran first
 	Ask       bool    `json:"ask,omitempty"`      // ask Model when the turn plays
 }
 
-// Tool is one MCP tool call a turn ran, with its output.
+// Tool is one tool call a turn ran: its name and input, and its output, or
+// with Fail its error.
 type Tool struct {
-	ID     string `json:"id"`
-	Output string `json:"output"`
+	ID     string         `json:"id"`
+	Name   string         `json:"name,omitempty"` // "" plays execute, Code Mode's tool
+	Input  map[string]any `json:"input,omitempty"`
+	Output string         `json:"output"`
+	Fail   string         `json:"fail,omitempty"`
 }
 
 // Tokens is OpenCode's per-step token usage.
@@ -252,7 +256,9 @@ func (s *Server) ask(msgs []map[string]any, servers map[string]map[string]any) T
 				t.Hold = true
 				return t
 			}
-			tools = append(tools, Tool{ID: c.ID, Output: out})
+			var input map[string]any
+			_ = json.Unmarshal([]byte(c.Function.Arguments), &input)
+			tools = append(tools, Tool{ID: c.ID, Name: c.Function.Name, Input: input, Output: out})
 			msgs = append(msgs, map[string]any{"role": "tool", "tool_call_id": c.ID, "content": out})
 		}
 	}
@@ -424,11 +430,7 @@ func (s *Server) play(sid string, r *run) {
 	msg := map[string]any{"id": "msg_" + s.newID(), "type": "assistant", "content": []map[string]any{}}
 	s.add(sid, msg)
 	for _, tool := range t.Tools {
-		msg["content"] = append(msg["content"].([]map[string]any), map[string]any{"type": "tool", "id": tool.ID,
-			"state": map[string]any{"status": "completed", "output": tool.Output}})
-		call := map[string]any{"assistantMessageID": msg["id"], "id": tool.ID}
-		s.emit(sid, "session.tool.called", clone(call))
-		s.emit(sid, "session.tool.success", with(call, "output", tool.Output))
+		s.playTool(sid, msg, tool)
 	}
 	for _, p := range []struct{ kind, text string }{{"reasoning", t.Reasoning}, {"text", t.Text}} {
 		if p.text == "" {
@@ -459,6 +461,33 @@ func (s *Server) play(sid string, r *run) {
 		s.emit(sid, "session.step.ended", map[string]any{"assistantMessageID": msg["id"], "tokens": t.Tokens, "cost": t.Cost})
 	}
 	s.end(sid, outcome, map[string]any{"error": msg["error"]})
+}
+
+// playTool plays one tool call as OpenCode b30c4d0 does: its input start
+// names the tool, its call carries the input, and its success the content,
+// or its failure the error; the message keeps the call's final state.
+func (s *Server) playTool(sid string, msg map[string]any, tool Tool) {
+	name := tool.Name
+	if name == "" {
+		name = "execute"
+	}
+	input := tool.Input
+	if input == nil {
+		input = map[string]any{}
+	}
+	content := []map[string]any{{"type": "text", "text": tool.Output}}
+	state := map[string]any{"status": "completed", "input": input, "content": content}
+	call := map[string]any{"assistantMessageID": msg["id"], "id": tool.ID}
+	s.emit(sid, "session.tool.input.started", with(call, "name", name))
+	s.emit(sid, "session.tool.called", with(with(call, "input", input), "executed", true))
+	if tool.Fail != "" {
+		e := map[string]any{"type": "tool", "message": tool.Fail}
+		state = map[string]any{"status": "error", "input": input, "error": e}
+		s.emit(sid, "session.tool.failed", with(with(call, "error", e), "executed", true))
+	} else {
+		s.emit(sid, "session.tool.success", with(with(call, "content", content), "executed", true))
+	}
+	msg["content"] = append(msg["content"].([]map[string]any), map[string]any{"type": "tool", "id": tool.ID, "name": name, "state": state})
 }
 
 // wait unlocks for d (forever when d < 0); false means r stopped or was

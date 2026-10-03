@@ -12,13 +12,28 @@ interface NativePayload {
   stopReason?: string;
   /** A delivery's slot sender, such as user:<id> or agent:<AgentID>. */
   sender?: string;
+  /** A tool item's call, on its tool.started notice and item.completed. */
+  tool?: ToolCall;
 }
+
+/**
+ * A tool call as every harness reports it: the harness's tool name, its
+ * input as text (JSON when structured) and, once it ended, its output.
+ */
+export interface ToolCall {
+  name?: string;
+  input?: string;
+  output?: string;
+  failed?: boolean;
+}
+
+export type ToolStatus = "running" | "completed" | "failed";
 
 export type ChatItem =
   | { key: string; kind: "user"; text: string }
   | { key: string; kind: "agent"; text: string; streaming?: boolean }
-  | { key: string; kind: "reasoning"; text: string }
-  | { key: string; kind: "tool"; text: string }
+  | { key: string; kind: "reasoning"; text: string; streaming?: boolean }
+  | { key: string; kind: "tool"; tool: ToolCall; status: ToolStatus }
   | { key: string; kind: "turn_end"; reason: string }
   | { key: string; kind: "child"; child: string; name: string }
   | { key: string; kind: "completion"; record: TaskCompleted };
@@ -47,8 +62,11 @@ function itemFor(e: AgentEvent): ChatItem | null {
     case "message.delivered":
       return { key, kind: "user", text: p.text ?? "" };
     case "item.completed":
-      if (p.itemKind === "tool")
-        return { key, kind: "tool", text: p.text ?? "" };
+      if (p.itemKind === "tool") {
+        const tool = p.tool ?? {};
+        const status = tool.failed ? "failed" : "completed";
+        return { key, kind: "tool", tool, status };
+      }
       if (p.itemKind === "reasoning")
         return { key, kind: "reasoning", text: p.text ?? "" };
       return { key, kind: "agent", text: p.text ?? "" };
@@ -68,16 +86,34 @@ function itemFor(e: AgentEvent): ChatItem | null {
   }
 }
 
-/** Live text per item id, built from delta notices until the item completes. */
-export type Streaming = ReadonlyMap<string, string>;
+/** An item in progress: a message's or reasoning's text so far, or a tool call that started. */
+export type LiveItem =
+  | { kind: "message" | "reasoning"; text: string }
+  | { kind: "tool"; tool: ToolCall };
 
-/** Appends one delta notice's text to its item; ignores other notices. */
+/** Live items per item id, built from notices until the item completes. */
+export type Streaming = ReadonlyMap<string, LiveItem>;
+
+/**
+ * Adds one notice: a delta appends its text to its message or reasoning, a
+ * tool.started adds its tool call; other notices change nothing.
+ */
 export function addDelta(streaming: Streaming, notice: AgentEvent): Streaming {
   const p = payload(notice);
-  if (notice.kind !== "delta" || !p.itemId || p.itemKind === "reasoning")
+  if (!p.itemId) return streaming;
+  let item: LiveItem;
+  if (notice.kind === "tool.started") {
+    item = { kind: "tool", tool: p.tool ?? {} };
+  } else if (notice.kind === "delta" && p.itemKind !== "tool") {
+    const kind = p.itemKind === "reasoning" ? "reasoning" : "message";
+    const was = streaming.get(p.itemId);
+    const text = was && was.kind !== "tool" ? was.text : "";
+    item = { kind, text: text + (p.text ?? "") };
+  } else {
     return streaming;
+  }
   const next = new Map(streaming);
-  next.set(p.itemId, (streaming.get(p.itemId) ?? "") + (p.text ?? ""));
+  next.set(p.itemId, item);
   return next;
 }
 
@@ -112,8 +148,14 @@ export function chatItems(
     )
     .map(itemFor)
     .filter((i): i is ChatItem => i !== null);
-  for (const [id, text] of streaming)
-    items.push({ key: `live:${id}`, kind: "agent", text, streaming: true });
+  for (const [id, live] of streaming) {
+    const key = `live:${id}`;
+    if (live.kind === "tool")
+      items.push({ key, kind: "tool", tool: live.tool, status: "running" });
+    else if (live.kind === "reasoning")
+      items.push({ key, kind: "reasoning", text: live.text, streaming: true });
+    else items.push({ key, kind: "agent", text: live.text, streaming: true });
+  }
   return items;
 }
 

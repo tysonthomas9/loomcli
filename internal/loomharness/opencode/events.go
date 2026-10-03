@@ -154,10 +154,13 @@ type mapper struct {
 	// history: its id and InputKey. Nil, or not found, uses the anchor.
 	lookup func(sid, anchor string) (id, key string, ok bool)
 	last   string // the native id of the event mapEvent last mapped
+	// tools holds a started tool call's name and input, by its item id,
+	// until the call ends: OpenCode's end event names neither.
+	tools map[string]loomharness.Tool
 }
 
 func newMapper(root func(string) string, lookup func(string, string) (string, string, bool)) *mapper {
-	return &mapper{seq: map[string]int64{}, turn: map[string]string{}, root: root, lookup: lookup}
+	return &mapper{seq: map[string]int64{}, turn: map[string]string{}, root: root, lookup: lookup, tools: map[string]loomharness.Tool{}}
 }
 
 // process maps one native event to the port events it releases, in order.
@@ -249,7 +252,57 @@ type wireEvent struct {
 			ID        string `json:"id"`
 			SessionID string `json:"sessionID"`
 		} `json:"form"` // form.created
+		Name    string          `json:"name"`    // session.tool.input.started
+		Input   json.RawMessage `json:"input"`   // session.tool.called
+		Content toolContent     `json:"content"` // session.tool.success and failed
+		Error   *toolError      `json:"error"`   // session.tool.failed
 	} `json:"data"`
+}
+
+// toolContent is a tool call's result parts; the chat shows their text.
+type toolContent []struct {
+	Type string `json:"type"` // text | file
+	Text string `json:"text"`
+	URI  string `json:"uri"`
+}
+
+func (c toolContent) text() string {
+	var out []string
+	for _, p := range c {
+		switch p.Type {
+		case "text":
+			out = append(out, p.Text)
+		case "file":
+			out = append(out, p.URI)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// toolError is a failed tool call's structured error.
+type toolError struct {
+	Message string `json:"message"`
+}
+
+// toolInput is a tool call's input object as text; "" when it has none.
+func toolInput(raw json.RawMessage) string {
+	switch string(raw) {
+	case "", "null", "{}":
+		return ""
+	}
+	return string(raw)
+}
+
+// toolOutput is an ended tool call's output text and whether it failed.
+func toolOutput(c toolContent, err *toolError) (string, bool) {
+	out := c.text()
+	if err == nil {
+		return out, false
+	}
+	if out == "" {
+		return err.Message, true
+	}
+	return err.Message + "\n" + out, true
 }
 
 // tokens is OpenCode's per-step TokenUsageInfo, on session.step.ended and
@@ -317,10 +370,8 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 		e.Type, e.ItemKind, e.ItemID = loomharness.EventItemStarted, kind(part), partItem(d.AssistantMessageID, part, d.Ordinal)
 	case "session.text.ended", "session.reasoning.ended":
 		e.Type, e.ItemKind, e.ItemID, e.Text = loomharness.EventItemCompleted, kind(part), partItem(d.AssistantMessageID, part, d.Ordinal), d.Text
-	case "session.tool.called":
-		e.Type, e.ItemKind, e.ItemID = loomharness.EventItemStarted, "tool", toolItem(d.AssistantMessageID, d.ID)
-	case "session.tool.success", "session.tool.failed":
-		e.Type, e.ItemKind, e.ItemID = loomharness.EventItemCompleted, "tool", toolItem(d.AssistantMessageID, d.ID)
+	case "session.tool.input.started", "session.tool.called", "session.tool.success", "session.tool.failed":
+		return m.tool(e, w)
 	case "session.step.ended":
 		e.Type, e.ItemID, e.Usage = loomharness.EventUsage, d.AssistantMessageID, d.Tokens.usage(d.Cost)
 	case "session.execution.interrupted":
@@ -354,6 +405,37 @@ func lastDot(s string) string { return s[strings.LastIndex(s, ".")+1:] }
 
 // partItem is the ItemID of a text or reasoning part, the same in the live
 // feed and in Messages.
+// tool maps a tool call's events. Its input start names the tool and maps
+// to nothing; its call starts the item with its input; its success or
+// failure completes it with the output, or the error.
+func (m *mapper) tool(e *loomharness.Event, w wireEvent) bool {
+	d := w.Data
+	id := toolItem(d.AssistantMessageID, d.ID)
+	t := m.tools[id]
+	switch w.Type {
+	case "session.tool.input.started":
+		m.setTool(id, loomharness.Tool{Name: d.Name})
+		return false
+	case "session.tool.called":
+		t.Input = toolInput(d.Input)
+		m.setTool(id, t)
+		e.Type = loomharness.EventItemStarted
+	default:
+		delete(m.tools, id)
+		t.Output, t.Failed = toolOutput(d.Content, d.Error)
+		e.Type = loomharness.EventItemCompleted
+	}
+	e.ItemKind, e.ItemID, e.Tool = "tool", id, &t
+	return true
+}
+
+func (m *mapper) setTool(id string, t loomharness.Tool) {
+	if m.tools == nil {
+		m.tools = map[string]loomharness.Tool{}
+	}
+	m.tools[id] = t
+}
+
 func partItem(messageID, part string, ordinal int) string {
 	return messageID + "/" + part + "/" + strconv.Itoa(ordinal)
 }

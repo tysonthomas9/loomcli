@@ -773,8 +773,12 @@ type message struct {
 		Type  string `json:"type"` // text | reasoning | tool
 		ID    string `json:"id"`
 		Text  string `json:"text"`
+		Name  string `json:"name"` // tool
 		State struct {
-			Status string `json:"status"` // tool: streaming | running | completed | error
+			Status  string          `json:"status"` // tool: streaming | running | completed | error
+			Input   json.RawMessage `json:"input"`
+			Content toolContent     `json:"content"`
+			Error   *toolError      `json:"error"`
 		} `json:"state"`
 	} `json:"content"`
 }
@@ -863,7 +867,9 @@ func (m message) events(ref loomharness.NativeRef) []loomharness.Event {
 				if c.State.Status != "completed" && c.State.Status != "error" {
 					continue
 				}
+				out, failed := toolOutput(c.State.Content, c.State.Error)
 				item.ItemKind, item.ItemID, item.Text = "tool", toolItem(m.ID, c.ID), ""
+				item.Tool = &loomharness.Tool{Name: c.Name, Input: toolInput(c.State.Input), Output: out, Failed: failed}
 			default:
 				continue
 			}

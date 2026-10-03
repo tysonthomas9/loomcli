@@ -37,3 +37,61 @@ describe("chatModel", () => {
     expect([...s.keys()]).toEqual(["b"]);
   });
 });
+
+describe("chatModel tool calls and reasoning", () => {
+  it("keeps a completed tool call's name, input, output and failure", () => {
+    const items = chatItems(
+      [
+        ev("item.completed", {
+          itemId: "x/tool/1",
+          itemKind: "tool",
+          tool: { name: "bash", input: '{"command":"ls"}', output: "a.go" },
+        }),
+        ev("item.completed", {
+          itemId: "x/tool/2",
+          itemKind: "tool",
+          tool: { name: "read", output: "no such file", failed: true },
+        }),
+      ],
+      new Map(),
+    );
+    expect(items).toEqual([
+      expect.objectContaining({
+        kind: "tool",
+        status: "completed",
+        tool: { name: "bash", input: '{"command":"ls"}', output: "a.go" },
+      }),
+      expect.objectContaining({ kind: "tool", status: "failed" }),
+    ]);
+  });
+
+  it("shows a started tool as running and live reasoning until they complete", () => {
+    let s = addDelta(
+      new Map(),
+      ev("tool.started", {
+        itemId: "x/tool/1",
+        itemKind: "tool",
+        tool: { name: "bash", input: '{"command":"sleep 1"}' },
+      }),
+    );
+    s = addDelta(
+      s,
+      ev("delta", { itemId: "r", itemKind: "reasoning", text: "hm" }),
+    );
+    s = addDelta(
+      s,
+      ev("delta", { itemId: "r", itemKind: "reasoning", text: "m" }),
+    );
+    expect(chatItems([], s)).toEqual([
+      {
+        key: "live:x/tool/1",
+        kind: "tool",
+        status: "running",
+        tool: { name: "bash", input: '{"command":"sleep 1"}' },
+      },
+      { key: "live:r", kind: "reasoning", text: "hmm", streaming: true },
+    ]);
+    s = settle(s, [ev("item.completed", { itemId: "x/tool/1" })]);
+    expect([...s.keys()]).toEqual(["r"]);
+  });
+});
