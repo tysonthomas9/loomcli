@@ -46,9 +46,9 @@ func reconcileLoom(t *testing.T, item fixture, forge *mergeForgeFake) {
 	}
 }
 
-// landBottom runs the Loom merge machine for the merging bottom layer through
+// landMergedBottom runs the Loom merge machine for the merging bottom layer through
 // landing and the restack of next (when there is one), like Reconcile does.
-func landBottom(t *testing.T, item fixture, forge *mergeForgeFake, change, next string) {
+func landMergedBottom(t *testing.T, item fixture, forge *mergeForgeFake, change, next string) {
 	t.Helper()
 	ctx := context.Background()
 	reconcileLoom(t, item, forge)
@@ -81,7 +81,7 @@ func TestApproveMergeBottomPRMergesNow(t *testing.T) {
 	if merge.Target != "A" || merge.Authority != humanApprovalAuthority || merge.RequestID != "approval-merge:W:A:1" {
 		t.Fatalf("merge = %+v", merge)
 	}
-	landBottom(t, item, forge, "A", "B")
+	landMergedBottom(t, item, forge, "A", "B")
 	if forge.merged != 1 || !forge.prs[0].Merged || forge.prs[1].Merged {
 		t.Fatalf("merged = %d, prs = %+v", forge.merged, forge.prs)
 	}
@@ -110,7 +110,7 @@ func TestApproveMergeAboveBottomWaitsThenMergesAfterCleanRestacks(t *testing.T) 
 	if _, err := approveMerge(ctx, item.store, forge, "W", "L", "A", heads[0], tyson); err != nil {
 		t.Fatal(err)
 	}
-	landBottom(t, item, forge, "A", "B")
+	landMergedBottom(t, item, forge, "A", "B")
 	reconcileApprovals(t, item, forge)
 	if got := approval(t, item, "B"); got.Status != MergeApprovalMerging || got.Head == heads[1] {
 		t.Fatalf("B after A landed and restacked = %+v", got)
@@ -118,7 +118,7 @@ func TestApproveMergeAboveBottomWaitsThenMergesAfterCleanRestacks(t *testing.T) 
 	if got := approval(t, item, "C"); got.Status != MergeApprovalWaiting || got.Reason != "merges after #2" {
 		t.Fatalf("C while B merges = %+v", got)
 	}
-	landBottom(t, item, forge, "B", "C")
+	landMergedBottom(t, item, forge, "B", "C")
 	reconcileApprovals(t, item, forge)
 	got := approval(t, item, "C")
 	if got.Status != MergeApprovalMerging || got.ApprovedHead != heads[2] || got.Head == heads[2] {
@@ -335,7 +335,7 @@ func TestCancelMergeApprovalStopsAWaitingMerge(t *testing.T) {
 	if _, err := approveMerge(ctx, item.store, forge, "W", "L", "A", heads[0], tyson); err != nil {
 		t.Fatal(err)
 	}
-	landBottom(t, item, forge, "A", "B")
+	landMergedBottom(t, item, forge, "A", "B")
 	reconcileApprovals(t, item, forge)
 	reconcileLoom(t, item, forge)
 	if got := approval(t, item, "B"); got.Status != MergeApprovalCancelled || got.Reason != "feedback fix-up changed the PR" || forge.prs[1].Merged {
