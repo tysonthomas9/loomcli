@@ -77,3 +77,35 @@ func handleRevisionDiff(interdiff bool, open func() (*gitread.Reader, func() err
 		handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": result})
 	}
 }
+
+// openRevisionReader opens serve's read-only revision view; tests replace it.
+var openRevisionReader = func() (*gitread.Reader, func() error, error) {
+	return gitread.OpenLocal(storeadapter.ResolveRepoPath)
+}
+
+// HandleTaskDiff serves a task's diff per repo: each repo's newest revision
+// against the layer below it in the lead's stack, the same as its PR.
+func HandleTaskDiff() http.HandlerFunc {
+	return handleTaskDiff(func() (*gitread.Reader, func() error, error) { return openRevisionReader() })
+}
+
+func handleTaskDiff(open func() (*gitread.Reader, func() error, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		workspace := middleware.WorkspaceFromContext(req.Context())
+		if workspace == "" {
+			workspace = req.PathValue("ws")
+		}
+		reader, closeStore, err := open()
+		if err != nil {
+			revisionError(w, err)
+			return
+		}
+		defer func() { _ = closeStore() }()
+		result, err := reader.TaskDiffs(req.Context(), workspace, req.PathValue("id"), req.URL.Query().Get("lead"))
+		if err != nil {
+			revisionError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": result})
+	}
+}

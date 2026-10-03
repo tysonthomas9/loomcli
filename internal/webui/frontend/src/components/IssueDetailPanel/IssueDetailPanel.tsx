@@ -86,6 +86,7 @@ import { ErrorToast } from "../ErrorToast";
 import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { RevisionsSection } from "./sections/RevisionsSection";
+import { TaskChangesTab } from "./TaskChangesTab";
 import { isLeadRole } from "@/utils/agentRole";
 import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
@@ -266,7 +267,7 @@ interface DetailTabMetadata {
 
 interface DetailTab {
   id: string;
-  type: "details" | "terminal" | "sessions" | "task-log";
+  type: "details" | "terminal" | "sessions" | "task-log" | "changes";
   label: string;
   closable: boolean;
   metadata?: DetailTabMetadata | undefined;
@@ -284,6 +285,14 @@ const SESSIONS_TAB: DetailTab = {
   id: "sessions",
   type: "sessions",
   label: "Runs",
+  closable: false,
+};
+
+/** Task review (D29): one diff per task, history behind a link. */
+const CHANGES_TAB: DetailTab = {
+  id: "changes",
+  type: "changes",
+  label: "Changes",
   closable: false,
 };
 
@@ -391,6 +400,7 @@ function canRenderDetailTab(tab: DetailTab | undefined): boolean {
     case "details":
     case "sessions":
     case "task-log":
+    case "changes":
       return true;
     case "terminal":
       return Boolean(tab.metadata?.sessionName && tab.metadata.backend);
@@ -717,7 +727,9 @@ function DefaultContent({
       activeTabId === "details";
     if (isDefault) return;
 
-    const persistableTabs = tabs.filter((t) => t.type !== "task-log");
+    const persistableTabs = tabs.filter(
+      (t) => t.type !== "task-log" && t.type !== "changes",
+    );
     const tabsToSave: IssueTab[] = persistableTabs.map((t, i) => {
       const tab: IssueTab = {
         id: t.id,
@@ -747,13 +759,22 @@ function DefaultContent({
       closable: false,
     }));
     const detailsIndex = tabs.findIndex((tab) => tab.id === "details");
-    if (detailsIndex === -1) return [...phaseTabs, ...tabs];
+    const withPhases =
+      detailsIndex === -1
+        ? [...phaseTabs, ...tabs]
+        : [
+            ...tabs.slice(0, detailsIndex + 1),
+            ...phaseTabs,
+            ...tabs.slice(detailsIndex + 1),
+          ];
+    if (issue?.issue_type !== "task") return withPhases;
+    const runsIndex = withPhases.findIndex((tab) => tab.id === "sessions");
     return [
-      ...tabs.slice(0, detailsIndex + 1),
-      ...phaseTabs,
-      ...tabs.slice(detailsIndex + 1),
+      ...withPhases.slice(0, runsIndex + 1),
+      CHANGES_TAB,
+      ...withPhases.slice(runsIndex + 1),
     ];
-  }, [tabs, taskLogPhases]);
+  }, [tabs, taskLogPhases, issue?.issue_type]);
   const activeTab = useMemo(
     () => visibleTabs.find((tab) => tab.id === activeTabId),
     [activeTabId, visibleTabs],
@@ -1663,6 +1684,21 @@ function DefaultContent({
 
       {renderedActiveTabId === "task-log-implementation" && (
         <TaskPhaseLogPanel issueId={issue.id} phase="implementation" />
+      )}
+
+      {renderedActiveTabId === "changes" && (
+        <div
+          className={styles.logsContainer}
+          role="tabpanel"
+          id="issue-panel-tabpanel-changes"
+          aria-labelledby="issue-panel-tab-changes"
+        >
+          <TaskChangesTab
+            workspaceId={workspaceId}
+            taskId={issue.id}
+            lead={revisionLead}
+          />
+        </div>
       )}
 
       {renderedActiveTabId === "sessions" && (
