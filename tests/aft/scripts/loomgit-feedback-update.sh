@@ -10,6 +10,8 @@
 #
 # The review feedback is recorded in the journal as the verified GitHub
 # webhook would record it (the webhook's signature path has its own tests).
+# With AFT_FEEDBACK_WEBHOOK=1 each case's first review instead arrives as a
+# real HMAC-signed pull_request_review webhook through the product endpoint.
 # Addressing it uses the product's address API, a real commit in the task copy
 # it returns, and `loom feedback complete`, as the feedback agent does.
 set -Eeuo pipefail
@@ -161,6 +163,26 @@ pr_file() { # pr_file <name> <path>: the file on the task's PR branch, or nothin
   git --git-dir="$remote" show "refs/heads/$(pr_ref "$1"):$2" 2>/dev/null || true
 }
 
+# signed_review <delivery> <change> <pr> <path> <head>: with
+# AFT_FEEDBACK_WEBHOOK=1 the case's first review arrives as a real GitHub
+# pull_request_review webhook, HMAC-signed with the trigger binding's secret,
+# and must show up as pending feedback on the change.
+signed_review() {
+  local delivery="$1" change="$2" pr="$3" path="$4" head="$5" secret="aft-feedback-secret" code
+  loom trigger bindings create --route-key github.pull_request_review.submitted \
+    --workflow epic-runner --secret "$secret" > "$case_dir/binding.txt"
+  python3 -c 'import json,sys; print(json.dumps({"action":"submitted","repository":{"full_name":"owner/"+sys.argv[1]},"sender":{"login":"reviewer"},"pull_request":{"number":int(sys.argv[2]),"head":{"sha":sys.argv[3]}},"review":{"state":"changes_requested","author_association":"MEMBER","body":"please fix "+sys.argv[4]}}))' \
+    "$repo_name" "$pr" "$head" "$path" > "$case_dir/webhook-$delivery.json"
+  code="$(curl -sS -o "$case_dir/webhook-response-$delivery.json" -w '%{http_code}' -X POST "$api/webhooks/github" \
+    -H 'Content-Type: application/json' -H 'X-GitHub-Event: pull_request_review' -H "X-GitHub-Delivery: $delivery" \
+    -H "X-Hub-Signature-256: sha256=$(openssl dgst -sha256 -hmac "$secret" -r < "$case_dir/webhook-$delivery.json" | cut -d' ' -f1)" \
+    --data-binary @"$case_dir/webhook-$delivery.json")"
+  test "$code" = 202 || { echo "signed review webhook: HTTP $code $(cat "$case_dir/webhook-response-$delivery.json")" >&2; return 1; }
+  curl -fsS "$api/changes/$change/feedback" > "$case_dir/feedback-$delivery.json"
+  json "$case_dir/feedback-$delivery.json" 'f=[x for x in v["feedback"] if x.get("delivery_id")==sys.argv[2]]; assert f and f[0].get("status")=="pending", v' "$delivery"
+  touch "$case_dir/webhook-sent"
+}
+
 # fixup <name> <path> <body>: a trusted reviewer requests changes on the task's
 # PR, and the feedback agent addresses it with one commit writing <path>.
 # Prints the new revision number.
@@ -171,8 +193,12 @@ fixup() {
   head="$(pr_head "$name")"
   delivery="fb-$case_name-$name-$RUN_ID-$RANDOM"
   attempt="fixup-$RANDOM"
-  python3 -c 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1],timeout=10); db.execute("insert into change_feedback(workspace,delivery_id,change_id,pr_number,kind,actor,association,body,head_sha,status) values (?,?,?,?,?,?,?,?,?,?)",(sys.argv[2],sys.argv[3],sys.argv[4],int(sys.argv[5]),"changes_requested","reviewer","MEMBER","please fix "+sys.argv[6],sys.argv[7],"pending")); db.commit()' \
-    "$journal" "$workspace" "$delivery" "$change" "$pr" "$path" "$head"
+  if [[ "${AFT_FEEDBACK_WEBHOOK:-}" == 1 && ! -f "$case_dir/webhook-sent" ]]; then
+    signed_review "$delivery" "$change" "$pr" "$path" "$head"
+  else
+    python3 -c 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1],timeout=10); db.execute("insert into change_feedback(workspace,delivery_id,change_id,pr_number,kind,actor,association,body,head_sha,status) values (?,?,?,?,?,?,?,?,?,?)",(sys.argv[2],sys.argv[3],sys.argv[4],int(sys.argv[5]),"changes_requested","reviewer","MEMBER","please fix "+sys.argv[6],sys.argv[7],"pending")); db.commit()' \
+      "$journal" "$workspace" "$delivery" "$change" "$pr" "$path" "$head"
+  fi
   curl -fsS -X POST "$api/changes/$change/feedback/$delivery/address" -H 'Content-Type: application/json' \
     -d "{\"attempt\":\"$attempt\"}" > "$case_dir/address-$delivery.json"
   target="$(json "$case_dir/address-$delivery.json" 'print(v["target"])')"
