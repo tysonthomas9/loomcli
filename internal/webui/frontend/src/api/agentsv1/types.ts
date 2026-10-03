@@ -108,6 +108,7 @@ export interface Agent {
   harness: string;
   host: string;
   model: string | null;
+  model_unverified: boolean; // the harness's model list lacked the model; the harness decides (MCS1)
   state: string;
   state_reason: string | null;
   waiting_on: string | null;

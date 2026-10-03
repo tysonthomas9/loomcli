@@ -1716,38 +1716,41 @@ type AgentV1 struct {
 	Harness         string  `json:"harness"`
 
 	// HistoryPurgeFailedAt Set while a due history purge has failed (an incomplete expiry); cleared when the purge succeeds or the deadline ends.
-	HistoryPurgeFailedAt *string                 `json:"history_purge_failed_at"`
-	HistoryPurgedAt      *string                 `json:"history_purged_at"`
-	Host                 string                  `json:"host"`
-	InteractionMode      string                  `json:"interaction_mode"`
-	LastActiveAt         *string                 `json:"last_active_at"`
-	Mode                 string                  `json:"mode"`
-	Model                *string                 `json:"model"`
-	Name                 string                  `json:"name"`
-	OpenAsks             []AgentV1Ask            `json:"open_asks"`
-	Outcome              *string                 `json:"outcome"`
-	OwnerId              string                  `json:"owner_id"`
-	OwnerKind            string                  `json:"owner_kind"`
-	ParentAgentId        *string                 `json:"parent_agent_id"`
-	Preset               string                  `json:"preset"`
-	PresetVersion        string                  `json:"preset_version"`
-	ProfileKey           string                  `json:"profile_key"`
-	Repo                 string                  `json:"repo"`
-	RoleKind             string                  `json:"role_kind"`
-	RootAgentId          *string                 `json:"root_agent_id"`
-	RunningTurnId        *string                 `json:"running_turn_id"`
-	SpecJson             string                  `json:"spec_json"`
-	SpecVersion          int64                   `json:"spec_version"`
-	State                string                  `json:"state"`
-	StateReason          *string                 `json:"state_reason"`
-	SubjectId            *string                 `json:"subject_id"`
-	SubjectType          *string                 `json:"subject_type"`
-	SubjectVersion       *string                 `json:"subject_version"`
-	UpdatedAt            string                  `json:"updated_at"`
-	WaitingMessages      []AgentV1WaitingMessage `json:"waiting_messages"`
-	WaitingOn            *string                 `json:"waiting_on"`
-	WorkspaceId          string                  `json:"workspace_id"`
-	WorktreePath         *string                 `json:"worktree_path"`
+	HistoryPurgeFailedAt *string `json:"history_purge_failed_at"`
+	HistoryPurgedAt      *string `json:"history_purged_at"`
+	Host                 string  `json:"host"`
+	InteractionMode      string  `json:"interaction_mode"`
+	LastActiveAt         *string `json:"last_active_at"`
+	Mode                 string  `json:"mode"`
+	Model                *string `json:"model"`
+
+	// ModelUnverified The harness's model list did not include the model when it was chosen; it was passed through and the harness decides whether it runs (see the model.unverified event).
+	ModelUnverified bool                    `json:"model_unverified"`
+	Name            string                  `json:"name"`
+	OpenAsks        []AgentV1Ask            `json:"open_asks"`
+	Outcome         *string                 `json:"outcome"`
+	OwnerId         string                  `json:"owner_id"`
+	OwnerKind       string                  `json:"owner_kind"`
+	ParentAgentId   *string                 `json:"parent_agent_id"`
+	Preset          string                  `json:"preset"`
+	PresetVersion   string                  `json:"preset_version"`
+	ProfileKey      string                  `json:"profile_key"`
+	Repo            string                  `json:"repo"`
+	RoleKind        string                  `json:"role_kind"`
+	RootAgentId     *string                 `json:"root_agent_id"`
+	RunningTurnId   *string                 `json:"running_turn_id"`
+	SpecJson        string                  `json:"spec_json"`
+	SpecVersion     int64                   `json:"spec_version"`
+	State           string                  `json:"state"`
+	StateReason     *string                 `json:"state_reason"`
+	SubjectId       *string                 `json:"subject_id"`
+	SubjectType     *string                 `json:"subject_type"`
+	SubjectVersion  *string                 `json:"subject_version"`
+	UpdatedAt       string                  `json:"updated_at"`
+	WaitingMessages []AgentV1WaitingMessage `json:"waiting_messages"`
+	WaitingOn       *string                 `json:"waiting_on"`
+	WorkspaceId     string                  `json:"workspace_id"`
+	WorktreePath    *string                 `json:"worktree_path"`
 }
 
 // AgentV1ArchiveBody defines model for AgentV1ArchiveBody.

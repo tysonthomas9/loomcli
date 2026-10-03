@@ -2559,6 +2559,8 @@ export interface components {
       harness: string;
       host: string;
       model: string | null;
+      /** @description The harness's model list did not include the model when it was chosen; it was passed through and the harness decides whether it runs (see the model.unverified event). */
+      model_unverified: boolean;
       state: string;
       state_reason: string | null;
       waiting_on: string | null;

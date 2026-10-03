@@ -19,11 +19,13 @@ type AgentInfo struct {
 	Compute         string           // always "local" in Phase 1
 	WaitingMessages []WaitingMessage // Get only
 	OpenAsks        []Ask            // Get only
+	ModelUnverified bool             // the model was not in the harness's catalog when chosen (MCS1)
 }
 
 func info(a loomstore.Agent) AgentInfo {
 	a.HarnessSessionID, a.HarnessSessionRoot = nil, nil
-	return AgentInfo{Agent: a, Compute: "local"}
+	cfg, _ := loadConfig(a)
+	return AgentInfo{Agent: a, Compute: "local", ModelUnverified: cfg.ModelUnverified}
 }
 
 // Get returns the agent with its waiting messages. It reads only the registry.

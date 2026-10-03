@@ -48,7 +48,10 @@ func (t TaskCompleted) text() string {
 // on a's parent.
 func (s *Service) created(ctx context.Context, a loomstore.Agent) error {
 	if err := s.appendEvent(ctx, a.AgentID, KindAgentCreated, KindAgentCreated,
-		map[string]any{"name": a.Name, "preset": a.Preset, "harness": a.Harness}); err != nil || a.ParentAgentID == nil {
+		map[string]any{"name": a.Name, "preset": a.Preset, "harness": a.Harness}); err != nil {
+		return err
+	}
+	if err := s.warnUnverified(ctx, a); err != nil || a.ParentAgentID == nil {
 		return err
 	}
 	return s.appendEvent(ctx, *a.ParentAgentID, KindChildCreated, KindChildCreated+":"+a.AgentID,

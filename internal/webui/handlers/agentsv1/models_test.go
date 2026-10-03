@@ -75,7 +75,8 @@ func TestHarnessModelsRoute(t *testing.T) {
 
 // TestUpdateEffortRoute: PATCH effort or options is saved and checked
 // against the catalog; an unknown value is a 400 that names the allowed
-// ones, and a value that is neither a string nor a boolean is refused.
+// ones, and a value that is neither a string nor a boolean is refused. An
+// unlisted model passes flagged model_unverified; a malformed one is a 400.
 func TestUpdateEffortRoute(t *testing.T) {
 	srv := modelServer(t)
 	status, out := call(t, srv, "PATCH", "ws/v1/agents/a1", "u1", `{"effort":"high"}`)
@@ -93,8 +94,12 @@ func TestUpdateEffortRoute(t *testing.T) {
 	}
 	status, out = call(t, srv, "PATCH", "ws/v1/agents/a1", "u4", `{"options":[{"id":"speed","value":true}]}`)
 	want(t, "unknown option", status, out, 400, "preset_invalid")
-	status, out = call(t, srv, "PATCH", "ws/v1/agents/a1", "u5", `{"model":"nope"}`)
-	want(t, "unknown model", status, out, 400, "preset_invalid")
+	status, out = call(t, srv, "PATCH", "ws/v1/agents/a1", "u5", `{"model":"nope"}`) // MCS1: passes, unverified
+	if status != 200 || out["model"] != "nope" || out["model_unverified"] != true {
+		t.Fatalf("patch unlisted model = %d %v; want 200 with model_unverified", status, out)
+	}
+	status, out = call(t, srv, "PATCH", "ws/v1/agents/a1", "u7", `{"model":"openai/"}`)
+	want(t, "malformed model", status, out, 400, "preset_invalid")
 	status, out = call(t, srv, "PATCH", "ws/v1/agents/a1", "u6", `{"options":[{"id":"effort","value":3}]}`)
 	want(t, "numeric value", status, out, 400, "")
 }

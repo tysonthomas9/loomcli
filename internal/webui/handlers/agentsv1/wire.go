@@ -142,6 +142,7 @@ type Agent struct {
 	Harness         string           `json:"harness"`
 	Host            string           `json:"host"`
 	Model           *string          `json:"model"`
+	ModelUnverified bool             `json:"model_unverified"` // the catalog did not list the model (MCS1)
 	State           string           `json:"state"`
 	StateReason     *string          `json:"state_reason"`
 	WaitingOn       *string          `json:"waiting_on"`
@@ -216,7 +217,7 @@ func agentOut(i loomagent.AgentInfo) Agent {
 		ParentAgentID: a.ParentAgentID, RootAgentID: a.RootAgentID, SubjectType: a.SubjectType,
 		SubjectID: a.SubjectID, SubjectVersion: a.SubjectVersion, ExternalKey: a.ExternalKey, Repo: a.Repo,
 		BaseRef: a.BaseRef, WorktreePath: a.WorktreePath, Branch: a.Branch, Harness: a.Harness, Host: a.Host,
-		Model: a.Model, State: a.State, StateReason: a.StateReason, WaitingOn: a.WaitingOn, Attempt: a.Attempt,
+		Model: a.Model, ModelUnverified: i.ModelUnverified, State: a.State, StateReason: a.StateReason, WaitingOn: a.WaitingOn, Attempt: a.Attempt,
 		Outcome: a.Outcome, ArchiveReason: a.ArchiveReason, AttentionReason: a.AttentionReason,
 		RunningTurnID: a.RunningTurnID, DeleteRequested: a.DeleteRequested, LastActiveAt: a.LastActiveAt,
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, ArchivedAt: a.ArchivedAt, FinishedAt: a.FinishedAt,

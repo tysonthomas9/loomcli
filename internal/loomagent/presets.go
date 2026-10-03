@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
@@ -124,21 +125,25 @@ var Enforcement = map[string]Enforces{"opencode": {Rules: true}}
 
 // Config is a preset resolved for one Create, ready for the harness adapter.
 type Config struct {
-	Preset         Preset
-	Harness        string
-	Model          string
-	Effort         string
-	Options        []loomharness.Option `json:",omitempty"` // the model options Update set (UI1)
-	MaxBudgetUSD   *float64
-	MaxRunDuration *int
-	Open           loomharness.PresetConfig
-	Rules          []loomharness.PermissionRule
-	Bridge         BridgeCaps `json:"-"` // host registration only; never stored in spec_json
+	Preset  Preset
+	Harness string
+	Model   string
+	Effort  string
+	Options []loomharness.Option `json:",omitempty"` // the model options Update set (UI1)
+	// ModelUnverified: the harness's catalog did not list Model when it was
+	// chosen (MCS1); it was passed through and the harness decides.
+	ModelUnverified bool `json:",omitempty"`
+	MaxBudgetUSD    *float64
+	MaxRunDuration  *int
+	Open            loomharness.PresetConfig
+	Rules           []loomharness.PermissionRule
+	Bridge          BridgeCaps `json:"-"` // host registration only; never stored in spec_json
 }
 
 // Resolve validates req against p and renders the harness config.
 // defaultHarness is the workspace default; models is the harness catalog
-// (nil skips the model check).
+// (nil skips the model check). A model it does not list is accepted as
+// ModelUnverified (MCS1); only a malformed id is refused.
 func Resolve(p Preset, req CreateRequest, defaultHarness string, models []string) (Config, error) {
 	o := req.Overrides
 	c := Config{Preset: p, Harness: o.Harness, Model: o.Model, Effort: o.Effort,
@@ -149,9 +154,10 @@ func Resolve(p Preset, req CreateRequest, defaultHarness string, models []string
 	if !slices.Contains(p.Harnesses, c.Harness) {
 		return Config{}, invalid(fmt.Sprintf("harness %q not allowed for %s", c.Harness, p.Name), p.Harnesses...)
 	}
-	if models != nil && c.Model != "" && !slices.Contains(models, c.Model) {
-		return Config{}, invalid(fmt.Sprintf("unknown model %q on %s", c.Model, c.Harness), models...)
+	if err := checkModelID(c.Model); err != nil {
+		return Config{}, err
 	}
+	c.ModelUnverified = models != nil && c.Model != "" && !slices.Contains(models, c.Model)
 	if err := checkOverrides(p, req); err != nil {
 		return Config{}, err
 	}
@@ -173,6 +179,23 @@ func Resolve(p Preset, req CreateRequest, defaultHarness string, models []string
 	c.Rules = rules
 	c.Open = loomharness.PresetConfig{Name: p.Name, Persona: persona, Tools: slices.Clone(p.Tools)}
 	return c, nil
+}
+
+// checkModelID refuses a malformed model id, the cheap check left when an
+// unlisted model passes through (MCS1): blank or with white space or control
+// characters, or a provider/model with an empty part. "" is the default.
+func checkModelID(model string) error {
+	if model == "" {
+		return nil
+	}
+	bad := strings.IndexFunc(model, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0
+	for _, part := range strings.Split(model, "/") {
+		bad = bad || part == ""
+	}
+	if bad {
+		return invalid(fmt.Sprintf("malformed model id %q; want model or provider/model", model))
+	}
+	return nil
 }
 
 // checkOverrides refuses overrides the preset does not permit.

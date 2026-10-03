@@ -92,7 +92,7 @@ func TestPresetResolveRefusesInvalidValues(t *testing.T) {
 		models []string
 	}{
 		"unknown harness":      {"lead", CreateRequest{Overrides: Overrides{Harness: "gemini"}}, nil},
-		"unknown model":        {"lead", CreateRequest{Overrides: Overrides{Model: "x"}}, []string{"m1"}},
+		"malformed model":      {"lead", CreateRequest{Overrides: Overrides{Model: "openai/"}}, []string{"m1"}},
 		"negative budget":      {"task", CreateRequest{Overrides: Overrides{MaxBudgetUSD: &neg}}, nil},
 		"duration not allowed": {"lead", CreateRequest{Overrides: Overrides{MaxRunDuration: &dur}}, nil},
 		"persona not allowed":  {"pr-review-webhook", CreateRequest{Persona: &Persona{Text: "x"}}, nil},
@@ -106,9 +106,16 @@ func TestPresetResolveRefusesInvalidValues(t *testing.T) {
 			wantCode(t, err, CodePresetInvalid)
 		})
 	}
-	_, err := Resolve(mustPreset(t, "lead"), CreateRequest{Overrides: Overrides{Model: "x"}}, "opencode", []string{"m1", "m2"})
-	if e := wantCode(t, err, CodePresetInvalid); !slices.Equal(e.Allowed, []string{"m1", "m2"}) {
-		t.Fatalf("allowed = %v", e.Allowed)
+	// MCS1: a model the catalog does not list passes, flagged unverified; an
+	// empty (not ready) catalog flags it too, an unwired (nil) one does not.
+	for _, tc := range []struct {
+		models []string
+		want   bool
+	}{{[]string{"m1", "m2"}, true}, {[]string{"x"}, false}, {[]string{}, true}, {nil, false}} {
+		c, err := Resolve(mustPreset(t, "lead"), CreateRequest{Overrides: Overrides{Model: "x"}}, "opencode", tc.models)
+		if err != nil || c.Model != "x" || c.ModelUnverified != tc.want {
+			t.Fatalf("catalog %v: model %q unverified=%v, %v; want unverified=%v", tc.models, c.Model, c.ModelUnverified, err, tc.want)
+		}
 	}
 }
 

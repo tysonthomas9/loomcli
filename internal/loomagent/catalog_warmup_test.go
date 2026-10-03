@@ -2,12 +2,15 @@ package loomagent
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
@@ -46,36 +49,100 @@ func TestCreateWaitsForCatalogWarmUp(t *testing.T) {
 	}
 }
 
-// MC1: a catalog still empty after the wait is "not ready, retry", not an
-// unknown model, and leaves no row.
+// wantUnverified fails unless a was created with model passed through to
+// the harness, flagged unverified with one model.unverified event (MCS1).
+func wantUnverified(t *testing.T, e *createEnv, a AgentInfo, err error, model string) {
+	t.Helper()
+	if err != nil || deref(a.Model) != model || !a.ModelUnverified {
+		t.Fatalf("create = %s unverified=%v, %v; want %s accepted unverified", deref(a.Model), a.ModelUnverified, err, model)
+	}
+	if n := e.events(t, a.AgentID, KindModelUnverified); n != 1 {
+		t.Fatalf("model.unverified events = %d, want 1", n)
+	}
+	if got := e.h.specs[len(e.h.specs)-1].Model; got != model {
+		t.Fatalf("harness opened with model %q, want %q", got, model)
+	}
+}
+
+// MCS1: a catalog still empty after the wait no longer fails the create
+// (MC1's 503): the model is accepted unverified and the harness decides.
 func TestCreateCatalogNotReady(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
 	s, _ := warmingService(e, 1<<30, 20*time.Millisecond)
 	req := leadReq("r1")
 	req.Overrides.Model = "fake-model"
-	_, err := s.Create(ctx, req)
-	if !isCode(err, CodeHarnessUnavailable) || !strings.Contains(err.Error(), "model catalog not ready") {
-		t.Fatalf("create on an empty catalog = %v, want harness_unavailable 'model catalog not ready'", err)
-	}
-	if as, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true}); len(as) != 0 {
-		t.Fatalf("not-ready create left %d rows", len(as))
-	}
+	a, err := s.Create(ctx, req)
+	wantUnverified(t, e, a, err, "fake-model")
 }
 
-// MC1: a loaded catalog still refuses an unknown model at once.
+// MCS1: a loaded catalog that lacks the model accepts it at once, unverified;
+// a listed model is not flagged.
 func TestCreateUnknownModelOnLoadedCatalogDoesNotWait(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
 	s, w := warmingService(e, 0, time.Minute)
 	req := leadReq("r1")
-	req.Overrides.Model = "other"
-	if _, err := s.Create(ctx, req); !isCode(err, CodePresetInvalid) || !strings.Contains(err.Error(), "unknown model") {
-		t.Fatalf("unknown model = %v, want preset_invalid", err)
-	}
+	req.Overrides.Model = "openai/other"
+	a, err := s.Create(ctx, req)
+	wantUnverified(t, e, a, err, "openai/other")
 	if n := w.calls.Load(); n != 1 {
 		t.Fatalf("unknown model on a loaded catalog listed it %d times, want 1", n)
 	}
+	req = leadReq("r2")
+	req.Name, req.Overrides.Model = "b", "fake-model"
+	if b, err := s.Create(ctx, req); err != nil || b.ModelUnverified || e.events(t, b.AgentID, KindModelUnverified) != 0 {
+		t.Fatalf("listed model = unverified %v, %v", b.ModelUnverified, err)
+	}
+}
+
+// MCS1: only a malformed model id is still refused, with no row.
+func TestCreateMalformedModelIs400(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s, _ := warmingService(e, 0, time.Minute)
+	for i, m := range []string{" ", "fake model", "openai/", "/gpt", "a//b", "tab\tid"} {
+		req := leadReq("r" + strconv.Itoa(i))
+		req.Overrides.Model = m
+		if _, err := s.Create(ctx, req); !isCode(err, CodePresetInvalid) || !strings.Contains(err.Error(), "malformed model") {
+			t.Fatalf("model %q = %v, want preset_invalid malformed", m, err)
+		}
+	}
+	if as, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true}); len(as) != 0 {
+		t.Fatalf("malformed creates left %d rows", len(as))
+	}
+}
+
+// MCS1: when the harness refuses an unverified model on a turn, the turn
+// ends as a normal failed turn naming the model, and the agent stays usable.
+func TestUnverifiedModelRefusedOnTurn(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := startFeed(s, e)
+	defer stop()
+	req := leadReq("r1")
+	req.Overrides.Model = "openai/bogus"
+	info, err := s.Create(ctx, req)
+	wantUnverified(t, e, info, err, "openai/bogus")
+	fh.Script(info.AgentID, fake.Turn{Steps: []fake.Step{{Fail: `model "openai/bogus" not found`}}})
+	mustSendMsg(t, s, sendReq(info.AgentID, "u1", "hi", user))
+	done := func() []loomstore.Event { return kinds(rows(t, s, info.AgentID, 0), EventTurnCompleted) }
+	eventually(t, "the turn fails", func() bool { return len(done()) == 1 })
+	var p struct{ StopReason, Error string }
+	if err := json.Unmarshal(done()[0].Payload, &p); err != nil || p.StopReason != "failed" || !strings.Contains(p.Error, "openai/bogus") {
+		t.Fatalf("turn_completed payload = %+v %v; want a failed turn naming the model", p, err)
+	}
+	eventually(t, "the agent is idle", func() bool { return s.get(t, info.AgentID).State == StateIdle })
+	if _, err := s.Update(ctx, UpdateRequest{AgentID: info.AgentID, Model: "fake-model"}); err != nil {
+		t.Fatalf("switch to a listed model: %v", err)
+	}
+	if a, _ := s.Get(ctx, info.AgentID); a.ModelUnverified {
+		t.Fatal("a listed model is still flagged unverified")
+	}
+	mustSendMsg(t, s, sendReq(info.AgentID, "u2", "again", user))
+	eventually(t, "the next turn completes", func() bool { return len(done()) == 2 })
 }
 
 // partial lists only early-model for its first calls, as OpenCode does
@@ -123,24 +190,25 @@ func TestCreateIncompleteCatalogWarmUpBounded(t *testing.T) {
 	req := leadReq("r1")
 	req.Overrides.Model = "fake-model"
 	start := time.Now()
-	if _, err := s.Create(ctx, req); !isCode(err, CodePresetInvalid) || !strings.Contains(err.Error(), "unknown model") {
-		t.Fatalf("create past the warm-up = %v, want preset_invalid unknown model", err)
-	}
+	a, err := s.Create(ctx, req)
+	wantUnverified(t, e, a, err, "fake-model")
 	if d := time.Since(start); d < 30*time.Millisecond || p.calls.Load() < 2 {
 		t.Fatalf("returned after %s and %d calls; want a re-fetch for the warm-up window", d, p.calls.Load())
 	}
-	// Warm now: the next unknown model fails on its first listing.
+	// Warm now: the next unknown model passes unverified on its first listing.
 	n := p.calls.Load()
 	req = leadReq("r2")
 	req.Name, req.Overrides.Model = "b", "other"
-	if _, err := s.Create(ctx, req); !isCode(err, CodePresetInvalid) || p.calls.Load() != n+1 {
-		t.Fatalf("unknown model on a warm harness = %v after %d calls, want preset_invalid at once", err, p.calls.Load()-n)
+	a, err = s.Create(ctx, req)
+	wantUnverified(t, e, a, err, "other")
+	if p.calls.Load() != n+1 {
+		t.Fatalf("unknown model on a warm harness listed %d times, want once", p.calls.Load()-n)
 	}
 }
 
 // MC1: one create waits catalogWait at most, even inside the warm-up window,
-// so it ends well before the API server's write timeout; the model may still
-// load, so it is "not ready, retry", not unknown, and leaves no row.
+// so it ends well before the API server's write timeout; then (MCS1) the
+// model is accepted unverified.
 func TestCreateIncompleteCatalogWaitCapped(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -149,13 +217,11 @@ func TestCreateIncompleteCatalogWaitCapped(t *testing.T) {
 	req := leadReq("r1")
 	req.Overrides.Model = "fake-model"
 	start := time.Now()
-	_, err := s.Create(ctx, req)
-	if !isCode(err, CodeHarnessUnavailable) || !strings.Contains(err.Error(), "model catalog not ready") || time.Since(start) > 5*time.Second {
-		t.Fatalf("create = %v after %s, want harness_unavailable 'model catalog not ready' after about catalogWait", err, time.Since(start))
+	a, err := s.Create(ctx, req)
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("create took %s, want about catalogWait", time.Since(start))
 	}
-	if as, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true}); len(as) != 0 {
-		t.Fatalf("not-ready create left %d rows", len(as))
-	}
+	wantUnverified(t, e, a, err, "fake-model")
 }
 
 // hung never answers a catalog listing until its context ends.
@@ -166,8 +232,8 @@ func (hung) Models(ctx context.Context) ([]loomharness.Model, error) {
 	return nil, ctx.Err()
 }
 
-// MC1: a hung catalog listing is bounded by catalogWait too, and is "not
-// ready, retry" with no row.
+// MC1: a hung catalog listing is bounded by catalogWait too; then (MCS1)
+// the model is accepted unverified.
 func TestCreateHungCatalogNotReady(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -175,17 +241,16 @@ func TestCreateHungCatalogNotReady(t *testing.T) {
 	s.harnesses["opencode"], s.catalogWait = hung{e.h}, 20*time.Millisecond
 	req := leadReq("r1")
 	req.Overrides.Model = "fake-model"
-	done := make(chan error, 1)
-	go func() { _, err := s.Create(ctx, req); done <- err }()
+	type result struct {
+		a   AgentInfo
+		err error
+	}
+	done := make(chan result, 1)
+	go func() { a, err := s.Create(ctx, req); done <- result{a, err} }()
 	select {
-	case err := <-done:
-		if !isCode(err, CodeHarnessUnavailable) || !strings.Contains(err.Error(), "model catalog not ready") {
-			t.Fatalf("create on a hung catalog = %v, want harness_unavailable 'model catalog not ready'", err)
-		}
+	case r := <-done:
+		wantUnverified(t, e, r.a, r.err, "fake-model")
 	case <-time.After(5 * time.Second):
 		t.Fatal("create on a hung catalog did not return within 5s")
-	}
-	if as, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true}); len(as) != 0 {
-		t.Fatalf("not-ready create left %d rows", len(as))
 	}
 }

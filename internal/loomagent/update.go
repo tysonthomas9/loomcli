@@ -20,6 +20,9 @@ const (
 	KindHarnessChanged = "harness.changed"
 	KindAskLost        = "ask.lost"
 	KindError          = "error"
+	// KindModelUnverified warns that the agent's model was not in its
+	// harness's catalog when chosen; the harness decides (MCS1).
+	KindModelUnverified = "model.unverified"
 )
 
 // UpdateRequest is the Update input (design v2 §4.6). Empty fields are left
@@ -91,13 +94,30 @@ func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstor
 	case err != nil:
 		return a, err
 	}
-	from := a.Harness
+	from, fromModel := a.Harness, deref(a.Model)
 	a.Name, a.SpecJSON, a.Harness, a.Model = to.Name, to.SpecJSON, to.Harness, to.Model
 	a.HarnessSessionID, a.HarnessSessionRoot = to.HarnessSessionID, to.HarnessSessionRoot
 	a.LastRequestID, a.SpecVersion = to.LastRequestID, to.SpecVersion
-	return a, s.appendEvent(ctx, a.AgentID, kind, kind+":v"+strconv.FormatInt(a.SpecVersion, 10),
+	if err := s.appendEvent(ctx, a.AgentID, kind, kind+":v"+strconv.FormatInt(a.SpecVersion, 10),
 		map[string]any{"name": a.Name, "model": deref(a.Model), "from_harness": from, "harness": a.Harness,
-			"spec_version": a.SpecVersion})
+			"spec_version": a.SpecVersion}); err != nil {
+		return a, err
+	}
+	if from == a.Harness && fromModel == deref(a.Model) {
+		return a, nil
+	}
+	return a, s.warnUnverified(ctx, a)
+}
+
+// warnUnverified saves model.unverified when a's model was not in its
+// harness's catalog when chosen (MCS1).
+func (s *Service) warnUnverified(ctx context.Context, a loomstore.Agent) error {
+	if cfg, err := loadConfig(a); err != nil || !cfg.ModelUnverified {
+		return err
+	}
+	return s.appendEvent(ctx, a.AgentID, KindModelUnverified, KindModelUnverified+":v"+strconv.FormatInt(a.SpecVersion, 10),
+		map[string]any{"model": deref(a.Model), "harness": a.Harness,
+			"message": fmt.Sprintf("model %q is not in %s's model list; the harness decides whether it runs", deref(a.Model), a.Harness)})
 }
 
 // checkUpdate refuses a change of anything but the name of an unfinished
@@ -121,15 +141,18 @@ func (s *Service) choose(ctx context.Context, a loomstore.Agent, req UpdateReque
 	if err != nil {
 		return err
 	}
-	target, opts, err := s.selection(ctx, a.Harness, cmp.Or(req.Model, deref(a.Model)), cfg.Options, req)
+	if err := checkModelID(req.Model); err != nil {
+		return err
+	}
+	target, opts, unverified, err := s.selection(ctx, a.Harness, cmp.Or(req.Model, deref(a.Model)), cfg.Options, req)
 	if err != nil {
 		return err
 	}
 	if req.Model != "" {
 		to.Model = &req.Model
 	}
-	if !slices.Equal(opts, cfg.Options) {
-		cfg.Options = opts
+	if !slices.Equal(opts, cfg.Options) || unverified != cfg.ModelUnverified {
+		cfg.Options, cfg.ModelUnverified = opts, unverified
 		b, err := json.Marshal(cfg)
 		if err != nil {
 			return err
@@ -141,14 +164,14 @@ func (s *Service) choose(ctx context.Context, a loomstore.Agent, req UpdateReque
 	return s.setModel(ctx, a, target, opts)
 }
 
-// checkModel refuses a model missing from harness's catalog. An unwired
-// harness skips the check.
-func (s *Service) checkModel(ctx context.Context, harness, model string) error {
-	ids, err := s.models(ctx, harness)
-	if err != nil || ids == nil || slices.Contains(ids, model) {
-		return err
+// checkModel refuses a malformed model and reports whether harness's catalog
+// lacks it (MCS1: it passes unverified). An unwired harness skips the check.
+func (s *Service) checkModel(ctx context.Context, harness, model string) (unverified bool, err error) {
+	if err := checkModelID(model); err != nil {
+		return false, err
 	}
-	return invalid(fmt.Sprintf("unknown model %q on %s", model, harness), ids...)
+	ids, err := s.models(ctx, harness)
+	return ids != nil && !slices.Contains(ids, model), err
 }
 
 // models lists harness's model ids, or nil when it is not wired.

@@ -362,12 +362,12 @@ func TestCreateUsesWorkspaceDefaultBackend(t *testing.T) {
 	if err != nil || a.Harness != "opencode" || deref(a.Model) != "fake-model" || e.h.specs[0].Model != "fake-model" {
 		t.Fatalf("omitted = %s/%s, %v", a.Harness, deref(a.Model), err)
 	}
-	// Explicit values win: a model the default does not name is refused by
-	// the catalog check rather than replaced.
+	// Explicit values win: a model the default does not name is kept, not
+	// replaced (unverified when the catalog lacks it, MCS1).
 	req = leadReq("r2")
 	req.Name, req.Overrides = "b", Overrides{Harness: "opencode", Model: "other"}
-	if _, err := s.Create(ctx, req); !isCode(err, CodePresetInvalid) {
-		t.Fatalf("explicit model = %v, want the catalog check", err)
+	if b, err := s.Create(ctx, req); err != nil || deref(b.Model) != "other" || !b.ModelUnverified {
+		t.Fatalf("explicit model = %s unverified=%v, %v; want other kept", deref(b.Model), b.ModelUnverified, err)
 	}
 	// An explicit harness other than the default does not take its model.
 	other := e.service(ServiceConfig{DefaultBackend: func(context.Context) (Backend, error) {

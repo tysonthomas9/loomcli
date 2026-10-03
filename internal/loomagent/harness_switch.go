@@ -101,11 +101,14 @@ func (s *Service) switchTarget(ctx context.Context, a loomstore.Agent, req Updat
 	}
 	model := req.Model
 	if model != "" {
-		if err := s.checkModel(ctx, req.Harness, model); err != nil {
+		if cfg.ModelUnverified, err = s.checkModel(ctx, req.Harness, model); err != nil {
 			return nil, cfg, "", err
 		}
-	} else if ids, err := s.models(ctx, req.Harness); err == nil && slices.Contains(ids, deref(a.Model)) {
-		model = deref(a.Model) // keep the model only if the destination offers it
+	} else {
+		cfg.ModelUnverified = false
+		if ids, err := s.models(ctx, req.Harness); err == nil && slices.Contains(ids, deref(a.Model)) {
+			model = deref(a.Model) // keep the model only if the destination offers it
+		}
 	}
 	return h, cfg, model, nil
 }

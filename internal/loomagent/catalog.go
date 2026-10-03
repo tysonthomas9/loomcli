@@ -37,24 +37,23 @@ func (s *Service) catalog(ctx context.Context, harness string) ([]loomharness.Mo
 	return ms, nil
 }
 
-// createModels lists harness's model ids for a create of model (MC1). A
-// harness that just started lists no models for a moment (OpenCode), or only
-// some providers' models: while the catalog is empty a create naming a model
-// polls it for up to catalogWait; while it lacks the model, it polls until
-// catalogWarmUp after this service first listed the harness, then Resolve
-// refuses the unknown model. A create still waiting after catalogWait,
-// including on a hung listing, which keeps it well inside the API server's
-// 30s write timeout, fails "model catalog not ready, retry". A warm catalog
-// is used at once.
+// createModels lists harness's model ids for a create of model (MC1, MCS1).
+// A harness that just started lists no models for a moment (OpenCode), or
+// only some providers' models: while the catalog is empty a create naming a
+// model polls it for up to catalogWait; while it lacks the model, it polls
+// until catalogWarmUp after this service first listed the harness. A create
+// still waiting after catalogWait, including on a hung listing, which keeps
+// it well inside the API server's 30s write timeout, gets the ids listed so
+// far (none for a hung listing), so Resolve accepts the model unverified
+// and the harness decides. A warm catalog is used at once.
 func (s *Service) createModels(ctx context.Context, harness, model string) ([]string, error) {
 	deadline := time.Now().Add(s.catalogWait)
 	lctx, cancel := context.WithDeadline(ctx, deadline) // bounds a hung listing too
 	defer cancel()
-	notReady := &Error{Code: CodeHarnessUnavailable, Message: fmt.Sprintf("model catalog not ready on %s, retry", harness)}
 	for {
 		ids, err := s.models(lctx, harness)
 		if err != nil && lctx.Err() != nil && ctx.Err() == nil {
-			return nil, notReady
+			return []string{}, nil // not ready: unverified
 		}
 		if err != nil || ids == nil || model == "" || slices.Contains(ids, model) {
 			return ids, err
@@ -69,14 +68,14 @@ func (s *Service) createModels(ctx context.Context, harness, model string) ([]st
 			}
 		}
 		if !now.Before(deadline) {
-			return nil, notReady
+			return ids, nil
 		}
 		select {
 		case <-lctx.Done():
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			return nil, notReady
+			return ids, nil
 		case <-time.After(s.catalogPoll):
 		}
 	}
@@ -87,20 +86,27 @@ func (s *Service) createModels(ctx context.Context, harness, model string) ([]st
 // else a's, else the catalog default (OpenCode needs one to carry a variant);
 // "" leaves the harness's own default. Options a has that the target model
 // does not take are dropped; req's options replace those with the same id.
-// A model, option or value the catalog does not list is preset_invalid. An
-// unwired harness skips the checks.
-func (s *Service) selection(ctx context.Context, harness, model string, have []loomharness.Option, req UpdateRequest) (string, []loomharness.Option, error) {
+// An option or value the catalog does not list is preset_invalid. A model it
+// does not list passes unverified (MCS1) with req's options unchecked, and
+// the harness decides. An unwired harness skips the checks.
+func (s *Service) selection(ctx context.Context, harness, model string, have []loomharness.Option, req UpdateRequest) (string, []loomharness.Option, bool, error) {
 	set := slices.Clone(req.Options)
 	if req.Effort != "" {
 		set = append(set, loomharness.Option{ID: loomharness.OptionEffort, Value: req.Effort})
 	}
 	ms, err := s.catalog(ctx, harness)
 	if err != nil || ms == nil {
-		return model, merge(have, set), err
+		return model, merge(have, set), false, err
 	}
-	target, m, err := pick(ms, model, harness)
+	target, m, known, err := pick(ms, model, harness)
 	if err != nil {
-		return "", nil, err
+		return "", nil, false, err
+	}
+	if !known {
+		if req.Model == "" {
+			set = merge(have, set) // the same model: keep what it had
+		}
+		return model, set, true, nil
 	}
 	var out []loomharness.Option
 	for _, o := range have {
@@ -110,35 +116,33 @@ func (s *Service) selection(ctx context.Context, harness, model string, have []l
 	}
 	for _, o := range set {
 		if err := checkOption(m, o); err != nil {
-			return "", nil, err
+			return "", nil, false, err
 		}
 	}
-	return target, merge(out, set), nil
+	return target, merge(out, set), false, nil
 }
 
-// pick finds model in ms. With none chosen it validates options against the
-// catalog default, or the first model when the harness marks none (Claude,
-// whose CLI picks per account), and target stays "" for the latter.
-func pick(ms []loomharness.Model, model, harness string) (string, loomharness.Model, error) {
-	ids := make([]string, len(ms))
-	for i, m := range ms {
-		ids[i] = m.ID
-		if model != "" && m.ID == model {
-			return model, m, nil
-		}
-	}
+// pick finds model in ms; known is false when ms does not list it. With none
+// chosen it validates options against the catalog default, or the first
+// model when the harness marks none (Claude, whose CLI picks per account),
+// and target stays "" for the latter.
+func pick(ms []loomharness.Model, model, harness string) (target string, m loomharness.Model, known bool, err error) {
 	if model != "" {
-		return "", loomharness.Model{}, invalid(fmt.Sprintf("unknown model %q on %s", model, harness), ids...)
+		i := slices.IndexFunc(ms, func(m loomharness.Model) bool { return m.ID == model })
+		if i < 0 {
+			return model, loomharness.Model{}, false, nil
+		}
+		return model, ms[i], true, nil
 	}
 	for _, m := range ms {
 		if m.Default {
-			return m.ID, m, nil
+			return m.ID, m, true, nil
 		}
 	}
 	if len(ms) == 0 {
-		return "", loomharness.Model{}, invalid(harness + " offers no models")
+		return "", loomharness.Model{}, false, invalid(harness + " offers no models")
 	}
-	return "", ms[0], nil
+	return "", ms[0], true, nil
 }
 
 // checkOption refuses an option m does not take, or a value it does not list.

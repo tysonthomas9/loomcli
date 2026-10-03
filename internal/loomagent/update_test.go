@@ -178,8 +178,8 @@ func TestUpdateNameAndModel(t *testing.T) {
 	wantCode(t, err, CodeSpecVersionMismatch)
 	_, err = e.s.Update(ctx, UpdateRequest{AgentID: "a1", Name: "a2"})
 	wantCode(t, err, CodeAgentNameTaken)
-	_, err = e.s.Update(ctx, UpdateRequest{AgentID: "a1", Model: "nope"})
-	wantCode(t, err, CodePresetInvalid)
+	_, err = e.s.Update(ctx, UpdateRequest{AgentID: "a1", Model: "no pe"})
+	wantCode(t, err, CodePresetInvalid) // malformed; an unlisted model passes (MCS1)
 	_, err = e.s.Update(ctx, UpdateRequest{AgentID: "a2", Model: "fake-model"})
 	wantCode(t, err, CodeAgentBusy)
 	if _, err = e.s.Update(ctx, UpdateRequest{AgentID: "a2", Name: "renamed"}); err != nil {
@@ -445,7 +445,6 @@ func TestUpdateEffortAppliesOnNextTurn(t *testing.T) {
 	for _, req := range []UpdateRequest{
 		{AgentID: "a1", Effort: "ultra"},
 		{AgentID: "a1", Options: []loomharness.Option{{ID: "speed", Value: "fast"}}},
-		{AgentID: "a1", Model: "nope", Effort: "low"},
 	} {
 		perr := wantCode(t, func() error { _, err := e.s.Update(ctx, req); return err }(), CodePresetInvalid)
 		if perr.Message == "" || len(perr.Allowed) == 0 {
