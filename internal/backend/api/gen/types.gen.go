@@ -926,6 +926,33 @@ func (e PullRequestReviewRequestEvent) Valid() bool {
 	}
 }
 
+// Defines values for ReviewRevisionPublishStatus.
+const (
+	NotPublished ReviewRevisionPublishStatus = "not_published"
+	Pending      ReviewRevisionPublishStatus = "pending"
+	Published    ReviewRevisionPublishStatus = "published"
+	Superseded   ReviewRevisionPublishStatus = "superseded"
+	Waiting      ReviewRevisionPublishStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the ReviewRevisionPublishStatus enum.
+func (e ReviewRevisionPublishStatus) Valid() bool {
+	switch e {
+	case NotPublished:
+		return true
+	case Pending:
+		return true
+	case Published:
+		return true
+	case Superseded:
+		return true
+	case Waiting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RuntimeReadyResponseMode.
 const (
 	Daemon RuntimeReadyResponseMode = "daemon"
@@ -997,19 +1024,19 @@ func (e TabMetadataReplacedReason) Valid() bool {
 
 // Defines values for TaskDiffCompare.
 const (
-	Base  TaskDiffCompare = "base"
-	Layer TaskDiffCompare = "layer"
-	Trunk TaskDiffCompare = "trunk"
+	TaskDiffCompareBase  TaskDiffCompare = "base"
+	TaskDiffCompareLayer TaskDiffCompare = "layer"
+	TaskDiffCompareTrunk TaskDiffCompare = "trunk"
 )
 
 // Valid indicates whether the value is a known member of the TaskDiffCompare enum.
 func (e TaskDiffCompare) Valid() bool {
 	switch e {
-	case Base:
+	case TaskDiffCompareBase:
 		return true
-	case Layer:
+	case TaskDiffCompareLayer:
 		return true
-	case Trunk:
+	case TaskDiffCompareTrunk:
 		return true
 	default:
 		return false
@@ -1573,16 +1600,16 @@ func (e UpdateGitSettingsJSONBodyActorKind) Valid() bool {
 
 // Defines values for UpdateGitSettingsJSONBodyDeliveryMode.
 const (
-	UpdateGitSettingsJSONBodyDeliveryModeStack UpdateGitSettingsJSONBodyDeliveryMode = "stack"
-	UpdateGitSettingsJSONBodyDeliveryModeTrunk UpdateGitSettingsJSONBodyDeliveryMode = "trunk"
+	Stack UpdateGitSettingsJSONBodyDeliveryMode = "stack"
+	Trunk UpdateGitSettingsJSONBodyDeliveryMode = "trunk"
 )
 
 // Valid indicates whether the value is a known member of the UpdateGitSettingsJSONBodyDeliveryMode enum.
 func (e UpdateGitSettingsJSONBodyDeliveryMode) Valid() bool {
 	switch e {
-	case UpdateGitSettingsJSONBodyDeliveryModeStack:
+	case Stack:
 		return true
-	case UpdateGitSettingsJSONBodyDeliveryModeTrunk:
+	case Trunk:
 		return true
 	default:
 		return false
@@ -3001,6 +3028,18 @@ type ReviewRevision struct {
 	Number    int    `json:"number"`
 	Outcome   string `json:"outcome"`
 
+	// PrNumber Number of the change's open PR, once published.
+	PrNumber *int `json:"pr_number,omitempty"`
+
+	// PrUrl URL of the change's open PR, once published.
+	PrUrl *string `json:"pr_url,omitempty"`
+
+	// PublishReason Why the PR is not open yet, such as "not published - no provider" or the last publish error.
+	PublishReason *string `json:"publish_reason,omitempty"`
+
+	// PublishStatus Outcome of this revision's Approve and create PR request, if it made one.
+	PublishStatus *ReviewRevisionPublishStatus `json:"publish_status,omitempty"`
+
 	// Repo Workspace repo name the revision diff route accepts.
 	Repo string `json:"repo"`
 
@@ -3008,6 +3047,9 @@ type ReviewRevision struct {
 	Superseded bool    `json:"superseded"`
 	Verdict    *string `json:"verdict,omitempty"`
 }
+
+// ReviewRevisionPublishStatus Outcome of this revision's Approve and create PR request, if it made one.
+type ReviewRevisionPublishStatus string
 
 // ReviewerConversation defines model for ReviewerConversation.
 type ReviewerConversation struct {
@@ -3723,10 +3765,13 @@ type SubmitRevisionVerdictJSONBody struct {
 		Id   string                                 `json:"id"`
 		Kind SubmitRevisionVerdictJSONBodyActorKind `json:"kind"`
 	} `json:"actor"`
-	HeadSha string                               `json:"head_sha"`
-	Lead    *string                              `json:"lead,omitempty"`
-	Reason  *string                              `json:"reason,omitempty"`
-	Verdict SubmitRevisionVerdictJSONBodyVerdict `json:"verdict"`
+
+	// ApproveOnly Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29).
+	ApproveOnly *bool                                `json:"approve_only,omitempty"`
+	HeadSha     string                               `json:"head_sha"`
+	Lead        *string                              `json:"lead,omitempty"`
+	Reason      *string                              `json:"reason,omitempty"`
+	Verdict     SubmitRevisionVerdictJSONBodyVerdict `json:"verdict"`
 }
 
 // SubmitRevisionVerdictJSONBodyActorKind defines parameters for SubmitRevisionVerdict.

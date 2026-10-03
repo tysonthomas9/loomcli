@@ -182,3 +182,46 @@ func TestConcurrentAddNode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 20, nodes[0].PRNumber, "lock must serialize read-modify-write")
 }
+
+func TestActiveDeclaredStack(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+
+	id, err := s.ActiveDeclaredStack(ctx, ws, "loomcli")
+	require.NoError(t, err)
+	assert.Empty(t, id, "no stack declared")
+
+	seedStack(t, s)
+	id, err = s.ActiveDeclaredStack(ctx, ws, "loomcli")
+	require.NoError(t, err)
+	assert.Equal(t, "epic:E1", id, "a declared stack with no units yet is active")
+
+	for _, other := range [][2]string{{ws, "other-repo"}, {"OTHER-WS", "loomcli"}} {
+		id, err = s.ActiveDeclaredStack(ctx, other[0], other[1])
+		require.NoError(t, err)
+		assert.Empty(t, id, "stack belongs to %s/loomcli, not %v", ws, other)
+	}
+
+	for _, task := range []string{"T1", "T2"} {
+		base := ""
+		if task == "T2" {
+			base = "T1"
+		}
+		_, err = s.AddNode(ctx, ws, "epic:E1", task, base, "")
+		require.NoError(t, err)
+	}
+	require.NoError(t, s.UpdateNode(ctx, ws, "epic:E1", "T1", func(n *sl.Node) error { n.State = sl.NodeStateMerged; return nil }))
+	id, err = s.ActiveDeclaredStack(ctx, ws, "loomcli")
+	require.NoError(t, err)
+	assert.Equal(t, "epic:E1", id, "T2 is still pending")
+
+	require.NoError(t, s.UpdateNode(ctx, ws, "epic:E1", "T2", func(n *sl.Node) error { n.State = sl.NodeStateClosed; return nil }))
+	id, err = s.ActiveDeclaredStack(ctx, ws, "loomcli")
+	require.NoError(t, err)
+	assert.Empty(t, id, "every unit merged or closed: the stack is finished")
+
+	var none *LocalStore
+	id, err = none.ActiveDeclaredStack(ctx, ws, "loomcli")
+	require.NoError(t, err)
+	assert.Empty(t, id)
+}

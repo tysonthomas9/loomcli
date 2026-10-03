@@ -118,6 +118,18 @@ func TestReadOnlyRunnerNeedsNoIdentityAndRejectsWrites(t *testing.T) {
 	if _, err := r.Run(context.Background(), "show", "HEAD"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("show allowed: %v", err)
 	}
+	// The origin URL may be read to name a provider; never remote's writers.
+	runGit(t, dir, "remote", "add", "origin", "git@github.com:owner/repo.git")
+	if url, err := r.Run(context.Background(), "remote", "get-url", "--push", "origin"); err != nil ||
+		strings.TrimSpace(string(url)) != "git@github.com:owner/repo.git" {
+		t.Fatalf("remote get-url: %q, %v", url, err)
+	}
+	if _, err := r.Run(context.Background(), "remote", "set-url", "--push", "origin"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("remote set-url allowed: %v", err)
+	}
+	if _, err := r.Run(context.Background(), "remote", "get-url", "--push", "--all"); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("remote get-url option allowed: %v", err)
+	}
 }
 
 func TestDefaultOptionsReadAllowlistedGlobalConfig(t *testing.T) {

@@ -3649,6 +3649,9 @@ paths:
                   type: string
                 lead:
                   type: string
+                approve_only:
+                  type: boolean
+                  description: Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29).
                 actor:
                   type: object
                   required: [kind, id]
@@ -3660,7 +3663,7 @@ paths:
                       type: string
       responses:
         "200":
-          description: Recorded SHA-bound verdict
+          description: Recorded SHA-bound verdict. `status` is published when the PR opened; `publish` reports the PR outcome (published, not_published with the reason, waiting, pending).
           content:
             application/json:
               schema:
@@ -6584,6 +6587,19 @@ components:
         date:
           type: string
           description: Commit date (ISO 8601) of the revision head, when the repo is readable.
+        pr_url:
+          type: string
+          description: URL of the change's open PR, once published.
+        pr_number:
+          type: integer
+          description: Number of the change's open PR, once published.
+        publish_status:
+          type: string
+          enum: [pending, waiting, published, not_published, superseded]
+          description: Outcome of this revision's Approve and create PR request, if it made one.
+        publish_reason:
+          type: string
+          description: Why the PR is not open yet, such as "not published - no provider" or the last publish error.
     RevisionDiffFile:
       type: object
       required: [path, patchSize, truncated]

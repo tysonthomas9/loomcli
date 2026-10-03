@@ -20,6 +20,12 @@ import (
 var ErrNoWorkingArea = errors.New("no working area for change repo and lead")
 
 func ApproveLocal(ctx context.Context, workspace, lead, change string, revision int, actor review.Actor) (FollowResult, error) {
+	return ApproveLocalPublishing(ctx, workspace, lead, change, revision, actor, false)
+}
+
+// ApproveLocalPublishing approves and follows; with publish it also records
+// the intent to open the change's PR once applied (D29).
+func ApproveLocalPublishing(ctx context.Context, workspace, lead, change string, revision int, actor review.Actor, publish bool) (FollowResult, error) {
 	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
 	store, err := journal.OpenSQLite(path)
 	if err != nil {
@@ -30,7 +36,7 @@ func ApproveLocal(ctx context.Context, workspace, lead, change string, revision 
 		_ = store.Close()
 		return FollowResult{}, err
 	}
-	_, err = review.SubmitForLead(ctx, store, workspace, change, revision, r.HeadSHA, "approve", "", actor, lead)
+	_, err = review.SubmitForLeadPublishing(ctx, store, workspace, change, revision, r.HeadSHA, "approve", "", actor, lead, publish)
 	if closeErr := store.Close(); err == nil {
 		err = closeErr
 	}

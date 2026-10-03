@@ -493,6 +493,9 @@ func readOnlyCommand(args []string) bool {
 		return true
 	case len(args) == 3 && args[0] == "cat-file" && args[1] == "-s":
 		return true
+	case len(args) == 4 && args[0] == "remote" && args[1] == "get-url" && args[2] == "--push":
+		// Which provider a repository publishes to; a remote name, never an option.
+		return !strings.HasPrefix(args[3], "-")
 	default: // A commit's date, for revision history; never an option such as --output.
 		return len(args) == 4 && args[0] == "show" && args[1] == "-s" && args[2] == "--format=%cI" &&
 			!strings.HasPrefix(args[3], "-")

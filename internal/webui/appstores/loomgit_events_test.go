@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/outbox"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -79,8 +80,21 @@ func TestDispatchLoomGitEventsDrainsDurableStore(t *testing.T) {
 	defer hub.Stop()
 	client := realtime.NewClient(1, realtime.ClientSendBuf, "", nil, "W")
 	hub.RegisterClient(client)
+	previous := reconcileApprovals
+	t.Cleanup(func() { reconcileApprovals = previous })
+	reconciled := 0
+	reconcileApprovals = func(_ context.Context, got string, stacks publish.DeclaredStacks) error {
+		reconciled++
+		if got != path || stacks == nil {
+			t.Fatalf("approval reconcile got %s, declared stacks %v", got, stacks)
+		}
+		return nil
+	}
 	if err := dispatchLoomGitEvents(ctx, path, loomGitEventSink{bus: bus, hub: hub}); err != nil {
 		t.Fatal(err)
+	}
+	if reconciled != 1 {
+		t.Fatalf("approval publications reconciled %d times", reconciled)
 	}
 	select {
 	case got := <-client.Send():
