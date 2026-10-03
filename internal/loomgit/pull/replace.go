@@ -35,7 +35,8 @@ func replaceForApply(ctx context.Context, store apply.Store, repo *pool.LocalRep
 		}
 	}
 	if area == nil {
-		return apply.Result{}, loomgit.NewError(loomgit.AttentionRequired, "working area is not registered for the lead", nil)
+		// Not a lead working area Loom restacks: plain Apply.
+		return apply.Result{}, apply.ErrNoLayer
 	}
 	result, err := New(full, repo, runner).Restack(ctx, RestackRequest{Workspace: in.Workspace, Lead: in.Lead,
 		Repo: area.Repo, BaseSHA: area.BaseSHA, RequestID: "replace:" + in.RequestID,
