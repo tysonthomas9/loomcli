@@ -7,10 +7,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/pull"
 )
 
+var recoverPull = pull.Recover
+
 // recoverPullThenApply keeps pull recovery ahead of apply recovery for each
 // lead. A lead whose pull could not be recovered skips apply; other leads go on.
 func recoverPullThenApply(ctx context.Context, recoverApply func(context.Context, func(string, string) bool) error) error {
-	pullErr := pull.Recover(ctx)
+	pullErr := recoverPull(ctx)
 	blocked := map[string]bool{}
 	if pullErr != nil && !blockedLeads(pullErr, blocked) {
 		return pullErr
