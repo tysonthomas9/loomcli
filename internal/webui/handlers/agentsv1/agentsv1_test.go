@@ -13,6 +13,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/tysonthomas9/loomcli/internal/agentworktree"
+	"github.com/tysonthomas9/loomcli/internal/gitrunner"
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
@@ -186,14 +188,6 @@ func TestAgentRESTRoutes(t *testing.T) {
 	want(t, "create without Idempotency-Key", status, out, 400, "preset_invalid")
 	status, out = call(t, srv, "POST", "ws/v1/agents", "c1", `{"preset":"nope"}`)
 	want(t, "create unknown preset", status, out, 404, "preset_not_found")
-	status, out = call(t, srv, "POST", "ws/v1/agents", "c2", `{"preset":"lead","name":"nobase","repo":"/repo"}`)
-	if msg, _ := out["error"].(string); status != 400 || out["code"] != "preset_invalid" || !strings.Contains(msg, "base_ref") {
-		t.Fatalf("create without base_ref = %d %v; want 400 preset_invalid naming base_ref", status, out)
-	}
-	status, out = call(t, srv, "GET", "ws/v1/agents?include_archived=true", "", "")
-	if as, _ := out["agents"].([]any); status != 200 || len(as) != 2 {
-		t.Fatalf("agents after a refused create = %d %v; want no new row", status, out)
-	}
 
 	status, out = call(t, srv, "GET", "ws/v1/presets", "", "")
 	if ps, _ := out["presets"].([]any); status != 200 || len(ps) != 5 {
@@ -357,4 +351,57 @@ func TestAgentCreateBodySnakeCase(t *testing.T) {
 	if got := b.request(); !reflect.DeepEqual(got, wantReq) {
 		t.Fatalf("request = %+v\nwant %+v", got, wantReq)
 	}
+}
+
+// TestCreateWithoutBaseRefIs400 (CR1): with the real worktree port, a lead
+// create with no base_ref is a 400 naming base_ref and writes no agent; it
+// was a 500 'needs BaseRef' that left a row creating forever.
+func TestCreateWithoutBaseRefIs400(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	git := gitrunner.Exec{}
+	for _, args := range [][]string{{"init", "-q", "-b", "main", repo},
+		{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init"}} {
+		if _, err := git.Run(ctx, dir, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	st, err := loomstore.Open(ctx, filepath.Join(dir, "loom.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	wt, err := agentworktree.New(filepath.Join(dir, "worktrees"), agentworktree.TargetLocal, git)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: "ws", Workspace: agentworktree.Port{W: wt},
+		Harnesses: map[string]loomharness.Harness{"opencode": fake.New()},
+		Bridge: func(context.Context, loomagent.Preset) (loomagent.BridgeCaps, error) {
+			return loomagent.BridgeCaps{}, nil
+		},
+		Launch: func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
+			return loomharness.Launch{Root: "/root/opencode"}, nil
+		}})
+	mux := http.NewServeMux()
+	New(func(string) *loomagent.Service { return svc }, nil).Register(mux, func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(middleware.WithWorkspace(r.Context(), r.PathValue("ws"))))
+		})
+	}, nil)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	status, out := call(t, srv, "POST", "ws/v1/agents", "c1",
+		`{"preset":"lead","name":"nobase","repo":"`+repo+`","overrides":{"harness":"opencode"}}`)
+	if msg, _ := out["error"].(string); status != 400 || out["code"] != "preset_invalid" || !strings.Contains(msg, "base_ref") {
+		t.Fatalf("create without base_ref = %d %v; want 400 preset_invalid naming base_ref", status, out)
+	}
+	if rows, _, _ := st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true}); len(rows) != 0 {
+		t.Fatalf("rows after a refused create = %d; want none", len(rows))
+	}
+	status, out = call(t, srv, "POST", "ws/v1/agents", "c2",
+		`{"preset":"lead","name":"withbase","repo":"`+repo+`","base_ref":"main","overrides":{"harness":"opencode"}}`)
+	want(t, "create with base_ref", status, out, 201, "")
 }

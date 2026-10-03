@@ -59,11 +59,16 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (AgentInfo, err
 	case errors.Is(err, loomstore.ErrNotFound):
 		a, err = s.insertCreate(ctx, req)
 	}
+	queued := true
 	if err == nil && a.CreateStep < stepRow {
 		createCrash("row")
 		err = s.queueFirst(ctx, a, req)
+		queued = err == nil
 	}
 	unlock()
+	if !queued { // the row is written: a retry or Reconcile finishes it and clears this
+		s.failed(ctx, a.AgentID, AttentionCreateIncomplete, err)
+	}
 	if err != nil {
 		return AgentInfo{}, err
 	}

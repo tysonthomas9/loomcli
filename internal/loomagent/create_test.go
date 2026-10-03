@@ -909,3 +909,32 @@ func TestCreateClearsCreateIncompleteRaisedInFlight(t *testing.T) {
 		t.Fatalf("after Create: state %s Attention %v; want idle with none", row.State, deref(row.AttentionReason))
 	}
 }
+
+// A Create whose first message cannot be queued (step 1, right after the row
+// is written) shows create_incomplete too, not a bare creating row.
+func TestCreateQueueFirstFailureShowsAttention(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	createCrash = func(p string) {
+		if p != "row" {
+			return
+		}
+		rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+		if _, _, err := e.st.Send(ctx, loomstore.SlotSend{AgentID: rows[0].AgentID, Sender: "user:local", RequestID: "busy",
+			Body: "x", Hand: true, NativeKey: "k", Result: func(bool) (string, error) { return `{}`, nil }}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { createCrash = func(string) {} })
+	req := leadReq("r1")
+	req.FirstMessage = "hello"
+	if _, err := s.Create(ctx, req); !errors.Is(err, loomstore.ErrSlotBusy) {
+		t.Fatalf("Create = %v; want the queueFirst failure", err)
+	}
+	rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+	if len(rows) != 1 || rows[0].State != StateCreating || deref(rows[0].AttentionReason) != AttentionCreateIncomplete {
+		t.Fatalf("rows = %d, state %s, Attention %v; want one creating row with create_incomplete",
+			len(rows), rows[0].State, deref(rows[0].AttentionReason))
+	}
+}
