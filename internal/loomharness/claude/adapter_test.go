@@ -864,3 +864,26 @@ func TestClaudeModelsCatalog(t *testing.T) {
 		t.Fatalf("catalog = %+v", ms)
 	}
 }
+
+// TestClaudeFailedResultCarriesError: a non-success result ends the turn
+// failed with its first user-facing error (never an [ede_diagnostic] entry),
+// or its subtype when it lists none; a success carries no error.
+func TestClaudeFailedResultCarriesError(t *testing.T) {
+	for raw, want := range map[string][2]string{
+		`{"type":"result","subtype":"error_during_execution","errors":["[ede_diagnostic] x","API Error: 401 invalid key"]}`: {"failed", "API Error: 401 invalid key"},
+		`{"type":"result","subtype":"error_max_turns"}`:                                                                     {"failed", "error_max_turns"},
+		`{"type":"result","subtype":"success","errors":["ignored"]}`:                                                        {"completed", ""},
+	} {
+		m := newMapper(loomharness.NativeRef{NativeID: "s"})
+		m.frame([]byte(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_a"}}}`))
+		var done loomharness.Event
+		for _, e := range m.frame([]byte(raw)) {
+			if e.Type == loomharness.EventTurnCompleted {
+				done = e
+			}
+		}
+		if done.StopReason != want[0] || done.Error != want[1] {
+			t.Errorf("%s -> %q %q; want %q %q", raw, done.StopReason, done.Error, want[0], want[1])
+		}
+	}
+}

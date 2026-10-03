@@ -256,7 +256,7 @@ test("an approval resolves once and the card leaves", async ({ page }) => {
     }),
   });
   await open(page, m);
-  await page.getByRole("button", { name: "Allow once" }).click();
+  await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByTestId("ask-card")).toHaveCount(0);
   expect(m.writes).toHaveLength(1);
   expect(m.writes[0].url).toContain("/asks/A1");

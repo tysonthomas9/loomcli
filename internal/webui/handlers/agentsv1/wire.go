@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
@@ -105,8 +106,9 @@ type SendBody struct {
 
 // RespondBody answers an ask: decision for an approval, answer for a question.
 type RespondBody struct {
-	Decision string `json:"decision"`
-	Answer   string `json:"answer"`
+	Decision string              `json:"decision"`
+	Answer   string              `json:"answer"`
+	Answers  map[string][]string `json:"answers,omitempty"`
 }
 
 // Agent is what Create, Get, Update and List return. waiting_messages and
@@ -172,9 +174,37 @@ type WaitingMessage struct {
 
 // Ask is one open harness ask.
 type Ask struct {
-	ID    string `json:"id"`
-	Type  string `json:"type"`
-	About string `json:"about"`
+	ID        string     `json:"id"`
+	Type      string     `json:"type"`
+	About     string     `json:"about"`
+	Questions []Question `json:"questions,omitempty"`
+}
+
+// Question is one question of a question ask.
+type Question struct {
+	ID          string   `json:"id"`
+	Header      string   `json:"header,omitempty"`
+	Question    string   `json:"question"`
+	Options     []Choice `json:"options,omitempty"`
+	MultiSelect bool     `json:"multi_select,omitempty"`
+}
+
+// Choice is one option of a Question.
+type Choice struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+func questionsOut(qs []loomharness.Question) []Question {
+	var out []Question
+	for _, q := range qs {
+		w := Question{ID: q.ID, Header: q.Header, Question: q.Question, MultiSelect: q.MultiSelect}
+		for _, o := range q.Options {
+			w.Options = append(w.Options, Choice(o))
+		}
+		out = append(out, w)
+	}
+	return out
 }
 
 func agentOut(i loomagent.AgentInfo) Agent {
@@ -196,7 +226,7 @@ func agentOut(i loomagent.AgentInfo) Agent {
 		out.WaitingMessages = append(out.WaitingMessages, WaitingMessage{w.Sender, w.Text, w.Since})
 	}
 	for _, k := range i.OpenAsks {
-		out.OpenAsks = append(out.OpenAsks, Ask{k.ID, k.Type, k.About})
+		out.OpenAsks = append(out.OpenAsks, Ask{k.ID, k.Type, k.About, questionsOut(k.Questions)})
 	}
 	return out
 }

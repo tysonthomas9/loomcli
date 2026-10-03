@@ -519,3 +519,82 @@ func TestEmulatorEchoParity(t *testing.T) {
 		t.Fatalf("model requests = %v", bodies)
 	}
 }
+
+// TestEmulatorAsksAndFailureReason: a scripted tool asks its permission and
+// OpenCode's question tool asks its questions as a form, each waiting for
+// the adapter's Reply; the pending asks are listed for history with what
+// they ask; the question tool's output is the answers; a failed turn
+// carries its reason.
+func TestEmulatorAsksAndFailureReason(t *testing.T) {
+	ctx := context.Background()
+	var qs []harnessemu.Question
+	if err := json.Unmarshal([]byte(`[{"header":"Color","question":"Which color?","options":[{"label":"Red"},{"label":"Blue","description":"cool"}]},
+		{"header":"Sizes","question":"Which sizes?","options":[{"label":"S"},{"label":"M"}],"multiple":true}]`), &qs); err != nil {
+		t.Fatal(err)
+	}
+	sc := scenarios(t, map[string][]harnessemu.Turn{"agent-1": {
+		{Text: "done", Tools: []harnessemu.Tool{
+			{ID: "call_1", Name: "bash", Input: map[string]any{"command": "make test"}, Output: "ok",
+				Permission: map[string]any{"action": "bash", "resources": []string{"make test"}, "save": []string{"make *"}}},
+			{ID: "call_2", Name: "question", Questions: qs},
+		}},
+		{Fail: "model exploded"},
+	}})
+	c, _ := emu(t, filepath.Join(t.TempDir(), "state.json"), sc)
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: t.TempDir(), Metadata: map[string]string{"agent_id": "agent-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(ref)
+	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r1"), Text: "go"}); err != nil {
+		t.Fatal(err)
+	}
+	opened := func(e loomharness.Event) bool { return e.Type == loomharness.EventAskOpened }
+	got := until(t, f, opened)
+	perm := got[len(got)-1]
+	if perm.Text != "bash make test" || perm.ItemKind != "" {
+		t.Fatalf("permission ask = %+v", perm)
+	}
+	if err := s.Reply(ctx, perm.AskID, loomharness.Reply{Allow: true}); err != nil {
+		t.Fatal(err)
+	}
+	got = until(t, f, opened)
+	q := got[len(got)-1]
+	if q.ItemKind != "question" || q.Text != "Which color?" || len(q.Questions) != 2 || !q.Questions[1].MultiSelect || q.Questions[0].Options[1].Description != "cool" {
+		t.Fatalf("question ask = %+v", q)
+	}
+	var pending []loomharness.Event
+	for _, e := range history(t, s, 0) {
+		if e.Type == loomharness.EventAskOpened {
+			pending = append(pending, e)
+		}
+	}
+	if len(pending) != 1 || pending[0].AskID != q.AskID || len(pending[0].Questions) != 2 {
+		t.Fatalf("history's pending asks = %+v", pending)
+	}
+	if err := s.Reply(ctx, q.AskID, loomharness.Reply{Answers: map[string][]string{"q0": {"Blue"}, "q1": {"S", "M"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var output string
+	for _, e := range until(t, f, completed) {
+		if e.Type == loomharness.EventItemCompleted && e.Tool != nil && e.Tool.Name == "question" {
+			output = e.Tool.Output
+		}
+	}
+	if output != `{"answers":[["Blue"],["S","M"]]}` {
+		t.Fatalf("question tool output = %q", output)
+	}
+
+	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r2"), Text: "again"}); err != nil {
+		t.Fatal(err)
+	}
+	live := until(t, f, completed)
+	if e := live[len(live)-1]; e.StopReason != "failed" || e.Error != "model exploded" {
+		t.Fatalf("failed turn = %+v", e)
+	}
+}

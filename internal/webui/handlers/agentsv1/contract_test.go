@@ -23,7 +23,7 @@ func TestAgentWireMatchesOpenAPI(t *testing.T) {
 		return out
 	}
 	for _, p := range [][2]any{
-		{Agent{}, gen.AgentV1{}}, {WaitingMessage{}, gen.AgentV1WaitingMessage{}}, {Ask{}, gen.AgentV1Ask{}},
+		{Agent{}, gen.AgentV1{}}, {WaitingMessage{}, gen.AgentV1WaitingMessage{}}, {Ask{}, gen.AgentV1Ask{}}, {Question{}, gen.AgentV1AskQuestion{}},
 		{AgentList{}, gen.AgentV1List{}}, {Overrides{}, gen.AgentV1Overrides{}}, {Persona{}, gen.AgentV1Persona{}},
 		{Subject{}, gen.AgentV1Subject{}}, {CreateBody{}, gen.AgentV1CreateBody{}}, {Expect{}, gen.AgentV1Expect{}},
 		{UpdateBody{}, gen.AgentV1UpdateBody{}}, {ArchiveBody{}, gen.AgentV1ArchiveBody{}},

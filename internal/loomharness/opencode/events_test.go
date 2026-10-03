@@ -362,3 +362,32 @@ func TestEventsToolCallCarriesNameInputOutput(t *testing.T) {
 		}
 	}
 }
+
+// TestEventsAsksAndFailureText: a live permission ask says what it asks
+// about, a form carries its questions, and a failed execution carries its
+// error's message (its type when it has none).
+func TestEventsAsksAndFailureText(t *testing.T) {
+	m := mapper{seq: map[string]int64{}, turn: map[string]string{}}
+	e, ok := m.mapEvent([]byte(`{"type":"permission.asked","data":{"sessionID":"ses_1","id":"per_1","action":"bash","resources":["rm -rf build"]}}`))
+	if !ok || e.Text != "bash rm -rf build" {
+		t.Fatalf("permission.asked -> %+v", e)
+	}
+	e, _ = m.mapEvent([]byte(`{"type":"permission.asked","data":{"sessionID":"ses_1","id":"per_2","action":"edit","resources":["a.go"],"message":"Edit a.go?","metadata":{"files":[{"file":"a.go","patch":"@@ -1 +1 @@"}]}}}`))
+	if e.Text != "Edit a.go?\n@@ -1 +1 @@" {
+		t.Fatalf("edit ask Text = %q", e.Text)
+	}
+	e, _ = m.mapEvent([]byte(`{"type":"form.created","data":{"form":{"id":"frm_1","sessionID":"ses_1","title":"Questions","fields":[{"key":"q0","type":"multiselect","title":"Pick","description":"Which ones?","options":[{"value":"a","label":"A"}]}]}}}`))
+	if len(e.Questions) != 1 || e.Text != "Which ones?" || !e.Questions[0].MultiSelect || e.Questions[0].Options[0].Label != "A" {
+		t.Fatalf("form.created -> %+v", e)
+	}
+	for raw, want := range map[string]string{
+		`{"type":"session.execution.failed","data":{"sessionID":"ses_1","error":{"type":"provider.invalid-output","message":"tool call delta is missing id"}}}`: "tool call delta is missing id",
+		`{"type":"session.execution.failed","data":{"sessionID":"ses_1","error":{"type":"provider.auth"}}}`:                                                     "provider.auth",
+		`{"type":"session.execution.succeeded","data":{"sessionID":"ses_1"}}`:                                                                                   "",
+	} {
+		e, ok := m.mapEvent([]byte(raw))
+		if !ok || e.Type != loomharness.EventTurnCompleted || e.Error != want {
+			t.Fatalf("%s -> %+v; want Error %q", raw, e, want)
+		}
+	}
+}

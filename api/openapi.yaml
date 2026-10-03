@@ -4727,7 +4727,30 @@ components:
       properties:
         id: {type: string}
         type: {type: string}
-        about: {type: string}
+        about:
+          type: string
+          description: "What it asks about: the command, file or diff, or a question's first question"
+        questions:
+          type: array
+          description: A question's questions, when its harness says
+          items: {$ref: "#/components/schemas/AgentV1AskQuestion"}
+    AgentV1AskQuestion:
+      type: object
+      description: One question of a question ask.
+      required: [id, question]
+      properties:
+        id: {type: string}
+        header: {type: string}
+        question: {type: string}
+        options:
+          type: array
+          items:
+            type: object
+            required: [label]
+            properties:
+              label: {type: string}
+              description: {type: string}
+        multi_select: {type: boolean}
     AgentV1List:
       type: object
       required: [agents, next]
@@ -4867,10 +4890,14 @@ components:
         result: {type: string, enum: [withdrawn, nothing_waiting, already_handed]}
     AgentV1RespondBody:
       type: object
-      description: decision for an approval, answer for a question.
+      description: decision for an approval, answer or answers for a question.
       properties:
         decision: {type: string, enum: [allow_once, allow_always, deny]}
         answer: {type: string}
+        answers:
+          type: object
+          description: "Each question's answer by question id: one value, or one per chosen option of a multi_select question"
+          additionalProperties: {type: array, items: {type: string}}
     AgentV1Event:
       type: object
       description: One saved agent event; payload is opaque.

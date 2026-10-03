@@ -228,12 +228,19 @@ func (f *fold) add(e loomharness.Event) int {
 	case loomharness.EventTurnCompleted:
 		if e.TurnID != "" && (e.TurnID == f.turn || e.TurnID == f.running) {
 			f.ended = &e
-			return len(e.TurnID) + len(e.StopReason)
+			return len(e.TurnID) + len(e.StopReason) + len(e.Error)
 		}
 	case loomharness.EventAskOpened:
 		ask := askOf(e)
 		f.asks[e.AskID] = &ask
-		return 2*len(ask.ID) + len(ask.Type) + len(ask.About) + len(ask.TurnID)
+		n := 2*len(ask.ID) + len(ask.Type) + len(ask.About) + len(ask.TurnID)
+		for _, q := range ask.Questions {
+			n += len(q.ID) + len(q.Header) + len(q.Question)
+			for _, o := range q.Options {
+				n += len(o.Label) + len(o.Description)
+			}
+		}
+		return n
 	case loomharness.EventAskResolved, loomharness.EventAskLost:
 		delete(f.asks, e.AskID)
 	}
@@ -416,6 +423,7 @@ func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 		Text             string            `json:"text,omitempty"`
 		Sender           string            `json:"sender,omitempty"`
 		StopReason       string            `json:"stopReason,omitempty"`
+		Error            string            `json:"error,omitempty"`
 		InputTokens      int64             `json:"inputTokens,omitempty"`
 		OutputTokens     int64             `json:"outputTokens,omitempty"`
 		CacheReadTokens  int64             `json:"cacheReadTokens,omitempty"`
@@ -423,7 +431,7 @@ func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 		CostUSD          float64           `json:"costUsd,omitempty"`
 		CostTotalUSD     float64           `json:"costTotalUsd,omitempty"`
 		Tool             *loomharness.Tool `json:"tool,omitempty"`
-	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.Sender, e.StopReason,
+	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.Sender, e.StopReason, capText(e.Error),
 		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSD, u.CostTotalUSD, capTool(e.Tool)})
 	return loomstore.Event{AgentID: agentID, Kind: kind, TurnID: e.TurnID, Payload: b,
 		EventID: kind + ":" + e.Session.Root + ":" + e.Session.NativeID + ":" + key}

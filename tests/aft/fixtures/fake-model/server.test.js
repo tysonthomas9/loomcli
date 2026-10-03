@@ -62,3 +62,12 @@ test("bad script bodies are refused", async (t) => {
   assert.equal((await post("/__script", { steps: "nope" })).status, 400);
   assert.equal((await post("/__script", "{")).status, 400);
 });
+
+test("an error step answers 400 with an OpenAI error", async (t) => {
+  const { base, post } = await start(t);
+  await post("/__script", { steps: [{ error: "model refused" }] });
+  const res = await post("/v1/chat/completions", { model: "m", stream: true, messages: [{ role: "user", content: "x" }] });
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error.message, "model refused");
+  assert.equal((await (await fetch(base + "/__requests")).json()).queued, 0);
+});

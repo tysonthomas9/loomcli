@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -845,5 +846,53 @@ func TestToolCallsSavedWithToolAndStartsLiveForDeltas(t *testing.T) {
 	}
 	if r := recv(t, noDeltas, 1); r[0].Kind != "item.completed" {
 		t.Fatalf("without deltas: %s", r[0].Kind)
+	}
+}
+
+// TestAskQuestionsAnswersAndTurnError: a question ask's questions and an
+// approval's subject show in Get; Respond passes Answers to the harness by
+// question id; a failed turn's error is saved on agent.turn_completed.
+func TestAskQuestionsAnswersAndTurnError(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	var replies []loomharness.Reply
+	s.harnesses["opencode"] = tweaked{Harness: e.h, replies: &replies}
+	stop := startFeed(s, e)
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	qs := []loomharness.Question{{ID: "q0", Header: "Color", Question: "Which color?", Options: []loomharness.Choice{{Label: "Red"}}}, {ID: "q1", Question: "Name?"}}
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1", About: "rm -rf build"}, {Ask: "q1", Question: true, About: "Which color?", Questions: qs}, {Fail: "model not found"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	open := func() []Ask {
+		info, err := s.Get(ctx, a.AgentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.OpenAsks
+	}
+	eventually(t, "a1 opens", func() bool { return len(open()) == 1 })
+	if got := open()[0]; got.About != "rm -rf build" {
+		t.Fatalf("approval = %+v", got)
+	}
+	if err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "q1 opens", func() bool { return len(open()) == 1 && open()[0].ID == "q1" })
+	if got := open()[0]; got.About != "Which color?" || !reflect.DeepEqual(got.Questions, qs) {
+		t.Fatalf("question = %+v", got)
+	}
+	answers := map[string][]string{"q0": {"Red"}, "q1": {"Loom"}}
+	if err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "q1", Answers: answers}); err != nil {
+		t.Fatal(err)
+	}
+	if len(replies) != 2 || !reflect.DeepEqual(replies[1].Answers, answers) {
+		t.Fatalf("replies = %+v", replies)
+	}
+	eventually(t, "the turn fails", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)) == 1 })
+	var p struct{ StopReason, Error string }
+	if err := json.Unmarshal(kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)[0].Payload, &p); err != nil || p.StopReason != "failed" || p.Error != "model not found" {
+		t.Fatalf("turn_completed payload = %+v %v", p, err)
 	}
 }

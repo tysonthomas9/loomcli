@@ -32,6 +32,9 @@ type Adapter struct {
 	// next holds a thread's model, effort and cwd from SetModel and Move until a
 	// turn/start sends them.
 	next map[loomharness.NativeRef]override
+	// diffs holds each started fileChange item's diff until it completes,
+	// for its approval, whose request names only the item.
+	diffs map[string]string
 
 	openMu sync.Mutex         // one Open at a time, so a key never gets two threads
 	opened map[opening]string // thread ids this process opened, until purged
@@ -45,7 +48,7 @@ type opening struct{ root, dir, key string }
 
 // NewAdapter returns an adapter; cfg.Unrouted is its own.
 func NewAdapter(cfg Config) *Adapter {
-	a := &Adapter{feeds: map[*feed]struct{}{}, asks: map[string]map[string]Message{}, starts: map[loomharness.NativeRef]loomharness.Event{}, next: map[loomharness.NativeRef]override{}, opened: map[opening]string{}}
+	a := &Adapter{feeds: map[*feed]struct{}{}, asks: map[string]map[string]Message{}, starts: map[loomharness.NativeRef]loomharness.Event{}, next: map[loomharness.NativeRef]override{}, diffs: map[string]string{}, opened: map[opening]string{}}
 	cfg.Unrouted = a.receive
 	a.Supervisor = New(cfg)
 	return a
@@ -305,8 +308,30 @@ func (a *Adapter) receive(root string, m Message) {
 			a.mu.Unlock()
 		}
 	}
-	if e, ok := live(root, m); ok {
-		a.started(e)
+	e, ok := live(root, m)
+	if !ok {
+		return
+	}
+	a.diff(m, &e)
+	a.started(e)
+}
+
+// diff keeps a started fileChange item's diff and adds it to the Text of
+// that item's approval; the item's completion drops it.
+func (a *Adapter) diff(m Message, e *loomharness.Event) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch {
+	case e.Type == loomharness.EventItemStarted && e.Tool != nil && e.Tool.Name == "edit":
+		var p protocol.ItemStartedNotification
+		var it item
+		if json.Unmarshal(m.Params, &p) == nil && json.Unmarshal(p.Item, &it) == nil {
+			a.diffs[e.ItemID] = it.tool(false).Output
+		}
+	case e.Type == loomharness.EventItemCompleted:
+		delete(a.diffs, e.ItemID)
+	case e.Type == loomharness.EventAskOpened && m.Method == "item/fileChange/requestApproval" && a.diffs[e.ItemID] != "":
+		e.Text = strings.TrimPrefix(e.Text+"\n"+a.diffs[e.ItemID], "\n")
 	}
 }
 

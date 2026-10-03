@@ -2592,7 +2592,21 @@ export interface components {
     AgentV1Ask: {
       id: string;
       type: string;
+      /** @description What it asks about: the command, file or diff, or a question's first question */
       about: string;
+      /** @description A question's questions, when its harness says */
+      questions?: components["schemas"]["AgentV1AskQuestion"][];
+    };
+    /** @description One question of a question ask. */
+    AgentV1AskQuestion: {
+      id: string;
+      header?: string;
+      question: string;
+      options?: {
+        label: string;
+        description?: string;
+      }[];
+      multi_select?: boolean;
     };
     AgentV1List: {
       agents: components["schemas"]["AgentV1"][];
@@ -2721,11 +2735,15 @@ export interface components {
       /** @enum {string} */
       result: "withdrawn" | "nothing_waiting" | "already_handed";
     };
-    /** @description decision for an approval, answer for a question. */
+    /** @description decision for an approval, answer or answers for a question. */
     AgentV1RespondBody: {
       /** @enum {string} */
       decision?: "allow_once" | "allow_always" | "deny";
       answer?: string;
+      /** @description Each question's answer by question id: one value, or one per chosen option of a multi_select question */
+      answers?: {
+        [key: string]: string[];
+      };
     };
     /** @description One saved agent event; payload is opaque. */
     AgentV1Event: {

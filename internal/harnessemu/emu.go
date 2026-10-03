@@ -65,13 +65,30 @@ type Turn struct {
 }
 
 // Tool is one tool call a turn ran: its name and input, and its output, or
-// with Fail its error.
+// with Fail its error. With Permission, the call first asks that permission
+// (OpenCode's Permission.Request fields: action, resources, save, metadata)
+// and waits for its reply; a reject fails it. With Questions, it plays
+// OpenCode's question tool: it asks them as a form and waits, and its output
+// is the answers, one list per question.
 type Tool struct {
-	ID     string         `json:"id"`
-	Name   string         `json:"name,omitempty"` // "" plays execute, Code Mode's tool
-	Input  map[string]any `json:"input,omitempty"`
-	Output string         `json:"output"`
-	Fail   string         `json:"fail,omitempty"`
+	ID         string         `json:"id"`
+	Name       string         `json:"name,omitempty"` // "" plays execute, Code Mode's tool
+	Input      map[string]any `json:"input,omitempty"`
+	Output     string         `json:"output"`
+	Fail       string         `json:"fail,omitempty"`
+	Permission map[string]any `json:"permission,omitempty"`
+	Questions  []Question     `json:"questions,omitempty"`
+}
+
+// Question is one question of OpenCode's question tool.
+type Question struct {
+	Header   string `json:"header"`
+	Question string `json:"question"`
+	Options  []struct {
+		Label       string `json:"label"`
+		Description string `json:"description,omitempty"`
+	} `json:"options"`
+	Multiple bool `json:"multiple,omitempty"`
 }
 
 // Tokens is OpenCode's per-step token usage.
@@ -99,6 +116,7 @@ type session struct {
 	Seq      int64            `json:"seq"`
 	Played   int              `json:"played"`            // scripted turns used
 	Running  *run             `json:"running,omitempty"` // the running turn
+	Asks     map[string]any   `json:"asks,omitempty"`    // pending per_ and frm_ asks by id, as listed
 }
 
 // agent is the session's metadata agent_id, or "".
@@ -130,11 +148,12 @@ type Server struct {
 	subs      map[chan []byte]bool
 	quit      chan struct{}
 	mcp       map[string]map[string]map[string]any // runtime MCP servers: directory, name, config
+	replies   map[string]chan any                  // a pending ask's reply, by ask id
 }
 
 // New loads the state file (absent is empty) and resumes turns a stop left running.
 func New(statePath, scenarios, password string) (*Server, error) {
-	s := &Server{Password: password, path: statePath, scenarios: scenarios, subs: map[chan []byte]bool{}, quit: make(chan struct{}), mcp: map[string]map[string]map[string]any{},
+	s := &Server{Password: password, path: statePath, scenarios: scenarios, subs: map[chan []byte]bool{}, quit: make(chan struct{}), mcp: map[string]map[string]map[string]any{}, replies: map[string]chan any{},
 		st: state{Sessions: map[string]*session{}}}
 	if b, err := os.ReadFile(statePath); err == nil { //nolint:gosec // G304: the test-owned state file.
 		if err := json.Unmarshal(b, &s.st); err != nil {
@@ -146,6 +165,7 @@ func New(statePath, scenarios, password string) (*Server, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, ss := range s.st.Sessions {
+		ss.Asks = nil // a resumed turn asks again
 		if ss.Running != nil {
 			ss.Running.stop = make(chan struct{})
 			s.add(id, map[string]any{"type": "synthetic", "text": RestartNotice, "metadata": map[string]string{"notice": "restart"}})
@@ -438,7 +458,9 @@ func (s *Server) play(sid string, r *run) {
 	msg := map[string]any{"id": "msg_" + s.newID(), "type": "assistant", "content": []map[string]any{}}
 	s.add(sid, msg)
 	for _, tool := range t.Tools {
-		s.playTool(sid, msg, tool)
+		if !s.playTool(sid, r, msg, tool) {
+			return
+		}
 	}
 	for _, p := range []struct{ kind, text string }{{"reasoning", t.Reasoning}, {"text", t.Text}} {
 		if p.text == "" {
@@ -472,9 +494,11 @@ func (s *Server) play(sid string, r *run) {
 }
 
 // playTool plays one tool call as OpenCode b30c4d0 does: its input start
-// names the tool, its call carries the input, and its success the content,
-// or its failure the error; the message keeps the call's final state.
-func (s *Server) playTool(sid string, msg map[string]any, tool Tool) {
+// names the tool, its call carries the input, then any permission or
+// question ask waits for its reply, and its success the content, or its
+// failure the error; the message keeps the call's final state. false means
+// r stopped while an ask waited.
+func (s *Server) playTool(sid string, r *run, msg map[string]any, tool Tool) bool {
 	name := tool.Name
 	if name == "" {
 		name = "execute"
@@ -483,19 +507,121 @@ func (s *Server) playTool(sid string, msg map[string]any, tool Tool) {
 	if input == nil {
 		input = map[string]any{}
 	}
-	content := []map[string]any{{"type": "text", "text": tool.Output}}
-	state := map[string]any{"status": "completed", "input": input, "content": content}
 	call := map[string]any{"assistantMessageID": msg["id"], "id": tool.ID}
 	s.emit(sid, "session.tool.input.started", with(call, "name", name))
 	s.emit(sid, "session.tool.called", with(with(call, "input", input), "executed", true))
-	if tool.Fail != "" {
-		e := map[string]any{"type": "tool", "message": tool.Fail}
+	output, fail := tool.Output, tool.Fail
+	source := map[string]any{"type": "tool", "messageID": msg["id"], "id": tool.ID}
+	if tool.Permission != nil {
+		ans, ok := s.await(sid, r, "per_"+s.newID(), with(tool.Permission, "source", source))
+		if !ok {
+			return false
+		}
+		if ans.(map[string]any)["decision"] == "reject" {
+			fail = "The user rejected permission to use this specific tool call."
+		}
+	}
+	if len(tool.Questions) > 0 {
+		ans, ok := s.await(sid, r, "frm_"+s.newID(), questionForm(tool.Questions))
+		if !ok {
+			return false
+		}
+		got := ans.(map[string]any)
+		answers := make([][]string, len(tool.Questions))
+		for i := range tool.Questions {
+			switch v := got["q"+strconv.Itoa(i)].(type) {
+			case string:
+				answers[i] = []string{v}
+			case []any:
+				for _, a := range v {
+					answers[i] = append(answers[i], fmt.Sprint(a))
+				}
+			}
+		}
+		b, _ := json.Marshal(map[string]any{"answers": answers})
+		output = string(b)
+	}
+	content := []map[string]any{{"type": "text", "text": output}}
+	state := map[string]any{"status": "completed", "input": input, "content": content}
+	if fail != "" {
+		e := map[string]any{"type": "tool", "message": fail}
 		state = map[string]any{"status": "error", "input": input, "error": e}
 		s.emit(sid, "session.tool.failed", with(with(call, "error", e), "executed", true))
 	} else {
 		s.emit(sid, "session.tool.success", with(with(call, "content", content), "executed", true))
 	}
 	msg["content"] = append(msg["content"].([]map[string]any), map[string]any{"type": "tool", "id": tool.ID, "name": name, "state": state})
+	return true
+}
+
+// questionForm is the form OpenCode's question tool asks: one field per
+// question, keyed q0, q1, ..., whose options' values are their labels.
+func questionForm(qs []Question) map[string]any {
+	fields := make([]map[string]any, len(qs))
+	for i, q := range qs {
+		typ := "string"
+		if q.Multiple {
+			typ = "multiselect"
+		}
+		opts := make([]map[string]any, len(q.Options))
+		for j, o := range q.Options {
+			opts[j] = map[string]any{"value": o.Label, "label": o.Label, "description": o.Description}
+		}
+		fields[i] = map[string]any{"key": "q" + strconv.Itoa(i), "title": q.Header, "description": q.Question, "type": typ, "options": opts, "custom": true}
+	}
+	return map[string]any{"title": "Questions", "metadata": map[string]any{"kind": "question"}, "fields": fields}
+}
+
+// await opens ask id (per_ a permission, frm_ a form) with info, as OpenCode
+// does, and waits for its reply without the lock: a permission reply's body
+// or a form's answer. false means r stopped or was replaced, or the server
+// is closing; the ask is then gone.
+func (s *Server) await(sid string, r *run, id string, info map[string]any) (any, bool) {
+	ss := s.st.Sessions[sid]
+	info = with(with(info, "id", id), "sessionID", sid)
+	if ss.Asks == nil {
+		ss.Asks = map[string]any{}
+	}
+	ss.Asks[id] = info
+	ch := make(chan any, 1)
+	s.replies[id] = ch
+	if strings.HasPrefix(id, "per_") {
+		s.emit(sid, "permission.asked", clone(info))
+	} else {
+		s.emit(sid, "form.created", map[string]any{"form": info})
+	}
+	s.mu.Unlock()
+	var ans any
+	select {
+	case ans = <-ch:
+	case <-r.stop:
+	case <-s.quit:
+	}
+	s.mu.Lock()
+	delete(s.replies, id)
+	if ss := s.st.Sessions[sid]; ss != nil {
+		delete(ss.Asks, id)
+	}
+	select {
+	case <-s.quit:
+		return nil, false
+	default:
+	}
+	ss = s.st.Sessions[sid]
+	return ans, ans != nil && ss != nil && ss.Running == r
+}
+
+// answer replies to session ss's pending ask id with ans and emits the
+// reply's event; false when no such ask is pending.
+func (s *Server) answer(sid string, ss *session, id, event string, data map[string]any, ans any) bool {
+	ch, ok := s.replies[id]
+	if _, pending := ss.Asks[id]; !ok || !pending {
+		return false
+	}
+	delete(ss.Asks, id)
+	s.emit(sid, event, data)
+	ch <- ans
+	return true
 }
 
 // wait unlocks for d (forever when d < 0); false means r stopped or was
@@ -805,14 +931,59 @@ func (s *Server) sessionRoutes(mux *http.ServeMux) {
 		s.save()
 		w.WriteHeader(204)
 	}))
-	none := s.h(func(w http.ResponseWriter, _ *http.Request, _ *session, _ map[string]any) {
-		reply(w, 200, map[string]any{"data": []any{}}) // the core raises no asks
-	})
-	mux.HandleFunc("GET /api/session/{id}/permission", none)
-	mux.HandleFunc("GET /api/session/{id}/form", none)
+	s.askRoutes(mux)
 	mux.HandleFunc("GET /api/session/{id}/message", s.h(func(w http.ResponseWriter, r *http.Request, ss *session, _ map[string]any) {
 		page, next := pageOf(ss.Messages, r.URL.Query())
 		reply(w, 200, map[string]any{"data": page, "cursor": map[string]string{"next": next}})
+	}))
+}
+
+// askRoutes serve the pending permission and form asks a scripted tool
+// raised: list, read and reply, as OpenCode b30c4d0 does.
+func (s *Server) askRoutes(mux *http.ServeMux) {
+	list := func(prefix string) http.HandlerFunc {
+		return s.h(func(w http.ResponseWriter, _ *http.Request, ss *session, _ map[string]any) {
+			out := []any{}
+			for _, id := range slices.Sorted(maps.Keys(ss.Asks)) {
+				if strings.HasPrefix(id, prefix) {
+					out = append(out, ss.Asks[id])
+				}
+			}
+			reply(w, 200, map[string]any{"data": out})
+		})
+	}
+	get := func(tag string) http.HandlerFunc {
+		return s.h(func(w http.ResponseWriter, r *http.Request, ss *session, _ map[string]any) {
+			if a, ok := ss.Asks[r.PathValue("ask")]; ok {
+				reply(w, 200, map[string]any{"data": a})
+				return
+			}
+			reply(w, 404, map[string]string{"_tag": tag, "message": "no request"})
+		})
+	}
+	mux.HandleFunc("GET /api/session/{id}/permission", list("per_"))
+	mux.HandleFunc("GET /api/session/{id}/form", list("frm_"))
+	mux.HandleFunc("GET /api/session/{id}/permission/{ask}", get("PermissionNotFoundError"))
+	mux.HandleFunc("GET /api/session/{id}/form/{ask}", get("FormNotFoundError"))
+	mux.HandleFunc("POST /api/session/{id}/permission/{ask}/reply", s.h(func(w http.ResponseWriter, r *http.Request, ss *session, body map[string]any) {
+		id := r.PathValue("ask")
+		if !s.answer(r.PathValue("id"), ss, id, "permission.replied", map[string]any{"requestID": id, "reply": body["decision"]}, body) {
+			reply(w, 404, map[string]string{"_tag": "PermissionNotFoundError", "message": "no request"})
+			return
+		}
+		w.WriteHeader(204)
+	}))
+	mux.HandleFunc("POST /api/session/{id}/form/{ask}/reply", s.h(func(w http.ResponseWriter, r *http.Request, ss *session, body map[string]any) {
+		id := r.PathValue("ask")
+		ans, _ := body["answer"].(map[string]any)
+		if ans == nil {
+			ans = map[string]any{}
+		}
+		if !s.answer(r.PathValue("id"), ss, id, "form.replied", map[string]any{"id": id, "answer": ans}, ans) {
+			reply(w, 404, map[string]string{"_tag": "FormNotFoundError", "message": "no form"})
+			return
+		}
+		w.WriteHeader(204)
 	}))
 }
 

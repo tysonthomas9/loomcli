@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { ownSender, useAgentChat, useRosterAgent } from "@/hooks";
+import {
+  latestTurnError,
+  ownSender,
+  useAgentChat,
+  useRosterAgent,
+} from "@/hooks";
 import type { ChatItem } from "@/hooks";
 import { AskCard } from "./AskCard";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -11,6 +16,12 @@ import {
 } from "./ComposerModelControls";
 import { LONG_TEXT_LIMIT, LongText } from "./LongText";
 import { MessageCopyButton } from "./MessageCopyButton";
+import {
+  dismissThreadErrorBannerForSession,
+  getThreadErrorBannerKey,
+  isThreadErrorBannerDismissedForSession,
+  ThreadErrorBanner,
+} from "./ThreadErrorBanner";
 import { deriveTimelineRows, type TimelineRow } from "./timelineRows";
 import {
   LiveWorkEntryRow,
@@ -47,6 +58,11 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     () => deriveTimelineRows(items, expandedGroups),
     [items, expandedGroups],
   );
+  // The latest turn's failure reason (T3's thread error), until dismissed.
+  const turnError = useMemo(() => latestTurnError(items), [items]);
+  const bannerKey = getThreadErrorBannerKey(agentId, turnError);
+  const [, setDismissed] = useState(0);
+  const ask = asks[0]; // T3 shows the first open ask, with "1/N"
   const toggleGroup = (id: string) =>
     setExpandedGroups((g) => {
       const next = new Set(g);
@@ -135,13 +151,25 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
         ))}
       </ol>
 
-      {asks.map((ask) => (
+      <ThreadErrorBanner
+        error={
+          isThreadErrorBannerDismissedForSession(bannerKey) ? null : turnError
+        }
+        onDismiss={() => {
+          dismissThreadErrorBannerForSession(bannerKey);
+          setDismissed((n) => n + 1);
+        }}
+      />
+
+      {ask && (
         <AskCard
           key={ask.id}
           ask={ask}
+          pendingCount={asks.length}
           onRespond={(body) => respond(ask.id, body)}
+          onStop={stop}
         />
-      ))}
+      )}
 
       {error && (
         <div className={styles.error} role="alert">
@@ -318,7 +346,16 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
       );
     }
     case "turn_end":
-      return <div className={styles.note}>Turn {item.reason}</div>;
+      return (
+        <div className={styles.note}>
+          Turn {item.reason}
+          {item.error && (
+            <div className={styles.text} data-testid="turn-end-error">
+              {item.error}
+            </div>
+          )}
+        </div>
+      );
     case "agent":
       return <AgentMessage text={item.text} streaming={!!item.streaming} />;
     case "user":

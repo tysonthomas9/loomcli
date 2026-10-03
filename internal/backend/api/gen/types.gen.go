@@ -1758,9 +1758,25 @@ type AgentV1ArchiveBody struct {
 
 // AgentV1Ask One open harness ask.
 type AgentV1Ask struct {
+	// About What it asks about: the command, file or diff, or a question's first question
 	About string `json:"about"`
 	Id    string `json:"id"`
-	Type  string `json:"type"`
+
+	// Questions A question's questions, when its harness says
+	Questions *[]AgentV1AskQuestion `json:"questions,omitempty"`
+	Type      string                `json:"type"`
+}
+
+// AgentV1AskQuestion One question of a question ask.
+type AgentV1AskQuestion struct {
+	Header      *string `json:"header,omitempty"`
+	Id          string  `json:"id"`
+	MultiSelect *bool   `json:"multi_select,omitempty"`
+	Options     *[]struct {
+		Description *string `json:"description,omitempty"`
+		Label       string  `json:"label"`
+	} `json:"options,omitempty"`
+	Question string `json:"question"`
 }
 
 // AgentV1CreateBody The Create body. For a bridge caller, parent is always the caller.
@@ -1932,9 +1948,12 @@ type AgentV1PresetList struct {
 	Presets []AgentV1Preset `json:"presets"`
 }
 
-// AgentV1RespondBody decision for an approval, answer for a question.
+// AgentV1RespondBody decision for an approval, answer or answers for a question.
 type AgentV1RespondBody struct {
-	Answer   *string                     `json:"answer,omitempty"`
+	Answer *string `json:"answer,omitempty"`
+
+	// Answers Each question's answer by question id: one value, or one per chosen option of a multi_select question
+	Answers  *map[string][]string        `json:"answers,omitempty"`
 	Decision *AgentV1RespondBodyDecision `json:"decision,omitempty"`
 }
 

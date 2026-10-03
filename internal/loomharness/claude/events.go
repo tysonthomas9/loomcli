@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"cmp"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -84,6 +85,7 @@ type wireFrame struct {
 	TaskType         string   `json:"task_type"`
 	TaskID           string   `json:"task_id"`
 	TotalCostUSD     float64  `json:"total_cost_usd"` // result: the session's running total
+	Errors           []string `json:"errors"`         // result: a non-success result's errors
 	Event            struct {
 		Type    string `json:"type"`
 		Index   int    `json:"index"`
@@ -150,7 +152,7 @@ func (m *mapper) frame(raw []byte) []loomharness.Event {
 	case f.Type == "system" && f.Subtype == "task_started" && f.TaskType == "local_agent":
 		emit(loomharness.Event{Type: loomharness.EventSubagentStarted, ItemID: f.TaskID})
 	case f.Type == "result":
-		m.result(f.Subtype, f.TotalCostUSD, emit)
+		m.result(f.Subtype, f.TotalCostUSD, resultError(f), emit)
 	}
 	return out
 }
@@ -244,7 +246,7 @@ func (m *mapper) assistant(msg string, blocks []block, emit func(loomharness.Eve
 // result's own usage may be a running total). Its cost is the session's
 // running total_cost_usd, which a resumed process continues; loomagent saves
 // its rise since the session's last saved total.
-func (m *mapper) result(subtype string, total float64, emit func(loomharness.Event)) {
+func (m *mapper) result(subtype string, total float64, reason string, emit func(loomharness.Event)) {
 	m.usage.CostTotalUSD = total
 	emit(loomharness.Event{Type: loomharness.EventUsage, ItemID: m.turnID + "/usage", Usage: m.usage})
 	m.usage = loomharness.Usage{}
@@ -255,8 +257,29 @@ func (m *mapper) result(subtype string, total float64, emit func(loomharness.Eve
 	case m.cancelled:
 		stop = "cancelled"
 	}
-	emit(loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: stop})
+	e := loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: stop}
+	if stop == "failed" {
+		e.Error = cmp.Or(reason, subtype)
+	}
+	emit(e)
 	m.turnID, m.lastInterrupted, m.cancelled = "", stop == "cancelled", false
+}
+
+// resultError is a non-success result's first user-facing error. Ported
+// from T3 Code apps/server/src/provider/Layers/ClaudeAdapter.ts
+// (resultUserFacingError) at commit 2daff8c25. Copyright (c) 2026 T3 Tools
+// Inc. MIT License; see THIRD_PARTY_NOTICES.md. "[ede_diagnostic] ..."
+// entries are the CLI's internal telemetry, never the reason shown.
+func resultError(f wireFrame) string {
+	if f.Subtype == "success" {
+		return ""
+	}
+	for _, e := range f.Errors {
+		if !strings.HasPrefix(e, "[ede_diagnostic]") {
+			return e
+		}
+	}
+	return ""
 }
 
 // item names a started content block; tool calls are remembered until their result.

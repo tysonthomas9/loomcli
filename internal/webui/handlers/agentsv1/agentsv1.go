@@ -235,7 +235,7 @@ func respond(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int,
 	}
 	return http.StatusNoContent, nil, s.Respond(r.Context(), loomagent.RespondRequest{
 		Envelope: loomagent.Envelope{RequestID: id}, AgentID: r.PathValue("id"), AskID: r.PathValue("askId"),
-		Decision: body.Decision, Answer: body.Answer})
+		Decision: body.Decision, Answer: body.Answer, Answers: body.Answers})
 }
 
 func listEvents(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {

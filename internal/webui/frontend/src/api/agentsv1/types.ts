@@ -51,6 +51,8 @@ export interface UpdateAgentBody {
 export interface RespondBody {
   decision?: "allow_once" | "allow_always" | "deny";
   answer?: string;
+  /** Each question's answer by question id (one per chosen option of a multi_select question). */
+  answers?: Record<string, string[]>;
 }
 
 export interface WaitingMessage {
@@ -62,7 +64,19 @@ export interface WaitingMessage {
 export interface Ask {
   id: string;
   type: string; // approval | question
+  /** What it asks about: the command, file or diff, or the first question. */
   about: string;
+  /** A question's questions, when its harness says. */
+  questions?: AskQuestion[];
+}
+
+/** One question of a question ask, in T3 Code's shape. */
+export interface AskQuestion {
+  id: string;
+  header?: string;
+  question: string;
+  options?: { label: string; description?: string }[];
+  multi_select?: boolean;
 }
 
 export interface Agent {

@@ -662,3 +662,160 @@ tests:
           assert '"reasoning_effort": "high"' in json.dumps(turn[-1]), turn[-1]
           PY
         intent: "Check that the turn after the pick reached the model at effort high"
+
+  - name: UI4 - an approval shows its command and Always allow this session answers it, and a failed turn says why in the chat
+    intent: An operator sees what a review agent asks to run, allows it for the session, gets the reply, and when the next turn fails reads the harness's reason in a banner and in the turn's note
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-ui4ok-${RUN_ID:-local}" }
+          body: { preset: pr-review-interactive, name: "agv1-ui4ok-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Ui4OkId
+        intent: "Create an OpenCode agent whose preset asks before running a shell command"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui4OkId")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          cmd = "echo AGV1-UI4-RAN"
+          fail = "AGV1-UI4-FAIL the model refused the request"
+          if scenarios:
+              # The emulator asks the scripted permission as OpenCode's bash "ask" rule does.
+              turns = [{"tools": [{"id": "call_ui4_bash", "name": "shell", "input": {"command": cmd},
+                                   "output": "AGV1-UI4-RAN",
+                                   "permission": {"action": "bash", "resources": [cmd], "save": ["echo *"]}}],
+                        "text": "AGV1-UI4-AFTER"},
+                       {"fail": fail}]
+              json.dump({agent: turns}, open(scenarios, "w"))
+          else:
+              steps = [{"bash": cmd}, {"text": "AGV1-UI4-AFTER"}, {"error": fail}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that runs a shell command, then a turn the model refuses, and open the agent's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the agent is ready"
+      - fill: { label: Message, value: "run the check" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=ask-card]');
+              const d = c?.querySelector('[aria-label="Approval request"]')?.textContent || '';
+              return d.includes('echo AGV1-UI4-RAN') && Array.from(c.querySelectorAll('button')).map((b) => b.textContent).join('|')
+                .includes('Always allow this session'); })()
+        budget: 90000
+        intent: "Wait until the approval card shows the command it asks to run and offers Always allow this session"
+      - click: { role: button, name: Always allow this session, exact: true }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=ask-card]') &&
+              (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI4-AFTER')
+        budget: 60000
+        intent: "Wait until the card closes and the agent replies after running the command"
+      - fill: { label: Message, value: "try again" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const b = document.querySelector('[data-testid=turn-error]');
+              const n = document.querySelector('[data-testid=turn-end-error]');
+              return (b?.textContent || '').includes('AGV1-UI4-FAIL') && (n?.textContent || '').includes('AGV1-UI4-FAIL'); })()
+        budget: 90000
+        intent: "Wait until the failed turn's reason shows in the error banner and the turn's note"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=turn-end-error]')?.textContent || '').includes('AGV1-UI4-FAIL') &&
+              (document.querySelector('[data-testid=turn-error]')?.textContent || '').includes('AGV1-UI4-FAIL')
+        intent: "Wait until a reload replays the reason from saved events"
+      - click: { role: button, name: Dismiss error, exact: true }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=turn-error]') &&
+              (document.querySelector('[data-testid=turn-end-error]')?.textContent || '').includes('AGV1-UI4-FAIL')
+        intent: "Wait until Dismiss hides the banner and the turn's note keeps the reason"
+
+  - name: UI4 - the agent asks several questions and the operator answers them one by one with an option and a custom answer
+    intent: An operator answers a lead's two questions in turn, picking an option for the first and writing a custom answer for the second, and the lead gets both answers
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-ui4q-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-ui4q-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Ui4QId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui4QId")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          qs = [{"header": "Color", "question": "AGV1-UI4 which color?",
+                 "options": [{"label": "Blue", "description": "calm"}, {"label": "Red", "description": "loud"}]},
+                {"header": "Size", "question": "AGV1-UI4 which size?",
+                 "options": [{"label": "Small", "description": "fits"}, {"label": "Large", "description": "roomy"}]}]
+          if scenarios:
+              turn = {"tools": [{"id": "call_ui4_q", "name": "question", "input": {"questions": qs},
+                                 "output": "", "questions": qs}], "text": "AGV1-UI4-ANSWERED"}
+              json.dump({agent: [turn]}, open(scenarios, "w"))
+          else:
+              steps = [{"tool_calls": [{"name": "question", "arguments": {"questions": qs}}]},
+                       {"text": "AGV1-UI4-ANSWERED"}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that asks two questions with OpenCode's question tool and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "ask me" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=ask-card]')?.textContent || '';
+              return c.includes('AGV1-UI4 which color?') && c.includes('1/2') && c.includes('Blue'); })()
+        budget: 90000
+        intent: "Wait until the card shows the first of two questions with its options"
+      - click: { selector: "[data-testid=ask-card] button[aria-pressed]", first: true }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('AGV1-UI4 which size?')
+        intent: "Wait until picking Blue moves on to the second question"
+      - fill: { label: Write custom answer, value: "AGV1-UI4-CUSTOM medium" }
+      - click: { role: button, name: Submit answers, exact: true }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=ask-card]') &&
+              (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI4-ANSWERED')
+        budget: 60000
+        intent: "Wait until the card closes and the lead replies after the answers"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui4QId")"
+          if [ -n "${AFT_EMU_SCENARIOS:-}" ]; then
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id/events?limit=500" > "$AFT_WORK_DIR/agv1-ui4q.json"
+          else
+            curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-ui4q.json"
+          fi
+          python3 - "$AFT_WORK_DIR/agv1-ui4q.json" <<'PY'
+          import json, sys
+          body = json.dumps(json.load(open(sys.argv[1])))
+          assert "AGV1-UI4-CUSTOM medium" in body, "the custom answer never reached the lead"
+          assert "Blue" in body, "the picked option never reached the lead"
+          PY
+        intent: "Check that both answers reached the lead"

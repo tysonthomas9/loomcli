@@ -24,18 +24,20 @@ const (
 // Ask is one open harness ask (design v2 §4.10). Loom keeps open asks in
 // memory, from the live feed and each backfill of the native history.
 type Ask struct {
-	ID     string
-	Type   string // approval | question
-	About  string
-	TurnID string `json:"-"`
+	ID        string
+	Type      string // approval | question
+	About     string
+	Questions []loomharness.Question // a question's questions, when its harness says
+	TurnID    string                 `json:"-"`
 }
 
 // RespondRequest answers an open ask: Decision (allow_once, allow_always or
-// deny) for an approval, Answer for a question.
+// deny) for an approval, Answer or Answers (by question id) for a question.
 type RespondRequest struct {
 	Envelope
 	AgentID, AskID   string
 	Decision, Answer string
+	Answers          map[string][]string
 }
 
 // openAsks returns agentID's open asks by ID.
@@ -67,7 +69,7 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 	if !ok {
 		return &Error{Code: CodeAskNotFound, Message: req.AskID}
 	}
-	r := loomharness.Reply{Answer: req.Answer}
+	r := loomharness.Reply{Answer: req.Answer, Answers: req.Answers}
 	switch {
 	case req.Decision == "allow_once":
 		r.Allow = true
@@ -146,7 +148,7 @@ func askOf(e loomharness.Event) Ask {
 	if e.ItemKind == "question" {
 		typ = "question"
 	}
-	return Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}
+	return Ask{ID: e.AskID, Type: typ, About: e.Text, Questions: e.Questions, TurnID: e.TurnID}
 }
 
 // syncWaiting sets a running agent waiting{approval|input} while an ask of

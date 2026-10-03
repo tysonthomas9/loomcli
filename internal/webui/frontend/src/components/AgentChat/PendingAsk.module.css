@@ -1,0 +1,361 @@
+/* Ported from T3 Code apps/web/src/components/chat/ComposerPendingApprovalPanel.tsx,
+   ComposerPendingApprovalActions.tsx, ComposerPendingUserInputPanel.tsx,
+   ComposerPrimaryActions.tsx and ThreadErrorBanner.tsx (their Tailwind
+   classes) at commit 2daff8c25. Copyright (c) 2026 T3 Tools Inc. MIT License;
+   see THIRD_PARTY_NOTICES.md. Translated to a CSS module with Loom's theme
+   tokens. */
+
+/* The pending ask sits above the composer, like T3's composer panel. */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+}
+
+.title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.counter {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ComposerPendingApprovalPanel */
+.approval {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.approvalDetail {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+  scrollbar-width: thin;
+}
+
+.approvalDetail:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* ComposerPendingApprovalActions: micro ghost buttons, right-aligned. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.action {
+  padding: 2px 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.actionAccept {
+  color: var(--color-text-primary);
+}
+
+.actionDecline,
+.actionDecline:hover:not(:disabled) {
+  color: var(--color-danger);
+}
+
+.actionLabel {
+  display: inline-block;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* ComposerPendingUserInputPanel */
+.userInput {
+  padding: 4px 0;
+}
+
+.userInputToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin: -4px 0;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms;
+}
+
+.userInputToggle:hover {
+  background: var(--color-bg-hover);
+}
+
+.userInputToggle:focus-visible {
+  outline: 1px solid var(--color-primary);
+}
+
+.userInputHeader {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.userInputReminder {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  transition: transform 150ms;
+}
+
+.chevronUp {
+  transform: rotate(180deg);
+}
+
+.userInputBody {
+  padding: 8px 8px 2px;
+}
+
+.userInputQuestion {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.userInputHint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms;
+}
+
+.option:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.option:focus-visible {
+  outline: 1px solid var(--color-primary);
+}
+
+.option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.optionSelected {
+  background: var(--color-bg-hover);
+}
+
+.optionText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.optionLabel {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.optionDescription {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.check {
+  flex-shrink: 0;
+  color: var(--color-primary);
+}
+
+.kbd {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The custom answer and T3's pending primary actions (Previous, Next
+   question, Submit answer). */
+.questionForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.customAnswer {
+  min-height: 2.5em;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-primary);
+  resize: vertical;
+  font: inherit;
+}
+
+.pendingActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pill {
+  padding: 4px 14px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pillPrimary {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ThreadErrorBanner */
+.errorBannerWrap {
+  width: fit-content;
+  max-width: min(48rem, 100%);
+  margin: 0 auto;
+}
+
+.errorBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-bg);
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.errorIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--color-danger);
+  border-radius: 50%;
+  color: var(--color-danger);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.errorText {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.errorDismiss {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-danger);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}

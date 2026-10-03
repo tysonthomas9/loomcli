@@ -13,6 +13,10 @@ Ported files (internal/webui/frontend/src/components/AgentChat/):
 - `MessageCopyButton.tsx`: from `apps/web/src/components/chat/MessageCopyButton.tsx`.
 - `timelineRows.ts`: from `apps/web/src/components/chat/MessagesTimeline.logic.ts`.
 - `WorkRows.tsx`, `Timeline.module.css`: from `apps/web/src/components/chat/MessagesTimeline.tsx` and `apps/web/src/index.css`.
+- `pendingUserInput.ts`, `__tests__/pendingUserInput.test.ts`: from `apps/web/src/pendingUserInput.ts` and its test.
+- `ComposerPendingApprovalPanel.tsx`, `ComposerPendingApprovalActions.tsx`, `ComposerPendingUserInputPanel.tsx`, `ThreadErrorBanner.tsx`: from the files of the same name in `apps/web/src/components/chat/`.
+- `PendingAsk.module.css`: from those components' Tailwind classes and `apps/web/src/components/chat/ComposerPrimaryActions.tsx`.
+- `AskCard.tsx`: the pending question's primary action label from `apps/web/src/components/chat/ComposerPrimaryActions.tsx`.
 
 Ported files for the composer model, provider and effort pickers (UI2; internal/webui/frontend/src/components/AgentChat/):
 
@@ -31,6 +35,7 @@ Ported files (internal/loomharness/):
 - `codex/catalog.go`: from `apps/server/src/provider/Layers/CodexProvider.ts`.
 - `opencode/catalog.go`: from `apps/server/src/provider/Layers/OpenCodeProvider.ts`.
 - `claude/catalog.go`: from `apps/server/src/provider/Layers/ClaudeProvider.ts`.
+- `claude/events.go` (`resultError`): from `resultUserFacingError` in `apps/server/src/provider/Layers/ClaudeAdapter.ts`.
 
 ```
 MIT License

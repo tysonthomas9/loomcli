@@ -18,15 +18,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
 
-// Step is one scripted step of a turn. Set exactly one of Delta, Ask, Crash or Usage.
+// Step is one scripted step of a turn. Set exactly one of Delta, Ask, Crash, Usage or Fail.
 type Step struct {
-	Delta    string             // emits a delta on the turn's message item
-	Ask      string             // opens an ask with this ID; the turn waits for Reply
-	Question bool               // the Ask is a question, not an approval
-	Crash    bool               // the harness process dies here, mid-turn
-	Gap      bool               // the live Feed misses this step's event (it gets feed.gap); Messages still has it
-	Usage    *loomharness.Usage // emits a usage event with these counts
-	Tool     *loomharness.Tool  // emits a tool call's item.started (name and input) and item.completed
+	Delta     string                 // emits a delta on the turn's message item
+	Ask       string                 // opens an ask with this ID; the turn waits for Reply
+	Question  bool                   // the Ask is a question, not an approval
+	About     string                 // what the Ask asks about (its ask.opened Text)
+	Questions []loomharness.Question // the Ask's questions
+	Fail      string                 // ends the turn failed with this error
+	Crash     bool                   // the harness process dies here, mid-turn
+	Gap       bool                   // the live Feed misses this step's event (it gets feed.gap); Messages still has it
+	Usage     *loomharness.Usage     // emits a usage event with these counts
+	Tool      *loomharness.Tool      // emits a tool call's item.started (name and input) and item.completed
 }
 
 // Turn is one scripted turn.
@@ -299,7 +302,10 @@ func (h *Harness) run(s *session) {
 			if st.Question {
 				kind = "question"
 			}
-			h.emit(s, loomharness.Event{Type: loomharness.EventAskOpened, AskID: st.Ask, ItemKind: kind}, !st.Gap)
+			h.emit(s, loomharness.Event{Type: loomharness.EventAskOpened, AskID: st.Ask, ItemKind: kind, Text: st.About, Questions: st.Questions}, !st.Gap)
+			return
+		case st.Fail != "":
+			h.endTurn(s, "failed", st.Fail)
 			return
 		case st.Usage != nil:
 			h.emit(s, loomharness.Event{Type: loomharness.EventUsage, Usage: *st.Usage}, !st.Gap)
@@ -313,17 +319,17 @@ func (h *Harness) run(s *session) {
 			h.emit(s, loomharness.Event{Type: loomharness.EventDelta, ItemID: s.turnID + "/msg", ItemKind: "message", Text: st.Delta}, !st.Gap)
 		}
 	}
-	h.endTurn(s, "completed")
+	h.endTurn(s, "completed", "")
 }
 
-func (h *Harness) endTurn(s *session, reason string) {
+func (h *Harness) endTurn(s *session, reason, errText string) {
 	if s.ask != "" {
 		h.emit(s, loomharness.Event{Type: loomharness.EventAskLost, AskID: s.ask}, true)
 		s.ask = ""
 	}
 	s.running, s.crashed = false, false
 	s.lastInterrupt = reason == "cancelled"
-	h.emit(s, loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: reason}, true)
+	h.emit(s, loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: reason, Error: errText}, true)
 }
 
 // lookup returns the live session for ref, under h.mu.
@@ -395,7 +401,7 @@ func (x *sessionHandle) Resume(_ context.Context, l loomharness.Launch, rules []
 			x.h.emit(s, loomharness.Event{Type: loomharness.EventTurnResumed}, true)
 			x.h.run(s)
 		} else {
-			x.h.endTurn(s, "cancelled")
+			x.h.endTurn(s, "cancelled", "")
 		}
 	}
 	return s.ref, nil
@@ -450,7 +456,7 @@ func (x *sessionHandle) Interrupt(context.Context) (bool, error) {
 	if err != nil || !s.running || s.crashed {
 		return false, err
 	}
-	x.h.endTurn(s, "cancelled")
+	x.h.endTurn(s, "cancelled", "")
 	return true, nil
 }
 

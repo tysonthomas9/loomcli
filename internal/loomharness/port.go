@@ -105,8 +105,24 @@ type Reply struct {
 	// grant, such as OpenCode's "always"). An adapter that cannot honor it
 	// fails Reply with an explicit error, never narrowing it; the ask stays open.
 	Always bool
-	Answer string
+	// Answer answers a question ask's first question. Answers, when set,
+	// answers each question by its Question.ID instead: one value, or one
+	// per chosen option of a MultiSelect question.
+	Answer  string
+	Answers map[string][]string
 }
+
+// Question is one question of a question ask, in T3 Code's shape: a short
+// Header, the Question text and the Options to choose from; with none, or
+// besides them, the answer may be free text.
+type Question struct {
+	ID, Header, Question string
+	Options              []Choice
+	MultiSelect          bool
+}
+
+// Choice is one option a Question offers.
+type Choice struct{ Label, Description string }
 
 // Landed says whether an input reached the harness.
 type Landed string
@@ -229,11 +245,15 @@ type Event struct {
 	Time       time.Time
 	InputKey   string // the input's key, for message.delivered and the turn.started it began
 	AskID      string
-	Text       string
+	Text       string // for ask.opened: what it asks about (the command, file or diff, or the question)
 	Sender     string // the Loom slot sender of a message.delivered; loomagent sets it
 	StopReason string // completed | cancelled | failed, for turn.completed
+	Error      string // for a failed turn.completed: the harness's reason, when it gives one
 	Usage      Usage  // for usage: this step's own counts, never a running total
 	Tool       *Tool  // for a tool item's item.started and item.completed: what the chat shows
+	// Questions, for a question's ask.opened, are what it asks when the
+	// harness says; Text is then the first question.
+	Questions []Question
 }
 
 // Tool is a tool call as the chat shows it, the same for every harness: the

@@ -6,6 +6,8 @@
 //   {tool_calls: [{name, arguments}]}      stream tool calls (arguments: object)
 //   {bash: "cmd"}                          a call to OpenCode 2.x's shell tool; under
 //                                          a bash "ask" rule OpenCode stops for approval
+//   {error: "message"}                     answer HTTP 400 with an OpenAI error, so the
+//                                          turn fails with that message
 // With the queue empty a turn gets the text "ok". OpenCode's title requests
 // (system prompt "You are a title generator") get "Title" and take no step.
 //
@@ -33,6 +35,10 @@ export function createFakeModel() {
   }
 
   function reply(res, step) {
+    if (step.error !== undefined) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: { message: String(step.error), type: "invalid_request_error", code: null } }));
+    }
     if (step.bash !== undefined) {
       step = { tool_calls: [{ name: "shell", arguments: { command: step.bash } }] };
     }

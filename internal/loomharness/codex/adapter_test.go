@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -455,7 +456,8 @@ func TestCodexRecordedFrames(t *testing.T) {
 		{Type: loomharness.EventTurnStarted, Thread: thread, Turn: turn, Key: "key-4"},
 		{Type: loomharness.EventMessageDelivered, Thread: thread, Turn: turn, Item: userID, Kind: "message", Key: "key-4", Text: "run it"},
 		{Type: loomharness.EventItemStarted, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "tool"},
-		{Type: loomharness.EventAskOpened, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "approval", Ask: "0"},
+		{Type: loomharness.EventAskOpened, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "approval", Ask: "0",
+			Text: "/bin/zsh -lc 'touch /tmp/codex41b/repo/f2 && echo done'\nin /tmp/codex41b/repo"}, // what it asks about
 		{Type: loomharness.EventAskResolved, Thread: thread, Ask: "0"},
 		{Type: loomharness.EventItemCompleted, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "tool"},
 		// Each usage is the step's own (last), not the thread's total, which
@@ -993,5 +995,53 @@ func TestCodexToolItemsCarryNameInputOutput(t *testing.T) {
 		if !ok || e.ItemKind != "tool" || e.Tool == nil || *e.Tool != c.want {
 			t.Errorf("%s: %v %+v, want %+v", c.item, ok, e.Tool, c.want)
 		}
+	}
+}
+
+// TestCodexAsksAndFailuresCarryText: an approval's Text is what it asks
+// about (the command and its cwd, or a file change's diff from its started
+// item), a question carries its questions in T3 Code's shape, Answers
+// answers each question by id, and a failed turn carries its error, live
+// and in history.
+func TestCodexAsksAndFailuresCarryText(t *testing.T) {
+	a := NewAdapter(Config{})
+	feed, err := a.Feed(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = feed.Close() }()
+	ask := func(id, method, params string) Message {
+		return Message{ID: protocol.RequestId(`"` + id + `"`), Method: method, Params: json.RawMessage(params), ThreadID: "t-1"}
+	}
+	a.receive("r", ask("c1", "item/commandExecution/requestApproval", `{"threadId":"t-1","turnId":"u","itemId":"i1","command":"rm -rf build","cwd":"/w","reason":"clean"}`))
+	if e := next(t, feed); e.Type != loomharness.EventAskOpened || e.Text != "rm -rf build\nin /w\nclean" {
+		t.Fatalf("command ask = %+v", e)
+	}
+	a.receive("r", Message{Method: "item/started", ThreadID: "t-1", Params: json.RawMessage(`{"threadId":"t-1","turnId":"u","item":{"type":"fileChange","id":"f1","status":"inProgress","changes":[{"path":"a.go","kind":{"type":"update"},"diff":"@@ -1 +1 @@\n-a\n+b"}]}}`)})
+	if e := next(t, feed); e.Type != loomharness.EventItemStarted {
+		t.Fatalf("item = %+v", e)
+	}
+	a.receive("r", ask("f", "item/fileChange/requestApproval", `{"threadId":"t-1","turnId":"u","itemId":"f1","reason":"edit a.go"}`))
+	if e := next(t, feed); e.Type != loomharness.EventAskOpened || e.Text != "edit a.go\n@@ -1 +1 @@\n-a\n+b" {
+		t.Fatalf("file ask = %q", e.Text)
+	}
+	a.receive("r", ask("q", "item/tool/requestUserInput", `{"threadId":"t-1","turnId":"u","itemId":"q1","isBlocking":true,"questions":[{"id":"color","header":"Color","question":"Which color?","options":[{"label":"Red","description":"warm"},{"label":"Blue","description":""}]},{"id":"name","header":"Name","question":"Name it"}]}`))
+	want := []loomharness.Question{
+		{ID: "color", Header: "Color", Question: "Which color?", Options: []loomharness.Choice{{Label: "Red", Description: "warm"}, {Label: "Blue"}}},
+		{ID: "name", Header: "Name", Question: "Name it"},
+	}
+	if e := next(t, feed); e.ItemKind != "question" || e.Text != "Which color?" || !reflect.DeepEqual(e.Questions, want) {
+		t.Fatalf("question = %+v", e)
+	}
+	q := ask("q", "item/tool/requestUserInput", `{"threadId":"t-1","questions":[{"id":"color","question":"?"},{"id":"name","question":"?"}]}`)
+	got, err := answer(q, loomharness.Reply{Answers: map[string][]string{"color": {"Red"}, "name": {"Loom"}}})
+	if b, _ := json.Marshal(got); err != nil || string(b) != `{"answers":{"color":{"answers":["Red"]},"name":{"answers":["Loom"]}}}` {
+		t.Fatalf("answers = %s %v", b, err)
+	}
+
+	failed := `{"threadId":"t-1","turn":{"id":"u","items":[],"status":"failed","error":{"message":"model not found","additionalDetails":"gpt-x"}}}`
+	a.receive("r", Message{Method: "turn/completed", ThreadID: "t-1", Params: json.RawMessage(failed)})
+	if e := next(t, feed); e.Type != loomharness.EventTurnCompleted || e.StopReason != "failed" || e.Error != "model not found\ngpt-x" {
+		t.Fatalf("turn = %+v", e)
 	}
 }

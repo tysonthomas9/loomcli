@@ -51,7 +51,7 @@ export type {
 
 export { useAgentChat } from "./useAgentChat";
 export type { UseAgentChatReturn } from "./useAgentChat";
-export { ownSender } from "./agentChatModel";
+export { latestTurnError, ownSender } from "./agentChatModel";
 export type {
   ChatItem,
   TaskCompleted,

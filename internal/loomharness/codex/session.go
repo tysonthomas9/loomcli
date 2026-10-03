@@ -176,7 +176,7 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 			if t.CompletedAt != nil {
 				done.Time = time.Unix(*t.CompletedAt, 0)
 			}
-			done.Type, done.StopReason = loomharness.EventTurnCompleted, stopReason(t.Status)
+			done.Type, done.StopReason, done.Error = loomharness.EventTurnCompleted, stopReason(t.Status), turnError(t.Error)
 			out.Events = append(out.Events, done)
 		}
 	}
@@ -325,6 +325,11 @@ func answer(ask Message, r loomharness.Reply) (any, error) {
 		out := protocol.ToolRequestUserInputResponse{Answers: map[string]protocol.ToolRequestUserInputAnswer{}}
 		if r.Answer != "" {
 			out.Answers[p.Questions[0].Id] = protocol.ToolRequestUserInputAnswer{Answers: []string{r.Answer}}
+		}
+		for _, q := range p.Questions {
+			if a, ok := r.Answers[q.Id]; ok {
+				out.Answers[q.Id] = protocol.ToolRequestUserInputAnswer{Answers: a}
+			}
 		}
 		return out, nil
 	case "mcpServer/elicitation/request":

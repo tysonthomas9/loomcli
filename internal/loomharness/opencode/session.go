@@ -553,21 +553,40 @@ func parseCursor(after string) (native, turn string, known bool) {
 }
 
 // pendingAsks lists the session's pending permission and form asks as
-// ask.opened events; a form, from the form list, is a question.
+// ask.opened events, with what each asks as the live feed gives it; a form,
+// from the form list, is a question.
 func (s *Session) pendingAsks(ctx context.Context, ref loomharness.NativeRef, turn string) ([]loomharness.Event, error) {
+	var perms struct {
+		Data []struct {
+			ID        string   `json:"id"`
+			Action    string   `json:"action"`
+			Resources []string `json:"resources"`
+			Message   string   `json:"message"`
+			Metadata  struct {
+				Files []fileDiff `json:"files"`
+			} `json:"metadata"`
+		} `json:"data"`
+	}
+	var forms struct {
+		Data []form `json:"data"`
+	}
+	if err := s.c.call(ctx, "GET", s.path("/permission"), nil, &perms); err != nil {
+		return nil, fmt.Errorf("list pending asks: %w", err)
+	}
+	if err := s.c.call(ctx, "GET", s.path("/form"), nil, &forms); err != nil {
+		return nil, fmt.Errorf("list pending asks: %w", err)
+	}
 	var out []loomharness.Event
-	for _, list := range []struct{ path, kind string }{{"/permission", ""}, {"/form", "question"}} {
-		var r struct {
-			Data []struct {
-				ID string `json:"id"`
-			} `json:"data"`
+	for _, p := range perms.Data {
+		out = append(out, loomharness.Event{Type: loomharness.EventAskOpened, Session: ref, AskID: p.ID, TurnID: turn,
+			Text: permissionAbout(p.Action, p.Message, p.Resources, p.Metadata.Files)})
+	}
+	for _, f := range forms.Data {
+		e := loomharness.Event{Type: loomharness.EventAskOpened, Session: ref, AskID: f.ID, ItemKind: "question", TurnID: turn, Questions: f.questions()}
+		if len(e.Questions) > 0 {
+			e.Text = e.Questions[0].Question
 		}
-		if err := s.c.call(ctx, "GET", s.path(list.path), nil, &r); err != nil {
-			return nil, fmt.Errorf("list pending asks: %w", err)
-		}
-		for _, a := range r.Data {
-			out = append(out, loomharness.Event{Type: loomharness.EventAskOpened, Session: ref, AskID: a.ID, ItemKind: list.kind, TurnID: turn})
-		}
+		out = append(out, e)
 	}
 	return out, nil
 }
@@ -661,7 +680,7 @@ func (s *Session) Interrupt(ctx context.Context) (bool, error) {
 }
 
 // Reply answers a permission ask (per_ id) or a question form (frm_ id). A
-// form gets r.Answer in its first field. An allowed Always installs a
+// form gets r.Answers by field key, or else r.Answer in its first field. An allowed Always installs a
 // session grant (grant) before allowing this ask once; a question has no
 // Always, so one asked with Always is refused and left open.
 func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
@@ -675,20 +694,25 @@ func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) 
 		if r.Always {
 			return &Error{Code: "bad_request", Message: "opencode: question " + askID + " has no always reply"}
 		}
-		var form struct {
-			Data struct {
-				Fields []struct {
-					Key string `json:"key"`
-				} `json:"fields"`
-			} `json:"data"`
+		var f struct {
+			Data form `json:"data"`
 		}
-		if err := s.c.call(ctx, "GET", s.path("/form/"+id), nil, &form); err != nil {
+		if err := s.c.call(ctx, "GET", s.path("/form/"+id), nil, &f); err != nil {
 			return err
 		}
-		if len(form.Data.Fields) == 0 {
+		fields := f.Data.Fields
+		if len(fields) == 0 {
 			return &Error{Code: "bad_request", Message: "form " + askID + " has no fields"}
 		}
-		answer := map[string]string{form.Data.Fields[0].Key: r.Answer}
+		answer := map[string]any{}
+		if r.Answers == nil {
+			answer[fields[0].Key] = fields[0].value([]string{r.Answer})
+		}
+		for _, fl := range fields {
+			if a, ok := r.Answers[fl.Key]; ok {
+				answer[fl.Key] = fl.value(a)
+			}
+		}
 		return s.c.call(ctx, "POST", s.path("/form/"+id+"/reply"), map[string]any{"answer": answer}, nil)
 	}
 	body := map[string]string{"decision": "reject"}

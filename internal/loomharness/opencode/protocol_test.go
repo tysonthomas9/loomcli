@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -50,6 +51,8 @@ type store struct {
 	agentDir []string                  // location[directory] of each agent lookup
 	loading  bool                      // the location lists no agents yet
 	asks     map[string][]string       // pending per_/frm_ ask ids, per session
+	forms    map[string]form           // pending forms by id, as GET form/{id} and the form list give them
+	answers  map[string]map[string]any // form id -> the answer Loom sent
 	mcp      string                    // a registered loom MCP server's /api/mcp status; "" is connected
 	bridges  map[string]map[string]any // location dir -> the loom MCP config PUT there
 	puts     int                       // PUT /api/experimental/mcp/loom calls
@@ -322,9 +325,18 @@ func fakeServer(t *testing.T, st *store) *Client {
 		return func(w http.ResponseWriter, r *http.Request) {
 			st.mu.Lock()
 			defer st.mu.Unlock()
-			out := []map[string]string{}
+			out := []any{}
 			for _, id := range st.asks[r.PathValue("id")] {
-				if strings.HasPrefix(id, prefix) {
+				switch p, isPerm := st.perms[id]; {
+				case !strings.HasPrefix(id, prefix):
+				case isPerm:
+					out = append(out, struct {
+						ID string `json:"id"`
+						permReq
+					}{id, p})
+				case st.forms[id].ID != "":
+					out = append(out, st.forms[id])
+				default:
 					out = append(out, map[string]string{"id": id})
 				}
 			}
@@ -371,6 +383,22 @@ func fakeServer(t *testing.T, st *store) *Client {
 		w.WriteHeader(204)
 	})
 	mux.HandleFunc("GET /api/session/{id}/form", pending("frm_"))
+	mux.HandleFunc("GET /api/session/{id}/form/{fid}", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		reply(w, 200, map[string]any{"data": st.forms[r.PathValue("fid")]})
+	})
+	mux.HandleFunc("POST /api/session/{id}/form/{fid}/reply", func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Answer map[string]any }
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if st.answers == nil {
+			st.answers = map[string]map[string]any{}
+		}
+		st.answers[r.PathValue("fid")] = body.Answer
+		w.WriteHeader(204)
+	})
 	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
 		var lines []string
@@ -1141,6 +1169,9 @@ type permReq struct {
 	Action    string   `json:"action"`
 	Resources []string `json:"resources"`
 	Save      []string `json:"save,omitempty"`
+	Metadata  struct {
+		Files []fileDiff `json:"files,omitempty"`
+	} `json:"metadata"`
 }
 
 // effect is what OpenCode decides for action on resource under the session's
@@ -1422,5 +1453,51 @@ func TestProtocolPromptRacesQuarantine(t *testing.T) {
 	}
 	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); err == nil || !strings.Contains(err.Error(), "quarantined") {
 		t.Fatalf("Prompt after the quarantine = %v; want quarantined", err)
+	}
+}
+
+// TestProtocolAsksCarryWhatTheyAsk: a pending permission's ask.opened says
+// what it asks about (its action and resources, then any patch) and a
+// pending form's carries its fields as questions; a Reply with Answers
+// sends each field its value by key, an option's label as its value and a
+// multiselect as a list.
+func TestProtocolAsksCarryWhatTheyAsk(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Launch: loomharness.Launch{Root: "/root"}, Dir: "/repo"})
+	p := permReq{Session: ref.NativeID, Action: "edit", Resources: []string{"a.go"}}
+	p.Metadata.Files = []fileDiff{{File: "a.go", Patch: "-a\n+b"}}
+	st.perms["per_1"] = p
+	f := form{ID: "frm_1", SessionID: ref.NativeID, Title: "Questions", Fields: []formField{
+		{Key: "q0", Type: "string", Title: "Color", Description: "Which color?"},
+		{Key: "q1", Type: "multiselect", Title: "Sizes", Description: "Which sizes?"},
+	}}
+	f.Fields[0].Options = append(f.Fields[0].Options, struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	}{"red", "Red", "warm"})
+	st.forms = map[string]form{"frm_1": f}
+	st.asks = map[string][]string{ref.NativeID: {"per_1", "frm_1"}}
+	page, err := c.Session(ref).Messages(ctx, "", 0)
+	if err != nil || len(page.Events) != 2 {
+		t.Fatalf("Messages = %+v, %v", page, err)
+	}
+	if e := page.Events[0]; e.AskID != "per_1" || e.Text != "edit a.go\n-a\n+b" {
+		t.Fatalf("permission ask = %+v", e)
+	}
+	want := []loomharness.Question{
+		{ID: "q0", Header: "Color", Question: "Which color?", Options: []loomharness.Choice{{Label: "Red", Description: "warm"}}},
+		{ID: "q1", Header: "Sizes", Question: "Which sizes?", MultiSelect: true},
+	}
+	if e := page.Events[1]; e.ItemKind != "question" || e.Text != "Which color?" || !reflect.DeepEqual(e.Questions, want) {
+		t.Fatalf("form ask = %+v", e)
+	}
+	if err := c.Session(ref).Reply(ctx, "frm_1", loomharness.Reply{Answers: map[string][]string{"q0": {"Red"}, "q1": {"S", "M"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.answers["frm_1"]; !reflect.DeepEqual(got, map[string]any{"q0": "red", "q1": []any{"S", "M"}}) {
+		t.Fatalf("answer sent = %v", got)
 	}
 }

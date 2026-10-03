@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,7 @@ func live(root string, m Message) (loomharness.Event, bool) {
 			return e, false
 		}
 		e.Type, e.TurnID, e.StopReason = loomharness.EventTurnCompleted, p.Turn.Id, stopReason(p.Turn.Status)
+		e.Error = turnError(p.Turn.Error)
 		return e, p.Turn.Status != protocol.TurnStatusInProgress
 	case "item/started", "item/completed":
 		var p protocol.ItemStartedNotification // the same shape as ItemCompletedNotification
@@ -76,21 +78,58 @@ func usage(e loomharness.Event, p protocol.ThreadTokenUsageUpdatedNotification) 
 }
 
 // askOpened maps a server request that is an ask: a question when it asks
-// for the user's input, else an approval.
+// for the user's input, else an approval. Text is what it asks about.
 func askOpened(e loomharness.Event, m Message) (loomharness.Event, bool) {
 	if m.ID == nil || !askMethods[m.Method] {
 		return e, false
 	}
 	var p struct {
-		TurnID string `json:"turnId"`
-		ItemID string `json:"itemId"`
+		TurnID      string                                  `json:"turnId"`
+		ItemID      string                                  `json:"itemId"`
+		Command     string                                  `json:"command"`     // commandExecution
+		Cwd         string                                  `json:"cwd"`         // commandExecution
+		Reason      string                                  `json:"reason"`      // approvals
+		GrantRoot   string                                  `json:"grantRoot"`   // fileChange
+		Permissions json.RawMessage                         `json:"permissions"` // permissions
+		Message     string                                  `json:"message"`     // mcpServer elicitation
+		Questions   []protocol.ToolRequestUserInputQuestion `json:"questions"`   // requestUserInput
 	}
 	_ = json.Unmarshal(m.Params, &p)
 	e.Type, e.AskID, e.TurnID, e.ItemID = loomharness.EventAskOpened, askID(m.ID), p.TurnID, p.ItemID
 	e.ItemKind = "approval"
-	if m.Method == "item/tool/requestUserInput" || m.Method == "mcpServer/elicitation/request" {
+	var about []string
+	switch m.Method {
+	case "item/commandExecution/requestApproval":
+		about = append(about, p.Command)
+		if p.Cwd != "" {
+			about = append(about, "in "+p.Cwd)
+		}
+	case "item/fileChange/requestApproval":
+		if p.GrantRoot != "" {
+			about = append(about, "write access to "+p.GrantRoot)
+		}
+	case "item/permissions/requestApproval":
+		about = append(about, string(p.Permissions))
+	case "item/tool/requestUserInput":
 		e.ItemKind = "question"
+		for _, q := range p.Questions {
+			lq := loomharness.Question{ID: q.Id, Header: q.Header, Question: q.Question}
+			for _, o := range q.Options {
+				lq.Options = append(lq.Options, loomharness.Choice{Label: o.Label, Description: o.Description})
+			}
+			e.Questions = append(e.Questions, lq)
+		}
+		if len(p.Questions) > 0 {
+			about = append(about, p.Questions[0].Question)
+		}
+	case "mcpServer/elicitation/request":
+		e.ItemKind = "question"
+		about = append(about, p.Message)
 	}
+	if p.Reason != "" {
+		about = append(about, p.Reason)
+	}
+	e.Text = strings.Join(slices.DeleteFunc(about, func(s string) bool { return s == "" || s == "null" }), "\n")
 	return e, true
 }
 
@@ -237,6 +276,17 @@ func itemEvent(e loomharness.Event, raw protocol.ThreadItem, started, isLive boo
 		return e, false
 	}
 	return e, true
+}
+
+// turnError is a failed turn's reason as text: its message and any details.
+func turnError(err *protocol.TurnError) string {
+	if err == nil {
+		return ""
+	}
+	if err.AdditionalDetails != nil && *err.AdditionalDetails != "" {
+		return err.Message + "\n" + *err.AdditionalDetails
+	}
+	return err.Message
 }
 
 func stopReason(s protocol.TurnStatus) string {

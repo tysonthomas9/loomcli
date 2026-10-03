@@ -283,8 +283,8 @@ describe("AgentChat", () => {
     await mount(
       agent({ open_asks: [{ id: "A1", type: "approval", about: "rm -rf" }] }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
-    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
     await vi.waitFor(() => expect(screen.queryByTestId("ask-card")).toBeNull());
     expect(api.respondToAsk).toHaveBeenCalledTimes(1);
     expect(api.respondToAsk).toHaveBeenCalledWith(
@@ -303,13 +303,129 @@ describe("AgentChat", () => {
     await mount(
       agent({ open_asks: [{ id: "Q1", type: "question", about: "Which?" }] }),
     );
-    fireEvent.change(screen.getByLabelText("Answer"), {
+    fireEvent.change(screen.getByLabelText("Write custom answer"), {
       target: { value: "B" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Answer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
     await vi.waitFor(() => expect(screen.queryByTestId("ask-card")).toBeNull());
     expect(api.respondToAsk.mock.calls[0][3]).toEqual({ answer: "B" });
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows what an approval asks about; Always allow this session is allow_always; Cancel declines and stops the turn", async () => {
+    api.respondToAsk.mockResolvedValue(undefined);
+    api.sendMessage.mockResolvedValue({ state: "handed", interrupted: true });
+    const asks = [
+      { id: "A1", type: "approval", about: "rm -rf build\nin /repo" },
+      { id: "A2", type: "approval", about: "@@ -1 +1 @@\n-a\n+b" },
+    ];
+    const { unmount } = await mount(
+      agent({ running_turn_id: "t1", open_asks: asks }),
+    );
+    expect(screen.getByLabelText("Approval request")).toHaveTextContent(
+      "rm -rf build in /repo",
+    );
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Always allow this session" }),
+    );
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText("Approval request")).toHaveTextContent(
+        "-a +b",
+      ),
+    );
+    expect(api.respondToAsk.mock.calls[0]?.[3]).toEqual({
+      decision: "allow_always",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await vi.waitFor(() => expect(api.sendMessage).toHaveBeenCalled());
+    expect(api.respondToAsk.mock.calls[1]?.[3]).toEqual({ decision: "deny" });
+    expect(api.sendMessage.mock.calls[0]?.slice(2, 5)).toEqual([
+      "",
+      expect.any(String),
+      "interrupt",
+    ]);
+    unmount();
+  });
+
+  it("asks a question's questions one at a time with progress, options and a custom answer, then sends every answer", async () => {
+    api.respondToAsk.mockResolvedValue(undefined);
+    const questions = [
+      {
+        id: "q0",
+        header: "Color",
+        question: "Which color?",
+        options: [{ label: "Red", description: "warm" }, { label: "Blue" }],
+      },
+      {
+        id: "q1",
+        header: "Sizes",
+        question: "Which sizes?",
+        options: [{ label: "S" }, { label: "M" }],
+        multi_select: true,
+      },
+      { id: "q2", header: "Name", question: "Name it" },
+    ];
+    await mount(
+      agent({
+        open_asks: [
+          { id: "Q1", type: "question", about: "Which color?", questions },
+        ],
+      }),
+    );
+    expect(screen.getByText("1/3")).toBeInTheDocument();
+    expect(screen.getByText("warm")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Blue/ }));
+    await screen.findByText("Which sizes?"); // a single choice moves on
+    expect(screen.getByText("2/3")).toBeInTheDocument();
+    expect(screen.getByText("Select one or more options.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^S\s/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^M\s/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+    expect(screen.getByText("Name it")).toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "Submit answers" });
+    expect(submit).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Write custom answer"), {
+      target: { value: "Loom" },
+    });
+    fireEvent.click(submit);
+    await vi.waitFor(() => expect(screen.queryByTestId("ask-card")).toBeNull());
+    expect(api.respondToAsk.mock.calls[0]?.[3]).toEqual({
+      answers: { q0: ["Blue"], q1: ["S", "M"], q2: ["Loom"] },
+    });
+  });
+
+  it("shows a failed turn's reason in a dismissable banner and on the turn's note", async () => {
+    await mount(agent());
+    deliver(
+      ev("message.delivered", { text: "hi" }),
+      ev("agent.turn_completed", {
+        stopReason: "failed",
+        error: "OpenAI Chat tool call delta is missing id or name",
+      }),
+    );
+    const banner = await screen.findByTestId("turn-error");
+    expect(banner).toHaveTextContent(
+      "OpenAI Chat tool call delta is missing id or name",
+    );
+    expect(screen.getByTestId("turn-end-error")).toHaveTextContent(
+      "OpenAI Chat tool call delta is missing id or name",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+    expect(screen.queryByTestId("turn-error")).toBeNull();
+    expect(screen.getByTestId("turn-end-error")).toBeInTheDocument();
+  });
+
+  it("drops the turn error banner once a later message starts another turn", async () => {
+    await mount(agent());
+    deliver(
+      ev("agent.turn_completed", { stopReason: "failed", error: "quota" }),
+    );
+    await screen.findByTestId("turn-error");
+    deliver(ev("message.delivered", { text: "again" }));
+    await vi.waitFor(() =>
+      expect(screen.queryByTestId("turn-error")).toBeNull(),
+    );
   });
 
   it("removes the card on ask.lost", async () => {

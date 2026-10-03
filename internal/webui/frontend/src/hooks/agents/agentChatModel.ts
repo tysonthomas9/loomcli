@@ -10,6 +10,8 @@ interface NativePayload {
   itemKind?: string;
   text?: string;
   stopReason?: string;
+  /** A failed turn's reason, as its harness gave it. */
+  error?: string;
   /** A delivery's slot sender, such as user:<id> or agent:<AgentID>. */
   sender?: string;
   /** A tool item's call, on its tool.started notice and item.completed. */
@@ -34,7 +36,7 @@ export type ChatItem =
   | { key: string; kind: "agent"; text: string; streaming?: boolean }
   | { key: string; kind: "reasoning"; text: string; streaming?: boolean }
   | { key: string; kind: "tool"; tool: ToolCall; status: ToolStatus }
-  | { key: string; kind: "turn_end"; reason: string }
+  | { key: string; kind: "turn_end"; reason: string; error?: string }
   | { key: string; kind: "child"; child: string; name: string }
   | { key: string; kind: "completion"; record: TaskCompleted };
 
@@ -72,7 +74,12 @@ function itemFor(e: AgentEvent): ChatItem | null {
       return { key, kind: "agent", text: p.text ?? "" };
     case "agent.turn_completed":
       return p.stopReason && p.stopReason !== "completed"
-        ? { key, kind: "turn_end", reason: p.stopReason }
+        ? {
+            key,
+            kind: "turn_end",
+            reason: p.stopReason,
+            ...(p.error ? { error: p.error } : {}),
+          }
         : null;
     case "child.created": {
       const c = e.payload as { child: string; name: string };
@@ -180,3 +187,15 @@ export const REFRESH_KINDS = new Set([
  */
 export const ownSender = (userId?: string | null) =>
   `user:${userId || "local"}`;
+
+/**
+ * The failure reason of the agent's latest turn, while no later message
+ * started another; null when it did not fail or gave no reason.
+ */
+export function latestTurnError(items: readonly ChatItem[]): string | null {
+  for (const item of [...items].reverse()) {
+    if (item.kind === "user") return null;
+    if (item.kind === "turn_end") return item.error ?? null;
+  }
+  return null;
+}
