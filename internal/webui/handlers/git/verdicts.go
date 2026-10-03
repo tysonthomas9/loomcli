@@ -31,9 +31,13 @@ type verdictRequest struct {
 	Reason  string       `json:"reason"`
 	Actor   review.Actor `json:"actor"`
 	Lead    string       `json:"lead"`
+	// ApproveOnly applies an approval without opening its PR (D29 Approve
+	// only). By default an approval opens the PR as soon as it applies.
+	ApproveOnly bool `json:"approve_only"`
 }
 
 var followApproved = apply.FollowLocal
+var publishApproved = publish.PublishApproved
 var hasWorkingArea = func(ctx context.Context, store *review.Local, workspace, lead string) (bool, error) {
 	areas, err := store.WorkingAreas(ctx, workspace, lead)
 	return len(areas) > 0, err
@@ -66,8 +70,8 @@ func handleVerdictWithPublisher(w http.ResponseWriter, req *http.Request, publis
 			body.Lead = body.Actor.ID
 		}
 	}
-	v, err := store.SubmitForLead(req.Context(), req.PathValue("ws"), req.PathValue("change"), number,
-		body.HeadSHA, body.Verdict, body.Reason, body.Actor, body.Lead)
+	v, err := store.SubmitForLeadPublishing(req.Context(), req.PathValue("ws"), req.PathValue("change"), number,
+		body.HeadSHA, body.Verdict, body.Reason, body.Actor, body.Lead, !body.ApproveOnly)
 	if err != nil {
 		writeReviewError(w, err)
 		return
@@ -120,7 +124,41 @@ func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local
 			}
 		}
 	}
-	handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": verdict, "status": status})
+	response := map[string]any{"success": true, "data": verdict, "status": status}
+	if verdict.Publish && available {
+		outcome, err := publishVerdict(req.Context(), verdict, lead)
+		if err != nil {
+			// The approval and apply stand; the background reconciler retries the PR.
+			handler.WriteJSON(w, http.StatusConflict, map[string]any{"success": false,
+				"error": "publish_failed", "message": err.Error(), "status": status, "publish": outcome})
+			return
+		}
+		if outcome.Status == "published" {
+			response["status"] = "published"
+		}
+		if outcome.Status != "" {
+			response["publish"] = outcome
+		}
+	}
+	handler.WriteJSON(w, http.StatusOK, response)
+}
+
+// publishVerdict opens the PR an Approve and create PR verdict asked for once
+// its change is applied; a held apply leaves the intent for the reconciler.
+func publishVerdict(ctx context.Context, verdict loomgit.Verdict, lead string) (publish.ApprovalOutcome, error) {
+	outcomes, err := publishApproved(ctx, verdict.Workspace, lead)
+	for _, outcome := range outcomes {
+		if outcome.Change == verdict.Change {
+			if err != nil && outcome.Status != "pending" {
+				// Another change's publish failed; this one is settled.
+				err = nil
+			}
+			return outcome, err
+		}
+	}
+	// Not published yet (held, or the journal could not be read): the
+	// reconciler retries it, so the approval itself still succeeded.
+	return publish.ApprovalOutcome{}, nil
 }
 
 func handleFollowing(w http.ResponseWriter, req *http.Request) {

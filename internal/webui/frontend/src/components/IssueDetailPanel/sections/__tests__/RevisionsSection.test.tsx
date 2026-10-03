@@ -6,15 +6,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/types";
 import { RevisionsSection } from "../RevisionsSection";
 
-const { applyRevision, getTaskRevisions, submitRevisionVerdict } = vi.hoisted(
-  () => ({
-    applyRevision: vi.fn(),
-    getTaskRevisions: vi.fn(),
-    submitRevisionVerdict: vi.fn(),
-  }),
-);
+const {
+  applyRevision,
+  createRevisionPR,
+  getTaskRevisions,
+  submitRevisionVerdict,
+} = vi.hoisted(() => ({
+  applyRevision: vi.fn(),
+  createRevisionPR: vi.fn(),
+  getTaskRevisions: vi.fn(),
+  submitRevisionVerdict: vi.fn(),
+}));
 vi.mock("@/api/git/revisions", () => ({
   applyRevision,
+  createRevisionPR,
   getTaskRevisions,
   submitRevisionVerdict,
 }));
@@ -48,7 +53,9 @@ describe("RevisionsSection", () => {
         { ...revision, verdict: "approve", applied: true },
       ]);
     render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve and create PR" }),
+    );
     expect(
       await screen.findByText(
         "Approved: Apply to create the lead working area",
@@ -60,6 +67,7 @@ describe("RevisionsSection", () => {
       "approve",
       "",
       "lead-a",
+      false,
     );
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(await screen.findByText("Applied")).toBeInTheDocument();
@@ -88,7 +96,9 @@ describe("RevisionsSection", () => {
       }),
     );
     render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve and create PR" }),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Apply" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "create the lead agent first",
@@ -103,7 +113,9 @@ describe("RevisionsSection", () => {
       "approved_waiting_for_working_area",
     );
     render(<RevisionsSection workspaceId="W" taskId="T" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve and create PR" }),
+    );
     expect(
       await screen.findByText("Approved: Apply needs a single workspace lead"),
     ).toBeInTheDocument();
@@ -113,7 +125,9 @@ describe("RevisionsSection", () => {
 
   it("records approval for the displayed revision and exact head", async () => {
     render(<RevisionsSection workspaceId="W" taskId="T" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve and create PR" }),
+    );
     await waitFor(() =>
       expect(submitRevisionVerdict).toHaveBeenCalledWith(
         "W",
@@ -121,6 +135,7 @@ describe("RevisionsSection", () => {
         "approve",
         "",
         undefined,
+        false,
       ),
     );
   });
@@ -230,7 +245,7 @@ describe("RevisionsSection", () => {
     const view = render(<RevisionsSection workspaceId="W" taskId="T" />);
     fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
     expect(await screen.findByText("reject")).toBeInTheDocument();
-    for (const name of ["Approve", "Reject", "Override"])
+    for (const name of ["Approve and create PR", "Reject", "Override"])
       expect(screen.getByRole("button", { name })).toBeDisabled();
     view.unmount();
 
@@ -240,7 +255,7 @@ describe("RevisionsSection", () => {
     ]);
     render(<RevisionsSection workspaceId="W" taskId="T" />);
     expect(await screen.findByText("Awaiting review")).toBeInTheDocument();
-    for (const name of ["Approve", "Reject", "Override"]) {
+    for (const name of ["Approve and create PR", "Reject", "Override"]) {
       const [decided, fresh] = screen.getAllByRole("button", { name });
       expect(decided).toBeDisabled();
       expect(fresh).toBeEnabled();
@@ -251,8 +266,83 @@ describe("RevisionsSection", () => {
     getTaskRevisions.mockResolvedValue([{ ...revision, incomplete: true }]);
     render(<RevisionsSection workspaceId="W" taskId="T" />);
     expect(await screen.findByText("Incomplete capture")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Override" })).toBeDisabled();
+  });
+
+  it("Approve only is in the dropdown and applies without opening a PR", async () => {
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "More approve options" }),
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Approve only" }));
+    await waitFor(() =>
+      expect(submitRevisionVerdict).toHaveBeenCalledWith(
+        "W",
+        revision,
+        "approve",
+        "",
+        "lead-a",
+        true,
+      ),
+    );
+  });
+
+  it("offers Create PR for an approved, applied change with no PR", async () => {
+    getTaskRevisions.mockResolvedValue([
+      { ...revision, verdict: "approve", applied: true },
+    ]);
+    createRevisionPR.mockResolvedValue(undefined);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create PR" }));
+    await waitFor(() =>
+      expect(createRevisionPR).toHaveBeenCalledWith("W", "lead-a", "C"),
+    );
+  });
+
+  it("shows the open PR and no Approve only once the PR exists", async () => {
+    getTaskRevisions.mockResolvedValue([
+      {
+        ...revision,
+        pr_number: 12,
+        pr_url: "https://github.com/o/r/pull/12",
+      },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    expect(await screen.findByRole("link", { name: "#12" })).toHaveAttribute(
+      "href",
+      "https://github.com/o/r/pull/12",
+    );
+    expect(
+      screen.queryByRole("button", { name: "More approve options" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Create PR" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says why an approved change has no PR", async () => {
+    getTaskRevisions.mockResolvedValue([
+      {
+        ...revision,
+        verdict: "approve",
+        applied: true,
+        publish_status: "not_published",
+        publish_reason:
+          "not published: no provider (the repository has no origin remote)",
+      },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    expect(
+      await screen.findByText(
+        "not published: no provider (the repository has no origin remote)",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Create PR" }),
+    ).toBeInTheDocument();
   });
 });

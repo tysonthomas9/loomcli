@@ -3360,6 +3360,22 @@ export interface components {
       applied: boolean;
       /** @description True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed. */
       needs_working_area: boolean;
+      /** @description URL of the change's open PR, once published. */
+      pr_url?: string;
+      /** @description Number of the change's open PR, once published. */
+      pr_number?: number;
+      /**
+       * @description Outcome of this revision's Approve and create PR request, if it made one.
+       * @enum {string}
+       */
+      publish_status?:
+        | "pending"
+        | "waiting"
+        | "published"
+        | "not_published"
+        | "superseded";
+      /** @description Why the PR is not open yet, such as "not published - no provider" or the last publish error. */
+      publish_reason?: string;
     };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {
@@ -7900,6 +7916,8 @@ export interface operations {
           verdict: "approve" | "reject" | "override";
           reason?: string;
           lead?: string;
+          /** @description Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29). */
+          approve_only?: boolean;
           actor: {
             /** @enum {string} */
             kind: "human" | "agent" | "lead";
@@ -7909,7 +7927,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Recorded SHA-bound verdict */
+      /** @description Recorded SHA-bound verdict. `status` is published when the PR opened; `publish` reports the PR outcome (published, not_published with the reason, waiting, pending). */
       200: {
         headers: {
           [name: string]: unknown;

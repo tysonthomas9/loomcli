@@ -35,6 +35,10 @@ func (l *Local) SubmitForLead(ctx context.Context, workspace, change string, num
 	return SubmitForLead(ctx, l.store, workspace, change, number, headSHA, kind, reason, actor, lead)
 }
 
+func (l *Local) SubmitForLeadPublishing(ctx context.Context, workspace, change string, number int, headSHA, kind, reason string, actor Actor, lead string, publish bool) (loomgit.Verdict, error) {
+	return SubmitForLeadPublishing(ctx, l.store, workspace, change, number, headSHA, kind, reason, actor, lead, publish)
+}
+
 func (l *Local) FollowingPaused(ctx context.Context, workspace, lead string) (bool, error) {
 	return l.store.FollowingPaused(ctx, workspace, lead)
 }
@@ -58,6 +62,13 @@ type TaskRevision struct {
 	// NeedsWorkingArea marks an approved, unapplied revision whose target lead
 	// has no working area yet, so the UI can offer Apply after a reload.
 	NeedsWorkingArea bool `json:"needs_working_area"`
+	// PRURL and PRNumber name the change's open PR, if one was published.
+	PRURL    string `json:"pr_url,omitempty"`
+	PRNumber int    `json:"pr_number,omitempty"`
+	// PublishStatus is this revision's Approve and create PR outcome: pending,
+	// waiting, published, not_published or superseded; PublishReason says why.
+	PublishStatus string `json:"publish_status,omitempty"`
+	PublishReason string `json:"publish_reason,omitempty"`
 }
 
 func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]TaskRevision, error) {
@@ -88,6 +99,9 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 			if i.NeedsWorkingArea, err = l.needsWorkingArea(ctx, workspace, lead, r.Change, r.Number); err != nil {
 				return nil, err
 			}
+		}
+		if err := l.addPublishState(ctx, workspace, &i); err != nil {
+			return nil, err
 		}
 		out = append(out, i)
 	}
@@ -125,4 +139,20 @@ func (l *Local) needsWorkingArea(ctx context.Context, workspace, only, change st
 
 func IsNotFound(err error) bool {
 	return errors.Is(err, journal.ErrNotFound) || errors.Is(err, os.ErrNotExist)
+}
+
+func (l *Local) addPublishState(ctx context.Context, workspace string, i *TaskRevision) error {
+	publication, found, err := l.store.Publication(ctx, workspace, i.ChangeID)
+	if err != nil {
+		return err
+	}
+	if found && publication.Phase == "done" && publication.PRNumber > 0 {
+		i.PRURL, i.PRNumber = publication.PRURL, publication.PRNumber
+	}
+	intent, found, err := l.store.LatestApprovalPublication(ctx, workspace, i.ChangeID, i.Number)
+	if err != nil || !found {
+		return err
+	}
+	i.PublishStatus, i.PublishReason = intent.Status, intent.Reason
+	return nil
 }

@@ -926,6 +926,33 @@ func (e PullRequestReviewRequestEvent) Valid() bool {
 	}
 }
 
+// Defines values for ReviewRevisionPublishStatus.
+const (
+	NotPublished ReviewRevisionPublishStatus = "not_published"
+	Pending      ReviewRevisionPublishStatus = "pending"
+	Published    ReviewRevisionPublishStatus = "published"
+	Superseded   ReviewRevisionPublishStatus = "superseded"
+	Waiting      ReviewRevisionPublishStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the ReviewRevisionPublishStatus enum.
+func (e ReviewRevisionPublishStatus) Valid() bool {
+	switch e {
+	case NotPublished:
+		return true
+	case Pending:
+		return true
+	case Published:
+		return true
+	case Superseded:
+		return true
+	case Waiting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RuntimeReadyResponseMode.
 const (
 	Daemon RuntimeReadyResponseMode = "daemon"
@@ -2970,11 +2997,26 @@ type ReviewRevision struct {
 	Incomplete bool   `json:"incomplete"`
 
 	// NeedsWorkingArea True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed.
-	NeedsWorkingArea bool    `json:"needs_working_area"`
-	Number           int     `json:"number"`
-	Outcome          string  `json:"outcome"`
-	Verdict          *string `json:"verdict,omitempty"`
+	NeedsWorkingArea bool   `json:"needs_working_area"`
+	Number           int    `json:"number"`
+	Outcome          string `json:"outcome"`
+
+	// PrNumber Number of the change's open PR, once published.
+	PrNumber *int `json:"pr_number,omitempty"`
+
+	// PrUrl URL of the change's open PR, once published.
+	PrUrl *string `json:"pr_url,omitempty"`
+
+	// PublishReason Why the PR is not open yet, such as "not published - no provider" or the last publish error.
+	PublishReason *string `json:"publish_reason,omitempty"`
+
+	// PublishStatus Outcome of this revision's Approve and create PR request, if it made one.
+	PublishStatus *ReviewRevisionPublishStatus `json:"publish_status,omitempty"`
+	Verdict       *string                      `json:"verdict,omitempty"`
 }
+
+// ReviewRevisionPublishStatus Outcome of this revision's Approve and create PR request, if it made one.
+type ReviewRevisionPublishStatus string
 
 // ReviewerConversation defines model for ReviewerConversation.
 type ReviewerConversation struct {
@@ -3654,10 +3696,13 @@ type SubmitRevisionVerdictJSONBody struct {
 		Id   string                                 `json:"id"`
 		Kind SubmitRevisionVerdictJSONBodyActorKind `json:"kind"`
 	} `json:"actor"`
-	HeadSha string                               `json:"head_sha"`
-	Lead    *string                              `json:"lead,omitempty"`
-	Reason  *string                              `json:"reason,omitempty"`
-	Verdict SubmitRevisionVerdictJSONBodyVerdict `json:"verdict"`
+
+	// ApproveOnly Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29).
+	ApproveOnly *bool                                `json:"approve_only,omitempty"`
+	HeadSha     string                               `json:"head_sha"`
+	Lead        *string                              `json:"lead,omitempty"`
+	Reason      *string                              `json:"reason,omitempty"`
+	Verdict     SubmitRevisionVerdictJSONBodyVerdict `json:"verdict"`
 }
 
 // SubmitRevisionVerdictJSONBodyActorKind defines parameters for SubmitRevisionVerdict.

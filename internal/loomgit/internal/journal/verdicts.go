@@ -127,6 +127,13 @@ func (s *SQLite) RecordVerdict(ctx context.Context, v loomgit.Verdict) (loomgit.
 			v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
 			return v, err
 		}
+		if v.Publish {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO approval_publications(workspace,lead,change_id,revision,verdict_id)
+				VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
+				v.Workspace, v.TargetLead, v.Change, v.Number, v.ID); err != nil {
+				return v, err
+			}
+		}
 	}
 	if err := queueVerdictEvent(ctx, tx, v); err != nil {
 		return v, err

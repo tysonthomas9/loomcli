@@ -32,6 +32,7 @@ export async function submitRevisionVerdict(
   verdict: "approve" | "reject" | "override",
   reason: string,
   lead?: string,
+  approveOnly?: boolean,
 ): Promise<string | undefined> {
   const { data, error, response } = await api.POST(
     "/api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict",
@@ -48,6 +49,7 @@ export async function submitRevisionVerdict(
         verdict,
         reason,
         ...(lead ? { lead } : {}),
+        ...(approveOnly ? { approve_only: true } : {}),
         actor: { kind: "human", id: "local-user" },
       },
     },
@@ -69,5 +71,21 @@ export async function applyRevision(
       lead,
     },
   });
+  if (error) throw apiErrorFromResponse(error, response);
+}
+
+/** Create PR for a change already applied in the lead's working area (D29). */
+export async function createRevisionPR(
+  workspaceId: string,
+  lead: string,
+  changeId: string,
+): Promise<void> {
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/agents/{name}/git/pr",
+    {
+      params: { path: { ws: workspaceId, name: lead } },
+      body: { change_id: changeId },
+    },
+  );
   if (error) throw apiErrorFromResponse(error, response);
 }

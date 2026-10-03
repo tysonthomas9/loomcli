@@ -30,6 +30,9 @@ func createAppliedSchema(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	if err := createApprovalPublicationSchema(db); err != nil {
+		return err
+	}
 	return createEpicPublicationSchema(db)
 }
 
@@ -356,4 +359,100 @@ func (s *SQLite) PendingEpicPublications(ctx context.Context) ([]EpicPublication
 func (s *SQLite) CompleteEpicPublication(ctx context.Context, workspace, runID string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE epic_publications SET done=1 WHERE workspace=? AND run_id=?`, workspace, runID)
 	return err
+}
+
+// ApprovalPublication is the durable "open the PR once applied" intent an
+// Approve and create PR verdict records (D29). Status is pending until the
+// change's PR opens (published), the workspace has no provider
+// (not_published), the approval is replaced by a newer one (superseded), or a
+// trunk-mode dependency has not landed (waiting, retried like pending).
+type ApprovalPublication struct {
+	Workspace, Lead, Change, Status, Reason, PRURL string
+	Revision, VerdictID, PRNumber                  int
+	AttemptedAt                                    int64
+}
+
+func createApprovalPublicationSchema(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS approval_publications (
+		workspace TEXT NOT NULL, lead TEXT NOT NULL, change_id TEXT NOT NULL,
+		revision INTEGER NOT NULL, verdict_id INTEGER NOT NULL,
+		status TEXT NOT NULL DEFAULT 'pending', reason TEXT NOT NULL DEFAULT '',
+		pr_url TEXT NOT NULL DEFAULT '', pr_number INTEGER NOT NULL DEFAULT 0,
+		attempted_at INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(workspace, lead, change_id, revision)
+	);
+	CREATE INDEX IF NOT EXISTS approval_publications_open ON approval_publications(status, workspace, lead);`)
+	return err
+}
+
+const approvalPublicationColumns = `workspace,lead,change_id,revision,verdict_id,status,reason,pr_url,pr_number,attempted_at`
+
+// OpenApprovalPublications lists intents still waiting to publish, oldest
+// approval first. An empty workspace or lead matches every one.
+func (s *SQLite) OpenApprovalPublications(ctx context.Context, workspace, lead string) ([]ApprovalPublication, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+approvalPublicationColumns+` FROM approval_publications
+		WHERE status IN ('pending','waiting') AND (?='' OR workspace=?) AND (?='' OR lead=?)
+		ORDER BY verdict_id`, workspace, workspace, lead, lead)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ApprovalPublication
+	for rows.Next() {
+		item, err := scanApprovalPublication(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// LatestApprovalPublication returns the newest intent recorded for a change revision.
+func (s *SQLite) LatestApprovalPublication(ctx context.Context, workspace, change string, revision int) (ApprovalPublication, bool, error) {
+	item, err := scanApprovalPublication(s.db.QueryRowContext(ctx, `SELECT `+approvalPublicationColumns+`
+		FROM approval_publications WHERE workspace=? AND change_id=? AND revision=?
+		ORDER BY verdict_id DESC LIMIT 1`, workspace, change, revision))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ApprovalPublication{}, false, nil
+	}
+	return item, err == nil, err
+}
+
+// SetApprovalPublication records an attempt's outcome. It only moves an open
+// intent, so a concurrent publisher that already finished it wins.
+func (s *SQLite) SetApprovalPublication(ctx context.Context, item ApprovalPublication) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE approval_publications SET status=?,reason=?,pr_url=?,pr_number=?,attempted_at=?
+		WHERE workspace=? AND lead=? AND change_id=? AND revision=? AND status IN ('pending','waiting')`,
+		item.Status, item.Reason, item.PRURL, item.PRNumber, item.AttemptedAt,
+		item.Workspace, item.Lead, item.Change, item.Revision)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrStale
+	}
+	return nil
+}
+
+func scanApprovalPublication(row interface{ Scan(...any) error }) (ApprovalPublication, error) {
+	var item ApprovalPublication
+	err := row.Scan(&item.Workspace, &item.Lead, &item.Change, &item.Revision, &item.VerdictID,
+		&item.Status, &item.Reason, &item.PRURL, &item.PRNumber, &item.AttemptedAt)
+	return item, err
+}
+
+// ApprovalFollowStatus reports how the approval behind an intent was followed.
+func (s *SQLite) ApprovalFollowStatus(ctx context.Context, workspace, lead, change string, revision int) (string, error) {
+	var status string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM approval_follow
+		WHERE workspace=? AND lead=? AND change_id=? AND revision=?`, workspace, lead, change, revision).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return status, err
 }
