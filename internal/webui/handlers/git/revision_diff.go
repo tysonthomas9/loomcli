@@ -83,8 +83,8 @@ var openRevisionReader = func() (*gitread.Reader, func() error, error) {
 	return gitread.OpenLocal(storeadapter.ResolveRepoPath)
 }
 
-// HandleTaskDiff serves one task's diff: its newest revision against the
-// layer below it in the lead's stack, the same as its PR.
+// HandleTaskDiff serves a task's diff per repo: each repo's newest revision
+// against the layer below it in the lead's stack, the same as its PR.
 func HandleTaskDiff() http.HandlerFunc {
 	return handleTaskDiff(func() (*gitread.Reader, func() error, error) { return openRevisionReader() })
 }
@@ -101,7 +101,7 @@ func handleTaskDiff(open func() (*gitread.Reader, func() error, error)) http.Han
 			return
 		}
 		defer func() { _ = closeStore() }()
-		result, err := reader.TaskDiff(req.Context(), workspace, req.PathValue("id"), req.URL.Query().Get("lead"))
+		result, err := reader.TaskDiffs(req.Context(), workspace, req.PathValue("id"), req.URL.Query().Get("lead"))
 		if err != nil {
 			revisionError(w, err)
 			return
