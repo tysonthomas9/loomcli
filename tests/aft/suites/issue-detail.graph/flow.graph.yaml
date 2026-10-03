@@ -113,10 +113,10 @@ graph:
     reload-blocked-board: blocked-on-board
 
   blocked-on-board:
-    agent-claim-refused-for-blocked-child: blocked-child-claim-refused
+    cli-claim-refused-for-blocked-child: blocked-child-claim-refused
 
   # Claim under an epic (STACKED-PRS-29): the human builds the epic and child in
-  # the UI; the agent's claim is an API step (see transitions/claim.yaml).
+  # the UI; the claim is a `loom data claim` CLI step (see transitions/claim.yaml).
   claim-epic-panel-ready:
     open-child-form-under-epic: claim-child-form-ready
 
@@ -124,7 +124,7 @@ graph:
     create-epic-child: epic-child-panel-ready
 
   epic-child-panel-ready:
-    agent-claims-ready-child: in-progress-detail
+    cli-claims-ready-child: in-progress-detail
     close-epic-child-panel: issue-card-ready
     create-epic-blocker: epic-blocker-panel-ready
 
@@ -138,7 +138,7 @@ graph:
     reload-epic-blocked-board: child-blocked-by-epic-on-board
 
   child-blocked-by-epic-on-board:
-    agent-claim-refused-under-blocked-epic: epic-child-claim-refused
+    cli-claim-refused-under-blocked-epic: epic-child-claim-refused
 
 coverage:
   strategy: transition
@@ -161,7 +161,7 @@ coverage:
         - return-to-closed-board
 
     # Pins the blocker claim to the epic prefix; coverage may route it either way.
-    - name: agent-refused-blocked-child-under-open-epic
+    - name: cli-claim-refused-blocked-child-under-open-epic
       path:
         - open-kanban
         - open-create-modal
@@ -173,4 +173,4 @@ coverage:
         - reopen-original-from-blocker
         - add-blocking-dependency
         - reload-blocked-board
-        - agent-claim-refused-for-blocked-child
+        - cli-claim-refused-for-blocked-child

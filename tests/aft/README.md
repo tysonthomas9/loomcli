@@ -298,7 +298,7 @@ Product-correctness (`tests/aft/suites/`):
   rehydrated activity), board delivery, reconnect catch-up, and agent-driven lifecycle transitions.
 - `issue-create-ui`, `issue-detail`, `issue-detail.graph`, `comments`, and `markdown-safety`
   — human creation, the split graph pilot for complete detail-panel UI journeys
-  (including agent claims of a child task under an open or blocked epic),
+  (including `loom data claim` of a child task under an open or blocked epic),
   field/comment editing, API readbacks, activity ordering, and safe rendering.
 - `dependencies-graph`, `filters`, `views`, `table-bulk`, and `pages` — dependency/graph
   behavior, URL filtering, route/view switching, bulk actions, and page contracts.

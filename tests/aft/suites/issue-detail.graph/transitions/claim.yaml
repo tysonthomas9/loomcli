@@ -6,20 +6,29 @@ group: claim
 # STACKED-PRS-29 (PR #786): the claim endpoint must accept a ready child of an
 # open epic and refuse a child with an open blocker or a blocked epic.
 #
-# Every claim below is an API step because no UI control calls
-# POST /issues/{id}/claim: the old Start Work button is no longer mounted, and
-# the panel's agent picker sets status through PATCH and starts an agent, which
-# claims through the driver path and never reaches this endpoint's check.
-# The lookup before each claim is also an API step: the agent needs the
-# server-assigned id of the task the human created in the UI.
+# No agent runs in these transitions. The test itself runs `loom data claim`,
+# the command the agent prompts tell a self-selecting agent to use
+# (internal/cli/agent/prompts/task.md), through the built e2e loom binary with
+# LOOM_SERVER_URL set, so it goes to POST /api/workspaces/{ws}/issues/{id}/claim
+# and through the fixed claimability check.
+#
+# Why not a UI-started agent: the issue panel's agent picker sends
+# PATCH status=in_progress, which claims through fleet-db directly
+# (FleetBackend.Update -> fleet-db /claim) and never reaches the fixed check,
+# and the deterministic stack runs no agent daemon. Driving the picker would
+# pass on v5 and could not catch the bug (probe evidence in the review guide).
+#
+# The id lookup before each claim is an API step: the CLI needs the
+# server-assigned id of the task the human created in the UI, and AFT cannot
+# pass a value read from the page into a later step.
 
 transitions:
-  agent-claims-ready-child:
-    intent: An agent finds the ready child task under the open epic and claims it through the claim API.
-    actor: agent
-    via: api
+  cli-claims-ready-child:
+    intent: The test runs `loom data claim`, the command agents use, on the ready child task under the open epic and the server accepts it.
+    actor: system
+    via: cli
     steps:
-      # API: the agent looks up the id of the human-created child (oldest open task on this path).
+      # API: look up the id of the human-created child (oldest open task on this path).
       - api:
           method: "GET"
           path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues?status=open&type=task&limit=100"
@@ -29,23 +38,25 @@ transitions:
               equals: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
           save:
             - { from: "data.0.id", as: "claimChildId" }
-        intent: "An agent looks up the open child task the human created under the epic"
-      # API: no UI control calls the claim endpoint (Start Work removed; the agent picker claims via a different path).
-      - api:
-          method: "POST"
-          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:claimChildId}/claim"
-          status: 200
-          assert:
-            - path: "success"
-              equals: true
-        intent: "An agent claims the ready child task under the open epic"
+        intent: "The test looks up the id of the open child task the human created under the epic"
+      # CLI: no UI control reaches the claim endpoint's check; see the header.
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/claimChildId")"
+          out="$AFT_WORK_DIR/claim-ready-${AFT_CASE_ID}"
+          if ! LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" LOOM_SERVER_URL="$AFT_API_URL" \
+            "$AFT_LOOM_BIN" --workspace "${AFT_WS:-E2E-WS}" data claim "$id" > "$out.out" 2> "$out.err"; then
+            echo "loom data claim $id was refused:"; cat "$out.out" "$out.err"; exit 1
+          fi
+          grep -Fx "claimed $id" "$out.out"
+        intent: "The test runs `loom data claim` on the ready child task and the server accepts the claim"
 
-  agent-claim-refused-for-blocked-child:
-    intent: An agent tries to claim the child task that has an open blocker and is refused.
-    actor: agent
-    via: api
+  cli-claim-refused-for-blocked-child:
+    intent: The test runs `loom data claim` on the child task that has an open blocker and the server refuses it.
+    actor: system
+    via: cli
     steps:
-      # API: the agent looks up the id of the human-created child (created before its blocker).
+      # API: look up the id of the human-created child (created before its blocker).
       - api:
           method: "GET"
           path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues?status=open&type=task&limit=100"
@@ -55,20 +66,25 @@ transitions:
               equals: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
           save:
             - { from: "data.0.id", as: "blockedChildId" }
-        intent: "An agent looks up the open child task that the human blocked"
-      # API: no UI control calls the claim endpoint (Start Work removed; the agent picker claims via a different path).
-      - api:
-          method: "POST"
-          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:blockedChildId}/claim"
-          status: 409
-        intent: "An agent is refused the claim on the child task with an open blocker"
+        intent: "The test looks up the id of the open child task that the human blocked"
+      # CLI: no UI control reaches the claim endpoint's check; see the header.
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/blockedChildId")"
+          out="$AFT_WORK_DIR/claim-blocked-${AFT_CASE_ID}"
+          if LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" LOOM_SERVER_URL="$AFT_API_URL" \
+            "$AFT_LOOM_BIN" --workspace "${AFT_WS:-E2E-WS}" data claim "$id" > "$out.out" 2> "$out.err"; then
+            echo "loom data claim $id unexpectedly succeeded:"; cat "$out.out"; exit 1
+          fi
+          cat "$out.err"
+          grep -F "issue is blocked by open dependency" "$out.err"
+        intent: "The test runs `loom data claim` on the child task with an open blocker and the server refuses it"
 
-  agent-claim-refused-under-blocked-epic:
-    intent: An agent tries to claim the child task whose epic has an open blocker and is refused.
-    actor: agent
-    via: api
+  cli-claim-refused-under-blocked-epic:
+    intent: The test runs `loom data claim` on the child task whose epic has an open blocker and the server refuses it.
+    actor: system
+    via: cli
     steps:
-      # API: the agent looks up the id of the human-created child (created before the epic's blocker).
+      # API: look up the id of the human-created child (created before the epic's blocker).
       - api:
           method: "GET"
           path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues?status=open&type=task&limit=100"
@@ -78,10 +94,15 @@ transitions:
               equals: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
           save:
             - { from: "data.0.id", as: "epicBlockedChildId" }
-        intent: "An agent looks up the open child task under the blocked epic"
-      # API: no UI control calls the claim endpoint (Start Work removed; the agent picker claims via a different path).
-      - api:
-          method: "POST"
-          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:epicBlockedChildId}/claim"
-          status: 409
-        intent: "An agent is refused the claim on the child task whose epic is blocked"
+        intent: "The test looks up the id of the open child task under the blocked epic"
+      # CLI: no UI control reaches the claim endpoint's check; see the header.
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/epicBlockedChildId")"
+          out="$AFT_WORK_DIR/claim-epic-blocked-${AFT_CASE_ID}"
+          if LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" LOOM_SERVER_URL="$AFT_API_URL" \
+            "$AFT_LOOM_BIN" --workspace "${AFT_WS:-E2E-WS}" data claim "$id" > "$out.out" 2> "$out.err"; then
+            echo "loom data claim $id unexpectedly succeeded:"; cat "$out.out"; exit 1
+          fi
+          cat "$out.err"
+          grep -F "issue is blocked by open dependency" "$out.err"
+        intent: "The test runs `loom data claim` on the child task whose epic is blocked and the server refuses it"

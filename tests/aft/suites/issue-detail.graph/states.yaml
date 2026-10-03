@@ -263,7 +263,7 @@ states:
       - expect: { count: { selector: "[data-testid=activity-comment]", equals: 1 } }
 
   in-progress-detail:
-    intent: The open panel reflects the in-progress status set by the human or by an agent's claim.
+    intent: The open panel reflects the in-progress status set by the human or by a `loom data claim` run.
     join: true
     assert:
       - wait:
