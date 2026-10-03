@@ -6,11 +6,21 @@ processes.
 
 Full E2E runbook: `../../docs/testing/local-mode-podman-e2e.md`
 
-Run it from the repo root:
+Run it from the repo root, as your own project on free ports:
 
 ```sh
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-<you> \
+LOCAL_MODE_FLEETDB_PORT=8680 LOCAL_MODE_API_PORT=8682 LOCAL_MODE_UI_PORT=8683 \
 make local-mode-up
 ```
+
+Every `make local-mode-*-up` target runs `preflight.sh` first. It fails fast,
+naming the knob, when `LOCAL_MODE_FLEETDB_PORT`, `LOCAL_MODE_API_PORT` or
+`LOCAL_MODE_UI_PORT` (default 8280/8282/8283) is already listening. A re-up
+of a project that already has containers skips the check.
+
+The examples below omit the project and port knobs for brevity; add them to
+each `up` command.
 
 To run the same stack with real Codex CLI agents:
 
@@ -96,7 +106,8 @@ Troubleshooting).
 Agent API variant (OpenCode Leads on a scripted fake model):
 
 `make local-mode-agents-up` runs the same stack, with `loom-local` built from
-`Dockerfile.agents` on top of the default image. It adds the pinned OpenCode
+the `agents` target of `Dockerfile`, in the same build as its `local-mode`
+stage (no separately tagged base image). It adds the pinned OpenCode
 2.0.19 build (b30c4d0, built as `aft.yml` does; the first build takes several
 minutes) and the AFT fake model (`tests/aft/fixtures/fake-model`), which
 listens on 127.0.0.1:4010 inside the container. Serve's OpenCode talks only to
@@ -114,8 +125,8 @@ LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" \
 make local-mode-agents-up
 ```
 
-- The Caddy service mounts the frontend dist from the host, and it is built
-  only when it's missing. Run `make build-frontend` after pulling.
+- The Caddy service mounts the frontend dist from the host. The `up` targets
+  rebuild it when it is missing or older than any frontend source.
 - Under Podman on macOS, run from a path the VM shares (`/Users/...` or
   `/private/tmp/...`, not `/tmp/...`).
 - From a git worktree, also point `fleet-db` at a fleet-db checkout through
@@ -259,6 +270,14 @@ LOCAL_MODE_COMPOSE_FILES=/tmp/fleetdb-review.yml make local-mode-up
 Image tags default to the Compose project name for parallel builds. Override
 `LOCAL_MODE_FLEETDB_IMAGE`, `LOCAL_MODE_LOOM_IMAGE`, or
 `LOCAL_MODE_LOOM_CODEX_IMAGE` only when a run needs explicit image tags.
+
+Each built image carries the label `io.loom.local-mode.project=<project>`, so
+two projects built from the same sources get different image IDs. Removing
+one project's image (`podman rmi <project>-loom:latest`) never removes
+another project's. Each image is built in one step (`loom-local` with
+`--target local-mode` or `--target agents`), so a `podman image prune` that
+runs between two make steps cannot delete a base image that a later step
+needs.
 
 Troubleshooting:
 

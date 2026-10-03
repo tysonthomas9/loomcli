@@ -7,7 +7,7 @@
 services:
   loom-local:
     image: ${LOCAL_MODE_LOOM_AGENTS_IMAGE:-loomcli-local-mode-loom-agents:latest}
+    # One build: the `agents` stage layers on the `local-mode` stage of the
+    # same Dockerfile, so no separately tagged base image is needed.
     build:
-      dockerfile: test/local-mode/Dockerfile.agents
-      args:
-        LOOM_BASE_IMAGE: ${LOCAL_MODE_LOOM_IMAGE:-loomcli-local-mode-loom:latest}
+      target: agents

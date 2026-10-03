@@ -25,6 +25,7 @@ export LOCAL_MODE_LOOM_IMAGE
 export LOCAL_MODE_LOOM_CODEX_IMAGE
 export LOCAL_MODE_LOOM_CLAUDE_IMAGE
 export LOCAL_MODE_LOOM_AGENTS_IMAGE
+export LOCAL_MODE_COMPOSE_PROJECT
 LOCAL_MODE_COMPOSE_SELECT = \
 	if [ "$(strip $(LOCAL_MODE_COMPOSE))" != "" ]; then \
 	  compose="$(LOCAL_MODE_COMPOSE)"; \
@@ -172,9 +173,17 @@ fleetdb-empty-down:
 # sidecar. Docker silently substitutes an empty directory when the bind-mount
 # source is missing, so a stack started from a clean checkout comes up "healthy"
 # and serves 404 with nothing in any log. Build it once on the host instead.
+# Rebuilds the dist when it is missing or older than any frontend source, so a
+# stack serving the host dist (local-mode, fleetdb-regression) never shows a
+# stale UI after a pull or a branch switch.
+FRONTEND_DIST_SOURCES = $(FRONTEND_DIR)/src $(FRONTEND_DIR)/public $(FRONTEND_DIR)/index.html $(FRONTEND_DIR)/package.json $(FRONTEND_DIR)/package-lock.json $(FRONTEND_DIR)/vite.config.ts $(FRONTEND_DIR)/tsconfig.json
 ensure-frontend-dist:
-	@if [ ! -f "$(FRONTEND_DIR)/dist/index.html" ]; then \
+	@dist="$(FRONTEND_DIR)/dist/index.html"; \
+	if [ ! -f "$$dist" ]; then \
 	  echo "Web UI dist is missing; building it once on the host..."; \
+	  $(MAKE) build-frontend; \
+	elif [ -n "$$(find $(FRONTEND_DIST_SOURCES) -newer "$$dist" -print 2>/dev/null | head -n 1)" ]; then \
+	  echo "Web UI dist is older than the frontend sources; rebuilding it on the host..."; \
 	  $(MAKE) build-frontend; \
 	fi
 
@@ -277,18 +286,21 @@ local-mode-up: local-mode-frontend-dist
 	@echo "Starting local-mode dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 local-mode-codex-up: local-mode-frontend-dist
 	@echo "Starting local-mode Codex dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_CODEX_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_CODEX_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 local-mode-claude-up: local-mode-frontend-dist
 	@echo "Starting local-mode Claude dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_CLAUDE_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_CLAUDE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 # Daemon TS leaf routed to Daytona: a claimed task runs inside a real Daytona
@@ -299,18 +311,20 @@ local-mode-daytona-up: local-mode-frontend-dist
 	@echo "Starting local-mode Daytona dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 # Agent API stack: the default stack plus the pinned OpenCode 2.0.19 build and
 # the scripted fake model, so Leads run in the browser with no provider auth.
-# Builds the default loom image first (the agents image layers on it), and
-# refuses the default project name so it never replaces the dogfood stack.
+# The agents image is the `agents` target of test/local-mode/Dockerfile, built
+# in one step on top of its `local-mode` stage. Refuses the default project
+# name so it never replaces the dogfood stack.
 local-mode-agents-up: local-mode-frontend-dist
 	@test "$(LOCAL_MODE_COMPOSE_PROJECT)" != loomcli-local-mode || { echo "set LOCAL_MODE_COMPOSE_PROJECT to your own project; loomcli-local-mode is the dogfood stack" >&2; exit 1; }
 	@echo "Starting local-mode Agent API stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	$$compose $(LOCAL_MODE_COMPOSE_ARGS) build loom-local; \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 local-mode-agents-down:

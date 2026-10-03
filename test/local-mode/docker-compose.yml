@@ -47,6 +47,10 @@ services:
     build:
       context: ../../../fleet-db
       dockerfile: deploy/docker/Dockerfile
+      # Per-project label: projects built from identical sources get distinct
+      # image IDs, so removing one project's tag never removes another's.
+      labels:
+        io.loom.local-mode.project: ${LOCAL_MODE_COMPOSE_PROJECT:-loomcli-local-mode}
     depends_on:
       redis:
         condition: service_healthy
@@ -72,6 +76,9 @@ services:
     build:
       context: ../..
       dockerfile: test/local-mode/Dockerfile
+      target: local-mode
+      labels:
+        io.loom.local-mode.project: ${LOCAL_MODE_COMPOSE_PROJECT:-loomcli-local-mode}
     depends_on:
       fleet-db:
         condition: service_started
