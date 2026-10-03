@@ -165,8 +165,8 @@ const server = createServer(async (request, response) => {
       if (remoteFor(target.repo)) {
         try {
           execFileSync("git", [`--git-dir=${remoteFor(target.repo)}`, "update-ref", "refs/heads/main", sha]);
-        } catch {
-          return send(response, 409, { message: "merge head is not in this repository's remote" });
+        } catch (error) {
+          return send(response, 409, { message: `merge head ${sha} is not in ${remoteFor(target.repo)}: ${String(error.stderr || error.message).trim()}` });
         }
       }
       for (const number of numbers) {
