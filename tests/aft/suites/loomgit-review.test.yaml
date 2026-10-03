@@ -89,7 +89,8 @@ tests:
           test "$status" = 409;
           grep -q 'review_required' "$AFT_WORK_DIR/review-unapproved-apply.json"
         intent: "An unapproved revision is refused by the HTTP Apply gate before any working-area swap"
-      - click: { role: button, name: Approve, exact: true }
+      - click: { role: button, name: More approve options, exact: true }
+      - click: { role: menuitem, name: Approve only, exact: true }
       - api:
           method: "GET"
           path: "/api/workspaces/E2E-WS-REVIEW/issues/${var:reviewTaskId}/revisions"
@@ -204,7 +205,8 @@ tests:
           "$AFT_BASE_URL/ws/E2E-WS-REVIEW/issues/$(cat "$AFT_WORK_DIR/pendingTaskId")"
         intent: "Open the second task in the review UI"
       - wait: { text: Revisions }
-      - click: { role: button, name: Approve, exact: true }
+      - click: { role: button, name: More approve options, exact: true }
+      - click: { role: menuitem, name: Approve only, exact: true }
       - run: >-
           repo="$AFT_WORK_DIR/review-repo";
           git -C "$repo" rev-parse refs/heads/loom/ws/E2E-WS-REVIEW/interactive/lead > "$AFT_WORK_DIR/pending-lead-before";

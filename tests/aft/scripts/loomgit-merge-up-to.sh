@@ -79,7 +79,7 @@ for layer in 1 2 3 4; do
   read -r change revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"],item["head_sha"])' "$case_dir/revisions-$layer.json")
   printf '%s\n' "$change" > "$case_dir/change-$layer.id"
   curl -sS --fail-with-body -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
-    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$case_dir/verdict-$layer.json"
+    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"approve_only\":true,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$case_dir/verdict-$layer.json"
   curl -fsS -X POST "$api/git/apply" -H 'Content-Type: application/json' \
     -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}" > "$case_dir/apply-$layer.json"
   grep -q '"success":true' "$case_dir/apply-$layer.json"
@@ -91,7 +91,7 @@ for layer in 1 2 3 4; do
   curl -fsS "$api/issues/$task/revisions" > "$case_dir/applied-revisions-$layer.json"
   read -r applied_revision applied_sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["number"],item["head_sha"])' "$case_dir/applied-revisions-$layer.json")
   curl -fsS -X POST "$api/changes/$change/revisions/$applied_revision/verdict" -H 'Content-Type: application/json' \
-    -d "{\"head_sha\":\"$applied_sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null
+    -d "{\"head_sha\":\"$applied_sha\",\"verdict\":\"approve\",\"approve_only\":true,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null
 done
 
 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" pr-stack aft-chain lead \

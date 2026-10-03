@@ -72,7 +72,7 @@ tests:
           api="$AFT_BASE_URL/api/workspaces/E2E-WS-TRUNK";
           read change revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"],item["head_sha"])' "$AFT_WORK_DIR/trunk-revisions.json");
           curl -sf -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json'
-          -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$AFT_WORK_DIR/trunk-approve.json";
+          -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"approve_only\":true,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" > "$AFT_WORK_DIR/trunk-approve.json";
           grep -q '"status":"applied"' "$AFT_WORK_DIR/trunk-approve.json";
           test "$(git -C "$AFT_WORK_DIR/trunk-repo" rev-parse refs/heads/loom/ws/E2E-WS-TRUNK/interactive/lead)" = "$sha";
           printf '%s\n' "$change" > "$AFT_WORK_DIR/trunk-change-id"

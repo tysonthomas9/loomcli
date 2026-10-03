@@ -134,14 +134,14 @@ approve_and_apply() {
     read -r change revision sha < <(json "$case_dir/revisions-$layer.json" 'i=v["data"][0]; print(i["change_id"],i["number"],i["head_sha"])')
     printf '%s\n' "$change" > "$case_dir/change-$layer.id"
     curl -sS --fail-with-body -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
-      -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null
+      -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"approve_only\":true,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null
     curl -fsS -X POST "$api/git/apply" -H 'Content-Type: application/json' \
       -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}" > "$case_dir/apply-$layer.json"
     grep -q '"success":true' "$case_dir/apply-$layer.json"
     curl -fsS "$api/issues/$task/revisions" > "$case_dir/applied-$layer.json"
     read -r revision sha < <(json "$case_dir/applied-$layer.json" 'i=v["data"][0]; print(i["number"],i["head_sha"])')
     curl -fsS -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
-      -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null
+      -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"approve_only\":true,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" >/dev/null
   done
 }
 
