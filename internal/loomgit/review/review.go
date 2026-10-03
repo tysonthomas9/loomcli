@@ -22,6 +22,10 @@ type Store interface {
 	VerdictByID(context.Context, int64) (loomgit.Verdict, error)
 }
 
+// maxVerdictChain bounds how many carried or feedback verdicts RequireVerdict
+// follows back to an approval.
+const maxVerdictChain = 64
+
 func required(message string) error { return loomgit.NewError(loomgit.ReviewRequired, message, nil) }
 
 func current(ctx context.Context, store Store, r loomgit.Revision) error {
@@ -154,7 +158,14 @@ func RequireVerdict(ctx context.Context, store Store, workspace, change string, 
 	if v.HeadSHA != r.HeadSHA {
 		return required("verdict does not match revision head")
 	}
-	for v.Kind == "carried" {
+	// A carried verdict inherits a patch-equivalent replay's approval; Loom's
+	// feedback verdict on a review fix-up inherits the approval its open PR
+	// was published under (D29 (6)). Either resolves to the human or policy
+	// approval it chains to.
+	for hops := 0; v.Kind == "carried" || v.Kind == "feedback"; hops++ {
+		if hops > maxVerdictChain || v.SourceVerdictID == 0 {
+			return required("revision needs an applicable approval")
+		}
 		v, err = store.VerdictByID(ctx, v.SourceVerdictID)
 		if err != nil {
 			return err

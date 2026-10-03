@@ -28,6 +28,7 @@ type Store interface {
 	DiscardPullPlan(context.Context, string) error
 	AbortRestack(context.Context, string, string, string, []string) error
 	RevisionByRequest(context.Context, string) (loomgit.Revision, error)
+	RevisionByHead(context.Context, string, string, string) (loomgit.Revision, error)
 }
 
 type Service struct {
@@ -37,6 +38,7 @@ type Service struct {
 	applier            *apply.Service
 	beforeCompletePull func() error
 	beforeRestackSwap  func() error
+	beforeSavePullPlan func() error
 	scratchParent      string
 }
 
@@ -54,6 +56,10 @@ type RestackRequest struct {
 	Order                                     []string
 	RemoveChange                              string
 	Heads                                     map[string]string
+	// ReplaceChange's layer is rebuilt to hold ReplaceRevision in place, and
+	// the layers above it are replayed onto it (D29 (6)).
+	ReplaceChange   string
+	ReplaceRevision int
 }
 
 type PullResult struct {
@@ -69,6 +75,9 @@ type pulledLayer struct {
 	layer     loomgit.AppliedLayer
 	original  loomgit.AppliedLayer
 	operation string
+	// replaced marks the layer a layer-replace restack rebuilt from a new
+	// revision of its change, rather than replayed unchanged.
+	replaced bool
 }
 
 // Restack rebuilds the working area's layers on an explicit base. When supplied,
@@ -99,6 +108,9 @@ func (s *Service) restackLocked(ctx context.Context, request RestackRequest, res
 	layers, err := s.appliedLog(ctx, request.Workspace, request.Lead, old)
 	if err != nil {
 		return err
+	}
+	if request.ReplaceChange != "" {
+		return s.replaceLocked(ctx, request, old, base, layers, result)
 	}
 	layers, replayBase, err := withoutLayer(layers, request.RemoveChange, base)
 	if err != nil {
@@ -323,6 +335,11 @@ func (s *Service) installPull(ctx context.Context, request PullRequest, old, bas
 	if err != nil {
 		return err
 	}
+	if s.beforeSavePullPlan != nil {
+		if err := s.beforeSavePullPlan(); err != nil {
+			return err
+		}
+	}
 	if err := s.store.SavePullPlan(ctx, journal.PullPlan{RequestID: request.RequestID, Workspace: request.Workspace,
 		Lead: request.Lead, Repo: request.Repo, BaseSHA: base, Layers: completed, RemoveChange: request.RemoveChange}); err != nil {
 		return err
@@ -382,7 +399,11 @@ func (s *Service) preparePulledLayers(ctx context.Context, request PullRequest, 
 			}
 			item.layer.CommitDetails = append(item.layer.CommitDetails, attribution)
 		}
-		if _, _, err := review.CarryForward(ctx, s.store, s.runner, item.source, derived, item.trial); err != nil {
+		if item.replaced {
+			if err := s.recordReplacedVerdict(ctx, item.source, derived); err != nil {
+				return nil, err
+			}
+		} else if _, _, err := review.CarryForward(ctx, s.store, s.runner, item.source, derived, item.trial); err != nil {
 			return nil, err
 		}
 		completed = append(completed, item.layer)

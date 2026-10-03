@@ -926,27 +926,54 @@ func (e PullRequestReviewRequestEvent) Valid() bool {
 	}
 }
 
+// Defines values for ReviewRevisionFeedbackStatus.
+const (
+	ReviewRevisionFeedbackStatusHeld       ReviewRevisionFeedbackStatus = "held"
+	ReviewRevisionFeedbackStatusNotPushed  ReviewRevisionFeedbackStatus = "not_pushed"
+	ReviewRevisionFeedbackStatusPushed     ReviewRevisionFeedbackStatus = "pushed"
+	ReviewRevisionFeedbackStatusPushing    ReviewRevisionFeedbackStatus = "pushing"
+	ReviewRevisionFeedbackStatusSuperseded ReviewRevisionFeedbackStatus = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the ReviewRevisionFeedbackStatus enum.
+func (e ReviewRevisionFeedbackStatus) Valid() bool {
+	switch e {
+	case ReviewRevisionFeedbackStatusHeld:
+		return true
+	case ReviewRevisionFeedbackStatusNotPushed:
+		return true
+	case ReviewRevisionFeedbackStatusPushed:
+		return true
+	case ReviewRevisionFeedbackStatusPushing:
+		return true
+	case ReviewRevisionFeedbackStatusSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ReviewRevisionPublishStatus.
 const (
-	NotPublished ReviewRevisionPublishStatus = "not_published"
-	Pending      ReviewRevisionPublishStatus = "pending"
-	Published    ReviewRevisionPublishStatus = "published"
-	Superseded   ReviewRevisionPublishStatus = "superseded"
-	Waiting      ReviewRevisionPublishStatus = "waiting"
+	ReviewRevisionPublishStatusNotPublished ReviewRevisionPublishStatus = "not_published"
+	ReviewRevisionPublishStatusPending      ReviewRevisionPublishStatus = "pending"
+	ReviewRevisionPublishStatusPublished    ReviewRevisionPublishStatus = "published"
+	ReviewRevisionPublishStatusSuperseded   ReviewRevisionPublishStatus = "superseded"
+	ReviewRevisionPublishStatusWaiting      ReviewRevisionPublishStatus = "waiting"
 )
 
 // Valid indicates whether the value is a known member of the ReviewRevisionPublishStatus enum.
 func (e ReviewRevisionPublishStatus) Valid() bool {
 	switch e {
-	case NotPublished:
+	case ReviewRevisionPublishStatusNotPublished:
 		return true
-	case Pending:
+	case ReviewRevisionPublishStatusPending:
 		return true
-	case Published:
+	case ReviewRevisionPublishStatusPublished:
 		return true
-	case Superseded:
+	case ReviewRevisionPublishStatusSuperseded:
 		return true
-	case Waiting:
+	case ReviewRevisionPublishStatusWaiting:
 		return true
 	default:
 		return false
@@ -3011,10 +3038,19 @@ type PullRequestReviewResult struct {
 // ReviewRevision defines model for ReviewRevision.
 type ReviewRevision struct {
 	// Applied True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
-	Applied    bool   `json:"applied"`
-	ChangeId   string `json:"change_id"`
-	HeadSha    string `json:"head_sha"`
-	Incomplete bool   `json:"incomplete"`
+	Applied  bool   `json:"applied"`
+	ChangeId string `json:"change_id"`
+
+	// FeedbackMergeCancelled True when this fix-up cancelled the change's pending Approve and merge, so merging needs a new Approve.
+	FeedbackMergeCancelled *bool `json:"feedback_merge_cancelled,omitempty"`
+
+	// FeedbackReason Why a review fix-up is held or was not pushed, such as a conflict, an incomplete capture or a secret-pattern path.
+	FeedbackReason *string `json:"feedback_reason,omitempty"`
+
+	// FeedbackStatus For a review fix-up of a change whose PR is open, how Loom's automatic update of that PR stands (no Approve needed).
+	FeedbackStatus *ReviewRevisionFeedbackStatus `json:"feedback_status,omitempty"`
+	HeadSha        string                        `json:"head_sha"`
+	Incomplete     bool                          `json:"incomplete"`
 
 	// MergeAfter Open PRs below this one in its stack, bottom first. Empty when it is the bottom PR (Approve and merge merges it now).
 	MergeAfter *[]int `json:"merge_after,omitempty"`
@@ -3049,6 +3085,9 @@ type ReviewRevision struct {
 	PublishStatus *ReviewRevisionPublishStatus `json:"publish_status,omitempty"`
 	Verdict       *string                      `json:"verdict,omitempty"`
 }
+
+// ReviewRevisionFeedbackStatus For a review fix-up of a change whose PR is open, how Loom's automatic update of that PR stands (no Approve needed).
+type ReviewRevisionFeedbackStatus string
 
 // ReviewRevisionPublishStatus Outcome of this revision's Approve and create PR request, if it made one.
 type ReviewRevisionPublishStatus string

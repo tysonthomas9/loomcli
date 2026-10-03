@@ -189,7 +189,9 @@ export function RevisionsSection({
           revision.verdict === "override" ||
           revision.verdict === "policy" ||
           // A revision Apply derived onto a moved working area carries the approval.
-          revision.verdict === "carried";
+          revision.verdict === "carried" ||
+          // A review fix-up carries the approval its open PR was published under.
+          revision.verdict === "feedback";
         // InWorkingArea: approved and applied with no PR yet (Approve only,
         // or Approve and create PR that could not publish).
         const canCreatePR = approved && revision.applied && !hasPR;
@@ -203,8 +205,19 @@ export function RevisionsSection({
             <div>
               {revision.incomplete
                 ? "Incomplete capture"
-                : (revision.verdict ?? "Awaiting review")}
+                : revision.verdict === "feedback"
+                  ? "Review fix-up (no Approve needed)"
+                  : (revision.verdict ?? "Awaiting review")}
             </div>
+            {revision.feedback_status && (
+              <div data-testid="feedback-status">{feedbackText(revision)}</div>
+            )}
+            {revision.feedback_merge_cancelled && (
+              <div data-testid="feedback-merge-cancelled">
+                Auto-merge cancelled because the code changed. Approve again to
+                merge.
+              </div>
+            )}
             {needsArea && (
               <div className={styles.actions}>
                 <span>
@@ -364,6 +377,31 @@ export function RevisionsSection({
       })}
     </section>
   );
+}
+
+/**
+ * How a review fix-up's automatic update of its open PR stands (D29 (6)):
+ * Loom pushes it with no Approve, unless it is held or must not be pushed.
+ */
+export function feedbackText(revision: ReviewRevision): string {
+  const pr = revision.pr_number ? `PR #${revision.pr_number}` : "its PR";
+  const reason = revision.feedback_reason ?? "";
+  switch (revision.feedback_status) {
+    case "pushing":
+      return reason
+        ? `Fixing review comments: not pushed to ${pr} yet (${reason})`
+        : `Fixing review comments: pushing to ${pr} automatically`;
+    case "pushed":
+      return `Pushed to ${pr} automatically`;
+    case "held":
+      return `Held, not pushed to ${pr}: ${reason}`;
+    case "not_pushed":
+      return `Not pushed to ${pr}: ${reason}`;
+    case "superseded":
+      return "Replaced by a newer fix-up";
+    default:
+      return "";
+  }
 }
 
 const activeMerge = ["waiting", "blocked", "merging"];

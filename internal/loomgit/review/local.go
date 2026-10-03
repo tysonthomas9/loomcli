@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
@@ -81,6 +82,13 @@ type TaskRevision struct {
 	// cancelled.
 	MergeStatus string `json:"merge_status,omitempty"`
 	MergeReason string `json:"merge_reason,omitempty"`
+	// FeedbackStatus reports a review fix-up's automatic update of its open PR
+	// (D29 (6)): pushing, pushed, held, not_pushed or superseded, with
+	// FeedbackReason saying why it is held or not pushed. FeedbackMergeCancelled
+	// says the fix-up cancelled a pending Approve and merge.
+	FeedbackStatus         string `json:"feedback_status,omitempty"`
+	FeedbackReason         string `json:"feedback_reason,omitempty"`
+	FeedbackMergeCancelled bool   `json:"feedback_merge_cancelled,omitempty"`
 }
 
 func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]TaskRevision, error) {
@@ -113,6 +121,9 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 			}
 		}
 		if err := l.addPublishState(ctx, workspace, &i); err != nil {
+			return nil, err
+		}
+		if err := l.addFeedbackState(ctx, workspace, &i); err != nil {
 			return nil, err
 		}
 		out = append(out, i)
@@ -205,5 +216,34 @@ func (l *Local) addMergeState(ctx context.Context, publication journal.Publicati
 		return err
 	}
 	i.MergeStatus, i.MergeReason = approval.Status, approval.Reason
+	return nil
+}
+
+// addFeedbackState reports how a review fix-up's automatic PR update stands.
+func (l *Local) addFeedbackState(ctx context.Context, workspace string, i *TaskRevision) error {
+	state, found, err := l.store.FeedbackUpdateFor(ctx, workspace, i.ChangeID, i.Number)
+	if err != nil || !found {
+		return err
+	}
+	i.FeedbackStatus, i.FeedbackReason, i.FeedbackMergeCancelled = state.Status, state.Reason, state.MergeCancelled
+	if state.Status != journal.FeedbackUpdatePushing {
+		return nil
+	}
+	switch {
+	case state.FollowStatus == "conflict" || state.FollowStatus == "apply_pending":
+		i.FeedbackStatus, i.FeedbackReason = "held", "it conflicts with the stack; the lead was told"
+		if state.FollowStatus == "apply_pending" {
+			i.FeedbackReason = "the lead's working area has edits to the same files; the lead was told"
+		}
+		if len(state.Paths) > 0 {
+			i.FeedbackReason += " (" + strings.Join(state.Paths, ", ") + ")"
+		}
+	case state.PublishStatus == "published":
+		i.FeedbackStatus = "pushed"
+	case state.PublishStatus == "not_published":
+		i.FeedbackStatus, i.FeedbackReason = "not_pushed", state.PublishReason
+	case state.PublishReason != "":
+		i.FeedbackReason = state.PublishReason
+	}
 	return nil
 }

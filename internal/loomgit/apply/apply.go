@@ -107,6 +107,9 @@ func (s *Service) Apply(ctx context.Context, in Request) (Result, error) {
 	if err := review.RequireVerdict(ctx, s.store, in.Workspace, in.Change, in.Revision, source.HeadSHA, "apply", in.Lead); err != nil {
 		return Result{}, err
 	}
+	if result, replaced, err := s.replaceExisting(ctx, in); replaced {
+		return result, err
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		old, err := git(ctx, s.runner, "rev-parse", "HEAD")
 		if err != nil {
