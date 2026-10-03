@@ -16,7 +16,7 @@ func TestEveryErrorCodeRoundTrips(t *testing.T) {
 		"merge_not_authorized", "merge_blocked", "merge_queue_required", "mode_mismatch", "integrity_missing",
 		"attention_required", "apply_pending", "swap_held", "restack_conflict",
 		"revision_superseded", "hash_mismatch", "capture_failed", "secret_path_refused",
-		"workspace_unsupported",
+		"workspace_unsupported", "no_changes",
 	}
 	if !slices.Equal(ErrorCodes, want) {
 		t.Fatalf("error codes differ from naming standards: got %v, want %v", ErrorCodes, want)

@@ -254,4 +254,37 @@ describe("RevisionsSection", () => {
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Override" })).toBeDisabled();
   });
+
+  it("shows No changes and no verdict buttons for an empty attempt", async () => {
+    getTaskRevisions.mockResolvedValue([{ ...revision, no_changes: true }]);
+    render(<RevisionsSection workspaceId="W" taskId="T" lead="lead-a" />);
+    expect(await screen.findByText("No changes")).toBeInTheDocument();
+    expect(screen.getByTestId("revision-no-changes")).toHaveTextContent(
+      "Revision 2",
+    );
+    expect(screen.queryByText("Awaiting review")).not.toBeInTheDocument();
+    for (const name of ["Approve", "Reject", "Override", "Apply"])
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    expect(submitRevisionVerdict).not.toHaveBeenCalled();
+  });
+
+  it("reviews a later attempt with changes normally after an empty one", async () => {
+    getTaskRevisions.mockResolvedValue([
+      { ...revision, number: 3, head_sha: "b".repeat(40) },
+      { ...revision, no_changes: true },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="T" />);
+    expect(await screen.findByText("Awaiting review")).toBeInTheDocument();
+    expect(screen.queryByText("No changes")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() =>
+      expect(submitRevisionVerdict).toHaveBeenCalledWith(
+        "W",
+        expect.objectContaining({ number: 3 }),
+        "approve",
+        "",
+        undefined,
+      ),
+    );
+  });
 });

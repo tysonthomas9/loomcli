@@ -959,6 +959,27 @@ func (e TabMetadataReplacedReason) Valid() bool {
 	}
 }
 
+// Defines values for TaskDiffCompare.
+const (
+	Base  TaskDiffCompare = "base"
+	Layer TaskDiffCompare = "layer"
+	Trunk TaskDiffCompare = "trunk"
+)
+
+// Valid indicates whether the value is a known member of the TaskDiffCompare enum.
+func (e TaskDiffCompare) Valid() bool {
+	switch e {
+	case Base:
+		return true
+	case Layer:
+		return true
+	case Trunk:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TranscriptEntryRole.
 const (
 	TranscriptEntryRoleAssistant TranscriptEntryRole = "assistant"
@@ -2858,16 +2879,28 @@ type PullRequestReviewResult struct {
 // ReviewRevision defines model for ReviewRevision.
 type ReviewRevision struct {
 	// Applied True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
-	Applied    bool   `json:"applied"`
-	ChangeId   string `json:"change_id"`
-	HeadSha    string `json:"head_sha"`
-	Incomplete bool   `json:"incomplete"`
+	Applied  bool   `json:"applied"`
+	ChangeId string `json:"change_id"`
+
+	// Date Commit date (ISO 8601) of the revision head, when the repo is readable.
+	Date       *string `json:"date,omitempty"`
+	HeadSha    string  `json:"head_sha"`
+	Incomplete bool    `json:"incomplete"`
 
 	// NeedsWorkingArea True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed.
-	NeedsWorkingArea bool    `json:"needs_working_area"`
-	Number           int     `json:"number"`
-	Outcome          string  `json:"outcome"`
-	Verdict          *string `json:"verdict,omitempty"`
+	NeedsWorkingArea bool `json:"needs_working_area"`
+
+	// NoChanges True when the attempt changed nothing (a complete source revision whose tree equals its base). The task closed as "No changes" with no review, apply or PR; verdicts on it are refused with no_changes. Never set on derived revisions.
+	NoChanges bool   `json:"no_changes"`
+	Number    int    `json:"number"`
+	Outcome   string `json:"outcome"`
+
+	// Repo Workspace repo name the revision diff route accepts.
+	Repo string `json:"repo"`
+
+	// Superseded True when a newer source revision of the same change exists; verdicts on it are refused.
+	Superseded bool    `json:"superseded"`
+	Verdict    *string `json:"verdict,omitempty"`
 }
 
 // ReviewerConversation defines model for ReviewerConversation.
@@ -2922,6 +2955,23 @@ type ReviewerMessageRequest struct {
 type ReviewerMessageResult struct {
 	Reason string `json:"reason"`
 	State  string `json:"state"`
+}
+
+// RevisionDiff defines model for RevisionDiff.
+type RevisionDiff struct {
+	Files    []RevisionDiffFile `json:"files"`
+	Revision int                `json:"revision"`
+}
+
+// RevisionDiffFile defines model for RevisionDiffFile.
+type RevisionDiffFile struct {
+	Hunks     *[]string `json:"hunks,omitempty"`
+	Patch     *string   `json:"patch,omitempty"`
+	PatchSize int       `json:"patchSize"`
+	Path      string    `json:"path"`
+
+	// Truncated True when the patch is too large to return; only path and size are sent.
+	Truncated bool `json:"truncated"`
 }
 
 // RuntimeReadyResponse defines model for RuntimeReadyResponse.
@@ -3090,6 +3140,20 @@ type TabPutRequest struct {
 	Pinned    bool   `json:"pinned"`
 	SortOrder int    `json:"sort_order"`
 }
+
+// TaskDiff defines model for TaskDiff.
+type TaskDiff struct {
+	Change string `json:"change"`
+
+	// Compare layer: against the layer below in the lead's stack; trunk: bottom layer, or PR-per-task (trunk) mode where the revision is its own PR to trunk; base: not applied, against the revision's own base.
+	Compare  TaskDiffCompare    `json:"compare"`
+	Files    []RevisionDiffFile `json:"files"`
+	Repo     string             `json:"repo"`
+	Revision int                `json:"revision"`
+}
+
+// TaskDiffCompare layer: against the layer below in the lead's stack; trunk: bottom layer, or PR-per-task (trunk) mode where the revision is its own PR to trunk; base: not applied, against the revision's own base.
+type TaskDiffCompare string
 
 // TerminalSessionInfo defines model for TerminalSessionInfo.
 type TerminalSessionInfo struct {
@@ -3542,6 +3606,11 @@ type AddressChangeFeedbackJSONBody struct {
 	Attempt string `json:"attempt"`
 }
 
+// GetRevisionDiffParams defines parameters for GetRevisionDiff.
+type GetRevisionDiffParams struct {
+	Repo string `form:"repo" json:"repo"`
+}
+
 // SubmitRevisionVerdictJSONBody defines parameters for SubmitRevisionVerdict.
 type SubmitRevisionVerdictJSONBody struct {
 	Actor struct {
@@ -3804,6 +3873,12 @@ type GetGraphParams struct {
 
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
+
+// GetTaskDiffParams defines parameters for GetTaskDiff.
+type GetTaskDiffParams struct {
+	// Lead Lead whose stack to compare in. Defaults to the lead that most recently applied the change.
+	Lead *string `form:"lead,omitempty" json:"lead,omitempty"`
+}
 
 // GetIssueEventsParams defines parameters for GetIssueEvents.
 type GetIssueEventsParams struct {

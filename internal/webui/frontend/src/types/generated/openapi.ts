@@ -3376,6 +3376,8 @@ export interface components {
       needs_working_area: boolean;
       /** @description True when a newer source revision of the same change exists; verdicts on it are refused. */
       superseded: boolean;
+      /** @description True when the attempt changed nothing (a complete source revision whose tree equals its base). The task closed as "No changes" with no review, apply or PR; verdicts on it are refused with no_changes. Never set on derived revisions. */
+      no_changes: boolean;
       /** @description Commit date (ISO 8601) of the revision head, when the repo is readable. */
       date?: string;
     };
