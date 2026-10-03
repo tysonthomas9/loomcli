@@ -12,10 +12,13 @@ export function RevisionsSection({
   workspaceId,
   taskId,
   lead,
+  onChanged,
 }: {
   workspaceId: string;
   taskId: string;
   lead?: string | undefined;
+  /** Called after a verdict or Apply changes what the task's diff compares with. */
+  onChanged?: (() => void) | undefined;
 }): JSX.Element {
   const [revisions, setRevisions] = useState<ReviewRevision[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,6 +70,7 @@ export function RevisionsSection({
       );
       if (status) setFollow((prev) => ({ ...prev, [key]: status }));
       setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      onChanged?.();
       setOverride("");
       setReason("");
     } catch (err) {
@@ -86,6 +90,7 @@ export function RevisionsSection({
       setFollow((prev) => ({ ...prev, [key]: "" }));
       // Applied state comes from the server's applied log, never browser state.
       setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      onChanged?.();
     } catch (err) {
       // 404: the lead agent does not exist, so Apply cannot open its area.
       if (err instanceof ApiError && err.status === 404)
