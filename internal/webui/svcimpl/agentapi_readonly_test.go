@@ -65,7 +65,7 @@ func (g readOnlyGitOps) SetRepoDefaultBranch(_, _, _ string) error {
 func (g readOnlyGitOps) Reset(path, _, target string, _, _ bool) (*ops.GitResetResult, error) {
 	g.call("reset")
 	for _, args := range [][]string{{"reset", "-q", "--hard", target}, {"clean", "-qfd"}} {
-		cmd := exec.Command("git", args...)
+		cmd := exec.Command("git", args...) //nolint:norawexec // Test fake really resets a temp repo so a reset that gets through shows.
 		cmd.Dir = path
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return nil, errors.New(string(out))
@@ -168,15 +168,9 @@ func statusOf(err error) int {
 func agentAPIGitWorktree(t *testing.T, branch string) string {
 	t.Helper()
 	dir := t.TempDir()
-	git := func(args ...string) string {
+	git := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
+		mustGit(t, dir, append([]string{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...)
 	}
 	git("init", "-q", "-b", "main")
 	writeTestFile(t, filepath.Join(dir, "a.txt"), "a\n")
@@ -202,13 +196,8 @@ func writeTestFile(t *testing.T, path, content string) {
 func worktreeState(t *testing.T, dir string) string {
 	t.Helper()
 	run := func(args ...string) string {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
+		t.Helper()
+		return strings.TrimSpace(gitOutput(t, dir, args...))
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
