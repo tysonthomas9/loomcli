@@ -289,13 +289,13 @@ func (s *agentServiceImpl) ListPullRequests(_ context.Context, wsID, state strin
 }
 
 func (s *agentServiceImpl) CreatePR(_ context.Context, wsID, agentName, target string) (*ops.GitPRResult, error) {
-	if err := s.gitOps.CheckGhInstalled(); err != nil {
-		return nil, service.ErrUnavailable("gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'")
-	}
-
 	wt, err := s.resolveWritableWorktree(wsID, agentName)
 	if err != nil {
 		return nil, err
+	}
+
+	if err := s.gitOps.CheckGhInstalled(); err != nil {
+		return nil, service.ErrUnavailable("gh CLI not installed: install from https://cli.github.com/ and run 'gh auth login'")
 	}
 
 	if target == "" {

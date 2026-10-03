@@ -24,6 +24,7 @@ func TestAgentAPIWorktreeIsReadOnly(t *testing.T) {
 	ctx := context.Background()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	wt := agentAPIGitWorktree(t)
+	pathWithoutGh(t)
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -126,6 +127,21 @@ func agentAPIGitWorktree(t *testing.T) string {
 	git("commit", "-q", "-m", "work")
 	writeTestFile(t, filepath.Join(dir, "scratch.txt"), "keep\n")
 	return dir
+}
+
+// pathWithoutGh leaves git on PATH and drops gh, as in the local-mode
+// container, so a gh check ahead of the guard shows up as a 503.
+func pathWithoutGh(t *testing.T) {
+	t.Helper()
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	if err := os.Symlink(gitBin, filepath.Join(bin, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
 }
 
 func writeTestFile(t *testing.T, path, content string) {
