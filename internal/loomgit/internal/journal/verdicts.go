@@ -191,8 +191,13 @@ func recordApprovalTargets(ctx context.Context, tx *sql.Tx, v loomgit.Verdict) e
 	if !v.Publish {
 		return nil
 	}
+	// Approving the same revision again re-arms an intent that ended without
+	// a PR (spent, superseded, unapplied, or a skip whose cause may be fixed);
+	// one that already opened its PR stays as it is.
 	_, err := tx.ExecContext(ctx, `INSERT INTO approval_publications(workspace,lead,change_id,revision,verdict_id)
-		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO NOTHING`,
+		VALUES (?,?,?,?,?) ON CONFLICT(workspace,lead,change_id,revision) DO UPDATE SET
+		verdict_id=excluded.verdict_id, status='pending', reason='', pr_url='', pr_number=0, attempted_at=0
+		WHERE approval_publications.status <> 'published'`,
 		v.Workspace, v.TargetLead, v.Change, v.Number, v.ID)
 	return err
 }

@@ -505,3 +505,71 @@ func TestSpentApprovalNeverPublishes(t *testing.T) {
 		t.Fatalf("spent intent = %+v", intent)
 	}
 }
+
+// reapprove approves the same revision again with Approve and create PR.
+func reapprove(t *testing.T, fx fixture, revision loomgit.Revision) loomgit.Verdict {
+	t.Helper()
+	verdict, err := review.SubmitForLeadPublishing(context.Background(), fx.store, "W", revision.Change, revision.Number,
+		revision.HeadSHA, "approve", "", reviewer, "L", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return verdict
+}
+
+func TestReapprovalRearmsIntentThatOpenedNoPR(t *testing.T) {
+	t.Run("not published skip", func(t *testing.T) {
+		fx, forge := approvalFixture(t, "stack")
+		ctx := context.Background()
+		previous := localPublishProvider
+		localPublishProvider = func() (Forge, string, string) { return nil, "", "" }
+		a := appliedTask(t, fx, "A", fx.base)
+		approveForLead(t, fx, a, reviewer, true, "applied")
+		if outcomes, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(outcomes) != 1 || outcomes[0].Status != "not_published" {
+			t.Fatalf("no-provider outcome = %+v, %v", outcomes, err)
+		}
+		localPublishProvider = previous // the provider is configured now
+		reapprove(t, fx, a)
+		outcomes, err := PublishApproved(ctx, "W", "L", nil)
+		if err != nil || len(outcomes) != 1 || outcomes[0].Status != "published" || len(forge.prs) != 1 {
+			t.Fatalf("re-approval did not re-arm the skipped intent: %+v, %v; PRs=%+v", outcomes, err, forge.prs)
+		}
+	})
+	t.Run("spent", func(t *testing.T) {
+		fx, forge := approvalFixture(t, "stack")
+		ctx := context.Background()
+		a := appliedTask(t, fx, "A", fx.base)
+		first := approveForLead(t, fx, a, reviewer, true, "spent")
+		if outcomes, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(outcomes) != 1 || outcomes[0].Status != "not_published" {
+			t.Fatalf("spent outcome = %+v, %v", outcomes, err)
+		}
+		reapprove(t, fx, a)
+		// The re-approval applies the revision again.
+		if err := fx.store.SetApprovalFollow(ctx, journal.PendingApproval{Workspace: "W", Lead: "L", Change: a.Change,
+			Revision: a.Number, VerdictID: int(first.ID)}, "applied", nil); err != nil {
+			t.Fatal(err)
+		}
+		outcomes, err := PublishApproved(ctx, "W", "L", nil)
+		if err != nil || len(outcomes) != 1 || outcomes[0].Status != "published" || len(forge.prs) != 1 {
+			t.Fatalf("re-approval did not re-arm the spent intent: %+v, %v; PRs=%+v", outcomes, err, forge.prs)
+		}
+	})
+	t.Run("PR already open", func(t *testing.T) {
+		fx, forge := approvalFixture(t, "stack")
+		ctx := context.Background()
+		a := appliedTask(t, fx, "A", fx.base)
+		approveForLead(t, fx, a, reviewer, true, "applied")
+		if outcomes, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(outcomes) != 1 || outcomes[0].Status != "published" {
+			t.Fatalf("first publish = %+v, %v", outcomes, err)
+		}
+		opened := intentStatus(t, fx, "A")
+		creates := forge.creates
+		reapprove(t, fx, a)
+		if outcomes, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(outcomes) != 0 {
+			t.Fatalf("re-approval re-armed an intent whose PR is open: %+v, %v", outcomes, err)
+		}
+		if after := intentStatus(t, fx, "A"); after != opened || forge.creates != creates || len(forge.prs) != 1 {
+			t.Fatalf("intent %+v -> %+v; creates %d -> %d; PRs=%+v", opened, after, creates, forge.creates, forge.prs)
+		}
+	})
+}
