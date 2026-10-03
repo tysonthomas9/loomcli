@@ -41,7 +41,12 @@ func TestApprovalFollowsWorkingAreaAfterResume(t *testing.T) {
 	if err := fixture.store.SetFollowingPaused(ctx, "W", "L", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := recoverPendingWithConfig(ctx, fixture.store, func() (*config.LoomConfig, error) { return cfg, nil }); err != nil ||
+	held := func(workspace, lead string) bool { return workspace == "W" && lead == "L" }
+	if err := recoverPendingWithConfig(ctx, fixture.store, func() (*config.LoomConfig, error) { return cfg, nil }, held); err != nil ||
+		fixture.git(t, "rev-parse", "HEAD") != fixture.base {
+		t.Fatalf("recovery followed a held-back lead: %v", err)
+	}
+	if err := recoverPendingWithConfig(ctx, fixture.store, func() (*config.LoomConfig, error) { return cfg, nil }, nil); err != nil ||
 		fixture.git(t, "rev-parse", "HEAD") != fixture.source {
 		t.Fatalf("recovery did not follow durable approval: %v", err)
 	}
