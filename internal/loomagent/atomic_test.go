@@ -69,7 +69,7 @@ func TestAtomicStateCrashAfterCommitBeforePublish(t *testing.T) {
 		moveTo(t, s, "a1", StateIdle)
 	}()
 	commitStateCrash = func() {}
-	quiet(t, sub)
+	old := s
 
 	s = serviceAt(t, path) // restart
 	a := s.get(t, "a1")
@@ -85,7 +85,12 @@ func TestAtomicStateCrashAfterCommitBeforePublish(t *testing.T) {
 	if e := recv(t, re, 2); !slices.Equal(ids(e), want) {
 		t.Fatalf("reconnect got %v; want %v", ids(e), want)
 	}
-	quiet(t, re)
+	// The crashed change was never fanned out: the old subscriber's next
+	// live event is the one after it.
+	moveTo(t, old, "a1", StateActive)
+	if e := recv(t, sub, 1)[0]; e.EventID != "a1:3:"+EventStateChanged {
+		t.Fatalf("old subscriber's next event %s; want a1:3:%s", e.EventID, EventStateChanged)
+	}
 }
 
 // TestRollbackPublishesNothing: when an event of a state change cannot be
@@ -118,9 +123,17 @@ func TestRollbackPublishesNothing(t *testing.T) {
 	if b := s.get(t, "a1"); b.State != StateIdle || b.Revision != 0 || len(rows(t, s, "a1", 0)) != 0 {
 		t.Fatalf("after rollback: state %s revision %d events %d; want idle, 0, 0", b.State, b.Revision, len(rows(t, s, "a1", 0)))
 	}
-	quiet(t, sub)
-	if got := drain(bus); len(got) != 0 {
-		t.Fatalf("bus got %v; want nothing", types(got))
+	// Nothing was published: once the write can succeed, the first event
+	// either subscriber gets is the successful change's.
+	if _, err := db.Exec(`DROP TRIGGER fail_insert`); err != nil {
+		t.Fatal(err)
+	}
+	moveTo(t, s, "a1", StateActive)
+	if e := recv(t, sub, 1)[0]; e.EventID != "a1:1:"+EventStateChanged {
+		t.Fatalf("subscriber's first event %s; want a1:1:%s", e.EventID, EventStateChanged)
+	}
+	if got := drain(bus); len(got) != 1 || got[0].EventID != "a1:1:"+EventStateChanged {
+		t.Fatalf("bus got %v; want only the successful change", types(got))
 	}
 }
 
@@ -205,6 +218,7 @@ func TestPublishOrderPerAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bus := s.Bus.Subscribe(agents...)
 	var unheld atomic.Int32 // the lane must be held from before BEGIN until the fanout ends
 	commitStateCrash = func() {
 		if s.events.mu.TryLock() {
@@ -230,7 +244,14 @@ func TestPublishOrderPerAgent(t *testing.T) {
 		t.Fatalf("%d commits were not under the lane", n)
 	}
 	got := collect(t, s, sub, agents...)
+	busIDs := map[string][]string{}
+	for _, e := range drain(bus) {
+		busIDs[e.AgentID] = append(busIDs[e.AgentID], e.EventID)
+	}
 	for _, id := range agents {
+		if !slices.Equal(busIDs[id], ids(got[id])) {
+			t.Fatalf("%s: bus order %v; want commit order %v", id, busIDs[id], ids(got[id]))
+		}
 		var att []string
 		for _, e := range got[id] {
 			if e.Kind == EventAttentionRaised || e.Kind == EventAttentionCleared {
@@ -260,28 +281,34 @@ func TestReconnectNoGap(t *testing.T) {
 		}
 	}()
 	var seen []loomstore.Event
-	cursor := int64(0)
-	for i := 0; ; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
-		sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": cursor})
-		if err != nil {
-			t.Fatal(err)
-		}
-		e := recv(t, sub, 1)[0]
-		cancel()
-		if e.Seq != cursor+1 {
-			t.Fatalf("reconnect %d from %d got seq %d", i, cursor, e.Seq)
-		}
-		seen, cursor = append(seen, e), e.Seq
-		select {
-		case <-done:
+	cursor, finished := int64(0), false
+	for {
+		if finished { // no more writes: stop once every saved event is seen
 			if all := rows(t, s, "a1", 0); int64(len(all)) == cursor {
 				if !slices.Equal(ids(seen), ids(all)) {
 					t.Fatalf("seen %v; want %v", ids(seen), ids(all))
 				}
 				return
 			}
-		default:
 		}
+		ctx, cancel := context.WithCancel(context.Background())
+		sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-done:
+			finished = true
+			done = nil // a nil channel never fires again
+		case e, ok := <-sub.C:
+			if !ok {
+				t.Fatalf("subscription closed: %v", sub.Err())
+			}
+			if e.Seq != cursor+1 {
+				t.Fatalf("reconnect from %d got seq %d", cursor, e.Seq)
+			}
+			seen, cursor = append(seen, e), e.Seq
+		}
+		cancel()
 	}
 }

@@ -59,10 +59,11 @@ var commitStateCrash = func() {}
 // the lane before the transaction begins and holds it until the fanout ends,
 // so commit order is publish order: in one transaction it compares and sets
 // the row from (from, rev) to `to`, bumping the revision, and saves events
-// (loomstore.CommitState); only after the commit does it publish them. If any
+// (loomstore.CommitState); only after the commit does it publish them, to
+// its subscribers and then, still under the lane, through publish. If any
 // write or the commit fails, nothing is saved or published.
 func (l *EventLog) CommitState(ctx context.Context, agentID string, from, to loomstore.AgentState, rev int64,
-	events []loomstore.Event) ([]loomstore.Event, error) {
+	events []loomstore.Event, publish func(saved []loomstore.Event)) ([]loomstore.Event, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	saved, err := l.store.CommitState(ctx, agentID, from, to, rev, events)
@@ -73,6 +74,7 @@ func (l *EventLog) CommitState(ctx context.Context, agentID string, from, to loo
 	for _, e := range saved {
 		l.fanout(e)
 	}
+	publish(saved)
 	return saved, nil
 }
 

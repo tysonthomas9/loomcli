@@ -296,13 +296,13 @@ func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.
 		}
 		rows[i] = loomstore.Event{AgentID: e.AgentID, Kind: e.Type, TurnID: e.TurnID, Payload: b}
 	}
-	saved, err := s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows)
-	if err != nil {
+	if _, err := s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, func(saved []loomstore.Event) {
+		for i, e := range out { // on the Bus too in commit order
+			e.EventID = saved[i].EventID
+			s.Bus.publish(e)
+		}
+	}); err != nil {
 		return before, err
-	}
-	for i, e := range out {
-		e.EventID = saved[i].EventID
-		s.Bus.publish(e)
 	}
 	if completed(a) && !completed(before) { // a child's attempt ended: tell its parent (§10.3)
 		s.tryRecordCompletion(ctx, a) // the change is committed; a failed record is retried
