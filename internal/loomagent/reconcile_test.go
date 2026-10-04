@@ -370,15 +370,19 @@ func TestReconcileGatesWritesUntilRecovered(t *testing.T) {
 	w := newRestarted(e.h, false)
 	w.block = make(chan struct{})
 	s.harnesses["opencode"] = w
+	held := make(chan struct{})
+	gateHeld = sync.OnceFunc(func() { close(held) })
+	t.Cleanup(func() { gateHeld = func() {} })
 	runDispatcher(t, s)
 	done := make(chan error, 1)
 	go func() {
 		done <- s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"})
 	}()
+	<-held // Respond waits on the gate; recovery is blocked reading history
 	select {
 	case err := <-done:
 		t.Fatalf("Respond returned %v before recovery", err)
-	case <-time.After(100 * time.Millisecond):
+	default:
 	}
 	close(w.block)
 	select {

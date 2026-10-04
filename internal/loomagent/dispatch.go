@@ -294,6 +294,7 @@ func (s *Service) RunDispatcher(ctx context.Context) {
 
 // runDispatcher is RunDispatcher as the loop l, which the caller registered.
 func (s *Service) runDispatcher(ctx context.Context, l *loop) {
+	ctx = within(ctx)
 	s.recoverAtStart(ctx)
 	s.recordCompletions(ctx)
 	for ctx.Err() == nil {
@@ -304,6 +305,7 @@ func (s *Service) runDispatcher(ctx context.Context, l *loop) {
 				_ = s.dispatchWake(ctx, id)
 			}
 		}
+		l.took() // the sweep is work a Drain must see
 		s.follow(ctx, sub, l)
 		s.Bus.Unsubscribe(sub)
 	}
@@ -329,14 +331,16 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 		case <-ctx.Done():
 			return
 		case <-retry:
+			l.took()
 			if s.owed.Swap(false) {
 				s.recordCompletions(ctx)
 			}
 		case req := <-l.drain:
-			if !settle(req, sub.C, handle) {
+			if !settle(l, req, sub.C, handle) {
 				return
 			}
 		case e, ok := <-sub.C:
+			l.took()
 			if !ok {
 				return
 			}

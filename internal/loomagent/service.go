@@ -144,8 +144,9 @@ type Service struct {
 	catalogWait, catalogPoll time.Duration
 	catalogWarmUp            time.Duration
 	listed                   map[string]time.Time // by harness, the first successful catalog listing, under mu
-	// loops are the running background loops Drain waits on, under mu.
-	loops map[*loop]struct{}
+	// loops are the running background loops Drain waits on, in the order
+	// they started, under mu.
+	loops []*loop
 	// tick is the dispatcher's completion-retry clock and after RunFeed's
 	// backoff timer: time's own, or a test's.
 	tick  ticker
@@ -160,7 +161,6 @@ func New(cfg ServiceConfig) *Service {
 		retire: cfg.Retire, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
 		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After,
-		loops: map[*loop]struct{}{},
 		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
 	if cfg.RecoverFirst {
 		s.ready = make(chan struct{})
@@ -204,10 +204,20 @@ func New(cfg ServiceConfig) *Service {
 	return s
 }
 
+// gateHeld runs when a write starts waiting on start-up recovery; tests
+// use it to know the write is held.
+var gateHeld = func() {}
+
 // waitReady holds a write until start-up recovery is done.
 func (s *Service) waitReady(ctx context.Context) error {
 	if s.ready == nil {
 		return nil
+	}
+	select {
+	case <-s.ready:
+		return nil
+	default:
+		gateHeld() // recovery is still running: this write waits
 	}
 	select {
 	case <-s.ready:

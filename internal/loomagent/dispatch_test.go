@@ -136,10 +136,11 @@ func pump(t *testing.T, s *Service, h loomharness.Harness, st *loomstore.Store) 
 		for {
 			select {
 			case req := <-l.drain:
-				if !settle(req, feed.Events(), apply) {
+				if !settle(l, req, feed.Events(), apply) {
 					return
 				}
 			case e, ok := <-feed.Events():
+				l.took()
 				if !ok {
 					return
 				}

@@ -65,11 +65,23 @@ func (s *Service) RunFeed(ctx context.Context, harness string) {
 
 // runFeed is RunFeed as the loop l, which the caller registered. While it
 // backs off it has nothing queued, so it answers Drain at once, unless the
-// backoff is over and it is about to reopen the feed.
+// backoff is over: then it holds the request until the reopened feed's
+// backfill is done.
 func (s *Service) runFeed(ctx context.Context, harness string, l *loop) {
+	ctx = within(ctx)
+	var held chan<- int // a Drain request taken as the backoff ended
+	defer func() {
+		if held != nil {
+			l.answer(held, 0)
+		}
+	}()
 	wait, last := feedRetry, ""
 	for h := s.harnesses[harness]; h != nil && ctx.Err() == nil; {
-		read, err := s.readFeed(ctx, harness, h, l)
+		read, err := s.readFeed(ctx, harness, h, l, &held)
+		if held != nil { // the reopen failed before the feed was read
+			l.answer(held, 0)
+			held = nil
+		}
 		if errors.Is(err, errFeedClosed) || errors.Is(err, loomharness.ErrUnavailable) {
 			s.forgetResumed(harness) // the harness may have restarted: Resume its sessions again
 		}
@@ -89,13 +101,14 @@ func (s *Service) runFeed(ctx context.Context, harness string, l *loop) {
 				retry = nil
 			case <-retry:
 				retry = nil
+				l.took() // the reopen is work a Drain must see
 			case req := <-l.drain:
 				select {
 				case <-retry:
-					retry = nil
-					req <- 1
+					retry, held = nil, req
+					l.took()
 				default:
-					req <- 0
+					l.answer(req, 0)
 				}
 			}
 		}
@@ -107,7 +120,8 @@ func (s *Service) runFeed(ctx context.Context, harness string, l *loop) {
 // it always returns an error, and read reports whether it ingested a live
 // native event of an owned session (a feed.gap or another session's event
 // is not one).
-func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Harness, l *loop) (read bool, err error) {
+func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Harness, l *loop,
+	held *chan<- int) (read bool, err error) {
 	f, err := h.Feed(ctx)
 	if err != nil {
 		return false, errors.Join(err, s.harnessAttention(ctx, harness, true))
@@ -135,13 +149,20 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 		read = read || ok
 		return true
 	}
+	if req := *held; req != nil { // the backfill is done: answer the held Drain request
+		*held = nil
+		if !settle(l, req, f.Events(), handle) {
+			return read, cmp.Or(err, errFeedClosed)
+		}
+	}
 	for {
 		select {
 		case req := <-l.drain:
-			if !settle(req, f.Events(), handle) {
+			if !settle(l, req, f.Events(), handle) {
 				return read, cmp.Or(err, errFeedClosed)
 			}
 		case e, ok := <-f.Events():
+			l.took()
 			if !ok {
 				return read, errFeedClosed
 			}
