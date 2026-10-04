@@ -120,7 +120,8 @@ async function push(page: Page, m: Mock, ...frames: Mock["events"]) {
   );
 }
 
-const composer = (page: Page) => page.getByLabel("Message");
+const composer = (page: Page) =>
+  page.getByRole("textbox", { name: "Message", exact: true });
 
 test.beforeEach(() => {
   seq = 0;
