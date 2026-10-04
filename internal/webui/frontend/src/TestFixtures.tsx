@@ -16,6 +16,7 @@ import {
   StoreContext,
   NO_STORE_CONTEXT,
   WorkspaceProvider,
+  useAgentRoster,
 } from "@/hooks";
 import {
   createAgentStore,
@@ -599,18 +600,30 @@ export function SplitDetailSummaryFixture(): JSX.Element {
   );
 }
 
+/** The sidebar's live roster, which a lead's chat reads its children from. */
+function RosterFixture({ ws }: { ws: string }): null {
+  useAgentRoster(ws);
+  return null;
+}
+
 /**
- * AgentChat for one agent, read from ?ws=&agent= (defaults w1 and a1). The
- * e2e spec mocks the Agent API routes.
+ * AgentChat for one agent, read from ?ws=&agent= (defaults w1 and a1), in a
+ * ?w=&h= box (default 480×640); ?roster=1 also runs the sidebar's roster.
+ * The e2e spec mocks the Agent API routes.
  */
 export function AgentChatFixture(): JSX.Element {
   const params = new URLSearchParams(window.location.search);
+  const ws = params.get("ws") ?? "w1";
   return (
-    <div style={{ width: 480, height: 640, padding: 8 }}>
-      <AgentChat
-        workspaceId={params.get("ws") ?? "w1"}
-        agentId={params.get("agent") ?? "a1"}
-      />
+    <div
+      style={{
+        width: Number(params.get("w") ?? 480),
+        height: Number(params.get("h") ?? 640),
+        padding: 8,
+      }}
+    >
+      {params.get("roster") === "1" && <RosterFixture ws={ws} />}
+      <AgentChat workspaceId={ws} agentId={params.get("agent") ?? "a1"} />
     </div>
   );
 }
