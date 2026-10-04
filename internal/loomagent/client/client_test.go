@@ -43,16 +43,17 @@ func (workspace) Publish(context.Context, loomagent.PublishRequest) (loomagent.P
 // OpenCode harness. A bearer token is taken as the signed-in user's id; a
 // request without one is the local user. The event stream needs a one-time
 // token from the webui SSE token route.
-func newServer(t *testing.T) (*httptest.Server, *fake.Harness) {
+func newServer(t *testing.T) (srv *httptest.Server, fh *fake.Harness, drain func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	st, err := loomstore.Open(ctx, filepath.Join(t.TempDir(), "loom.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fh := fake.New()
+	fh = fake.New()
+	opened := make(chan struct{}, 1)
 	svc := loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: "ws", Workspace: workspace{},
-		Harnesses: map[string]loomharness.Harness{"opencode": fh},
+		Harnesses: map[string]loomharness.Harness{"opencode": feedOpened{fh, opened}},
 		Bridge: func(context.Context, loomagent.Preset) (loomagent.BridgeCaps, error) {
 			return loomagent.BridgeCaps{}, nil
 		},
@@ -61,6 +62,15 @@ func newServer(t *testing.T) (*httptest.Server, *fake.Harness) {
 		}})
 	done := make(chan struct{})
 	go func() { defer close(done); svc.RunFeed(ctx, "opencode") }()
+	<-opened // RunFeed is running: Drain waits for it
+	drain = func() {
+		t.Helper()
+		dctx, dcancel := context.WithTimeout(ctx, 30*time.Second) // a guard against a hang, never needed to pass
+		defer dcancel()
+		if err := svc.Drain(dctx); err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+	}
 	tokens, err := realtime.NewTokenStore()
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +92,7 @@ func newServer(t *testing.T) (*httptest.Server, *fake.Harness) {
 		}
 		return nil
 	}, nil).Register(mux, auth, tokens.Validate)
-	srv := httptest.NewServer(mux)
+	srv = httptest.NewServer(mux)
 	t.Cleanup(func() {
 		srv.Close()
 		tokens.Stop()
@@ -90,7 +100,21 @@ func newServer(t *testing.T) (*httptest.Server, *fake.Harness) {
 		<-done
 		st.Close()
 	})
-	return srv, fh
+	return srv, fh, drain
+}
+
+// feedOpened signals on opened when RunFeed opens its feed.
+type feedOpened struct {
+	loomharness.Harness
+	opened chan struct{}
+}
+
+func (f feedOpened) Feed(ctx context.Context) (loomharness.Feed, error) {
+	select {
+	case f.opened <- struct{}{}:
+	default:
+	}
+	return f.Harness.Feed(ctx)
 }
 
 func newClient(srv *httptest.Server, ws, token string) *Client {
@@ -98,12 +122,13 @@ func newClient(srv *httptest.Server, ws, token string) *Client {
 		Token: func(context.Context) (string, error) { return token, nil }})
 }
 
-func eventually(t *testing.T, what string, ok func() bool) {
+// drained drains the server's feed (loomagent.Service.Drain), then requires
+// ok: a test that needs a timeout to pass is wrong.
+func drained(t *testing.T, drain func(), what string, ok func() bool) {
 	t.Helper()
-	for end := time.Now().Add(10 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
-		if time.Now().After(end) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
+	drain()
+	if !ok() {
+		t.Fatalf("after draining: not %s", what)
 	}
 }
 
@@ -123,7 +148,7 @@ func lead(name string) agentsv1.CreateBody {
 // against the real routes on a fake harness.
 func TestClientEveryMethod(t *testing.T) {
 	ctx := context.Background()
-	srv, fh := newServer(t)
+	srv, fh, drain := newServer(t)
 	c := newClient(srv, "ws", "")
 
 	a, err := c.Create(ctx, "c1", lead("alpha"))
@@ -134,7 +159,7 @@ func TestClientEveryMethod(t *testing.T) {
 		t.Fatalf("Create retry = %+v, %v; want %s", again, err, a.AgentID)
 	}
 	id := a.AgentID
-	eventually(t, "idle", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
+	drained(t, drain, "idle", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
 
 	l, err := c.List(ctx, loomstore.AgentFilter{Name: "alpha", Limit: 10})
 	if err != nil || len(l.Agents) != 1 || l.Agents[0].AgentID != id || l.Next != "" {
@@ -158,7 +183,7 @@ func TestClientEveryMethod(t *testing.T) {
 	if retry, err := c.Send(ctx, "s1", id, "hi"); err != nil || retry.MessageID != sent.MessageID {
 		t.Fatalf("Send retry = %+v, %v; want %+v", retry, err, sent)
 	}
-	eventually(t, "ask k1", func() bool { got, err := c.Get(ctx, id); return err == nil && len(got.OpenAsks) == 1 })
+	drained(t, drain, "ask k1", func() bool { got, err := c.Get(ctx, id); return err == nil && len(got.OpenAsks) == 1 })
 	if _, err := c.Send(ctx, "s2", id, "next"); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +197,7 @@ func TestClientEveryMethod(t *testing.T) {
 	if err := c.Respond(ctx, "r1", id, "k1", agentsv1.RespondBody{Decision: "allow_once"}); err != nil {
 		t.Fatalf("Respond = %v", err)
 	}
-	eventually(t, "turn end", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
+	drained(t, drain, "turn end", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
 
 	all, err := c.ListEvents(ctx, loomstore.EventQuery{AgentID: id})
 	if err != nil || len(all.Events) < 3 || all.More || all.SnapshotSeq == 0 || all.Events[0].EventID == "" {
@@ -239,7 +264,7 @@ func TestClientEveryMethod(t *testing.T) {
 // and answers without a code as a StatusError.
 func TestClientTypedErrors(t *testing.T) {
 	ctx := context.Background()
-	srv, _ := newServer(t)
+	srv, _, _ := newServer(t)
 	c := newClient(srv, "ws", "")
 
 	if _, err := c.Get(ctx, "nope"); code(err) != loomagent.CodeAgentNotFound {
@@ -271,7 +296,7 @@ func TestClientTypedErrors(t *testing.T) {
 // the client has no way to name an actor, and the server takes the token's.
 func TestClientActorFromAuth(t *testing.T) {
 	ctx := context.Background()
-	srv, fh := newServer(t)
+	srv, fh, drain := newServer(t)
 	alice := newClient(srv, "ws", "alice")
 
 	a, err := alice.Create(ctx, "c1", lead("alpha"))
@@ -279,14 +304,14 @@ func TestClientActorFromAuth(t *testing.T) {
 		t.Fatalf("Create = owner %q by %q, %v; want alice", a.OwnerID, a.CreatedByID, err)
 	}
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "k1"}}})
-	eventually(t, "idle", func() bool {
+	drained(t, drain, "idle", func() bool {
 		got, err := alice.Get(ctx, a.AgentID)
 		return err == nil && got.State == loomagent.StateIdle
 	})
 	if _, err := alice.Send(ctx, "s1", a.AgentID, "first"); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "busy", func() bool {
+	drained(t, drain, "busy", func() bool {
 		got, err := alice.Get(ctx, a.AgentID)
 		return err == nil && got.State == loomagent.StateWaiting
 	})

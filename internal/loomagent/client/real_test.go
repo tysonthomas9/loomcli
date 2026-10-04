@@ -114,3 +114,15 @@ func fakeModel(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 }
+
+// eventually waits up to 10s for ok. Only the real-process tests poll: they
+// wait on a real harness and model over HTTP, which nothing here can drain
+// (allowlisted in scripts/sleep-allowlist.txt).
+func eventually(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for end := time.Now().Add(10 * time.Second); !ok(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}

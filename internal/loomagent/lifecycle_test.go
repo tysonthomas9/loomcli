@@ -136,8 +136,7 @@ func TestArchiveDoneRulesAndRetry(t *testing.T) {
 	if err := s.Archive(ctx, ArchiveRequest{AgentID: "idle"}); err != nil {
 		t.Fatal(err)
 	}
-	first := s.get(t, "idle")
-	time.Sleep(2 * time.Millisecond)
+	first := s.get(t, "idle") // stamps are in ns: a retry that set the clock again would differ
 	if err := s.Archive(ctx, ArchiveRequest{AgentID: "idle"}); err != nil {
 		t.Fatal(err)
 	}

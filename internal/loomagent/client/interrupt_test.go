@@ -14,14 +14,14 @@ import (
 // with no turn running it is no_op.
 func TestClientInterrupt(t *testing.T) {
 	ctx := context.Background()
-	srv, fh := newServer(t)
+	srv, fh, drain := newServer(t)
 	c := newClient(srv, "ws", "")
 	a, err := c.Create(ctx, "c1", lead("alpha"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := a.AgentID
-	eventually(t, "idle", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
+	drained(t, drain, "idle", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
 	if r, err := c.Interrupt(ctx, "n1", id, ""); err != nil || r.State != loomagent.StateNoOp || r.Interrupted == nil || *r.Interrupted {
 		t.Fatalf("idle Interrupt = %+v, %v; want no_op", r, err)
 	}
@@ -31,12 +31,12 @@ func TestClientInterrupt(t *testing.T) {
 	if _, err := c.Send(ctx, "s1", id, "hi"); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "ask k1", func() bool { got, err := c.Get(ctx, id); return err == nil && len(got.OpenAsks) == 1 })
+	drained(t, drain, "ask k1", func() bool { got, err := c.Get(ctx, id); return err == nil && len(got.OpenAsks) == 1 })
 	stop, err := c.Interrupt(ctx, "st1", id, "")
 	if err != nil || stop.Interrupted == nil || !*stop.Interrupted {
 		t.Fatalf("Interrupt = %+v, %v; want interrupted", stop, err)
 	}
-	eventually(t, "turn stopped", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
+	drained(t, drain, "turn stopped", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
 	if again, err := c.Interrupt(ctx, "st1", id, ""); err != nil || again.Interrupted == nil || !*again.Interrupted {
 		t.Fatalf("Interrupt retry = %+v, %v; want the first result", again, err)
 	}
@@ -44,7 +44,7 @@ func TestClientInterrupt(t *testing.T) {
 	if _, err := c.Send(ctx, "s2", id, "again"); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "ask k2", func() bool {
+	drained(t, drain, "ask k2", func() bool {
 		got, err := c.Get(ctx, id)
 		return err == nil && len(got.OpenAsks) == 1 && got.OpenAsks[0].ID == "k2"
 	})
@@ -52,7 +52,7 @@ func TestClientInterrupt(t *testing.T) {
 	if err != nil || r.Interrupted == nil || !*r.Interrupted || r.State != "waiting" {
 		t.Fatalf("Interrupt with text = %+v, %v", r, err)
 	}
-	eventually(t, "instead ran", func() bool {
+	drained(t, drain, "instead ran", func() bool {
 		got, err := c.Get(ctx, id)
 		return err == nil && got.State == loomagent.StateIdle && len(got.WaitingMessages) == 0
 	})

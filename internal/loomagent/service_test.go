@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
@@ -24,7 +24,9 @@ func newService(t *testing.T, cfg ServiceConfig, agents ...loomstore.Agent) *Ser
 		}
 	}
 	cfg.Store, cfg.Events, cfg.WorkspaceID = st, NewEventLog(st), "ws"
-	return New(cfg)
+	s := New(cfg)
+	useTestClock(s) // nothing in a test waits on real time
+	return s
 }
 
 func svcAgent(id, mode, state string) loomstore.Agent {
@@ -242,7 +244,7 @@ func TestStateAgentLockOrdersWrites(t *testing.T) {
 			defer wg.Done()
 			defer s.lock("a1")()
 			v := n
-			time.Sleep(time.Microsecond)
+			runtime.Gosched() // let another writer run inside the lock if it could
 			n = v + 1
 		}()
 	}

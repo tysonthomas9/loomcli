@@ -125,10 +125,7 @@ func TestDeliveredCarriesTextLive(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			feedCtx, cancel := context.WithCancel(ctx)
-			done := make(chan struct{})
-			go func() { defer close(done); s.RunFeed(feedCtx, name) }()
-			defer func() { cancel(); <-done }()
+			runFeed(t, s, name)
 			mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first message", user))
 			key := s.inputKey(name, a.AgentID, "u1")
 			var live []loomstore.Event

@@ -120,7 +120,7 @@ func TestUnverifiedModelRefusedOnTurn(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
+	stop := runFeed(t, s, "opencode")
 	defer stop()
 	req := leadReq("r1")
 	req.Overrides.Model = "openai/bogus"
@@ -129,12 +129,12 @@ func TestUnverifiedModelRefusedOnTurn(t *testing.T) {
 	fh.Script(info.AgentID, fake.Turn{Steps: []fake.Step{{Fail: `model "openai/bogus" not found`}}})
 	mustSendMsg(t, s, sendReq(info.AgentID, "u1", "hi", user))
 	done := func() []loomstore.Event { return kinds(rows(t, s, info.AgentID, 0), EventTurnCompleted) }
-	eventually(t, "the turn fails", func() bool { return len(done()) == 1 })
+	drained(t, s, "the turn fails", func() bool { return len(done()) == 1 })
 	var p struct{ StopReason, Error string }
 	if err := json.Unmarshal(done()[0].Payload, &p); err != nil || p.StopReason != "failed" || !strings.Contains(p.Error, "openai/bogus") {
 		t.Fatalf("turn_completed payload = %+v %v; want a failed turn naming the model", p, err)
 	}
-	eventually(t, "the agent is idle", func() bool { return s.get(t, info.AgentID).State == StateIdle })
+	drained(t, s, "the agent is idle", func() bool { return s.get(t, info.AgentID).State == StateIdle })
 	if _, err := s.Update(ctx, UpdateRequest{AgentID: info.AgentID, Model: "fake-model"}); err != nil {
 		t.Fatalf("switch to a listed model: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestUnverifiedModelRefusedOnTurn(t *testing.T) {
 		t.Fatal("a listed model is still flagged unverified")
 	}
 	mustSendMsg(t, s, sendReq(info.AgentID, "u2", "again", user))
-	eventually(t, "the next turn completes", func() bool { return len(done()) == 2 })
+	drained(t, s, "the next turn completes", func() bool { return len(done()) == 2 })
 }
 
 // partial lists only early-model for its first calls, as OpenCode does

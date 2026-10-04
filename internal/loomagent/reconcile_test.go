@@ -118,12 +118,12 @@ func (x restartedSession) Messages(ctx context.Context, after string, limit int)
 func waitingOnAsk(t *testing.T, e *createEnv) loomstore.Agent {
 	t.Helper()
 	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
+	stop := runFeed(t, s, "opencode")
 	defer stop()
 	a, _ := newLead(t, e, s, "alpha")
 	e.h.Harness.(*fake.Harness).Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}, {Delta: "done"}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool { return s.get(t, a.AgentID).State == StateWaiting })
+	drained(t, s, "a1 opens", func() bool { return s.get(t, a.AgentID).State == StateWaiting })
 	return s.get(t, a.AgentID)
 }
 
@@ -217,9 +217,9 @@ func TestReconcileRestartOpenAskRespond(t *testing.T) {
 	if err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"}); err != nil {
 		t.Fatalf("Respond after Reconcile = %v", err)
 	}
-	stop := startFeed(s, e)
+	stop := runFeed(t, s, "opencode")
 	defer stop()
-	eventually(t, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+	drained(t, s, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
 	if n := len(kinds(rows(t, s, a.AgentID, 0), KindAskLost)); n != 0 || w.resumeCount() != 1 {
 		t.Fatalf("ask.lost rows %d, resumes %d; want 0 and 1", n, w.resumeCount())
 	}
@@ -370,7 +370,7 @@ func TestReconcileGatesWritesUntilRecovered(t *testing.T) {
 	w := newRestarted(e.h, false)
 	w.block = make(chan struct{})
 	s.harnesses["opencode"] = w
-	go s.RunDispatcher(ctx)
+	runDispatcher(t, s)
 	done := make(chan error, 1)
 	go func() {
 		done <- s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"})
@@ -460,19 +460,19 @@ func TestReconcileResumesAgainAfterHarnessRestart(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s1 := e.service(ServiceConfig{})
-	stop1 := startFeed(s1, e)
+	stop1 := runFeed(t, s1, "opencode")
 	a, _ := newLead(t, e, s1, "alpha")
 	fh.Script(a.AgentID, fake.Turn{ResumeContinues: true,
 		Steps: []fake.Step{{Ask: "a1"}, {Ask: "a2"}, {Ask: "a3"}, {Delta: "x", Gap: true}}})
 	mustSendMsg(t, s1, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool { return s1.get(t, a.AgentID).State == StateWaiting })
+	drained(t, s1, "a1 opens", func() bool { return s1.get(t, a.AgentID).State == StateWaiting })
 	stop1()
 
 	s := e.service(ServiceConfig{})
 	w := newRestarted(e.h, false)
 	s.harnesses["opencode"] = w
-	stop := startFeed(s, e)
-	defer stop()
+	clk := useTestClock(s)
+	runFeed(t, s, "opencode")
 	passDone := func(n int) func() bool { // pass n resumed, then checked the turn's status
 		return func() bool {
 			w.mu.Lock()
@@ -480,16 +480,20 @@ func TestReconcileResumesAgainAfterHarnessRestart(t *testing.T) {
 			return w.resumes == n && w.statuses >= n
 		}
 	}
-	eventually(t, "the start-up pass", passDone(1))
+	drained(t, s, "the start-up pass", passDone(1))
 	for n := 2; n <= 3; n++ {
 		_ = fh.Restart(context.Background())
-		eventually(t, fmt.Sprintf("pass %d", n), passDone(n))
+		settled(t, s) // the feed closed and backs off
+		if clk.fire() != 1 {
+			t.Fatal("the feed did not back off after the restart")
+		}
+		drained(t, s, fmt.Sprintf("pass %d", n), passDone(n))
 	}
-	eventually(t, "a3 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a3:approval"}) })
+	drained(t, s, "a3 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a3:approval"}) })
 	if err := s.Respond(context.Background(), RespondRequest{AgentID: a.AgentID, AskID: "a3", Decision: "allow_once"}); err != nil {
 		t.Fatal(err) // the rest of the turn misses the live feed: a feed.gap
 	}
-	eventually(t, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+	drained(t, s, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
 	if n := w.resumeCount(); n != 3 {
 		t.Fatalf("resumes %d; want 3: the gap or Respond resumed again", n)
 	}

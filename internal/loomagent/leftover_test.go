@@ -41,8 +41,8 @@ func TestCreateOpenLeftoverPurgedAcrossRestart(t *testing.T) {
 	fh.FailOpen(nil, false)
 	fh.FailPurge(nil)
 	s := e.service(ServiceConfig{}) // restart
-	go s.RunDispatcher(ctx)
-	eventually(t, "the leftover purged", func() bool {
+	runDispatcher(t, s)
+	drained(t, s, "the leftover purged", func() bool {
 		p, err := e.st.PurgePending(ctx, "ws")
 		return err == nil && len(p) == 0
 	})

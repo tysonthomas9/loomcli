@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -271,14 +270,11 @@ func TestTaskCompletedReconcileOnce(t *testing.T) {
 	if got := e.events(t, lead.AgentID, KindChildCreated); got != 1 {
 		t.Fatalf("child.created = %d", got)
 	}
-	run, stop := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() { defer close(done); s.RunDispatcher(run) }()
-	defer func() { stop(); <-done }()
+	runDispatcher(t, s)
 	reconcile(t, s)
 	reconcile(t, s)
 	// The dispatcher hands the record to the idle lead without a manual Dispatch.
-	eventually(t, "the lead is handed the record", func() bool {
+	drained(t, s, "the lead is handed the record", func() bool {
 		slots, err := s.store.Slots(ctx, lead.AgentID)
 		return err == nil && slices.ContainsFunc(slots, func(sl loomstore.Slot) bool {
 			return sl.Sender == "agent:"+info.AgentID && sl.State != loomstore.SlotWaiting &&
@@ -311,29 +307,31 @@ func (w *flakyStatus) Status(ctx context.Context, s WorkspaceSpec) (WorkspaceSta
 // TestTaskCompletedPortFailureRetries: a failed Workspace.Status saves no
 // record; the dispatcher retries it and saves one, with the port's head.
 func TestTaskCompletedPortFailureRetries(t *testing.T) {
-	ctx := context.Background()
-	defer func(d time.Duration) { completionRetry = d }(completionRetry)
-	completionRetry = 10 * time.Millisecond
 	ws := &flakyStatus{headWorkspace: headWorkspace{branch: "loom/agent/c1", head: "abc123"}}
 	ws.fail.Store(true)
 	c := childOf("c1", "L")
 	c.WorktreePath, c.Branch = sp("/wt/c1"), sp("loom/agent/c1")
 	s := newService(t, ServiceConfig{Workspace: ws}, busy("L", "persistent", StateActive), c)
+	clk := useTestClock(s)
 	endAttempt(t, s, "c1", "completed")
 	if got := completions(t, s, "L"); len(got) != 0 || s.get(t, "c1").State != StateFinished {
 		t.Fatalf("records after a failed status = %+v", got)
 	}
-	run, stop := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() { defer close(done); s.RunDispatcher(run) }()
-	defer func() { stop(); <-done }()
-	time.Sleep(5 * completionRetry) // retries while the port still fails save nothing
+	runDispatcher(t, s) // its start-up sweep fails too
+	for range 3 {       // retries while the port still fails save nothing
+		clk.tick(t)
+	}
+	settled(t, s)
 	if got := completions(t, s, "L"); len(got) != 0 {
 		t.Fatalf("saved while failing: %+v", got)
 	}
 	ws.fail.Store(false)
-	eventually(t, "the record is saved", func() bool { return len(completions(t, s, "L")) == 1 })
-	time.Sleep(5 * completionRetry)
+	clk.tick(t)
+	drained(t, s, "the record is saved", func() bool { return len(completions(t, s, "L")) == 1 })
+	for range 3 { // nothing is owed: more ticks save nothing more
+		clk.tick(t)
+	}
+	settled(t, s)
 	if got := completions(t, s, "L"); len(got) != 1 || got[0].Head != "abc123" || got[0].Branch != "loom/agent/c1" {
 		t.Fatalf("records = %+v", got)
 	}

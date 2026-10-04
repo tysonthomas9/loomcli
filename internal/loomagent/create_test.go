@@ -64,7 +64,9 @@ func (e *createEnv) service(cfg ServiceConfig) *Service {
 			return loomharness.Launch{Root: "/root/opencode"}, nil
 		}
 	}
-	return New(cfg)
+	s := New(cfg)
+	useTestClock(s) // nothing in a test waits on real time
+	return s
 }
 
 func (e *createEnv) events(t *testing.T, id, kind string) int {

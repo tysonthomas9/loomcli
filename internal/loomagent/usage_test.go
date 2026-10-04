@@ -22,14 +22,14 @@ func TestUsageCostFromSessionTotal(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
+	stop := runFeed(t, s, "opencode")
 	a, _ := newLead(t, e, s, "alpha")
 	turn := func(s *Service, req string, steps ...fake.Step) {
 		t.Helper()
 		fh.Script(a.AgentID, fake.Turn{Steps: steps})
 		n := len(kinds(rows(t, s, a.AgentID, 0), EventIdle))
 		mustSendMsg(t, s, sendReq(a.AgentID, req, "go", user))
-		eventually(t, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == n+1 })
+		drained(t, s, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == n+1 })
 	}
 	total := func(v float64) fake.Step {
 		return fake.Step{Usage: &loomharness.Usage{OutputTokens: 1, CostTotalUSD: v}}
@@ -56,7 +56,7 @@ func TestUsageCostFromSessionTotal(t *testing.T) {
 
 	stop() // a serve restart: a new service on the same store
 	s2 := e.service(ServiceConfig{})
-	defer startFeed(s2, e)()
+	defer runFeed(t, s2, "opencode")()
 	turn(s2, "u3", total(1))
 	turn(s2, "u4", total(0.125)) // a total below the last: the session started again
 	if got, want := costs(s2), []float64{0.25, 0, 0.5, 0.25, 0.125}; !slices.Equal(got, want) {
@@ -98,9 +98,9 @@ func TestUsageCostFromReplay(t *testing.T) {
 	// The first turn ends before the feed is read: the backfill saves it.
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{total(0.25), {Usage: &loomharness.Usage{InputTokens: 3}}, total(0.75)}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "the turn in the native history", inHistory)
-	defer startFeed(s, e)()
-	eventually(t, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 1 })
+	drained(t, s, "the turn in the native history", inHistory)
+	defer runFeed(t, s, "opencode")()
+	drained(t, s, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 1 })
 	if got, want := costs(), []float64{0.25, 0, 0.5}; !slices.Equal(got, want) {
 		t.Fatalf("costs %v, want %v", got, want)
 	}
@@ -108,7 +108,7 @@ func TestUsageCostFromReplay(t *testing.T) {
 	// A live turn after the backfill counts its rise over the replayed total.
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{total(1)}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u2", "go", user))
-	eventually(t, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 2 })
+	drained(t, s, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 2 })
 	if got, want := costs(), []float64{0.25, 0, 0.5, 0.25}; !slices.Equal(got, want) {
 		t.Fatalf("costs after a live turn %v, want %v", got, want)
 	}

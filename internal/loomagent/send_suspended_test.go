@@ -57,7 +57,7 @@ func TestSendInterruptEndsASuspendedTurn(t *testing.T) {
 	h.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Delta: "t1"}, {Ask: "t1"}}})
 
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
-	eventually(t, "t1's ask open", func() bool { return s.get(t, a.AgentID).State == StateWaiting })
+	drained(t, s, "t1's ask open", func() bool { return s.get(t, a.AgentID).State == StateWaiting })
 	turn := deref(s.get(t, a.AgentID).RunningTurnID)
 	h.on.Store(true)
 	stop := mustSendMsg(t, s, interruptReq(a.AgentID, "stop1", "", user))

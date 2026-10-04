@@ -22,14 +22,14 @@ import (
 // while it was down.
 func TestClientSubscribeResumesFromCursor(t *testing.T) {
 	ctx := context.Background()
-	srv, fh := newServer(t)
+	srv, fh, drain := newServer(t)
 	c := newClient(srv, "ws", "alice")
 	a, err := c.Create(ctx, "c1", lead("alpha"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := a.AgentID
-	eventually(t, "idle", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
+	drained(t, drain, "idle", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
 	before, err := c.ListEvents(ctx, loomstore.EventQuery{AgentID: id})
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestClientSubscribeResumesFromCursor(t *testing.T) {
 		if _, err := c.Send(ctx, fmt.Sprintf("s%d", turn), id, "hi"); err != nil {
 			t.Fatal(err)
 		}
-		eventually(t, "turn end", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
+		drained(t, drain, "turn end", func() bool { got, err := c.Get(ctx, id); return err == nil && got.State == loomagent.StateIdle })
 		page, err := c.ListEvents(ctx, loomstore.EventQuery{AgentID: id, After: cursor})
 		if err != nil || len(page.Events) < 3 {
 			t.Fatalf("turn %d events = %+v, %v", turn, page, err)

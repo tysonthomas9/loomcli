@@ -12,18 +12,108 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
-// eventually waits up to 5s for ok.
-func eventually(t *testing.T, what string, ok func() bool) {
+// drainGuard bounds a Drain in a test. It never makes a test pass: a
+// converted test settles by draining, and only a hang reaches the guard.
+const drainGuard = 30 * time.Second
+
+// settled waits until s's background loops have handled everything queued.
+func settled(t *testing.T, s *Service) {
 	t.Helper()
-	for end := time.Now().Add(5 * time.Second); !ok(); time.Sleep(5 * time.Millisecond) {
-		if time.Now().After(end) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), drainGuard)
+	defer cancel()
+	if err := s.Drain(ctx); err != nil {
+		t.Fatalf("drain: %v", err)
 	}
 }
 
+// drained drains s, then requires ok: what s's loops owed is done, so ok
+// holds now or never will. A test that needs a timeout to pass is wrong.
+func drained(t *testing.T, s *Service, what string, ok func() bool) {
+	t.Helper()
+	settled(t, s)
+	if !ok() {
+		t.Fatalf("after draining: not %s", what)
+	}
+}
+
+// testClock is a hand-driven clock for a Service's completion-retry ticker
+// and feed backoff: nothing fires until the test fires it.
+type testClock struct {
+	ticks  chan time.Time
+	mu     sync.Mutex
+	timers []chan time.Time
+	waits  []time.Duration // every backoff asked for, in order
+}
+
+// useTestClock puts s on a new testClock; call it before s's loops start.
+func useTestClock(s *Service) *testClock {
+	c := &testClock{ticks: make(chan time.Time)}
+	s.tick = func(time.Duration) (<-chan time.Time, func()) { return c.ticks, func() {} }
+	s.after = func(d time.Duration) <-chan time.Time {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		ch := make(chan time.Time, 1)
+		c.timers, c.waits = append(c.timers, ch), append(c.waits, d)
+		return ch
+	}
+	return c
+}
+
+// tick hands the dispatcher one completion-retry tick; it returns once the
+// dispatcher took it, and a drain then waits for the retry it runs.
+func (c *testClock) tick(t *testing.T) {
+	t.Helper()
+	select {
+	case c.ticks <- time.Now():
+	case <-time.After(drainGuard):
+		t.Fatal("the dispatcher took no tick")
+	}
+}
+
+// fire fires every pending backoff timer and returns how many it fired.
+func (c *testClock) fire() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, ch := range c.timers {
+		ch <- time.Now()
+	}
+	n := len(c.timers)
+	c.timers = nil
+	return n
+}
+
+// backoffs is every backoff the feed asked for, in order.
+func (c *testClock) backoffs() []time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.waits)
+}
+
+// runDispatcher runs s's dispatcher until the test ends. It is registered
+// for Drain before it starts, so a drain waits for its start-up sweep.
+func runDispatcher(t *testing.T, s *Service) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	l, done := s.startLoop(), make(chan struct{})
+	go func() { defer close(done); defer s.stopLoop(l); s.runDispatcher(ctx, l) }()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
+// runFeed runs s's feed of harness, registered for Drain before it starts;
+// stop ends it (the test's end does too).
+func runFeed(t *testing.T, s *Service, harness string) (stop func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	l, done := s.startLoop(), make(chan struct{})
+	go func() { defer close(done); defer s.stopLoop(l); s.runFeed(ctx, harness, l) }()
+	stop = sync.OnceFunc(func() { cancel(); <-done })
+	t.Cleanup(stop)
+	return stop
+}
+
 // pump applies the harness feed to s as the 1.6d ingestion will: each event
-// goes to the agent that owns its session.
+// goes to the agent that owns its session. It is one of s's loops, so a
+// drain waits for the events the harness already sent.
 func pump(t *testing.T, s *Service, h loomharness.Harness, st *loomstore.Store) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -31,14 +121,29 @@ func pump(t *testing.T, s *Service, h loomharness.Harness, st *loomstore.Store) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan struct{})
+	l, done := s.startLoop(), make(chan struct{})
 	t.Cleanup(func() { cancel(); _ = feed.Close(); <-done })
+	apply := func(e loomharness.Event) bool {
+		id, err := st.NativeSessionOwner(ctx, "opencode", e.Session.Root, e.Session.NativeID)
+		if err == nil {
+			_ = s.HarnessEvent(ctx, id, e)
+		}
+		return true
+	}
 	go func() {
 		defer close(done)
-		for e := range feed.Events() {
-			id, err := st.NativeSessionOwner(ctx, "opencode", e.Session.Root, e.Session.NativeID)
-			if err == nil {
-				_ = s.HarnessEvent(ctx, id, e)
+		defer s.stopLoop(l)
+		for {
+			select {
+			case req := <-l.drain:
+				if !settle(req, feed.Events(), apply) {
+					return
+				}
+			case e, ok := <-feed.Events():
+				if !ok {
+					return
+				}
+				apply(e)
 			}
 		}
 	}()
@@ -134,13 +239,8 @@ func TestHarnessSwitchIdleDispatchUnderAgentLock(t *testing.T) {
 	if err := e.s.store.CompareAndSetState(ctx, "a1", e.s.get(t, "a1").StateOf(), to); err != nil {
 		t.Fatal(err)
 	}
-	stopped := make(chan struct{})
-	go func() { defer close(stopped); e.s.RunDispatcher(ctx) }()
-	eventually(t, "the dispatcher subscribed", func() bool {
-		e.s.Bus.mu.Lock()
-		defer e.s.Bus.mu.Unlock()
-		return len(e.s.Bus.subs) == 1
-	})
+	runDispatcher(t, e.s)
+	settled(t, e.s)                                            // its start-up sweep is done: it follows the Bus
 	mustSendMsg(t, e.s, sendReq("a1", "r-next", "next", user)) // waits: a turn runs
 	if got := slotState(t, e.s, "a1", "r-next"); got != loomstore.SlotWaiting {
 		t.Fatalf("slot = %s; want waiting", got)
@@ -158,7 +258,7 @@ func TestHarnessSwitchIdleDispatchUnderAgentLock(t *testing.T) {
 	a := e.s.get(t, "a1")
 	newRef := loomharness.NativeRef{Root: "/root/fb", NativeID: *a.HarnessSessionID}
 	key := defaultInputKey("fb", "a1", "r-next")
-	eventually(t, "the hand-over", func() bool { return slotState(t, e.s, "a1", "r-next") == loomstore.SlotHanded })
+	drained(t, e.s, "the hand-over", func() bool { return slotState(t, e.s, "a1", "r-next") == loomstore.SlotHanded })
 	if l, _ := e.fb.Session(newRef).HasInput(ctx, key); l != loomharness.LandedFound {
 		t.Fatalf("message on the new session: %s", l)
 	}
@@ -167,15 +267,13 @@ func TestHarnessSwitchIdleDispatchUnderAgentLock(t *testing.T) {
 	}
 	// No second dispatch: more wakes find the turn running.
 	_ = e.s.Dispatch(ctx, "a1")
-	time.Sleep(50 * time.Millisecond)
+	settled(t, e.s)
 	if _, turns := e.fb.Rules(newRef); len(turns) != 1 {
 		t.Fatalf("turns on the new session = %d; want 1", len(turns))
 	}
 	if a := e.s.get(t, "a1"); a.State != StateActive || deref(a.RunningTurnID) == "" {
 		t.Fatalf("after the hand-over: %s turn %v", a.State, a.RunningTurnID)
 	}
-	cancel()
-	<-stopped
 }
 
 // TestDispatchCreateFirstMessageOnceAcrossRestart: the creator's first
@@ -192,14 +290,14 @@ func TestDispatchCreateFirstMessageOnceAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := e.service(ServiceConfig{}) // restart
-	go s.RunDispatcher(ctx)         // its start-up sweep
+	runDispatcher(t, s)             // its start-up sweep
 	if _, err := s.Create(ctx, req); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Dispatch(ctx, info.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	settled(t, s)
 	a := s.get(t, info.AgentID)
 	ref := loomharness.NativeRef{Root: *a.HarnessSessionRoot, NativeID: *a.HarnessSessionID}
 	if n := turnsRun(e, ref); n != 1 || slotState(t, s, a.AgentID, "create:r1") != loomstore.SlotHanded {
@@ -303,7 +401,7 @@ func TestDispatchOldestFirstOneTurnAtATime(t *testing.T) {
 	reqs := []string{"u1", "c1", "x1", "u2"}
 	mustSendMsg(t, s, sendReq(a.AgentID, "c1", "child done", child))
 	mustSendMsg(t, s, sendReq(a.AgentID, "x1", "from the system", ActorRef{Kind: "system", ID: "x"}))
-	eventually(t, "u1 delivered", func() bool { return slotState(t, s, a.AgentID, "u1") == loomstore.SlotDelivered })
+	drained(t, s, "u1 delivered", func() bool { return slotState(t, s, a.AgentID, "u1") == loomstore.SlotDelivered })
 	mustSendMsg(t, s, sendReq(a.AgentID, "u2", "second", user)) // the user's slot is free again
 	if err := s.Dispatch(ctx, a.AgentID); err != nil {          // a turn runs: nothing more
 		t.Fatal(err)
@@ -319,7 +417,7 @@ func TestDispatchOldestFirstOneTurnAtATime(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Oldest first, one per turn: c1 and x1 waited before u2 was sent.
-		eventually(t, "the next hand-over", func() bool { return len(handedReqs(t, s, a.AgentID, reqs...)) == i+2 })
+		drained(t, s, "the next hand-over", func() bool { return len(handedReqs(t, s, a.AgentID, reqs...)) == i+2 })
 		if got := handedReqs(t, s, a.AgentID, reqs...); !slices.Equal(got, reqs[:i+2]) {
 			t.Fatalf("after turn %d handed = %v; want %v", i+1, got, reqs[:i+2])
 		}
@@ -336,7 +434,7 @@ func TestDispatchOldestFirstOneTurnAtATime(t *testing.T) {
 	if err := fh.Session(ref).Reply(ctx, "t4", loomharness.Reply{Allow: true}); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "idle", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+	drained(t, s, "idle", func() bool { return s.get(t, a.AgentID).State == StateIdle })
 	slots, _ := s.store.Slots(ctx, a.AgentID)
 	for _, sl := range slots {
 		if sl.State != loomstore.SlotDelivered {
@@ -370,21 +468,21 @@ func TestDispatchArchiveDoneAndSingleTaskOutcome(t *testing.T) {
 	if err := fh.Session(ref).Reply(ctx, "t1", loomharness.Reply{Allow: true}); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the waiting message's turn", func() bool { return len(handedReqs(t, s, a.AgentID, "u1", "c1")) == 2 })
+	drained(t, s, "the waiting message's turn", func() bool { return len(handedReqs(t, s, a.AgentID, "u1", "c1")) == 2 })
 	if got := s.get(t, a.AgentID); got.State != StateStopping {
 		t.Fatalf("state = %s; want stopping until the waiting message ran", got.State)
 	}
 	if err := fh.Session(ref).Reply(ctx, "t2", loomharness.Reply{Allow: true}); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "archived", func() bool { return s.get(t, a.AgentID).State == StateArchived })
+	drained(t, s, "archived", func() bool { return s.get(t, a.AgentID).State == StateArchived })
 
 	info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: "w1"}, Preset: "daemon-worker", Name: "w",
 		Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode"}, FirstMessage: "fix it"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the task finished", func() bool { return s.get(t, info.AgentID).State == StateFinished })
+	drained(t, s, "the task finished", func() bool { return s.get(t, info.AgentID).State == StateFinished })
 	if got := s.get(t, info.AgentID); deref(got.Outcome) != "completed" || got.FinishedAt == nil || got.RunningTurnID != nil {
 		t.Fatalf("finished task: outcome %q finished_at %v turn %v", deref(got.Outcome), got.FinishedAt, got.RunningTurnID)
 	}

@@ -37,20 +37,20 @@ func TestSendInterrupt(t *testing.T) {
 	reqs := []string{"u1", "c1", "x1"} // the messages sent so far
 	handed := func(want ...string) {
 		t.Helper()
-		eventually(t, "handed "+want[len(want)-1], func() bool { return len(handedReqs(t, s, a.AgentID, reqs...)) == len(want) })
+		drained(t, s, "handed "+want[len(want)-1], func() bool { return len(handedReqs(t, s, a.AgentID, reqs...)) == len(want) })
 		if got := handedReqs(t, s, a.AgentID, reqs...); !slices.Equal(got, want) {
 			t.Fatalf("handed = %v; want %v", got, want)
 		}
 	}
 
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
-	eventually(t, "u1 delivered", func() bool { return slotState(t, s, a.AgentID, "u1") == loomstore.SlotDelivered })
+	drained(t, s, "u1 delivered", func() bool { return slotState(t, s, a.AgentID, "u1") == loomstore.SlotDelivered })
 	mustSendMsg(t, s, sendReq(a.AgentID, "c1", "child done", child))
 	mustSendMsg(t, s, sendReq(a.AgentID, "x1", "from the system", ActorRef{Kind: "system", ID: "x"}))
 
 	// Stop with no message: t1 ends, the waiting slots stay, oldest first.
 	// Stop once t1's ask is open, so the agent's state is settled at waiting.
-	eventually(t, "t1's ask open", func() bool { return s.get(t, a.AgentID).State == StateWaiting })
+	drained(t, s, "t1's ask open", func() bool { return s.get(t, a.AgentID).State == StateWaiting })
 	stop := mustSendMsg(t, s, interruptReq(a.AgentID, "stop1", "", user))
 	if stop.Interrupted == nil || !*stop.Interrupted || stop.State != StateWaiting || stop.MessageID != "" {
 		t.Fatalf("stop = %+v; want interrupted, no message, state waiting", stop)
@@ -61,7 +61,7 @@ func TestSendInterrupt(t *testing.T) {
 	}
 	// The fake's Interrupt ends a turn at once, so c1's turn still running
 	// right after the retry returns means the retry interrupted nothing.
-	eventually(t, "c1's turn running", running)
+	drained(t, s, "c1's turn running", running)
 	if again := mustSendMsg(t, s, interruptReq(a.AgentID, "stop1", "", user)); again.State != stop.State || again.Interrupted == nil || !*again.Interrupted {
 		t.Fatalf("retry = %+v; want %+v", again, stop)
 	}
