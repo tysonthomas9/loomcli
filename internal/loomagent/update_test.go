@@ -239,7 +239,7 @@ func TestHarnessSwitchOpenApprovalReportsAskLostOnce(t *testing.T) {
 	e.startTurn(t)
 	to := e.s.get(t, "a1").StateOf()
 	to.WaitingOn, to.RunningTurn = sp("approval"), sp("turn1")
-	if err := e.s.store.CompareAndSetState(ctx, "a1", e.s.get(t, "a1").StateOf(), to); err != nil {
+	if _, err := e.s.store.CommitState(ctx, "a1", e.s.get(t, "a1").StateOf(), to, e.s.get(t, "a1").Revision, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.s.Update(ctx, switchReq("r1", 1, "fb")); err != nil {

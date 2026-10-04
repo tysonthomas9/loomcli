@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -272,22 +273,36 @@ func (s *Service) repoPath(ctx context.Context, repo string) (string, error) {
 	return s.resolveRepo(ctx, s.target, repo)
 }
 
-// setState moves a to `to` by compare-and-set on a's state columns, then,
-// after the commit, publishes the change. It returns loomstore.ErrStateChanged
-// when another writer moved a first; that writer alone publishes.
+// setState moves a to `to` by compare-and-set on a's state columns and
+// revision, saving the change's events in the same transaction under the
+// event lane, then publishes them (EventLog.CommitState). It returns
+// loomstore.ErrStateChanged when another writer moved a first; that writer
+// alone publishes. On any error nothing is saved or published.
 func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.AgentState) (loomstore.Agent, error) {
 	from := a.StateOf()
 	if to.State != from.State && !slices.Contains(transitions[from.State], to.State) {
 		return a, fmt.Errorf("loomagent: invalid state change %s -> %s", from.State, to.State)
 	}
-	if err := s.store.CompareAndSetState(ctx, a.AgentID, from, to); err != nil {
-		return a, err
-	}
 	before := a
 	a.State, a.StateReason, a.WaitingOn, a.Outcome = to.State, to.StateReason, to.WaitingOn, to.Outcome
 	a.AttentionReason, a.RunningTurnID, a.Attempt = to.AttentionReason, to.RunningTurn, to.Attempt
-	if err := s.publishChange(ctx, before, a); err != nil {
-		return a, err
+	a.Revision++
+	out := changeEvents(before, a)
+	rows := make([]loomstore.Event, len(out))
+	for i, e := range out {
+		b, err := json.Marshal(e)
+		if err != nil {
+			return before, err
+		}
+		rows[i] = loomstore.Event{AgentID: e.AgentID, Kind: e.Type, TurnID: e.TurnID, Payload: b}
+	}
+	saved, err := s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows)
+	if err != nil {
+		return before, err
+	}
+	for i, e := range out {
+		e.EventID = saved[i].EventID
+		s.Bus.publish(e)
 	}
 	if completed(a) && !completed(before) { // a child's attempt ended: tell its parent (§10.3)
 		s.tryRecordCompletion(ctx, a) // the change is committed; a failed record is retried
@@ -320,6 +335,16 @@ func (s *Service) handOver(ctx context.Context, a loomstore.Agent, nativeKey fun
 
 // publishChange saves, then publishes, the events of a's committed change.
 func (s *Service) publishChange(ctx context.Context, before, after loomstore.Agent) error {
+	for _, c := range changeEvents(before, after) {
+		if err := s.emit(ctx, c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// changeEvents are the events of a's change from before to after.
+func changeEvents(before, after loomstore.Agent) []Event {
 	e, out := Event{AgentID: after.AgentID, Time: time.Now()}, []Event{}
 	if before.State != after.State {
 		c := e
@@ -345,12 +370,7 @@ func (s *Service) publishChange(ctx context.Context, before, after loomstore.Age
 		c.Type, c.Reason, c.Outcome, c.Attempt = EventSettled, r, deref(after.Outcome), after.Attempt
 		out = append(out, c)
 	}
-	for _, c := range out {
-		if err := s.emit(ctx, c); err != nil {
-			return err
-		}
-	}
-	return nil
+	return out
 }
 
 // settledReason is why a is settled (§5.1), or "" when it is not.

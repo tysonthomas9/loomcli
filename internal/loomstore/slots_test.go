@@ -424,7 +424,7 @@ func TestSlotHandedRequeueReceiptAndFinish(t *testing.T) {
 		t.Fatal(err)
 	}
 	from := AgentState{State: "active"}
-	if err := s.CompareAndSetState(ctx, "t1", from, AgentState{State: "finished", Outcome: ptr("completed")}); err != nil {
+	if _, err := s.CommitState(ctx, "t1", from, AgentState{State: "finished", Outcome: ptr("completed")}, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	if a, _ := s.GetAgent(ctx, "t1"); a.FinishedAt == nil {

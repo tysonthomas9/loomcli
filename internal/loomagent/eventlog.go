@@ -51,6 +51,31 @@ func (l *EventLog) Append(ctx context.Context, e loomstore.Event) (loomstore.Eve
 // tests crash there.
 var appendAllCrash = func() {}
 
+// commitStateCrash runs between a CommitState's commit and its publication;
+// tests crash there.
+var commitStateCrash = func() {}
+
+// CommitState is the ordered atomic write of agentID's state change. It takes
+// the lane before the transaction begins and holds it until the fanout ends,
+// so commit order is publish order: in one transaction it compares and sets
+// the row from (from, rev) to `to`, bumping the revision, and saves events
+// (loomstore.CommitState); only after the commit does it publish them. If any
+// write or the commit fails, nothing is saved or published.
+func (l *EventLog) CommitState(ctx context.Context, agentID string, from, to loomstore.AgentState, rev int64,
+	events []loomstore.Event) ([]loomstore.Event, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	saved, err := l.store.CommitState(ctx, agentID, from, to, rev, events)
+	if err != nil {
+		return nil, err
+	}
+	commitStateCrash() // committed, not yet published
+	for _, e := range saved {
+		l.fanout(e)
+	}
+	return saved, nil
+}
+
 // AppendAll appends events to agentID in one short transaction and
 // publishes the new ones, in order, only after the commit: if any write or
 // the commit fails, nothing is saved or published.

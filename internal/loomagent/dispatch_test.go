@@ -237,7 +237,7 @@ func TestHarnessSwitchIdleDispatchUnderAgentLock(t *testing.T) {
 	e.startTurn(t)
 	to := e.s.get(t, "a1").StateOf()
 	to.RunningTurn = sp("turn_0")
-	if err := e.s.store.CompareAndSetState(ctx, "a1", e.s.get(t, "a1").StateOf(), to); err != nil {
+	if _, err := e.s.store.CommitState(ctx, "a1", e.s.get(t, "a1").StateOf(), to, e.s.get(t, "a1").Revision, nil); err != nil {
 		t.Fatal(err)
 	}
 	runDispatcher(t, e.s)

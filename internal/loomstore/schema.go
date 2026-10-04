@@ -169,4 +169,6 @@ CREATE TABLE custom_models (                -- model ids a workspace adds to a h
 -- text; the handed receipt keeps the slot's at hand-over. NULL when none.
 ALTER TABLE agent_slots ADD COLUMN notices TEXT;
 ALTER TABLE agent_send_receipts ADD COLUMN notices TEXT;
+`, `
+ALTER TABLE agents ADD COLUMN revision INTEGER NOT NULL DEFAULT 0; -- OR2: bumped by one with every state change; its events are named <agent>:<revision>:<kind>
 `}

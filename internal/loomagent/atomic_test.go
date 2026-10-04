@@ -1,0 +1,287 @@
+package loomagent
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"path/filepath"
+	"slices"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/loomstore"
+)
+
+// moveTo sets id's state to state from its saved row.
+func moveTo(t *testing.T, s *Service, id, state string) {
+	t.Helper()
+	a := s.get(t, id)
+	to := a.StateOf()
+	to.State = state
+	if _, err := s.setState(context.Background(), a, to); err != nil {
+		t.Fatalf("%s -> %s: %v", a.State, state, err)
+	}
+}
+
+// toggleAttention raises or clears id's Attention, retrying a lost race.
+func toggleAttention(t *testing.T, s *Service, id string) {
+	for {
+		a := s.get(t, id)
+		var err error
+		if a.AttentionReason == nil {
+			_, err = s.raiseAttention(context.Background(), a, "look")
+		} else {
+			_, err = s.clearAttention(context.Background(), a)
+		}
+		if !errors.Is(err, loomstore.ErrStateChanged) {
+			if err != nil {
+				t.Error(err)
+			}
+			return
+		}
+	}
+}
+
+// TestAtomicStateCrashAfterCommitBeforePublish: a crash between the commit
+// and the fanout publishes nothing live; after a restart the row change and
+// its event exist exactly once, and a subscriber reconnecting from its
+// cursor receives the event.
+func TestAtomicStateCrashAfterCommitBeforePublish(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := serviceAt(t, path, svcAgent("a1", "persistent", StateIdle))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moveTo(t, s, "a1", StateActive)
+	cursor := recv(t, sub, 1)[0].Seq // sub is live now: anything more it gets is a fanout
+	commitStateCrash = func() { panic("crash") }
+	t.Cleanup(func() { commitStateCrash = func() {} })
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("did not crash")
+			}
+		}()
+		moveTo(t, s, "a1", StateIdle)
+	}()
+	commitStateCrash = func() {}
+	quiet(t, sub)
+
+	s = serviceAt(t, path) // restart
+	a := s.get(t, "a1")
+	got := rows(t, s, "a1", cursor)
+	want := []string{"a1:2:" + EventStateChanged, "a1:2:" + EventIdle}
+	if a.State != StateIdle || a.Revision != 2 || !slices.Equal(ids(got), want) {
+		t.Fatalf("after restart: state %s revision %d events %v; want idle, 2, %v", a.State, a.Revision, ids(got), want)
+	}
+	re, err := s.events.Subscribe(ctx, map[string]int64{"a1": cursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := recv(t, re, 2); !slices.Equal(ids(e), want) {
+		t.Fatalf("reconnect got %v; want %v", ids(e), want)
+	}
+	quiet(t, re)
+}
+
+// TestRollbackPublishesNothing: when an event of a state change cannot be
+// saved, the row change rolls back with it and nothing is published.
+func TestRollbackPublishesNothing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := serviceAt(t, path, svcAgent("a1", "persistent", StateIdle))
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TRIGGER fail_insert BEFORE INSERT ON agent_events WHEN NEW.kind = 'agent.state_changed'
+		BEGIN SELECT RAISE(ABORT, 'injected write failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus := s.Bus.Subscribe("a1")
+	a := s.get(t, "a1")
+	to := a.StateOf()
+	to.State = StateActive
+	if _, err := s.setState(ctx, a, to); err == nil {
+		t.Fatal("setState succeeded; want the injected failure")
+	}
+	if b := s.get(t, "a1"); b.State != StateIdle || b.Revision != 0 || len(rows(t, s, "a1", 0)) != 0 {
+		t.Fatalf("after rollback: state %s revision %d events %d; want idle, 0, 0", b.State, b.Revision, len(rows(t, s, "a1", 0)))
+	}
+	quiet(t, sub)
+	if got := drain(bus); len(got) != 0 {
+		t.Fatalf("bus got %v; want nothing", types(got))
+	}
+}
+
+// TestRepeatedCycleDistinctEventIDs: a persistent agent going idle -> active
+// -> idle -> active -> idle in one attempt saves an event for every
+// transition, each with its own revision-based ID.
+func TestRepeatedCycleDistinctEventIDs(t *testing.T) {
+	s := serviceAt(t, filepath.Join(t.TempDir(), "loom.db"), svcAgent("a1", "persistent", StateIdle))
+	for _, st := range []string{StateActive, StateIdle, StateActive, StateIdle} {
+		moveTo(t, s, "a1", st)
+	}
+	got := rows(t, s, "a1", 0)
+	want := []string{"a1:1:" + EventStateChanged, "a1:2:" + EventStateChanged, "a1:2:" + EventIdle,
+		"a1:3:" + EventStateChanged, "a1:4:" + EventStateChanged, "a1:4:" + EventIdle}
+	if !slices.Equal(ids(got), want) {
+		t.Fatalf("events %v; want %v", ids(got), want)
+	}
+	if a := s.get(t, "a1"); a.Revision != 4 || a.Attempt != 1 {
+		t.Fatalf("revision %d attempt %d; want 4, 1", a.Revision, a.Attempt)
+	}
+}
+
+// TestRepeatedCycleReconnect: a subscriber dropped midway through a repeated
+// cycle reconnects from its cursor and sees each event exactly once.
+func TestRepeatedCycleReconnect(t *testing.T) {
+	s := serviceAt(t, filepath.Join(t.TempDir(), "loom.db"), svcAgent("a1", "persistent", StateIdle))
+	ctx, cancel := context.WithCancel(context.Background())
+	sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moveTo(t, s, "a1", StateActive)
+	moveTo(t, s, "a1", StateIdle)
+	seen := recv(t, sub, 3)
+	cancel()
+	moveTo(t, s, "a1", StateActive)
+	moveTo(t, s, "a1", StateIdle)
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	re, err := s.events.Subscribe(ctx, map[string]int64{"a1": seen[len(seen)-1].Seq})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen = append(seen, recv(t, re, 3)...)
+	quiet(t, re)
+	want := []string{"a1:1:" + EventStateChanged, "a1:2:" + EventStateChanged, "a1:2:" + EventIdle,
+		"a1:3:" + EventStateChanged, "a1:4:" + EventStateChanged, "a1:4:" + EventIdle}
+	if all := rows(t, s, "a1", 0); !slices.Equal(ids(seen), ids(all)) || !slices.Equal(ids(all), want) {
+		t.Fatalf("seen %v; want each of %v once", ids(seen), ids(all))
+	}
+}
+
+// collect reads sub until it has every saved event of agents, checking each
+// agent's seq rises by exactly one.
+func collect(t *testing.T, s *Service, sub *Subscription, agents ...string) map[string][]loomstore.Event {
+	t.Helper()
+	want := 0
+	for _, id := range agents {
+		want += len(rows(t, s, id, 0))
+	}
+	got := map[string][]loomstore.Event{}
+	for _, e := range recv(t, sub, want) {
+		if n := int64(len(got[e.AgentID])); e.Seq != n+1 {
+			t.Fatalf("%s: seq %d after %d; want %d", e.AgentID, e.Seq, n, n+1)
+		}
+		got[e.AgentID] = append(got[e.AgentID], e)
+	}
+	quiet(t, sub)
+	return got
+}
+
+// TestPublishOrderPerAgent: concurrent writers on one agent and across
+// agents; a subscriber sees each agent's seq rise with no gap, and the
+// events in commit order (Attention raised and cleared alternate).
+func TestPublishOrderPerAgent(t *testing.T) {
+	agents := []string{"a1", "a2"}
+	s := serviceAt(t, filepath.Join(t.TempDir(), "loom.db"),
+		svcAgent("a1", "persistent", StateIdle), svcAgent("a2", "persistent", StateIdle))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": 0, "a2": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var unheld atomic.Int32 // the lane must be held from before BEGIN until the fanout ends
+	commitStateCrash = func() {
+		if s.events.mu.TryLock() {
+			s.events.mu.Unlock()
+			unheld.Add(1)
+		}
+	}
+	t.Cleanup(func() { commitStateCrash = func() {} })
+	var wg sync.WaitGroup
+	for _, id := range agents {
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range 10 {
+					toggleAttention(t, s, id)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	if n := unheld.Load(); n != 0 {
+		t.Fatalf("%d commits were not under the lane", n)
+	}
+	got := collect(t, s, sub, agents...)
+	for _, id := range agents {
+		var att []string
+		for _, e := range got[id] {
+			if e.Kind == EventAttentionRaised || e.Kind == EventAttentionCleared {
+				att = append(att, e.Kind)
+			}
+		}
+		if len(att) != 40 {
+			t.Fatalf("%s: %d attention events; want 40", id, len(att))
+		}
+		for i, k := range att {
+			if want := []string{EventAttentionRaised, EventAttentionCleared}[i%2]; k != want {
+				t.Fatalf("%s: attention event %d is %s; want %s (publish order is not commit order)", id, i, k, want)
+			}
+		}
+	}
+}
+
+// TestReconnectNoGap: a subscriber that drops and reconnects from its
+// cursor while writes go on sees every event once, with no gap.
+func TestReconnectNoGap(t *testing.T) {
+	s := serviceAt(t, filepath.Join(t.TempDir(), "loom.db"), svcAgent("a1", "persistent", StateIdle))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 40 {
+			toggleAttention(t, s, "a1")
+		}
+	}()
+	var seen []loomstore.Event
+	cursor := int64(0)
+	for i := 0; ; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := recv(t, sub, 1)[0]
+		cancel()
+		if e.Seq != cursor+1 {
+			t.Fatalf("reconnect %d from %d got seq %d", i, cursor, e.Seq)
+		}
+		seen, cursor = append(seen, e), e.Seq
+		select {
+		case <-done:
+			if all := rows(t, s, "a1", 0); int64(len(all)) == cursor {
+				if !slices.Equal(ids(seen), ids(all)) {
+					t.Fatalf("seen %v; want %v", ids(seen), ids(all))
+				}
+				return
+			}
+		default:
+		}
+	}
+}

@@ -591,8 +591,9 @@ func rollBackNotices(t *testing.T, path string) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{"ALTER TABLE agent_slots DROP COLUMN notices", "ALTER TABLE agent_send_receipts DROP COLUMN notices",
-		"PRAGMA user_version = " + strconv.Itoa(v-1)} {
+	for _, q := range []string{"ALTER TABLE agents DROP COLUMN revision", // OR2's migration came after
+		"ALTER TABLE agent_slots DROP COLUMN notices", "ALTER TABLE agent_send_receipts DROP COLUMN notices",
+		"PRAGMA user_version = " + strconv.Itoa(v-2)} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
