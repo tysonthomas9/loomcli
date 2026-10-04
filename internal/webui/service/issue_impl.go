@@ -200,6 +200,10 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 		return nil, svcErr
 	}
 
+	if backend.HasCodeReviewLabel(params.Labels) {
+		return nil, ErrValidation(codeReviewLabelRefusal)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -253,9 +257,12 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	if patchHasLabelMutation(params) {
+	if patchHasLabelMutation(params) || params.SetLabels != nil {
 		s.labelMutationMu.Lock()
 		defer s.labelMutationMu.Unlock()
+		if err := refuseCodeReviewLabelEdit(ctx, be, params); err != nil {
+			return err
+		}
 	}
 
 	if err := be.Update(ctx, params.IssueID, patchParamsToBackendUpdate(&params)); err != nil {
@@ -266,6 +273,33 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 		}
 		slog.Error("backend error in PatchIssue", "issue_id", params.IssueID, "err", err)
 		return translateBackendError(err)
+	}
+	return nil
+}
+
+const codeReviewLabelRefusal = "the code-review label belongs to Loom: only Approve or Reject of the task's revision changes it"
+
+// refuseCodeReviewLabelEdit keeps the code-review label out of reach of the
+// issue API (D29, P1.26): Loom sets it when a finished attempt leaves code
+// awaiting review and clears it on Approve or Reject, through the issue
+// backend, never through this API. No caller may add, remove or replace it.
+func refuseCodeReviewLabelEdit(ctx context.Context, be backend.IssueBackend, params PatchIssueParams) error {
+	if backend.HasCodeReviewLabel(params.AddLabels) || backend.HasCodeReviewLabel(params.RemoveLabels) {
+		return ErrConflict(codeReviewLabelRefusal)
+	}
+	if params.SetLabels == nil {
+		return nil
+	}
+	issue, err := be.Get(ctx, params.IssueID)
+	if err != nil {
+		return translateBackendError(err)
+	}
+	var current []string
+	if issue != nil {
+		current = issue.Labels
+	}
+	if backend.TouchesCodeReviewLabel(backend.UpdateParams{SetLabels: params.SetLabels}, current) {
+		return ErrConflict(codeReviewLabelRefusal)
 	}
 	return nil
 }
