@@ -51,8 +51,22 @@ teardown: |
 tests:
   # ports: zz-lead-agent "lead template creates an interactive lead agent and role"
   - name: parity - the Lead template creates an Agent API lead with its own worktree and branch
-    intent: An operator creates a Lead in the New Agent modal and the saved agent is a user-made OpenCode lead on the picked repo, with its own worktree on its own branch from main
+    intent: An operator creates a Lead in the New Agent modal and the saved agent is a user-made OpenCode lead on the picked repo, with its own worktree on its own branch from the tip of the repo's default branch even when the repo's checkout is on another branch
     steps:
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR" |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data") or d; r=[r for r in d["repos"] if r["name"]=="agv1-par-alpha"][0]; print(r["path"]); print(r["default_branch"])' > "$AFT_WORK_DIR/par-alpha-ws"
+          copy="$(sed -n 1p "$AFT_WORK_DIR/par-alpha-ws")"; def="$(sed -n 2p "$AFT_WORK_DIR/par-alpha-ws")"
+          [ -n "$def" ] || { echo "no default_branch for agv1-par-alpha"; exit 1; }
+          git -C "$copy" rev-parse "$def^{commit}" > "$AFT_WORK_DIR/par-alpha-def-tip"
+          git -C "$copy" switch -q -c "par-side-${RUN_ID:-local}"
+          echo side > "$copy/par-side.txt"
+          git -C "$copy" add par-side.txt
+          git -C "$copy" -c user.email=e2e@x -c user.name=e2e commit -q -m "par side commit"
+          git -C "$copy" rev-parse HEAD > "$AFT_WORK_DIR/par-alpha-side-tip"
+          [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" != "$def" ] && [ "$(cat "$AFT_WORK_DIR/par-alpha-side-tip")" != "$(cat "$AFT_WORK_DIR/par-alpha-def-tip")" ]
+        intent: "Put the workspace's agv1-par-alpha checkout on a side branch with its own commit, so its HEAD differs from its default branch"
       - open: /ws/E2E-AGV1-PAR/agents
       - wait:
           fn: &parAddReady >-
@@ -92,11 +106,19 @@ tests:
           wt = a["worktree_path"]
           assert wt and os.path.isdir(wt), a
           assert git(wt, "rev-parse", "--abbrev-ref", "HEAD") == a["branch"], wt
-          assert git(wt, "rev-parse", "HEAD") == git(a["repo"], "rev-parse", a["base_ref"] + "^{commit}"), "worktree did not start at the tip of " + a["base_ref"]
+          assert a["base_ref"] != git(a["repo"], "rev-parse", "--abbrev-ref", "HEAD"), ("base_ref followed the checkout's HEAD", a)
+          def_tip = open(os.path.join(os.path.dirname(sys.argv[1]), "par-alpha-def-tip")).read().strip()
+          side_tip = open(os.path.join(os.path.dirname(sys.argv[1]), "par-alpha-side-tip")).read().strip()
+          assert git(wt, "rev-parse", "HEAD") == def_tip != side_tip, "worktree did not start at the tip of " + a["base_ref"]
           assert os.path.realpath(git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir")) == \
             os.path.realpath(git(a["repo"], "rev-parse", "--path-format=absolute", "--git-common-dir")), wt
           PY
         intent: "An operator's readback shows a user-made OpenCode lead on the workspace's copy of the picked repo, with its own worktree on loom/agent/<id> from the tip of the repo's default branch as the modal sends it"
+      - run: |
+          set -e
+          copy="$(sed -n 1p "$AFT_WORK_DIR/par-alpha-ws")"; def="$(sed -n 2p "$AFT_WORK_DIR/par-alpha-ws")"
+          git -C "$copy" switch -q "$def"
+        intent: "Put the agv1-par-alpha checkout back on its default branch"
 
   # ports: zz-lead-agent "lead backend dropdown selects the runtime"
   - name: parity - the Lead backend list is the server's lead harnesses and the pick reaches the agent
@@ -373,7 +395,9 @@ tests:
           PY
         intent: "Check that the second turn reached the model with the first turn's conversation"
 
-  # ports: zz-lead-agent "migrating a lead backend rebuilds the launch spec"
+  # ports: zz-lead-agent "migrating a lead backend rebuilds the launch spec" (refusal only).
+  # Deferred: a successful switch needs a second harness, and the emulator stack runs only
+  # OpenCode (codex and claude are harness_unavailable here), so it belongs to a real-backend run.
   - name: parity - a harness switch to a harness this server does not run is refused and the lead keeps working
     intent: An operator asks to move a lead to codex on a server without codex, gets a clear harness_unavailable refusal, and the lead keeps its harness, history and replies
     steps:
