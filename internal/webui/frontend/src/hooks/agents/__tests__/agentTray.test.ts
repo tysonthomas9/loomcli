@@ -57,22 +57,26 @@ describe("trayRows", () => {
   it("shows only working children and results waiting for the Lead", () => {
     const roster = [
       kid("run"),
+      kid("ask", { state: "waiting" }),
+      kid("idle", { state: "idle" }),
       kid("held", { state: "finished" }),
       kid("read", { state: "finished" }),
       kid("other", { parent_agent_id: "X" }),
       kid("gone", { deleted_at: "t" }),
     ];
     const items = [
-      started("", "run", "held", "read"),
+      started("", "run", "ask", "idle", "held", "read"),
       done("held", 0),
       done("read", 0),
     ];
     const rows = trayRows("L", roster, items, [waits("held", 0)]);
+    // An idle child (made with no first message) is not at work.
     expect(rows.map((r) => [r.id, r.status, r.unread])).toEqual([
       ["run", "running", false],
+      ["ask", "running", false],
       ["held", "waiting_for_lead", true],
     ]);
-    expect(rows[1].record?.summary).toBe("held result");
+    expect(rows[2].record?.summary).toBe("held result");
     // Once delivered, the result leaves: the tray empties when all are read.
     const after = trayRows(
       "L",

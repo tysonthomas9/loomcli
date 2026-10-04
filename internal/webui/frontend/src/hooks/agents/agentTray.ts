@@ -36,12 +36,14 @@ export interface TrayWave {
   rows: TrayRow[];
 }
 
-const ENDED = new Set(["finished", "archived"]);
+/** The states of a child at work; idle, finished and archived are not. */
+const WORKING = new Set(["creating", "active", "waiting", "stopping"]);
 
 /**
  * The tray's rows, oldest wave first: each child of leadId in the roster
  * whose result waits in the Lead's waiting messages (matched on the record
- * the server names), else that has not ended. Others are left out.
+ * the server names), else that is at work (creating, active, waiting on an
+ * ask, or stopping). Others, idle ones included, are left out.
  */
 export function trayRows(
   leadId: string,
@@ -94,7 +96,7 @@ export function trayRows(
         startedAt: a.created_at,
         unread: true,
       });
-    } else if (!ENDED.has(a.state)) {
+    } else if (WORKING.has(a.state)) {
       // The roster's attempt can lag a retry; a saved record cannot.
       const attempt = Math.max(a.attempt, last ? last.attempt + 1 : 0);
       rows.push({
