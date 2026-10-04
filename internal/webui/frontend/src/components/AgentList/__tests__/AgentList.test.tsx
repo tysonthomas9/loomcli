@@ -2,7 +2,14 @@
  * @vitest-environment jsdom
  */
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import type { NavigateFunction } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -217,5 +224,53 @@ describe("AgentList", () => {
       "kidopencodeactive",
       "kid3opencodeidle",
     ]);
+  });
+
+  it("lists leads first and independent workers under a collapsible Background group", async () => {
+    api.agents = [
+      agent("worker", { preset: "daemon-worker", role_kind: "worker" }),
+      agent("review", {
+        preset: "pr-review-interactive",
+        role_kind: "interactive",
+      }),
+      agent("lead", { preset: "lead", role_kind: "interactive" }),
+      agent("kid", {
+        parent_agent_id: "lead",
+        preset: "task",
+        role_kind: "worker",
+      }),
+    ];
+    renderList();
+    await waitFor(() => expect(names()).toHaveLength(4));
+    // Lead first, its worker child nested under it, then the rest, then Background.
+    expect(names()).toEqual([
+      "leadopencodeidle",
+      "kidopencodeidle",
+      "reviewopencodeidle",
+      "workeropencodeidle",
+    ]);
+    const lead = screen.getByRole("link", { name: /^lead/ }).closest("li")!;
+    expect(within(lead).getByRole("link", { name: /^kid/ })).toBeVisible();
+    const bg = screen.getByTestId("agent-list-background");
+    const bgNames = within(bg)
+      .getAllByRole("link")
+      .map((l) => l.textContent);
+    expect(bgNames).toEqual(["workeropencodeidle"]);
+
+    const toggle = within(bg).getByRole("button", { name: "Background" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("link", { name: /^worker/ })).toBeNull();
+    expect(names()).toHaveLength(3);
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: /^worker/ })).toBeVisible();
+  });
+
+  it("shows no Background group without an independent worker", async () => {
+    renderList();
+    await waitFor(() => expect(names()).toHaveLength(3));
+    expect(screen.queryByTestId("agent-list-background")).toBeNull();
   });
 });

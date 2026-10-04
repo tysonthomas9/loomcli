@@ -492,9 +492,7 @@ tests:
         intent: "Wait until a reload shows the stopped turn, the next message and its reply"
 
   # ports: zz-lead-agent "leads sort ahead of workers in the rail" (nesting part only).
-  # Deferred: the old lead-before-independent-worker order and the Background group have no
-  # Agent API equivalent; AgentList lists the roster in server order with children under their
-  # parent, so there is no ordering to assert until the sidebar gains one.
+  # The old lead-before-independent-worker order and Background group are the case below (SB1).
   - name: parity - the sidebar lists a lead at the top level with its child nested under it
     intent: An operator sees a lead in the sidebar's agent list with the child it made indented under it, not beside it
     steps:
@@ -521,3 +519,37 @@ tests:
                 !topNames.some((t) => t.includes('par-tree-kid-${RUN_ID:-local}')); })()
         budget: 90000
         intent: "Wait until the sidebar shows the lead at the top level with its child nested under it"
+
+  # ports: zz-lead-agent "leads sort ahead of workers in the rail" (row 18)
+  - name: parity - the sidebar lists a lead ahead of an independent worker, which sits under Background
+    intent: An operator with a lead and an independent worker finds the lead first and the worker under the collapsible Background group
+    steps:
+      - run: |
+          set -e
+          printf '{"preset":"daemon-worker","name":"par-bg-worker-%s","repo":"%s","base_ref":"main","overrides":{"harness":"opencode"}}' \
+            "${RUN_ID:-local}" "$AFT_WORK_DIR/agv1-par-alpha" |
+            curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents" \
+              -H "Content-Type: application/json" -H "Idempotency-Key: par-bg-worker-${RUN_ID:-local}" -d @- >/dev/null
+          "$AFT_WORK_DIR/par-lead" "par-bg-lead-${RUN_ID:-local}" parBgLeadId
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parBgLeadId")"
+        intent: "Create an independent worker first, then a lead, so server order alone would list the worker first, and open the lead's chat"
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const links = Array.from(nav?.querySelectorAll('a') || []).map((a) => a.textContent || '');
+              const lead = links.findIndex((t) => t.startsWith('par-bg-lead-${RUN_ID:-local}'));
+              const worker = links.findIndex((t) => t.startsWith('par-bg-worker-${RUN_ID:-local}'));
+              const bg = Array.from(nav?.querySelectorAll('[data-testid=agent-list-background] a') || []).map((a) => a.textContent || '');
+              return lead >= 0 && worker > lead &&
+                bg.some((t) => t.startsWith('par-bg-worker-${RUN_ID:-local}')) &&
+                !bg.some((t) => t.startsWith('par-bg-lead-${RUN_ID:-local}')); })()
+        budget: 30000
+        intent: "Wait until the sidebar lists the lead before the worker and only the worker under Background"
+      - click: { role: button, name: Background, exact: true }
+      - wait:
+          fn: >-
+            (() => { const bg = document.querySelector('nav[aria-label=Agents] [data-testid=agent-list-background]');
+              return bg?.querySelector('button')?.getAttribute('aria-expanded') === 'false' &&
+                !Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some((a) => (a.textContent || '').startsWith('par-bg-worker-${RUN_ID:-local}')) &&
+                Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some((a) => (a.textContent || '').startsWith('par-bg-lead-${RUN_ID:-local}')); })()
+        intent: "Collapsing Background hides the worker and keeps the lead"

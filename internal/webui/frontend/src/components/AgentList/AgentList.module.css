@@ -35,3 +35,16 @@
 .label {
   opacity: 0.7;
 }
+
+.group {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  opacity: 0.7;
+  cursor: pointer;
+}
