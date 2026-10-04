@@ -39,7 +39,8 @@ import {
 } from "./ComposerModelControls";
 import { LONG_TEXT_LIMIT, LongText } from "./LongText";
 import { MessageCopyButton } from "./MessageCopyButton";
-import { UserMessage, WorkingRow } from "./MessageRows";
+import { useLinger, UserMessage, WorkingRow } from "./MessageRows";
+import { FADE_MS, useSmoothText } from "./useSmoothText";
 import {
   dismissThreadErrorBannerForSession,
   getThreadErrorBannerKey,
@@ -49,6 +50,7 @@ import {
 import {
   deriveTimelineRows,
   firstLine,
+  toolHeading,
   type TimelineRow,
 } from "./timelineRows";
 import {
@@ -104,6 +106,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     () => deriveTimelineRows(items, expandedGroups),
     [items, expandedGroups],
   );
+  const entering = useEnteringRows(rows);
   // The agent tray: working children, and results waiting for this agent.
   const roster = useRoster();
   const activity = useRosterActivity();
@@ -131,6 +134,11 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   const [, setDismissed] = useState(0);
   const ask = asks[0]; // T3 shows the first open ask, with "1/N"
   const running = !!agent?.running_turn_id;
+  const working = useLinger(running, FADE_MS);
+  // The fading working row keeps the time it showed.
+  const [since, setSince] = useState(runningSince);
+  if (running && runningSince !== since) setSince(runningSince);
+  const step = useMemo(() => runningStep(items), [items]);
   const waiting = agent?.waiting_messages ?? [];
   const scroll = useStickToEnd();
   const toggleGroup = (id: string) =>
@@ -187,13 +195,25 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
           onScroll={scroll.onScroll}
         >
           {rows.map((row) => (
-            <li key={row.id} className={page.row} data-kind={rowKind(row)}>
+            <li
+              key={row.id}
+              className={page.row}
+              data-kind={rowKind(row)}
+              data-enter={entering.has(row.id) || undefined}
+            >
               <Row row={row} workspaceId={workspaceId} onToggle={toggleGroup} />
             </li>
           ))}
-          {running && (
-            <li className={page.row} data-kind="working">
-              <WorkingRow startedAt={runningSince} />
+          {working.mounted && (
+            <li
+              className={page.row}
+              data-kind="working"
+              data-leaving={working.leaving || undefined}
+            >
+              <WorkingRow
+                startedAt={running ? runningSince : since}
+                step={running ? step : null}
+              />
             </li>
           )}
           {waiting.map((w) =>
@@ -393,6 +413,39 @@ const attentionText = (reason: string) => ATTENTION[reason] ?? reason;
 function rowKind(row: TimelineRow): string {
   if (row.kind === "started") return "started";
   return row.kind === "item" ? row.item.kind : "work";
+}
+
+/** The running tool's name, for the working row's "· step". */
+function runningStep(items: readonly ChatItem[]): string | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]!;
+    if (it.kind === "tool" && it.status === "running") return toolHeading(it);
+  }
+  return null;
+}
+
+const isMessageRow = (r: TimelineRow) =>
+  r.kind === "item" && (r.item.kind === "user" || r.item.kind === "agent");
+
+/**
+ * The ids of user and agent rows that arrived live, which fade in. Rows at
+ * the first render, rows that arrive several at once (history loading) and
+ * a completed message replacing its streamed copy do not animate.
+ */
+function useEnteringRows(rows: readonly TimelineRow[]): ReadonlySet<string> {
+  const prev = useRef<ReadonlyMap<string, boolean> | null>(null);
+  const entering = useRef(new Set<string>()).current;
+  useMemo(() => {
+    const now = new Map(rows.map((r) => [r.id, isMessageRow(r)]));
+    const before = prev.current;
+    prev.current = now;
+    if (!before) return;
+    const added = rows.filter((r) => !before.has(r.id));
+    const replaced = [...before].some(([id, msg]) => msg && !now.has(id));
+    if (added.length > 2 || replaced) return;
+    added.filter(isMessageRow).forEach((r) => entering.add(r.id));
+  }, [rows, entering]);
+  return entering;
 }
 
 /** Distance from the end, in px, that still counts as at the end. */
@@ -714,12 +767,14 @@ function AgentMessage({
   streaming: boolean;
 }) {
   const [all, setAll] = useState(false);
-  const cut = !all && text.length > LONG_TEXT_LIMIT;
+  const smooth = useSmoothText(text, streaming);
+  const cut = !all && smooth.text.length > LONG_TEXT_LIMIT;
   return (
     <div className={page.agentMessage}>
       <ChatMarkdown
-        text={cut ? text.slice(0, LONG_TEXT_LIMIT) + "…" : text}
+        text={cut ? smooth.text.slice(0, LONG_TEXT_LIMIT) + "…" : smooth.text}
         streaming={streaming}
+        fresh={smooth.fresh}
       />
       {cut && (
         <button className={styles.showAll} onClick={() => setAll(true)}>

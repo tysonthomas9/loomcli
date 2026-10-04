@@ -4,13 +4,16 @@
 // Changes: the GFM, table and code-block parts only (no file links, workspace
 // images, skills or alerts); Lezer highlighting in place of Shiki; CSS
 // modules in place of Tailwind; raw HTML shows as literal text, as Loom's chat
-// always has, instead of T3's sanitized HTML.
+// always has, instead of T3's sanitized HTML. Loom's own additions: the text
+// renders block by block so streaming re-parses only the last block, and the
+// streaming tail carries a caret and fades its newest words in.
 
 import {
   Children,
   isValidElement,
   memo,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentProps,
@@ -22,11 +25,22 @@ import remarkGfm from "remark-gfm";
 import { highlight, highlightLanguage, loadLanguage } from "./codeHighlight";
 import type { Token } from "./codeHighlight";
 import { useCopy } from "./MessageCopyButton";
+import type { FreshRun } from "./useSmoothText";
 import styles from "./ChatMarkdown.module.css";
 
 interface MdNode {
   type: string;
   children?: MdNode[];
+}
+
+/** The hast nodes the streaming tail touches. */
+interface HNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: HNode[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
 }
 
 /** Raw HTML in a message is shown as the text it is, never as markup. */
@@ -294,28 +308,181 @@ function components(streaming: boolean): Components {
 const STATIC = components(false);
 const STREAMING = components(true);
 
+// Text that a cut could change: reference links, and HTML blocks that run
+// past a blank line (comments, <pre>, <script> and the like).
+const WHOLE = /^ {0,3}(\[[^\]]+\]:|<([!?]|script|pre|style|textarea))/im;
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+// A line after a blank line that may still belong to the block above.
+const CONTINUES = /^(\s|[-*+>|]|\d+[.)](\s|$))/;
+
+/**
+ * The text cut into top-level blocks that render the same alone as
+ * together: a cut falls only at a blank line outside a code fence, before a
+ * line that cannot continue a list, quote or table. Text with reference
+ * links or long HTML blocks stays whole.
+ */
+export function splitBlocks(text: string): string[] {
+  if (WHOLE.test(text)) return [text];
+  const blocks: string[] = [];
+  let start = 0;
+  let fence = "";
+  let blank = false;
+  for (let i = 0; i < text.length; ) {
+    const nl = text.indexOf("\n", i);
+    const line = text.slice(i, nl === -1 ? text.length : nl);
+    const m = FENCE.exec(line);
+    const marker = m?.[1] ?? "";
+    if (fence) {
+      if (
+        marker[0] === fence[0] &&
+        marker.length >= fence.length &&
+        !line.slice(m?.[0].length).trim()
+      )
+        fence = "";
+    } else if (!line.trim()) {
+      blank = true;
+    } else {
+      if (blank && !CONTINUES.test(line)) {
+        blocks.push(text.slice(start, i));
+        start = i;
+      }
+      blank = false;
+      fence = marker;
+    }
+    i = nl === -1 ? text.length : nl + 1;
+  }
+  blocks.push(text.slice(start));
+  return blocks;
+}
+
+/** Wraps the text from each fresh run's start in a span at its opacity. */
+function fadeRuns(node: HNode, runs: readonly FreshRun[]) {
+  if (!node.children) return;
+  node.children = node.children.flatMap((child): HNode[] => {
+    if (child.type !== "text") {
+      fadeRuns(child, runs);
+      return [child];
+    }
+    const s = child.position?.start.offset;
+    const e = child.position?.end.offset;
+    const value = child.value ?? "";
+    if (s === undefined || e === undefined || e - s !== value.length)
+      return [child];
+    const cuts = [s, ...runs.map((r) => r.from).filter((f) => f > s && f < e)];
+    return cuts.map((from, i) => {
+      const piece = value.slice(from - s, (cuts[i + 1] ?? e) - s);
+      const run = runs.filter((r) => r.from <= from).pop();
+      if (!run || run.opacity >= 1) return { type: "text", value: piece };
+      return {
+        type: "element",
+        tagName: "span",
+        properties: { dataFresh: "", style: `opacity:${run.opacity}` },
+        children: [{ type: "text", value: piece }],
+      };
+    });
+  });
+}
+
+/** Puts the caret at the end of the last element with text. */
+function appendCaret(root: HNode) {
+  let node = root;
+  for (;;) {
+    const last = [...(node.children ?? [])]
+      .reverse()
+      .find((c) => c.type === "element" || c.value?.trim());
+    if (
+      last?.type !== "element" ||
+      last.tagName === "pre" ||
+      last.properties?.dataFresh !== undefined
+    )
+      break;
+    node = last;
+  }
+  (node.children ??= []).push({
+    type: "element",
+    tagName: "span",
+    properties: {
+      className: [styles.caret],
+      dataStreamingCaret: "",
+      ariaHidden: "true",
+    },
+    children: [],
+  });
+}
+
+/** The streaming tail: fresh runs, from the block's start, and the caret. */
+interface Tail {
+  fresh: readonly FreshRun[];
+}
+
+const MarkdownBlock = memo(function MarkdownBlock({
+  text,
+  streaming,
+  tail,
+}: {
+  text: string;
+  streaming: boolean;
+  tail?: Tail | undefined;
+}) {
+  const rehype = tail
+    ? [
+        ...REHYPE_PLUGINS,
+        () => (tree: HNode) => {
+          if (tail.fresh.length) fadeRuns(tree, tail.fresh);
+          appendCaret(tree);
+        },
+      ]
+    : REHYPE_PLUGINS;
+  return (
+    <Markdown
+      remarkPlugins={REMARK_PLUGINS}
+      rehypePlugins={rehype}
+      components={streaming ? STREAMING : STATIC}
+    >
+      {text}
+    </Markdown>
+  );
+});
+
 /**
  * An agent's markdown: GFM (tables, task lists, strikethrough, autolinks),
  * code blocks with their language, highlighting, wrap and copy, and tables
- * that copy as Markdown or CSV. While the text streams, code is not
- * highlighted.
+ * that copy as Markdown or CSV. It renders block by block, so a growing
+ * message re-parses only its last block. While the text streams, code is
+ * not highlighted, a caret ends the text and `fresh` runs fade in.
  */
 export const ChatMarkdown = memo(function ChatMarkdown({
   text,
   streaming = false,
+  fresh = NO_RUNS,
 }: {
   text: string;
   streaming?: boolean;
+  fresh?: readonly FreshRun[];
 }) {
+  const blocks = useMemo(() => splitBlocks(text), [text]);
+  const lastStart = text.length - (blocks[blocks.length - 1] ?? "").length;
   return (
     <div className={styles.markdown} data-testid="chat-markdown">
-      <Markdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={REHYPE_PLUGINS}
-        components={streaming ? STREAMING : STATIC}
-      >
-        {text}
-      </Markdown>
+      {blocks.map((block, i) => (
+        <MarkdownBlock
+          key={i}
+          text={block}
+          streaming={streaming}
+          tail={
+            streaming && i === blocks.length - 1
+              ? {
+                  fresh: fresh.map((r) => ({
+                    ...r,
+                    from: Math.max(0, r.from - lastStart),
+                  })),
+                }
+              : undefined
+          }
+        />
+      ))}
     </div>
   );
 });
+
+const NO_RUNS: readonly FreshRun[] = [];

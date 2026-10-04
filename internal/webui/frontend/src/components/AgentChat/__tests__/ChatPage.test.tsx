@@ -2,7 +2,13 @@
  * @vitest-environment jsdom
  */
 
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
@@ -59,7 +65,9 @@ import { ChatHeader, resolveRenameCommit } from "../ChatHeader";
 import {
   formatElapsed,
   shouldCollapseUserMessage,
+  useLinger,
   UserMessage,
+  WorkingRow,
 } from "../MessageRows";
 
 function agent(over: Partial<Agent> = {}): Agent {
@@ -364,5 +372,47 @@ describe("AgentChat page", () => {
     );
     expect(header?.textContent).toContain("lead");
     expect(header?.textContent).toContain("idle");
+  });
+});
+
+describe("WorkingRow motion", () => {
+  it("names the running step and shimmers only while a step runs", () => {
+    const { rerender } = render(<WorkingRow startedAt={null} step="Bash" />);
+    expect(screen.getByTestId("working-row")).toHaveTextContent(
+      "Working...· Bash",
+    );
+    expect(screen.getByText("Working...").className).not.toBe("");
+    rerender(<WorkingRow startedAt={null} />);
+    expect(screen.queryByText(/· /)).toBeNull();
+    expect(screen.getByText("Working...").className).toBe("");
+  });
+
+  it("lingers 150ms to fade out when the turn ends", () => {
+    vi.useFakeTimers();
+    try {
+      const { result, rerender } = renderHook(({ s }) => useLinger(s, 150), {
+        initialProps: { s: true },
+      });
+      expect(result.current).toEqual({ mounted: true, leaving: false });
+      rerender({ s: false });
+      expect(result.current).toEqual({ mounted: true, leaving: true });
+      act(() => vi.advanceTimersByTime(150));
+      expect(result.current).toEqual({ mounted: false, leaving: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("goes at once under prefers-reduced-motion", () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }));
+    try {
+      const { result, rerender } = renderHook(({ s }) => useLinger(s, 150), {
+        initialProps: { s: true },
+      });
+      rerender({ s: false });
+      expect(result.current).toEqual({ mounted: false, leaving: false });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

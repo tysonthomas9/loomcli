@@ -414,6 +414,33 @@
   line-height: 1.625;
 }
 
+.workingStep {
+  margin-left: 8px;
+  opacity: 0.55;
+}
+
+/* A new message rises 4px as it fades in; the working row fades out. */
+.row[data-enter] {
+  animation: row-enter 150ms ease-out;
+}
+
+.row[data-leaving] {
+  animation: row-leave 150ms ease-out forwards;
+}
+
+@keyframes row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes row-leave {
+  to {
+    opacity: 0;
+  }
+}
+
 .tabular {
   font-variant-numeric: tabular-nums;
 }
@@ -440,6 +467,7 @@
   position: relative;
   z-index: 0;
   margin: 0 1.375rem calc(-1rem - 1px);
+  animation: row-enter 150ms ease-out;
 }
 
 .askDrawer > [data-testid="ask-card"] {
@@ -620,7 +648,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spinner {
+  .spinner,
+  .row[data-enter],
+  .row[data-leaving],
+  .askDrawer {
     animation: none;
   }
 

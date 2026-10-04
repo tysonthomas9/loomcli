@@ -3,10 +3,13 @@
 // row, WorkingTimelineRow and WorkingTimer) at commit 2daff8c25. Copyright (c)
 // 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md. Loom has no
 // attachments, terminal contexts, timestamps or revert on a user message.
+// The working row's step label is the running tool, as Loom has no plans.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LongText } from "./LongText";
 import { MessageCopyButton } from "./MessageCopyButton";
 import styles from "./ChatPage.module.css";
+import timeline from "./Timeline.module.css";
+import { prefersReducedMotion } from "./useSmoothText";
 
 const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
 const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 600;
@@ -68,19 +71,51 @@ export function UserMessage({
   );
 }
 
-/** "Working for Ns" while a turn runs (T3's WorkingTimelineRow). */
-export function WorkingRow({ startedAt }: { startedAt: string | null }) {
+/**
+ * "Working for Ns" while a turn runs (T3's WorkingTimelineRow), with the
+ * live-activity shimmer and "· step" while a tool runs.
+ */
+export function WorkingRow({
+  startedAt,
+  step,
+}: {
+  startedAt: string | null;
+  step?: string | null | undefined;
+}) {
   return (
     <div className={styles.working} data-testid="working-row">
-      {startedAt ? (
-        <>
-          Working for <WorkingTimer startedAt={startedAt} />
-        </>
-      ) : (
-        "Working..."
-      )}
+      <span className={step ? timeline.liveLabel : undefined}>
+        {startedAt ? (
+          <>
+            Working for <WorkingTimer startedAt={startedAt} />
+          </>
+        ) : (
+          "Working..."
+        )}
+      </span>
+      {step && <span className={styles.workingStep}>· {step}</span>}
     </div>
   );
+}
+
+/**
+ * Whether a row that shows while `show` holds is still mounted, and whether
+ * it is leaving: it stays `ms` after `show` ends so it can fade out, unless
+ * the user prefers reduced motion.
+ */
+export function useLinger(show: boolean, ms: number) {
+  const [leaving, setLeaving] = useState(false);
+  const [was, setWas] = useState(show);
+  if (was !== show) {
+    setWas(show);
+    setLeaving(!show && !prefersReducedMotion());
+  }
+  useEffect(() => {
+    if (!leaving) return;
+    const id = setTimeout(() => setLeaving(false), ms);
+    return () => clearTimeout(id);
+  }, [leaving, ms]);
+  return { mounted: show || leaving, leaving: !show && leaving };
 }
 
 /** The elapsed time, ticking every second without re-rendering the chat. */

@@ -262,6 +262,24 @@
   list-style: none;
 }
 
+.modelList[data-fade-top] {
+  mask-image: linear-gradient(to bottom, transparent, black 1.5rem);
+}
+
+.modelList[data-fade-bottom] {
+  mask-image: linear-gradient(to top, transparent, black 1.5rem);
+}
+
+.modelList[data-fade-top][data-fade-bottom] {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 1.5rem,
+    black calc(100% - 1.5rem),
+    transparent
+  );
+}
+
 .modelRow {
   display: flex;
   align-items: center;
@@ -393,6 +411,7 @@
 
 /* ModelPickerSidebar: a w-11 icon rail. */
 .rail {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -428,17 +447,25 @@
   color: var(--color-text-primary);
 }
 
-/* T3's selected indicator: a bar on the rail's inner edge. */
-.railButton[data-selected]::after {
-  content: "";
+/* T3's selected indicator: a bar on the rail's inner edge that slides to
+   the selected provider. */
+.railIndicator {
   position: absolute;
-  top: 50%;
-  right: -4px;
+  top: 0;
+  right: 0;
+  z-index: 1;
   width: 3px;
   height: 20px;
   border-radius: 999px 0 0 999px;
   background: var(--color-primary);
-  transform: translateY(-50%);
+  pointer-events: none;
+  transition: transform 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .railIndicator {
+    transition: none;
+  }
 }
 
 .railGlyph {

@@ -382,3 +382,59 @@ test("agent text takes T3's markdown type, colour and list gap in light and dark
     expect(m.quoteStyle, theme).toBe("normal");
   }
 });
+
+test("streaming reveals smoothly with no layout shift and the end kept in view", async ({
+  page,
+}) => {
+  // Enough history to scroll, so live follow has an end to hold.
+  const history = Array.from({ length: 30 }, (_, i) =>
+    ev("item.completed", { itemKind: "message", text: `Earlier reply ${i}.` }),
+  );
+  const m = mock({
+    agent: agent({ state: "active", running_turn_id: "t1" }),
+    events: history,
+  });
+  await open(page, m);
+  await expect(transcript(page).getByText("Earlier reply 29.")).toBeVisible();
+  // The 100ms recorder: layout-shift score and the gap under the last row.
+  await page.evaluate(() => {
+    const w = window as unknown as { __cls: number; __gaps: number[] };
+    w.__cls = 0;
+    w.__gaps = [];
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries() as (PerformanceEntry & {
+        value: number;
+        hadRecentInput: boolean;
+      })[])
+        if (!e.hadRecentInput) w.__cls += e.value;
+    }).observe({ type: "layout-shift", buffered: true });
+    const el = document.querySelector('[data-testid="chat-transcript"]')!;
+    setInterval(
+      () => w.__gaps.push(el.scrollHeight - el.scrollTop - el.clientHeight),
+      100,
+    );
+  });
+  const words = "The quick brown fox jumps over the lazy dog. ".repeat(12);
+  const delta = (text: string) =>
+    ev("delta", { itemId: "m1", itemKind: "message", text }, true);
+  for (let i = 0; i < words.length; i += 24) {
+    await push(page, m, delta(words.slice(i, i + 24)));
+    await page.waitForTimeout(80);
+  }
+  const live = transcript(page).getByTestId("chat-markdown").last();
+  await expect(live.locator("[data-streaming-caret]")).toHaveCount(1);
+  await push(
+    page,
+    m,
+    ev("item.completed", { itemId: "m1", itemKind: "message", text: words }),
+  );
+  await expect(live.locator("[data-streaming-caret]")).toHaveCount(0);
+  await expect(live).toHaveText(words.trim());
+  const r = await page.evaluate(() => {
+    const w = window as unknown as { __cls: number; __gaps: number[] };
+    return { cls: w.__cls, gaps: w.__gaps };
+  });
+  expect(r.gaps.length).toBeGreaterThan(10);
+  expect(Math.max(...r.gaps)).toBeLessThanOrEqual(0);
+  expect(r.cls).toBe(0);
+});

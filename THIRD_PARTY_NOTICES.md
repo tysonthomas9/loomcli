@@ -38,6 +38,12 @@ Ported files for the chat page design (UI0; internal/webui/frontend/src/componen
 - `ChatPage.module.css`: from `apps/web/src/index.css` (the composer glass shell and host, the theme's radius, message and message-action tokens) and the Tailwind classes of `apps/web/src/components/ChatView.tsx` and the files above.
 - `AgentChat.tsx` (the page layout, message column and scroll-to-end): from `apps/web/src/components/ChatView.tsx` and `apps/web/src/components/chat/MessagesTimeline.tsx`.
 
+Ported motion for the chat (UI5; internal/webui/frontend/src/components/AgentChat/):
+
+- `ChatPage.module.css`: the pending-ask drawer's entrance, from `apps/web/src/components/chat/ComposerBannerStack.tsx` (opacity and a 4px rise only, without its height transition).
+- `MessageRows.tsx`: the working row's step label and live-activity shimmer, from `WorkingTimelineRow` in `apps/web/src/components/chat/MessagesTimeline.tsx`.
+- `ModelPickerSidebar.tsx`, `ModelPickerContent.tsx`, `ModelPicker.module.css`: the sliding selected-provider indicator and the model list's scroll fades, from `apps/web/src/components/chat/ModelPickerSidebar.tsx`, `apps/web/src/components/chat/ModelPickerContent.tsx` and `apps/web/src/components/ui/scroll-area.tsx`.
+
 Ported files (internal/loomharness/):
 
 - `codex/catalog.go`: from `apps/server/src/provider/Layers/CodexProvider.ts`.

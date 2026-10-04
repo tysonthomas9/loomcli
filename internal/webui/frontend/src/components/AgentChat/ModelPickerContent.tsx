@@ -176,6 +176,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [models, favorites, harness, searching, query, section, prefs.recent]);
 
   useEffect(() => setHighlighted(0), [query, section]);
+  // T3's list scroll fades: a fade at each end with more to scroll to.
+  const [fade, setFade] = useState({ top: false, bottom: false });
+  const updateFade = () => {
+    const el = listRef.current;
+    if (!el) return;
+    const rest = el.scrollHeight - el.clientHeight - el.scrollTop;
+    setFade((f) =>
+      f.top === el.scrollTop > 1 && f.bottom === rest > 1
+        ? f
+        : { top: el.scrollTop > 1, bottom: rest > 1 },
+    );
+  };
+  useEffect(updateFade, [visible]);
   useEffect(() => {
     listRef.current
       ?.querySelector<HTMLElement>(`[data-index="${highlighted}"]`)
@@ -255,6 +268,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ref={listRef}
           id="model-picker-list"
           className={styles.modelList}
+          data-fade-top={fade.top || undefined}
+          data-fade-bottom={fade.bottom || undefined}
+          onScroll={updateFade}
           role="listbox"
           aria-label="Models"
         >

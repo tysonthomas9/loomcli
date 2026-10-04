@@ -380,3 +380,27 @@
 .tkDeleted {
   color: var(--color-danger);
 }
+
+/* The streaming caret: a small block after the last word that pulses. */
+.caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  border-radius: 2px;
+  background: var(--color-text-muted);
+  vertical-align: -0.125em;
+  animation: caret-pulse 1s ease-in-out infinite;
+}
+
+@keyframes caret-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+}
