@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -889,5 +890,62 @@ func TestCompletionNoticeLongReplyKeepsItsEnd(t *testing.T) {
 	}
 	if got := waiting(t, s, "L"); len(got) != 1 || !strings.Contains(got[0], " summary="+strconv.Quote(r)+" next=") {
 		t.Fatalf("notice lacks the result: %.200q", got)
+	}
+}
+
+// notOwnedStatus is a Workspace port whose Status reports key's working
+// copy as not the agent's, as when the agent moved it to another branch.
+type notOwnedStatus struct {
+	headWorkspace
+	key string
+}
+
+func (w *notOwnedStatus) Status(ctx context.Context, s WorkspaceSpec) (WorkspaceStatus, error) {
+	if s.Key == w.key {
+		return WorkspaceStatus{}, fmt.Errorf("%w: on branch %q, want %q", ErrWorkspaceNotOwned, "feature-x", s.Branch)
+	}
+	return w.headWorkspace.Status(ctx, s)
+}
+
+// TestTaskCompletedWorkingCopyNotOwned (CL3, RT2's miss): the first child's
+// result is delivered and the lead's turn on it ends; then the second child,
+// whose working copy is no longer the agent's (another branch checked
+// out), settles. Its record is still saved, with its own branch and no
+// head, and reaches the lead exactly once; retries and sweeps add nothing.
+func TestTaskCompletedWorkingCopyNotOwned(t *testing.T) {
+	ctx := context.Background()
+	ws := &notOwnedStatus{headWorkspace: headWorkspace{branch: "loom/agent/quick", head: "abc123"}, key: "feature"}
+	quick, feature := childOf("quick", "L"), childOf("feature", "L")
+	quick.WorktreePath, quick.Branch = sp("/wt/quick"), sp("loom/agent/quick")
+	feature.WorktreePath, feature.Branch = sp("/wt/feature"), sp("loom/agent/feature")
+	s := newService(t, ServiceConfig{Workspace: ws}, busy("L", "persistent", StateActive), quick, feature)
+	clk := useTestClock(s)
+
+	endAttempt(t, s, "quick", "completed")
+	dispatchOK(t, s, "L")
+	deliverNext(t, s, "L")
+	if got := waiting(t, s, "L"); len(got) != 0 {
+		t.Fatalf("after the first delivery, lead slots = %q", got)
+	}
+
+	endAttempt(t, s, "feature", "completed")
+	recs := completions(t, s, "L")
+	if len(recs) != 2 || recs[1].Child != "feature" || recs[1].Branch != "loom/agent/feature" || recs[1].Head != "" {
+		t.Fatalf("records = %+v; want feature's, with its branch and no head", recs)
+	}
+	if s.owed.Load() {
+		t.Fatal("feature's record is owed; a not-owned working copy never clears on retry")
+	}
+	runDispatcher(t, s)
+	clk.tick(t)
+	settled(t, s)
+	s.recordCompletions(ctx)
+	dispatchOK(t, s, "L")
+	got := waiting(t, s, "L")
+	if len(got) != 1 || !strings.HasPrefix(got[0], "agent:feature="+completionKey("feature", 1)+` child="feature" outcome=completed branch=loom/agent/feature still_running=0 `) {
+		t.Fatalf("lead slots = %q; want feature's one notice", got)
+	}
+	if n := len(completions(t, s, "L")); n != 2 {
+		t.Fatalf("records after retries = %d", n)
 	}
 }

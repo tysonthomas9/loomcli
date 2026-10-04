@@ -3,6 +3,7 @@ package agentworktree
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 )
@@ -25,6 +26,9 @@ func (p Port) Ensure(ctx context.Context, s loomagent.WorkspaceSpec) (loomagent.
 // Status implements loomagent.Workspace with Worktrees.Status.
 func (p Port) Status(ctx context.Context, s loomagent.WorkspaceSpec) (loomagent.WorkspaceStatus, error) {
 	st, err := p.W.Status(ctx, Spec(s))
+	if errors.Is(err, ErrNotOwned) {
+		err = fmt.Errorf("%w: %w", loomagent.ErrWorkspaceNotOwned, err)
+	}
 	return loomagent.WorkspaceStatus(st), err
 }
 

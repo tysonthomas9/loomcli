@@ -303,17 +303,21 @@ func (s *Service) recordCompletion(ctx context.Context, a loomstore.Agent) error
 		return err
 	}
 	rec := TaskCompleted{Child: a.AgentID, Attempt: a.Attempt, Outcome: *a.Outcome, Branch: deref(a.Branch)}
-	if a.WorktreePath != nil && s.workspace != nil { // nothing is saved without the port's branch and head
+	if a.WorktreePath != nil && s.workspace != nil { // a failed Status saves nothing, unless retrying cannot help
 		repo, err := s.repoPath(ctx, a.Repo)
 		if err != nil {
 			return err
 		}
 		st, err := s.workspace.Status(ctx, WorkspaceSpec{Key: a.AgentID, Repo: repo, BaseRef: deref(a.BaseRef),
 			Branch: deref(a.Branch), Detached: a.Branch == nil})
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrWorkspaceNotOwned): // no retry clears it: tell the parent without a head
+			slog.Warn("loomagent: task_completed without head; working copy not the agent's", "agent", a.AgentID, "error", err)
+		case err != nil:
 			return fmt.Errorf("loomagent: task_completed workspace status: %w", err)
+		default:
+			rec.Branch, rec.Head = st.Branch, st.HEAD
 		}
-		rec.Branch, rec.Head = st.Branch, st.HEAD
 	}
 	summary, err := s.store.LastMessage(ctx, a.AgentID)
 	if err != nil {
