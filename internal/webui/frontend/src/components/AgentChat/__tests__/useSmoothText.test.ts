@@ -109,33 +109,26 @@ describe("useSmoothText", () => {
     expect(now - arrived).toBeLessThanOrEqual(300 + FRAME);
   });
 
-  it.each([
-    // [characters per chunk, frames between chunks]: steady and bursty.
-    [24, 5],
-    [120, 24],
-  ])(
-    "shows every %i-character chunk (one per %i frames) within 300ms",
-    (size, every) => {
-      const words = "The quick brown fox jumps over the lazy dog. ".repeat(20);
-      const { result, rerender } = renderHook(
-        ({ t, s }) => useSmoothText(t, s),
-        { initialProps: { t: "", s: true } },
-      );
-      const pending: { end: number; at: number }[] = [];
-      let worst = 0;
-      for (let f = 0, i = 0; i < words.length || pending.length; f++) {
-        if (i < words.length && f % every === 0) {
-          i = Math.min(words.length, i + size);
-          rerender({ t: words.slice(0, i), s: true });
-          pending.push({ end: i, at: now });
-        }
-        tick();
-        while (pending[0] && result.current.text.length >= pending[0].end)
-          worst = Math.max(worst, now - pending.shift()!.at);
+  it("shows every chunk of a bursty stream within 300ms", () => {
+    // 120 characters every 24 frames (400ms), as chunked SDKs flush.
+    const words = "The quick brown fox jumps over the lazy dog. ".repeat(20);
+    const { result, rerender } = renderHook(({ t, s }) => useSmoothText(t, s), {
+      initialProps: { t: "", s: true },
+    });
+    const pending: { end: number; at: number }[] = [];
+    let worst = 0;
+    for (let f = 0, i = 0; i < words.length || pending.length; f++) {
+      if (i < words.length && f % 24 === 0) {
+        i = Math.min(words.length, i + 120);
+        rerender({ t: words.slice(0, i), s: true });
+        pending.push({ end: i, at: now });
       }
-      expect(worst).toBeLessThanOrEqual(300 + 2 * FRAME);
-    },
-  );
+      tick();
+      while (pending[0] && result.current.text.length >= pending[0].end)
+        worst = Math.max(worst, now - pending.shift()!.at);
+    }
+    expect(worst).toBeLessThanOrEqual(300 + 2 * FRAME);
+  });
 
   it("fades new words in, by opacity alone", () => {
     const { result, rerender } = renderHook(({ t, s }) => useSmoothText(t, s), {

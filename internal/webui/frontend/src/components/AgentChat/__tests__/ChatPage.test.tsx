@@ -387,6 +387,16 @@ describe("WorkingRow motion", () => {
       "utf8",
     );
     expect(css).toMatch(/\.workingLive\s*\{\s*animation:\s*working-pulse/);
+    // Item 10: every chat keyframe animates only opacity and transform.
+    for (const name of ["ChatPage", "ChatMarkdown", "ModelPicker"]) {
+      const sheet = readFileSync(
+        `${process.cwd()}/src/components/AgentChat/${name}.module.css`,
+        "utf8",
+      );
+      for (const [, body] of sheet.matchAll(/@keyframes[^{]*\{([\s\S]*?)\n\}/g))
+        for (const [, prop] of body!.matchAll(/([a-z-]+)\s*:/g))
+          expect(["opacity", "transform"], name).toContain(prop);
+    }
   });
 
   it("names the running step and shimmers only while a step runs", () => {
@@ -428,21 +438,4 @@ describe("WorkingRow motion", () => {
       vi.unstubAllGlobals();
     }
   });
-});
-
-// Coverage: these also pass on the parent; they guard item 10 from here on.
-describe("chat motion CSS", () => {
-  it.each(["ChatPage", "ChatMarkdown", "ModelPicker"])(
-    "%s.module.css keyframes animate only opacity and transform",
-    (name) => {
-      const css = readFileSync(
-        `${process.cwd()}/src/components/AgentChat/${name}.module.css`,
-        "utf8",
-      );
-      const keyframes = [...css.matchAll(/@keyframes[^{]*\{([\s\S]*?)\n\}/g)];
-      for (const [, body] of keyframes)
-        for (const [, prop] of body!.matchAll(/([a-z-]+)\s*:/g))
-          expect(["opacity", "transform"]).toContain(prop);
-    },
-  );
 });
