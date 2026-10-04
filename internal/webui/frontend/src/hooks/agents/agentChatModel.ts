@@ -2,7 +2,7 @@
 // deltas become chat items. Nothing here depends on the harness; every
 // harness maps its native events to the same Loom kinds before they get here.
 
-import type { AgentEvent } from "@/api/agentsv1";
+import type { AgentEvent, Completion, WaitingMessage } from "@/api/agentsv1";
 
 /** The fields of a saved native event's payload that the chat reads. */
 interface NativePayload {
@@ -14,6 +14,13 @@ interface NativePayload {
   error?: string;
   /** A delivery's slot sender, such as user:<id> or agent:<AgentID>. */
   sender?: string;
+  /**
+   * An agent's delivery: the child task_completed records its text carries
+   * (empty when none; absent on rows saved before DF1) and the text without
+   * them.
+   */
+  completions?: Completion[];
+  message?: string;
   /** A tool item's call, on its tool.started notice and item.completed. */
   tool?: ToolCall;
 }
@@ -33,12 +40,37 @@ export type ToolStatus = "running" | "completed" | "failed";
 
 export type ChatItem =
   | { key: string; kind: "user"; text: string }
+  /** A message another agent sent on purpose, such as a child's agent_send. */
+  | {
+      key: string;
+      kind: "from_agent";
+      agent: string;
+      name: string;
+      text: string;
+    }
   | { key: string; kind: "agent"; text: string; streaming?: boolean }
   | { key: string; kind: "reasoning"; text: string; streaming?: boolean }
   | { key: string; kind: "tool"; tool: ToolCall; status: ToolStatus }
   | { key: string; kind: "turn_end"; reason: string; error?: string }
-  | { key: string; kind: "child"; child: string; name: string }
-  | { key: string; kind: "completion"; record: TaskCompleted };
+  /** One marker for children started back to back. */
+  | { key: string; kind: "started"; children: StartedChild[]; at: string }
+  | {
+      key: string;
+      kind: "completion";
+      record: TaskCompleted;
+      /** The child's name from its child.created, else its id. */
+      name: string;
+      at: string;
+      /** Whether the record waits for this agent, or it was delivered. */
+      delivery?: Delivery;
+    };
+
+export interface StartedChild {
+  child: string;
+  name: string;
+}
+
+export type Delivery = "waiting" | "delivered";
 
 /** A child attempt's completion record, saved once per attempt (§10.3). */
 export interface TaskCompleted {
@@ -56,13 +88,35 @@ function payload(e: AgentEvent): NativePayload {
     : {};
 }
 
+/** A child attempt's key, as its record's task_completed:<child>:<attempt>. */
+export const attemptKey = (c: Completion) => `${c.child}:${c.attempt}`;
+
+/** The agent id of an agent:<id> sender, else null. */
+export const senderAgent = (sender?: string) =>
+  sender?.startsWith("agent:") ? sender.slice("agent:".length) : null;
+
 /** One chat item for a saved event, or null for kinds the chat skips. */
-function itemFor(e: AgentEvent): ChatItem | null {
+function itemFor(
+  e: AgentEvent,
+  names: ReadonlyMap<string, string>,
+): ChatItem | null {
   const p = payload(e);
   const key = e.event_id;
   switch (e.kind) {
-    case "message.delivered":
-      return { key, kind: "user", text: p.text ?? "" };
+    case "message.delivered": {
+      const from = senderAgent(p.sender);
+      if (!from) return { key, kind: "user", text: p.text ?? "" };
+      // Records show on their completion cards: only the rest is a message.
+      const text = p.completions ? (p.message ?? "") : (p.text ?? "");
+      if (!text.trim()) return null;
+      return {
+        key,
+        kind: "from_agent",
+        agent: from,
+        name: names.get(from) ?? from,
+        text,
+      };
+    }
     case "item.completed":
       if (p.itemKind === "tool") {
         const tool = p.tool ?? {};
@@ -82,12 +136,25 @@ function itemFor(e: AgentEvent): ChatItem | null {
           }
         : null;
     case "child.created": {
-      const c = e.payload as { child: string; name: string };
-      return { key, kind: "child", child: c.child, name: c.name };
+      const c = e.payload as StartedChild;
+      return {
+        key,
+        kind: "started",
+        children: [{ child: c.child, name: c.name }],
+        at: e.created_at,
+      };
     }
     // Keyed task_completed:<child>:<attempt>, so each attempt shows once.
     case "task_completed":
-      return { key, kind: "completion", record: e.payload as TaskCompleted };
+      return {
+        key,
+        kind: "completion",
+        record: e.payload as TaskCompleted,
+        name:
+          names.get((e.payload as TaskCompleted).child) ??
+          (e.payload as TaskCompleted).child,
+        at: e.created_at,
+      };
     default:
       return null;
   }
@@ -136,25 +203,71 @@ export function settle(streaming: Streaming, events: AgentEvent[]): Streaming {
   return next;
 }
 
-/** The chat transcript: saved items in seq order, then any streaming text. */
+/** Each child's name, from its child.created. */
+export function childNames(events: readonly AgentEvent[]): Map<string, string> {
+  return new Map(
+    events
+      .filter((e) => e.kind === "child.created")
+      .map((e) => {
+        const c = e.payload as StartedChild;
+        return [c.child, c.name] as const;
+      }),
+  );
+}
+
+/**
+ * Each child attempt's delivery state: delivered once a saved delivery
+ * carries its record, else waiting while a waiting message does. Matched on
+ * the records the server names, never on message text.
+ */
+export function deliveries(
+  events: readonly AgentEvent[],
+  waiting: readonly WaitingMessage[],
+): Map<string, Delivery> {
+  const out = new Map<string, Delivery>();
+  for (const w of waiting)
+    for (const c of w.completions ?? []) out.set(attemptKey(c), "waiting");
+  for (const e of events)
+    if (e.kind === "message.delivered")
+      for (const c of payload(e).completions ?? [])
+        out.set(attemptKey(c), "delivered");
+  return out;
+}
+
+/**
+ * The chat transcript: saved items in seq order, then any streaming text.
+ * waiting is the agent's waiting messages, for each completion's state.
+ */
 export function chatItems(
   events: readonly AgentEvent[],
   streaming: Streaming,
+  waiting: readonly WaitingMessage[] = [],
 ): ChatItem[] {
-  // A child's slot carries only its completion records, which show as
-  // records; its delivery to the lead is not shown again.
-  const kids = new Set(
-    events
-      .filter((e) => e.kind === "child.created")
-      .map((e) => `agent:${(e.payload as { child: string }).child}`),
-  );
-  const items = events
-    .filter(
-      (e) =>
-        e.kind !== "message.delivered" || !kids.has(payload(e).sender ?? ""),
-    )
-    .map(itemFor)
-    .filter((i): i is ChatItem => i !== null);
+  // A row saved before DF1 from a child carries only its completion
+  // records, which show on their cards; it is not shown again.
+  const names = childNames(events);
+  const state = deliveries(events, waiting);
+  const items: ChatItem[] = [];
+  for (const e of events) {
+    const p = payload(e);
+    const from = e.kind === "message.delivered" ? senderAgent(p.sender) : null;
+    if (from && !p.completions && names.has(from)) continue;
+    const item = itemFor(e, names);
+    if (!item) continue;
+    const last = items[items.length - 1];
+    if (item.kind === "started" && last?.kind === "started") {
+      items[items.length - 1] = {
+        ...last,
+        children: [...last.children, ...item.children],
+      };
+      continue;
+    }
+    if (item.kind === "completion") {
+      const d = state.get(attemptKey(item.record));
+      if (d) item.delivery = d;
+    }
+    items.push(item);
+  }
   // A notice can come after its item's saved completion (a subscriber
   // replaying history gets saved rows before live notices): a completed
   // item never shows live again.
@@ -203,7 +316,7 @@ export const ownSender = (userId?: string | null) =>
  */
 export function latestTurnError(items: readonly ChatItem[]): string | null {
   for (const item of [...items].reverse()) {
-    if (item.kind === "user") return null;
+    if (item.kind === "user" || item.kind === "from_agent") return null;
     if (item.kind === "turn_end") return item.error ?? null;
   }
   return null;

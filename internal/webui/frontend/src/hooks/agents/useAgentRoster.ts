@@ -39,6 +39,10 @@ const subscribe = (l: () => void) => {
 export const useRosterAgent = (id: string): Agent | undefined =>
   useSyncExternalStore(subscribe, () => shared.get(id));
 
+/** The whole live roster (a stable map until it changes). */
+export const useRoster = (): Roster =>
+  useSyncExternalStore(subscribe, () => shared);
+
 const message = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 

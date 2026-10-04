@@ -41,6 +41,16 @@ test("scripted steps play in order, regardless of user text", async (t) => {
   assert.equal((await chat(user)).content, "ok");
 });
 
+test("next picks a step for a tool follow-up or a new prompt, in queue order", async (t) => {
+  const { post, chat } = await start(t);
+  await post("/__script", { steps: [{ next: "tool", text: "follow-up" }, { next: "prompt", text: "fresh" }, { text: "any" }] });
+  const followUp = [{ role: "user", content: "x" }, { role: "assistant", tool_calls: [] }, { role: "tool", content: "out" }];
+  assert.equal((await chat([{ role: "user", content: "x" }])).content, "fresh");
+  assert.equal((await chat(followUp)).content, "follow-up");
+  assert.equal((await chat(followUp)).content, "any");
+  assert.equal((await chat(followUp)).content, "ok");
+});
+
 test("title requests take no step; requests are logged and reset clears all", async (t) => {
   const { base, post, chat } = await start(t);
   await post("/__script", { steps: [{ text: "scripted" }] });

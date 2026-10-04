@@ -59,6 +59,16 @@ export interface WaitingMessage {
   sender: string;
   text: string;
   since: string;
+  /** The text without its child task_completed records; set only with completions. */
+  message?: string;
+  /** The child task_completed records the text carries; set only when it has any. */
+  completions?: Completion[];
+}
+
+/** One child attempt whose task_completed record a message carries. */
+export interface Completion {
+  child: string;
+  attempt: number;
 }
 
 export interface Ask {

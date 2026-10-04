@@ -322,9 +322,9 @@ tests:
       - press: Enter
       - wait:
           fn: >-
-            (document.querySelector('[data-testid=child-card]')?.textContent || '').includes('par-attr-kid-${RUN_ID:-local}')
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('par-attr-kid-${RUN_ID:-local}')
         budget: 90000
-        intent: "Wait until the lead's chat shows the child's card"
+        intent: "Wait until the lead's chat shows the Started marker naming the child"
       - run: |
           set -e
           lead="$(cat "$AFT_WORK_DIR/parAttrId")"

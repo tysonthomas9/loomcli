@@ -115,49 +115,129 @@ beforeEach(() => {
 });
 
 describe("AgentChat", () => {
-  it("shows a child card and each completion attempt as its own record", async () => {
-    await mount(agent());
-    const done = (attempt: number, summary: string) => ({
-      ...ev("task_completed", {
-        child: "k1",
-        attempt,
-        outcome: "succeeded",
-        branch: "loom/k1",
-        head: "0123456789abcdef",
-        summary,
-      }),
-      event_id: `task_completed:k1:${attempt}`,
-    });
+  const done = (attempt: number, summary: string, outcome = "completed") => ({
+    ...ev("task_completed", {
+      child: "k1",
+      attempt,
+      outcome,
+      branch: "loom/k1",
+      head: "0123456789abcdef",
+      summary,
+    }),
+    event_id: `task_completed:k1:${attempt}`,
+  });
+
+  it("shows children as started and result markers, never a raw task_completed bubble", async () => {
+    const { container } = await mount(agent());
     deliver(
       ev("message.delivered", { text: "make a child", sender: "user:local" }),
       ev("child.created", { child: "k1", name: "kid", preset: "task" }),
-      done(0, "first try"),
+      ev("child.created", { child: "k2", name: "kid2", preset: "task" }),
+      done(0, "first try", "failed"),
+      // Saved before DF1: no completions field, so hidden as before.
       ev("message.delivered", {
-        text: "task_completed:k1:0 …",
+        text: "task_completed:k1:0 outcome=failed …",
         sender: "agent:k1",
       }),
       done(1, "second try"),
+      // Only the record: nothing left to show as a message.
       ev("message.delivered", {
-        text: "task_completed:k1:1 …",
+        text: "task_completed:k1:1 outcome=completed …",
         sender: "agent:k1",
+        completions: [{ child: "k1", attempt: 1 }],
+        message: "",
+      }),
+      // The child's own message, sent on purpose, merged with no record.
+      ev("message.delivered", {
+        text: "Heads up: use **cursor** paging",
+        sender: "agent:k2",
+        completions: [],
+        message: "Heads up: use **cursor** paging",
       }),
       ev("message.delivered", {
         text: "from another agent",
         sender: "agent:x",
       }),
     );
-    // The child's deliveries show only as their records; other input stays.
-    expect(screen.queryByText(/^task_completed:/)).toBeNull();
+    expect(container.textContent).not.toMatch(/task_completed:/);
     expect(screen.getByText("make a child")).toBeInTheDocument();
-    expect(screen.getByText("from another agent")).toBeInTheDocument();
-    const card = screen.getByTestId("child-card");
-    expect(card).toHaveTextContent("Child agentkid");
-    expect(card.querySelector("a")).toHaveAttribute("href", "/ws/w1/chat/k1");
+    const started = screen.getByTestId("started-marker");
+    expect(started).toHaveTextContent("↳Started kid, kid2");
+    expect(started.querySelector("a")).toHaveAttribute(
+      "href",
+      "/ws/w1/chat/k1",
+    );
     const records = screen.getAllByTestId("completion-record");
-    expect(records.map((r) => r.textContent)).toEqual([
-      "Attempt 1 succeeded · loom/k1 @ 01234567k1first try",
-      "Attempt 2 succeeded · loom/k1 @ 01234567k1second try",
+    expect(records).toHaveLength(2);
+    expect(records[0]).toHaveTextContent(/^✕kid failed/);
+    expect(records[1]).toHaveTextContent(/^✓kid done · attempt 2/);
+    expect(records[1]).toHaveTextContent("Lead read the result");
+    // The summary opens on "view".
+    expect(screen.queryByText("second try")).toBeNull();
+    fireEvent.click(records[1].querySelector("button")!);
+    expect(screen.getByText("second try")).toBeInTheDocument();
+    expect(records[1]).toHaveTextContent("loom/k1@0123456");
+    // A message an agent sent on purpose is a named bubble with markdown.
+    const from = screen.getAllByTestId("from-agent");
+    expect(from.map((f) => f.textContent)).toEqual([
+      "from kid2Heads up: use cursor paging",
+      "from xfrom another agent",
     ]);
+    expect(from[0].innerHTML).toContain("<strong>cursor</strong>");
+  });
+
+  it("folds a waiting result into its marker and shows only a child's own words", async () => {
+    const { container } = await mount(
+      agent({
+        waiting_messages: [
+          {
+            sender: "agent:k1",
+            text: "Heads up: **cursor** paging\ntask_completed:k1:0 outcome=completed …",
+            since: "",
+            message: "Heads up: **cursor** paging",
+            completions: [{ child: "k1", attempt: 0 }],
+          },
+        ],
+      }),
+    );
+    deliver(
+      ev("child.created", { child: "k1", name: "kid", preset: "task" }),
+      done(0, "all done"),
+    );
+    expect(container.textContent).not.toMatch(/task_completed:/);
+    const record = screen.getByTestId("completion-record");
+    expect(record).toHaveTextContent("waiting for Lead");
+    const bubble = screen.getByTestId("from-agent");
+    expect(bubble).toHaveAttribute("data-waiting", "true");
+    expect(bubble).toHaveTextContent(
+      "Waiting · from kidHeads up: cursor paging",
+    );
+    expect(bubble.innerHTML).toContain("<strong>cursor</strong>");
+  });
+
+  it("shows no bubble at all when only a child's record waits", async () => {
+    const { container } = await mount(
+      agent({
+        waiting_messages: [
+          {
+            sender: "agent:k1",
+            text: "task_completed:k1:0 outcome=completed …",
+            since: "",
+            message: "",
+            completions: [{ child: "k1", attempt: 0 }],
+          },
+        ],
+      }),
+    );
+    deliver(
+      ev("child.created", { child: "k1", name: "kid", preset: "task" }),
+      done(0, "all done"),
+    );
+    expect(container.textContent).not.toMatch(/task_completed:/);
+    expect(container.querySelector('[data-kind="waiting"]')).toBeNull();
+    expect(screen.getByTestId("completion-record")).toHaveTextContent(
+      "waiting for Lead",
+    );
   });
 
   it("renders untrusted text as text, never as markup", async () => {

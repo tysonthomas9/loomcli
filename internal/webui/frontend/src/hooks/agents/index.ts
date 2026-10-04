@@ -51,12 +51,23 @@ export type {
 
 export { useAgentChat } from "./useAgentChat";
 export type { UseAgentChatReturn } from "./useAgentChat";
-export { latestTurnError, ownSender } from "./agentChatModel";
+export { latestTurnError, ownSender, senderAgent } from "./agentChatModel";
 export type {
   ChatItem,
+  Delivery,
+  StartedChild,
   TaskCompleted,
   ToolCall,
   ToolStatus,
 } from "./agentChatModel";
-export { useAgentRoster, useRosterAgent } from "./useAgentRoster";
+export { useAgentRoster, useRoster, useRosterAgent } from "./useAgentRoster";
+export {
+  elapsed,
+  startedAgo,
+  trayCounts,
+  trayLabel,
+  trayRows,
+  trayWaves,
+} from "./agentTray";
+export type { TrayCounts, TrayRow, TrayStatus, TrayWave } from "./agentTray";
 export { childrenByParent } from "./agentRoster";

@@ -130,3 +130,70 @@ describe("chatModel tool calls and reasoning", () => {
     expect([...s.keys()]).toEqual(["r"]);
   });
 });
+
+describe("child results (DF1)", () => {
+  const rec = (attempt: number) => ({
+    ...ev("task_completed", { child: "k1", attempt, outcome: "completed" }),
+    event_id: `task_completed:k1:${attempt}`,
+  });
+
+  it("folds a result's waiting and delivered state into its one card, matched on the named record", () => {
+    const created = ev("child.created", { child: "k1", name: "kid" });
+    const waiting = [
+      {
+        sender: "agent:k1",
+        text: "task_completed:k1:0 …",
+        since: "",
+        message: "",
+        completions: [{ child: "k1", attempt: 0 }],
+      },
+    ];
+    let items = chatItems([created, rec(0)], new Map(), waiting);
+    expect(items.map((i) => i.kind)).toEqual(["started", "completion"]);
+    expect(items[1]).toMatchObject({ delivery: "waiting" });
+    // Delivered: the delivery's text is only the record, so no bubble.
+    items = chatItems(
+      [
+        created,
+        rec(0),
+        ev("message.delivered", {
+          sender: "agent:k1",
+          text: "task_completed:k1:0 …",
+          completions: [{ child: "k1", attempt: 0 }],
+          message: "",
+        }),
+      ],
+      new Map(),
+      [],
+    );
+    expect(items.map((i) => i.kind)).toEqual(["started", "completion"]);
+    expect(items[1]).toMatchObject({ delivery: "delivered" });
+    // Free text that looks like a record is never matched.
+    items = chatItems([created, rec(0)], new Map(), [
+      { sender: "agent:k1", text: "task_completed:k1:0 …", since: "" },
+    ]);
+    expect(items[1]).not.toHaveProperty("delivery");
+  });
+
+  it("merges back-to-back starts into one marker and names an agent's own message", () => {
+    const items = chatItems(
+      [
+        ev("child.created", { child: "k1", name: "api" }),
+        ev("child.created", { child: "k2", name: "ui" }),
+        ev("message.delivered", {
+          sender: "agent:k2",
+          text: "hi **there**\ntask_completed:k2:0 …",
+          completions: [{ child: "k2", attempt: 0 }],
+          message: "hi **there**",
+        }),
+        ev("child.created", { child: "k3", name: "docs" }),
+      ],
+      new Map(),
+    );
+    expect(items).toMatchObject([
+      { kind: "started", children: [{ name: "api" }, { name: "ui" }] },
+      { kind: "from_agent", agent: "k2", name: "ui", text: "hi **there**" },
+      { kind: "started", children: [{ name: "docs" }] },
+    ]);
+  });
+});

@@ -89,9 +89,10 @@ export function useAgentChat(
     return () => stream.close();
   }, [workspaceId, agentId, refresh]);
 
+  const waiting = agent?.waiting_messages;
   const items = useMemo(
-    () => chatItems(events, streaming),
-    [events, streaming],
+    () => chatItems(events, streaming, waiting),
+    [events, streaming, waiting],
   );
 
   // Runs one write; on failure shows the error and rethrows it.

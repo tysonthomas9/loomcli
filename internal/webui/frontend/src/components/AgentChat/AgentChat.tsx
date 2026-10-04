@@ -2,16 +2,29 @@
 // apps/web/src/components/ChatView.tsx and
 // apps/web/src/components/chat/MessagesTimeline.tsx at commit 2daff8c25.
 // Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   latestTurnError,
   ownSender,
+  senderAgent,
+  trayRows,
+  trayWaves,
   useAgentChat,
+  useRoster,
   useRosterAgent,
 } from "@/hooks";
+import type { WaitingMessage } from "@/api/agentsv1";
 import type { ChatItem } from "@/hooks";
+import { AgentTray, chatPath, HarnessIcon } from "./AgentTray";
 import { AskCard } from "./AskCard";
 import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
@@ -38,6 +51,7 @@ import {
 } from "./WorkRows";
 import styles from "./AgentChat.module.css";
 import page from "./ChatPage.module.css";
+import tray from "./AgentTray.module.css";
 
 export interface AgentChatProps {
   workspaceId: string;
@@ -76,6 +90,26 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     () => deriveTimelineRows(items, expandedGroups),
     [items, expandedGroups],
   );
+  // The agent tray: working children, and results waiting for this agent.
+  const roster = useRoster();
+  const [trayOpen, setTrayOpen] = useState(false);
+  const tRows = useMemo(
+    () =>
+      trayRows(agentId, roster.values(), items, agent?.waiting_messages ?? []),
+    [agentId, roster, items, agent?.waiting_messages],
+  );
+  const tWaves = useMemo(() => trayWaves(tRows, items), [tRows, items]);
+  const names = useMemo(
+    () =>
+      new Map(
+        items.flatMap((i) =>
+          i.kind === "started"
+            ? i.children.map((c) => [c.child, c.name] as const)
+            : [],
+        ),
+      ),
+    [items],
+  );
   // The latest turn's failure reason (T3's thread error), until dismissed.
   const turnError = useMemo(() => latestTurnError(items), [items]);
   const bannerKey = getThreadErrorBannerKey(agentId, turnError);
@@ -96,6 +130,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
+    setTrayOpen(false); // the open tray hides the latest lines (R2)
     scroll.follow();
     send(text)
       .then(() => {
@@ -138,44 +173,48 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
               <WorkingRow startedAt={runningSince} />
             </li>
           )}
-          {waiting.map((w) => (
-            <li
-              key={`waiting:${w.sender}`}
-              className={`${page.row} ${page.waiting}`}
-              data-kind="waiting"
-            >
-              <div className={page.userBubble}>
-                <div className={page.waitingTitle}>
-                  Waiting
-                  {w.sender !== own && ` · from ${w.sender}`}
-                </div>
-                <LongText text={w.text} />
-                {w.sender === own && (
-                  <div className={page.waitingActions}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDraft(w.text);
-                        setEditing(true);
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        clear()
-                          .then(() => editing && stopEditing())
-                          .catch(() => {})
-                      }
-                    >
-                      Clear
-                    </button>
+          {waiting.map((w) =>
+            senderAgent(w.sender) ? (
+              <AgentWaiting key={`waiting:${w.sender}`} w={w} names={names} />
+            ) : (
+              <li
+                key={`waiting:${w.sender}`}
+                className={`${page.row} ${page.waiting}`}
+                data-kind="waiting"
+              >
+                <div className={page.userBubble}>
+                  <div className={page.waitingTitle}>
+                    Waiting
+                    {w.sender !== own && ` · from ${w.sender}`}
                   </div>
-                )}
-              </div>
-            </li>
-          ))}
+                  <LongText text={w.text} />
+                  {w.sender === own && (
+                    <div className={page.waitingActions}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDraft(w.text);
+                          setEditing(true);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          clear()
+                            .then(() => editing && stopEditing())
+                            .catch(() => {})
+                        }
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </li>
+            ),
+          )}
         </ol>
         {empty && agent && (
           <div className={page.emptyOverlay}>
@@ -227,6 +266,15 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
           )}
 
           <div>
+            <AgentTray
+              workspaceId={workspaceId}
+              rows={tRows}
+              waves={tWaves}
+              open={trayOpen}
+              onOpenChange={setTrayOpen}
+              narrow={compact.narrow}
+              tucked={!ask}
+            />
             {ask && (
               <div className={page.askDrawer}>
                 <AskCard
@@ -332,23 +380,144 @@ function useNarrow(px: number) {
   return { ref, narrow };
 }
 
-/** A child's chat link, with its live state from the sidebar's roster. */
-function ChildLink({ ws, id, name }: { ws: string; id: string; name: string }) {
+/** An agent's name, live from the roster, else the name it was saved with. */
+function AgentName({ id, name }: { id: string; name: string }) {
+  return <>{useRosterAgent(id)?.name ?? name}</>;
+}
+
+/** An agent's name as a link to its chat. */
+function NameLink({ ws, id, name }: { ws: string; id: string; name: string }) {
+  return (
+    <Link to={chatPath(ws, id)}>
+      <AgentName id={id} name={name} />
+    </Link>
+  );
+}
+
+/** A clock time such as 2:45 PM, or "" when the stamp does not parse. */
+function clockTime(at: string): string {
+  const t = Date.parse(at);
+  return Number.isNaN(t)
+    ? ""
+    : new Date(t).toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+}
+
+/** A message another agent sent on purpose: "from <name>", as markdown. */
+function FromAgent({
+  id,
+  name,
+  text,
+  waiting,
+}: {
+  id: string;
+  name: string;
+  text: string;
+  waiting?: boolean;
+}) {
   const a = useRosterAgent(id);
   return (
-    <Link
-      className={page.childLink}
-      to={`/ws/${encodeURIComponent(ws)}/chat/${encodeURIComponent(id)}`}
+    <div
+      className={tray.fromAgent}
+      data-testid="from-agent"
+      data-waiting={!!waiting}
     >
-      <span className={page.childName}>{a?.name ?? name}</span>
-      {a && <span className={page.badge}>{a.harness}</span>}
-      {a && (
-        <span className={page.statePill} data-state={a.state}>
-          <span className={page.stateDot} aria-hidden="true" />
-          {a.state}
+      <div className={tray.fromTitle}>
+        {a && <HarnessIcon harness={a.harness} />}
+        {waiting && "Waiting · "}
+        <span>
+          from <strong>{a?.name ?? name}</strong>
+        </span>
+      </div>
+      <ChatMarkdown text={text} streaming={false} />
+    </div>
+  );
+}
+
+/**
+ * A waiting message from an agent: its text without the child records it
+ * carries (those show on their completion markers), or nothing when only
+ * records wait.
+ */
+function AgentWaiting({
+  w,
+  names,
+}: {
+  w: WaitingMessage;
+  names: ReadonlyMap<string, string>;
+}) {
+  const id = senderAgent(w.sender) ?? w.sender;
+  const text = w.completions ? (w.message ?? "") : w.text;
+  if (!text.trim()) return null;
+  return (
+    <li className={page.row} data-kind="waiting">
+      <FromAgent id={id} name={names.get(id) ?? id} text={text} waiting />
+    </li>
+  );
+}
+
+/** A child result's one-line marker, with its delivery state and summary. */
+function CompletionMarker({
+  item,
+  workspaceId,
+}: {
+  item: Extract<ChatItem, { kind: "completion" }>;
+  workspaceId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const r = item.record;
+  const ok = r.outcome === "completed";
+  const time = clockTime(item.at);
+  const where =
+    r.branch && `${r.branch}${r.head ? `@${r.head.slice(0, 7)}` : ""}`;
+  return (
+    <div
+      className={tray.marker}
+      data-testid="completion-record"
+      data-outcome={r.outcome}
+      data-attempt={r.attempt}
+      data-delivery={item.delivery}
+      title={where || undefined}
+    >
+      <span className={ok ? tray.ok : tray.fail} aria-hidden="true">
+        {ok ? "✓" : "✕"}
+      </span>
+      <span>
+        <NameLink ws={workspaceId} id={r.child} name={item.name} />{" "}
+        {ok ? "done" : r.outcome}
+        {/* Attempts count from 0; people count from 1. */}
+        {r.attempt > 0 && ` · attempt ${r.attempt + 1}`}
+        {time && ` · ${time}`}
+      </span>
+      {item.delivery === "waiting" && (
+        <span className={tray.tag} data-delivery="waiting">
+          waiting for Lead
         </span>
       )}
-    </Link>
+      {item.delivery === "delivered" && (
+        <span className={tray.tag} data-delivery="delivered">
+          · Lead read the result
+        </span>
+      )}
+      {r.summary && (
+        <button
+          type="button"
+          className={tray.view}
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? "hide" : "view"}
+        </button>
+      )}
+      {open && r.summary && (
+        <div className={tray.markerBody}>
+          {where && <div className={tray.meta}>{where}</div>}
+          <LongText text={r.summary} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -414,28 +583,28 @@ function AgentMessage({
 
 function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
   switch (item.kind) {
-    case "child":
+    case "started": {
+      const time = clockTime(item.at);
       return (
-        <div className={page.card} data-testid="child-card">
-          <div className={page.cardNote}>Child agent</div>
-          <ChildLink ws={workspaceId} id={item.child} name={item.name} />
-        </div>
-      );
-    case "completion": {
-      const r = item.record;
-      return (
-        <div className={page.card} data-testid="completion-record">
-          <div className={page.cardNote}>
-            {/* Attempts count from 0; people count from 1. */}
-            Attempt {r.attempt + 1} {r.outcome}
-            {r.branch && ` · ${r.branch}`}
-            {r.head && ` @ ${r.head.slice(0, 8)}`}
-          </div>
-          <ChildLink ws={workspaceId} id={r.child} name={r.child} />
-          {r.summary && <LongText text={r.summary} />}
+        <div className={tray.marker} data-testid="started-marker">
+          <span aria-hidden="true">↳</span>
+          <span>
+            Started{" "}
+            {item.children.map((c, i) => (
+              <Fragment key={c.child}>
+                {i > 0 && ", "}
+                <NameLink ws={workspaceId} id={c.child} name={c.name} />
+              </Fragment>
+            ))}
+            {time && ` · ${time}`}
+          </span>
         </div>
       );
     }
+    case "completion":
+      return <CompletionMarker item={item} workspaceId={workspaceId} />;
+    case "from_agent":
+      return <FromAgent id={item.agent} name={item.name} text={item.text} />;
     case "turn_end":
       return (
         <div className={page.turnEnd}>
