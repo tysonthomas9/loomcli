@@ -268,10 +268,10 @@ test("children show as markers and the tray, a waiting result keeps its dot unti
     await expect(marker.getByRole("link", { name: n })).toBeVisible();
   const records = page.getByTestId("completion-record");
   await expect(records).toHaveCount(2);
-  await expect(records.nth(0)).toContainText("api-worker done");
+  await expect(records.nth(0)).toContainText("api-worker✓ done");
   await expect(records.nth(0)).not.toContainText("Lead read the result");
   await expect(records.nth(0)).toHaveAttribute("role", "link");
-  await expect(records.nth(1)).toContainText("db-worker failed");
+  await expect(records.nth(1)).toContainText("db-worker✕ failed");
   const from = page.getByTestId("from-agent");
   await expect(from).toHaveCount(1);
   await expect(from).toContainText("from api-worker");
@@ -322,7 +322,7 @@ test("children show as markers and the tray, a waiting result keeps its dot unti
   );
   await expect(tray).toContainText("3 agents · 2 running · 1 done");
   await expect(page.getByTestId("tray-new")).toHaveText("+1 new");
-  await expect(records.nth(2)).toContainText("docs-worker done");
+  await expect(records.nth(2)).toContainText("docs-worker✓ done");
   await expect(records.nth(2)).toContainText("waiting for Lead");
   await expect(page.locator("body")).not.toContainText("task_completed:");
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/desktop-collapsed.png` });
@@ -645,7 +645,11 @@ test("two children show as one Started marker and two E1 cards, no raw tool JSON
     await page.evaluate((t) => {
       document.documentElement.dataset.theme = t;
     }, theme);
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/cl1-${theme}.png` });
+    if (SHOTS)
+      await page.screenshot({
+        path: `${SHOTS}/cl1-${theme}.png`,
+        animations: "disabled",
+      });
   }
   // Enter on a focused card opens that child's chat.
   await cards.nth(0).focus();
