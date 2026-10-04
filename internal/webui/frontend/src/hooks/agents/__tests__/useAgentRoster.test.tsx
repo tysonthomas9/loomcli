@@ -208,9 +208,6 @@ describe("useAgentRoster", () => {
       expect(result.current.roster.get("kid")?.state).toBe("active"),
     );
     await act(async () => release());
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
     expect(result.current.roster.get("kid")?.state).toBe("active");
   });
 
