@@ -15,14 +15,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-// probed is a fake harness with a capability probe.
+// probed is a fake harness with a capability probe; it records the dirs asked.
 type probed struct {
 	*fake.Harness
 	caps loomharness.Capabilities
 	ok   bool
+	dirs []string
 }
 
-func (p *probed) Capabilities() (loomharness.Capabilities, bool) { return p.caps, p.ok }
+func (p *probed) Capabilities(dir string) (loomharness.Capabilities, bool) {
+	p.dirs = append(p.dirs, dir)
+	return p.caps, p.ok
+}
 
 func harnessServer(t *testing.T, hs map[string]loomharness.Harness) *httptest.Server {
 	t.Helper()
@@ -31,7 +35,11 @@ func harnessServer(t *testing.T, hs map[string]loomharness.Harness) *httptest.Se
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	svc := loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: "ws", Harnesses: hs})
+	return serveService(t, loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: "ws", Harnesses: hs}))
+}
+
+func serveService(t *testing.T, svc *loomagent.Service) *httptest.Server {
+	t.Helper()
 	mux := http.NewServeMux()
 	ws := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,4 +86,33 @@ func TestHarnessInfoRoute(t *testing.T) {
 
 	status, out = call(t, srv, "GET", "ws/v1/harnesses/zz", "", "")
 	want(t, "unwired harness", status, out, 503, "harness_unavailable")
+
+	status, out = call(t, srv, "GET", "ws/v1/harnesses/claude?repo=%2Fsrc%2Fapp", "", "")
+	if status != 200 || out["account_kind"] != "subscription" || len(claude.dirs) != 2 || claude.dirs[0] != "" || claude.dirs[1] != "/src/app" {
+		t.Fatalf("repo probe = %d %v, dirs %q", status, out, claude.dirs)
+	}
+}
+
+// TestHarnessInfoRepoChecked: ?repo= is checked as a create's repo is, and a
+// refused repo is never probed.
+func TestHarnessInfoRepoChecked(t *testing.T) {
+	claude := &probed{Harness: fake.New(), ok: true}
+	st, err := loomstore.Open(context.Background(), filepath.Join(t.TempDir(), "loom.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	svc := loomagent.New(loomagent.ServiceConfig{Store: st, WorkspaceID: "ws", Harnesses: map[string]loomharness.Harness{"claude": claude},
+		ResolveRepo: func(_ context.Context, _ loomagent.Target, repo string) (string, error) {
+			if repo != "/ok" {
+				return "", &loomagent.Error{Code: loomagent.CodePresetInvalid, Message: "not a clone"}
+			}
+			return "/resolved/ok", nil
+		}})
+	srv := serveService(t, svc)
+	status, out := call(t, srv, "GET", "ws/v1/harnesses/claude?repo=relative", "", "")
+	want(t, "bad repo", status, out, 400, "preset_invalid")
+	if status, _ = call(t, srv, "GET", "ws/v1/harnesses/claude?repo=%2Fok", "", ""); status != 200 || len(claude.dirs) != 1 || claude.dirs[0] != "/resolved/ok" {
+		t.Fatalf("good repo = %d, dirs %q", status, claude.dirs)
+	}
 }

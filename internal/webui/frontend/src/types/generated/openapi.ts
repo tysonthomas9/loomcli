@@ -2478,7 +2478,7 @@ export interface paths {
     };
     /**
      * Get a harness's last background capability probe
-     * @description The account kind and label and the slash commands from the harness's own periodic probe (Claude: every 5 minutes, without sending a prompt). A harness without a probe returns capabilities_supported false; probed_at is absent until the first good probe. Never carries an email, key or token.
+     * @description The account kind and label and the slash commands from the harness's own periodic probe (Claude: every 5 minutes, without sending a prompt). With repo, the probe runs in that clone and also reads its project and local settings; it starts on the first request for the repo, refreshes on a request 5 minutes after the last attempt, and until the repo's first good probe the harness-level result is returned. A harness without a probe returns capabilities_supported false; probed_at is absent until the first good probe. Never carries an email, key or token.
      */
     get: operations["getHarnessV1"];
     put?: never;
@@ -9342,7 +9342,10 @@ export interface operations {
   };
   getHarnessV1: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Absolute path of a repo clone, checked as a create's repo is */
+        repo?: string;
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */

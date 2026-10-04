@@ -26,21 +26,84 @@ import (
 const (
 	probeTimeout = 25 * time.Second // Bedrock's init is slow (T3)
 	probeEvery   = 5 * time.Minute  // T3's provider health refresh
+	probeRepos   = 32               // repo probes kept, least recently used dropped
 )
 
 var _ loomharness.CapabilityReporter = (*Adapter)(nil)
 
-// Capabilities is the last good probe result; ok is false before one.
-func (a *Adapter) Capabilities() (loomharness.Capabilities, bool) {
+// repoProbe is one repo clone's cached probe.
+type repoProbe struct {
+	caps      loomharness.Capabilities
+	ok        bool
+	running   bool
+	attempted time.Time // the last probe's start
+	used      time.Time // the last request
+}
+
+// Capabilities is the last good probe result; ok is false before one. With
+// dir "" it is the harness-level probe (user settings only). With a repo
+// clone's dir it is that repo's probe (user, project and local settings, run
+// in dir), started on the first request and again on a request 5 minutes or
+// more after the last attempt, in the background; until the repo's first
+// good probe it is the harness-level result.
+func (a *Adapter) Capabilities(dir string) (loomharness.Capabilities, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if dir == "" {
+		return a.caps, a.probed
+	}
+	now := time.Now()
+	e, ok := a.repos[dir]
+	if !ok {
+		a.evictLocked()
+		e = &repoProbe{}
+		a.repos[dir] = e
+	}
+	e.used = now
+	if !e.running && (e.attempted.IsZero() || now.Sub(e.attempted) >= probeEvery) {
+		e.running, e.attempted = true, now
+		go a.probeRepo(dir, e)
+	}
+	if e.ok {
+		return e.caps, true
+	}
 	return a.caps, a.probed
 }
 
+// evictLocked drops the least recently used repo probe when the cache is full.
+func (a *Adapter) evictLocked() {
+	if len(a.repos) < probeRepos {
+		return
+	}
+	var oldest string
+	for d, e := range a.repos {
+		if oldest == "" || e.used.Before(a.repos[oldest].used) {
+			oldest = d
+		}
+	}
+	delete(a.repos, oldest)
+}
+
+func (a *Adapter) probeRepo(dir string, e *repoProbe) {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	caps, err := a.probe(ctx, dir)
+	cancel()
+	if err != nil {
+		slog.Warn("claude capability probe failed; keeping the last result", "error", err)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err == nil {
+		e.caps, e.ok = caps, true
+	}
+	e.running = false
+}
+
 // StartProbe probes now and then every 5 minutes until ctx ends, in the
-// background. A failed probe keeps the last good result and logs a warning.
+// background, with user settings only. A failed probe keeps the last good
+// result and logs a warning.
 func (a *Adapter) StartProbe(ctx context.Context) {
-	go a.probeLoop(ctx, probeEvery, a.probeOnce)
+	go a.probeLoop(ctx, probeEvery, func(ctx context.Context) (loomharness.Capabilities, error) { return a.probe(ctx, "") })
 }
 
 func (a *Adapter) probeLoop(ctx context.Context, every time.Duration, probe func(context.Context) (loomharness.Capabilities, error)) {
@@ -70,13 +133,18 @@ func (a *Adapter) probeLoop(ctx context.Context, every time.Duration, probe func
 
 // probeOnce starts claude on the stream-json protocol and sends only the
 // initialize control request, never a prompt, so nothing reaches the API. As
-// T3's probe it runs no hooks and no MCP servers and saves no session. Only
-// user settings are read: the probe has no project directory.
-func (a *Adapter) probeOnce(ctx context.Context) (loomharness.Capabilities, error) {
+// T3's probe it runs no hooks and no MCP servers and saves no session. With
+// a dir it runs there and reads user, project and local settings, as T3's
+// does in its workspace; with none it reads user settings only.
+func (a *Adapter) probeOnce(ctx context.Context, dir string) (loomharness.Capabilities, error) {
+	sources := "user"
+	if dir != "" {
+		sources = "user,project,local"
+	}
 	cmd := exec.CommandContext(ctx, a.cfg.Bin, "-p", "--input-format", "stream-json", "--output-format", "stream-json", //nolint:gosec // G204: the configured claude binary.
-		"--verbose", "--setting-sources", "user", "--settings", `{"disableAllHooks":true}`, "--strict-mcp-config",
+		"--verbose", "--setting-sources", sources, "--settings", `{"disableAllHooks":true}`, "--strict-mcp-config",
 		"--no-session-persistence")
-	cmd.Env = append(NewProcess(a.cfg, ProcessSpec{}).env(), "ENABLE_CLAUDEAI_MCP_SERVERS=false")
+	cmd.Dir, cmd.Env = dir, append(NewProcess(a.cfg, ProcessSpec{}).env(), "ENABLE_CLAUDEAI_MCP_SERVERS=false")
 	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

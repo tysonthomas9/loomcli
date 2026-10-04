@@ -275,9 +275,10 @@ func (s *Service) reapply(ctx context.Context, harness string, ref loomharness.N
 	return harnessErr(s.harnesses[harness].Session(ref).SetModel(ctx, cfg.Model, opts))
 }
 
-// Capabilities is harness's last capability probe. supported is false for a
+// Capabilities is harness's last capability probe, for repo's clone when
+// repo is set (checked as a create's repo is). supported is false for a
 // harness without a probe; caps is nil before its first good probe.
-func (s *Service) Capabilities(harness string) (caps *loomharness.Capabilities, supported bool, err error) {
+func (s *Service) Capabilities(ctx context.Context, harness, repo string) (caps *loomharness.Capabilities, supported bool, err error) {
 	h, ok := s.harnesses[harness]
 	if !ok {
 		return nil, false, s.unavailable(harness)
@@ -286,7 +287,13 @@ func (s *Service) Capabilities(harness string) (caps *loomharness.Capabilities, 
 	if !ok {
 		return nil, false, nil
 	}
-	if c, ok := r.Capabilities(); ok {
+	dir := ""
+	if repo != "" {
+		if dir, err = s.repoPath(ctx, repo); err != nil {
+			return nil, true, err
+		}
+	}
+	if c, ok := r.Capabilities(dir); ok {
 		return &c, true, nil
 	}
 	return nil, true, nil

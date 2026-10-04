@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -23,7 +25,7 @@ const fakeInit = `{"account":{"email":"me@example.com","subscriptionType":"max",
 // the email) and the commands, with compact first and duplicates merged.
 func TestClaudeProbeReadsInitialize(t *testing.T) {
 	f, cfg := newFixture(t, "2.1.285", append([]string{"LOOM_FAKE_CLAUDE_INIT=" + fakeInit}, seededGitHubTokens...)...)
-	caps, err := New(cfg).probeOnce(context.Background())
+	caps, err := New(cfg).probeOnce(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +49,9 @@ func TestClaudeProbeReadsInitialize(t *testing.T) {
 			t.Errorf("args %q lack %q", args, w)
 		}
 	}
+	if i := slices.Index(ls[0].Args, "--setting-sources"); i < 0 || ls[0].Args[i+1] != "user" {
+		t.Errorf("harness-level probe must read user settings only: %v", ls[0].Args)
+	}
 	if slices.Contains(ls[0].Args, "--session-id") || !slices.Contains(ls[0].Env, "ENABLE_CLAUDEAI_MCP_SERVERS=false") {
 		t.Errorf("launch = %+v", ls[0])
 	}
@@ -60,7 +65,7 @@ func TestClaudeProbeReadsInitialize(t *testing.T) {
 // TestClaudeProbeFails: claude dying before it answers is an error.
 func TestClaudeProbeFails(t *testing.T) {
 	_, cfg := newFixture(t, "2.1.285", "LOOM_FAKE_CLAUDE_INIT_FAIL=1")
-	if _, err := New(cfg).probeOnce(context.Background()); err == nil {
+	if _, err := New(cfg).probeOnce(context.Background(), ""); err == nil {
 		t.Fatal("want an error")
 	}
 }
@@ -83,7 +88,7 @@ func TestClaudeProbeRefusalHidesCLIText(t *testing.T) {
 			cancel()
 			return loomharness.Capabilities{}, ctx.Err()
 		}
-		caps, err := a.probeOnce(ctx)
+		caps, err := a.probeOnce(ctx, "")
 		errs = append(errs, err)
 		return caps, err
 	})
@@ -93,7 +98,7 @@ func TestClaudeProbeRefusalHidesCLIText(t *testing.T) {
 	if !strings.Contains(buf.String(), "claude capability probe failed") || strings.Contains(buf.String(), secret) {
 		t.Fatalf("log = %s", buf.String())
 	}
-	if _, ok := a.Capabilities(); ok {
+	if _, ok := a.Capabilities(""); ok {
 		t.Fatal("a refused probe must not report capabilities")
 	}
 }
@@ -127,7 +132,7 @@ func TestClaudeProbeAccountKinds(t *testing.T) {
 // first good probe.
 func TestClaudeProbeLoop(t *testing.T) {
 	a := New(Config{})
-	if _, ok := a.Capabilities(); ok {
+	if _, ok := a.Capabilities(""); ok {
 		t.Fatal("reported before any probe")
 	}
 	results := make(chan error)
@@ -149,7 +154,7 @@ func TestClaudeProbeLoop(t *testing.T) {
 		t.Helper()
 		results <- err
 		results <- errors.New("sync") // the next probe has started, so this one is stored
-		caps, ok := a.Capabilities()
+		caps, ok := a.Capabilities("")
 		if ok != wantOK || caps.AccountLabel != wantLabel {
 			t.Fatalf("after probe: %+v %v, want %q %v", caps, ok, wantLabel, wantOK)
 		}
@@ -160,4 +165,113 @@ func TestClaudeProbeLoop(t *testing.T) {
 	step(nil, "G", true)                // probe 7 refreshes
 	cancel()
 	<-done
+}
+
+// TestClaudeProbeRepoReadsProjectSettings: a repo probe runs in the repo
+// clone with user, project and local settings, as T3's does in its
+// workspace, so the repo's own commands are listed; hooks and MCP stay off.
+func TestClaudeProbeRepoReadsProjectSettings(t *testing.T) {
+	f, cfg := newFixture(t, "2.1.285", "LOOM_FAKE_CLAUDE_INIT="+fakeInit)
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".claude", "commands"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".claude", "commands", "deploy.md"), []byte("deploy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	caps, err := New(cfg).probeOnce(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(caps.SlashCommands, func(c loomharness.SlashCommand) bool { return c.Name == "deploy" }) {
+		t.Fatalf("project command missing: %+v", caps.SlashCommands)
+	}
+	ls := launches(t, f.dumpPath)
+	args := strings.Join(ls[0].Args, " ")
+	if ls[0].Cwd != repo || !strings.Contains(args, "--setting-sources user,project,local") ||
+		!strings.Contains(args, `--settings {"disableAllHooks":true}`) || !strings.Contains(args, "--strict-mcp-config") {
+		t.Fatalf("launch = %s in %s", args, ls[0].Cwd)
+	}
+}
+
+// TestClaudeCapabilitiesByRepo: a repo's first request starts its probe in
+// the background and answers with the harness-level result; the repo's result
+// follows once probed; another probe starts only 5 minutes after the last
+// attempt, and its failure keeps the last good result; the cache keeps the 32
+// most recently used repos.
+func TestClaudeCapabilitiesByRepo(t *testing.T) {
+	a := New(Config{})
+	a.caps, a.probed = loomharness.Capabilities{AccountLabel: "harness"}, true
+	type call struct {
+		dir string
+		res chan error
+	}
+	calls := make(chan call)
+	a.probe = func(_ context.Context, dir string) (loomharness.Capabilities, error) {
+		c := call{dir, make(chan error)}
+		calls <- c
+		return loomharness.Capabilities{AccountLabel: dir}, <-c.res
+	}
+	settle := func(dir string) {
+		t.Helper()
+		for i := 0; i < 1000; i++ {
+			a.mu.Lock()
+			running := a.repos[dir].running
+			a.mu.Unlock()
+			if !running {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatal("probe never finished")
+	}
+	if c, _ := a.Capabilities("/r"); c.AccountLabel != "harness" {
+		t.Fatalf("before the repo probe = %+v", c)
+	}
+	c := <-calls
+	if c.dir != "/r" {
+		t.Fatalf("probed %q", c.dir)
+	}
+	if got, _ := a.Capabilities("/r"); got.AccountLabel != "harness" { // still running: no second probe
+		t.Fatalf("while probing = %+v", got)
+	}
+	c.res <- nil
+	settle("/r")
+	if got, ok := a.Capabilities("/r"); !ok || got.AccountLabel != "/r" {
+		t.Fatalf("after the repo probe = %+v %v", got, ok)
+	}
+	select {
+	case c := <-calls:
+		t.Fatalf("re-probed %q within 5 minutes", c.dir)
+	case <-time.After(20 * time.Millisecond):
+	}
+	a.mu.Lock()
+	a.repos["/r"].attempted = time.Now().Add(-probeEvery)
+	a.mu.Unlock()
+	a.Capabilities("/r")
+	c = <-calls
+	c.res <- errors.New("boom")
+	settle("/r")
+	if got, ok := a.Capabilities("/r"); !ok || got.AccountLabel != "/r" {
+		t.Fatalf("a failed refresh must keep the last result: %+v %v", got, ok)
+	}
+
+	go func() {
+		for c := range calls {
+			c.res <- errors.New("boom")
+		}
+	}()
+	for i := range probeRepos {
+		a.Capabilities(filepath.Join("/x", string(rune('a'+i))))
+	}
+	a.mu.Lock()
+	_, kept := a.repos["/r"]
+	n := len(a.repos)
+	a.mu.Unlock()
+	if n != probeRepos || kept {
+		t.Fatalf("cache holds %d repos, /r kept %v; want %d and the least recently used dropped", n, kept, probeRepos)
+	}
 }

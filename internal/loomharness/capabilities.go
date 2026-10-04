@@ -3,10 +3,11 @@ package loomharness
 import "time"
 
 // CapabilityReporter is an optional port: a harness that probes its own
-// account and commands in the background reports the last good result. ok is
-// false before the first good probe. It never blocks on a probe.
+// account and commands in the background reports the last good result for
+// dir, a repo clone whose project settings count, or "" for the harness
+// alone. ok is false before the first good probe. It never blocks on a probe.
 type CapabilityReporter interface {
-	Capabilities() (caps Capabilities, ok bool)
+	Capabilities(dir string) (caps Capabilities, ok bool)
 }
 
 // Capabilities is one probe result. It carries the account's kind and label

@@ -7,8 +7,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
 )
 
-// HarnessInfo is GET /harnesses/{harness}: the harness's last background
-// capability probe. capabilities_supported is false for a harness without a
+// HarnessInfo is GET /harnesses/{harness}[?repo=]: the harness's last
+// background capability probe, for the repo clone's project settings when
+// repo is given. capabilities_supported is false for a harness without a
 // probe; probed_at is absent before the first good probe. It carries the
 // account's kind and label only, never an email, key or token.
 type HarnessInfo struct {
@@ -29,7 +30,7 @@ type SlashCommand struct {
 
 func (h *Handler) getHarness(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
 	harness := r.PathValue("harness")
-	caps, supported, err := s.Capabilities(harness)
+	caps, supported, err := s.Capabilities(r.Context(), harness, r.URL.Query().Get("repo"))
 	if err != nil {
 		return 0, nil, err
 	}

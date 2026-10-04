@@ -4213,6 +4213,12 @@ type StreamAgentEventsV1Params struct {
 	Deltas *bool   `form:"deltas,omitempty" json:"deltas,omitempty"`
 }
 
+// GetHarnessV1Params defines parameters for GetHarnessV1.
+type GetHarnessV1Params struct {
+	// Repo Absolute path of a repo clone, checked as a create's repo is
+	Repo *string `form:"repo,omitempty" json:"repo,omitempty"`
+}
+
 // ReportClientErrorJSONRequestBody defines body for ReportClientError for application/json ContentType.
 type ReportClientErrorJSONRequestBody = ReportClientErrorJSONBody
 

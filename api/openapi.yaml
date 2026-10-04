@@ -4528,12 +4528,16 @@ paths:
       summary: Get a harness's last background capability probe
       description: >-
         The account kind and label and the slash commands from the harness's own periodic probe (Claude: every
-        5 minutes, without sending a prompt). A harness without a probe returns capabilities_supported false;
-        probed_at is absent until the first good probe. Never carries an email, key or token.
+        5 minutes, without sending a prompt). With repo, the probe runs in that clone and also reads its project and
+        local settings; it starts on the first request for the repo, refreshes on a request 5 minutes after the last
+        attempt, and until the repo's first good probe the harness-level result is returned. A harness without a probe
+        returns capabilities_supported false; probed_at is absent until the first good probe. Never carries an
+        email, key or token.
       security: [{BearerAuth: []}, {AgentBridgeToken: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - {name: harness, in: path, required: true, schema: {type: string}, description: "opencode, codex or claude"}
+        - {name: repo, in: query, required: false, schema: {type: string}, description: "Absolute path of a repo clone, checked as a create's repo is"}
       responses:
         "200": {description: The probe result, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1HarnessInfo"}}}}
         default: {$ref: "#/components/responses/AgentV1Error"}

@@ -25,15 +25,20 @@ type Adapter struct {
 	mu       sync.Mutex
 	sessions map[loomharness.NativeRef]*Session // by root and native id
 	feeds    map[*feed]struct{}
-	caps     loomharness.Capabilities // the last good capability probe
+	caps     loomharness.Capabilities // the last good harness-level capability probe
 	probed   bool
+	repos    map[string]*repoProbe // capability probes by repo clone
+	probe    func(ctx context.Context, dir string) (loomharness.Capabilities, error)
 }
 
 var _ loomharness.Harness = (*Adapter)(nil)
 
 // New returns an adapter; nothing starts until a session's first Prompt.
 func New(cfg Config) *Adapter {
-	return &Adapter{cfg: cfg, sessions: map[loomharness.NativeRef]*Session{}, feeds: map[*feed]struct{}{}}
+	a := &Adapter{cfg: cfg, sessions: map[loomharness.NativeRef]*Session{}, feeds: map[*feed]struct{}{},
+		repos: map[string]*repoProbe{}}
+	a.probe = a.probeOnce
+	return a
 }
 
 // Name is the harness name.

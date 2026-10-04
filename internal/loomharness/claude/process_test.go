@@ -118,7 +118,7 @@ func fakeClaude() {
 					continue
 				}
 				_ = out.Encode(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success",
-					"request_id": in.RequestID, "response": json.RawMessage(os.Getenv("LOOM_FAKE_CLAUDE_INIT"))}})
+					"request_id": in.RequestID, "response": fakeInitResponse(args)}})
 				continue
 			}
 			_ = out.Encode(map[string]any{"type": "control_response",
@@ -129,6 +129,22 @@ func fakeClaude() {
 			}
 		}
 	}
+}
+
+// fakeInitResponse is LOOM_FAKE_CLAUDE_INIT plus, when project settings
+// are read, a command per .claude/commands/*.md in the working directory.
+func fakeInitResponse(args []string) map[string]any {
+	var init map[string]any
+	_ = json.Unmarshal([]byte(os.Getenv("LOOM_FAKE_CLAUDE_INIT")), &init)
+	if i := slices.Index(args, "--setting-sources"); i >= 0 && strings.Contains(args[i+1], "project") {
+		files, _ := filepath.Glob(filepath.Join(".claude", "commands", "*.md"))
+		cmds, _ := init["commands"].([]any)
+		for _, f := range files {
+			cmds = append(cmds, map[string]any{"name": strings.TrimSuffix(filepath.Base(f), ".md"), "description": "(project)"})
+		}
+		init["commands"] = cmds
+	}
+	return init
 }
 
 // fakeTurn emits one assistant message in the 2.1.285 partial-message shape.
