@@ -337,6 +337,11 @@ func TestSendReopenCrashAfterCommit(t *testing.T) {
 	s := serviceAt(t, path, svcAgent("a1", "persistent", StateFinished))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBus := s.Bus.Subscribe("a1")
 	commitStateCrash = func() { panic("crash") }
 	t.Cleanup(func() { commitStateCrash = func() {} })
 	func() {
@@ -348,13 +353,25 @@ func TestSendReopenCrashAfterCommit(t *testing.T) {
 		_, _ = s.Send(ctx, sendReq("a1", "r1", "again", user))
 	}()
 	commitStateCrash = func() {}
+	// Nothing was fanned out: the old subscriber's next live event is a
+	// sentinel written after the crash, and the Bus got nothing.
+	if _, err := s.events.Append(ctx, loomstore.Event{AgentID: "a1", EventID: "sentinel", Kind: "test.sentinel",
+		Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if e := recv(t, sub, 1)[0]; e.EventID != "sentinel" {
+		t.Fatalf("old subscriber got %s before the sentinel", e.EventID)
+	}
+	if got := drain(oldBus); len(got) != 0 {
+		t.Fatalf("bus got %v before the fanout", types(got))
+	}
 
-	s = serviceAt(t, path) // restart
-	want := []string{"a1:1:" + EventStateChanged, "a1:send:r1:" + EventWaiting}
+	s = serviceAt(t, path)                                                      // restart
+	want := []string{"a1:1:" + EventStateChanged, "a1:send:r1:" + EventWaiting} // then the sentinel
 	check := func() {
 		t.Helper()
 		a := s.get(t, "a1")
-		if a.State != StateActive || a.Attempt != 2 || a.Revision != 1 || !slices.Equal(ids(rows(t, s, "a1", 0)), want) ||
+		if a.State != StateActive || a.Attempt != 2 || a.Revision != 1 || !slices.Equal(ids(rows(t, s, "a1", 0)), append(want, "sentinel")) ||
 			!slices.Equal(waiting(t, s, "a1"), []string{"user:u=again"}) {
 			t.Fatalf("after restart: state %s attempt %d revision %d events %v waiting %q; want active, 2, 1, %v, [user:u=again]",
 				a.State, a.Attempt, a.Revision, ids(rows(t, s, "a1", 0)), waiting(t, s, "a1"), want)
@@ -379,6 +396,14 @@ func TestSendReopenCrashAfterCommit(t *testing.T) {
 	if got := drain(bus); len(got) != 0 {
 		t.Fatalf("retry published %v", types(got))
 	}
+	// The reopen's revision bump keeps OR2's CAS: the next change from the
+	// reloaded row commits at revision 2.
+	if _, err := s.raiseAttention(ctx, s.get(t, "a1"), "look"); err != nil {
+		t.Fatal(err)
+	}
+	if a, got := s.get(t, "a1"), ids(rows(t, s, "a1", 0)); a.Revision != 2 || got[len(got)-2] != "a1:2:"+EventAttentionRaised {
+		t.Fatalf("after the next change: revision %d events %v; want 2, then a1:2:%s", a.Revision, got, EventAttentionRaised)
+	}
 }
 
 // TestSendRetrySameRequestNoNewEvents: a Send whose message.waiting event
@@ -397,14 +422,25 @@ func TestSendRetrySameRequestNoNewEvents(t *testing.T) {
 		BEGIN SELECT RAISE(ABORT, 'injected write failure'); END`); err != nil {
 		t.Fatal(err)
 	}
+	sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus := s.Bus.Subscribe("a1")
 	if _, err := s.Send(ctx, sendReq("a1", "r1", "hello", user)); err == nil {
 		t.Fatal("Send succeeded; want the injected failure")
+	}
+	if got := drain(bus); len(got) != 0 {
+		t.Fatalf("the failed Send published %v", types(got))
 	}
 	if _, err := db.Exec(`DROP TRIGGER fail_insert`); err != nil {
 		t.Fatal(err)
 	}
-	bus := s.Bus.Subscribe("a1")
 	first := mustSendMsg(t, s, sendReq("a1", "r1", "hello", user))
+	// The failed Send was never fanned out: the subscriber's first event is the retry's.
+	if e := recv(t, sub, 1)[0]; e.EventID != "a1:send:r1:"+EventWaiting || e.Seq != 1 {
+		t.Fatalf("subscriber's first event %s seq %d; want a1:send:r1:%s at 1", e.EventID, e.Seq, EventWaiting)
+	}
 	want := []string{"a1:send:r1:" + EventWaiting}
 	if got := ids(rows(t, s, "a1", 0)); !slices.Equal(got, want) {
 		t.Fatalf("after the retry: events %v; want %v", got, want)
