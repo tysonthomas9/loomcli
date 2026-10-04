@@ -430,3 +430,33 @@ func TestPurgePendingIsPerWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestGetAndListAgentsCarryLastSeq(t *testing.T) {
+	ctx := context.Background()
+	s := openAt(t, filepath.Join(t.TempDir(), "loom.db"))
+	for _, id := range []string{"a1", "a2"} {
+		if err := s.InsertAgent(ctx, agent(id, "interactive")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 3 {
+		if _, err := s.AppendEvent(ctx, Event{AgentID: "a1", EventID: fmt.Sprintf("e%d", i), Kind: "message", Payload: json.RawMessage(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := s.GetAgent(ctx, "a1")
+	if err != nil || a.LastSeq != 3 {
+		t.Fatalf("GetAgent a1 LastSeq = %d, %v; want 3", a.LastSeq, err)
+	}
+	rows, _, err := s.ListAgents(ctx, AgentFilter{WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for _, r := range rows {
+		got[r.AgentID] = r.LastSeq
+	}
+	if got["a1"] != 3 || got["a2"] != 0 || len(got) != 2 {
+		t.Fatalf("ListAgents LastSeq = %v; want a1:3 a2:0", got)
+	}
+}

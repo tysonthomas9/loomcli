@@ -115,7 +115,10 @@ export function useAgentRoster(
 
   useEffect(() => relist(), [relist, openId]);
 
+  // The roster as of the last render, for the stream's starting cursors.
+  const latest = useRef(roster);
   useEffect(() => {
+    latest.current = roster;
     shared = roster;
     sharedActivity = activity;
     listeners.forEach((l) => l());
@@ -124,7 +127,8 @@ export function useAgentRoster(
   // The stream reopens only when the set of agents changes.
   const ids = useMemo(() => [...roster.keys()].sort().join(","), [roster]);
   // The last stream's cache, so the next one opens at the cursors it
-  // reached; a new agent opens at 0 (RR1).
+  // reached, and never before an agent's listed last_seq: the row already
+  // shows everything up to it (RR1).
   const history = useRef<{ ws: string; h: AgentHistory } | null>(null);
   const purged = useMemo(
     () =>
@@ -145,6 +149,9 @@ export function useAgentRoster(
       ...(history.current?.ws === workspaceId
         ? { history: history.current.h }
         : {}),
+      from: Object.fromEntries(
+        [...latest.current.values()].map((a) => [a.agent_id, a.last_seq ?? 0]),
+      ),
       expired: purged ? purged.split(",") : [],
       onEvents: (added) => {
         inflight.current.forEach((seen) => seen.push(...added));

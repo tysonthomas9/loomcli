@@ -1763,8 +1763,11 @@ type AgentV1 struct {
 	Host                 string  `json:"host"`
 	InteractionMode      string  `json:"interaction_mode"`
 	LastActiveAt         *string `json:"last_active_at"`
-	Mode                 string  `json:"mode"`
-	Model                *string `json:"model"`
+
+	// LastSeq The agent's latest committed event seq when the row was read; a stream opened after it misses no change the row does not show.
+	LastSeq int64   `json:"last_seq"`
+	Mode    string  `json:"mode"`
+	Model   *string `json:"model"`
 
 	// ModelUnverified The harness's model list did not include the model when it was chosen; it was passed through and the harness decides whether it runs (see the model.unverified event).
 	ModelUnverified bool                    `json:"model_unverified"`

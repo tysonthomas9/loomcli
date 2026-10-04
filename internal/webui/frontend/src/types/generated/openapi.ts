@@ -2625,6 +2625,11 @@ export interface components {
       history_purge_failed_at: string | null;
       deleted_at: string | null;
       compute: string;
+      /**
+       * Format: int64
+       * @description The agent's latest committed event seq when the row was read; a stream opened after it misses no change the row does not show.
+       */
+      last_seq: number;
       waiting_messages: components["schemas"]["AgentV1WaitingMessage"][];
       open_asks: components["schemas"]["AgentV1Ask"][];
     };

@@ -137,6 +137,7 @@ export interface Agent {
   history_purge_failed_at: string | null; // a due R29 purge failed: expiry incomplete
   deleted_at: string | null;
   compute: string;
+  last_seq: number; // latest committed event seq when the row was read (RR1)
   waiting_messages: WaitingMessage[]; // filled by Get only
   open_asks: Ask[]; // filled by Get only
 }

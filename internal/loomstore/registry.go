@@ -39,6 +39,9 @@ type Agent struct {
 	// HistoryPurgeFailedAt is set while a due history purge has failed (an
 	// incomplete expiry); whatever ends the deadline clears it.
 	HistoryPurgeFailedAt *string
+	// LastSeq is the agent's latest committed event seq, read in the same
+	// statement as the row. Only GetAgent and ListAgents set it.
+	LastSeq int64
 }
 
 // insertCols are the columns InsertAgent writes; agentCols adds those only
@@ -53,6 +56,11 @@ const insertCols = `agent_id, workspace_id, name, profile_key, preset, preset_ve
  history_purged_at, deleted_at, harness_session_root`
 
 const agentCols = insertCols + `, history_purge_failed_at`
+
+// readCols adds LastSeq: one lookup on agent_events' (agent_id, seq) key.
+const readCols = agentCols + `, (SELECT COALESCE(MAX(seq), 0) FROM agent_events e WHERE e.agent_id = agents.agent_id)`
+
+func (a *Agent) readFields() []any { return append(a.fields(), &a.LastSeq) }
 
 // fields lists a's fields in agentCols order; used both to bind and to scan.
 func (a *Agent) fields() []any {
@@ -96,7 +104,7 @@ func (s *Store) InsertAgent(ctx context.Context, a Agent) error {
 // GetAgent returns the agent row by id, tombstoned or not.
 func (s *Store) GetAgent(ctx context.Context, agentID string) (Agent, error) {
 	var a Agent
-	err := s.db.QueryRowContext(ctx, "SELECT "+agentCols+" FROM agents WHERE agent_id = ?", agentID).Scan(a.fields()...)
+	err := s.db.QueryRowContext(ctx, "SELECT "+readCols+" FROM agents WHERE agent_id = ?", agentID).Scan(a.readFields()...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrNotFound
 	}
@@ -392,7 +400,7 @@ func (s *Store) ListAgents(ctx context.Context, f AgentFilter) ([]Agent, string,
 	if !f.IncludeDeleted {
 		where = append(where, "deleted_at IS NULL")
 	}
-	q := "SELECT " + agentCols + " FROM agents WHERE " + strings.Join(where, " AND ") + " ORDER BY agent_id" //nolint:gosec // G202: constant column names and placeholders only.
+	q := "SELECT " + readCols + " FROM agents WHERE " + strings.Join(where, " AND ") + " ORDER BY agent_id" //nolint:gosec // G202: constant column names and placeholders only.
 	if f.Limit > 0 {
 		q += " LIMIT ?"
 		args = append(args, f.Limit+1)
@@ -405,7 +413,7 @@ func (s *Store) ListAgents(ctx context.Context, f AgentFilter) ([]Agent, string,
 	var out []Agent
 	for rows.Next() {
 		var a Agent
-		if err := rows.Scan(a.fields()...); err != nil {
+		if err := rows.Scan(a.readFields()...); err != nil {
 			return nil, "", err
 		}
 		out = append(out, a)

@@ -27,6 +27,11 @@ export interface AgentStreamOptions {
    * before the server registered the stream (RR1).
    */
   live?: boolean;
+  /**
+   * Live: each agent's cursor is at least this (its List row's last_seq),
+   * so a first open replays only what came after the row was read (RR1).
+   */
+  from?: Readonly<Record<string, number>>;
   /** Agents whose history is purged: followed with no cursor, which the server refuses. */
   expired?: readonly string[];
   /** The cache to merge into; a new one when omitted. */
@@ -114,7 +119,10 @@ export class AgentEventStream {
     const p = new URLSearchParams({ agents: agents.join(",") });
     const after = agents
       .filter((a) => !this.expired.has(a))
-      .map((a) => `${a}:${this.history.lastSeq(a)}`);
+      .map(
+        (a) =>
+          `${a}:${Math.max(this.history.lastSeq(a), this.opts.from?.[a] ?? 0)}`,
+      );
     if (after.length) p.set("after", after.join(","));
     if (types) p.set("types", types.join(","));
     if (deltas) p.set("deltas", "true");

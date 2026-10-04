@@ -4715,7 +4715,7 @@ components:
     AgentV1:
       type: object
       description: An agent; waiting_messages and open_asks are filled by Get only.
-      required: [agent_id, workspace_id, name, profile_key, preset, preset_version, mode, interaction_mode, role_kind, spec_json, spec_version, owner_kind, owner_id, created_by_kind, created_by_id, parent_agent_id, root_agent_id, subject_type, subject_id, subject_version, external_key, repo, base_ref, worktree_path, branch, harness, host, model, model_unverified, state, state_reason, waiting_on, attempt, outcome, archive_reason, attention_reason, running_turn_id, delete_requested, last_active_at, created_at, updated_at, archived_at, finished_at, history_purged_at, history_purge_failed_at, deleted_at, compute, waiting_messages, open_asks]
+      required: [agent_id, workspace_id, name, profile_key, preset, preset_version, mode, interaction_mode, role_kind, spec_json, spec_version, owner_kind, owner_id, created_by_kind, created_by_id, parent_agent_id, root_agent_id, subject_type, subject_id, subject_version, external_key, repo, base_ref, worktree_path, branch, harness, host, model, model_unverified, state, state_reason, waiting_on, attempt, outcome, archive_reason, attention_reason, running_turn_id, delete_requested, last_active_at, created_at, updated_at, archived_at, finished_at, history_purged_at, history_purge_failed_at, deleted_at, compute, last_seq, waiting_messages, open_asks]
       properties:
         agent_id: {type: string}
         workspace_id: {type: string}
@@ -4764,6 +4764,7 @@ components:
         history_purge_failed_at: {type: [string, "null"], description: "Set while a due history purge has failed (an incomplete expiry); cleared when the purge succeeds or the deadline ends."}
         deleted_at: {type: [string, "null"]}
         compute: {type: string}
+        last_seq: {type: integer, format: int64, description: "The agent's latest committed event seq when the row was read; a stream opened after it misses no change the row does not show."}
         waiting_messages: {type: array, items: {$ref: "#/components/schemas/AgentV1WaitingMessage"}}
         open_asks: {type: array, items: {$ref: "#/components/schemas/AgentV1Ask"}}
     AgentV1WaitingMessage:

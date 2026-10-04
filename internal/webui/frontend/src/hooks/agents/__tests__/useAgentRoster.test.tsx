@@ -120,10 +120,11 @@ async function fakeFetch(input: string) {
   if (url.pathname.endsWith("/v1/agents")) {
     lists.push(url);
     const parent = url.searchParams.get("parent");
+    // Each row carries its last_seq, read with it, as the server's does.
     const body = {
-      agents: [...agents.values()].filter(
-        (a) => !parent || a.parent_agent_id === parent,
-      ),
+      agents: [...agents.values()]
+        .filter((a) => !parent || a.parent_agent_id === parent)
+        .map((a) => ({ ...a, last_seq: log.get(a.agent_id)?.length ?? 0 })),
       next: "",
     };
     if (!parent && holdFull) await holdFull;
@@ -222,6 +223,15 @@ describe("useAgentRoster", () => {
     commit("lead", "agent.state_changed", { from: "creating", to: "idle" });
     renderHook(() => useAgentRoster("ws1"));
     await waitFor(() => expect(openStream()?.agents).toEqual(["lead", "old"]));
-    expect(openStream()!.url.searchParams.get("after")).toBe("lead:0");
+    expect(openStream()!.url.searchParams.get("after")).toBe("lead:1");
+  });
+
+  it("opens each agent's stream at its listed last_seq, not at 0", async () => {
+    agents.set("lead", agent("lead", { preset: "lead" }));
+    for (let i = 0; i < 5; i++)
+      commit("lead", "agent.state_changed", { from: "idle", to: "idle" });
+    renderHook(() => useAgentRoster("ws1"));
+    await waitFor(() => expect(openStream()?.agents).toEqual(["lead"]));
+    expect(openStream()!.url.searchParams.get("after")).toBe("lead:5");
   });
 });

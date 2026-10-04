@@ -164,6 +164,9 @@ type Agent struct {
 	OpenAsks        []Ask            `json:"open_asks"`
 
 	HistoryPurgeFailedAt *string `json:"history_purge_failed_at"` // a due purge failed: expiry incomplete
+	// LastSeq is the latest committed event seq when the row was read: a
+	// stream opened after it misses nothing the row does not show (RR1).
+	LastSeq int64 `json:"last_seq"`
 }
 
 // WaitingMessage is one sender's message waiting for the agent.
@@ -231,7 +234,7 @@ func agentOut(i loomagent.AgentInfo) Agent {
 		Outcome: a.Outcome, ArchiveReason: a.ArchiveReason, AttentionReason: a.AttentionReason,
 		RunningTurnID: a.RunningTurnID, DeleteRequested: a.DeleteRequested, LastActiveAt: a.LastActiveAt,
 		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt, ArchivedAt: a.ArchivedAt, FinishedAt: a.FinishedAt,
-		HistoryPurgedAt: a.HistoryPurgedAt, HistoryPurgeFailedAt: a.HistoryPurgeFailedAt, DeletedAt: a.DeletedAt, Compute: i.Compute,
+		HistoryPurgedAt: a.HistoryPurgedAt, HistoryPurgeFailedAt: a.HistoryPurgeFailedAt, DeletedAt: a.DeletedAt, Compute: i.Compute, LastSeq: a.LastSeq,
 		WaitingMessages: []WaitingMessage{}, OpenAsks: []Ask{}}
 	for _, w := range i.WaitingMessages {
 		wm := WaitingMessage{Sender: w.Sender, Text: w.Text, Since: w.Since, Message: w.Message}
