@@ -3,8 +3,9 @@
 // THIRD_PARTY_NOTICES.md. Changes: the work-log grouping only, over Loom's
 // harness-neutral chat items; a tool's action comes from its name and input.
 
-import type { ChatItem } from "@/hooks";
-import { argPreviewFromJSON } from "@/utils/toolPreview";
+import type { AgentEvent } from "@/api/agentsv1";
+import type { ChatItem, ToolCall } from "@/hooks";
+import { argPreviewFromJSON, truncate } from "@/utils/toolPreview";
 
 /** Work entries a mixed group shows before "+N previous log entries". */
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
@@ -119,6 +120,62 @@ export function toolHeading(entry: ToolEntry): string {
 /** The thing a tool call is about (its command, path or query), or "". */
 export function toolPreview(entry: ToolEntry): string {
   return argPreviewFromJSON(entry.tool.input);
+}
+
+/** Reasoning's first line as plain text: no emphasis, code or heading marks. */
+export function firstLine(text: string, max = 120): string {
+  let line = (text.trim().split("\n")[0] ?? "").replace(/^#{1,6}\s+/, "");
+  for (let prev = ""; prev !== line; ) {
+    prev = line;
+    line = line.replace(/(\*\*|__|\*|_|`)(.+?)\1/g, "$2");
+  }
+  line = line.trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/** The agent tray's step line, at most this long. */
+export const STEP_MAX = 60;
+
+const STEP_BY_ACTION: Partial<Record<ToolGroupAction, string>> = {
+  read: "Read file",
+  edit: "Changed file",
+  command: "Ran command",
+  "code-search": "Searched code",
+  search: "Searched the web",
+};
+
+/**
+ * A working agent's latest step as the agent tray shows it (DF2): a tool
+ * start or completed tool as its action and what it is about ("▸ Ran
+ * command · npm test"), a completed reasoning item as its first line
+ * ("💭 Thinking · Checking routes"); null for any other event. A tool's
+ * input shows only as its salient argument, never as raw JSON; without a
+ * preview, only the action shows.
+ */
+export function stepLabel(e: AgentEvent, preview = true): string | null {
+  const p = (e.payload ?? {}) as {
+    itemKind?: string;
+    text?: string;
+    tool?: ToolCall;
+  };
+  if (e.kind === "item.completed" && p.itemKind === "reasoning") {
+    const line = preview ? firstLine(p.text ?? "") : "";
+    return truncate(`💭 Thinking${line ? ` · ${line}` : ""}`, STEP_MAX);
+  }
+  const tool =
+    e.kind === "tool.started" ||
+    (e.kind === "item.completed" && p.itemKind === "tool");
+  if (!tool) return null;
+  const entry: ToolEntry = {
+    key: e.event_id,
+    kind: "tool",
+    tool: p.tool ?? {},
+    status: "running",
+  };
+  const about = preview ? toolPreview(entry) : "";
+  const action = STEP_BY_ACTION[toolGroupAction(entry)] ?? toolHeading(entry);
+  const shown = about && !/^[[{]/.test(about) ? ` · ${about}` : "";
+  return truncate(`▸ ${action}${shown}`, STEP_MAX);
 }
 
 /**

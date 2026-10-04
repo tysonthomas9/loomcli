@@ -8,6 +8,7 @@
 import { useState, type KeyboardEvent } from "react";
 import {
   entryFailed,
+  firstLine,
   toolGroupAction,
   toolHeading,
   toolPreview,
@@ -56,17 +57,6 @@ function prettyInput(input: string | undefined): string {
   } catch {
     return raw;
   }
-}
-
-/** Reasoning's first line as plain text: no emphasis, code or heading marks. */
-function firstLine(text: string, max = 120): string {
-  let line = (text.trim().split("\n")[0] ?? "").replace(/^#{1,6}\s+/, "");
-  for (let prev = ""; prev !== line; ) {
-    prev = line;
-    line = line.replace(/(\*\*|__|\*|_|`)(.+?)\1/g, "$2");
-  }
-  line = line.trim();
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
 function entryIcon(entry: WorkEntry): IconName {

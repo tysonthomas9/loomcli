@@ -8,8 +8,8 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Agent, WaitingMessage } from "@/api/agentsv1";
-import { trayRows, trayWaves, type ChatItem } from "@/hooks";
+import type { Agent, AgentEvent, WaitingMessage } from "@/api/agentsv1";
+import { trayRows, trayWaves, type Activities, type ChatItem } from "@/hooks";
 import { AgentTray } from "../AgentTray";
 
 const kid = (id: string, over: Partial<Agent> = {}): Agent =>
@@ -39,11 +39,13 @@ function Harness({
   items,
   waiting = [],
   narrow = false,
+  activity,
 }: {
   roster: Agent[];
   items: ChatItem[];
   waiting?: WaitingMessage[];
   narrow?: boolean;
+  activity?: Activities;
 }) {
   const [open, setOpen] = useState(false);
   const rows = trayRows("L", roster, items, waiting);
@@ -57,6 +59,7 @@ function Harness({
         onOpenChange={setOpen}
         narrow={narrow}
         tucked
+        activity={activity}
       />
     </MemoryRouter>
   );
@@ -160,5 +163,38 @@ describe("AgentTray", () => {
       />,
     );
     expect(screen.getByRole("button")).toHaveTextContent("2 agents · 2 run");
+  });
+
+  it("shows a running child's latest step with its turn time, else Working…", () => {
+    const step: AgentEvent = {
+      agent_id: "a",
+      seq: 0,
+      event_id: "t1",
+      kind: "tool.started",
+      turn_id: "t",
+      payload: {
+        itemKind: "tool",
+        tool: { name: "bash", input: '{"command":"npm test"}' },
+      },
+      created_at: "",
+    };
+    const turnAt = new Date(Date.now() - 29_000).toISOString();
+    render(
+      <Harness
+        roster={[kid("a"), kid("b")]}
+        items={[started(0, "a", "b")]}
+        activity={
+          new Map([
+            ["a", { step, turnAt }],
+            ["b", { turnAt }],
+          ])
+        }
+      />,
+    );
+    fireEvent.click(screen.getByRole("button"));
+    const rowA = document.querySelector('[data-tray-row="a"]')!;
+    const rowB = document.querySelector('[data-tray-row="b"]')!;
+    expect(rowA).toHaveTextContent(/▸ Ran command · npm test · 0:(29|30)/);
+    expect(rowB).toHaveTextContent("Working…");
   });
 });

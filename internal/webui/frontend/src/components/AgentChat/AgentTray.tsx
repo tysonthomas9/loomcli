@@ -7,6 +7,8 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import {
+  type Activities,
+  type Activity,
   elapsed,
   startedAgo,
   trayCounts,
@@ -15,6 +17,7 @@ import {
   type TrayWave,
 } from "@/hooks";
 import { ProviderIcon } from "./ProviderIcon";
+import { stepLabel } from "./timelineRows";
 import tray from "./AgentTray.module.css";
 
 /** The catalog provider id whose glyph a harness shows. */
@@ -64,6 +67,8 @@ export interface AgentTrayProps {
   narrow: boolean;
   /** Sits on the composer's top edge; false when the ask drawer is there. */
   tucked: boolean;
+  /** Each working child's latest step this turn (DF2), by agent id. */
+  activity?: Activities | undefined;
 }
 
 /**
@@ -79,6 +84,7 @@ export function AgentTray({
   onOpenChange,
   narrow,
   tucked,
+  activity,
 }: AgentTrayProps) {
   const running = rows.some((r) => r.status === "running");
   const now = useNow(running);
@@ -182,6 +188,7 @@ export function AgentTray({
                 now={now}
                 workspaceId={workspaceId}
                 narrow={narrow}
+                activity={activity}
               />
             ))}
           </ul>
@@ -202,12 +209,14 @@ function WaveRows({
   now,
   workspaceId,
   narrow,
+  activity,
 }: {
   wave: TrayWave;
   divided: boolean;
   now: number;
   workspaceId: string;
   narrow: boolean;
+  activity?: Activities | undefined;
 }) {
   const n = wave.rows.length;
   return (
@@ -220,7 +229,13 @@ function WaveRows({
       )}
       {wave.rows.map((r) => (
         <li key={r.id} data-tray-row={r.id}>
-          <Row row={r} now={now} workspaceId={workspaceId} narrow={narrow} />
+          <Row
+            row={r}
+            now={now}
+            workspaceId={workspaceId}
+            narrow={narrow}
+            activity={activity?.get(r.id)}
+          />
         </li>
       ))}
     </>
@@ -242,16 +257,34 @@ function StatusIcon({ row }: { row: TrayRow }) {
   );
 }
 
+/**
+ * A working child's latest step and how long its turn has run ("▸ Ran
+ * command · npm test · 0:29"); null before its first step this turn.
+ */
+function stepLine(
+  activity: Activity | undefined,
+  now: number,
+  narrow: boolean,
+): string | null {
+  const step = activity?.step && stepLabel(activity.step, !narrow);
+  if (!step) return null;
+  return activity?.turnAt
+    ? `${step} · ${elapsed(since(activity.turnAt, now), true)}`
+    : step;
+}
+
 function Row({
   row,
   now,
   workspaceId,
   narrow,
+  activity,
 }: {
   row: TrayRow;
   now: number;
   workspaceId: string;
   narrow: boolean;
+  activity?: Activity | undefined;
 }) {
   const head = row.record?.head?.slice(0, 7);
   const branch = row.record?.branch || row.branch;
@@ -262,7 +295,7 @@ function Row({
   const result =
     row.status === "running"
       ? row.state === "active"
-        ? "Working…"
+        ? (stepLine(activity, now, narrow) ?? "Working…")
         : row.state
       : (row.record?.summary?.split("\n")[0] ??
         (ok ? "Done" : (row.record?.outcome ?? "")));

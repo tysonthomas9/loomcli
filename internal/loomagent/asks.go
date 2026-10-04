@@ -16,8 +16,8 @@ import (
 const (
 	KindDelta   = "delta"
 	KindFeedGap = "feed.gap"
-	// KindToolStarted is a tool call that started; like a delta, only a
-	// Subscribe that asks for deltas gets it.
+	// KindToolStarted is a tool call that started; a Subscribe gets it if
+	// it asks for deltas or names tool.started in its Kinds.
 	KindToolStarted = "tool.started"
 )
 

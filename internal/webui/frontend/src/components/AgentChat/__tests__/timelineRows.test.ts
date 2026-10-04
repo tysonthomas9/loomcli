@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import type { AgentEvent } from "@/api/agentsv1";
 import type { ChatItem } from "@/hooks";
-import { deriveTimelineRows, summarizeToolGroup } from "../timelineRows";
+import {
+  STEP_MAX,
+  deriveTimelineRows,
+  stepLabel,
+  summarizeToolGroup,
+} from "../timelineRows";
 
 const tool = (
   key: string,
@@ -120,5 +126,81 @@ describe("timelineRows", () => {
       new Set(),
     );
     expect(rows.map((r) => r.kind)).toEqual(["item", "thinking"]);
+  });
+});
+
+describe("stepLabel", () => {
+  const ev = (kind: string, payload: object): AgentEvent => ({
+    agent_id: "c",
+    seq: 0,
+    event_id: "e",
+    kind,
+    turn_id: "t",
+    payload,
+    created_at: "",
+  });
+  const started = (name: string, input?: string) =>
+    ev("tool.started", {
+      itemKind: "tool",
+      tool: input === undefined ? { name } : { name, input },
+    });
+
+  it("names a tool by its action and salient argument on every harness", () => {
+    for (const name of ["bash", "Bash", "exec_command", "shell"])
+      expect(stepLabel(started(name, '{"command":"npm test"}'))).toBe(
+        "▸ Ran command · npm test",
+      );
+    expect(stepLabel(started("read", '{"filePath":"src/a.ts"}'))).toBe(
+      "▸ Read file · src/a.ts",
+    );
+    expect(
+      stepLabel(
+        ev("item.completed", {
+          itemKind: "tool",
+          tool: { name: "grep", input: '{"pattern":"TODO"}', output: "x" },
+        }),
+      ),
+    ).toBe("▸ Searched code · TODO");
+    expect(stepLabel(started("todowrite"))).toBe("▸ Todowrite");
+  });
+
+  it("never shows raw tool input", () => {
+    expect(stepLabel(started("todowrite", '{"todos":[{"id":1}]}'))).toBe(
+      "▸ Todowrite",
+    );
+    expect(stepLabel(started("bash", '{"command":"ls"}'), false)).toBe(
+      "▸ Ran command",
+    );
+  });
+
+  it("cuts a long input to about 60 characters", () => {
+    const long = `npm test -- ${"x".repeat(200)}`;
+    const got = stepLabel(started("bash", JSON.stringify({ command: long })))!;
+    expect(got.length).toBeLessThanOrEqual(STEP_MAX);
+    expect(got.startsWith("▸ Ran command · npm test -- x")).toBe(true);
+    expect(got.endsWith("…")).toBe(true);
+  });
+
+  it("shows reasoning's first plain line", () => {
+    expect(
+      stepLabel(
+        ev("item.completed", {
+          itemKind: "reasoning",
+          text: "**Checking routes**\n\nThe router lives in app.ts.",
+        }),
+      ),
+    ).toBe("💭 Thinking · Checking routes");
+    expect(
+      stepLabel(ev("item.completed", { itemKind: "reasoning", text: "" })),
+    ).toBe("💭 Thinking");
+  });
+
+  it("is null for anything but a step", () => {
+    expect(
+      stepLabel(ev("item.completed", { itemKind: "message", text: "hi" })),
+    ).toBeNull();
+    expect(stepLabel(ev("delta", { itemKind: "message", text: "hi" }))).toBe(
+      null,
+    );
   });
 });

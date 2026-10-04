@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -313,5 +314,48 @@ func TestReplayBackfillAfterReloadAndServeRestart(t *testing.T) {
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("logged %v; native history %v", got, want)
+	}
+}
+
+// TestNotifyToolStartsForSubscriptionsNamingThem: a subscription that names
+// tool.started gets tool starts without deltas; one that names neither gets
+// no tool starts or deltas; one with deltas gets both.
+func TestNotifyToolStartsForSubscriptionsNamingThem(t *testing.T) {
+	ctx := context.Background()
+	_, l := openLog(t, filepath.Join(t.TempDir(), "loom.db"), "a1")
+	sub := func(deltas bool, kinds ...string) *Subscription {
+		s := &Subscription{notes: true, deltas: deltas, kinds: map[string]bool{}}
+		for _, k := range kinds {
+			s.kinds[k] = true
+		}
+		got, err := l.subscribe(ctx, map[string]int64{"a1": LiveOnly}, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	named := sub(false, "item.completed", KindToolStarted)
+	plain := sub(false, "item.completed")
+	all := sub(false)
+	withDeltas := sub(true, "item.completed")
+	l.Notify(loomstore.Event{AgentID: "a1", EventID: "d", Kind: KindDelta})
+	l.Notify(loomstore.Event{AgentID: "a1", EventID: "t", Kind: KindToolStarted})
+	mustAppend(t, l, ev("a1", "c", "item.completed"))
+	for name, c := range map[string]struct {
+		s    *Subscription
+		want []string
+	}{
+		"named":       {named, []string{"t", "c"}},
+		"plain":       {plain, []string{"c"}},
+		"all kinds":   {all, []string{"c"}},
+		"with deltas": {withDeltas, []string{"d", "t", "c"}},
+	} {
+		got := ids(recv(t, c.s, len(c.want))) // a saved row and a notice can cross
+		slices.Sort(got)
+		slices.Sort(c.want)
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Fatalf("%s: got %v, want %v", name, got, c.want)
+		}
+		quiet(t, c.s)
 	}
 }

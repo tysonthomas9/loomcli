@@ -1,17 +1,67 @@
 // The agent roster projection (design v2 §9.4–§9.5): List fills it, and the
 // stream's child.created, agent.state_changed and agent.deleted events keep it
-// current. Agents are keyed by id, so a re-list never duplicates a row.
+// current. Agents are keyed by id, so a re-list never duplicates a row. The
+// same stream's tool starts and completed items give each working agent its
+// latest step (DF2), kept beside the roster and never saved.
 
 import type { Agent, AgentEvent } from "@/api/agentsv1";
 
 export type Roster = ReadonlyMap<string, Agent>;
 
-/** The saved kinds the roster subscribes to. */
+/**
+ * The kinds the roster subscribes to: saved ones, and tool.started, which
+ * the server sends a stream that names it without asking for deltas.
+ */
 export const ROSTER_KINDS = [
   "child.created",
   "agent.state_changed",
   "agent.deleted",
+  "tool.started",
+  "item.completed",
 ];
+
+/** An agent's latest step this turn, and when the turn started, if seen. */
+export interface Activity {
+  /** A tool.started, or a completed tool or reasoning item. */
+  step?: AgentEvent;
+  turnAt?: string;
+}
+
+export type Activities = ReadonlyMap<string, Activity>;
+
+/** The states of an agent at work; an ask (waiting) is the same turn. */
+const WORKING = new Set(["creating", "active", "waiting", "stopping"]);
+
+/**
+ * Applies stream events and notices to each agent's activity: a change to
+ * active from a resting state starts a turn (its time, no step yet), one to
+ * a resting state drops the agent, and a tool start or completed tool or
+ * reasoning item is its latest step. Other events change nothing.
+ */
+export function applyActivity(m: Activities, events: AgentEvent[]): Activities {
+  let next: Map<string, Activity> | null = null;
+  const edit = () => (next ??= new Map(m));
+  for (const e of events) {
+    const p = (e.payload ?? {}) as {
+      from?: string;
+      to?: string;
+      itemKind?: string;
+    };
+    if (e.kind === "agent.state_changed" && p.to) {
+      if (!WORKING.has(p.to)) edit().delete(e.agent_id);
+      else if (p.to === "active" && !WORKING.has(p.from ?? ""))
+        edit().set(e.agent_id, { turnAt: e.created_at });
+    } else if (
+      e.kind === "tool.started" ||
+      (e.kind === "item.completed" &&
+        (p.itemKind === "tool" || p.itemKind === "reasoning"))
+    ) {
+      const was = (next ?? m).get(e.agent_id);
+      edit().set(e.agent_id, { ...was, step: e });
+    }
+  }
+  return next ?? m;
+}
 
 export const upsert = (r: Roster, agents: Agent[]): Roster =>
   new Map([...r, ...agents.map((a) => [a.agent_id, a] as const)]);

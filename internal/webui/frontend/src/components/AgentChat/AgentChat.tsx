@@ -20,6 +20,7 @@ import {
   trayWaves,
   useAgentChat,
   useRoster,
+  useRosterActivity,
   useRosterAgent,
 } from "@/hooks";
 import type { WaitingMessage } from "@/api/agentsv1";
@@ -92,6 +93,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   );
   // The agent tray: working children, and results waiting for this agent.
   const roster = useRoster();
+  const activity = useRosterActivity();
   const [trayOpen, setTrayOpen] = useState(false);
   const tRows = useMemo(
     () =>
@@ -274,6 +276,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
               onOpenChange={setTrayOpen}
               narrow={compact.narrow}
               tucked={!ask}
+              activity={activity}
             />
             {ask && (
               <div className={page.askDrawer}>

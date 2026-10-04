@@ -60,7 +60,12 @@ export type {
   ToolCall,
   ToolStatus,
 } from "./agentChatModel";
-export { useAgentRoster, useRoster, useRosterAgent } from "./useAgentRoster";
+export {
+  useAgentRoster,
+  useRoster,
+  useRosterActivity,
+  useRosterAgent,
+} from "./useAgentRoster";
 export {
   elapsed,
   startedAgo,
@@ -70,4 +75,5 @@ export {
   trayWaves,
 } from "./agentTray";
 export type { TrayCounts, TrayRow, TrayStatus, TrayWave } from "./agentTray";
-export { childrenByParent } from "./agentRoster";
+export { applyActivity, childrenByParent } from "./agentRoster";
+export type { Activities, Activity } from "./agentRoster";

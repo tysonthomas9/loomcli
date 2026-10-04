@@ -9,11 +9,12 @@ import { AgentEventStream, listAgents } from "@/api/agentsv1";
 import type { Agent, ListAgentsQuery } from "@/api/agentsv1";
 import {
   ROSTER_KINDS,
+  applyActivity,
   applyEvents,
   newChildParents,
   upsert,
 } from "./agentRoster";
-import type { Roster } from "./agentRoster";
+import type { Activities, Roster } from "./agentRoster";
 
 async function listAll(ws: string, q: ListAgentsQuery = {}): Promise<Agent[]> {
   const out: Agent[] = [];
@@ -29,6 +30,7 @@ async function listAll(ws: string, q: ListAgentsQuery = {}): Promise<Agent[]> {
 // The sidebar's roster, shared so a lead's chat reads its children's live
 // state from the one roster stream rather than opening another.
 let shared: Roster = new Map();
+let sharedActivity: Activities = new Map();
 const listeners = new Set<() => void>();
 const subscribe = (l: () => void) => {
   listeners.add(l);
@@ -42,6 +44,10 @@ export const useRosterAgent = (id: string): Agent | undefined =>
 /** The whole live roster (a stable map until it changes). */
 export const useRoster = (): Roster =>
   useSyncExternalStore(subscribe, () => shared);
+
+/** Each listed agent's latest step this turn, from the roster stream. */
+export const useRosterActivity = (): Activities =>
+  useSyncExternalStore(subscribe, () => sharedActivity);
 
 const message = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -61,6 +67,7 @@ export function useAgentRoster(
   error: string | null;
 } {
   const [roster, setRoster] = useState<Roster>(new Map());
+  const [activity, setActivity] = useState<Activities>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   const relist = useCallback(() => {
@@ -76,8 +83,9 @@ export function useAgentRoster(
 
   useEffect(() => {
     shared = roster;
+    sharedActivity = activity;
     listeners.forEach((l) => l());
-  }, [roster]);
+  }, [roster, activity]);
 
   // The stream reopens only when the set of agents changes.
   const ids = useMemo(() => [...roster.keys()].sort().join(","), [roster]);
@@ -90,12 +98,21 @@ export function useAgentRoster(
       live: true,
       onEvents: (added) => {
         setRoster((r) => applyEvents(r, added));
+        setActivity((m) => applyActivity(m, added));
         for (const parent of newChildParents(added))
           listAll(workspaceId, { parent })
             .then((kids) => setRoster((r) => upsert(r, kids)))
             .catch((err) => setError(message(err)));
       },
-      onResync: relist,
+      onNotice: (n) => {
+        if (n.kind === "tool.started")
+          setActivity((m) => applyActivity(m, [n]));
+      },
+      // Steps missed while away are not caught up: "Working…" until the next.
+      onResync: () => {
+        setActivity(new Map());
+        relist();
+      },
     });
     void stream.connect();
     return () => stream.close();

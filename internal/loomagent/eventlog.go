@@ -133,7 +133,8 @@ func (l *EventLog) Backfill(ctx context.Context, s loomharness.Session,
 // Subscription delivers each subscribed agent's events in seq order: first
 // the committed rows after its cursor, then live rows. A Service.Subscribe
 // subscription also gets live-only notices (Seq 0): deltas if it asked for
-// them, and feed.gap; and only the kinds it asked for.
+// them, tool starts if it asked for deltas or named tool.started, and
+// feed.gap; and only the saved kinds it asked for.
 type Subscription struct {
 	C      <-chan loomstore.Event // closed when the subscription ends; then read Err
 	out    chan loomstore.Event
@@ -153,7 +154,8 @@ func (l *EventLog) Notify(e loomstore.Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for s := range l.subs {
-		if !s.notes || (e.AgentID != "" && !s.agents[e.AgentID]) || ((e.Kind == KindDelta || e.Kind == KindToolStarted) && !s.deltas) {
+		if !s.notes || (e.AgentID != "" && !s.agents[e.AgentID]) || (e.Kind == KindDelta && !s.deltas) ||
+			(e.Kind == KindToolStarted && !s.deltas && !s.kinds[KindToolStarted]) {
 			continue
 		}
 		select {
