@@ -184,7 +184,10 @@ read-only. Instead, each REAL stack gets a private copy of the login:
   folder that belongs to that compose project only. It then runs
   `PRAGMA quick_check` on the copy. If the backup or the check fails, `up`
   stops with a clear message and boots nothing; it never retries in another
-  mode. A re-up of the same project keeps its existing copy.
+  mode. That includes a host database whose `-wal`/`-shm` pair is damaged or
+  unreadable (for example `file is not a database`): the stack refuses to boot
+  until you repair the host database yourself, with OpenCode closed. A re-up of
+  the same project keeps its existing copy.
 - The container mounts only that copy, read-only, and on first boot seeds its
   own OpenCode database on the `loom-data` volume from it. A `podman restart`
   keeps the stack's database.

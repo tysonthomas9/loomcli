@@ -107,6 +107,23 @@ rm -f "$host/opencode.db"
 check "missing host db: make fails" '[ "$rc" != 0 ] && [ ! -e "$state/proj-d" ]'
 check "missing host db: nothing created in the host folder" '[ -z "$(ls -A "$host")" ]'
 
+# A -wal that exists but cannot be read (damaged WAL pair): refuse, with no
+# immutable fallback and nothing written to the host folder.
+mkfake "$host"
+python3 - "$host/opencode.db" <<'PY'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1]); c.execute("pragma wal_autocheckpoint=0")
+c.execute("insert into account(token) values ('x')"); c.commit()
+import os; os._exit(0)
+PY
+chmod 000 "$host/opencode.db-wal"
+before="$(listing "$host")"
+out="$("$script" make "$state/proj-e/opencode.db" 2>&1)"; rc=$?
+check "unreadable host WAL: make refuses" '[ "$rc" != 0 ] && printf "%s" "$out" | grep -q "not starting the REAL stack"'
+check "unreadable host WAL: no copy left" '[ ! -e "$state/proj-e" ]'
+check "unreadable host WAL: host folder unchanged" '[ "$(listing "$host")" = "$before" ]'
+chmod 600 "$host/opencode.db-wal"
+
 # --- 5. The copy may never live in the host folder. -------------------------
 mkfake "$host"
 "$script" make "$host/sub/opencode.db" >/dev/null 2>&1; rc=$?
