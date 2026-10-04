@@ -82,7 +82,7 @@ tests:
               return tabs.join('|') === 'Chat|Info|Git|Diff|Files' && on === 'Chat' &&
                 document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'; })()
         intent: "Wait until the lead opens on Chat | Info | Git | Diff | Files with Chat selected and no Terminal"
-      - click: { role: button, name: "Info", exact: true }
+      - click: { selector: "[data-testid=agent-editor-groups] button[draggable]:nth-of-type(2)" }
       - wait:
           fn: &uiInfoShown >-
             (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '';
@@ -94,7 +94,7 @@ tests:
       - wait:
           fn: *uiInfoShown
         intent: "Wait until a reload reopens Info with the same rows"
-      - click: { role: button, name: "Git", exact: true }
+      - click: { selector: "[data-testid=agent-editor-groups] button[draggable]:nth-of-type(3)" }
       - wait:
           fn: &uiGitShown >-
             location.search === '?tab=git' &&
@@ -104,7 +104,7 @@ tests:
       - wait:
           fn: *uiGitShown
         intent: "Wait until a reload reopens Git with the commit"
-      - click: { role: button, name: "Diff", exact: true }
+      - click: { selector: "[data-testid=agent-editor-groups] button[draggable]:nth-of-type(4)" }
       - wait:
           fn: &uiDiffShown >-
             location.search === '?tab=diff' &&
@@ -129,7 +129,7 @@ tests:
       - wait:
           fn: *uiFilesShown
         intent: "Wait until a reload reopens Files with the lead's checkout"
-      - click: { role: button, name: "Chat", exact: true }
+      - click: { selector: "[data-testid=agent-editor-groups] button[draggable]:nth-of-type(1)" }
       - wait:
           fn: >-
             location.search !== '?tab=files' &&
@@ -467,13 +467,18 @@ tests:
                 !!t.querySelector('[data-testid=chat-codeblock]'); })()
         budget: 90000
         intent: "Wait until the reply with its table and code block is shown"
-      - wait:
-          fn: >-
-            (() => { window.__uiCopied = [];
-              Object.defineProperty(navigator, 'clipboard', { configurable: true,
-                value: { writeText: async (s) => { window.__uiCopied.push(s); } } });
-              return true; })()
-        intent: "Record clipboard writes, so each copy action's text can be checked in a headless browser"
+      - run: |
+          set -e
+          ab() { agent-browser --session "$AFT_SESSION" "$@"; }
+          ab eval "(() => { window.__uiCopied = [];
+            Object.defineProperty(navigator, 'clipboard', { configurable: true,
+              value: { writeText: async (s) => { window.__uiCopied.push(s); } } }); return 1; })()" >/dev/null
+          got="$(ab eval "(async () => { await navigator.clipboard.writeText('AGV1-UI-PROBE');
+            const ok = window.__uiCopied.length === 1 && window.__uiCopied[0] === 'AGV1-UI-PROBE';
+            window.__uiCopied = []; return ok ? 'stub-ok' : 'stub-missing'; })()")"
+          echo "clipboard: $got"
+          case "$got" in *stub-ok*) ;; *) echo "clipboard stub not installed" >&2; exit 1 ;; esac
+        intent: "Record clipboard writes, so each copy action's text can be checked in a headless browser, and check the recorder captures a probe write"
       - click: { role: button, name: "Copy code", exact: true }
       - wait:
           fn: >-

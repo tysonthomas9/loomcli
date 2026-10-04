@@ -73,7 +73,8 @@ tests:
           set -e
           id="$(agent-browser --session "$AFT_SESSION" eval "location.pathname.split('/').pop()" | tr -d '"')"
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents/$id" > "$AFT_WORK_DIR/par-atlas.json"
-          python3 - "$AFT_WORK_DIR/par-atlas.json" "par-atlas-${RUN_ID:-local}" agv1-par-alpha <<'PY'
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR" > "$AFT_WORK_DIR/par-ws.json"
+          python3 - "$AFT_WORK_DIR/par-atlas.json" "par-atlas-${RUN_ID:-local}" agv1-par-alpha "$AFT_WORK_DIR/par-ws.json" <<'PY'
           import json, os, subprocess, sys
           a = json.load(open(sys.argv[1]))
           name, repo = sys.argv[2], sys.argv[3]
@@ -82,14 +83,20 @@ tests:
           assert a["created_by_kind"] == "user" and a["parent_agent_id"] is None, a
           assert os.path.basename(a["repo"]) == repo and "/.loom-config/workspaces/e2e-agv1-par/" in a["repo"], a
           assert a["branch"] == "loom/agent/" + a["agent_id"], a
-          assert a["base_ref"] == git(a["repo"], "rev-parse", "--abbrev-ref", "HEAD"), a
+          ws = json.load(open(sys.argv[4]))
+          ws = ws.get("data") or ws
+          picked = [r for r in ws["repos"] if r["name"] == repo]
+          assert len(picked) == 1, ws["repos"]
+          assert os.path.realpath(a["repo"]) == os.path.realpath(picked[0]["path"]), (a, picked)
+          assert a["base_ref"] == picked[0]["default_branch"], (a, picked)
           wt = a["worktree_path"]
           assert wt and os.path.isdir(wt), a
           assert git(wt, "rev-parse", "--abbrev-ref", "HEAD") == a["branch"], wt
+          assert git(wt, "rev-parse", "HEAD") == git(a["repo"], "rev-parse", a["base_ref"] + "^{commit}"), "worktree did not start at the tip of " + a["base_ref"]
           assert os.path.realpath(git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir")) == \
             os.path.realpath(git(a["repo"], "rev-parse", "--path-format=absolute", "--git-common-dir")), wt
           PY
-        intent: "An operator's readback shows a user-made OpenCode lead on the workspace's copy of the picked repo, with its own worktree on loom/agent/<id> from the workspace branch"
+        intent: "An operator's readback shows a user-made OpenCode lead on the workspace's copy of the picked repo, with its own worktree on loom/agent/<id> from the tip of the repo's default branch as the modal sends it"
 
   # ports: zz-lead-agent "lead backend dropdown selects the runtime"
   - name: parity - the Lead backend list is the server's lead harnesses and the pick reaches the agent
@@ -178,11 +185,17 @@ tests:
           set -e
           id="$(agent-browser --session "$AFT_SESSION" eval "location.pathname.split('/').pop()" | tr -d '"')"
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents/$id" > "$AFT_WORK_DIR/par-beta.json"
-          python3 - "$AFT_WORK_DIR/par-beta.json" agv1-par-beta <<'PY'
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR" > "$AFT_WORK_DIR/par-ws-beta.json"
+          python3 - "$AFT_WORK_DIR/par-beta.json" agv1-par-beta "$AFT_WORK_DIR/par-ws-beta.json" <<'PY'
           import json, os, subprocess, sys
           a = json.load(open(sys.argv[1]))
           git = lambda d, *args: subprocess.check_output(["git", "-C", d] + list(args), text=True).strip()
           assert os.path.basename(a["repo"]) == sys.argv[2] and "/.loom-config/workspaces/e2e-agv1-par/" in a["repo"], a
+          ws = json.load(open(sys.argv[3]))
+          ws = ws.get("data") or ws
+          picked = [r for r in ws["repos"] if r["name"] == sys.argv[2]]
+          assert len(picked) == 1 and os.path.realpath(a["repo"]) == os.path.realpath(picked[0]["path"]), (a, picked)
+          assert a["base_ref"] == picked[0]["default_branch"], (a, picked)
           assert os.path.realpath(git(a["worktree_path"], "rev-parse", "--path-format=absolute", "--git-common-dir")) == \
             os.path.realpath(git(a["repo"], "rev-parse", "--path-format=absolute", "--git-common-dir")), a
           PY
@@ -454,7 +467,10 @@ tests:
               return t.includes('par long turn') && t.includes('par after stop') && t.includes('PAR-STOP-AFTER'); })()
         intent: "Wait until a reload shows the stopped turn, the next message and its reply"
 
-  # ports: zz-lead-agent "leads sort ahead of workers in the rail"
+  # ports: zz-lead-agent "leads sort ahead of workers in the rail" (nesting part only).
+  # Deferred: the old lead-before-independent-worker order and the Background group have no
+  # Agent API equivalent; AgentList lists the roster in server order with children under their
+  # parent, so there is no ordering to assert until the sidebar gains one.
   - name: parity - the sidebar lists a lead at the top level with its child nested under it
     intent: An operator sees a lead in the sidebar's agent list with the child it made indented under it, not beside it
     steps:
