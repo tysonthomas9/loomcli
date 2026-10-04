@@ -91,7 +91,13 @@ const json = (route: Route, body: unknown, status = 200) =>
     body: JSON.stringify(body),
   });
 
-async function open(page: Page, m: Mock, w: number, h: number) {
+async function open(
+  page: Page,
+  m: Mock,
+  w: number,
+  h: number,
+  first = "Build a Slack clone",
+) {
   await page.route("**/api/config", (r) => json(r, { mode: "open" }));
   await page.route("**/api/workspaces/w1/events/token", (r) =>
     r.fulfill({ status: 404 }),
@@ -138,9 +144,7 @@ async function open(page: Page, m: Mock, w: number, h: number) {
   );
   await page.setViewportSize({ width: w + 16, height: h + 16 });
   await page.goto(`/test/agent-chat?roster=1&w=${w}&h=${h}`);
-  await expect(page.getByTestId("chat-transcript")).toContainText(
-    "Build a Slack clone",
-  );
+  await expect(page.getByTestId("chat-transcript")).toContainText(first);
 }
 
 // Saves events, then sends them on every open stream (the chat's and the roster's).
@@ -258,13 +262,15 @@ test("children show as markers and the tray, a waiting result keeps its dot unti
   await open(page, m, 900, 860);
   const chat = page.getByTestId("chat-transcript");
   await expect(page.locator("body")).not.toContainText("task_completed:");
-  await expect(page.getByTestId("started-marker")).toContainText(
-    "Started api-worker, ui-worker, db-worker",
-  );
+  const marker = page.getByTestId("started-marker");
+  await expect(marker).toContainText("Started");
+  for (const n of ["api-worker", "ui-worker", "db-worker"])
+    await expect(marker.getByRole("link", { name: n })).toBeVisible();
   const records = page.getByTestId("completion-record");
   await expect(records).toHaveCount(2);
   await expect(records.nth(0)).toContainText("api-worker done");
-  await expect(records.nth(0)).toContainText("Lead read the result");
+  await expect(records.nth(0)).not.toContainText("Lead read the result");
+  await expect(records.nth(0)).toHaveAttribute("role", "link");
   await expect(records.nth(1)).toContainText("db-worker failed");
   const from = page.getByTestId("from-agent");
   await expect(from).toHaveCount(1);
@@ -342,7 +348,7 @@ test("children show as markers and the tray, a waiting result keeps its dot unti
   await push(page, m, delivered("k4", 0, "", T(54)));
   await expect(rows).toHaveCount(2);
   await expect(tray.getByLabel("unread by the Lead")).toHaveCount(0);
-  await expect(records.nth(2)).toContainText("Lead read the result");
+  await expect(records.nth(2)).not.toContainText("waiting for Lead");
 
   // Sending collapses the open tray so the latest lines show.
   await page
@@ -492,4 +498,158 @@ test("a running child's row shows its latest step and turn time, then its result
   await expect(ui).toContainText("done · waiting for Lead");
   await expect(ui).toContainText("Done");
   await expect(ui).not.toContainText("Thinking");
+});
+
+// The round-3 mockup scenario (CL1): the Lead starts two UI test agents
+// through code mode, checks the first, and summarizes once both are done.
+function twoTestAgents(): Mock {
+  seq = 0;
+  const ask = "Can you run 2 test agents, I'm testing UI";
+  const execute = (code: string, at: string) =>
+    ev(
+      "item.completed",
+      {
+        itemKind: "tool",
+        tool: {
+          name: "execute",
+          input: JSON.stringify({ code }),
+          output: "{}",
+        },
+      },
+      at,
+    );
+  const say = (text: string, at: string) =>
+    ev("item.completed", { itemKind: "message", text }, at);
+  return {
+    agent: {
+      agent_id: "a1",
+      name: "slack-lead",
+      harness: "opencode",
+      model: "gpt-6-luna",
+      branch: "loom/lead",
+      state: "idle",
+      running_turn_id: null,
+      waiting_messages: [],
+      open_asks: [],
+      created_at: T(38),
+    },
+    roster: [
+      kid("agt_01j9ui1", "ui-test-agent-1", "opencode", "gpt-6-luna", {
+        state: "finished",
+      }),
+      kid("agt_01j9ui2", "ui-test-agent-2", "opencode", "gpt-6-luna", {
+        state: "finished",
+      }),
+    ],
+    events: [
+      ev("message.delivered", { sender: "user:local", text: ask }, T(39)),
+      say("Starting two UI test agents.", T(39)),
+      ev(
+        "child.created",
+        { child: "agt_01j9ui1", name: "ui-test-agent-1" },
+        T(39),
+      ),
+      ev(
+        "child.created",
+        { child: "agt_01j9ui2", name: "ui-test-agent-2" },
+        T(39),
+      ),
+      execute(
+        "return await tools.loom.agent_create({brief:'UI test 1'})",
+        T(39),
+      ),
+      execute(
+        "return await tools.loom.agent_create({brief:'UI test 2'})",
+        T(39),
+      ),
+      record(
+        "agt_01j9ui1",
+        0,
+        "completed",
+        "node --test 3/3 passed · smoke checks OK · npm test skipped (npm unavailable)",
+        T(40),
+        "a1b2c3d4e5f6",
+      ),
+      delivered("agt_01j9ui1", 0, "", T(40)),
+      execute(
+        "return await tools.loom.agent_get({agent:'agt_01j9ui1'})",
+        T(40),
+      ),
+      ev("message.delivered", { sender: "user:local", text: "hi" }, T(40)),
+      say(
+        "Hi! ui-test-agent-2 is still running. I'll summarise once both are done.",
+        T(40),
+      ),
+      record(
+        "agt_01j9ui2",
+        0,
+        "completed",
+        "node --test 3/3 passed · UI/API message flow verified",
+        T(41),
+        "b2c3d4e5f6a7",
+      ),
+      delivered("agt_01j9ui2", 0, "", T(41)),
+      say(
+        "Both UI test agents are done:\n\n- **ui-test-agent-1**: `node --test` 3/3 passed.\n- **ui-test-agent-2**: `node --test` 3/3 passed; UI/API message flow verified.\n\nNo files were changed.",
+        T(41),
+      ),
+    ],
+  };
+}
+
+test("two children show as one Started marker and two E1 cards, no raw tool JSON (CL1)", async ({
+  page,
+}) => {
+  await open(page, twoTestAgents(), 900, 860, "Can you run 2 test agents");
+  const chat = page.getByTestId("chat-transcript");
+  await expect(chat).toContainText("No files were changed.");
+  const marker = page.getByTestId("started-marker");
+  await expect(marker).toHaveCount(1);
+  await expect(
+    marker.getByRole("button", { name: /2 tool calls/ }),
+  ).toBeVisible();
+  const cards = page.getByTestId("completion-record");
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0)).toContainText("ui-test-agent-1✓ done");
+  await expect(cards.nth(0)).toContainText("smoke checks OK");
+  await expect(page.getByTestId("bridge-call")).toHaveText(
+    "·Checked ui-test-agent-1",
+  );
+  for (const gone of [
+    "Execute",
+    "tools.loom",
+    "Used 2 tools",
+    "Lead read the result",
+    "view",
+  ])
+    await expect(chat).not.toContainText(gone);
+  // The marker and the card share each child's colour.
+  for (const [id, name] of [
+    ["agt_01j9ui1", "ui-test-agent-1"],
+    ["agt_01j9ui2", "ui-test-agent-2"],
+  ] as const) {
+    const color = await marker
+      .locator(`a[href$="/${id}"] [data-agent-color]`)
+      .getAttribute("data-agent-color");
+    expect(color).toMatch(/^[0-7]$/);
+    await expect(cards.filter({ hasText: name })).toHaveAttribute(
+      "data-agent-color",
+      color!,
+    );
+  }
+  // The time shows only on hover.
+  await expect(cards.nth(1).getByTestId("card-time")).toHaveCount(0);
+  await cards.nth(1).hover();
+  await expect(cards.nth(1).getByTestId("card-time")).toBeVisible();
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate((t) => {
+      document.documentElement.dataset.theme = t;
+    }, theme);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/cl1-${theme}.png` });
+  }
+  // Enter on a focused card opens that child's chat.
+  await cards.nth(0).focus();
+  await expect(cards.nth(0).getByTestId("card-time")).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/ws\/w1\/chat\/agt_01j9ui1$/);
 });
