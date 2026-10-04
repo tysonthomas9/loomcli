@@ -53,3 +53,52 @@ func TestIssueAPIRefusesCodeReviewLabelEdits(t *testing.T) {
 		t.Fatalf("create with the label: %v, want a validation error and no create", err)
 	}
 }
+
+// D29 / P1.26: a task in code review moves only on Approve or Reject of its
+// revision; a hand-made status change, close or reopen is refused, so it can
+// neither skip the review nor leave a stale code-review label.
+func TestIssueAPIRefusesStatusChangesOnATaskInCodeReview(t *testing.T) {
+	inReview := &backend.IssueDetailData{IssueData: backend.IssueData{ID: "i-1", Status: "review", Labels: []string{backend.CodeReviewLabel}}}
+	plainReview := &backend.IssueDetailData{IssueData: backend.IssueData{ID: "i-1", Status: "review"}}
+	refused := func(t *testing.T, err error, fb *fakeIssueBackend) {
+		t.Helper()
+		var sErr *ServiceError
+		if !errors.As(err, &sErr) || sErr.Kind != KindConflict {
+			t.Fatalf("err = %v, want a conflict", err)
+		}
+		if len(fb.updateCalls)+len(fb.closeCalls)+len(fb.reopenCalls) != 0 {
+			t.Fatalf("a refused change still wrote to the backend")
+		}
+	}
+	for _, status := range []string{"closed", "open", "in_progress"} {
+		t.Run("patch to "+status, func(t *testing.T) {
+			fb := &fakeIssueBackend{getResult: inReview}
+			s := status
+			refused(t, newServiceWithFake(fb).PatchIssue(context.Background(), PatchIssueParams{IssueID: "i-1", Status: &s}), fb)
+		})
+	}
+	t.Run("close", func(t *testing.T) {
+		fb := &fakeIssueBackend{getResult: inReview}
+		_, err := newServiceWithFake(fb).CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1", Reason: "done"})
+		refused(t, err, fb)
+	})
+	t.Run("reopen", func(t *testing.T) {
+		fb := &fakeIssueBackend{getResult: inReview}
+		refused(t, newServiceWithFake(fb).ReopenIssue(context.Background(), ReopenIssueParams{IssueID: "i-1"}), fb)
+	})
+
+	review := "review"
+	fb := &fakeIssueBackend{getResult: inReview}
+	if err := newServiceWithFake(fb).PatchIssue(context.Background(), PatchIssueParams{IssueID: "i-1", Status: &review}); err != nil || len(fb.updateCalls) != 1 {
+		t.Fatalf("keeping it in review must pass: %v (%d updates)", err, len(fb.updateCalls))
+	}
+	closed := "closed"
+	fb = &fakeIssueBackend{getResult: plainReview}
+	if err := newServiceWithFake(fb).PatchIssue(context.Background(), PatchIssueParams{IssueID: "i-1", Status: &closed}); err != nil || len(fb.updateCalls) != 1 {
+		t.Fatalf("plan review without the label must still close: %v (%d updates)", err, len(fb.updateCalls))
+	}
+	fb = &fakeIssueBackend{getResult: plainReview, closeResult: &backend.CloseResult{}}
+	if _, err := newServiceWithFake(fb).CloseIssue(context.Background(), CloseIssueParams{IssueID: "i-1"}); err != nil || len(fb.closeCalls) != 1 {
+		t.Fatalf("closing an unlabelled task must pass: %v (%d closes)", err, len(fb.closeCalls))
+	}
+}

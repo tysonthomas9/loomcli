@@ -7,7 +7,7 @@ import type { Issue, IssueDetails } from "@/types";
 import type { Status } from "@/types/issue";
 
 import { EditableTitle } from "@/components/EditableTitle";
-import { formatStatusLabel } from "@/utils/issue";
+import { formatStatusLabel, isAwaitingCodeReview } from "@/utils/issue";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import styles from "./IssueHeader.module.css";
 
@@ -95,7 +95,9 @@ export function IssueHeader({
           <span className={styles.issueId} data-testid="issue-id">
             {issue.id}
           </span>
-          {onStatusChange ? (
+          {/* A task in code review moves only on Approve or Reject of its
+              revision (D29), so its status is shown, not editable. */}
+          {onStatusChange && !isAwaitingCodeReview(issue) ? (
             <StatusDropdown
               status={issue.status ?? "open"}
               onStatusChange={onStatusChange}
@@ -107,6 +109,9 @@ export function IssueHeader({
               data-status={issue.status ?? "open"}
               role="status"
               data-testid="issue-status-badge"
+              {...(isAwaitingCodeReview(issue) && {
+                title: "Approve or Reject the revision to move this task on",
+              })}
             >
               {formatStatus(issue.status)}
             </span>

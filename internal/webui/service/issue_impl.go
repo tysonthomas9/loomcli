@@ -264,6 +264,11 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 			return err
 		}
 	}
+	if params.Status != nil && *params.Status != "review" {
+		if err := refuseCodeReviewStatusChange(ctx, be, params.IssueID); err != nil {
+			return err
+		}
+	}
 
 	if err := be.Update(ctx, params.IssueID, patchParamsToBackendUpdate(&params)); err != nil {
 		// Special-case "cannot update template" — backend classifies as
@@ -304,6 +309,24 @@ func refuseCodeReviewLabelEdit(ctx context.Context, be backend.IssueBackend, par
 	return nil
 }
 
+const codeReviewStatusRefusal = "this task's code awaits review: Approve or Reject its revision to move it on"
+
+// refuseCodeReviewStatusChange keeps a task in code review where it is: only
+// Approve (closed) or Reject (open) of its revision moves it, and each also
+// clears the label. A hand-made close or reopen would skip the review and
+// leave a stale code-review label, so the API refuses it from every caller,
+// as the daemon already does for agents.
+func refuseCodeReviewStatusChange(ctx context.Context, be backend.IssueBackend, id string) error {
+	issue, err := be.Get(ctx, id)
+	if err != nil {
+		return translateBackendError(err)
+	}
+	if issue != nil && backend.HasCodeReviewLabel(issue.Labels) {
+		return ErrConflict(codeReviewStatusRefusal)
+	}
+	return nil
+}
+
 func patchHasLabelMutation(params PatchIssueParams) bool {
 	return len(params.AddLabels) > 0 || len(params.RemoveLabels) > 0 || len(params.SetLabels) > 0
 }
@@ -326,6 +349,9 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	if err := refuseCodeReviewStatusChange(ctx, be, params.IssueID); err != nil {
+		return nil, err
+	}
 	result, err := be.Close(ctx, params.IssueID, backend.CloseParams{
 		Actor:       params.Actor,
 		Reason:      params.Reason,
@@ -627,6 +653,9 @@ func (s *issueServiceImpl) ReopenIssue(ctx context.Context, params ReopenIssuePa
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	if err := refuseCodeReviewStatusChange(ctx, be, params.IssueID); err != nil {
+		return err
+	}
 	if err := be.Reopen(ctx, params.IssueID, backend.ReopenParams{Actor: params.Actor, Reason: params.Reason}); err != nil {
 		slog.Error("backend error in ReopenIssue", "issue_id", params.IssueID, "err", err)
 		return translateBackendError(err)
