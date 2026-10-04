@@ -28,6 +28,20 @@ setup: |
     curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
   SH
   chmod +x "$AFT_WORK_DIR/kids-script"
+  # tray-script <child> <lead follow-up step> <child step>: the lead's
+  # agent_create call, then one step for the lead's follow-up (its tool
+  # result) and one for the child's first prompt, so the two never race.
+  cat > "$AFT_WORK_DIR/tray-script" <<'SH'
+  #!/bin/sh
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  python3 -c 'import json,sys
+  code = "return await tools.loom.agent_create(%s)" % json.dumps({"name": sys.argv[1], "brief": "do the task"})
+  print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [{"name": "execute", "arguments": {"code": code}}]},
+    dict(json.loads(sys.argv[2]), next="tool"), dict(json.loads(sys.argv[3]), next="prompt")]}))' "$1" "$2" "$3" |
+    curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+  SH
+  chmod +x "$AFT_WORK_DIR/tray-script"
 teardown: |
   set +e
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS" >/dev/null
@@ -206,20 +220,6 @@ tests:
         intent: "Create an OpenCode lead through the Agent API"
       - run: |
           set -e
-          # tray-script <child> <lead follow-up step> <child step>: the lead's
-          # agent_create call, then one step for the lead's follow-up (its tool
-          # result) and one for the child's first prompt, so the two never race.
-          cat > "$AFT_WORK_DIR/tray-script" <<'SH'
-          #!/bin/sh
-          set -e
-          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
-          python3 -c 'import json,sys
-          code = "return await tools.loom.agent_create(%s)" % json.dumps({"name": sys.argv[1], "brief": "do the task"})
-          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [{"name": "execute", "arguments": {"code": code}}]},
-            dict(json.loads(sys.argv[2]), next="tool"), dict(json.loads(sys.argv[3]), next="prompt")]}))' "$1" "$2" "$3" |
-            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
-          SH
-          chmod +x "$AFT_WORK_DIR/tray-script"
           # The first child holds its turn (a tool the emulator does not run
           # waits until interrupted), so it keeps working.
           "$AFT_WORK_DIR/tray-script" "agv1-tray-a-${RUN_ID:-local}" '{"text":"AGV1-TRAY-STARTED-A"}' '{"tool_calls":[{"name":"df1_hold"}]}'
@@ -306,6 +306,122 @@ tests:
                 document.querySelectorAll('[data-testid=started-marker]').length === 2 &&
                 !document.body.textContent.includes('task_completed:'); })()
         intent: "Wait until a reload shows the two Started markers and two result markers, no tray, and no raw task_completed text"
+
+  - name: T9 sidebar children - two working children show nested under the lead, each leaves when it finishes, and a finished child stays only while its chat is open
+    intent: An operator's OpenCode lead starts two children that keep working; both show once, nested under the lead in the sidebar. When one finishes it leaves the sidebar while the other stays. Opening the finished child from the lead's Started marker shows it nested under the lead and marked current until the operator goes back to the lead; then it is gone. When the second child finishes it leaves too (SB2)
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-KIDS/v1/agents
+          headers: { Idempotency-Key: "agv1-kids-side-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-kids-side-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-kids-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: sideLeadId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          # Both children hold their turn (a tool the emulator does not run
+          # waits until interrupted), so they keep working until stopped.
+          "$AFT_WORK_DIR/tray-script" "agv1-side-a-${RUN_ID:-local}" '{"text":"AGV1-SIDE-STARTED-A"}' '{"tool_calls":[{"name":"df1_hold"}]}'
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-KIDS/chat/$(cat "$AFT_WORK_DIR/sideLeadId")"
+        intent: "Script the first child, which keeps working, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "start worker a" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-SIDE-STARTED-A')
+        budget: 90000
+        intent: "Wait until the lead's turn that started the first child ends"
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/tray-script" "agv1-side-b-${RUN_ID:-local}" '{"text":"AGV1-SIDE-STARTED-B"}' '{"tool_calls":[{"name":"df1_hold"}]}'
+        intent: "Script the second child, which also keeps working"
+      - fill: { label: Message, value: "start worker b" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const all = Array.from(nav?.querySelectorAll('a') || []);
+              const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
+              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
+              const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
+              const at = (a) => !!a && location.pathname === a.getAttribute('href');
+              const A = 'agv1-side-a-${RUN_ID:-local}', B = 'agv1-side-b-${RUN_ID:-local}';
+              return !!leadRow && kid(A).length === 1 && kid(B).length === 1 && anywhere(A) === 1 && anywhere(B) === 1; })()
+        budget: 90000
+        intent: "Wait until both working children show once each, nested under the lead"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/sideLeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents"
+          id="$(curl -sf "$api?parent=$lead" | python3 -c 'import json,sys; print([a["agent_id"] for a in json.load(sys.stdin)["agents"] if a["name"] == sys.argv[1]][0])' "agv1-side-b-${RUN_ID:-local}")"
+          curl -sf -X POST "$api/$id/messages" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-side-stop-b-${RUN_ID:-local}" -d '{"text":"","delivery":"interrupt"}' >/dev/null
+        intent: "Stop the second child, which ends its task"
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const all = Array.from(nav?.querySelectorAll('a') || []);
+              const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
+              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
+              const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
+              const at = (a) => !!a && location.pathname === a.getAttribute('href');
+              const A = 'agv1-side-a-${RUN_ID:-local}', B = 'agv1-side-b-${RUN_ID:-local}';
+              return !!leadRow && kid(A).length === 1 && anywhere(B) === 0; })()
+        budget: 90000
+        intent: "Wait until the finished second child leaves the sidebar while the first child stays nested under the lead"
+      - click: { role: link, name: "agv1-side-b-${RUN_ID:-local}", exact: true }
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const all = Array.from(nav?.querySelectorAll('a') || []);
+              const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
+              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
+              const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
+              const at = (a) => !!a && location.pathname === a.getAttribute('href');
+              const A = 'agv1-side-a-${RUN_ID:-local}', B = 'agv1-side-b-${RUN_ID:-local}';
+              return !!leadRow && kid(B).length === 1 && anywhere(B) === 1 && at(kid(B)[0]) && kid(B)[0].getAttribute('aria-current') === 'page' && kid(A).length === 1; })()
+        intent: "Wait until the Started marker opens the finished child's chat and the sidebar shows it once, nested under the lead and marked current"
+      - click: { selector: "nav[aria-label=Agents] a[aria-label^='agv1-kids-side-${RUN_ID:-local} ']" }
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const all = Array.from(nav?.querySelectorAll('a') || []);
+              const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
+              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
+              const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
+              const at = (a) => !!a && location.pathname === a.getAttribute('href');
+              const A = 'agv1-side-a-${RUN_ID:-local}', B = 'agv1-side-b-${RUN_ID:-local}';
+              return !!leadRow && at(leadRow) && anywhere(B) === 0 && kid(A).length === 1; })()
+        intent: "Back on the lead's chat, the finished child is gone from the sidebar and the working one stays"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/sideLeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents"
+          id="$(curl -sf "$api?parent=$lead" | python3 -c 'import json,sys; print([a["agent_id"] for a in json.load(sys.stdin)["agents"] if a["name"] == sys.argv[1]][0])' "agv1-side-a-${RUN_ID:-local}")"
+          curl -sf -X POST "$api/$id/messages" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-side-stop-a-${RUN_ID:-local}" -d '{"text":"","delivery":"interrupt"}' >/dev/null
+        intent: "Stop the first child, which ends its task"
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const all = Array.from(nav?.querySelectorAll('a') || []);
+              const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
+              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
+              const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
+              const at = (a) => !!a && location.pathname === a.getAttribute('href');
+              const A = 'agv1-side-a-${RUN_ID:-local}', B = 'agv1-side-b-${RUN_ID:-local}';
+              return !!leadRow && kids.length === 0 && anywhere(A) === 0 && anywhere(B) === 0; })()
+        budget: 90000
+        intent: "Wait until both finished children are gone and the lead stays in the sidebar"
 
   - name: T7 agent page tabs - a lead and its child open on Chat | Info | Git | Diff | Files, and the child's Diff shows its commit after a reload
     intent: An operator opens an Agent API lead and its child and sees the tabbed agent page with Chat in place of Terminal; the child's Git shows its own branch and its Diff shows the file it committed, and a reload on Diff keeps the tab and the diff
