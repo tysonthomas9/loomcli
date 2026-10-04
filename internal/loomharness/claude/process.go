@@ -194,22 +194,9 @@ func (p *Process) launch(ctx context.Context, line []byte) error {
 	}
 }
 
-// start checks the version, then starts the process and its reader.
-func (p *Process) start(ctx context.Context, resume bool) error {
-	env := p.env()
-	if err := p.checkRoot(env); err != nil {
-		return err
-	}
-	ver := exec.CommandContext(ctx, p.cfg.Bin, "--version") //nolint:gosec // G204: the configured claude binary.
-	ver.Env = env
-	out, err := ver.Output()
-	if err != nil {
-		return fmt.Errorf("claude --version: %w: %w", loomharness.ErrUnavailable, err)
-	}
-	vc, err := loomharness.CheckVersion("claude", string(out))
-	if err != nil {
-		return err
-	}
+// args is the launch command line: a fresh --session-id or a --resume, then
+// the model, effort, persona and the configured extra flags.
+func (p *Process) args(resume bool) []string {
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json",
 		"--verbose", "--include-partial-messages", "--replay-user-messages"}
 	if resume {
@@ -226,7 +213,26 @@ func (p *Process) start(ctx context.Context, resume bool) error {
 	if p.spec.Persona != "" {
 		args = append(args, "--append-system-prompt", p.spec.Persona)
 	}
-	cmd := exec.Command(p.cfg.Bin, append(args, p.cfg.Args...)...) //nolint:gosec // G204: the configured claude binary.
+	return append(args, p.cfg.Args...)
+}
+
+// start checks the version, then starts the process and its reader.
+func (p *Process) start(ctx context.Context, resume bool) error {
+	env := p.env()
+	if err := p.checkRoot(env); err != nil {
+		return err
+	}
+	ver := exec.CommandContext(ctx, p.cfg.Bin, "--version") //nolint:gosec // G204: the configured claude binary.
+	ver.Env = env
+	out, err := ver.Output()
+	if err != nil {
+		return fmt.Errorf("claude --version: %w: %w", loomharness.ErrUnavailable, err)
+	}
+	vc, err := loomharness.CheckVersion("claude", string(out))
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(p.cfg.Bin, p.args(resume)...) //nolint:gosec // G204: the configured claude binary.
 	cmd.Dir, cmd.Env = p.spec.Dir, env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stderr := &tail{}
