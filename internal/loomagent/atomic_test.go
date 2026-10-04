@@ -342,6 +342,11 @@ func TestSendReopenCrashAfterCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldBus := s.Bus.Subscribe("a1")
+	if _, err := s.events.Append(ctx, loomstore.Event{AgentID: "a1", EventID: "pre", Kind: "test.sentinel",
+		Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	cursor := recv(t, sub, 1)[0].Seq // sub is live now: anything more it gets is a fanout
 	commitStateCrash = func() { panic("crash") }
 	t.Cleanup(func() { commitStateCrash = func() {} })
 	func() {
@@ -371,17 +376,17 @@ func TestSendReopenCrashAfterCommit(t *testing.T) {
 	check := func() {
 		t.Helper()
 		a := s.get(t, "a1")
-		if a.State != StateActive || a.Attempt != 2 || a.Revision != 1 || !slices.Equal(ids(rows(t, s, "a1", 0)), append(want, "sentinel")) ||
+		if a.State != StateActive || a.Attempt != 2 || a.Revision != 1 || !slices.Equal(ids(rows(t, s, "a1", cursor)), append(want, "sentinel")) ||
 			!slices.Equal(waiting(t, s, "a1"), []string{"user:u=again"}) {
 			t.Fatalf("after restart: state %s attempt %d revision %d events %v waiting %q; want active, 2, 1, %v, [user:u=again]",
-				a.State, a.Attempt, a.Revision, ids(rows(t, s, "a1", 0)), waiting(t, s, "a1"), want)
+				a.State, a.Attempt, a.Revision, ids(rows(t, s, "a1", cursor)), waiting(t, s, "a1"), want)
 		}
 		if _, err := s.store.GetReceipt(ctx, "a1", "r1"); err != nil {
 			t.Fatalf("receipt: %v", err)
 		}
 	}
 	check()
-	re, err := s.events.Subscribe(ctx, map[string]int64{"a1": 0})
+	re, err := s.events.Subscribe(ctx, map[string]int64{"a1": cursor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,6 +458,14 @@ func TestSendRetrySameRequestNoNewEvents(t *testing.T) {
 	}
 	if got := ids(rows(t, s, "a1", 0)); !slices.Equal(got, want) || len(drain(bus)) != 0 {
 		t.Fatalf("second retry added events: %v", got)
+	}
+	// Nor did it publish live: the subscriber's next event is a sentinel.
+	if _, err := s.events.Append(ctx, loomstore.Event{AgentID: "a1", EventID: "sentinel", Kind: "test.sentinel",
+		Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if e := recv(t, sub, 1)[0]; e.EventID != "sentinel" {
+		t.Fatalf("subscriber got %s after the second retry; want the sentinel", e.EventID)
 	}
 	if got := waiting(t, s, "a1"); !slices.Equal(got, []string{"user:u=hello"}) {
 		t.Fatalf("waiting = %q", got)
