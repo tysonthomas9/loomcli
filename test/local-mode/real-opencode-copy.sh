@@ -50,6 +50,11 @@ outside_host() {
   local d h
   d="$(canon "$dir")/" h="$(canon "$data")/"
   case "$d" in "$h"*) echo "local-mode: the OpenCode copy must live outside $data (resolved: $h)" >&2; exit 2 ;; esac
+  # A symlinked project folder could point at another project's copy; refuse
+  # rather than write or delete through it.
+  if [ -L "$dir" ] || { [ -e "$dir" ] && [ ! -d "$dir" ]; }; then
+    echo "local-mode: $dir is a symlink or not a folder; remove it by hand" >&2; exit 2
+  fi
   if [ -L "$copy" ] || { [ -e "$copy" ] && [ ! -f "$copy" ]; }; then
     echo "local-mode: $copy is not a regular file; remove it by hand" >&2; exit 2
   fi

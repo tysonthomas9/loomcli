@@ -253,6 +253,16 @@ rm -f "$T/shim/sqlite3"
 "$script" remove "$state/proj-n/opencode.db"
 mkfake "$host"
 
+# --- 5e. A symlinked project folder is refused (make and remove). -----------
+"$script" make "$state/proj-v/opencode.db" >/dev/null 2>&1
+ln -s "$state/proj-v" "$state/proj-w"
+out="$("$script" make "$state/proj-w/opencode.db" 2>&1)"; rc=$?
+check "make through a symlinked project folder is refused" '[ "$rc" = 2 ] && printf "%s" "$out" | grep -q "symlink or not a folder"'
+"$script" remove "$state/proj-w/opencode.db" >/dev/null 2>&1; rc=$?
+check "remove through a symlinked project folder is refused; the other copy survives" '[ "$rc" = 2 ] && [ -f "$state/proj-v/opencode.db" ]'
+rm -f "$state/proj-w"
+"$script" remove "$state/proj-v/opencode.db"
+
 # --- 6. remove deletes that project's copy only. ----------------------------
 "$script" remove "$copy"; rc=$?
 check "remove succeeds and deletes the project's copy folder" '[ "$rc" = 0 ] && [ ! -e "$state/proj-a" ]'
