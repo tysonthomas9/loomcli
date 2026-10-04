@@ -96,7 +96,7 @@ describe("ChatMarkdown block memoisation", () => {
         fresh={[{ from: 5, opacity: 0.5 }]}
       />,
     );
-    const first = container.querySelector("[data-run]")!;
+    const first = container.querySelector("[data-fresh]")!;
     expect(first.textContent).toBe(" there my");
     rerender(
       <ChatMarkdown
@@ -110,6 +110,8 @@ describe("ChatMarkdown block memoisation", () => {
     );
     expect(first.isConnected).toBe(true);
     expect(first.textContent).toBe(" there my");
-    expect(container.querySelectorAll("[data-run]")).toHaveLength(2);
+    const next = container.querySelector("[data-fresh]")!;
+    expect(next).not.toBe(first);
+    expect(next.textContent).toBe(" friend");
   });
 });
