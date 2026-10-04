@@ -492,3 +492,27 @@ func TestUpdateModelAppliesOnNextTurn(t *testing.T) {
 		t.Fatalf("turns = %+v; want one turn on fake/other", turns)
 	}
 }
+
+// TestUpdateModelDropsCreateEffort (SM1): a model change keeps only the
+// options the new model takes, the create override's effort included, and
+// the next turn's reapply does not bring a dropped effort back.
+func TestUpdateModelDropsCreateEffort(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateIdle)
+	a := e.s.get(t, "a1")
+	to := a.SpecOf()
+	to.SpecJSON = `{"Model":"fake-model","Effort":"low"}` // a create override's effort
+	if err := e.s.store.CompareAndSetSpec(ctx, "a1", a.SpecVersion, to); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.Update(ctx, UpdateRequest{AgentID: "a1", Model: "fake/other"}); err != nil {
+		t.Fatal(err)
+	}
+	queue(t, e.s, "a1", "user", "after")
+	if _, err := e.s.handOff(ctx, e.s.get(t, "a1")); err != nil {
+		t.Fatal(err)
+	}
+	if turns := e.fa.Turns(e.old); len(turns) != 1 || turns[0].Model != "fake/other" || len(turns[0].Options) != 0 {
+		t.Fatalf("turns = %+v; want one turn on fake/other with no options", turns)
+	}
+}

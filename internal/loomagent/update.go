@@ -136,7 +136,8 @@ func checkUpdate(a loomstore.Agent, req UpdateRequest) error {
 // choose applies req's model and options to to and to a's session from its
 // next turn. The model and options are saved in the spec's Model and
 // Options, which every hand-off's resume sets on the session again (SM1); a
-// model change keeps the options the new model takes.
+// model change keeps the options the new model takes, a create override's
+// effort included, so the spec's Effort is then cleared.
 func (s *Service) choose(ctx context.Context, a loomstore.Agent, req UpdateRequest, to *loomstore.AgentSpec) error {
 	cfg, err := loadConfig(a)
 	if err != nil {
@@ -145,15 +146,16 @@ func (s *Service) choose(ctx context.Context, a loomstore.Agent, req UpdateReque
 	if err := checkModelID(req.Model); err != nil {
 		return err
 	}
-	target, opts, unverified, err := s.selection(ctx, a.Harness, cmp.Or(req.Model, deref(a.Model)), cfg.Options, req)
+	have := selected(cfg)
+	target, opts, unverified, err := s.selection(ctx, a.Harness, cmp.Or(req.Model, deref(a.Model)), have, req)
 	if err != nil {
 		return err
 	}
 	if req.Model != "" {
 		to.Model = &req.Model
 	}
-	if !slices.Equal(opts, cfg.Options) || unverified != cfg.ModelUnverified || cmp.Or(req.Model, cfg.Model) != cfg.Model {
-		cfg.Model, cfg.Options, cfg.ModelUnverified = cmp.Or(req.Model, cfg.Model), opts, unverified
+	if !slices.Equal(opts, have) || unverified != cfg.ModelUnverified || cmp.Or(req.Model, cfg.Model) != cfg.Model {
+		cfg.Model, cfg.Effort, cfg.Options, cfg.ModelUnverified = cmp.Or(req.Model, cfg.Model), "", opts, unverified
 		b, err := json.Marshal(cfg)
 		if err != nil {
 			return err
