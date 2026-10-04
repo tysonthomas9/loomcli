@@ -80,7 +80,7 @@ tests:
           fn: >-
             (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
               return r.length === 1 && r[0].dataset.attempt === '0' && r[0].dataset.delivery === 'delivered' &&
-                r[0].textContent.includes('agv1-kid-${RUN_ID:-local} done') && !document.querySelector('[data-testid=agent-tray]') &&
+                r[0].textContent.includes('agv1-kid-${RUN_ID:-local}') && r[0].dataset.outcome === 'completed' && !document.querySelector('[data-testid=agent-tray]') &&
                 !document.body.textContent.includes('task_completed:'); })()
         budget: 90000
         intent: "Wait until the child's one result marker shows the Lead read it, the tray is gone and no raw task_completed text shows"
@@ -251,7 +251,7 @@ tests:
               const r = document.querySelector('[data-testid=completion-record]');
               return document.querySelectorAll('[data-testid=started-marker]').length === 2 &&
                 t.includes('2 agents · 1 running · 1 done') && t.includes('+1 new') &&
-                !!r && r.textContent.includes('agv1-tray-b-${RUN_ID:-local} done') && r.dataset.delivery === 'waiting' &&
+                !!r && r.textContent.includes('agv1-tray-b-${RUN_ID:-local}') && r.dataset.outcome === 'completed' && r.dataset.delivery === 'waiting' &&
                 !!document.querySelector('[data-kind=working]') &&
                 !document.body.textContent.includes('task_completed:'); })()
         budget: 90000
@@ -555,7 +555,8 @@ tests:
       - press: Enter
       - wait:
           fn: >-
-            (document.querySelector('[data-testid=completion-record]')?.textContent || '').includes('agv1-kid3-${RUN_ID:-local} done')
+            (() => { const r = document.querySelector('[data-testid=completion-record]');
+              return !!r && (r.textContent || '').includes('agv1-kid3-${RUN_ID:-local}') && r.dataset.outcome === 'completed'; })()
         budget: 90000
         intent: "Wait until the lead's chat shows its child finished"
       - run: |
