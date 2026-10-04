@@ -397,7 +397,7 @@ test("streaming reveals smoothly with no layout shift and the end kept in view",
   await open(page, m);
   await expect(transcript(page).getByText("Earlier reply 29.")).toBeVisible();
   // The model controls settle last (no catalog here, so "Unavailable").
-  await expect(page.getByText("Unavailable")).toBeVisible();
+  await expect(page.getByText("Unavailable", { exact: true })).toBeVisible();
   // The 100ms recorder: layout-shift score and the gap under the last row,
   // from the end of the history load (its shifts are not streaming's).
   await page.evaluate(() => {
