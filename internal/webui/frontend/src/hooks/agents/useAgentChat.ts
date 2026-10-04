@@ -45,7 +45,10 @@ export interface UseAgentChatReturn {
   remove: () => Promise<void>;
   /** The saved history is gone (history_purged_at, or a history_expired error). */
   expired: boolean;
-  /** The first catch-up has loaded: rows from here on arrived live. */
+  /**
+   * No catch-up is replaying history: false from each connect, reconnect or
+   * feed.gap until its catch-up loads, so rows that arrive while true are live.
+   */
   synced: boolean;
 }
 
@@ -110,7 +113,14 @@ export function useAgentChat(
         );
         if (added.some((e) => REFRESH_KINDS.has(e.kind))) refresh();
       },
-      onNotice: (n) => setStreaming((s) => addDelta(s, n)),
+      onNotice: (n) => {
+        if (n.kind === "feed.gap") setSynced(false);
+        setStreaming((s) => addDelta(s, n));
+      },
+      onStateChange: (state) => {
+        if (state === "connecting" || state === "reconnecting")
+          setSynced(false);
+      },
       onResync: () => {
         setSynced(true);
         refresh();

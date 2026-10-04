@@ -678,7 +678,7 @@ describe("AgentChat", () => {
     expect(screen.getAllByText("Hello!")).toHaveLength(1);
   });
 
-  it.each([1, 2, 3])(
+  it.each([1, 2])(
     "fades in a message that arrives live, not a %i-row history load",
     async (n) => {
       const { container } = await mount(agent());
@@ -696,6 +696,35 @@ describe("AgentChat", () => {
       expect(entered[0]).toHaveTextContent("four");
     },
   );
+
+  it.each([1, 2])(
+    "does not fade in %i rows that a reconnect's catch-up replays",
+    async (n) => {
+      const { container } = await mount(agent());
+      const s = api.streams[0];
+      act(() => s.opts.onResync?.());
+      act(() => s.opts.onStateChange?.("reconnecting"));
+      deliver(
+        ...Array.from({ length: n }, (_, i) =>
+          ev("message.delivered", { sender: "user:u1", text: `missed ${i}` }),
+        ),
+      );
+      act(() => s.opts.onResync?.());
+      expect(container.querySelectorAll("li[data-enter]")).toHaveLength(0);
+      deliver(ev("message.delivered", { sender: "user:u1", text: "live" }));
+      expect(container.querySelectorAll("li[data-enter]")).toHaveLength(1);
+    },
+  );
+
+  it("does not fade in a row that a feed.gap's catch-up replays", async () => {
+    const { container } = await mount(agent());
+    const s = api.streams[0];
+    act(() => s.opts.onResync?.());
+    act(() => s.opts.onNotice?.({ ...ev("feed.gap"), seq: 0 }));
+    deliver(ev("message.delivered", { sender: "user:u1", text: "missed" }));
+    act(() => s.opts.onResync?.());
+    expect(container.querySelectorAll("li[data-enter]")).toHaveLength(0);
+  });
 
   it("does not fade a completed message in over its streamed copy", async () => {
     const { container } = await mount(agent());

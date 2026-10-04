@@ -40,7 +40,7 @@ import {
 import { LONG_TEXT_LIMIT, LongText } from "./LongText";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { useLinger, UserMessage, WorkingRow } from "./MessageRows";
-import { FADE_MS, useSmoothText } from "./useSmoothText";
+import { useSmoothText } from "./useSmoothText";
 import {
   dismissThreadErrorBannerForSession,
   getThreadErrorBannerKey,
@@ -135,7 +135,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   const [, setDismissed] = useState(0);
   const ask = asks[0]; // T3 shows the first open ask, with "1/N"
   const running = !!agent?.running_turn_id;
-  const working = useLinger(running, FADE_MS);
+  const working = useLinger(running);
   // The fading working row keeps the time it showed.
   const [since, setSince] = useState(runningSince);
   if (running && runningSince !== since) setSince(runningSince);
@@ -429,11 +429,11 @@ const isMessageRow = (r: TimelineRow) =>
   r.kind === "item" && (r.item.kind === "user" || r.item.kind === "agent");
 
 /**
- * The ids of user and agent rows that arrived live, which fade in. Nothing
- * animates until the first catch-up has loaded (`synced`); after that, a
- * batch of several rows (a reconnect's catch-up) and a completed message
- * replacing its streamed copy do not animate either. An id is kept while
- * its row shows, so a later render does not cut its fade short.
+ * The ids of user and agent rows that arrived live, which fade in. Rows
+ * that a catch-up replays (`synced` false: the first load, a reconnect or a
+ * feed.gap) and a completed message replacing its streamed copy do not
+ * animate. An id is kept while its row shows, so a later render does not
+ * cut its fade short.
  */
 function useEnteringRows(
   rows: readonly TimelineRow[],
@@ -449,7 +449,7 @@ function useEnteringRows(
     if (!before) return;
     const added = rows.filter((r) => !before.has(r.id));
     const replaced = [...before].some(([id, msg]) => msg && !now.has(id));
-    if (added.length > 2 || replaced) return;
+    if (replaced) return;
     added.filter(isMessageRow).forEach((r) => entering.add(r.id));
   }, [rows, synced, entering]);
   return entering;

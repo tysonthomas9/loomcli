@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LongText } from "./LongText";
 import { MessageCopyButton } from "./MessageCopyButton";
 import styles from "./ChatPage.module.css";
-import { prefersReducedMotion } from "./useSmoothText";
+import { FADE_MS, prefersReducedMotion } from "./useSmoothText";
 
 const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
 const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 600;
@@ -99,10 +99,10 @@ export function WorkingRow({
 
 /**
  * Whether a row that shows while `show` holds is still mounted, and whether
- * it is leaving: it stays `ms` after `show` ends so it can fade out, unless
- * the user prefers reduced motion.
+ * it is leaving: it stays FADE_MS after `show` ends so it can fade out,
+ * unless the user prefers reduced motion.
  */
-export function useLinger(show: boolean, ms: number) {
+export function useLinger(show: boolean) {
   const [leaving, setLeaving] = useState(false);
   const [was, setWas] = useState(show);
   if (was !== show) {
@@ -111,9 +111,9 @@ export function useLinger(show: boolean, ms: number) {
   }
   useEffect(() => {
     if (!leaving) return;
-    const id = setTimeout(() => setLeaving(false), ms);
+    const id = setTimeout(() => setLeaving(false), FADE_MS);
     return () => clearTimeout(id);
-  }, [leaving, ms]);
+  }, [leaving]);
   return { mounted: show || leaving, leaving: !show && leaving };
 }
 

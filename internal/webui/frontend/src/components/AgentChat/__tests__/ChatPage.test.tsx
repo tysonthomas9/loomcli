@@ -13,6 +13,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 import { readFileSync } from "node:fs";
+import page from "../ChatPage.module.css";
 
 import type { Agent, AgentEvent, AgentStreamOptions } from "@/api/agentsv1";
 import { turnStartedAt } from "@/hooks/agents/useAgentChat";
@@ -377,6 +378,17 @@ describe("AgentChat page", () => {
 });
 
 describe("WorkingRow motion", () => {
+  it("pulses by opacity (ChatPage's workingLive), not T3's shimmer", () => {
+    render(<WorkingRow startedAt={null} step="Bash" />);
+    expect(page.workingLive).toBeTruthy();
+    expect(screen.getByText("Working...")).toHaveClass(page.workingLive!);
+    const css = readFileSync(
+      `${process.cwd()}/src/components/AgentChat/ChatPage.module.css`,
+      "utf8",
+    );
+    expect(css).toMatch(/\.workingLive\s*\{\s*animation:\s*working-pulse/);
+  });
+
   it("names the running step and shimmers only while a step runs", () => {
     const { rerender } = render(<WorkingRow startedAt={null} step="Bash" />);
     expect(screen.getByTestId("working-row")).toHaveTextContent(
@@ -391,7 +403,7 @@ describe("WorkingRow motion", () => {
   it("lingers 150ms to fade out when the turn ends", () => {
     vi.useFakeTimers();
     try {
-      const { result, rerender } = renderHook(({ s }) => useLinger(s, 150), {
+      const { result, rerender } = renderHook(({ s }) => useLinger(s), {
         initialProps: { s: true },
       });
       expect(result.current).toEqual({ mounted: true, leaving: false });
@@ -407,7 +419,7 @@ describe("WorkingRow motion", () => {
   it("goes at once under prefers-reduced-motion", () => {
     vi.stubGlobal("matchMedia", (q: string) => ({ matches: true, media: q }));
     try {
-      const { result, rerender } = renderHook(({ s }) => useLinger(s, 150), {
+      const { result, rerender } = renderHook(({ s }) => useLinger(s), {
         initialProps: { s: true },
       });
       rerender({ s: false });
@@ -418,6 +430,7 @@ describe("WorkingRow motion", () => {
   });
 });
 
+// Coverage: these also pass on the parent; they guard item 10 from here on.
 describe("chat motion CSS", () => {
   it.each(["ChatPage", "ChatMarkdown", "ModelPicker"])(
     "%s.module.css keyframes animate only opacity and transform",
