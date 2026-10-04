@@ -13,27 +13,99 @@
   padding-left: 12px;
 }
 
+/* The old agent rows' look (AgentCard compact). */
 .row {
   display: flex;
-  gap: 6px;
-  padding: 4px 8px;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
   color: inherit;
   text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+
+.row:hover {
+  background: var(--color-bg-hover);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
 }
 
 .row[aria-current="page"] {
-  font-weight: 600;
+  background: color-mix(
+    in srgb,
+    var(--color-accent, #c96442) 12%,
+    var(--color-bg-primary, #fff)
+  );
+  box-shadow: inset 3px 0 0 var(--color-accent, #c96442);
 }
 
-.name {
+.avatar {
+  order: -1;
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* The status dot, placed as AgentAvatar's compact dot. */
+.dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--color-bg, #fff);
+  border-radius: 50%;
+  background: var(--color-status-idle, #9ca3af);
+}
+
+.avatar[data-dot="working"] .dot {
+  background: var(--color-status-working, #facc15);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Waiting on an answer: amber, apart from the blue of working. */
+.avatar[data-dot="waiting"] .dot {
+  background: var(--color-warning, #f59e0b);
+}
+
+.avatar[data-dot="done"] .dot {
+  background: var(--color-status-done, #22c55e);
+}
+
+.avatar[data-dot="failed"] .dot {
+  background: var(--color-status-error, #ef4444);
+}
+
+.info {
+  display: flex;
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
 }
 
-.label {
-  opacity: 0.7;
+/* Names wrap rather than being cut off. */
+.name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.role {
+  font-size: 0.65rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.2;
+}
+
+.harness {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
 }
 
 .group {
@@ -47,4 +119,15 @@
   text-align: left;
   opacity: 0.7;
   cursor: pointer;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
 }

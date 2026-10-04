@@ -14,6 +14,8 @@ import { MemoryRouter, useNavigate } from "react-router-dom";
 import type { NavigateFunction } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import type {
   Agent,
@@ -88,11 +90,26 @@ function serve(q: ListAgentsQuery) {
 }
 
 const stream = () => api.streams.at(-1)!;
-const names = () => screen.getAllByRole("link").map((l) => l.textContent ?? "");
+const names = () =>
+  screen.queryAllByTestId("agent-list-name").map((n) => n.textContent ?? "");
+const row = (name: string) =>
+  screen
+    .queryAllByRole("link")
+    .find(
+      (l) =>
+        l.querySelector("[data-testid=agent-list-name]")?.textContent === name,
+    ) ?? null;
 
-function renderList() {
+let navigate: NavigateFunction = () => {};
+function Nav() {
+  navigate = useNavigate();
+  return null;
+}
+
+function renderList(at = "/ws/ws1/chat/lead") {
   render(
-    <MemoryRouter initialEntries={["/ws/ws1/chat/lead"]}>
+    <MemoryRouter initialEntries={[at]}>
+      <Nav />
       <AgentList workspaceId="ws1" />
     </MemoryRouter>,
   );
@@ -112,17 +129,24 @@ beforeEach(() => {
 });
 
 describe("AgentList", () => {
-  it("groups children under their lead and shows the harness as a label", async () => {
+  it("groups children under their lead and shows the harness as a logo", async () => {
     renderList();
     await waitFor(() => expect(names()).toHaveLength(3));
-    const lead = screen.getByRole("link", { name: /^lead/ });
+    const lead = row("lead")!;
     expect(lead).toHaveAttribute("href", "/ws/ws1/chat/lead");
     expect(lead).toHaveAttribute("aria-current", "page");
     const leadItem = lead.closest("li")!;
-    expect(leadItem.querySelector("ul")).toHaveTextContent("kidopencodeactive");
-    expect(screen.getByRole("link", { name: /^other/ })).toHaveTextContent(
-      "otherclaudeidle",
+    expect(within(leadItem.querySelector("ul")!).getByRole("link")).toBe(
+      row("kid"),
     );
+    // The harness is a logo named for it; no harness or state words show.
+    expect(
+      within(row("other")!).getByRole("img", { name: "claude" }),
+    ).toHaveAttribute("title", "claude");
+    for (const name of ["lead", "kid", "other"]) {
+      const text = row(name)!.textContent ?? "";
+      expect(text).not.toMatch(/opencode|claude|idle|active/);
+    }
     expect(stream().opts).toMatchObject({
       agents: ["kid", "lead", "other"],
       live: true,
@@ -160,19 +184,30 @@ describe("AgentList", () => {
         ev("other", "agent.deleted"),
       ]),
     );
-    expect(screen.getByRole("link", { name: /^kid/ })).toHaveTextContent(
-      "finished",
+    // A finished child leaves the sidebar; the Lead stays.
+    expect(row("kid")).toBeNull();
+    expect(row("lead")).not.toBeNull();
+    expect(row("other")).toBeNull();
+    // A new Send makes it active again, and it comes back.
+    act(() =>
+      stream().opts.onEvents!([
+        ev("kid", "agent.state_changed", { from: "finished", to: "active" }),
+      ]),
     );
-    expect(screen.queryByRole("link", { name: /^other/ })).toBeNull();
+    expect(row("lead")!.closest("li")!.querySelector("ul")).toContainElement(
+      row("kid"),
+    );
   });
 
   it("lists a lead's children on child.created and subscribes the new child", async () => {
     renderList();
     await waitFor(() => expect(names()).toHaveLength(3));
     const first = stream();
-    api.agents.push(agent("kid2", { parent_agent_id: "lead" }));
+    api.agents.push(
+      agent("kid2", { parent_agent_id: "lead", state: "creating" }),
+    );
     act(() => first.opts.onEvents!([ev("lead", "child.created")]));
-    await waitFor(() => expect(names()).toContain("kid2opencodeidle"));
+    await waitFor(() => expect(names()).toContain("kid2"));
     expect(api.listAgents).toHaveBeenLastCalledWith("ws1", {
       parent: "lead",
       after: "",
@@ -183,17 +218,7 @@ describe("AgentList", () => {
 
   it("shows a new lead without a reload when its chat opens, starting empty", async () => {
     api.agents = [];
-    let navigate: NavigateFunction = () => {};
-    function Nav() {
-      navigate = useNavigate();
-      return null;
-    }
-    render(
-      <MemoryRouter initialEntries={["/ws/ws1/agents"]}>
-        <Nav />
-        <AgentList workspaceId="ws1" />
-      </MemoryRouter>,
-    );
+    renderList("/ws/ws1/agents");
     await waitFor(() => expect(api.listAgents).toHaveBeenCalledTimes(1));
     expect(screen.queryAllByRole("link")).toHaveLength(0);
     expect(api.streams).toHaveLength(0);
@@ -202,12 +227,10 @@ describe("AgentList", () => {
       api.agents.push(agent(id));
       act(() => navigate(`/ws/ws1/chat/${id}`));
       await waitFor(() =>
-        expect(
-          screen.getByRole("link", { name: new RegExp(`^${id}`) }),
-        ).toHaveAttribute("aria-current", "page"),
+        expect(row(id)).toHaveAttribute("aria-current", "page"),
       );
     }
-    expect(names()).toEqual(["leadopencodeidle", "lead2opencodeidle"]);
+    expect(names()).toEqual(["lead", "lead2"]);
     expect(stream().opts.agents).toEqual(["lead", "lead2"]);
     expect(api.streams.filter((s) => !s.closed)).toHaveLength(1);
   });
@@ -216,14 +239,12 @@ describe("AgentList", () => {
     renderList();
     await waitFor(() => expect(names()).toHaveLength(3));
     api.agents = api.agents.filter((a) => a.agent_id !== "other");
-    api.agents.push(agent("kid3", { parent_agent_id: "lead" }));
+    api.agents.push(
+      agent("kid3", { parent_agent_id: "lead", state: "waiting" }),
+    );
     act(() => stream().opts.onResync!());
-    await waitFor(() => expect(names()).toContain("kid3opencodeidle"));
-    expect(names()).toEqual([
-      "leadopencodeidle",
-      "kidopencodeactive",
-      "kid3opencodeidle",
-    ]);
+    await waitFor(() => expect(names()).toContain("kid3"));
+    expect(names()).toEqual(["lead", "kid", "kid3"]);
   });
 
   it("lists leads first and independent workers under a collapsible Background group", async () => {
@@ -238,39 +259,165 @@ describe("AgentList", () => {
         parent_agent_id: "lead",
         preset: "task",
         role_kind: "worker",
+        state: "active",
       }),
     ];
     renderList();
     await waitFor(() => expect(names()).toHaveLength(4));
     // Lead first, its worker child nested under it, then the rest, then Background.
-    expect(names()).toEqual([
-      "leadopencodeidle",
-      "kidopencodeidle",
-      "reviewopencodeidle",
-      "workeropencodeidle",
-    ]);
-    const lead = screen.getByRole("link", { name: /^lead/ }).closest("li")!;
-    expect(within(lead).getByRole("link", { name: /^kid/ })).toBeVisible();
+    expect(names()).toEqual(["lead", "kid", "review", "worker"]);
+    const lead = row("lead")!.closest("li")!;
+    expect(lead).toContainElement(row("kid"));
     const bg = screen.getByTestId("agent-list-background");
     const bgNames = within(bg)
-      .getAllByRole("link")
+      .getAllByTestId("agent-list-name")
       .map((l) => l.textContent);
-    expect(bgNames).toEqual(["workeropencodeidle"]);
+    expect(bgNames).toEqual(["worker"]);
 
     const toggle = within(bg).getByRole("button", { name: "Background" });
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("link", { name: /^worker/ })).toBeNull();
+    expect(row("worker")).toBeNull();
     expect(names()).toHaveLength(3);
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("link", { name: /^worker/ })).toBeVisible();
+    expect(row("worker")).toBeVisible();
   });
 
   it("shows no Background group without an independent worker", async () => {
     renderList();
     await waitFor(() => expect(names()).toHaveLength(3));
     expect(screen.queryByTestId("agent-list-background")).toBeNull();
+  });
+
+  it("shows a child only while it is at work; Leads and Background are not hidden", async () => {
+    api.agents = [
+      agent("lead", { preset: "lead", state: "finished" }),
+      agent("bg", {
+        role_kind: "worker",
+        state: "finished",
+        outcome: "failed",
+      }),
+      ...["creating", "active", "waiting", "stopping"].map((state) =>
+        agent(`k-${state}`, { parent_agent_id: "lead", state }),
+      ),
+      agent("k-idle", { parent_agent_id: "lead", state: "idle" }),
+      agent("k-done", {
+        parent_agent_id: "lead",
+        state: "finished",
+        outcome: "completed",
+      }),
+      agent("k-failed", {
+        parent_agent_id: "lead",
+        state: "finished",
+        outcome: "failed",
+      }),
+      agent("k-stopped", {
+        parent_agent_id: "lead",
+        state: "archived",
+        outcome: "cancelled",
+      }),
+      agent("k-deleted", {
+        parent_agent_id: "lead",
+        state: "active",
+        deleted_at: "2026-10-04T00:00:00Z",
+      }),
+    ];
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toContain("bg"));
+    expect(names()).toEqual([
+      "lead",
+      "k-creating",
+      "k-active",
+      "k-waiting",
+      "k-stopping",
+      "bg",
+    ]);
+  });
+
+  it("keeps a finished child while its chat is open, until you navigate away", async () => {
+    api.agents = [
+      agent("lead", { preset: "lead" }),
+      agent("done", { parent_agent_id: "lead", state: "finished" }),
+    ];
+    renderList("/ws/ws1/chat/done");
+    await waitFor(() => expect(row("done")).not.toBeNull());
+    expect(row("done")).toHaveAttribute("aria-current", "page");
+    expect(row("lead")!.closest("li")).toContainElement(row("done"));
+    act(() => navigate("/ws/ws1/chat/lead"));
+    await waitFor(() => expect(row("done")).toBeNull());
+    expect(row("lead")).toHaveAttribute("aria-current", "page");
+  });
+
+  it("keeps a finished child that has a child at work, so the working one stays nested", async () => {
+    api.agents = [
+      agent("lead", { preset: "lead" }),
+      agent("mid", { parent_agent_id: "lead", state: "finished" }),
+      agent("deep", { parent_agent_id: "mid", state: "active" }),
+    ];
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    expect(row("mid")!.closest("li")).toContainElement(row("deep"));
+  });
+
+  it("renders the AgentCard look: role line, status dot and the harness logo per harness", async () => {
+    api.agents = [
+      agent("lead", { preset: "lead", harness: "opencode" }),
+      agent("cx", { role_kind: "worker", harness: "codex", state: "active" }),
+      agent("cl", { preset: "pr-review-interactive", harness: "claude" }),
+      agent("zz", { harness: "other-harness", state: "waiting" }),
+    ];
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(4));
+    const glyph = (name: string) =>
+      row(name)!.querySelector("[data-provider-icon]")!;
+    expect(glyph("lead")).toHaveAttribute("data-provider-icon", "opencode");
+    expect(glyph("cx")).toHaveAttribute("data-provider-icon", "codex");
+    expect(glyph("cl")).toHaveAttribute("data-provider-icon", "claude");
+    for (const name of ["lead", "cx", "cl"])
+      expect(glyph(name).querySelector("svg")).not.toBeNull();
+    // An unknown harness falls back to initials, still named for the harness.
+    expect(glyph("zz").querySelector("svg")).toBeNull();
+    expect(
+      within(row("zz")!).getByRole("img", { name: "other-harness" }),
+    ).toBeInTheDocument();
+
+    expect(row("lead")).toHaveTextContent("Lead");
+    expect(row("cx")).toHaveTextContent("Worker");
+    expect(row("cl")).toHaveTextContent("Reviewer");
+    expect(row("zz")).toHaveTextContent("Agent");
+    const dot = (name: string) =>
+      row(name)!.querySelector("[data-dot]")!.getAttribute("data-dot");
+    expect([dot("lead"), dot("cx"), dot("zz")]).toEqual([
+      "idle",
+      "working",
+      "waiting",
+    ]);
+    // The avatar shows initials and is hidden from the link's name.
+    expect(screen.getByRole("link", { name: "cx Worker codex" })).toBe(
+      row("cx"),
+    );
+  });
+
+  it("shows a 20-character name in full, wrapping instead of cutting it off", async () => {
+    const long = "db-worker-migrations";
+    expect(long).toHaveLength(20);
+    api.agents = [
+      agent("lead", { preset: "lead" }),
+      agent(long, { preset: "lead" }),
+    ];
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toContain(long));
+    const name = within(row(long)!).getByTestId("agent-list-name");
+    expect(name.textContent).toBe(long);
+    // The name rule wraps rather than clipping with an ellipsis.
+    const css = readFileSync(
+      resolve(__dirname, "../AgentList.module.css"),
+      "utf8",
+    );
+    const rule = /\.name \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/overflow-wrap: anywhere/);
+    expect(rule).not.toMatch(/ellipsis|nowrap|overflow: hidden/);
   });
 });

@@ -34,7 +34,7 @@ teardown: |
 
 tests:
   - name: T6 child markers - a lead made with New Agent creates a child that shows as started and result markers in its chat and nested in the sidebar
-    intent: An operator creates an OpenCode lead in the New Agent modal, sees it in the sidebar at once, asks it for a child, and sees a Started marker naming the child, one result marker the Lead read with its summary behind view, and the child nested under the lead; the marker opens the child's chat
+    intent: An operator creates an OpenCode lead in the New Agent modal, sees it in the sidebar at once, asks it for a child, and sees a Started marker naming the child, one result marker the Lead read with its summary behind view; the finished child is not in the sidebar until the marker opens its chat, where it shows nested under the lead
     steps:
       - run: '"$AFT_WORK_DIR/kids-script" "agv1-kid-${RUN_ID:-local}" AGV1-KIDS-ONE'
         intent: "Script the lead's agent_create call and the replies after it"
@@ -78,11 +78,10 @@ tests:
       - wait:
           fn: >-
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
-              const lead = Array.from(nav?.querySelectorAll('a') || []).find((a) => (a.textContent || '').startsWith('agv1-kids-lead-${RUN_ID:-local}'));
-              const kids = lead?.closest('li')?.querySelector('ul');
-              return !!kids && (kids.textContent || '').includes('agv1-kid-${RUN_ID:-local}') &&
-                Array.from(nav.querySelectorAll('a')).filter((a) => (a.textContent || '').startsWith('agv1-kid-${RUN_ID:-local}')).length === 1; })()
-        intent: "Wait until the sidebar shows the child once, nested under the lead"
+              const links = Array.from(nav?.querySelectorAll('a') || []);
+              return links.some((a) => (a.textContent || '').startsWith('agv1-kids-lead-${RUN_ID:-local}')) &&
+                !links.some((a) => (a.textContent || '').startsWith('agv1-kid-${RUN_ID:-local}')); })()
+        intent: "Wait until the sidebar lists the lead but not its finished child (SB2: only children at work show)"
       - click: { selector: "[data-testid=started-marker] a" }
       - wait:
           fn: >-
@@ -90,6 +89,15 @@ tests:
               return location.pathname.startsWith('/ws/E2E-AGV1-KIDS/chat/') && h.includes('agv1-kid-${RUN_ID:-local}') &&
                 document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'; })()
         intent: "Wait until the marker opens the child's chat, labelled opencode"
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const lead = Array.from(nav?.querySelectorAll('a') || []).find((a) => (a.textContent || '').startsWith('agv1-kids-lead-${RUN_ID:-local}'));
+              const kids = Array.from(lead?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              return kids.length === 1 && (kids[0].textContent || '').startsWith('agv1-kid-${RUN_ID:-local}') &&
+                kids[0].getAttribute('aria-current') === 'page' &&
+                Array.from(nav.querySelectorAll('a')).filter((a) => (a.textContent || '').startsWith('agv1-kid-${RUN_ID:-local}')).length === 1; })()
+        intent: "Wait until the open finished child shows once in the sidebar, nested under the lead, while its chat is open"
 
   - name: T2 every attempt - two child attempts show as two records, once each, while the lead's chat loads
     intent: A child's second attempt finishes while the lead's chat backfills; each attempt's record shows exactly once, before and after a reload, and the lead's model received both

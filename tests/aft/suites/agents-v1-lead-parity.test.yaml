@@ -508,6 +508,14 @@ tests:
         intent: "Wait until the lead's chat is ready"
       - fill: { label: Message, value: "make a child" }
       - press: Enter
+      # SB2: a finished child shows only while its chat is open, and this
+      # child finishes at once, so check the nesting from the child's chat.
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('par-tree-kid-${RUN_ID:-local}')
+        budget: 90000
+        intent: "Wait until the lead's chat shows the started marker naming the child"
+      - click: { selector: "[data-testid=started-marker] a" }
       - wait:
           fn: >-
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
@@ -517,8 +525,8 @@ tests:
               const topNames = top.map((li) => li.querySelector(':scope > a')?.textContent || '');
               return !!lead && nested.some((t) => t.includes('par-tree-kid-${RUN_ID:-local}')) &&
                 !topNames.some((t) => t.includes('par-tree-kid-${RUN_ID:-local}')); })()
-        budget: 90000
-        intent: "Wait until the sidebar shows the lead at the top level with its child nested under it"
+        budget: 30000
+        intent: "Wait until the child's chat is open and the sidebar shows the lead at the top level with the child nested under it"
 
   # ports: zz-lead-agent "leads sort ahead of workers in the rail" (row 18)
   - name: parity - the sidebar lists a lead ahead of an independent worker, which sits under Background

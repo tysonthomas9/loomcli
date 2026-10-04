@@ -1,7 +1,14 @@
 import { useMemo, useState } from "react";
 import { Link, useMatch } from "react-router-dom";
 import type { Agent } from "@/api/agentsv1";
+import { AgentAvatar } from "@/components/AgentAvatar";
+import { ProviderIcon } from "@/components/AgentChat";
 import { childrenByParent, useAgentRoster } from "@/hooks";
+import {
+  agentDot,
+  agentRoleLabel,
+  childVisible,
+} from "@/hooks/agents/agentSidebar";
 import styles from "./AgentList.module.css";
 
 export interface AgentListProps {
@@ -10,9 +17,11 @@ export interface AgentListProps {
 
 /**
  * Agent API agents with children grouped under their lead (design v2 §9.4).
- * Every row opens the same chat; the harness is only a label. At the top
- * level Leads come first and independent workers sit under a collapsible
- * Background group, as in the old Lead UI rail.
+ * Every row opens the same chat and looks like the old agent rows (avatar,
+ * name, role line, status dot) with the harness as a logo. At the top level
+ * Leads come first and independent workers sit under a collapsible
+ * Background group, as in the old Lead UI rail. A child shows only while it
+ * is at work or its chat is open (SB2).
  */
 export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   // The agent whose chat is open.
@@ -35,20 +44,55 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
     if (!list?.length) return null;
     return (
       <ul className={styles.list}>
-        {list.map((a) => (
-          <li key={a.agent_id}>
-            <Link
-              className={styles.row}
-              to={`/ws/${ws}/chat/${encodeURIComponent(a.agent_id)}`}
-              aria-current={a.agent_id === activeId ? "page" : undefined}
-            >
-              <span className={styles.name}>{a.name}</span>
-              <span className={styles.label}>{a.harness}</span>
-              <span className={styles.label}>{a.state}</span>
-            </Link>
-            {rows(kids.get(a.agent_id))}
-          </li>
-        ))}
+        {list.map((a) => {
+          const dot = agentDot(a);
+          const role = agentRoleLabel(a);
+          return (
+            <li key={a.agent_id}>
+              <Link
+                className={styles.row}
+                to={`/ws/${ws}/chat/${encodeURIComponent(a.agent_id)}`}
+                aria-current={a.agent_id === activeId ? "page" : undefined}
+                aria-label={`${a.name} ${role} ${a.harness}`}
+                data-state={a.state}
+              >
+                {/* Name first in the DOM, so the row reads as its name; the
+                    avatar is drawn first by CSS order. */}
+                <span className={styles.info}>
+                  <span className={styles.name} data-testid="agent-list-name">
+                    {a.name}
+                  </span>
+                  <span className={styles.role}>{role}</span>
+                </span>
+                <span
+                  className={styles.avatar}
+                  data-dot={dot}
+                  aria-hidden="true"
+                >
+                  <AgentAvatar name={a.name} compact />
+                  <span className={styles.dot} />
+                </span>
+                <span
+                  className={styles.harness}
+                  role="img"
+                  aria-label={a.harness}
+                  title={a.harness}
+                >
+                  <ProviderIcon
+                    providerId={a.harness}
+                    providerName={a.harness}
+                    size="sm"
+                  />
+                </span>
+              </Link>
+              {rows(
+                kids
+                  .get(a.agent_id)
+                  ?.filter((k) => childVisible(k, kids, activeId)),
+              )}
+            </li>
+          );
+        })}
       </ul>
     );
   };

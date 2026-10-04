@@ -45,6 +45,7 @@ const PROVIDER_ICONS: Record<string, Glyph> = {
   openai: OpenAI,
   codex: OpenAI,
   anthropic: ClaudeAI,
+  claude: ClaudeAI,
   opencode: OpenCodeIcon,
 };
 
