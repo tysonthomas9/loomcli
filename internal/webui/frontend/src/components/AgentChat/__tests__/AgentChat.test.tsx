@@ -2,7 +2,14 @@
  * @vitest-environment jsdom
  */
 
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
@@ -741,16 +748,16 @@ describe("AgentChat lifecycle (1.8b)", () => {
     expect(await screen.findByTestId("where")).toHaveTextContent("/ws/w1/home");
   });
 
-  it("shows the attention reason in a banner", async () => {
+  it("shows the attention reason in a banner, and none once it clears", async () => {
     await mount(agent({ attention_reason: "harness_unavailable" }));
     expect(screen.getByTestId("agent-attention-banner")).toHaveTextContent(
       "Needs attention: the harness is unavailable.",
     );
-  });
-
-  it("shows no attention banner without a reason", async () => {
-    await mount(agent());
-    expect(screen.queryByTestId("agent-attention-banner")).toBeNull();
+    api.getAgent.mockResolvedValue(agent());
+    deliver(ev("agent.state_changed"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("agent-attention-banner")).toBeNull(),
+    );
   });
 
   it("shows history expired in place of the composer once history is purged, with no Unarchive", async () => {
@@ -790,10 +797,16 @@ describe("AgentChat lifecycle (1.8b)", () => {
     expect(box).toHaveValue("big");
   });
 
-  it("marks a harness switch with a context divider and keeps the earlier transcript", async () => {
+  it("marks a harness switch with a context divider and keeps the earlier transcript; a failed switch shows none", async () => {
     await mount(agent());
+    // A failed switch saves no harness.changed: no divider.
     deliver(
       ev("message.delivered", { text: "before the switch" }),
+      ev("agent.turn_completed", { stopReason: "cancelled" }),
+      ev("ask.lost", { askId: "k" }),
+    );
+    expect(screen.queryByTestId("harness-context-divider")).toBeNull();
+    deliver(
       ev("harness.changed", { from_harness: "opencode", harness: "codex" }),
       ev("message.delivered", { text: "after the switch" }),
     );
@@ -802,15 +815,5 @@ describe("AgentChat lifecycle (1.8b)", () => {
     expect(divider).not.toHaveTextContent(/closed|ended/i);
     expect(screen.getByText("before the switch")).toBeInTheDocument();
     expect(screen.getByText("after the switch")).toBeInTheDocument();
-  });
-
-  it("shows no divider when the stream has no harness.changed (a failed switch)", async () => {
-    await mount(agent());
-    deliver(
-      ev("message.delivered", { text: "hi" }),
-      ev("agent.turn_completed", { stopReason: "cancelled" }),
-      ev("ask.lost", { askId: "k" }),
-    );
-    expect(screen.queryByTestId("harness-context-divider")).toBeNull();
   });
 });
