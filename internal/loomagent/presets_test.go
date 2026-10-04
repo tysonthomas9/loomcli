@@ -327,3 +327,25 @@ func TestPolicySubagentDeny(t *testing.T) {
 		t.Errorf("unserved preset with Subagents: rules %+v; want its stored rules only", rules)
 	}
 }
+
+// TestLeadPersonaSummarizesOnce (CL2): the lead's persona tells it the
+// completion notice is the result (no agent_get), to stay brief while other
+// children run, and to write one combined summary when none are; it names
+// no harness, so OpenCode and codex Leads read the same rule.
+func TestLeadPersonaSummarizesOnce(t *testing.T) {
+	p, err := BuiltinPresets{}.Get(context.Background(), "lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"You are a lead agent", "task_completed notice", "don't call agent_get",
+		"still running", "one short line or not at all", "one combined summary"} {
+		if !strings.Contains(p.Persona, want) {
+			t.Errorf("lead persona lacks %q", want)
+		}
+	}
+	for _, h := range Harnesses {
+		if strings.Contains(strings.ToLower(p.Persona), h) {
+			t.Errorf("lead persona names harness %q", h)
+		}
+	}
+}

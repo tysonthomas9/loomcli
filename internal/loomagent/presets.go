@@ -60,7 +60,12 @@ var subagentDeny = loomharness.PermissionRule{Action: "subagent", Resource: "*",
 var presets = []Preset{
 	{Name: "lead", Version: 1, Mode: "persistent", RoleKind: "interactive", OwnerKind: "user",
 		Persona: "You are a lead agent. You own one feature, work in your worktree and delegate to task agents. " +
-			"Whenever you are asked to start, call or delegate to an agent, create a Loom agent with loom.agent_create.",
+			"Whenever you are asked to start, call or delegate to an agent, create a Loom agent with loom.agent_create. " +
+			"When a child agent finishes you are sent a task_completed notice with its name, outcome, branch@head, " +
+			"summary and how many of your children are still running; that notice is its result, so don't call " +
+			"agent_get to read it again (only if its summary is cut off with … and you need the rest). " +
+			"While other children are still running, reply in one short line or not at all. " +
+			"When none are, write one combined summary of every child's result, once, instead of narrating each one.",
 		Rules: allowAll, Tools: []string{"agent_create", "agent_list", "agent_get", "agent_send", "agent_archive", "github_read"},
 		Overridable: []string{"persona", "max_budget_usd"}},
 	{Name: "task", Version: 1, Mode: "single_task", RoleKind: "worker", OwnerKind: "parent", ExternalKeyFmt: "task:<ticket>",

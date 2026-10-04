@@ -40,11 +40,50 @@ func completionKey(child string, attempt int64) string {
 	return KindTaskCompleted + ":" + child + ":" + strconv.FormatInt(attempt, 10)
 }
 
-// text is the record as the lead reads it in the child's slot.
+// text is the record's line as releases before CL2 put it in the child's
+// slot. Only the legacy rebuild (slotNotices) reads it, to find those lines
+// in a slot saved before notices were kept; the lead now reads notice.
 func (t TaskCompleted) text() string {
 	return fmt.Sprintf("%s outcome=%s branch=%s head=%s summary=%s", completionKey(t.Child, t.Attempt),
 		t.Outcome, t.Branch, t.Head, strconv.Quote(t.Summary))
 }
+
+// notice is the record as the lead reads it in the child's slot: one line
+// with the child's name, its outcome, branch@head, its summary, how many of
+// the lead's other children are still running, and what to do next, so the
+// lead needs no agent_get for it and writes one summary once all are done.
+// The line starts with the record's key; the chat finds the record by the
+// slot's notice keys, never by this text.
+func (t TaskCompleted) notice(name string, running int) string {
+	at := t.at()
+	next := "no children still running: write one combined summary of every child's result now"
+	if running > 0 {
+		next = fmt.Sprintf("%d other %s still running: reply in one short line or not at all, "+
+			"and write one combined summary when the last one finishes", running, plural(running, "child", "children"))
+	}
+	return fmt.Sprintf("%s child=%s outcome=%s branch=%s still_running=%d summary=%s next=%s",
+		completionKey(t.Child, t.Attempt), strconv.Quote(name), t.Outcome, at, running, strconv.Quote(t.Summary),
+		strconv.Quote("this notice is the result, no agent_get needed; "+next))
+}
+
+// at is the record's branch@head, the branch alone without a head.
+func (t TaskCompleted) at() string {
+	if t.Head == "" {
+		return t.Branch
+	}
+	return t.Branch + "@" + t.Head
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// noticeText is the line deliverCompletions puts in a slot; legacy-store
+// tests swap it for text to write slots as the prior release did.
+var noticeText = TaskCompleted.notice
 
 // Completion names one child attempt whose task_completed record is part of
 // a message: the chat shows it on that record, not as message text.
@@ -96,7 +135,7 @@ func (s *Service) slotNotices(ctx context.Context, agentID, sender, body string,
 	if err != nil {
 		return n, err
 	}
-	texts, err := s.recordTexts(ctx, agentID, last.Child)
+	recs, err := s.records(ctx, agentID, last.Child)
 	if err != nil {
 		return n, err
 	}
@@ -108,7 +147,7 @@ func (s *Service) slotNotices(ctx context.Context, agentID, sender, body string,
 			return out, nil
 		}
 		stamp := receipts[at].CreatedAt
-		keys, i := batchLines(receipts, texts, stamp, body)
+		keys, i := batchLines(receipts, recs, stamp, body)
 		if len(keys) == 0 || keys[len(keys)-1] != key {
 			return out, nil
 		}
@@ -134,19 +173,24 @@ func (s *Service) slotNotices(ctx context.Context, agentID, sender, body string,
 }
 
 // batchLines returns the keys of the records one Notify added (receipts
-// stamped stamp, texts by key) in the order their lines end body, and the
+// stamped stamp, recs by key) in the order their lines end body, and the
 // index of the first such line; no keys unless every record is accounted for.
-func batchLines(receipts []loomstore.SenderReceipt, texts map[string]string, stamp, body string) ([]string, int) {
-	batch := map[string]string{} // text -> key
+func batchLines(receipts []loomstore.SenderReceipt, recs map[string]TaskCompleted, stamp, body string) ([]string, int) {
+	batch := map[string]TaskCompleted{}
 	for _, r := range receipts {
-		if r.CreatedAt == stamp && strings.HasPrefix(r.RequestID, "task_completed:") && texts[r.RequestID] != "" {
-			batch[texts[r.RequestID]] = r.RequestID
+		if rec, ok := recs[r.RequestID]; ok && r.CreatedAt == stamp && strings.HasPrefix(r.RequestID, "task_completed:") {
+			batch[r.RequestID] = rec
 		}
 	}
 	lines := strings.Split(body, "\n")
 	i, keys := len(lines), []string{}
-	for i > 0 && len(keys) < len(batch) && batch[lines[i-1]] != "" {
-		keys = append([]string{batch[lines[i-1]]}, keys...)
+	for i > 0 && len(keys) < len(batch) {
+		key, _, _ := strings.Cut(lines[i-1], " ")
+		rec, ok := batch[key]
+		if !ok || slices.Contains(keys, key) || !rec.isLine(lines[i-1]) {
+			break
+		}
+		keys = append([]string{key}, keys...)
 		i--
 	}
 	if len(keys) != len(batch) {
@@ -155,10 +199,23 @@ func batchLines(receipts []loomstore.SenderReceipt, texts map[string]string, sta
 	return keys, i
 }
 
-// recordTexts maps each record agentID saved for child, by key, to the line
-// text() wrote for it.
-func (s *Service) recordTexts(ctx context.Context, agentID, child string) (map[string]string, error) {
-	out := map[string]string{}
+// isLine reports whether line is t's line in a slot: text, as releases
+// before CL2 wrote it, or notice, whose name, running count and next step
+// were read when it was written, so only its key, outcome, branch and
+// summary are checked.
+func (t TaskCompleted) isLine(line string) bool {
+	if line == t.text() {
+		return true
+	}
+	at := t.at()
+	rest, ok := strings.CutPrefix(line, completionKey(t.Child, t.Attempt)+" child=")
+	return ok && strings.Contains(rest, " outcome="+t.Outcome+" branch="+at+" still_running=") &&
+		strings.Contains(rest, " summary="+strconv.Quote(t.Summary)+" next=")
+}
+
+// records maps each record agentID saved for child by its key.
+func (s *Service) records(ctx context.Context, agentID, child string) (map[string]TaskCompleted, error) {
+	out := map[string]TaskCompleted{}
 	q := loomstore.EventQuery{AgentID: agentID, Kinds: []string{KindTaskCompleted}, Limit: 500}
 	for {
 		page, err := s.store.ListEvents(ctx, q)
@@ -168,7 +225,7 @@ func (s *Service) recordTexts(ctx context.Context, agentID, child string) (map[s
 		for _, e := range page.Events {
 			var rec TaskCompleted
 			if json.Unmarshal(e.Payload, &rec) == nil && rec.Child == child {
-				out[e.EventID] = rec.text()
+				out[e.EventID] = rec
 			}
 		}
 		if !page.More {
@@ -291,6 +348,10 @@ func (s *Service) deliverCompletions(ctx context.Context, a loomstore.Agent) err
 	if err != nil || len(events) == 0 {
 		return err
 	}
+	names, running, err := s.children(ctx, a.AgentID)
+	if err != nil {
+		return err
+	}
 	byChild, order := map[string][]loomstore.Notice{}, []string{}
 	for _, e := range events {
 		var rec TaskCompleted
@@ -300,7 +361,11 @@ func (s *Service) deliverCompletions(ctx context.Context, a loomstore.Agent) err
 		if _, ok := byChild[rec.Child]; !ok {
 			order = append(order, rec.Child)
 		}
-		byChild[rec.Child] = append(byChild[rec.Child], loomstore.Notice{Key: e.EventID, Text: rec.text()})
+		name := names[rec.Child]
+		if name == "" {
+			name = rec.Child
+		}
+		byChild[rec.Child] = append(byChild[rec.Child], loomstore.Notice{Key: e.EventID, Text: noticeText(rec, name, running)})
 	}
 	for _, child := range order {
 		sender := senderOf(ActorRef{Kind: "agent", ID: child})
@@ -323,6 +388,24 @@ func (s *Service) deliverCompletions(ctx context.Context, a loomstore.Agent) err
 		}
 	}
 	return nil
+}
+
+// children returns the names of parent's children by id, and how many of
+// its single tasks are still running: not deleted and not ended (finished
+// or archived), counted when a record is put in a slot.
+func (s *Service) children(ctx context.Context, parent string) (map[string]string, int, error) {
+	kids, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{Parent: parent, IncludeArchived: true})
+	if err != nil {
+		return nil, 0, err
+	}
+	names, running := map[string]string{}, 0
+	for _, c := range kids {
+		names[c.AgentID] = c.Name
+		if c.Mode == "single_task" && c.DeletedAt == nil && c.State != StateFinished && c.State != StateArchived {
+			running++
+		}
+	}
+	return names, running, nil
 }
 
 // clip cuts s to at most n bytes, the "…" mark included, on a rune boundary.

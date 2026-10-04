@@ -89,8 +89,7 @@ func TestTaskCompletedTwoAttemptsBeforeLeadReads(t *testing.T) {
 	nextAttempt(t, s, "c1")
 	endAttempt(t, s, "c1", "completed")
 	dispatchOK(t, s, "L")
-	want := []string{"agent:c1=" + `task_completed:c1:1 outcome=failed branch= head= summary=""` + "\n" +
-		`task_completed:c1:2 outcome=completed branch= head= summary=""`}
+	want := []string{"agent:c1=" + notice("c1", 1, "failed", 0) + "\n" + notice("c1", 2, "completed", 0)}
 	if got := waiting(t, s, "L"); !slices.Equal(got, want) {
 		t.Fatalf("lead slots = %q", got)
 	}
@@ -132,8 +131,7 @@ func TestTaskCompletedOlderAttemptAfterDelivery(t *testing.T) {
 	}
 	endAttempt(t, s, "c1", "failed")
 	dispatchOK(t, s, "L")
-	if got := waiting(t, s, "L"); !slices.Equal(got, []string{"agent:c1=" +
-		`task_completed:c1:2 outcome=failed branch= head= summary=""`}) {
+	if got := waiting(t, s, "L"); !slices.Equal(got, []string{"agent:c1=" + notice("c1", 2, "failed", 0)}) {
 		t.Fatalf("lead slots = %q", got)
 	}
 }
@@ -234,7 +232,7 @@ func TestTaskCompletedWorkspaceResult(t *testing.T) {
 		t.Fatalf("records = %+v", got)
 	}
 	dispatchOK(t, s, "L")
-	if w := waiting(t, s, "L"); len(w) != 1 || !strings.Contains(w[0], "branch=loom/agent/c1 head=abc123 ") {
+	if w := waiting(t, s, "L"); len(w) != 1 || !strings.Contains(w[0], " branch=loom/agent/c1@abc123 ") {
 		t.Fatalf("lead slots = %q", w)
 	}
 }
@@ -280,7 +278,7 @@ func TestTaskCompletedReconcileOnce(t *testing.T) {
 		slots, err := s.store.Slots(ctx, lead.AgentID)
 		return err == nil && slices.ContainsFunc(slots, func(sl loomstore.Slot) bool {
 			return sl.Sender == "agent:"+info.AgentID && sl.State != loomstore.SlotWaiting &&
-				strings.HasPrefix(sl.Body, completionKey(info.AgentID, 0)+" outcome=completed ")
+				strings.HasPrefix(sl.Body, completionKey(info.AgentID, 0)+` child="c" outcome=completed `)
 		})
 	})
 	got := completions(t, s, lead.AgentID)
@@ -454,7 +452,7 @@ func TestWaitingCompletionsSplit(t *testing.T) {
 	mustSendMsg(t, s, sendReq("L", "m1", "Heads up:\nuse cursor paging", child))
 	endAttempt(t, s, "c1", "completed")
 	dispatchOK(t, s, "L")
-	rec := `task_completed:c1:1 outcome=completed branch= head= summary=""`
+	rec := notice("c1", 1, "completed", 0)
 	w := waitingFrom("agent:c1")
 	if w.Text != "Heads up:\nuse cursor paging\n"+rec {
 		t.Fatalf("slot text = %q", w.Text)
@@ -507,6 +505,7 @@ func TestWaitingCompletionsSplit(t *testing.T) {
 func TestLegacyCompletionSlotsUpgrade(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "loom.db")
+	restore := priorRelease(t)
 	s := serviceAt(t, path, busy("L", "persistent", StateActive), childOf("c1", "L"), childOf("c2", "L"))
 	useTestClock(s)
 	mustSendMsg(t, s, sendReq("L", "m1", "Heads up:\nuse cursor paging", child))
@@ -517,6 +516,7 @@ func TestLegacyCompletionSlotsUpgrade(t *testing.T) {
 	dispatchOK(t, s, "L")
 
 	rollBackNotices(t, path)
+	restore()
 
 	s2 := serviceAt(t, path)
 	useTestClock(s2)
@@ -561,6 +561,22 @@ func TestLegacyCompletionSlotsUpgrade(t *testing.T) {
 	}
 }
 
+// notice is the line a record of child's attempt, with no branch or summary,
+// takes in its slot with running other children still running.
+func notice(child string, attempt int64, outcome string, running int) string {
+	return TaskCompleted{Child: child, Attempt: attempt, Outcome: outcome}.notice(child, running)
+}
+
+// priorRelease makes the service write record lines as releases before CL2
+// did, until restore (or the test's end), so a legacy store holds them.
+func priorRelease(t *testing.T) (restore func()) {
+	t.Helper()
+	restore = func() { noticeText = TaskCompleted.notice }
+	noticeText = func(r TaskCompleted, _ string, _ int) string { return r.text() }
+	t.Cleanup(restore)
+	return restore
+}
+
 // rollBackNotices returns the store file at path to the schema before slots
 // kept their notices, as a store saved by the prior release.
 func rollBackNotices(t *testing.T, path string) {
@@ -590,6 +606,7 @@ func rollBackNotices(t *testing.T, path string) {
 func TestLegacySlotRepeatedRecordMessage(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "loom.db")
+	restore := priorRelease(t)
 	s := serviceAt(t, path, busy("L", "persistent", StateActive), childOf("c1", "L"))
 	useTestClock(s)
 	endAttempt(t, s, "c1", "completed")
@@ -601,6 +618,7 @@ func TestLegacySlotRepeatedRecordMessage(t *testing.T) {
 	endAttempt(t, s, "c1", "completed")
 	dispatchOK(t, s, "L")
 	rollBackNotices(t, path)
+	restore()
 
 	s2 := serviceAt(t, path)
 	useTestClock(s2)
@@ -641,12 +659,14 @@ func TestLegacySlotRepeatedRecordMessage(t *testing.T) {
 func TestLegacySlotGetsRecordAfterUpgrade(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "loom.db")
+	restore := priorRelease(t)
 	s := serviceAt(t, path, busy("L", "persistent", StateActive), childOf("c1", "L"))
 	useTestClock(s)
 	mustSendMsg(t, s, sendReq("L", "m1", "Heads up", child))
 	endAttempt(t, s, "c1", "completed")
 	dispatchOK(t, s, "L")
 	rollBackNotices(t, path)
+	restore()
 
 	s2 := serviceAt(t, path)
 	useTestClock(s2)
@@ -679,5 +699,133 @@ func TestLegacySlotGetsRecordAfterUpgrade(t *testing.T) {
 	}
 	if p.Message != "Heads up" || !slices.Equal(p.Completions, want) {
 		t.Fatalf("delivery after upgrade = %+v", p)
+	}
+}
+
+// TestCompletionNoticePayload (CL2): each child's notice in the lead's slot
+// carries the child's name, outcome, branch@head, summary, how many of the
+// lead's other children are still running and what to do next, and keeps
+// its structured key, so Get still shows it as one completion and no
+// message. A cancelled (archived) sibling is not counted as running.
+func TestCompletionNoticePayload(t *testing.T) {
+	ctx := context.Background()
+	ws := &headWorkspace{branch: "loom/agent/c1", head: "abc123"}
+	c1, c2, c3 := childOf("c1", "L"), childOf("c2", "L"), childOf("c3", "L")
+	c1.Name, c2.Name = "ui-test-agent-1", "ui-test-agent-2"
+	c1.WorktreePath, c1.Branch = sp("/wt/c1"), sp("loom/agent/c1")
+	c3.State, c3.RunningTurnID, c3.Outcome = StateArchived, nil, sp("cancelled")
+	s := newService(t, ServiceConfig{Workspace: ws}, busy("L", "persistent", StateActive), c1, c2, c3)
+	if err := s.appendEvent(ctx, "c1", "item.completed", "item:1", map[string]string{"itemKind": "message",
+		"text": "node --test 3/3 passed; npm unavailable"}); err != nil {
+		t.Fatal(err)
+	}
+	slotOf := func(child string) (string, WaitingMessage) {
+		t.Helper()
+		info, err := s.Get(ctx, "L")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range info.WaitingMessages {
+			if w.Sender == "agent:"+child {
+				return w.Text, w
+			}
+		}
+		t.Fatalf("no waiting slot for %s: %+v", child, info.WaitingMessages)
+		return "", WaitingMessage{}
+	}
+
+	endAttempt(t, s, "c1", "completed")
+	dispatchOK(t, s, "L")
+	text, w := slotOf("c1")
+	want := `task_completed:c1:1 child="ui-test-agent-1" outcome=completed branch=loom/agent/c1@abc123 still_running=1 ` +
+		`summary="node --test 3/3 passed; npm unavailable" next="this notice is the result, no agent_get needed; ` +
+		`1 other child still running: reply in one short line or not at all, and write one combined summary when the last one finishes"`
+	if text != want {
+		t.Fatalf("first notice =\n%s\nwant\n%s", text, want)
+	}
+	if w.Message != "" || !slices.Equal(w.Completions, []Completion{{"c1", 1}}) {
+		t.Fatalf("first notice split = %q %+v", w.Message, w.Completions)
+	}
+	deliverNext(t, s, "L")
+
+	endAttempt(t, s, "c2", "failed")
+	dispatchOK(t, s, "L")
+	text, w = slotOf("c2")
+	want = `task_completed:c2:1 child="ui-test-agent-2" outcome=failed branch= still_running=0 summary="" ` +
+		`next="this notice is the result, no agent_get needed; no children still running: write one combined summary of every child's result now"`
+	if text != want {
+		t.Fatalf("last notice =\n%s\nwant\n%s", text, want)
+	}
+	if w.Message != "" || !slices.Equal(w.Completions, []Completion{{"c2", 1}}) {
+		t.Fatalf("last notice split = %q %+v", w.Message, w.Completions)
+	}
+	if got := strings.Count(text, "\n"); got != 0 {
+		t.Fatalf("notice spans %d lines", got+1)
+	}
+}
+
+// TestCompletionNoticeTwoRunning: with two other children still running the
+// count says so, in the plural.
+func TestCompletionNoticeTwoRunning(t *testing.T) {
+	s := newService(t, ServiceConfig{}, busy("L", "persistent", StateActive),
+		childOf("c1", "L"), childOf("c2", "L"), childOf("c3", "L"))
+	endAttempt(t, s, "c1", "completed")
+	dispatchOK(t, s, "L")
+	if got := waiting(t, s, "L"); len(got) != 1 || !strings.Contains(got[0], " still_running=2 ") ||
+		!strings.Contains(got[0], "2 other children still running") {
+		t.Fatalf("lead slots = %q", got)
+	}
+}
+
+// TestLeadOneInputPerChildResult (2.3d): two children of a real lead finish;
+// the lead is handed each child's result exactly once, as one input, and
+// runs one turn per result, never a second input for the same completion.
+func TestLeadOneInputPerChildResult(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	lead, ref := newLead(t, e, s, "lead")
+	kids := []string{}
+	for _, name := range []string{"ui-test-agent-1", "ui-test-agent-2"} {
+		info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: name}, Preset: "task", Name: name,
+			Parent: lead.AgentID, Repo: "/repo", Overrides: Overrides{Harness: "opencode"}, FirstMessage: "do it"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		kids = append(kids, info.AgentID)
+	}
+	runFeed(t, s, "opencode")
+	runDispatcher(t, s)
+	reconcile(t, s)
+	keys := []string{}
+	for _, rec := range completions(t, s, lead.AgentID) {
+		keys = append(keys, completionKey(rec.Child, rec.Attempt))
+	}
+	if len(keys) != len(kids) {
+		t.Fatalf("records = %v", keys)
+	}
+	delivered := func(key string) int {
+		page, err := e.st.ListEvents(ctx, loomstore.EventQuery{AgentID: lead.AgentID, Kinds: []string{"message.delivered"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, ev := range page.Events {
+			n += strings.Count(string(ev.Payload), key+` child=`)
+		}
+		return n
+	}
+	drained(t, s, "both results delivered to the lead", func() bool {
+		return delivered(keys[0]) > 0 && delivered(keys[1]) > 0
+	})
+	reconcile(t, s)
+	settled(t, s)
+	for _, k := range keys {
+		if got := delivered(k); got != 1 {
+			t.Fatalf("%s reached the lead %d times", k, got)
+		}
+	}
+	if got := turnsRun(e, ref); got != 2 {
+		t.Fatalf("lead turns = %d, want one per child result", got)
 	}
 }
