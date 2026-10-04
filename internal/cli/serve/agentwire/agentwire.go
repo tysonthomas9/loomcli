@@ -100,8 +100,7 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		return nil, fmt.Errorf("agentwire: %w", err)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	a := &API{store: st, tokens: tokens, opencode: oc, ctx: ctx, cancel: cancel, services: map[string]*loomagent.Service{},
-		ticker: realTicker, now: time.Now}
+	a := &API{store: st, tokens: tokens, opencode: oc, ctx: ctx, cancel: cancel, services: map[string]*loomagent.Service{}, ticker: realTicker, now: time.Now}
 	a.SetAPIBase(cfg.APIBase)
 	a.newSvc = func(ws string) (*loomagent.Service, func()) {
 		var svc *loomagent.Service

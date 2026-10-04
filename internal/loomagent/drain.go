@@ -41,9 +41,9 @@ func (s *Service) stopLoop(l *loop) {
 func (l *loop) took() { l.handled++ }
 
 // answer answers the Drain request req with the items handled since the
-// last answer, plus extra.
-func (l *loop) answer(req chan<- int, extra int) {
-	req <- l.handled + extra
+// last answer.
+func (l *loop) answer(req chan<- int) {
+	req <- l.handled
 	l.handled = 0
 }
 
@@ -121,7 +121,7 @@ func (l *loop) wait(ctx context.Context) (int, error) {
 // (returned false), so the loop ends as it would have on its own; a close
 // counts as an item, so Drain asks again once the loop has moved on.
 func settle[T any](l *loop, req chan<- int, ch <-chan T, handle func(T) bool) bool {
-	defer func() { l.answer(req, 0) }()
+	defer func() { l.answer(req) }()
 	for {
 		select {
 		case v, ok := <-ch:

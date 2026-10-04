@@ -80,14 +80,14 @@ func (s *Service) runFeed(ctx context.Context, harness string, l *loop) {
 	var held chan<- int // a Drain request taken as the backoff ended
 	defer func() {
 		if held != nil {
-			l.answer(held, 0)
+			l.answer(held)
 		}
 	}()
 	wait, last := feedRetry, ""
 	for h := s.harnesses[harness]; h != nil && ctx.Err() == nil; {
 		read, err := s.readFeed(ctx, harness, h, l, &held)
 		if held != nil { // the reopen failed before the feed was read
-			l.answer(held, 0)
+			l.answer(held)
 			held = nil
 		}
 		if errors.Is(err, errFeedClosed) || errors.Is(err, loomharness.ErrUnavailable) {
@@ -116,7 +116,7 @@ func (s *Service) runFeed(ctx context.Context, harness string, l *loop) {
 					retry, held = nil, req
 					l.took()
 				default:
-					l.answer(req, 0)
+					l.answer(req)
 				}
 			}
 		}
