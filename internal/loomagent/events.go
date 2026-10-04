@@ -1,6 +1,7 @@
 package loomagent
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -57,9 +58,18 @@ func (s *Service) forgetResumed(harness string) {
 // the reconnect replays a failed one whole. A warning is logged when the
 // failure changes, not on every retry.
 func (s *Service) RunFeed(ctx context.Context, harness string) {
+	l := s.startLoop()
+	defer s.stopLoop(l)
+	s.runFeed(ctx, harness, l)
+}
+
+// runFeed is RunFeed as the loop l, which the caller registered. While it
+// backs off it has nothing queued, so it answers Drain at once, unless the
+// backoff is over and it is about to reopen the feed.
+func (s *Service) runFeed(ctx context.Context, harness string, l *loop) {
 	wait, last := feedRetry, ""
 	for h := s.harnesses[harness]; h != nil && ctx.Err() == nil; {
-		read, err := s.readFeed(ctx, harness, h)
+		read, err := s.readFeed(ctx, harness, h, l)
 		if errors.Is(err, errFeedClosed) || errors.Is(err, loomharness.ErrUnavailable) {
 			s.forgetResumed(harness) // the harness may have restarted: Resume its sessions again
 		}
@@ -73,9 +83,21 @@ func (s *Service) RunFeed(ctx context.Context, harness string) {
 			last = err.Error()
 			slog.Warn("loomagent: event ingestion stopped; reopening the feed to backfill", "harness", harness, "error", err)
 		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(wait):
+		for retry := s.after(wait); retry != nil; {
+			select {
+			case <-ctx.Done():
+				retry = nil
+			case <-retry:
+				retry = nil
+			case req := <-l.drain:
+				select {
+				case <-retry:
+					retry = nil
+					req <- 1
+				default:
+					req <- 0
+				}
+			}
 		}
 		wait = min(2*wait, feedRetryMax)
 	}
@@ -85,7 +107,7 @@ func (s *Service) RunFeed(ctx context.Context, harness string) {
 // it always returns an error, and read reports whether it ingested a live
 // native event of an owned session (a feed.gap or another session's event
 // is not one).
-func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Harness) (read bool, err error) {
+func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Harness, l *loop) (read bool, err error) {
 	f, err := h.Feed(ctx)
 	if err != nil {
 		return false, errors.Join(err, s.harnessAttention(ctx, harness, true))
@@ -99,7 +121,7 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 	if err := s.harnessAttention(ctx, harness, false); err != nil {
 		return false, err
 	}
-	for e := range f.Events() {
+	handle := func(e loomharness.Event) bool {
 		ok := false
 		if e.Type == loomharness.EventFeedGap {
 			s.events.Notify(gap)
@@ -108,11 +130,26 @@ func (s *Service) readFeed(ctx context.Context, harness string, h loomharness.Ha
 			ok, err = s.ingest(ctx, harness, e)
 		}
 		if err != nil {
-			return read, err
+			return false
 		}
 		read = read || ok
+		return true
 	}
-	return read, errFeedClosed
+	for {
+		select {
+		case req := <-l.drain:
+			if !settle(req, f.Events(), handle) {
+				return read, cmp.Or(err, errFeedClosed)
+			}
+		case e, ok := <-f.Events():
+			if !ok {
+				return read, errFeedClosed
+			}
+			if !handle(e) {
+				return read, err
+			}
+		}
+	}
 }
 
 // backfill replays the native history of every live agent's current session.

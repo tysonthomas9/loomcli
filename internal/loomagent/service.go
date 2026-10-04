@@ -144,6 +144,12 @@ type Service struct {
 	catalogWait, catalogPoll time.Duration
 	catalogWarmUp            time.Duration
 	listed                   map[string]time.Time // by harness, the first successful catalog listing, under mu
+	// loops are the running background loops Drain waits on, under mu.
+	loops map[*loop]struct{}
+	// tick is the dispatcher's completion-retry clock and after RunFeed's
+	// backoff timer: time's own, or a test's.
+	tick  ticker
+	after func(time.Duration) <-chan time.Time
 }
 
 // New returns a Service for cfg.
@@ -153,7 +159,8 @@ func New(cfg ServiceConfig) *Service {
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
 		retire: cfg.Retire, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
-		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{},
+		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After,
+		loops: map[*loop]struct{}{},
 		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
 	if cfg.RecoverFirst {
 		s.ready = make(chan struct{})

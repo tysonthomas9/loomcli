@@ -285,8 +285,15 @@ func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomha
 // RecoverFirst it first reconciles every wired harness once and then opens
 // the write gate. It then retries purge-pending native sessions and
 // dispatches every agent with a pending slot (a restart), and does so again
-// whenever its subscription lags and is replaced.
+// whenever its subscription lags and is replaced. Drain waits for it.
 func (s *Service) RunDispatcher(ctx context.Context) {
+	l := s.startLoop()
+	defer s.stopLoop(l)
+	s.runDispatcher(ctx, l)
+}
+
+// runDispatcher is RunDispatcher as the loop l, which the caller registered.
+func (s *Service) runDispatcher(ctx context.Context, l *loop) {
 	s.recoverAtStart(ctx)
 	s.recordCompletions(ctx)
 	for ctx.Err() == nil {
@@ -297,7 +304,7 @@ func (s *Service) RunDispatcher(ctx context.Context) {
 				_ = s.dispatchWake(ctx, id)
 			}
 		}
-		s.follow(ctx, sub)
+		s.follow(ctx, sub, l)
 		s.Bus.Unsubscribe(sub)
 	}
 }
@@ -306,25 +313,34 @@ func (s *Service) RunDispatcher(ctx context.Context) {
 var completionRetry = 5 * time.Second
 
 // follow dispatches on each agent.idle and task_completed until sub ends or
-// ctx does, and retries owed task_completed records.
-func (s *Service) follow(ctx context.Context, sub *BusSubscription) {
-	retry := time.NewTicker(completionRetry)
-	defer retry.Stop()
+// ctx does, retries owed task_completed records on each tick of s.tick, and
+// answers Drain once sub's queued events are handled.
+func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
+	retry, stop := s.tick(completionRetry)
+	defer stop()
+	handle := func(e Event) bool {
+		if e.Type == EventIdle || e.Type == KindTaskCompleted {
+			_ = s.dispatchWake(ctx, e.AgentID)
+		}
+		return true
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-retry.C:
+		case <-retry:
 			if s.owed.Swap(false) {
 				s.recordCompletions(ctx)
+			}
+		case req := <-l.drain:
+			if !settle(req, sub.C, handle) {
+				return
 			}
 		case e, ok := <-sub.C:
 			if !ok {
 				return
 			}
-			if e.Type == EventIdle || e.Type == KindTaskCompleted {
-				_ = s.dispatchWake(ctx, e.AgentID)
-			}
+			handle(e)
 		}
 	}
 }
