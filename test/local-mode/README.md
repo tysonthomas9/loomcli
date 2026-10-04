@@ -185,10 +185,20 @@ The cost of sharing the live folder:
 - Only one REAL stack may run at a time. `make local-mode-agents-up` refuses
   to start one while another project's REAL stack is running (it checks the
   `loom.local-mode.opencode-host-data` container label).
-- SQLite is shared across the podman VM boundary. Your desktop OpenCode and a
-  REAL stack writing `opencode.db` at the same time risks corrupting it, so
-  quit desktop OpenCode while a REAL stack runs; `up` warns when a host
-  process has the database open.
+- SQLite is shared across the podman VM boundary. A host OpenCode and a REAL
+  stack writing `opencode.db` at the same time risks corrupting it.
+  `make local-mode-agents-up` refuses to start while a host OpenCode process
+  (desktop, TUI, or a Loom harness `opencode`) has the database open, naming
+  its PID; quit it first, or set `LOCAL_MODE_OPENCODE_SHARED_OK=1` to start
+  anyway.
+- Before each REAL boot, `up` takes a consistent online backup of
+  `opencode.db` (`sqlite3 .backup`, which folds in the WAL) to
+  `opencode.db.loom-backup-<UTC time>` in the same folder, mode 600, and keeps
+  the newest 3 (`LOCAL_MODE_OPENCODE_BACKUPS`). They are for recovery only and
+  hold the login: never print or copy them. To recover, quit OpenCode and tear
+  down the REAL stack, then copy the newest backup over `opencode.db` and
+  delete `opencode.db-wal` and `opencode.db-shm`. A `podman restart` of the
+  container takes no new backup.
 - The stack's pinned OpenCode must match the host's OpenCode version (both
   2.0.19 today), since either one may migrate the shared database.
 
