@@ -135,7 +135,8 @@ func (s *Service) checkCreate(ctx context.Context, req CreateRequest) (Preset, s
 	if len(taken) > 0 {
 		return p, name, parent, nameTaken(name)
 	}
-	if _, err := s.repoPath(ctx, req.Repo); err != nil {
+	repo, err := s.repoPath(ctx, req.Repo)
+	if err != nil {
 		return p, name, parent, err
 	}
 	if req.Parent != "" {
@@ -145,6 +146,11 @@ func (s *Service) checkCreate(ctx context.Context, req CreateRequest) (Preset, s
 	}
 	if req.BaseRef == "" && parent.Branch == nil { // a task starts from its lead's branch
 		return p, name, parent, invalid("Create needs a base_ref, the branch or commit the agent starts from")
+	}
+	if req.BaseRef != "" {
+		if err := s.workspace.CheckBase(ctx, repo, req.BaseRef); err != nil {
+			return p, name, parent, invalid(fmt.Sprintf("base_ref %q is not a branch or commit in %s: %v", req.BaseRef, req.Repo, err))
+		}
 	}
 	return p, name, parent, nil
 }

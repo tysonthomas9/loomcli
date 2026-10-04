@@ -28,6 +28,11 @@ func (p Port) Status(ctx context.Context, s loomagent.WorkspaceSpec) (loomagent.
 	return loomagent.WorkspaceStatus(st), err
 }
 
+// CheckBase implements loomagent.Workspace with Worktrees.CheckBase.
+func (p Port) CheckBase(ctx context.Context, repo, ref string) error {
+	return p.W.CheckBase(ctx, repo, ref)
+}
+
 // Remove implements loomagent.Workspace with Worktrees.Remove.
 func (p Port) Remove(ctx context.Context, s loomagent.WorkspaceSpec) error {
 	return p.W.Remove(ctx, Spec(s))

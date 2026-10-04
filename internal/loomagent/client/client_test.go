@@ -31,6 +31,8 @@ func (workspace) Status(_ context.Context, s loomagent.WorkspaceSpec) (loomagent
 	return loomagent.WorkspaceStatus{Branch: s.Branch, HEAD: "abc"}, nil
 }
 
+func (workspace) CheckBase(context.Context, string, string) error { return nil }
+
 func (workspace) Remove(context.Context, loomagent.WorkspaceSpec) error { return nil }
 
 func (workspace) Publish(context.Context, loomagent.PublishRequest) (loomagent.PublishResult, error) {

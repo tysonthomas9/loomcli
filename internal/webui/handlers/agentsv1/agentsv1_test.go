@@ -354,8 +354,8 @@ func TestAgentCreateBodySnakeCase(t *testing.T) {
 }
 
 // TestCreateWithoutBaseRefIs400 (CR1): with the real worktree port, a lead
-// create with no base_ref is a 400 naming base_ref and writes no agent; it
-// was a 500 'needs BaseRef' that left a row creating forever.
+// create with no base_ref, or one that does not resolve in the repo, is a 400
+// naming it and writes no agent; both were a 500 that left a row creating.
 func TestCreateWithoutBaseRefIs400(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -400,6 +400,15 @@ func TestCreateWithoutBaseRefIs400(t *testing.T) {
 	}
 	if rows, _, _ := st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true}); len(rows) != 0 {
 		t.Fatalf("rows after a refused create = %d; want none", len(rows))
+	}
+	status, out = call(t, srv, "POST", "ws/v1/agents", "c3",
+		`{"preset":"lead","name":"badbase","repo":"`+repo+`","base_ref":"no-such-ref","overrides":{"harness":"opencode"}}`)
+	if msg, _ := out["error"].(string); status != 400 || out["code"] != "preset_invalid" ||
+		!strings.Contains(msg, "no-such-ref") || !strings.Contains(msg, repo) {
+		t.Fatalf("create with an unknown base_ref = %d %v; want 400 preset_invalid naming the ref and repo", status, out)
+	}
+	if rows, _, _ := st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true}); len(rows) != 0 {
+		t.Fatalf("rows after an unknown base_ref = %d; want none", len(rows))
 	}
 	status, out = call(t, srv, "POST", "ws/v1/agents", "c2",
 		`{"preset":"lead","name":"withbase","repo":"`+repo+`","base_ref":"main","overrides":{"harness":"opencode"}}`)

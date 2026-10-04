@@ -25,6 +25,8 @@ func (e2eWorkspace) Status(_ context.Context, s loomagent.WorkspaceSpec) (loomag
 	return loomagent.WorkspaceStatus{Branch: s.Branch, HEAD: "abc"}, nil
 }
 
+func (e2eWorkspace) CheckBase(context.Context, string, string) error { return nil }
+
 func (e2eWorkspace) Remove(context.Context, loomagent.WorkspaceSpec) error { return nil }
 
 func (e2eWorkspace) Publish(context.Context, loomagent.PublishRequest) (loomagent.PublishResult, error) {

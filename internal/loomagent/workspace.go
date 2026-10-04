@@ -8,6 +8,9 @@ import "context"
 type Workspace interface {
 	// Ensure makes the working copy for s, or reuses it when s owns it.
 	Ensure(ctx context.Context, s WorkspaceSpec) (WorkingCopy, error)
+	// CheckBase reports whether ref resolves in repo as Ensure would resolve
+	// a new working copy's BaseRef; it makes nothing.
+	CheckBase(ctx context.Context, repo, ref string) error
 	// Status reports uncommitted paths and the branch and head for task results.
 	Status(ctx context.Context, s WorkspaceSpec) (WorkspaceStatus, error)
 	// Remove deletes the working copy for s and keeps its branch. It refuses

@@ -53,6 +53,8 @@ func (f *fakeWorkspace) Status(_ context.Context, s WorkspaceSpec) (WorkspaceSta
 	return WorkspaceStatus{Branch: s.Branch, HEAD: "abc"}, nil
 }
 
+func (f *fakeWorkspace) CheckBase(context.Context, string, string) error { return nil }
+
 func (f *fakeWorkspace) Remove(context.Context, WorkspaceSpec) error { return nil }
 
 func (f *fakeWorkspace) Publish(context.Context, PublishRequest) (PublishResult, error) {
