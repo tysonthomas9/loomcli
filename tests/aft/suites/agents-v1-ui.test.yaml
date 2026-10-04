@@ -197,6 +197,9 @@ tests:
             -H "Content-Type: application/json" -H "If-None-Match: *" -d '{"content":"x"}')"
           [ "$code" = 200 ] || { echo "file write gave $code"; cat "$AFT_WORK_DIR/ui-ro-write.json"; exit 1; }
           [ "$(cat "$wt/ro-new.txt")" = x ] || { echo "the file write did not reach the worktree"; exit 1; }
+          # The v5 reset fetches origin and resets to origin/<branch>; give the
+          # lead's checkout the suite's source repo as origin if it has none.
+          git -C "$wt" remote get-url origin >/dev/null 2>&1 || git -C "$wt" remote add origin "$AFT_WORK_DIR/agv1-ui-repo"
           code="$(curl -s -o "$AFT_WORK_DIR/ui-ro-reset.json" -w '%{http_code}' -X POST \
             "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/agents/$id/git/reset" \
             -H "Content-Type: application/json" -d '{"branch":"main","force":true,"push":false}')"
