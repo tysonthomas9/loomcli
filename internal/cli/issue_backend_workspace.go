@@ -67,3 +67,11 @@ func WorkspaceAwareIssueBackendForURL(fleetURL, actor string) func(ctx context.C
 		return fb
 	}
 }
+
+// MarkTaskInCodeReview keeps a task whose finished attempt froze code that
+// awaits review open, in review (D29), through the workspace's issue backend.
+// It is the task-run completion paths' review marker.
+func MarkTaskInCodeReview(ctx context.Context, workspace, task string) error {
+	ctx = middleware.WithWorkspace(ctx, workspace)
+	return backend.MarkCodeReview(ctx, WorkspaceAwareIssueBackend()(ctx), task, "")
+}

@@ -90,11 +90,26 @@ func TestDispatchLoomGitEventsDrainsDurableStore(t *testing.T) {
 		}
 		return nil
 	}
+	previousSettle := settleTaskReviews
+	t.Cleanup(func() { settleTaskReviews = previousSettle })
+	settled := 0
+	settleTaskReviews = func(_ context.Context, got string) error {
+		settled++
+		if got != path || reconciled != 1 {
+			t.Fatalf("task reviews settled on %s before approvals reconciled (%d)", got, reconciled)
+		}
+		return nil
+	}
 	if err := dispatchLoomGitEvents(ctx, path, loomGitEventSink{bus: bus, hub: hub}); err != nil {
 		t.Fatal(err)
 	}
 	if reconciled != 1 {
 		t.Fatalf("approval publications reconciled %d times", reconciled)
+	}
+	// P1.26: every pass settles tasks in code review once their verdict is
+	// applied, after the approval publisher ran.
+	if settled != 1 {
+		t.Fatalf("task reviews settled %d times, want once per pass", settled)
 	}
 	select {
 	case got := <-client.Send():

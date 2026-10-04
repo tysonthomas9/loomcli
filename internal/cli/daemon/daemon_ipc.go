@@ -286,6 +286,9 @@ func (d *Daemon) handleIPCClaim(req AgentIPCRequest) AgentIPCResponse {
 	if resp, ok := d.validateIPCLease(ctx, req); !ok {
 		return resp
 	}
+	if resp, ok := d.guardCodeReview(ctx, req.IssueID, nil); !ok {
+		return resp
+	}
 	if err := d.issueBackend.ClaimIssue(ctx, req.IssueID, lockTTL); err != nil {
 		return ipcErrorResponse(err)
 	}
@@ -318,6 +321,9 @@ func (d *Daemon) handleIPCUpdate(req AgentIPCRequest) AgentIPCResponse {
 	if resp, ok := d.validateIPCLease(ctx, req); !ok {
 		return resp
 	}
+	if resp, ok := d.guardCodeReview(ctx, req.IssueID, &params); !ok {
+		return resp
+	}
 	if err := d.issueBackend.Update(ctx, req.IssueID, params); err != nil {
 		return ipcErrorResponse(err)
 	}
@@ -348,6 +354,12 @@ func (d *Daemon) handleIPCComplete(req AgentIPCRequest) AgentIPCResponse {
 
 	if resp, ok := d.validateIPCLease(ctx, req); !ok {
 		return resp
+	}
+	if resp, ok := d.guardCodeReview(ctx, req.IssueID, nil); !ok {
+		return resp
+	}
+	if d.sup != nil && d.sup.FreezesTaskOnExit(req.AgentName, req.IssueID) {
+		return d.holdCompleteForReview(ctx, req)
 	}
 	result, err := d.issueBackend.Close(ctx, req.IssueID, params)
 	if err != nil {
@@ -514,4 +526,60 @@ func writeIPCResponse(conn net.Conn, resp AgentIPCResponse) {
 	}
 	data = append(data, '\n')
 	_, _ = conn.Write(data)
+}
+
+// codeReviewRefusal is returned when an agent tries to move a task out of
+// code review or touch its code-review label: only Approve or Reject does
+// that (D29).
+var codeReviewRefusal = AgentIPCResponse{
+	Error: "task is awaiting code review; only Approve or Reject in Loom can change its status or code-review label",
+	Kind:  string(backend.KindConflict),
+}
+
+// guardCodeReview refuses agent mutations that would let a task skip code
+// review. A nil update is a claim or close, which a task in code review
+// refuses; an update may not touch the code-review label, nor change the
+// status of a task in code review.
+func (d *Daemon) guardCodeReview(ctx context.Context, issueID string, params *backend.UpdateParams) (AgentIPCResponse, bool) {
+	if params != nil && (backend.HasCodeReviewLabel(params.AddLabels) || backend.HasCodeReviewLabel(params.RemoveLabels)) {
+		return codeReviewRefusal, false
+	}
+	if params != nil && params.Status == nil && params.SetLabels == nil && !params.Claim {
+		return AgentIPCResponse{}, true
+	}
+	issue, err := d.issueBackend.Get(ctx, issueID)
+	if err != nil {
+		return ipcErrorResponse(err), false
+	}
+	if issue == nil {
+		return AgentIPCResponse{}, true
+	}
+	if params != nil && backend.TouchesCodeReviewLabel(*params, issue.Labels) {
+		return codeReviewRefusal, false
+	}
+	if backend.HasCodeReviewLabel(issue.Labels) && (params == nil || params.Status != nil || params.Claim) {
+		return codeReviewRefusal, false
+	}
+	return AgentIPCResponse{}, true
+}
+
+// holdCompleteForReview answers an agent's close of a task whose run freezes
+// its work on exit: the task stays open, in review, with the code-review
+// label (D29). Once the revision is frozen, Loom's review settle closes it as
+// "No changes" if it is empty, or keeps it for Approve or Reject.
+func (d *Daemon) holdCompleteForReview(ctx context.Context, req AgentIPCRequest) AgentIPCResponse {
+	if err := backend.MarkCodeReview(ctx, d.issueBackend, req.IssueID, ""); err != nil {
+		return ipcErrorResponse(err)
+	}
+	result := backend.CloseResult{Closed: &backend.IssueData{ID: req.IssueID, Status: "review"}}
+	if issue, err := d.issueBackend.Get(ctx, req.IssueID); err == nil && issue != nil {
+		result.Closed = &issue.IssueData
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return AgentIPCResponse{Error: "failed to marshal close result: " + err.Error(), Kind: string(backend.KindInternal)}
+	}
+	d.publishMutation(backend.MutationData{Type: backend.MutationStatus, IssueID: req.IssueID, Actor: req.AgentName,
+		OldStatus: "in_progress", NewStatus: "review"})
+	return AgentIPCResponse{Success: true, Data: data}
 }

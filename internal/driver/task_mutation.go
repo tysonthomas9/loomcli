@@ -8,8 +8,45 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+// TaskReviewMarker keeps a task open, in review, when its finished attempt
+// froze code that awaits review (D29), instead of closing it.
+type TaskReviewMarker func(ctx context.Context, workspace, taskID string) error
+
+var attemptAwaitsReview = driverfreeze.AttemptAwaitsReview
+
+// closeTaskOnSuccess decides whether a successful run closes its task. A run
+// whose attempt froze code that awaits review leaves its task open in review
+// (marker), and an empty attempt ("No changes") or a run with no Loom Git copy
+// closes it as before. Without a marker the task closes, as it always did.
+func closeTaskOnSuccess(ctx context.Context, taskRuns store.TaskRunStore, run *domain.TaskRun, marker TaskReviewMarker, metadata map[string]string) (bool, error) {
+	if marker == nil {
+		return true, nil
+	}
+	attempt := metadata["attempt_id"]
+	if attempt == "" {
+		attempt = metadata["remote_capture_attempt"]
+	}
+	if attempt == "" && taskRuns != nil {
+		if latest, err := taskRuns.Get(ctx, run.WorkspaceKey, run.TaskRunID); err == nil && latest != nil {
+			attempt = firstNonEmpty(latest.RuntimeMetadata["attempt_id"], latest.RuntimeMetadata["remote_capture_attempt"])
+		}
+	}
+	awaits, err := attemptAwaitsReview(ctx, run.WorkspaceKey, attempt)
+	if err != nil {
+		return false, fmt.Errorf("check task %s revision for review: %w", run.TaskID, err)
+	}
+	if !awaits {
+		return true, nil
+	}
+	if err := marker(ctx, run.WorkspaceKey, run.TaskID); err != nil {
+		return false, err
+	}
+	return false, nil
+}
 
 type TaskCompleteOptions struct {
 	TaskID  string
@@ -71,6 +108,9 @@ type DriverTaskRunCompletionOptions struct {
 	LogsRef      string
 	ArtifactsRef string
 	Reason       string
+	// ReviewMarker keeps the task open in review when the run froze code
+	// that awaits review (D29); nil closes the task as before.
+	ReviewMarker TaskReviewMarker
 }
 
 // CompleteDriverTaskRun finalizes a deferred TaskRun via the fenced
@@ -92,6 +132,10 @@ func CompleteDriverTaskRun(ctx context.Context, taskRuns store.TaskRunStore, ws,
 	if reason == "" {
 		reason = "completed by driver"
 	}
+	closeTask, err := closeTaskOnSuccess(ctx, taskRuns, taskRun, opts.ReviewMarker, taskRun.RuntimeMetadata)
+	if err != nil {
+		return nil, err
+	}
 	completed, err := taskRuns.Complete(ctx, ws, taskRunID, store.TaskRunComplete{
 		CompletionID:        completionID,
 		NodeID:              taskRun.NodeID,
@@ -103,7 +147,7 @@ func CompleteDriverTaskRun(ctx context.Context, taskRuns store.TaskRunStore, ws,
 		ArtifactsRef:        opts.ArtifactsRef,
 		RequiredArtifactIDs: opts.ArtifactIDs,
 		RequireArtifacts:    len(opts.ArtifactIDs) > 0,
-		CloseTask:           true,
+		CloseTask:           closeTask,
 		CloseReason:         reason,
 	})
 	if err != nil {

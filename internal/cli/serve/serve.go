@@ -328,6 +328,7 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		MaxAttempts:      taskRunMaxAttempts,
 		APIBaseURL:       driverAPIBaseURL(),
 		LocalSettingsDir: bootstrap.LoomDir(),
+		ReviewMarker:     cli.MarkTaskInCodeReview,
 	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)

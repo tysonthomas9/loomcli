@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/outbox"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskreview"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
@@ -100,6 +101,10 @@ var reconcileApprovals = publish.ReconcileApprovalPublicationsAt
 // reconciler pushes them (D29 (6)); tests replace it.
 var reconcileFeedback = publish.ReconcileFeedbackUpdatesAt
 
+// settleTaskReviews moves tasks out of code review once their verdict is
+// applied (D29, P1.26); tests replace it.
+var settleTaskReviews = taskreview.SettleAll
+
 func dispatchLoomGitEvents(ctx context.Context, path string, sink loomGitEventSink) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil
@@ -117,5 +122,6 @@ func dispatchLoomGitEvents(ctx context.Context, path string, sink loomGitEventSi
 	}
 	epicErr := publish.ReconcileEpicPublicationsAt(ctx, path)
 	feedbackErr := reconcileFeedback(ctx, path)
-	return errors.Join(epicErr, feedbackErr, reconcileApprovals(ctx, path, stackstore.Declared()))
+	approvalErr := reconcileApprovals(ctx, path, stackstore.Declared())
+	return errors.Join(epicErr, feedbackErr, approvalErr, settleTaskReviews(ctx, path))
 }

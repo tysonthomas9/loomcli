@@ -713,7 +713,8 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 	if err != nil {
 		return nil, err
 	}
-	if _, err := m.verifyParent(ctx, ws, id); err != nil {
+	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
 		return nil, err
 	}
 	taskRunID := strings.TrimSpace(params.TaskRunID)
@@ -728,11 +729,24 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 		LogsRef:      params.LogsRef,
 		ArtifactsRef: params.ArtifactsRef,
 		Reason:       params.Reason,
+		ReviewMarker: m.codeReviewMarker(driverpkg.DriverRunActor(parent.RunID)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("complete task run: %w", err)
 	}
 	return result, nil
+}
+
+// codeReviewMarker keeps a completed task whose code awaits review open, in
+// review with the code-review label, as the driver run's actor (D29).
+func (m *Module) codeReviewMarker(actor string) driverpkg.TaskReviewMarker {
+	return func(ctx context.Context, ws, task string) error {
+		issues, err := m.issueBackends(ws, actor)
+		if err != nil {
+			return err
+		}
+		return backend.MarkCodeReview(ctx, issues, task, "")
+	}
 }
 
 func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {

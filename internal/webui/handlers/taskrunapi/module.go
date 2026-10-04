@@ -460,6 +460,9 @@ func (m *Module) complete(ctx context.Context, ws string, id leaseIdentity, body
 		return nil, err
 	}
 	complete := params.storeComplete(id, m.now())
+	if complete.CloseTask, err = m.closeTaskOnComplete(ctx, ws, id, complete); err != nil {
+		return nil, err
+	}
 	run, err := m.store.TaskRuns().Complete(ctx, ws, id.TaskRunID, complete)
 	if err != nil {
 		return nil, fmt.Errorf("complete task run: %w", err)

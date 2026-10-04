@@ -35,6 +35,9 @@ type TaskWorker struct {
 	// APIBaseURL is the serve task-run API base URL exported to bridge task
 	// runners as LOOM_TASK_RUN_API_URL (see HostBridgeTaskExecutor).
 	APIBaseURL string
+	// ReviewMarker keeps a task open in review when its run froze code that
+	// awaits review (D29); nil closes every successful task as before.
+	ReviewMarker TaskReviewMarker
 	// LocalSettingsDir is passed through to HostBridgeTaskExecutor so bundled
 	// local-task-runner can read desktop-local credentials/settings.
 	LocalSettingsDir string
@@ -108,6 +111,7 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 		SandboxPlacement:   w.SandboxPlacement,
 		HeartbeatInterval:  w.HeartbeatInterval,
 		CloseTaskOnSuccess: true,
+		ReviewMarker:       w.ReviewMarker,
 		MaxAttempts:        w.maxAttempts(),
 		Now:                w.Now,
 	}, executor)

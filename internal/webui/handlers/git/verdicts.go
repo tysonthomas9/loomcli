@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskreview"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
@@ -96,7 +98,22 @@ func handleVerdictWithPublisher(w http.ResponseWriter, req *http.Request, publis
 		followVerdict(w, req, store, v, body.Lead, publisher)
 		return
 	}
+	settleVerdictTask(req.Context(), v)
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": v, "status": "recorded"})
+}
+
+// settleTask moves the verdict's task out of code review when the verdict
+// decides it (D29); tests replace it.
+var settleTask = func(ctx context.Context, workspace, change string) (taskreview.Decision, error) {
+	return taskreview.SettleChange(ctx, "", workspace, change)
+}
+
+// settleVerdictTask settles the task right after its verdict so the task
+// shows its outcome at once. The reconcile loop retries a failure.
+func settleVerdictTask(ctx context.Context, verdict loomgit.Verdict) {
+	if _, err := settleTask(ctx, verdict.Workspace, verdict.Change); err != nil {
+		slog.WarnContext(ctx, "task review settle after verdict failed", "workspace", verdict.Workspace, "change", verdict.Change, "err", err)
+	}
 }
 
 func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local, verdict loomgit.Verdict,
@@ -147,6 +164,7 @@ func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local
 // for, once its working area exists, and reports the outcome with the status.
 func writeApprovalResponse(w http.ResponseWriter, req *http.Request, verdict loomgit.Verdict, lead, status string, available bool) {
 	response := map[string]any{"success": true, "data": verdict, "status": status}
+	defer settleVerdictTask(req.Context(), verdict)
 	if verdict.Publish && available {
 		outcome, err := publishVerdict(req.Context(), verdict, lead)
 		if err != nil {

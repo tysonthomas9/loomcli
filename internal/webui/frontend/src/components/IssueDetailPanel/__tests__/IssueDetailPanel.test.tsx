@@ -1333,6 +1333,25 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("panel-reject-button")).toBeInTheDocument();
     });
 
+    it("does NOT render ReviewActionBar for a task whose code awaits review", () => {
+      // D29 / P1.26: the Revisions panel owns Approve/Reject for it.
+      const mockIssue = createTestIssueDetails({
+        title: "Some task",
+        status: "review",
+        labels: ["code-review"],
+      });
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onApprove={vi.fn()}
+          onReject={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId("review-action-bar")).not.toBeInTheDocument();
+    });
+
     it("does NOT render ReviewActionBar for non-review items", () => {
       const mockIssue = createTestIssueDetails({
         title: "Regular task without review",

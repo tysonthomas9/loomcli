@@ -15,7 +15,11 @@ import (
 type Local struct{ store *journal.SQLite }
 
 func OpenLocal() (*Local, error) {
-	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	return OpenLocalAt(filepath.Join(config.GetConfigDir(), "loomgit", "store.db"))
+}
+
+// OpenLocalAt opens the journal at path; it must exist.
+func OpenLocalAt(path string) (*Local, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, err
 	}
@@ -27,6 +31,16 @@ func OpenLocal() (*Local, error) {
 }
 
 func (l *Local) Close() error { return l.store.Close() }
+
+// TaskForChange names the task a change belongs to ("" when none).
+func (l *Local) TaskForChange(ctx context.Context, workspace, change string) (string, error) {
+	return l.store.TaskForChange(ctx, workspace, change)
+}
+
+// TaskWorkspaces lists the workspaces whose tasks have changes.
+func (l *Local) TaskWorkspaces(ctx context.Context) ([]string, error) {
+	return l.store.TaskWorkspaces(ctx)
+}
 
 func (l *Local) Submit(ctx context.Context, workspace, change string, number int, headSHA, kind, reason string, actor Actor) (loomgit.Verdict, error) {
 	return Submit(ctx, l.store, workspace, change, number, headSHA, kind, reason, actor)

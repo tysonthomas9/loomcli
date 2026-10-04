@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
@@ -248,6 +249,7 @@ func runDriverCompleteTask(_ *cobra.Command, _ []string) error {
 			LogsRef:      driverCompleteTaskLogsRef,
 			ArtifactsRef: driverCompleteTaskArtifactsRef,
 			Reason:       driverCompleteTaskReason,
+			ReviewMarker: cli.MarkTaskInCodeReview,
 		})
 		if err != nil {
 			return fmt.Errorf("complete task run: %w", err)

@@ -35,6 +35,10 @@ type mockIPCBackend struct {
 	closeErr    error
 	closeResult *backend.CloseResult
 	releaseErr  error
+	// issue is what Get returns (nil: no such issue), for the code-review
+	// guard that reads the task's labels before a claim, close or status
+	// update.
+	issue *backend.IssueDetailData
 }
 
 // ReleaseClaim records the call so handleIPCReleaseClaim tests can assert the
@@ -94,7 +98,7 @@ func (m *mockIPCBackend) Close(_ context.Context, id string, params backend.Clos
 
 // Stub methods to satisfy the IssueBackend interface (not used by IPC server).
 func (m *mockIPCBackend) Get(context.Context, string) (*backend.IssueDetailData, error) {
-	panic("not implemented")
+	return m.issue, nil
 }
 func (m *mockIPCBackend) List(context.Context, backend.ListOpts) ([]backend.IssueData, error) {
 	panic("not implemented")

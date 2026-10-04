@@ -448,3 +448,30 @@ func (s *Supervisor) taskIDForLifecycle(ap *AgentProcess, lockInfo *cli.LockInfo
 	defer ap.Mu.Unlock()
 	return ap.AssignedTaskID
 }
+
+// FreezesTaskOnExit reports whether the named agent's current run freezes
+// task as a Loom Git revision when it exits (P1.21), so a close of that task
+// can wait for the revision instead of closing before its code is reviewed
+// (D29).
+func (s *Supervisor) FreezesTaskOnExit(agentName, task string) bool {
+	if s.WorkspaceID == "" || agentName == "" || task == "" {
+		return false
+	}
+	s.AgentsMu.RLock()
+	var found *AgentProcess
+	for _, ap := range s.Agents {
+		if ap.Entry.Worktree == agentName {
+			found = ap
+			break
+		}
+	}
+	s.AgentsMu.RUnlock()
+	if found == nil {
+		return false
+	}
+	found.Mu.Lock()
+	ready := found.BeforeRef != "" && found.AgentSessionID != ""
+	found.Mu.Unlock()
+	lockInfo, _, _ := cli.CheckLock(found.WorktreePath)
+	return ready && s.taskIDForLifecycle(found, lockInfo) == task
+}
