@@ -547,3 +547,36 @@ func getReceipt(ctx context.Context, q interface {
 	}
 	return r, err
 }
+
+// SenderReceipt is one of a sender's receipts on an agent: its request id,
+// the slot body it left (NULL for a Send with no message, a record other
+// than its batch's last, or a row older than receipt bodies), and its stamp.
+type SenderReceipt struct {
+	RequestID string
+	Body      *string
+	CreatedAt string
+}
+
+// SenderReceipts returns sender's receipts on agentID, oldest first; the
+// records one Notify added share a stamp.
+func (s *Store) SenderReceipts(ctx context.Context, agentID, sender string) ([]SenderReceipt, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT request_id, body, created_at FROM agent_send_receipts
+		WHERE agent_id = ? AND sender = ? ORDER BY created_at, rowid`, agentID, sender)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []SenderReceipt
+	for rows.Next() {
+		var r SenderReceipt
+		var body sql.NullString
+		if err := rows.Scan(&r.RequestID, &body, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		if body.Valid {
+			r.Body = &body.String
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -74,12 +75,14 @@ func completionsIn(body string, n loomstore.SlotNotices) (string, []Completion) 
 }
 
 // slotNotices is n, a slot's notices; for a slot saved before notices were
-// kept (n.Legacy), it rebuilds them: the trailing lines of body that are
-// records agentID saved for sender's child, exactly as text() wrote them,
-// ending with the n.Legacy record the slot last took. That provenance is
-// required, so only such a legacy slot is ever read this way; if the lines
-// do not match (a redacted record), the whole body counts as records, so a
-// raw record never shows as a message.
+// kept (n.Legacy), it rebuilds them from the sender's receipts. The last
+// record of each Notify saved the slot's body after it; walking back from
+// n.Legacy, each such batch must account for the body's last lines (its
+// records' text, exactly), and the receipt the sender wrote just before it
+// must have saved the body that is left: a Send's message (the slot's own
+// text) or an earlier batch's body (walk on). Whatever is not proven that
+// way is left as the message, so the rebuild never hides a message, at
+// worst leaving an unproven record's line visible in it.
 func (s *Service) slotNotices(ctx context.Context, agentID, sender, body string,
 	n loomstore.SlotNotices) (loomstore.SlotNotices, error) {
 	if n.Legacy == "" {
@@ -89,38 +92,78 @@ func (s *Service) slotNotices(ctx context.Context, agentID, sender, body string,
 	if !ok || "agent:"+last.Child != sender {
 		return loomstore.SlotNotices{}, nil
 	}
-	byText := map[string]string{}
+	receipts, err := s.store.SenderReceipts(ctx, agentID, sender)
+	if err != nil {
+		return n, err
+	}
+	texts, err := s.recordTexts(ctx, agentID, last.Child)
+	if err != nil {
+		return n, err
+	}
+	out := loomstore.SlotNotices{}
+	key := n.Legacy
+	for {
+		at := slices.IndexFunc(receipts, func(r loomstore.SenderReceipt) bool { return r.RequestID == key })
+		if at < 0 || receipts[at].Body == nil || *receipts[at].Body != body {
+			return out, nil
+		}
+		stamp := receipts[at].CreatedAt
+		batch := map[string]string{} // text -> key, of the records this Notify added
+		for _, r := range receipts {
+			if r.CreatedAt == stamp && strings.HasPrefix(r.RequestID, "task_completed:") && texts[r.RequestID] != "" {
+				batch[texts[r.RequestID]] = r.RequestID
+			}
+		}
+		lines := strings.Split(body, "\n")
+		i, keys := len(lines), []string{}
+		for i > 0 && len(keys) < len(batch) && batch[lines[i-1]] != "" {
+			keys = append([]string{batch[lines[i-1]]}, keys...)
+			i--
+		}
+		if len(keys) != len(batch) || len(keys) == 0 || keys[len(keys)-1] != key {
+			return out, nil
+		}
+		out.Keys = append(keys, out.Keys...)
+		if i == 0 {
+			out.At = 0
+			return out, nil
+		}
+		body = strings.Join(lines[:i], "\n")
+		out.At = len(body) + 1
+		prev := -1
+		for j, r := range receipts {
+			if r.CreatedAt < stamp && r.Body != nil {
+				prev = j
+			}
+		}
+		if prev < 0 || *receipts[prev].Body != body || !strings.HasPrefix(receipts[prev].RequestID, "task_completed:") {
+			return out, nil // the sender's own message, or not proven a record
+		}
+		key = receipts[prev].RequestID
+	}
+}
+
+// recordTexts maps each record agentID saved for child, by key, to the line
+// text() wrote for it.
+func (s *Service) recordTexts(ctx context.Context, agentID, child string) (map[string]string, error) {
+	out := map[string]string{}
 	q := loomstore.EventQuery{AgentID: agentID, Kinds: []string{KindTaskCompleted}, Limit: 500}
 	for {
 		page, err := s.store.ListEvents(ctx, q)
 		if err != nil {
-			return n, err
+			return nil, err
 		}
 		for _, e := range page.Events {
 			var rec TaskCompleted
-			if json.Unmarshal(e.Payload, &rec) == nil && rec.Child == last.Child {
-				byText[rec.text()] = e.EventID
+			if json.Unmarshal(e.Payload, &rec) == nil && rec.Child == child {
+				out[e.EventID] = rec.text()
 			}
 		}
 		if !page.More {
-			break
+			return out, nil
 		}
 		q.After, q.Snapshot = page.Next, page.SnapshotSeq
 	}
-	lines := strings.Split(body, "\n")
-	i, keys := len(lines), []string{}
-	for i > 0 && byText[lines[i-1]] != "" {
-		keys = append([]string{byText[lines[i-1]]}, keys...)
-		i--
-	}
-	if len(keys) == 0 || keys[len(keys)-1] != n.Legacy {
-		return loomstore.SlotNotices{Keys: []string{n.Legacy}}, nil
-	}
-	at := 0
-	for _, l := range lines[:i] {
-		at += len(l) + 1
-	}
-	return loomstore.SlotNotices{Keys: keys, At: at}, nil
 }
 
 // parseCompletionKey reads a record key completionKey wrote.

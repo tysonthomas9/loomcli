@@ -516,22 +516,7 @@ func TestLegacyCompletionSlotsUpgrade(t *testing.T) {
 	endAttempt(t, s, "c2", "failed")
 	dispatchOK(t, s, "L")
 
-	// Roll the file back to the prior schema: no notices columns.
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var v int
-	if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
-		t.Fatal(err)
-	}
-	for _, q := range []string{"ALTER TABLE agent_slots DROP COLUMN notices", "ALTER TABLE agent_send_receipts DROP COLUMN notices",
-		"PRAGMA user_version = " + strconv.Itoa(v-1)} {
-		if _, err := db.Exec(q); err != nil {
-			t.Fatal(q, err)
-		}
-	}
-	db.Close()
+	rollBackNotices(t, path)
 
 	s2 := serviceAt(t, path)
 	useTestClock(s2)
@@ -573,5 +558,78 @@ func TestLegacyCompletionSlotsUpgrade(t *testing.T) {
 	mustSendMsg(t, s2, sendReq("L", "task_completed:c1:9", "one more thing", child))
 	if w := waiting()["agent:c1"]; w.Message != "" || w.Completions != nil || w.Text != "one more thing" {
 		t.Fatalf("plain message after upgrade = %+v", w)
+	}
+}
+
+// rollBackNotices returns the store file at path to the schema before slots
+// kept their notices, as a store saved by the prior release.
+func rollBackNotices(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var v int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"ALTER TABLE agent_slots DROP COLUMN notices", "ALTER TABLE agent_send_receipts DROP COLUMN notices",
+		"PRAGMA user_version = " + strconv.Itoa(v-1)} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+}
+
+// TestLegacySlotRepeatedRecordMessage: before the upgrade, a child's
+// attempt-1 record was delivered, the child then sent a message whose text is
+// exactly that record's line, and its attempt-2 record merged after it. After
+// the upgrade, Get and the delivery show the message (the repeated line) and
+// one completion, attempt 2 alone.
+func TestLegacySlotRepeatedRecordMessage(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := serviceAt(t, path, busy("L", "persistent", StateActive), childOf("c1", "L"))
+	useTestClock(s)
+	endAttempt(t, s, "c1", "completed")
+	dispatchOK(t, s, "L")
+	deliverNext(t, s, "L")
+	rec1 := completions(t, s, "L")[0].text()
+	mustSendMsg(t, s, sendReq("L", "m1", rec1, child))
+	nextAttempt(t, s, "c1")
+	endAttempt(t, s, "c1", "completed")
+	dispatchOK(t, s, "L")
+	rollBackNotices(t, path)
+
+	s2 := serviceAt(t, path)
+	useTestClock(s2)
+	info, err := s2.Get(ctx, "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(info.WaitingMessages) != 1 {
+		t.Fatalf("waiting = %+v", info.WaitingMessages)
+	}
+	w := info.WaitingMessages[0]
+	want := []Completion{{"c1", 2}}
+	if w.Message != rec1 || !slices.Equal(w.Completions, want) {
+		t.Fatalf("legacy waiting = %q %+v", w.Message, w.Completions)
+	}
+	sl := deliverNext(t, s2, "L")
+	e := loomharness.Event{Type: loomharness.EventMessageDelivered, InputKey: "k-" + sl.RequestID, Sender: sl.Sender, Text: sl.Body}
+	row, err := s2.withCompletions(ctx, "L", nativeRow("L", "message.delivered", e), e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p struct {
+		Message     string
+		Completions []Completion
+	}
+	if err := json.Unmarshal(row.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Message != rec1 || !slices.Equal(p.Completions, want) {
+		t.Fatalf("legacy delivery = %+v", p)
 	}
 }
