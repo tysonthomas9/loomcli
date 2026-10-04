@@ -240,7 +240,7 @@ tests:
         intent: "Check that no lead was made and that an unknown repo gets the same 400"
 
   - name: a lead calls a Loom bridge tool and the chat shows the call and the reply
-    intent: The lead's model calls loom.agent_list through OpenCode's execute tool, the Loom bridge answers from the Agent API, the chat shows the tool call and the follow-up reply, and the model received the tool's result
+    intent: The lead's model calls loom.agent_list through OpenCode's execute tool, the Loom bridge answers from the Agent API, the chat shows the call as one plain bridge line and the follow-up reply, and the model received the tool's result
     steps:
       - api:
           method: POST
@@ -266,10 +266,13 @@ tests:
       - press: Enter
       - wait:
           fn: >-
-            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
-              return t.includes('Tool call') && t.indexOf('AGV1-BRIDGE-REPLY') > t.indexOf('Tool call'); })()
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              const t = c?.textContent || '';
+              const b = c?.querySelectorAll('[data-testid=bridge-call]') || [];
+              return b.length === 1 && b[0].dataset.status === 'completed' && b[0].textContent.includes('Listed agents') &&
+                t.indexOf('AGV1-BRIDGE-REPLY') > t.indexOf('Listed agents') && !t.includes('tools.loom.agent_list'); })()
         budget: 90000
-        intent: "Wait until the chat shows the tool call and then the reply"
+        intent: "Wait until the chat shows the bridge call as one plain 'Listed agents' line (CL1, no raw Execute input) and then the reply"
       - run: |
           set -e
           curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-bridge-requests.json"
