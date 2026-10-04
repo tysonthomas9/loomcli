@@ -438,15 +438,23 @@ func TestSendRetrySameRequestNoNewEvents(t *testing.T) {
 	if got := drain(bus); len(got) != 0 {
 		t.Fatalf("the failed Send published %v", types(got))
 	}
+	// The failed Send was never fanned out: the subscriber's first event is a
+	// sentinel written after it, and the retry's comes next.
+	if _, err := s.events.Append(ctx, loomstore.Event{AgentID: "a1", EventID: "mid", Kind: "test.sentinel",
+		Payload: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if e := recv(t, sub, 1)[0]; e.EventID != "mid" || e.Seq != 1 {
+		t.Fatalf("subscriber's first event %s seq %d; want the sentinel at 1", e.EventID, e.Seq)
+	}
 	if _, err := db.Exec(`DROP TRIGGER fail_insert`); err != nil {
 		t.Fatal(err)
 	}
 	first := mustSendMsg(t, s, sendReq("a1", "r1", "hello", user))
-	// The failed Send was never fanned out: the subscriber's first event is the retry's.
-	if e := recv(t, sub, 1)[0]; e.EventID != "a1:send:r1:"+EventWaiting || e.Seq != 1 {
-		t.Fatalf("subscriber's first event %s seq %d; want a1:send:r1:%s at 1", e.EventID, e.Seq, EventWaiting)
+	if e := recv(t, sub, 1)[0]; e.EventID != "a1:send:r1:"+EventWaiting || e.Seq != 2 {
+		t.Fatalf("subscriber's next event %s seq %d; want a1:send:r1:%s at 2", e.EventID, e.Seq, EventWaiting)
 	}
-	want := []string{"a1:send:r1:" + EventWaiting}
+	want := []string{"mid", "a1:send:r1:" + EventWaiting}
 	if got := ids(rows(t, s, "a1", 0)); !slices.Equal(got, want) {
 		t.Fatalf("after the retry: events %v; want %v", got, want)
 	}
