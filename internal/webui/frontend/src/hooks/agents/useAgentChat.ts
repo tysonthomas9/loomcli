@@ -45,6 +45,8 @@ export interface UseAgentChatReturn {
   remove: () => Promise<void>;
   /** The saved history is gone (history_purged_at, or a history_expired error). */
   expired: boolean;
+  /** The first catch-up has loaded: rows from here on arrived live. */
+  synced: boolean;
 }
 
 /** REST Send's JSON request body limit (the server's 1 MiB guard). */
@@ -85,6 +87,7 @@ export function useAgentChat(
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [expiredErr, setExpiredErr] = useState(false);
+  const [synced, setSynced] = useState(false);
 
   const refresh = useCallback(() => {
     getAgent(workspaceId, agentId)
@@ -94,6 +97,7 @@ export function useAgentChat(
 
   useEffect(() => {
     refresh();
+    setSynced(false);
     const stream: AgentEventStream = new AgentEventStream(workspaceId, {
       agents: [agentId],
       deltas: true,
@@ -107,7 +111,10 @@ export function useAgentChat(
         if (added.some((e) => REFRESH_KINDS.has(e.kind))) refresh();
       },
       onNotice: (n) => setStreaming((s) => addDelta(s, n)),
-      onResync: refresh,
+      onResync: () => {
+        setSynced(true);
+        refresh();
+      },
     });
     void stream.connect();
     return () => stream.close();
@@ -217,6 +224,7 @@ export function useAgentChat(
     unarchive,
     remove,
     expired: expiredErr || !!agent?.history_purged_at,
+    synced,
   };
 }
 

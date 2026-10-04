@@ -41,7 +41,7 @@ Ported files for the chat page design (UI0; internal/webui/frontend/src/componen
 Ported motion for the chat (UI5; internal/webui/frontend/src/components/AgentChat/):
 
 - `ChatPage.module.css`: the pending-ask drawer's entrance, from `apps/web/src/components/chat/ComposerBannerStack.tsx` (opacity and a 4px rise only, without its height transition).
-- `MessageRows.tsx`: the working row's step label and live-activity shimmer, from `WorkingTimelineRow` in `apps/web/src/components/chat/MessagesTimeline.tsx`.
+- `MessageRows.tsx`: the working row's step label, from `WorkingTimelineRow` in `apps/web/src/components/chat/MessagesTimeline.tsx`, and its live-activity shimmer redone as an opacity pulse.
 - `ModelPickerSidebar.tsx`, `ModelPickerContent.tsx`, `ModelPicker.module.css`: the sliding selected-provider indicator and the model list's scroll fades, from `apps/web/src/components/chat/ModelPickerSidebar.tsx`, `apps/web/src/components/chat/ModelPickerContent.tsx` and `apps/web/src/components/ui/scroll-area.tsx`.
 
 Ported files (internal/loomharness/):

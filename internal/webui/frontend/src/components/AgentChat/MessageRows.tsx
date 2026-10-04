@@ -8,7 +8,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LongText } from "./LongText";
 import { MessageCopyButton } from "./MessageCopyButton";
 import styles from "./ChatPage.module.css";
-import timeline from "./Timeline.module.css";
 import { prefersReducedMotion } from "./useSmoothText";
 
 const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
@@ -72,8 +71,8 @@ export function UserMessage({
 }
 
 /**
- * "Working for Ns" while a turn runs (T3's WorkingTimelineRow), with the
- * live-activity shimmer and "· step" while a tool runs.
+ * "Working for Ns" while a turn runs (T3's WorkingTimelineRow); while a tool
+ * runs it pulses, by opacity alone, and names the tool as "· step".
  */
 export function WorkingRow({
   startedAt,
@@ -84,7 +83,7 @@ export function WorkingRow({
 }) {
   return (
     <div className={styles.working} data-testid="working-row">
-      <span className={step ? timeline.liveLabel : undefined}>
+      <span className={step ? styles.workingLive : undefined}>
         {startedAt ? (
           <>
             Working for <WorkingTimer startedAt={startedAt} />

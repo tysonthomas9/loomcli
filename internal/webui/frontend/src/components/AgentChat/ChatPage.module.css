@@ -419,6 +419,17 @@
   opacity: 0.55;
 }
 
+/* The live-activity shimmer, by opacity only. */
+.workingLive {
+  animation: working-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes working-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
 /* A new message rises 4px as it fades in; the working row fades out. */
 .row[data-enter] {
   animation: row-enter 150ms ease-out;
@@ -649,6 +660,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .spinner,
+  .workingLive,
   .row[data-enter],
   .row[data-leaving],
   .askDrawer {

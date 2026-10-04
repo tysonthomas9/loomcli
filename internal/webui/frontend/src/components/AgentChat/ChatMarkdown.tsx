@@ -410,25 +410,21 @@ function appendCaret(root: HNode) {
   });
 }
 
-/** The streaming tail: fresh runs, from the block's start, and the caret. */
-interface Tail {
-  fresh: readonly FreshRun[];
-}
-
 const MarkdownBlock = memo(function MarkdownBlock({
   text,
   streaming,
-  tail,
+  fresh,
 }: {
   text: string;
   streaming: boolean;
-  tail?: Tail | undefined;
+  /** Set on the streaming tail: its fresh runs, from the block's start. */
+  fresh?: readonly FreshRun[] | undefined;
 }) {
-  const rehype = tail
+  const rehype = fresh
     ? [
         ...REHYPE_PLUGINS,
         () => (tree: HNode) => {
-          if (tail.fresh.length) fadeRuns(tree, tail.fresh);
+          if (fresh.length) fadeRuns(tree, fresh);
           appendCaret(tree);
         },
       ]
@@ -469,14 +465,12 @@ export const ChatMarkdown = memo(function ChatMarkdown({
           key={i}
           text={block}
           streaming={streaming}
-          tail={
+          fresh={
             streaming && i === blocks.length - 1
-              ? {
-                  fresh: fresh.map((r) => ({
-                    ...r,
-                    from: Math.max(0, r.from - lastStart),
-                  })),
-                }
+              ? fresh.map((r) => ({
+                  ...r,
+                  from: Math.max(0, r.from - lastStart),
+                }))
               : undefined
           }
         />

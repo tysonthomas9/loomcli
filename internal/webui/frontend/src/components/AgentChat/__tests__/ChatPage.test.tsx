@@ -12,6 +12,7 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
+import { readFileSync } from "node:fs";
 
 import type { Agent, AgentEvent, AgentStreamOptions } from "@/api/agentsv1";
 import { turnStartedAt } from "@/hooks/agents/useAgentChat";
@@ -415,4 +416,20 @@ describe("WorkingRow motion", () => {
       vi.unstubAllGlobals();
     }
   });
+});
+
+describe("chat motion CSS", () => {
+  it.each(["ChatPage", "ChatMarkdown", "ModelPicker"])(
+    "%s.module.css keyframes animate only opacity and transform",
+    (name) => {
+      const css = readFileSync(
+        `${process.cwd()}/src/components/AgentChat/${name}.module.css`,
+        "utf8",
+      );
+      const keyframes = [...css.matchAll(/@keyframes[^{]*\{([\s\S]*?)\n\}/g)];
+      for (const [, body] of keyframes)
+        for (const [, prop] of body!.matchAll(/([a-z-]+)\s*:/g))
+          expect(["opacity", "transform"]).toContain(prop);
+    },
+  );
 });

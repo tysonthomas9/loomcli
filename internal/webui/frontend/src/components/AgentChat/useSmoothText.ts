@@ -2,17 +2,21 @@ import { useEffect, useReducer, useRef } from "react";
 
 /** The steady reveal rate while the buffer is short. */
 export const BASE_CHARS_PER_SECOND = 90;
-/** The reveal speeds up so the text trails the model by about this much. */
-const MAX_LAG_SECONDS = 0.3;
+/** No text stays hidden longer than this after it arrives. */
+export const MAX_LAG_MS = 300;
 /** How long a newly revealed run takes to fade in. */
 export const FADE_MS = 150;
 
 const FRAME_MS = 1000 / 60;
 const isSpace = (c: string | undefined) => c !== undefined && /\s/.test(c);
 
-/** Characters a second to reveal with `backlog` characters still hidden. */
-export function revealRate(backlog: number): number {
-  return Math.max(BASE_CHARS_PER_SECOND, backlog / MAX_LAG_SECONDS);
+/**
+ * Characters a second to reveal with `backlog` characters still hidden, the
+ * oldest of them `ageMs` old: fast enough to show them all by MAX_LAG_MS.
+ */
+export function revealRate(backlog: number, ageMs = 0): number {
+  const leftMs = Math.max(FRAME_MS, MAX_LAG_MS - ageMs);
+  return Math.max(BASE_CHARS_PER_SECOND, (backlog * 1000) / leftMs);
 }
 
 /**
@@ -24,10 +28,12 @@ export function nextReveal(
   pos: number,
   shown: number,
   dtMs: number,
+  ageMs = 0,
 ): { pos: number; shown: number } {
   const len = text.length;
   if (shown >= len) return { pos: len, shown: len };
-  const next = Math.min(len, pos + (revealRate(len - shown) * dtMs) / 1000);
+  const rate = revealRate(len - shown, ageMs);
+  const next = Math.min(len, pos + (rate * dtMs) / 1000);
   let k = Math.floor(next);
   if (k <= shown) return { pos: next, shown };
   while (k < len && isSpace(text[k - 1])) k++;
@@ -63,6 +69,7 @@ export function useSmoothText(
     pos: text.length,
     shown: text.length,
     runs: [] as { from: number; at: number }[],
+    arrivals: [] as { end: number; at: number }[],
     now: 0,
     last: 0,
     frame: 0,
@@ -75,6 +82,7 @@ export function useSmoothText(
       s.frame = s.last = 0;
       s.pos = s.shown = s.text.length;
       s.runs = [];
+      s.arrivals = [];
       return;
     }
     if (s.frame || (s.shown >= s.text.length && s.runs.length === 0)) return;
@@ -82,7 +90,13 @@ export function useSmoothText(
       const dt = s.last ? now - s.last : FRAME_MS;
       s.last = s.now = now;
       if (s.shown > s.text.length) s.pos = s.shown = s.text.length;
-      const r = nextReveal(s.text, s.pos, s.shown, dt);
+      // When each piece of text arrived, to bound how long it stays hidden.
+      const known = s.arrivals[s.arrivals.length - 1]?.end ?? s.shown;
+      if (s.text.length > known)
+        s.arrivals.push({ end: s.text.length, at: now });
+      s.arrivals = s.arrivals.filter((a) => a.end > s.shown);
+      const age = s.arrivals[0] ? now - s.arrivals[0].at : 0;
+      const r = nextReveal(s.text, s.pos, s.shown, dt, age);
       if (r.shown > s.shown) s.runs.push({ from: s.shown, at: now });
       s.pos = r.pos;
       s.shown = r.shown;

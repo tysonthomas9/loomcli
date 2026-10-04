@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BASE_CHARS_PER_SECOND,
   FADE_MS,
+  MAX_LAG_MS,
   nextReveal,
   revealRate,
   useSmoothText,
@@ -21,6 +22,11 @@ describe("revealRate", () => {
 
   it("speeds up so the backlog drains within about 300ms", () => {
     expect(revealRate(900)).toBeCloseTo(3000);
+  });
+
+  it("speeds up as the oldest hidden text nears 300ms", () => {
+    expect(revealRate(900, 200)).toBeCloseTo(9000);
+    expect(revealRate(900, 400)).toBeCloseTo(900 * 60);
   });
 });
 
@@ -89,6 +95,40 @@ describe("useSmoothText", () => {
     expect(result.current.text).toBe("Hello there");
     for (let i = 0; i < 60; i++) tick();
     expect(result.current.text).toBe("Hello there my friend");
+  });
+
+  it("shows a 900-character burst within 300ms of its arrival", () => {
+    const burst = "word ".repeat(180);
+    const { result, rerender } = renderHook(({ t, s }) => useSmoothText(t, s), {
+      initialProps: { t: "", s: true },
+    });
+    rerender({ t: burst, s: true });
+    tick(); // the frame that sees it arrive
+    const arrived = now;
+    while (result.current.text.length < burst.length && now - arrived < 1000)
+      tick();
+    expect(now - arrived).toBeLessThanOrEqual(MAX_LAG_MS + FRAME);
+  });
+
+  it("keeps every chunk of a 300 chars/s stream within 300ms", () => {
+    const words = "The quick brown fox jumps over the lazy dog. ".repeat(20);
+    const { result, rerender } = renderHook(({ t, s }) => useSmoothText(t, s), {
+      initialProps: { t: "", s: true },
+    });
+    const pending: { end: number; at: number }[] = [];
+    let worst = 0;
+    // 24 characters every 5 frames (83ms): about 290 chars/s.
+    for (let f = 0, i = 0; i < words.length || pending.length; f++) {
+      if (i < words.length && f % 5 === 0) {
+        i = Math.min(words.length, i + 24);
+        rerender({ t: words.slice(0, i), s: true });
+        pending.push({ end: i, at: now });
+      }
+      tick();
+      while (pending[0] && result.current.text.length >= pending[0].end)
+        worst = Math.max(worst, now - pending.shift()!.at);
+    }
+    expect(worst).toBeLessThanOrEqual(MAX_LAG_MS + 2 * FRAME);
   });
 
   it("fades new words in, by opacity alone", () => {

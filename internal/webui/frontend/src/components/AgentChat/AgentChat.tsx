@@ -92,6 +92,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     unarchive,
     remove,
     expired,
+    synced,
   } = useAgentChat(workspaceId, agentId);
   const navigate = useNavigate();
   const compact = useNarrow(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX);
@@ -106,7 +107,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     () => deriveTimelineRows(items, expandedGroups),
     [items, expandedGroups],
   );
-  const entering = useEnteringRows(rows);
+  const entering = useEnteringRows(rows, synced);
   // The agent tray: working children, and results waiting for this agent.
   const roster = useRoster();
   const activity = useRosterActivity();
@@ -428,23 +429,29 @@ const isMessageRow = (r: TimelineRow) =>
   r.kind === "item" && (r.item.kind === "user" || r.item.kind === "agent");
 
 /**
- * The ids of user and agent rows that arrived live, which fade in. Rows at
- * the first render, rows that arrive several at once (history loading) and
- * a completed message replacing its streamed copy do not animate.
+ * The ids of user and agent rows that arrived live, which fade in. Nothing
+ * animates until the first catch-up has loaded (`synced`); after that, a
+ * batch of several rows (a reconnect's catch-up) and a completed message
+ * replacing its streamed copy do not animate either. An id is kept while
+ * its row shows, so a later render does not cut its fade short.
  */
-function useEnteringRows(rows: readonly TimelineRow[]): ReadonlySet<string> {
+function useEnteringRows(
+  rows: readonly TimelineRow[],
+  synced: boolean,
+): ReadonlySet<string> {
   const prev = useRef<ReadonlyMap<string, boolean> | null>(null);
   const entering = useRef(new Set<string>()).current;
   useMemo(() => {
     const now = new Map(rows.map((r) => [r.id, isMessageRow(r)]));
     const before = prev.current;
-    prev.current = now;
+    prev.current = synced ? now : null;
+    entering.forEach((id) => now.has(id) || entering.delete(id));
     if (!before) return;
     const added = rows.filter((r) => !before.has(r.id));
     const replaced = [...before].some(([id, msg]) => msg && !now.has(id));
     if (added.length > 2 || replaced) return;
     added.filter(isMessageRow).forEach((r) => entering.add(r.id));
-  }, [rows, entering]);
+  }, [rows, synced, entering]);
   return entering;
 }
 

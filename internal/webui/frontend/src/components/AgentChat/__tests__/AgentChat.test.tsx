@@ -678,23 +678,29 @@ describe("AgentChat", () => {
     expect(screen.getAllByText("Hello!")).toHaveLength(1);
   });
 
-  it("fades in a message that arrives live, not the history that loads", async () => {
-    const { container } = await mount(agent());
-    deliver(
-      ev("message.delivered", { sender: "user:u1", text: "one" }),
-      ev("item.completed", { itemKind: "message", text: "two" }),
-      ev("item.completed", { itemKind: "message", text: "three" }),
-    );
-    expect(container.querySelectorAll("li[data-enter]")).toHaveLength(0);
-    deliver(ev("message.delivered", { sender: "user:u1", text: "four" }));
-    const entered = container.querySelectorAll("li[data-enter]");
-    expect(entered).toHaveLength(1);
-    expect(entered[0]).toHaveTextContent("four");
-  });
+  it.each([1, 2, 3])(
+    "fades in a message that arrives live, not a %i-row history load",
+    async (n) => {
+      const { container } = await mount(agent());
+      const s = api.streams[0];
+      deliver(
+        ...Array.from({ length: n }, (_, i) =>
+          ev("message.delivered", { sender: "user:u1", text: `old ${i}` }),
+        ),
+      );
+      act(() => s.opts.onResync?.());
+      expect(container.querySelectorAll("li[data-enter]")).toHaveLength(0);
+      deliver(ev("message.delivered", { sender: "user:u1", text: "four" }));
+      const entered = container.querySelectorAll("li[data-enter]");
+      expect(entered).toHaveLength(1);
+      expect(entered[0]).toHaveTextContent("four");
+    },
+  );
 
   it("does not fade a completed message in over its streamed copy", async () => {
     const { container } = await mount(agent());
     const s = api.streams[0];
+    act(() => s.opts.onResync?.());
     act(() =>
       s.opts.onNotice?.({
         ...ev("delta", { itemId: "m1", itemKind: "message", text: "Hi" }),
