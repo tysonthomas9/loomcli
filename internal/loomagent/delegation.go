@@ -84,10 +84,14 @@ func (t TaskCompleted) notice(name string, running int) string {
 		strconv.Quote("this notice is the result, no agent_get needed; "+next))
 }
 
-// at is the record's branch@head, the branch alone without a head.
+// at is the record's branch@head: branch@unknown when the head could not
+// be read (a working copy not the agent's), empty without a branch.
 func (t TaskCompleted) at() string {
+	if t.Branch == "" {
+		return ""
+	}
 	if t.Head == "" {
-		return t.Branch
+		return t.Branch + "@unknown"
 	}
 	return t.Branch + "@" + t.Head
 }

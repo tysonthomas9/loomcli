@@ -942,7 +942,7 @@ func TestTaskCompletedWorkingCopyNotOwned(t *testing.T) {
 	s.recordCompletions(ctx)
 	dispatchOK(t, s, "L")
 	got := waiting(t, s, "L")
-	if len(got) != 1 || !strings.HasPrefix(got[0], "agent:feature="+completionKey("feature", 1)+` child="feature" outcome=completed branch=loom/agent/feature still_running=0 `) {
+	if len(got) != 1 || !strings.HasPrefix(got[0], "agent:feature="+completionKey("feature", 1)+` child="feature" outcome=completed branch=loom/agent/feature@unknown still_running=0 `) {
 		t.Fatalf("lead slots = %q; want feature's one notice", got)
 	}
 	if n := len(completions(t, s, "L")); n != 2 {
