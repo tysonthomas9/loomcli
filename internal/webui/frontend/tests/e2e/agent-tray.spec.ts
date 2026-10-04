@@ -9,8 +9,9 @@ import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 
 const SHOTS = process.env.DF1_SHOTS;
+// Minute min of the hour that ends now, so elapsed times read as real.
 const T = (min: number) =>
-  new Date(Date.UTC(2026, 9, 4, 14, min)).toISOString();
+  new Date(Date.now() - (60 - min) * 60_000).toISOString();
 
 let seq = 0;
 const ev = (kind: string, payload: object, at = T(41), id?: string) => ({
@@ -344,8 +345,10 @@ test("children show as markers and the tray, a waiting result keeps its dot unti
   await expect(records.nth(2)).toContainText("Lead read the result");
 
   // Sending collapses the open tray so the latest lines show.
-  await page.getByLabel("Message").fill("Thanks — what's next?");
-  await page.getByLabel("Message").press("Enter");
+  await page
+    .getByRole("textbox", { name: "Message" })
+    .fill("Thanks — what's next?");
+  await page.getByRole("textbox", { name: "Message" }).press("Enter");
   await expect(tray.getByRole("button", { expanded: false })).toBeVisible();
   await expect(chat).not.toContainText("task_completed:");
 

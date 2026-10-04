@@ -123,6 +123,7 @@ export function AgentTray({
       data-testid="agent-tray"
       data-open={open}
       data-tucked={tucked}
+      data-narrow={narrow}
     >
       <button
         type="button"
@@ -152,7 +153,7 @@ export function AgentTray({
             </span>
           )}
         </span>
-        {running && (
+        {running && !narrow && (
           <span className={tray.clock}>{elapsed(oldestRun, true)}</span>
         )}
         <svg

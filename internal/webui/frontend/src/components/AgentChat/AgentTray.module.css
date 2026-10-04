@@ -17,6 +17,17 @@
   border-radius: 14px;
 }
 
+.tray[data-narrow="true"] {
+  margin-right: 0.25rem;
+  margin-left: 0.25rem;
+}
+
+.tray[data-narrow="true"] .header {
+  gap: 6px;
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
 .header {
   display: flex;
   align-items: center;
