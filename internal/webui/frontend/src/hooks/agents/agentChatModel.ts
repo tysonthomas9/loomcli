@@ -23,6 +23,9 @@ interface NativePayload {
   message?: string;
   /** A tool item's call, on its tool.started notice and item.completed. */
   tool?: ToolCall;
+  /** A harness.changed's old and new harness. */
+  from_harness?: string;
+  harness?: string;
 }
 
 /**
@@ -52,6 +55,8 @@ export type ChatItem =
   | { key: string; kind: "reasoning"; text: string; streaming?: boolean }
   | { key: string; kind: "tool"; tool: ToolCall; status: ToolStatus }
   | { key: string; kind: "turn_end"; reason: string; error?: string }
+  /** A harness switch: later turns run in a fresh native context. */
+  | { key: string; kind: "harness_changed"; from: string; to: string }
   /** One marker for children started back to back. */
   | { key: string; kind: "started"; children: StartedChild[]; at: string }
   | {
@@ -135,6 +140,13 @@ function itemFor(
             ...(p.error ? { error: p.error } : {}),
           }
         : null;
+    case "harness.changed":
+      return {
+        key,
+        kind: "harness_changed",
+        from: p.from_harness ?? "",
+        to: p.harness ?? "",
+      };
     case "child.created": {
       const c = e.payload as StartedChild;
       return {
@@ -300,6 +312,7 @@ export const REFRESH_KINDS = new Set([
   "ask.opened",
   "ask.resolved",
   "ask.lost",
+  "harness.changed",
 ]);
 
 /**

@@ -28,21 +28,40 @@ export function resolveRenameCommit(input: {
 
 /**
  * The chat's header: the agent's name (renamed inline through PATCH name),
- * its harness as a label and its state as a pill. The same for every
- * harness.
+ * its harness as a label, its state as a pill, and Archive, Unarchive and
+ * Delete (design v2 §4.7–§4.8). The same for every harness.
  */
 export function ChatHeader({
   agentId,
   agent,
+  expired,
   onRename,
+  onArchive,
+  onUnarchive,
+  onDelete,
 }: {
   agentId: string;
   agent: Agent | null;
+  /** The saved history is gone, so Unarchive would fail. */
+  expired: boolean;
   /** PATCHes the name; rejects after the chat shows the error. */
   onRename: (name: string) => Promise<void>;
+  /** Each rejects after the chat shows the error. */
+  onArchive: () => Promise<void>;
+  onUnarchive: () => Promise<void>;
+  onDelete: () => Promise<void>;
 }) {
   const title = agent?.name ?? agentId;
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const act = (call: () => Promise<void>) => {
+    setBusy(true);
+    setConfirming(false);
+    void call()
+      .catch(() => {})
+      .finally(() => setBusy(false));
+  };
   const committed = useRef(false);
 
   const start = () => {
@@ -137,6 +156,60 @@ export function ChatHeader({
             <span className={styles.statePill} role="status">
               History expiry incomplete
             </span>
+          )}
+          {agent.archived_at ? (
+            !expired && (
+              <button
+                type="button"
+                className={styles.headerAction}
+                data-testid="agent-unarchive"
+                disabled={busy}
+                onClick={() => act(onUnarchive)}
+              >
+                Unarchive
+              </button>
+            )
+          ) : (
+            <button
+              type="button"
+              className={styles.headerAction}
+              data-testid="agent-archive"
+              disabled={busy}
+              onClick={() => act(onArchive)}
+            >
+              Archive
+            </button>
+          )}
+          {confirming ? (
+            <>
+              <button
+                type="button"
+                className={styles.headerAction}
+                data-danger="true"
+                data-testid="agent-delete-confirm"
+                disabled={busy}
+                onClick={() => act(onDelete)}
+              >
+                Delete agent
+              </button>
+              <button
+                type="button"
+                className={styles.headerAction}
+                onClick={() => setConfirming(false)}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className={styles.headerAction}
+              data-testid="agent-delete"
+              disabled={busy}
+              onClick={() => setConfirming(true)}
+            >
+              Delete
+            </button>
           )}
         </div>
       )}

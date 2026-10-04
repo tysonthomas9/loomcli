@@ -86,7 +86,12 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     respond,
     update,
     runningSince,
+    archive,
+    unarchive,
+    remove,
+    expired,
   } = useAgentChat(workspaceId, agentId);
+  const navigate = useNavigate();
   const compact = useNarrow(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX);
   const own = ownSender(useAuth().user?.id);
   const [draft, setDraft] = useState("");
@@ -163,7 +168,15 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
       <ChatHeader
         agentId={agentId}
         agent={agent}
+        expired={expired}
         onRename={(name) => update({ name })}
+        onArchive={archive}
+        onUnarchive={unarchive}
+        onDelete={() =>
+          remove().then(() =>
+            navigate(`/ws/${encodeURIComponent(workspaceId)}/home`),
+          )
+        }
       />
 
       <div className={page.scroller}>
@@ -269,6 +282,16 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
             }}
           />
 
+          {agent?.attention_reason && (
+            <div
+              className={page.attention}
+              role="status"
+              data-testid="agent-attention-banner"
+            >
+              Needs attention: {attentionText(agent.attention_reason)}
+            </div>
+          )}
+
           {error && (
             <div className={page.error} role="alert">
               {error}
@@ -297,31 +320,70 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
                 />
               </div>
             )}
-            <ChatComposer
-              formRef={compact.ref}
-              draft={draft}
-              onDraftChange={setDraft}
-              editing={editing}
-              sending={sending}
-              running={running}
-              onSubmit={submit}
-              onCancelEdit={stopEditing}
-              onStop={() => void stop().catch(() => {})}
-              controls={
-                <ComposerModelControls
-                  workspaceId={workspaceId}
-                  agent={agent}
-                  compact={compact.narrow}
-                  update={update}
-                />
-              }
-            />
+            {expired ? (
+              <div className={page.notice} data-testid="agent-history-expired">
+                History expired: the saved transcript was removed after the
+                30-day retention, so it cannot be reopened.
+              </div>
+            ) : agent?.archived_at ? (
+              <div className={page.notice} data-testid="agent-archived-notice">
+                Archived: read-only. {daysLeftText(agent.archived_at)} Unarchive
+                to send messages again.
+              </div>
+            ) : (
+              <ChatComposer
+                formRef={compact.ref}
+                draft={draft}
+                onDraftChange={setDraft}
+                editing={editing}
+                sending={sending}
+                running={running}
+                onSubmit={submit}
+                onCancelEdit={stopEditing}
+                onStop={() => void stop().catch(() => {})}
+                controls={
+                  <ComposerModelControls
+                    workspaceId={workspaceId}
+                    agent={agent}
+                    compact={compact.narrow}
+                    update={update}
+                  />
+                }
+              />
+            )}
           </div>
         </div>
       </div>
     </section>
   );
 }
+
+/** How long history outlives Archive (R29). */
+const RETENTION_DAYS = 30;
+
+/** The days left before an archived agent's history expires, as a sentence. */
+export function daysLeftText(archivedAt: string, now = Date.now()): string {
+  const t = Date.parse(archivedAt);
+  if (Number.isNaN(t)) return "";
+  const left = Math.max(
+    0,
+    Math.ceil((t + RETENTION_DAYS * 86_400_000 - now) / 86_400_000),
+  );
+  return left === 1
+    ? "History expires in 1 day."
+    : `History expires in ${left} days.`;
+}
+
+/** Plain words for the server's attention reasons; others show as sent. */
+const ATTENTION: Record<string, string> = {
+  harness_unavailable: "the harness is unavailable.",
+  delivery_unknown: "a message may not have been delivered.",
+  history_too_large: "the history is too large to load in full.",
+  session_missing: "the native session is missing.",
+  create_incomplete: "creating the agent did not finish.",
+  delete_incomplete: "deleting the agent did not finish.",
+};
+const attentionText = (reason: string) => ATTENTION[reason] ?? reason;
 
 /**
  * The row's spacing kind. Every work row (work, work-toggle, work-live and
@@ -682,6 +744,17 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
       return <CompletionCard item={item} workspaceId={workspaceId} />;
     case "from_agent":
       return <FromAgent id={item.agent} name={item.name} text={item.text} />;
+    // A fresh native context; the transcript above stays readable.
+    case "harness_changed":
+      return (
+        <div
+          className={page.contextDivider}
+          data-testid="harness-context-divider"
+        >
+          New harness context
+          {item.to && `: ${item.from ? `${item.from} → ` : ""}${item.to}`}
+        </div>
+      );
     case "turn_end":
       return (
         <div className={page.turnEnd}>

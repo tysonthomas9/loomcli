@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AgentEventStream,
+  archiveAgent,
+  deleteAgent,
   getAgent,
   newRequestId,
   respondToAsk,
   sendMessage,
+  unarchiveAgent,
   updateAgent,
   withdrawMessage,
 } from "@/api/agentsv1";
@@ -36,10 +39,30 @@ export interface UseAgentChatReturn {
   update: (body: UpdateAgentBody) => Promise<void>;
   /** When the running turn started (its saved turn.started), else null. */
   runningSince: string | null;
+  archive: () => Promise<void>;
+  unarchive: () => Promise<void>;
+  /** Deletes the agent; the server refuses while it has unsaved work. */
+  remove: () => Promise<void>;
+  /** The saved history is gone (history_purged_at, or a history_expired error). */
+  expired: boolean;
 }
 
-const message = (err: unknown) =>
-  err instanceof Error ? err.message : String(err);
+/** REST Send's JSON request body limit (the server's 1 MiB guard). */
+const TOO_LARGE =
+  "Not sent: the message is over the server's 1 MiB request limit. Shorten it or split it into parts.";
+
+const message = (err: unknown) => {
+  if (err instanceof ApiError && err.status === 413) return TOO_LARGE;
+  const paths = err instanceof ApiError ? errorPaths(err) : [];
+  const text = err instanceof Error ? err.message : String(err);
+  return paths.length ? `${text}: ${paths.join(", ")}` : text;
+};
+
+// The files an unsaved_work refusal names.
+const errorPaths = (err: ApiError) => {
+  const p = (err.body as { paths?: unknown } | undefined)?.paths;
+  return Array.isArray(p) ? p.map(String) : [];
+};
 
 const errorCode = (err: unknown) =>
   err instanceof ApiError && err.body && typeof err.body === "object"
@@ -61,6 +84,7 @@ export function useAgentChat(
   const [streaming, setStreaming] = useState<Streaming>(new Map());
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [expiredErr, setExpiredErr] = useState(false);
 
   const refresh = useCallback(() => {
     getAgent(workspaceId, agentId)
@@ -97,12 +121,13 @@ export function useAgentChat(
 
   // Runs one write; on failure shows the error and rethrows it.
   const write = useCallback(
-    async (call: () => Promise<unknown>) => {
+    async (call: () => Promise<unknown>, failed = "") => {
       setError(null);
       try {
         await call();
       } catch (err) {
-        setError(message(err));
+        setError(failed + message(err));
+        if (errorCode(err) === "history_expired") setExpiredErr(true);
         throw err;
       }
       refresh();
@@ -151,6 +176,25 @@ export function useAgentChat(
     [write, workspaceId, agentId],
   );
 
+  const archive = useCallback(
+    () => write(() => archiveAgent(workspaceId, agentId, newRequestId())),
+    [write, workspaceId, agentId],
+  );
+
+  const unarchive = useCallback(
+    () => write(() => unarchiveAgent(workspaceId, agentId, newRequestId())),
+    [write, workspaceId, agentId],
+  );
+
+  const remove = useCallback(
+    () =>
+      write(
+        () => deleteAgent(workspaceId, agentId, newRequestId()),
+        "Not deleted: ",
+      ),
+    [write, workspaceId, agentId],
+  );
+
   const runningTurn = agent?.running_turn_id ?? null;
   const runningSince = useMemo(
     () => turnStartedAt(events, runningTurn),
@@ -169,6 +213,10 @@ export function useAgentChat(
     respond,
     update,
     runningSince,
+    archive,
+    unarchive,
+    remove,
+    expired: expiredErr || !!agent?.history_purged_at,
   };
 }
 

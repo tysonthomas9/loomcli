@@ -641,3 +641,61 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* 1.8b: Archive, Unarchive and Delete in the header; the notices that
+   replace the composer; the attention banner and the harness divider. */
+.headerAction {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--chat-outline);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.headerAction:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+.headerAction[data-danger="true"] {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.headerAction:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.notice {
+  padding: 10px 14px;
+  border: 1px solid var(--chat-outline);
+  border-radius: 1rem;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.attention {
+  padding: 8px 12px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: 0.8125rem;
+}
+
+.contextDivider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.contextDivider::before,
+.contextDivider::after {
+  flex: 1;
+  border-top: 1px dashed var(--color-border-light);
+  content: "";
+}

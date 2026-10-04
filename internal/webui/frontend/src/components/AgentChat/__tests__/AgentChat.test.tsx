@@ -15,6 +15,9 @@ const api = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   withdrawMessage: vi.fn(),
   respondToAsk: vi.fn(),
+  archiveAgent: vi.fn(),
+  unarchiveAgent: vi.fn(),
+  deleteAgent: vi.fn(),
   streams: [] as { opts: AgentStreamOptions; events: AgentEvent[] }[],
   ids: 0,
   user: null as { id: string } | null,
@@ -29,6 +32,9 @@ vi.mock("@/api/agentsv1", () => ({
   sendMessage: api.sendMessage,
   withdrawMessage: api.withdrawMessage,
   respondToAsk: api.respondToAsk,
+  archiveAgent: api.archiveAgent,
+  unarchiveAgent: api.unarchiveAgent,
+  deleteAgent: api.deleteAgent,
   updateAgent: () => Promise.resolve({}),
   listHarnessModels: (_ws: string, harness: string) =>
     Promise.resolve({ harness, providers: [] }),
@@ -49,7 +55,7 @@ vi.mock("@/api/agentsv1", () => ({
   },
 }));
 
-import { AgentChat } from "../AgentChat";
+import { AgentChat, daysLeftText } from "../AgentChat";
 import { LONG_TEXT_LIMIT } from "../LongText";
 
 function agent(over: Partial<Agent> = {}): Agent {
@@ -662,5 +668,149 @@ describe("AgentChat", () => {
     );
     expect(screen.queryByText("Hello")).toBeNull();
     expect(screen.getAllByText("Hello!")).toHaveLength(1);
+  });
+});
+
+describe("AgentChat lifecycle (1.8b)", () => {
+  it("archives, then shows read-only history with the days left; unarchive restores the composer", async () => {
+    await mount(agent());
+    expect(screen.getByLabelText("Message")).toBeInTheDocument();
+    api.archiveAgent.mockResolvedValue(undefined);
+    const archived = new Date(Date.now() - 5 * 86_400_000).toISOString();
+    api.getAgent.mockResolvedValue(
+      agent({ state: "archived", archived_at: archived }),
+    );
+    fireEvent.click(screen.getByTestId("agent-archive"));
+    expect(
+      await screen.findByTestId("agent-archived-notice"),
+    ).toHaveTextContent("History expires in 25 days.");
+    expect(api.archiveAgent).toHaveBeenCalledWith(
+      "w1",
+      "a1",
+      expect.any(String),
+    );
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    expect(screen.queryByTestId("agent-archive")).toBeNull();
+
+    api.unarchiveAgent.mockResolvedValue(undefined);
+    api.getAgent.mockResolvedValue(agent());
+    fireEvent.click(screen.getByTestId("agent-unarchive"));
+    expect(await screen.findByLabelText("Message")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-archived-notice")).toBeNull();
+    expect(api.unarchiveAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts the days left before the 30-day expiry", () => {
+    const now = Date.parse("2026-10-04T00:00:00Z");
+    expect(daysLeftText("2026-10-04T00:00:00Z", now)).toBe(
+      "History expires in 30 days.",
+    );
+    expect(daysLeftText("2026-09-04T12:00:00Z", now)).toBe(
+      "History expires in 1 day.",
+    );
+    expect(daysLeftText("2026-08-01T00:00:00Z", now)).toBe(
+      "History expires in 0 days.",
+    );
+  });
+
+  it("deletes only after a confirmation and shows the server's dirty-work refusal plainly", async () => {
+    await mount(agent());
+    fireEvent.click(screen.getByTestId("agent-delete"));
+    expect(api.deleteAgent).not.toHaveBeenCalled();
+    api.deleteAgent.mockRejectedValue(
+      new ApiError(409, "Conflict", {
+        error: "uncommitted changes in /wt/a1",
+        code: "unsaved_work",
+        paths: ["main.go", "notes.md"],
+        fingerprint: "f1",
+      }),
+    );
+    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Not deleted: uncommitted changes in /wt/a1: main.go, notes.md",
+    );
+    expect(screen.getByTestId("where")).toHaveTextContent("/");
+    expect(screen.getByTestId("agent-delete")).toBeInTheDocument();
+  });
+
+  it("leaves the chat once the delete succeeds", async () => {
+    await mount(agent());
+    api.deleteAgent.mockResolvedValue(undefined);
+    fireEvent.click(screen.getByTestId("agent-delete"));
+    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
+    expect(await screen.findByTestId("where")).toHaveTextContent("/ws/w1/home");
+  });
+
+  it("shows the attention reason in a banner", async () => {
+    await mount(agent({ attention_reason: "harness_unavailable" }));
+    expect(screen.getByTestId("agent-attention-banner")).toHaveTextContent(
+      "Needs attention: the harness is unavailable.",
+    );
+  });
+
+  it("shows no attention banner without a reason", async () => {
+    await mount(agent());
+    expect(screen.queryByTestId("agent-attention-banner")).toBeNull();
+  });
+
+  it("shows history expired in place of the composer once history is purged, with no Unarchive", async () => {
+    await mount(
+      agent({ state: "archived", archived_at: "t", history_purged_at: "t" }),
+    );
+    expect(screen.getByTestId("agent-history-expired")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    expect(screen.queryByTestId("agent-unarchive")).toBeNull();
+    expect(screen.queryByTestId("agent-archived-notice")).toBeNull();
+  });
+
+  it("shows history expired after a history_expired error", async () => {
+    await mount(agent({ state: "archived", archived_at: "t" }));
+    api.unarchiveAgent.mockRejectedValue(
+      new ApiError(410, "Gone", { error: "a1", code: "history_expired" }),
+    );
+    fireEvent.click(screen.getByTestId("agent-unarchive"));
+    expect(
+      await screen.findByTestId("agent-history-expired"),
+    ).toBeInTheDocument();
+  });
+
+  it("explains a Send over the 1 MiB request limit and keeps the draft", async () => {
+    await mount(agent());
+    api.sendMessage.mockRejectedValue(
+      new ApiError(413, "Payload Too Large", {
+        error: "request body too large (max 1MB)",
+      }),
+    );
+    const box = screen.getByLabelText("Message");
+    fireEvent.change(box, { target: { value: "big" } });
+    fireEvent.submit(box.closest("form")!);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "over the server's 1 MiB request limit",
+    );
+    expect(box).toHaveValue("big");
+  });
+
+  it("marks a harness switch with a context divider and keeps the earlier transcript", async () => {
+    await mount(agent());
+    deliver(
+      ev("message.delivered", { text: "before the switch" }),
+      ev("harness.changed", { from_harness: "opencode", harness: "codex" }),
+      ev("message.delivered", { text: "after the switch" }),
+    );
+    const divider = screen.getByTestId("harness-context-divider");
+    expect(divider).toHaveTextContent("New harness context: opencode → codex");
+    expect(divider).not.toHaveTextContent(/closed|ended/i);
+    expect(screen.getByText("before the switch")).toBeInTheDocument();
+    expect(screen.getByText("after the switch")).toBeInTheDocument();
+  });
+
+  it("shows no divider when the stream has no harness.changed (a failed switch)", async () => {
+    await mount(agent());
+    deliver(
+      ev("message.delivered", { text: "hi" }),
+      ev("agent.turn_completed", { stopReason: "cancelled" }),
+      ev("ask.lost", { askId: "k" }),
+    );
+    expect(screen.queryByTestId("harness-context-divider")).toBeNull();
   });
 });
