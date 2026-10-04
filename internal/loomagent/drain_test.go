@@ -110,3 +110,71 @@ func TestDrainInsideLoopFailsFast(t *testing.T) {
 	}
 	settled(t, s) // the feed is not stuck
 }
+
+// TestDrainSeesWorkQueuedBeforeLoopStops: loop A is asked first and
+// answers; loop B's item, in flight when Drain began, then queues an item
+// for A and B ends before Drain asks it. B's handled count must outlive B,
+// so Drain asks A again rather than return with A's item queued.
+func TestDrainSeesWorkQueuedBeforeLoopStops(t *testing.T) {
+	s := New(ServiceConfig{})
+	a, b := s.startLoop(), s.startLoop() // Drain asks a first
+	aItems, bItems := make(chan string, 1), make(chan string, 1)
+	var aHandled []string               // read only after a ends
+	aAnswered := make(chan struct{}, 8) // one per Drain request a answers
+	bEntered, gate := make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	aDone, bDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(aDone)
+		defer s.stopLoop(a)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case req := <-a.drain:
+				settle(a, req, aItems, func(v string) bool { aHandled = append(aHandled, v); return true })
+				aAnswered <- struct{}{}
+			}
+		}
+	}()
+	go func() { // b answers Drain until it takes its item, then ends after it
+		defer close(bDone)
+		defer s.stopLoop(b)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case req := <-b.drain:
+				settle(b, req, bItems, func(string) bool { return true })
+			case <-bItems:
+				b.took()
+				close(bEntered)
+				<-gate
+				aItems <- "from b"
+				return // before b takes the next Drain request
+			}
+		}
+	}()
+	defer func() { cancel(); <-aDone; <-bDone }()
+
+	if err := s.Drain(ctx); err != nil { // the loops' start-up is settled
+		t.Fatal(err)
+	}
+	for range len(aAnswered) {
+		<-aAnswered
+	}
+	bItems <- "b's item"
+	<-bEntered // b's item is in flight
+	drained := make(chan error, 1)
+	go func() { drained <- s.Drain(ctx) }()
+	<-aAnswered // a answered first, before b's item queued anything for it
+	close(gate)
+	if err := <-drained; err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	<-aDone
+	if len(aHandled) != 1 || aHandled[0] != "from b" {
+		t.Fatalf("Drain returned with a's item unhandled after b stopped: a handled %v", aHandled)
+	}
+}

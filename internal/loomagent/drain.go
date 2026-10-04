@@ -31,6 +31,7 @@ func (s *Service) startLoop() *loop {
 func (s *Service) stopLoop(l *loop) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.stoppedWork += l.handled // what it did since its last answer outlives it
 	s.loops = slices.DeleteFunc(s.loops, func(x *loop) bool { return x == l })
 	close(l.stopped)
 }
@@ -60,7 +61,8 @@ func within(ctx context.Context) context.Context { return context.WithValue(ctx,
 // everything queued for it, the item each was handling included, and none
 // queued more for another meanwhile (T3's DrainableWorker.drain): it asks
 // each loop in turn, in the order they started, until one full round finds
-// that no loop handled anything since its previous answer. Any work one loop
+// that no loop handled anything since its previous answer, a loop that
+// stopped meanwhile included (stopLoop keeps its count). Any work one loop
 // queued for another came from an item it handled, so it shows in that
 // round. A loop still starting (the dispatcher's start-up sweep) is waited
 // for. Tests use it instead of sleeping. A loop's own work must not call
@@ -70,6 +72,9 @@ func (s *Service) Drain(ctx context.Context) error {
 	if ctx.Value(inLoop{}) != nil {
 		return ErrDrainInLoop
 	}
+	s.mu.Lock()
+	seen := s.stoppedWork
+	s.mu.Unlock()
 	for {
 		s.mu.Lock()
 		loops := slices.Clone(s.loops)
@@ -82,6 +87,10 @@ func (s *Service) Drain(ctx context.Context) error {
 			}
 			handled += n
 		}
+		s.mu.Lock() // work of loops that stopped since the last round counts too
+		handled += s.stoppedWork - seen
+		seen = s.stoppedWork
+		s.mu.Unlock()
 		if handled == 0 {
 			return nil
 		}

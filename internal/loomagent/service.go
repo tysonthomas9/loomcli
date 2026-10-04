@@ -147,6 +147,9 @@ type Service struct {
 	// loops are the running background loops Drain waits on, in the order
 	// they started, under mu.
 	loops []*loop
+	// stoppedWork sums the items stopped loops handled after their last
+	// Drain answer, under mu.
+	stoppedWork int
 	// tick is the dispatcher's completion-retry clock and after RunFeed's
 	// backoff timer: time's own, or a test's.
 	tick  ticker
