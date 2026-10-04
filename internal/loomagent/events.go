@@ -510,8 +510,8 @@ func (s *Service) withText(ctx context.Context, agentID string, e loomharness.Ev
 }
 
 // withCompletions adds to row, the saved message.delivered e from an agent,
-// the task_completed records its text carries ("completions", maybe empty)
-// and the text without them ("message"), so the chat shows each record on
+// the task_completed records its handed slot named ("completions", maybe
+// empty) and the text before them ("message"), so the chat shows each record on
 // its card and never as message text; a row saved before these fields has
 // neither. Other rows are unchanged.
 func (s *Service) withCompletions(ctx context.Context, agentID string, row loomstore.Event,
@@ -519,13 +519,12 @@ func (s *Service) withCompletions(ctx context.Context, agentID string, row looms
 	if e.Type != loomharness.EventMessageDelivered || !strings.HasPrefix(e.Sender, "agent:") {
 		return row, nil
 	}
-	msg, done, err := s.splitCompletions(ctx, agentID, e.Sender, e.Text)
+	// The records the handed slot named, not ones found in its text.
+	notes, err := s.store.HandedNotices(ctx, agentID, e.InputKey)
 	if err != nil {
 		return row, err
 	}
-	if done == nil {
-		done = []Completion{}
-	}
+	msg, done := completionsIn(e.Text, notes)
 	var p map[string]any
 	if err := json.Unmarshal(row.Payload, &p); err != nil {
 		return row, err

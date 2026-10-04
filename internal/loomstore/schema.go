@@ -163,4 +163,10 @@ CREATE TABLE custom_models (                -- model ids a workspace adds to a h
   pos          INTEGER NOT NULL,            -- the order they were set in
   PRIMARY KEY (workspace_id, harness, model)
 );
+`, `
+-- DF1: the Notify records at the end of a slot's body, as JSON {"keys": [...],
+-- "at": <byte offset of the first>}, so a reader names them without parsing
+-- text; the handed receipt keeps the slot's at hand-over. NULL when none.
+ALTER TABLE agent_slots ADD COLUMN notices TEXT;
+ALTER TABLE agent_send_receipts ADD COLUMN notices TEXT;
 `}

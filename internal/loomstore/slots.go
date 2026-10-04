@@ -3,6 +3,7 @@ package loomstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -123,8 +124,9 @@ func putSlot(ctx context.Context, tx *sql.Tx, in SlotSend, cur Slot) (replaced b
 	} else if queuedAt, err = nextQueuedAt(ctx, tx, in.AgentID); err != nil {
 		return false, "", err
 	}
+	// A new body drops the slot's notices; Notify sets them after.
 	_, err = tx.ExecContext(ctx, `INSERT INTO agent_slots (`+slotCols+`) VALUES (?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT (agent_id, sender) DO UPDATE SET request_id = excluded.request_id, body = excluded.body,
+		ON CONFLICT (agent_id, sender) DO UPDATE SET request_id = excluded.request_id, body = excluded.body, notices = NULL,
 		source = excluded.source, state = excluded.state, native_key = excluded.native_key,
 		queued_at = excluded.queued_at, first = excluded.first, updated_at = excluded.updated_at`,
 		in.AgentID, in.Sender, in.RequestID, in.Body, in.Source, state, nativeKey, queuedAt,
@@ -134,6 +136,23 @@ func putSlot(ctx context.Context, tx *sql.Tx, in SlotSend, cur Slot) (replaced b
 
 // Notice is one record a sender adds to its slot, keyed so it is added once.
 type Notice struct{ Key, Text string }
+
+// SlotNotices are the notices at the end of a slot's body: their keys in
+// the order added, and the byte offset in the body where the first begins
+// (the text before it, less its line break, is the sender's own message).
+type SlotNotices struct {
+	Keys []string `json:"keys"`
+	At   int      `json:"at"`
+}
+
+func readNotices(raw sql.NullString) (SlotNotices, error) {
+	var n SlotNotices
+	if !raw.Valid || raw.String == "" {
+		return n, nil
+	}
+	err := json.Unmarshal([]byte(raw.String), &n)
+	return n, err
+}
 
 // Notify adds notices, in order, to the sender's slot in one transaction
 // (design v2 §10.3): a waiting slot keeps its text and place and gains the
@@ -159,8 +178,20 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 			return ErrSlotBusy
 		}
 		texts := make([]string, 0, len(fresh)+1)
+		var notes SlotNotices
 		if cur.State == SlotWaiting {
 			texts = append(texts, cur.Body)
+			var raw sql.NullString
+			if err := tx.QueryRowContext(ctx, `SELECT notices FROM agent_slots WHERE agent_id = ? AND sender = ?`,
+				agentID, sender).Scan(&raw); err != nil {
+				return err
+			}
+			if notes, err = readNotices(raw); err != nil {
+				return err
+			}
+			if len(notes.Keys) == 0 { // the records start after the waiting text and its line break
+				notes.At = len(cur.Body) + 1
+			}
 		}
 		for _, n := range fresh {
 			texts = append(texts, n.Text)
@@ -169,6 +200,17 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 			Body: strings.Join(texts, "\n"), Source: source}
 		replaced, now, err := putSlot(ctx, tx, in, cur)
 		if err != nil {
+			return err
+		}
+		for _, n := range fresh {
+			notes.Keys = append(notes.Keys, n.Key)
+		}
+		b, err := json.Marshal(notes)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_slots SET notices = ? WHERE agent_id = ? AND sender = ?`,
+			string(b), agentID, sender); err != nil {
 			return err
 		}
 		for _, n := range fresh {
@@ -286,9 +328,11 @@ func (s *Store) HandNext(ctx context.Context, agentID string, nativeKey func(Slo
 		}
 		// The Send's receipt now reports the hand-over, so a later retry of it
 		// returns state handed (design v2 §4.9), and records the input key.
+		// It also keeps the slot's notices, which a delivery reports.
 		_, err = tx.ExecContext(ctx, `UPDATE agent_send_receipts SET native_key = ?,
-			result_json = CASE WHEN json_valid(result_json) THEN json_set(result_json, '$.state', ?) ELSE result_json END
-			WHERE agent_id = ? AND request_id = ?`, k, SlotHanded, agentID, sl.RequestID)
+			result_json = CASE WHEN json_valid(result_json) THEN json_set(result_json, '$.state', ?) ELSE result_json END,
+			notices = (SELECT notices FROM agent_slots WHERE agent_id = ? AND sender = ?)
+			WHERE agent_id = ? AND request_id = ?`, k, SlotHanded, agentID, sl.Sender, agentID, sl.RequestID)
 		return err
 	})
 	return sl, err
@@ -414,6 +458,47 @@ func (s *Store) HandedText(ctx context.Context, agentID, nativeKey string) (text
 		return "", "", false, nil
 	}
 	return body.String, sender, err == nil && body.Valid, err
+}
+
+// WaitingNotices returns the notices of each of agentID's waiting slots that
+// has any, by sender.
+func (s *Store) WaitingNotices(ctx context.Context, agentID string) (map[string]SlotNotices, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT sender, notices FROM agent_slots WHERE agent_id = ? AND state = ?
+		AND notices IS NOT NULL`, agentID, SlotWaiting)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]SlotNotices{}
+	for rows.Next() {
+		var sender string
+		var raw sql.NullString
+		if err := rows.Scan(&sender, &raw); err != nil {
+			return nil, err
+		}
+		n, err := readNotices(raw)
+		if err != nil {
+			return nil, err
+		}
+		out[sender] = n
+	}
+	return out, rows.Err()
+}
+
+// HandedNotices returns the notices of the message agentID was handed with
+// input key nativeKey, as its slot had them at hand-over (none for a legacy
+// receipt or a message with none).
+func (s *Store) HandedNotices(ctx context.Context, agentID, nativeKey string) (SlotNotices, error) {
+	var raw sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT notices FROM agent_send_receipts WHERE agent_id = ? AND native_key = ?
+		ORDER BY created_at DESC LIMIT 1`, agentID, nativeKey).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SlotNotices{}, nil
+	}
+	if err != nil {
+		return SlotNotices{}, err
+	}
+	return readNotices(raw)
 }
 
 // GetReceipt returns the receipt of the agent's Send requestID, or ErrNotFound.

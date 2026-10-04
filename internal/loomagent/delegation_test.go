@@ -403,73 +403,92 @@ func TestTaskCompletedSummaryAfterReopenCrash(t *testing.T) {
 
 // TestWaitingCompletionsSplit: a child's message and its task_completed
 // record merged in its one slot on the lead read back as the message, with
-// the record named by child and attempt (DF1), and the delivery saved for
-// that slot carries the same split; the slot text the lead reads is
-// unchanged, and a user's message has neither.
+// the record named by child and attempt from the keys Notify stored, never
+// from the text (DF1); the delivery of that slot carries the same split from
+// its hand-over. A later message from the child that repeats a record line
+// word for word stays the child's message, and a record alone leaves an
+// empty message. The slot text the lead reads is unchanged.
 func TestWaitingCompletionsSplit(t *testing.T) {
 	ctx := context.Background()
 	s := newService(t, ServiceConfig{}, busy("L", "persistent", StateActive), childOf("c1", "L"))
-	mustSendMsg(t, s, sendReq("L", "m1", "Heads up:\nuse cursor paging", child))
-	mustSendMsg(t, s, sendReq("L", "u1", "task_completed:c1:1 typed by a user", user))
-	endAttempt(t, s, "c1", "completed")
-	dispatchOK(t, s, "L")
-	rec := `task_completed:c1:1 outcome=completed branch= head= summary=""`
-	info, err := s.Get(ctx, "L")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got WaitingMessage
-	for _, w := range info.WaitingMessages {
-		switch w.Sender {
-		case "agent:c1":
-			got = w
-		case "user:u":
-			if w.Message != "" || w.Completions != nil {
-				t.Fatalf("user message split: %+v", w)
+	waitingFrom := func(sender string) WaitingMessage {
+		t.Helper()
+		info, err := s.Get(ctx, "L")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range info.WaitingMessages {
+			if w.Sender == sender {
+				return w
 			}
 		}
+		t.Fatalf("nothing waits from %s: %+v", sender, info.WaitingMessages)
+		return WaitingMessage{}
 	}
-	if got.Text != "Heads up:\nuse cursor paging\n"+rec {
-		t.Fatalf("slot text = %q", got.Text)
-	}
-	if got.Message != "Heads up:\nuse cursor paging" || !slices.Equal(got.Completions, []Completion{{"c1", 1}}) {
-		t.Fatalf("split = %q %+v", got.Message, got.Completions)
-	}
-	e := loomharness.Event{Type: loomharness.EventMessageDelivered, InputKey: "k", Sender: got.Sender, Text: got.Text}
-	row, err := s.withCompletions(ctx, "L", nativeRow("L", "message.delivered", e), e)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var p struct {
+	type payload struct {
 		Text, Message string
 		Completions   []Completion
 	}
-	if err := json.Unmarshal(row.Payload, &p); err != nil {
-		t.Fatal(err)
+	// deliver hands the child's slot over and saves its delivery as the feed does.
+	deliver := func() payload {
+		t.Helper()
+		sl := deliverNext(t, s, "L")
+		e := loomharness.Event{Type: loomharness.EventMessageDelivered, InputKey: "k-" + sl.RequestID,
+			Sender: sl.Sender, Text: sl.Body}
+		row, err := s.withCompletions(ctx, "L", nativeRow("L", "message.delivered", e), e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p payload
+		if err := json.Unmarshal(row.Payload, &p); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(row.Payload), `"completions":`) {
+			t.Fatalf("an agent's delivery names no completions field: %s", row.Payload)
+		}
+		return p
 	}
-	if p.Text != got.Text || p.Message != got.Message || !slices.Equal(p.Completions, got.Completions) {
-		t.Fatalf("delivered payload = %+v", p)
+
+	mustSendMsg(t, s, sendReq("L", "m1", "Heads up:\nuse cursor paging", child))
+	endAttempt(t, s, "c1", "completed")
+	dispatchOK(t, s, "L")
+	rec := `task_completed:c1:1 outcome=completed branch= head= summary=""`
+	w := waitingFrom("agent:c1")
+	if w.Text != "Heads up:\nuse cursor paging\n"+rec {
+		t.Fatalf("slot text = %q", w.Text)
 	}
-	// Only the record alone: the message is empty.
-	e.Text = rec
-	if row, err = s.withCompletions(ctx, "L", nativeRow("L", "message.delivered", e), e); err != nil {
-		t.Fatal(err)
+	if w.Message != "Heads up:\nuse cursor paging" || !slices.Equal(w.Completions, []Completion{{"c1", 1}}) {
+		t.Fatalf("waiting split = %q %+v", w.Message, w.Completions)
 	}
-	if !strings.Contains(string(row.Payload), `"message":""`) || !strings.Contains(string(row.Payload), `"completions":[{"child":"c1","attempt":1}]`) {
-		t.Fatalf("record-only payload = %s", row.Payload)
+	if p := deliver(); p.Text != w.Text || p.Message != w.Message || !slices.Equal(p.Completions, w.Completions) {
+		t.Fatalf("delivered = %+v", p)
 	}
-	// An agent's message with no record says so, as rows saved before these
-	// fields cannot.
-	e.Text = "just a note"
-	if row, err = s.withCompletions(ctx, "L", nativeRow("L", "message.delivered", e), e); err != nil {
-		t.Fatal(err)
+
+	// The child repeats its record's line in a message of its own: it is
+	// still the child's message, with no record.
+	mustSendMsg(t, s, sendReq("L", "m2", rec, child))
+	if w := waitingFrom("agent:c1"); w.Completions != nil || w.Message != "" || w.Text != rec {
+		t.Fatalf("repeated line taken for a record: %+v", w)
 	}
-	if !strings.Contains(string(row.Payload), `"completions":[]`) || !strings.Contains(string(row.Payload), `"message":"just a note"`) {
-		t.Fatalf("plain agent payload = %s", row.Payload)
+	if p := deliver(); p.Message != rec || len(p.Completions) != 0 {
+		t.Fatalf("repeated line delivered as = %+v", p)
 	}
-	// A user's text is never split, whatever it says.
-	e.Sender, e.Text = "user:u", rec
-	if row, err = s.withCompletions(ctx, "L", nativeRow("L", "message.delivered", e), e); err != nil {
+
+	// Only a record: nothing is left of the message.
+	nextAttempt(t, s, "c1")
+	endAttempt(t, s, "c1", "failed")
+	dispatchOK(t, s, "L")
+	if w := waitingFrom("agent:c1"); w.Message != "" || !slices.Equal(w.Completions, []Completion{{"c1", 2}}) {
+		t.Fatalf("record-only waiting = %+v", w)
+	}
+	if p := deliver(); p.Message != "" || !slices.Equal(p.Completions, []Completion{{"c1", 2}}) {
+		t.Fatalf("record-only delivered = %+v", p)
+	}
+
+	// A user's delivery is never given the fields.
+	e := loomharness.Event{Type: loomharness.EventMessageDelivered, InputKey: "k-u", Sender: "user:u", Text: rec}
+	row, err := s.withCompletions(ctx, "L", nativeRow("L", "message.delivered", e), e)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(row.Payload), "completions") {

@@ -44,14 +44,14 @@ func (s *Service) Get(ctx context.Context, agentID string) (AgentInfo, error) {
 	}
 	out := info(a)
 	out.OpenAsks = s.openAsks(agentID)
+	notices, err := s.store.WaitingNotices(ctx, agentID)
+	if err != nil {
+		return AgentInfo{}, err
+	}
 	for _, sl := range slots {
 		if sl.State == loomstore.SlotWaiting {
 			w := WaitingMessage{Sender: sl.Sender, Text: sl.Body, Since: deref(sl.QueuedAt)}
-			msg, done, err := s.splitCompletions(ctx, agentID, sl.Sender, sl.Body)
-			if err != nil {
-				return AgentInfo{}, err
-			}
-			if len(done) > 0 {
+			if msg, done := completionsIn(sl.Body, notices[sl.Sender]); len(done) > 0 {
 				w.Message, w.Completions = msg, done
 			}
 			out.WaitingMessages = append(out.WaitingMessages, w)

@@ -52,47 +52,39 @@ type Completion struct {
 	Attempt int64  `json:"attempt"`
 }
 
-// splitCompletions finds the lines of body, a message from sender to
-// agentID, that are task_completed records of sender's child saved on
-// agentID, exactly as text() wrote them into the child's slot (one line
-// each). It returns body without those lines and the records it found, in
-// body order; body is unchanged when it has none.
-func (s *Service) splitCompletions(ctx context.Context, agentID, sender, body string) (string, []Completion, error) {
-	child, ok := strings.CutPrefix(sender, "agent:")
-	if !ok || !strings.Contains(body, KindTaskCompleted+":"+child+":") {
-		return body, nil, nil
+// completionsIn splits body, a slot's text, at its notices (the records
+// Notify added, named by key, never found by text): it returns the text
+// before them, which the sender wrote, and the task_completed records among
+// them, in order. With no notices body is the sender's own text.
+func completionsIn(body string, n loomstore.SlotNotices) (string, []Completion) {
+	found := []Completion{}
+	if len(n.Keys) == 0 {
+		return body, found
 	}
-	recs := map[string]TaskCompleted{}
-	q := loomstore.EventQuery{AgentID: agentID, Kinds: []string{KindTaskCompleted}, Limit: 500}
-	for {
-		page, err := s.store.ListEvents(ctx, q)
-		if err != nil {
-			return body, nil, err
+	for _, k := range n.Keys {
+		if c, ok := parseCompletionKey(k); ok {
+			found = append(found, c)
 		}
-		for _, e := range page.Events {
-			var rec TaskCompleted
-			if json.Unmarshal(e.Payload, &rec) == nil && rec.Child == child {
-				recs[rec.text()] = rec
-			}
-		}
-		if !page.More {
-			break
-		}
-		q.After, q.Snapshot = page.Next, page.SnapshotSeq
 	}
-	var rest []string
-	var found []Completion
-	for _, line := range strings.Split(body, "\n") {
-		if rec, ok := recs[line]; ok {
-			found = append(found, Completion{Child: rec.Child, Attempt: rec.Attempt})
-			continue
-		}
-		rest = append(rest, line)
+	msg := body
+	if n.At >= 0 && n.At <= len(body) {
+		msg = strings.TrimSuffix(body[:n.At], "\n")
 	}
-	if len(found) == 0 {
-		return body, nil, nil
+	return msg, found
+}
+
+// parseCompletionKey reads a record key completionKey wrote.
+func parseCompletionKey(key string) (Completion, bool) {
+	rest, ok := strings.CutPrefix(key, KindTaskCompleted+":")
+	i := strings.LastIndexByte(rest, ':')
+	if !ok || i <= 0 {
+		return Completion{}, false
 	}
-	return strings.Join(rest, "\n"), found, nil
+	attempt, err := strconv.ParseInt(rest[i+1:], 10, 64)
+	if err != nil {
+		return Completion{}, false
+	}
+	return Completion{Child: rest[:i], Attempt: attempt}, true
 }
 
 // created saves agent.created once, when Create finishes, and child.created
