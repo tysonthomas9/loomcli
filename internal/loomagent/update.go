@@ -134,8 +134,9 @@ func checkUpdate(a loomstore.Agent, req UpdateRequest) error {
 }
 
 // choose applies req's model and options to to and to a's session from its
-// next turn. The options are saved in the spec's Options; a model change
-// keeps those the new model takes.
+// next turn. The model and options are saved in the spec's Model and
+// Options, which every hand-off's resume sets on the session again (SM1); a
+// model change keeps the options the new model takes.
 func (s *Service) choose(ctx context.Context, a loomstore.Agent, req UpdateRequest, to *loomstore.AgentSpec) error {
 	cfg, err := loadConfig(a)
 	if err != nil {
@@ -151,8 +152,8 @@ func (s *Service) choose(ctx context.Context, a loomstore.Agent, req UpdateReque
 	if req.Model != "" {
 		to.Model = &req.Model
 	}
-	if !slices.Equal(opts, cfg.Options) || unverified != cfg.ModelUnverified {
-		cfg.Options, cfg.ModelUnverified = opts, unverified
+	if !slices.Equal(opts, cfg.Options) || unverified != cfg.ModelUnverified || cmp.Or(req.Model, cfg.Model) != cfg.Model {
+		cfg.Model, cfg.Options, cfg.ModelUnverified = cmp.Or(req.Model, cfg.Model), opts, unverified
 		b, err := json.Marshal(cfg)
 		if err != nil {
 			return err

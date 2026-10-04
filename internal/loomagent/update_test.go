@@ -467,3 +467,28 @@ func TestUpdateEffortAppliesOnNextTurn(t *testing.T) {
 		t.Fatalf("options survived the harness switch: %+v", cfg.Options)
 	}
 }
+
+// TestUpdateModelAppliesOnNextTurn (SM1): a PATCHed model runs the next
+// turn. Every hand-off resumes the session and sets the spec's saved model
+// again, so that model must be the new one, not the one the agent was
+// created with.
+func TestUpdateModelAppliesOnNextTurn(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateIdle)
+	a := e.s.get(t, "a1")
+	to := a.SpecOf()
+	to.SpecJSON = `{"Model":"fake-model"}` // as Create saves it
+	if err := e.s.store.CompareAndSetSpec(ctx, "a1", a.SpecVersion, to); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.Update(ctx, UpdateRequest{AgentID: "a1", Model: "fake/other"}); err != nil {
+		t.Fatal(err)
+	}
+	queue(t, e.s, "a1", "user", "after")
+	if _, err := e.s.handOff(ctx, e.s.get(t, "a1")); err != nil {
+		t.Fatal(err)
+	}
+	if turns := e.fa.Turns(e.old); len(turns) != 1 || turns[0].Model != "fake/other" {
+		t.Fatalf("turns = %+v; want one turn on fake/other", turns)
+	}
+}
