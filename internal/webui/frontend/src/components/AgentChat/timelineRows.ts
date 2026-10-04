@@ -5,7 +5,7 @@
 
 import type { AgentEvent } from "@/api/agentsv1";
 import type { ChatItem, ToolCall } from "@/hooks";
-import { argPreviewFromJSON, truncate } from "@/utils/toolPreview";
+import { argPreview, argPreviewFromJSON, truncate } from "@/utils/toolPreview";
 
 /** Work entries a mixed group shows before "+N previous log entries". */
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
@@ -144,13 +144,57 @@ const STEP_BY_ACTION: Partial<Record<ToolGroupAction, string>> = {
   search: "Searched the web",
 };
 
+const SECRETS: [RegExp, string][] = [
+  [/\b(bearer|basic|token)(\s+)\S+/gi, "$1$2•••"],
+  [
+    /\b([\w-]*(?:key|token|secret|passw(?:or)?d|pass|pwd|auth\w*|credential\w*|cookie))(["']?\s*[=:]\s*["']?)[^\s"'&]+/gi,
+    "$1$2•••",
+  ],
+  [/(--?(?:password|passwd|token|secret|api-?key|auth)[= ])\S+/gi, "$1•••"],
+  [/(\/\/[^/\s:@]+:)[^@\s/]+@/g, "$1•••@"],
+  [
+    /\b(sk|pk|rk|ghp|gho|ghs|ghu|github_pat|xox[abprs]|glpat|AKIA)[-_]?[A-Za-z0-9_-]{6,}/g,
+    "•••",
+  ],
+  [/\beyJ[\w-]{8,}\.[\w-]+\.[\w-]+/g, "•••"],
+];
+
+/** Text with credential-looking values (tokens, keys, passwords) masked. */
+export function maskSecrets(text: string): string {
+  return SECRETS.reduce((t, [re, to]) => t.replace(re, to), text);
+}
+
+/**
+ * What a tool step is about, for the tray: the salient argument of a JSON
+ * input, its secrets masked before it is cut; "" for unstructured input,
+ * which is never shown.
+ */
+function stepPreview(input: string | undefined): string {
+  const raw = (input ?? "").trim();
+  if (!raw.startsWith("{")) return "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "";
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+  const masked = Object.fromEntries(
+    Object.entries(parsed).map(([k, v]) => [
+      k,
+      typeof v === "string" ? maskSecrets(v.replace(/\s+/g, " ")) : v,
+    ]),
+  );
+  return argPreview(masked);
+}
+
 /**
  * A working agent's latest step as the agent tray shows it (DF2): a tool
  * start or completed tool as its action and what it is about ("▸ Ran
  * command · npm test"), a completed reasoning item as its first line
  * ("💭 Thinking · Checking routes"); null for any other event. A tool's
- * input shows only as its salient argument, never as raw JSON; without a
- * preview, only the action shows.
+ * input shows only as its salient JSON argument with secrets masked, never
+ * raw; without one, only the action shows.
  */
 export function stepLabel(e: AgentEvent, preview = true): string | null {
   const p = (e.payload ?? {}) as {
@@ -172,9 +216,9 @@ export function stepLabel(e: AgentEvent, preview = true): string | null {
     tool: p.tool ?? {},
     status: "running",
   };
-  const about = preview ? toolPreview(entry) : "";
+  const about = preview ? stepPreview(entry.tool.input) : "";
   const action = STEP_BY_ACTION[toolGroupAction(entry)] ?? toolHeading(entry);
-  const shown = about && !/^[[{]/.test(about) ? ` · ${about}` : "";
+  const shown = about ? ` · ${about}` : "";
   return truncate(`▸ ${action}${shown}`, STEP_MAX);
 }
 

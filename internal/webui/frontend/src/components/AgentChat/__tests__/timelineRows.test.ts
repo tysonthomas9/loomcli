@@ -173,6 +173,35 @@ describe("stepLabel", () => {
     );
   });
 
+  it("masks credentials and never shows unstructured input", () => {
+    const bearer = stepLabel(
+      started(
+        "bash",
+        JSON.stringify({
+          command:
+            "curl -H 'Authorization: Bearer sk-example' https://example.com",
+        }),
+      ),
+    )!;
+    expect(bearer).toContain("▸ Ran command · curl -H 'Authorization");
+    expect(bearer).not.toMatch(/sk-example|sk-exa/);
+    for (const command of [
+      "SECRET=hunter2 npm test",
+      "export GITHUB_TOKEN=ghp_abcdefghijklmnop",
+      "mysql --password=hunter2 -u root",
+      "git clone https://bob:hunter2@example.com/r.git",
+      "echo sk-proj-abcdefghijkl",
+    ]) {
+      const got = stepLabel(started("bash", JSON.stringify({ command })))!;
+      expect(got).not.toMatch(/hunter2|ghp_abc|sk-proj/);
+      expect(got).toContain("•••");
+    }
+    expect(stepLabel(started("bash", "SECRET=hunter2 npm test"))).toBe(
+      "▸ Ran command",
+    );
+    expect(stepLabel(started("bash", "npm test"))).toBe("▸ Ran command");
+  });
+
   it("cuts a long input to about 60 characters", () => {
     const long = `npm test -- ${"x".repeat(200)}`;
     const got = stepLabel(started("bash", JSON.stringify({ command: long })))!;
