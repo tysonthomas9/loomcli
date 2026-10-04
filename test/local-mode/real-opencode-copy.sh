@@ -6,7 +6,8 @@
 #
 # `make` copies the host's opencode.db (and its -wal) with plain reads into a
 # private snapshot, accepted only when the host files hash the same before and
-# after; SQLite never opens a host file, so nothing in the host folder is
+# after and the host folder's file list (names, sizes, mtimes) is unchanged;
+# SQLite never opens a host file, so nothing in the host folder is
 # created or written. SQLite then takes one online backup of the snapshot into
 # <copy>, a mode-600 file in a mode-700 folder owned by one compose project,
 # and runs quick_check on it. Any failure (a host write during the copy, a
@@ -97,7 +98,7 @@ digest() {
   else sha256sum < "$1"; fi
 }
 if [ -e "$db-wal" ] && [ ! -e "$db-shm" ]; then
-  echo "local-mode: $db-wal exists without $db-shm (a crashed or damaged OpenCode write); repair the host database with OpenCode first; not starting the REAL stack" >&2
+  echo "local-mode: opencode.db has a -wal but no -shm; open and close OpenCode once, then retry; not starting the REAL stack" >&2
   exit 1
 fi
 if [ -s "$db-wal" ]; then
@@ -122,6 +123,13 @@ fail() {
 }
 rm -f -- "$tmp" "$tmp-wal" "$tmp-shm" "$tmp-journal"
 
+# Names, sizes and mtimes of the host folder's entries; must not change.
+hostlist() {
+  find "$data" -mindepth 1 -maxdepth 1 | LC_ALL=C sort | while IFS= read -r f; do
+    printf '%s %s\n' "$f" "$(stat -f '%z %m' "$f" 2>/dev/null || stat -c '%s %Y' "$f")"
+  done
+}
+listbefore="$(hostlist)"
 before="$(digest "$db") $(digest "$db-wal")"
 (
   umask 077
@@ -131,6 +139,8 @@ before="$(digest "$db") $(digest "$db-wal")"
 after="$(digest "$db") $(digest "$db-wal")"
 [ "$before" = "$after" ] \
   || fail "$db changed during the copy (host OpenCode is writing); try again"
+[ "$(hostlist)" = "$listbefore" ] \
+  || fail "the host OpenCode folder changed during the copy (host OpenCode is writing); try again"
 snapped="$(digest "$snap/opencode.db") $(digest "$snap/opencode.db-wal")"
 [ "$snapped" = "$before" ] || fail "the snapshot of $db does not match the host file"
 

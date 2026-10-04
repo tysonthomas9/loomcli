@@ -180,7 +180,8 @@ read-only. Instead, each REAL stack gets a private copy of the login:
   opening a host file. Even a read-only SQLite reader writes into `-shm`, so
   the script only reads the bytes of `opencode.db` and its `-wal` into a
   private snapshot. It accepts the snapshot only when both host files hash
-  the same before and after the read. SQLite then recovers the snapshot
+  the same before and after the read and the host folder's file list (names,
+  sizes, modification times) is unchanged. SQLite then recovers the snapshot
   privately and takes one online backup of it into
   `~/.local/state/loom-local-mode/<project>/opencode.db` (`LOCAL_MODE_STATE_DIR`
   overrides `~/.local/state/loom-local-mode`), a mode-600 file in a mode-700
@@ -191,8 +192,9 @@ read-only. Instead, each REAL stack gets a private copy of the login:
   never retries in another mode. Failures include: host OpenCode writing
   during the read (run `up` again), a missing or unreadable host file, a
   failed backup or check. A host database whose `-wal` is damaged or
-  unreadable, or that has a `-wal` with no `-shm` (a crashed writer), also
-  refuses to boot until you repair the host database yourself with OpenCode.
+  unreadable also refuses to boot until you repair the host database yourself
+  with OpenCode. If `opencode.db` has a `-wal` but no `-shm`, open and close
+  OpenCode once, then retry.
 - A re-up of the same project keeps its existing copy, but only if it is still
   mode 600 in a 700 folder and passes `quick_check`; otherwise run
   `make local-mode-agents-down` first.

@@ -137,7 +137,7 @@ chmod 600 "$host/opencode.db-wal"
 rm -f "$host/opencode.db-shm"
 before="$(listing "$host")"
 out="$("$script" make "$state/proj-f/opencode.db" 2>&1)"; rc=$?
-check "host -wal without -shm: make refuses" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "without"'
+check "host -wal without -shm: make refuses with the repair hint" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "opencode.db has a -wal but no -shm; open and close OpenCode once, then retry"'
 check "host -wal without -shm: no -shm created, host unchanged" '[ ! -e "$host/opencode.db-shm" ] && [ "$(listing "$host")" = "$before" ] && [ ! -e "$state/proj-f" ]'
 
 # A -wal with a bad header (damaged): refuse.
@@ -208,6 +208,25 @@ mkfake "$host"
 out="$(PATH="$T/shim:$PATH" "$script" make "$state/proj-m/opencode.db" 2>&1)"; rc=$?
 check "same-size, mtime-restored host change during the copy is refused" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "changed during the copy" && [ ! -e "$state/proj-m" ]'
 rm -f "$T/shim/cp"
+
+# Any change to the host folder's file list (names, sizes, mtimes) during the
+# copy refuses, even when opencode.db and its -wal are untouched: a cp shim
+# bumps the -shm mtime and creates a new file right after the snapshot read.
+cat > "$T/shim/cp" <<SH
+#!/usr/bin/env bash
+"$real_cp" "\$@"; rc=\$?
+case "\$*" in *"$host/opencode.db "*)
+  touch -t 203001010000 "$host/opencode.db-shm" 2>/dev/null || true
+  : > "$host/new-file" ;;
+esac
+exit \$rc
+SH
+chmod +x "$T/shim/cp"
+mkfake "$host"
+: > "$host/opencode.db-shm"
+out="$(PATH="$T/shim:$PATH" "$script" make "$state/proj-q/opencode.db" 2>&1)"; rc=$?
+check "host folder list change during the copy is refused" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "host OpenCode folder changed during the copy" && [ ! -e "$state/proj-q" ]'
+rm -f "$T/shim/cp" "$host/new-file"
 
 # --- 5d. sqlite3 is never pointed at a host file. ----------------------------
 real_sqlite="$(command -v sqlite3)"
