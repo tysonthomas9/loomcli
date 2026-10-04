@@ -406,3 +406,90 @@ test("at 400px the tray keeps one line with short labels", async ({ page }) => {
   await expect(tray.locator("[data-tray-row]")).toHaveCount(3);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/narrow-expanded.png` });
 });
+
+test("a running child's row shows its latest step and turn time, then its result (DF2)", async ({
+  page,
+}) => {
+  const m = slackClone();
+  await open(page, m, 900, 860);
+  const tray = page.getByTestId("agent-tray");
+  await tray.getByRole("button", { expanded: false }).click();
+  const ui = tray.locator('[data-tray-row="k2"]');
+  const db = tray.locator('[data-tray-row="k3"]');
+  await expect(ui).toContainText("Working…");
+
+  // The roster's one stream names tool.started and item.completed, no deltas.
+  const urls = await page.evaluate(() =>
+    (window as unknown as { __sse: { url: string }[] }).__sse.map((s) => s.url),
+  );
+  const roster = new URL(urls.find((u) => u.includes("k2"))!);
+  expect(roster.searchParams.get("types")!.split(",")).toEqual(
+    expect.arrayContaining(["tool.started", "item.completed"]),
+  );
+  expect(roster.searchParams.get("deltas")).toBeNull();
+
+  const of = (agent: string, frame: ReturnType<typeof ev>) => ({
+    ...frame,
+    agent_id: agent,
+  });
+  const turnAt = new Date(Date.now() - 29_000).toISOString();
+  await push(
+    page,
+    m,
+    of("k2", ev("agent.state_changed", { from: "idle", to: "active" }, turnAt)),
+  );
+  // A tool start is a live-only notice (seq 0).
+  await push(page, m, {
+    ...of(
+      "k2",
+      ev("tool.started", {
+        itemKind: "tool",
+        tool: { name: "exec_command", input: '{"command":"npm test"}' },
+      }),
+    ),
+    seq: 0,
+  });
+  await expect(ui).toContainText(/▸ Ran command · npm test · 0:(29|3\d)/);
+  await expect(db).toContainText("Working…");
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/desktop-step.png` });
+
+  await push(
+    page,
+    m,
+    of(
+      "k2",
+      ev("item.completed", {
+        itemKind: "reasoning",
+        text: "**Checking routes**\n\nThe router lives in app.tsx.",
+      }),
+    ),
+  );
+  await expect(ui).toContainText("💭 Thinking · Checking routes · 0:");
+
+  // ui-worker finishes: its row shows the result, not a step.
+  m.roster = m.roster.map((a) =>
+    a.agent_id === "k2" ? { ...a, state: "finished" } : a,
+  );
+  m.agent = {
+    ...m.agent,
+    waiting_messages: [
+      {
+        sender: "agent:k2",
+        text: "task_completed:k2:0 …",
+        since: T(58),
+        message: "",
+        completions: [{ child: "k2", attempt: 0 }],
+      },
+    ],
+  };
+  await push(
+    page,
+    m,
+    record("k2", 0, "completed", "Done", T(58), "b2c3d4e5f6a7"),
+    of("k2", ev("agent.state_changed", { from: "active", to: "finished" })),
+    ev("message.waiting", {}, T(58)),
+  );
+  await expect(ui).toContainText("done · waiting for Lead");
+  await expect(ui).toContainText("Done");
+  await expect(ui).not.toContainText("Thinking");
+});
