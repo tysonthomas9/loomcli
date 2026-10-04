@@ -246,6 +246,38 @@ func (s *Store) LastCostTotal(ctx context.Context, agentID, session string) (flo
 	return total, err
 }
 
+// LastReply returns the texts of the completed message items of the turn
+// that holds agentID's last message item in its current attempt, in order:
+// the whole final reply, which a harness may save as several message items
+// (OpenCode saves one per text part, so the last alone can be a one-line
+// stub). The turn starts after the last turn.started before that message,
+// and never before the attempt (attempt_after_seq). It is empty when the
+// attempt has no message.
+func (s *Store) LastReply(ctx context.Context, agentID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `WITH
+		attempt AS (SELECT attempt_after_seq AS after FROM agents WHERE agent_id = ?1),
+		msgs AS (SELECT e.seq, json_extract(e.redacted_payload, '$.text') AS text FROM agent_events e, attempt
+			WHERE e.agent_id = ?1 AND e.kind = 'item.completed' AND json_extract(e.redacted_payload, '$.itemKind') = 'message'
+			AND e.seq > attempt.after),
+		last AS (SELECT MAX(seq) AS seq FROM msgs),
+		start AS (SELECT MAX((SELECT after FROM attempt), COALESCE((SELECT MAX(t.seq) FROM agent_events t, last
+			WHERE t.agent_id = ?1 AND t.kind = 'turn.started' AND t.seq < last.seq), 0)) AS seq)
+		SELECT COALESCE(msgs.text, '') FROM msgs, start WHERE msgs.seq > start.seq ORDER BY msgs.seq`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			return nil, err
+		}
+		out = append(out, text)
+	}
+	return out, rows.Err()
+}
+
 // LastMessage returns the text of the last completed message item of
 // agentID's current attempt, or "" when that attempt has none. The attempt
 // starts after attempt_after_seq, which the reopen sets in its own

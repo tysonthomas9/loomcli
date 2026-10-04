@@ -829,3 +829,65 @@ func TestLeadOneInputPerChildResult(t *testing.T) {
 		t.Fatalf("lead turns = %d, want one per child result", got)
 	}
 }
+
+// TestCompletionNoticeCarriesWholeReply (CL2 RT1 fix): a child's final reply
+// saved as several message items (OpenCode saves one per text part, around
+// tool calls) reaches the lead's notice whole, not only its last one-line
+// item; an earlier turn's text and a later turn with no message don't
+// change it. The record's Summary, the chat's one-line result, stays the
+// last item.
+func TestCompletionNoticeCarriesWholeReply(t *testing.T) {
+	ctx := context.Background()
+	s := newService(t, ServiceConfig{}, busy("L", "persistent", StateActive), childOf("c1", "L"))
+	ev := func(kind, id string, payload map[string]string) {
+		t.Helper()
+		if err := s.appendEvent(ctx, "c1", kind, id, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	msg := func(id, text string) {
+		ev("item.completed", id, map[string]string{"itemKind": "message", "text": text})
+	}
+	ev("turn.started", "turn:t0", map[string]string{})
+	msg("m0", "Looking at an earlier brief.")
+	ev("turn.started", "turn:t1", map[string]string{})
+	msg("m1", "Findings: auth.go leaks the token in logs; cache.go never expires entries.")
+	ev("item.completed", "tool1", map[string]string{"itemKind": "tool", "text": "grep output"})
+	msg("m2", "Read-only review completed")
+	ev("turn.started", "turn:t2", map[string]string{}) // a later turn with no message
+	endAttempt(t, s, "c1", "completed")
+	dispatchOK(t, s, "L")
+	want := strconv.Quote("Findings: auth.go leaks the token in logs; cache.go never expires entries.\n\nRead-only review completed")
+	got := waiting(t, s, "L")
+	if len(got) != 1 || !strings.Contains(got[0], " summary="+want+" next=") || strings.Contains(got[0], "earlier brief") {
+		t.Fatalf("lead slots = %q\nwant summary=%s", got, want)
+	}
+	if recs := completions(t, s, "L"); len(recs) != 1 || recs[0].Summary != "Read-only review completed" {
+		t.Fatalf("records = %+v", recs)
+	}
+}
+
+// TestCompletionNoticeLongReplyKeepsItsEnd: a reply longer than resultCap
+// reaches the notice as its last resultCap bytes, the "…" mark included,
+// starting at a word, so its conclusion is kept.
+func TestCompletionNoticeLongReplyKeepsItsEnd(t *testing.T) {
+	ctx := context.Background()
+	s := newService(t, ServiceConfig{}, busy("L", "persistent", StateActive), childOf("c1", "L"))
+	var b strings.Builder
+	for i := 0; b.Len() < 3*resultCap; i++ {
+		b.WriteString("word" + strconv.Itoa(i) + " ")
+	}
+	b.WriteString("CONCLUSION: all tests pass.")
+	if err := s.appendEvent(ctx, "c1", "item.completed", "m1", map[string]string{"itemKind": "message", "text": b.String()}); err != nil {
+		t.Fatal(err)
+	}
+	endAttempt(t, s, "c1", "completed")
+	dispatchOK(t, s, "L")
+	r := completions(t, s, "L")[0].Result
+	if len(r) > resultCap || len(r) < resultCap-64 || !strings.HasPrefix(r, "…word") || !strings.HasSuffix(r, "CONCLUSION: all tests pass.") {
+		t.Fatalf("result = %d bytes, %.20q … %q", len(r), r, r[max(len(r)-30, 0):])
+	}
+	if got := waiting(t, s, "L"); len(got) != 1 || !strings.Contains(got[0], " summary="+strconv.Quote(r)+" next=") {
+		t.Fatalf("notice lacks the result: %.200q", got)
+	}
+}

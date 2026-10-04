@@ -21,9 +21,14 @@ const (
 	KindTaskCompleted = "task_completed"
 )
 
-// summaryCap bounds the final message a task_completed record quotes; the
-// lead reads the rest from the child's history and branch.
+// summaryCap bounds the final message a task_completed record quotes for
+// the chat's one-line result; the lead reads resultCap of the final reply.
 const summaryCap = 500
+
+// resultCap bounds the child's final reply a record carries for the lead's
+// notice: enough that the lead needs no agent_get for it. A longer reply
+// keeps its end, where its conclusion is.
+const resultCap = 4000
 
 // TaskCompleted is one child attempt's completion record, saved once on the
 // parent's history with EventID task_completed:<child>:<attempt>.
@@ -34,6 +39,19 @@ type TaskCompleted struct {
 	Branch  string `json:"branch,omitempty"`
 	Head    string `json:"head,omitempty"`
 	Summary string `json:"summary,omitempty"`
+	// Result is the child's whole final reply (every message item of its
+	// last turn), its end kept within resultCap; records saved before it
+	// have only Summary.
+	Result string `json:"result,omitempty"`
+}
+
+// result is what the lead's notice quotes: Result, or Summary on a record
+// saved before Result.
+func (t TaskCompleted) result() string {
+	if t.Result != "" {
+		return t.Result
+	}
+	return t.Summary
 }
 
 func completionKey(child string, attempt int64) string {
@@ -62,7 +80,7 @@ func (t TaskCompleted) notice(name string, running int) string {
 			"and write one combined summary when the last one finishes", running, plural(running, "child", "children"))
 	}
 	return fmt.Sprintf("%s child=%s outcome=%s branch=%s still_running=%d summary=%s next=%s",
-		completionKey(t.Child, t.Attempt), strconv.Quote(name), t.Outcome, at, running, strconv.Quote(t.Summary),
+		completionKey(t.Child, t.Attempt), strconv.Quote(name), t.Outcome, at, running, strconv.Quote(t.result()),
 		strconv.Quote("this notice is the result, no agent_get needed; "+next))
 }
 
@@ -210,7 +228,7 @@ func (t TaskCompleted) isLine(line string) bool {
 	at := t.at()
 	rest, ok := strings.CutPrefix(line, completionKey(t.Child, t.Attempt)+" child=")
 	return ok && strings.Contains(rest, " outcome="+t.Outcome+" branch="+at+" still_running=") &&
-		strings.Contains(rest, " summary="+strconv.Quote(t.Summary)+" next=")
+		strings.Contains(rest, " summary="+strconv.Quote(t.result())+" next=")
 }
 
 // records maps each record agentID saved for child by its key.
@@ -302,6 +320,11 @@ func (s *Service) recordCompletion(ctx context.Context, a loomstore.Agent) error
 		return err
 	}
 	rec.Summary = clip(summary, summaryCap)
+	reply, err := s.store.LastReply(ctx, a.AgentID)
+	if err != nil {
+		return err
+	}
+	rec.Result = clipHead(strings.Join(reply, "\n\n"), resultCap)
 	if err := s.appendEvent(ctx, parent, KindTaskCompleted, key, rec); err != nil {
 		return err
 	}
@@ -406,6 +429,24 @@ func (s *Service) children(ctx context.Context, parent string) (map[string]strin
 		}
 	}
 	return names, running, nil
+}
+
+// clipHead keeps at most the last n bytes of s, the leading "…" mark
+// included, starting after a space or line break within the next 64 bytes,
+// else on a rune boundary.
+func clipHead(s string, n int) string {
+	const mark = "…"
+	if len(s) <= n {
+		return s
+	}
+	cut := len(s) - max(n-len(mark), 0)
+	if i := strings.IndexAny(s[cut:min(cut+64, len(s))], " \n"); i >= 0 {
+		cut += i + 1
+	}
+	for cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut++
+	}
+	return mark + s[cut:]
 }
 
 // clip cuts s to at most n bytes, the "…" mark included, on a rune boundary.
