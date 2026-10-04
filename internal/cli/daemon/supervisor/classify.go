@@ -14,6 +14,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
@@ -292,6 +293,7 @@ func (s *Supervisor) captureAndFreezeExit(ap *AgentProcess, agentName, taskID, t
 			return agentcapture.Result{}, true, pendingFreeze
 		}
 		if ready {
+			s.reviewFrozenTask(taskID, attempt)
 			return agentcapture.Result{}, false, nil
 		}
 	}
@@ -316,7 +318,42 @@ func (s *Supervisor) captureAndFreezeExit(ap *AgentProcess, agentName, taskID, t
 		slog.Error("agent revision freeze needs attention; worktree retained", "task_id", taskID, "err", err)
 		return result, true, pendingFreeze
 	}
+	s.reviewFrozenTask(taskID, attempt)
 	return result, false, nil
+}
+
+// attemptAwaitsReview reports whether a frozen attempt has code awaiting
+// review; tests replace it.
+var attemptAwaitsReview = driverfreeze.AttemptAwaitsReview
+
+// reviewFrozenTask is the safety net for an agent that closed its task past
+// the daemon (e.g. straight through the HTTP API) before its run froze its
+// work: once the attempt is frozen with code awaiting review, a closed task
+// goes back to review with the code-review label (D29, P1.26). An empty
+// attempt ("No changes") stays closed.
+func (s *Supervisor) reviewFrozenTask(taskID, attempt string) {
+	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+	defer cancel()
+	awaits, err := attemptAwaitsReview(ctx, s.WorkspaceID, attempt)
+	if err != nil {
+		slog.Error("task review check after freeze needs attention", "task_id", taskID, "err", err)
+		return
+	}
+	if !awaits || s.IssueBackend == nil {
+		return
+	}
+	issue, err := s.IssueBackend.Get(ctx, taskID)
+	if err != nil || issue == nil || issue.Status != "closed" {
+		return
+	}
+	// A closed issue refuses label changes, so it reopens first.
+	if err := s.IssueBackend.Reopen(ctx, taskID, backend.ReopenParams{Reason: "code awaits review"}); err != nil {
+		slog.Error("reopen closed task for code review needs attention", "task_id", taskID, "err", err)
+		return
+	}
+	if err := backend.MarkCodeReview(ctx, s.IssueBackend, taskID, ""); err != nil {
+		slog.Error("put closed task back in code review needs attention", "task_id", taskID, "err", err)
+	}
 }
 
 func (s *Supervisor) pendingExitFreeze(ap *AgentProcess, agentName, taskID, epicID, yieldReason string, exitCode int, lockDir string) (*config.Checkpoint, string) {
