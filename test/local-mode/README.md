@@ -167,13 +167,32 @@ LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-<you> make local-mode-agents-down
 ```
 
 Real-model mode: `LOCAL_MODE_AGENTS_REAL=1` adds
-`docker-compose.agents-real.yml`. It mounts the host's OpenCode
-`~/.local/share/opencode/auth.json` (or `LOCAL_MODE_OPENCODE_AUTH`) READ-ONLY
-at the container's OpenCode data path, and does not start the fake model, so
-Leads use the providers you are logged in to. Nothing on the host is written,
-and the file is never copied into an image. At each start the entrypoint has
-OpenCode import it into the container's OpenCode database, which lives on the
-project's `loom-data` volume and goes away with `make local-mode-agents-down`. The create flow's model list comes
+`docker-compose.agents-real.yml`. It mounts the host's live OpenCode data
+folder `~/.local/share/opencode` (or `LOCAL_MODE_OPENCODE_DATA`) READ-WRITE at
+the container's OpenCode data path, and does not start the fake model, so
+Leads use the providers you are logged in to with `opencode auth login` on the
+host. OpenCode 2.x keeps that login in `opencode.db` (the legacy `auth.json`
+there is a stale one-time import source and is ignored). Because the folder is
+shared read-write, a token refresh in the stack is saved to the host and the
+host login keeps working; a read-only copy would not work, since OpenAI's
+OAuth refresh rotates the refresh token and one side's refresh revokes the
+other's.
+
+The cost of sharing the live folder:
+
+- Stack OpenCode sessions, projects and logs land in your host OpenCode
+  history and are not removed by `make local-mode-agents-down`.
+- Only one REAL stack may run at a time. `make local-mode-agents-up` refuses
+  to start one while another project's REAL stack is running (it checks the
+  `loom.local-mode.opencode-host-data` container label).
+- SQLite is shared across the podman VM boundary. Your desktop OpenCode and a
+  REAL stack writing `opencode.db` at the same time risks corrupting it, so
+  quit desktop OpenCode while a REAL stack runs; `up` warns when a host
+  process has the database open.
+- The stack's pinned OpenCode must match the host's OpenCode version (both
+  2.0.19 today), since either one may migrate the shared database.
+
+The create flow's model list comes
 from those providers. To set a default model, use `LOCAL_MODE_AGENTS_MODEL`
 (`provider/model`); otherwise OpenCode picks one. The fake-model mode stays
 the default for AFT and CI.
@@ -192,12 +211,10 @@ LOCAL_MODE_FLEETDB_PORT=8680 LOCAL_MODE_API_PORT=8682 LOCAL_MODE_UI_PORT=8683 \
 LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" make local-mode-agents-up
 ```
 
-Tear it down with the same `make local-mode-agents-down` as above. If a
-provider token expires, refresh it on the host with `opencode auth login`,
-then `podman restart` the container. Never log in inside the container: the
-file is read-only there. Prefer an API-key provider, or an OAuth login whose
-access token has not expired: refreshing a stale OAuth token in the container
-can invalidate the host's login.
+Tear it down with the same `make local-mode-agents-down` as above. If the
+login is revoked or expired, run `opencode auth login` on the host (with no
+REAL stack running), then `podman restart` the container. Never log in inside
+the container, and never print or copy `opencode.db`.
 
 The agents image also carries the R21 pinned `codex` 0.157.1 and `claude`
 2.1.285 on `PATH`. Real mode mounts the host's codex `~/.codex/auth.json`

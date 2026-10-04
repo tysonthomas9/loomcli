@@ -324,6 +324,7 @@ local-mode-agents-up: local-mode-frontend-dist
 	@echo "Starting local-mode Agent API stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
+	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ]; then test/local-mode/real-opencode-guard.sh "$(LOCAL_MODE_COMPOSE_PROJECT)"; fi; \
 	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS); \
 	case " $(LOCAL_MODE_COMPOSE_UP_FLAGS) " in *" -d "*|*" --detach "*) ;; *) exit 0 ;; esac; \
