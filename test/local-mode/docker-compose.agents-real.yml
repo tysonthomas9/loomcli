@@ -13,7 +13,10 @@
 #
 # codex and Claude: each host credential file gets one read-only bind here, at
 # the path that harness reads, with a LOCAL_MODE_<HARNESS>_AUTH knob.
-# Never copy a credential, never log in inside the container.
+# Never copy a credential, never log in inside the container. The one
+# exception is opt-in LOCAL_MODE_CLAUDE_COPY=1: real-claude-copy.sh writes a
+# private, project-owned copy of the host's current Claude login with its
+# refresh token removed, and LOCAL_MODE_CLAUDE_AUTH points at that copy.
 
 services:
   loom-local:
@@ -25,6 +28,8 @@ services:
       # down -v removes them; only the auth file inside each is a host bind.
       CODEX_HOME: /root/.loom/agents-codex
       CLAUDE_CONFIG_DIR: /root/.loom/agents-claude
+      # Set by LOCAL_MODE_CLAUDE_COPY=1 (the private, refresh-token-free copy).
+      LOCAL_MODE_CLAUDE_COPY: "${LOCAL_MODE_CLAUDE_COPY:-}"
     volumes:
       - ${LOCAL_MODE_OPENCODE_COPY:?run REAL stacks through make local-mode-agents-up}:/run/secrets/opencode-seed.db:ro
       - ${LOCAL_MODE_CODEX_AUTH:-${HOME}/.codex/auth.json}:/root/.loom/agents-codex/auth.json:ro

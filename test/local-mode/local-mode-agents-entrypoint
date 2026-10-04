@@ -42,7 +42,9 @@ if [ -n "${LOCAL_MODE_AGENTS_REAL:-}" ]; then
   fi
   # A setup-token token skips the login flow, but not Claude's first-run
   # onboarding, which ends at "Select login method"; mark it done (no secret).
-  if [ -s /run/secrets/claude-token ] && [ ! -e "$CLAUDE_CONFIG_DIR/.claude.json" ]; then
+  # The same applies to the private login copy (LOCAL_MODE_CLAUDE_COPY=1).
+  if { [ -s /run/secrets/claude-token ] || [ -n "${LOCAL_MODE_CLAUDE_COPY:-}" ]; } \
+    && [ ! -e "$CLAUDE_CONFIG_DIR/.claude.json" ]; then
     mkdir -p "$CLAUDE_CONFIG_DIR"
     echo '{"hasCompletedOnboarding":true}' > "$CLAUDE_CONFIG_DIR/.claude.json"
   fi

@@ -276,6 +276,20 @@ entrypoint writes `{"hasCompletedOnboarding":true}` to the volume's
 `.claude.json` when a token is mounted and that file does not exist yet. With it unset,
 the `.credentials.json` bind is used as before.
 
+Or, without a setup token, opt in to a private copy of your current Claude
+login with `LOCAL_MODE_CLAUDE_COPY=1` on the same `make local-mode-agents-up`
+line. Before `up`, `test/local-mode/real-claude-copy.sh` reads the live login
+(on macOS the Keychain item `Claude Code-credentials`, otherwise
+`~/.claude/.credentials.json`; `LOCAL_MODE_CLAUDE_SOURCE` picks another file),
+removes the OAuth refresh token, and writes the rest, silently, to
+`$LOCAL_MODE_STATE_DIR/<project>/claude-auth/.credentials.json` (mode 600 in a
+mode-700 folder). That copy is what gets mounted read-only. Without a refresh
+token the stack can never rotate, and so sign out, your host login; it uses the
+current access token until that expires. A login that expires within
+`LOCAL_MODE_CLAUDE_MIN_MINUTES` (default 30) refuses the boot: run `claude` on
+the host, then down and up the stack. The entrypoint marks onboarding done, as
+it does for a token. `make local-mode-agents-down` deletes the copy.
+
 Codex variant knobs:
 
 The Codex image installs the current npm `latest` release by default. Set

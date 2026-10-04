@@ -32,6 +32,11 @@ export LOCAL_MODE_COMPOSE_PROJECT
 LOCAL_MODE_STATE_DIR ?= $(or $(XDG_STATE_HOME),$(HOME)/.local/state)/loom-local-mode
 LOCAL_MODE_OPENCODE_COPY = $(LOCAL_MODE_STATE_DIR)/$(LOCAL_MODE_COMPOSE_PROJECT)/opencode.db
 export LOCAL_MODE_OPENCODE_COPY
+# Opt-in (LOCAL_MODE_CLAUDE_COPY=1 with LOCAL_MODE_AGENTS_REAL=1): mount a
+# private copy of the host's current Claude login with its refresh token
+# removed (test/local-mode/real-claude-copy.sh) instead of
+# ~/.claude/.credentials.json. Removed by the same down targets.
+LOCAL_MODE_CLAUDE_COPY_PATH = $(LOCAL_MODE_STATE_DIR)/$(LOCAL_MODE_COMPOSE_PROJECT)/claude-auth/.credentials.json
 LOCAL_MODE_COMPOSE_SELECT = \
 	if [ "$(strip $(LOCAL_MODE_COMPOSE))" != "" ]; then \
 	  compose="$(LOCAL_MODE_COMPOSE)"; \
@@ -332,6 +337,10 @@ local-mode-agents-up: local-mode-frontend-dist
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS); \
 	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ]; then test/local-mode/real-opencode-copy.sh make "$(LOCAL_MODE_OPENCODE_COPY)"; fi; \
+	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ] && [ -n "$(LOCAL_MODE_CLAUDE_COPY)" ]; then \
+	  test/local-mode/real-claude-copy.sh make "$(LOCAL_MODE_CLAUDE_COPY_PATH)"; \
+	  LOCAL_MODE_CLAUDE_AUTH="$(LOCAL_MODE_CLAUDE_COPY_PATH)"; export LOCAL_MODE_CLAUDE_AUTH; \
+	fi; \
 	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS); \
 	case " $(LOCAL_MODE_COMPOSE_UP_FLAGS) " in *" -d "*|*" --detach "*) ;; *) exit 0 ;; esac; \
 	echo "Waiting for loom-local to print [local-mode] ready..."; \
@@ -345,13 +354,15 @@ local-mode-agents-down:
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) down -v --remove-orphans; \
-	test/local-mode/real-opencode-copy.sh remove "$(LOCAL_MODE_OPENCODE_COPY)"
+	test/local-mode/real-opencode-copy.sh remove "$(LOCAL_MODE_OPENCODE_COPY)"; \
+	test/local-mode/real-claude-copy.sh remove "$(LOCAL_MODE_CLAUDE_COPY_PATH)"
 
 local-mode-down:
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans; \
-	test/local-mode/real-opencode-copy.sh remove "$(LOCAL_MODE_OPENCODE_COPY)"
+	test/local-mode/real-opencode-copy.sh remove "$(LOCAL_MODE_OPENCODE_COPY)"; \
+	test/local-mode/real-claude-copy.sh remove "$(LOCAL_MODE_CLAUDE_COPY_PATH)"
 
 local-mode-logs:
 	@set -e; \
