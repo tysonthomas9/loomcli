@@ -2,11 +2,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import { AgentEventStream, listAgents } from "@/api/agentsv1";
-import type { Agent, ListAgentsQuery } from "@/api/agentsv1";
+import type { Agent, AgentHistory, ListAgentsQuery } from "@/api/agentsv1";
 import {
   ROSTER_KINDS,
   applyActivity,
@@ -89,6 +90,18 @@ export function useAgentRoster(
 
   // The stream reopens only when the set of agents changes.
   const ids = useMemo(() => [...roster.keys()].sort().join(","), [roster]);
+  // The last stream's cache, so the next one opens at the cursors it
+  // reached; a new agent opens at 0 (RR1).
+  const history = useRef<{ ws: string; h: AgentHistory } | null>(null);
+  const purged = useMemo(
+    () =>
+      [...roster.values()]
+        .filter((a) => a.history_purged_at)
+        .map((a) => a.agent_id)
+        .sort()
+        .join(","),
+    [roster],
+  );
 
   useEffect(() => {
     if (!ids) return;
@@ -96,6 +109,10 @@ export function useAgentRoster(
       agents: ids.split(","),
       types: ROSTER_KINDS,
       live: true,
+      ...(history.current?.ws === workspaceId
+        ? { history: history.current.h }
+        : {}),
+      expired: purged ? purged.split(",") : [],
       onEvents: (added) => {
         setRoster((r) => applyEvents(r, added));
         setActivity((m) => applyActivity(m, added));
@@ -114,9 +131,10 @@ export function useAgentRoster(
         relist();
       },
     });
+    history.current = { ws: workspaceId, h: stream.history };
     void stream.connect();
     return () => stream.close();
-  }, [workspaceId, ids, relist]);
+  }, [workspaceId, ids, purged, relist]);
 
   return { roster, error };
 }

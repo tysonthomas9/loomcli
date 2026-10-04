@@ -20,10 +20,15 @@ export interface AgentStreamOptions {
   types?: string[];
   deltas?: boolean;
   /**
-   * Live events only: no cursors and no paging. A reconnect or feed.gap just
-   * calls onResync, whose List is the catch-up (the agent roster).
+   * No paging: the stream opens with each agent's cursor (its last held seq,
+   * 0 for none), so the server replays whatever came after it, and a
+   * reconnect or feed.gap just calls onResync, whose List is the catch-up
+   * (the agent roster). The cursors cover a change made after that List but
+   * before the server registered the stream (RR1).
    */
   live?: boolean;
+  /** Agents whose history is purged: followed with no cursor, which the server refuses. */
+  expired?: readonly string[];
   /** The cache to merge into; a new one when omitted. */
   history?: AgentHistory;
   /** Newly merged saved events, from paging or the stream. */
@@ -58,6 +63,7 @@ export class AgentEventStream {
     private opts: AgentStreamOptions,
   ) {
     this.history = opts.history ?? new AgentHistory();
+    for (const a of opts.expired ?? []) this.expired.add(a);
   }
 
   /** Opens the stream and catches up; reconnects until close(). */
@@ -109,7 +115,7 @@ export class AgentEventStream {
     const after = agents
       .filter((a) => !this.expired.has(a))
       .map((a) => `${a}:${this.history.lastSeq(a)}`);
-    if (after.length && !this.opts.live) p.set("after", after.join(","));
+    if (after.length) p.set("after", after.join(","));
     if (types) p.set("types", types.join(","));
     if (deltas) p.set("deltas", "true");
     if (token.kind === "token") p.set("token", token.token);

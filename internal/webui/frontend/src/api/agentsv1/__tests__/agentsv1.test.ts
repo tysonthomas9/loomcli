@@ -200,12 +200,17 @@ describe("AgentEventStream", () => {
     s.close();
   });
 
-  it("live mode sends no cursors, never pages, and resyncs on connect and feed.gap", async () => {
+  it("live mode opens at the cache's cursors, never pages, and resyncs on connect and feed.gap", async () => {
     commit("a1", 1, 2);
-    const { s, onEvents, onResync } = open(["a1"], { live: true });
+    const { s, onEvents, onResync } = open(["a1", "a2", "gone"], {
+      live: true,
+      expired: ["gone"],
+    });
+    s.history.merge([ev("a1", 2)]);
     await s.connect();
     const es = lastES();
-    expect(es.url.searchParams.get("after")).toBeNull();
+    // The server replays after each cursor; a purged agent has none.
+    expect(es.url.searchParams.get("after")).toBe("a1:2,a2:0");
     es.saved(ev("a1", 3));
     es.gap();
     await flush();
