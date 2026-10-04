@@ -36,6 +36,9 @@ tests:
           fn: "(document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status') === 'review'"
         intent: The task page shows the task in review, not closed
       - wait:
+          fn: "!!document.querySelector('[data-testid=issue-status-badge]') && !document.querySelector('[data-testid=status-dropdown]') && !document.querySelector('[data-testid=remove-label-code-review]')"
+        intent: Its status is a badge, not a dropdown, and the code-review label has no remove button
+      - wait:
           fn: "!document.querySelector('[data-testid=review-action-bar]') && !document.querySelector('[data-testid=panel-approve-button]')"
         intent: The header offers no plan Approve/Reject for code awaiting review
       - click: { role: tab, name: Changes, exact: true }
@@ -83,6 +86,20 @@ tests:
         intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" no-changes E2E-WS-TREV empty
         intent: The empty attempt closed its task as No changes
+      - open: /ws/E2E-WS-TREV/kanban
+        intent: Load the workspace before following the task deep link
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: The board has mounted, so the workspace is loaded before the deep link
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-TREV/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TREV-empty-task")"
+        intent: Open the task whose attempt changed nothing
+      - wait:
+          fn: "(document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status') === 'closed'"
+        intent: The task shows Closed
+      - wait: { text: "No changes" }
+        intent: Its revision reads No changes
 
   - name: PR per task, the task waits in review, Approve closes it and Reject reopens it
     intent: In trunk mode the same task states hold
