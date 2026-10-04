@@ -351,22 +351,20 @@ tests:
           lead="$(cat "$AFT_WORK_DIR/cl2LeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents"
           kid() { curl -sf "$api?parent=$lead" | python3 -c 'import json,sys; print([a["agent_id"] for a in json.load(sys.stdin)["agents"] if a["name"] == sys.argv[1]][0])' "$1"; }
           kid "agv1-cl2-a-${RUN_ID:-local}" > "$AFT_WORK_DIR/cl2A"; kid "agv1-cl2-b-${RUN_ID:-local}" > "$AFT_WORK_DIR/cl2B"
-          # cl2-notice <child id> <want>: wait until exactly one lead prompt
-          # ends with that child's notice, and check the notice's fields.
+          # cl2-notice <child id> <child name> <want>: run once, after the
+          # Lead's reply shows (it follows the model request): exactly one
+          # lead prompt ends with the child's notice, which has its fields,
+          # and the lead never called agent_get.
           cat > "$AFT_WORK_DIR/cl2-notice" <<'SH'
           #!/bin/sh
           set -e
-          for i in $(seq 1 90); do
-            curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/cl2-requests.json"
-            rc=0
-            python3 - "$1" "$2" "$3" "$AFT_WORK_DIR/cl2-requests.json" <<'PY' || rc=$?
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/cl2-requests.json"
+          python3 - "$1" "$2" "$3" "$AFT_WORK_DIR/cl2-requests.json" <<'PY'
           import json, sys
           child, name, want, path = sys.argv[1:5]
           reqs = [r["messages"] for r in json.load(open(path))["requests"]
                   if any("start two workers" in json.dumps(m.get("content")) for m in r.get("messages", []))]
           prompts = [m[-1] for m in reqs if m and m[-1].get("role") == "user" and "task_completed:%s:" % child in json.dumps(m[-1].get("content"))]
-          if not prompts:
-              sys.exit(3)  # not yet
           assert len(prompts) == 1, "the lead was prompted %d times with %s's notice" % (len(prompts), child)
           text = prompts[0]["content"] if isinstance(prompts[0]["content"], str) else json.dumps(prompts[0]["content"])
           for part in ['child="%s"' % name, "outcome=", "branch=", want, "no agent_get needed"]:
@@ -374,11 +372,6 @@ tests:
           calls = [json.dumps(y.get("tool_calls") or []) for m in reqs for y in m if y.get("role") == "assistant"]
           assert not any("agent_get" in c for c in calls), "the lead called agent_get"
           PY
-            [ "$rc" -eq 0 ] && exit 0
-            [ "$rc" -eq 3 ] || exit "$rc"
-            sleep 1
-          done
-          echo "no lead prompt with $1's notice"; exit 1
           SH
           chmod +x "$AFT_WORK_DIR/cl2-notice"
           # The lead answers the first notice with one short line.
@@ -386,26 +379,22 @@ tests:
             curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
           curl -sf -X POST "$api/$(cat "$AFT_WORK_DIR/cl2A")/messages" -H "Content-Type: application/json" \
             -H "Idempotency-Key: agv1-cl2-stop-a-${RUN_ID:-local}" -d '{"text":"","delivery":"interrupt"}' >/dev/null
-          "$AFT_WORK_DIR/cl2-notice" "$(cat "$AFT_WORK_DIR/cl2A")" "agv1-cl2-a-${RUN_ID:-local}" "still_running=1"
-          grep -q '1 other child still running' "$AFT_WORK_DIR/cl2-requests.json"
-        intent: "Stop the first child; the Lead's model gets one notice for it naming the child, still_running=1 and no need for agent_get"
+        intent: "The operator's API client stops the first child, and the Lead's model is scripted to answer its notice with one short line"
       - wait:
           fn: >-
             (document.body.textContent || '').includes('AGV1-CL2-ACK') && !document.body.textContent.includes('task_completed:')
         budget: 90000
-        intent: "Wait until the Lead's one-line acknowledgement shows"
+        intent: "Wait until the Lead's one-line acknowledgement shows, so its model has been sent the first notice"
       - run: |
           set -e
           lead="$(cat "$AFT_WORK_DIR/cl2LeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents"
+          "$AFT_WORK_DIR/cl2-notice" "$(cat "$AFT_WORK_DIR/cl2A")" "agv1-cl2-a-${RUN_ID:-local}" "still_running=1"
+          grep -q '1 other child still running' "$AFT_WORK_DIR/cl2-requests.json"
           printf '{"steps":[{"next":"prompt","text":"AGV1-CL2-SUMMARY a and b are both done."}]}' |
             curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
           curl -sf -X POST "$api/$(cat "$AFT_WORK_DIR/cl2B")/messages" -H "Content-Type: application/json" \
             -H "Idempotency-Key: agv1-cl2-stop-b-${RUN_ID:-local}" -d '{"text":"","delivery":"interrupt"}' >/dev/null
-          "$AFT_WORK_DIR/cl2-notice" "$(cat "$AFT_WORK_DIR/cl2B")" "agv1-cl2-b-${RUN_ID:-local}" "still_running=0"
-          grep -q 'write one combined summary' "$AFT_WORK_DIR/cl2-requests.json"
-          # Each child's notice reached the lead once, in all: still one each.
-          "$AFT_WORK_DIR/cl2-notice" "$(cat "$AFT_WORK_DIR/cl2A")" "agv1-cl2-a-${RUN_ID:-local}" "still_running=1"
-        intent: "Stop the second child; the Lead's model gets one notice for it with still_running=0 and the instruction to write one combined summary, and the first child's notice was still sent once"
+        intent: "Check the Lead's model got one notice for the first child naming it, still_running=1 and no need for agent_get; then the operator's API client stops the second child"
       - wait:
           fn: >-
             (() => { const t = document.body.textContent || '';
@@ -413,6 +402,13 @@ tests:
                 !t.includes('task_completed:'); })()
         budget: 90000
         intent: "Wait until the chat shows the Lead's one acknowledgement and one summary, each once, and no raw task_completed text"
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/cl2-notice" "$(cat "$AFT_WORK_DIR/cl2B")" "agv1-cl2-b-${RUN_ID:-local}" "still_running=0"
+          grep -q 'write one combined summary' "$AFT_WORK_DIR/cl2-requests.json"
+          # The first child's notice still reached the lead once in all.
+          "$AFT_WORK_DIR/cl2-notice" "$(cat "$AFT_WORK_DIR/cl2A")" "agv1-cl2-a-${RUN_ID:-local}" "still_running=1"
+        intent: "Check the Lead's model got one notice for the second child with still_running=0 and the instruction to write one combined summary, and the first child's notice was sent once in all"
 
   - name: T9 sidebar children - two working children show nested under the lead, each leaves when it finishes, and a finished child stays only while its chat is open
     intent: An operator's OpenCode lead starts two children that keep working; both show once, nested under the lead in the sidebar. When one finishes it leaves the sidebar while the other stays. Opening the finished child from the lead's Started marker shows it nested under the lead and marked current until the operator goes back to the lead; then it is gone. When the second child finishes it leaves too (SB2)
