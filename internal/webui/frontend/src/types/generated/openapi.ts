@@ -2633,6 +2633,16 @@ export interface components {
       sender: string;
       text: string;
       since: string;
+      /** @description The text without its task_completed records; set only with completions */
+      message?: string;
+      /** @description The child task_completed records the text carries, in text order; set only when it has any */
+      completions?: components["schemas"]["AgentV1Completion"][];
+    };
+    /** @description One child attempt whose task_completed record a message carries. */
+    AgentV1Completion: {
+      child: string;
+      /** Format: int64 */
+      attempt: number;
     };
     /** @description One open harness ask. */
     AgentV1Ask: {

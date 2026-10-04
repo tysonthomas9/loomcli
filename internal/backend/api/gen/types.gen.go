@@ -1824,6 +1824,12 @@ type AgentV1AskQuestion struct {
 	Question string `json:"question"`
 }
 
+// AgentV1Completion One child attempt whose task_completed record a message carries.
+type AgentV1Completion struct {
+	Attempt int64  `json:"attempt"`
+	Child   string `json:"child"`
+}
+
 // AgentV1CreateBody The Create body. For a bridge caller, parent is always the caller.
 type AgentV1CreateBody struct {
 	// BaseRef The branch or commit the agent starts from. Required unless parent has a branch, which is then the default; a create without one is a 400 preset_invalid and writes no agent.
@@ -2087,9 +2093,14 @@ type AgentV1UpdateBody struct {
 
 // AgentV1WaitingMessage One sender's message waiting for the agent.
 type AgentV1WaitingMessage struct {
-	Sender string `json:"sender"`
-	Since  string `json:"since"`
-	Text   string `json:"text"`
+	// Completions The child task_completed records the text carries, in text order; set only when it has any
+	Completions *[]AgentV1Completion `json:"completions,omitempty"`
+
+	// Message The text without its task_completed records; set only with completions
+	Message *string `json:"message,omitempty"`
+	Sender  string  `json:"sender"`
+	Since   string  `json:"since"`
+	Text    string  `json:"text"`
 }
 
 // AgentV1WithdrawResult defines model for AgentV1WithdrawResult.

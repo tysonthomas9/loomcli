@@ -167,10 +167,20 @@ type Agent struct {
 }
 
 // WaitingMessage is one sender's message waiting for the agent.
+// Message and Completions are set only when Text carries child
+// task_completed records: Text without them, and the records.
 type WaitingMessage struct {
-	Sender string `json:"sender"`
-	Text   string `json:"text"`
-	Since  string `json:"since"`
+	Sender      string       `json:"sender"`
+	Text        string       `json:"text"`
+	Since       string       `json:"since"`
+	Message     string       `json:"message,omitempty"`
+	Completions []Completion `json:"completions,omitempty"`
+}
+
+// Completion is one child attempt whose task_completed record a message carries.
+type Completion struct {
+	Child   string `json:"child"`
+	Attempt int64  `json:"attempt"`
 }
 
 // Ask is one open harness ask.
@@ -224,7 +234,11 @@ func agentOut(i loomagent.AgentInfo) Agent {
 		HistoryPurgedAt: a.HistoryPurgedAt, HistoryPurgeFailedAt: a.HistoryPurgeFailedAt, DeletedAt: a.DeletedAt, Compute: i.Compute,
 		WaitingMessages: []WaitingMessage{}, OpenAsks: []Ask{}}
 	for _, w := range i.WaitingMessages {
-		out.WaitingMessages = append(out.WaitingMessages, WaitingMessage{w.Sender, w.Text, w.Since})
+		wm := WaitingMessage{Sender: w.Sender, Text: w.Text, Since: w.Since, Message: w.Message}
+		for _, c := range w.Completions {
+			wm.Completions = append(wm.Completions, Completion{c.Child, c.Attempt})
+		}
+		out.WaitingMessages = append(out.WaitingMessages, wm)
 	}
 	for _, k := range i.OpenAsks {
 		out.OpenAsks = append(out.OpenAsks, Ask{k.ID, k.Type, k.About, questionsOut(k.Questions)})

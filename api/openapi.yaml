@@ -4774,6 +4774,20 @@ components:
         sender: {type: string}
         text: {type: string}
         since: {type: string}
+        message:
+          type: string
+          description: The text without its task_completed records; set only with completions
+        completions:
+          type: array
+          description: The child task_completed records the text carries, in text order; set only when it has any
+          items: {$ref: '#/components/schemas/AgentV1Completion'}
+    AgentV1Completion:
+      type: object
+      description: One child attempt whose task_completed record a message carries.
+      required: [child, attempt]
+      properties:
+        child: {type: string}
+        attempt: {type: integer, format: int64}
     AgentV1Ask:
       type: object
       description: One open harness ask.

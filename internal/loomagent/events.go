@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -270,7 +271,10 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 				}
 				e, lastTotal = costOver(e, lastTotal), e.Usage.CostTotalUSD
 			}
-			r := nativeRow(a.AgentID, kind, e)
+			r, err := s.withCompletions(ctx, a.AgentID, nativeRow(a.AgentID, kind, e), e)
+			if err != nil {
+				return err
+			}
 			size += len(r.EventID) + len(r.Kind) + len(r.TurnID) + len(r.Payload) + f.add(e)
 			if size > replayCap {
 				return fmt.Errorf("%w of %d bytes", errHistoryTooLarge, replayCap)
@@ -473,7 +477,11 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 		return false, err
 	}
 	if kind, ok := savedKinds[e.Type]; ok {
-		if _, err := s.events.Append(ctx, nativeRow(id, kind, e)); err != nil {
+		row, err := s.withCompletions(ctx, id, nativeRow(id, kind, e), e)
+		if err != nil {
+			return false, err
+		}
+		if _, err := s.events.Append(ctx, row); err != nil {
 			return false, err
 		}
 	} else if e.Type == loomharness.EventDelta {
@@ -499,6 +507,36 @@ func (s *Service) withText(ctx context.Context, agentID string, e loomharness.Ev
 		e.Text, e.Sender = text, sender
 	}
 	return e, err
+}
+
+// withCompletions adds to row, the saved message.delivered e from an agent,
+// the task_completed records its text carries ("completions", maybe empty)
+// and the text without them ("message"), so the chat shows each record on
+// its card and never as message text; a row saved before these fields has
+// neither. Other rows are unchanged.
+func (s *Service) withCompletions(ctx context.Context, agentID string, row loomstore.Event,
+	e loomharness.Event) (loomstore.Event, error) {
+	if e.Type != loomharness.EventMessageDelivered || !strings.HasPrefix(e.Sender, "agent:") {
+		return row, nil
+	}
+	msg, done, err := s.splitCompletions(ctx, agentID, e.Sender, e.Text)
+	if err != nil {
+		return row, err
+	}
+	if done == nil {
+		done = []Completion{}
+	}
+	var p map[string]any
+	if err := json.Unmarshal(row.Payload, &p); err != nil {
+		return row, err
+	}
+	p["completions"], p["message"] = done, msg
+	b, err := json.Marshal(p)
+	if err != nil {
+		return row, err
+	}
+	row.Payload = b
+	return row, nil
 }
 
 // savedKinds maps the completed native events Phase 1 saves to their Loom

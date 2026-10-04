@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -42,6 +43,56 @@ func completionKey(child string, attempt int64) string {
 func (t TaskCompleted) text() string {
 	return fmt.Sprintf("%s outcome=%s branch=%s head=%s summary=%s", completionKey(t.Child, t.Attempt),
 		t.Outcome, t.Branch, t.Head, strconv.Quote(t.Summary))
+}
+
+// Completion names one child attempt whose task_completed record is part of
+// a message: the chat shows it on that record, not as message text.
+type Completion struct {
+	Child   string `json:"child"`
+	Attempt int64  `json:"attempt"`
+}
+
+// splitCompletions finds the lines of body, a message from sender to
+// agentID, that are task_completed records of sender's child saved on
+// agentID, exactly as text() wrote them into the child's slot (one line
+// each). It returns body without those lines and the records it found, in
+// body order; body is unchanged when it has none.
+func (s *Service) splitCompletions(ctx context.Context, agentID, sender, body string) (string, []Completion, error) {
+	child, ok := strings.CutPrefix(sender, "agent:")
+	if !ok || !strings.Contains(body, KindTaskCompleted+":"+child+":") {
+		return body, nil, nil
+	}
+	recs := map[string]TaskCompleted{}
+	q := loomstore.EventQuery{AgentID: agentID, Kinds: []string{KindTaskCompleted}, Limit: 500}
+	for {
+		page, err := s.store.ListEvents(ctx, q)
+		if err != nil {
+			return body, nil, err
+		}
+		for _, e := range page.Events {
+			var rec TaskCompleted
+			if json.Unmarshal(e.Payload, &rec) == nil && rec.Child == child {
+				recs[rec.text()] = rec
+			}
+		}
+		if !page.More {
+			break
+		}
+		q.After, q.Snapshot = page.Next, page.SnapshotSeq
+	}
+	var rest []string
+	var found []Completion
+	for _, line := range strings.Split(body, "\n") {
+		if rec, ok := recs[line]; ok {
+			found = append(found, Completion{Child: rec.Child, Attempt: rec.Attempt})
+			continue
+		}
+		rest = append(rest, line)
+	}
+	if len(found) == 0 {
+		return body, nil, nil
+	}
+	return strings.Join(rest, "\n"), found, nil
 }
 
 // created saves agent.created once, when Create finishes, and child.created

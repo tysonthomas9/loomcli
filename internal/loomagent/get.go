@@ -8,8 +8,12 @@ import (
 )
 
 // WaitingMessage is one sender's message waiting for the agent (§4.9).
+// Completions are the task_completed records in Text, and Message is Text
+// without them; both are set only when Text has such records.
 type WaitingMessage struct {
 	Sender, Text, Since string
+	Message             string
+	Completions         []Completion
 }
 
 // AgentInfo is what Get and List return (design v2 §4.5). HarnessSessionID is
@@ -42,7 +46,15 @@ func (s *Service) Get(ctx context.Context, agentID string) (AgentInfo, error) {
 	out.OpenAsks = s.openAsks(agentID)
 	for _, sl := range slots {
 		if sl.State == loomstore.SlotWaiting {
-			out.WaitingMessages = append(out.WaitingMessages, WaitingMessage{Sender: sl.Sender, Text: sl.Body, Since: deref(sl.QueuedAt)})
+			w := WaitingMessage{Sender: sl.Sender, Text: sl.Body, Since: deref(sl.QueuedAt)}
+			msg, done, err := s.splitCompletions(ctx, agentID, sl.Sender, sl.Body)
+			if err != nil {
+				return AgentInfo{}, err
+			}
+			if len(done) > 0 {
+				w.Message, w.Completions = msg, done
+			}
+			out.WaitingMessages = append(out.WaitingMessages, w)
 		}
 	}
 	return out, nil
