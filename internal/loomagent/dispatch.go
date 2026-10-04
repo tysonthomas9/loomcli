@@ -286,10 +286,20 @@ func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomha
 // the write gate. It then retries purge-pending native sessions and
 // dispatches every agent with a pending slot (a restart), and does so again
 // whenever its subscription lags and is replaced. Drain waits for it.
-func (s *Service) RunDispatcher(ctx context.Context) {
+func (s *Service) RunDispatcher(ctx context.Context) { s.Dispatcher()(ctx) }
+
+// Dispatcher registers s's dispatcher with Drain now and returns
+// RunDispatcher's body, for a caller that runs it on another goroutine, so
+// a Drain right after waits for it. Run the body once; with ctx already
+// done it only ends the registration.
+func (s *Service) Dispatcher() func(context.Context) {
 	l := s.startLoop()
-	defer s.stopLoop(l)
-	s.runDispatcher(ctx, l)
+	return func(ctx context.Context) {
+		defer s.stopLoop(l)
+		if ctx.Err() == nil {
+			s.runDispatcher(ctx, l)
+		}
+	}
 }
 
 // runDispatcher is RunDispatcher as the loop l, which the caller registered.

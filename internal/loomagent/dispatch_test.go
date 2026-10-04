@@ -94,8 +94,8 @@ func (c *testClock) backoffs() []time.Duration {
 func runDispatcher(t *testing.T, s *Service) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	l, done := s.startLoop(), make(chan struct{})
-	go func() { defer close(done); defer s.stopLoop(l); s.runDispatcher(ctx, l) }()
+	run, done := s.Dispatcher(), make(chan struct{})
+	go func() { defer close(done); run(ctx) }()
 	t.Cleanup(func() { cancel(); <-done })
 }
 
@@ -104,8 +104,8 @@ func runDispatcher(t *testing.T, s *Service) {
 func runFeed(t *testing.T, s *Service, harness string) (stop func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	l, done := s.startLoop(), make(chan struct{})
-	go func() { defer close(done); defer s.stopLoop(l); s.runFeed(ctx, harness, l) }()
+	run, done := s.Feed(harness), make(chan struct{})
+	go func() { defer close(done); run(ctx) }()
 	stop = sync.OnceFunc(func() { cancel(); <-done })
 	t.Cleanup(stop)
 	return stop

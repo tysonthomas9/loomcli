@@ -2,10 +2,12 @@ package agentwire
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -52,11 +54,27 @@ func TestStartServesEachWorkspace(t *testing.T) {
 	if len(api.services) != 2 || api.services["ws"] == api.services["ws2"] {
 		t.Errorf("services = %v; want one per workspace", api.services)
 	}
-	time.Sleep(500 * time.Millisecond) // longer than the first feed retry
+	drainAll(t, api) // the dispatchers' start-up is done; any feed it started has opened
 	api.Stop()
 	stopped = true
 	if _, err := os.Stat(ran); err == nil {
 		t.Fatal("a boot with no agents ran OpenCode")
+	}
+}
+
+// drainAll drains every workspace service of api: a test that needs a
+// timeout to pass is wrong.
+func drainAll(t *testing.T, api *API) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // a guard against a hang
+	defer cancel()
+	api.mu.Lock()
+	services := slices.Collect(maps.Values(api.services))
+	api.mu.Unlock()
+	for _, s := range services {
+		if err := s.Drain(ctx); err != nil {
+			t.Fatalf("drain: %v", err)
+		}
 	}
 }
 
@@ -103,20 +121,15 @@ func TestStartResumesWorkspacesWithAgents(t *testing.T) {
 			if len(api.services) != 1 || api.services["ws2"] == nil {
 				t.Fatalf("services = %v; want ws2", api.services)
 			}
+			drainAll(t, api) // the start-up Reconcile is done, and the feed's first open if one started
 			if deleted {
-				time.Sleep(500 * time.Millisecond) // longer than the first feed retry
 				if _, err := os.Stat(ran); err == nil {
 					t.Fatal("a workspace with only a deleted agent ran OpenCode")
 				}
 				return
 			}
-			for end := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-				if _, err := os.Stat(ran); err == nil {
-					break
-				}
-				if time.Now().After(end) {
-					t.Fatal("the feed of a workspace with OpenCode agents never reached OpenCode")
-				}
+			if _, err := os.Stat(ran); err != nil {
+				t.Fatal("the feed of a workspace with OpenCode agents never reached OpenCode")
 			}
 		})
 	}

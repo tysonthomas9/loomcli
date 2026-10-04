@@ -57,10 +57,18 @@ func (s *Service) forgetResumed(harness string) {
 // feed after a backoff; a replay is all or nothing, so the backfill after
 // the reconnect replays a failed one whole. A warning is logged when the
 // failure changes, not on every retry.
-func (s *Service) RunFeed(ctx context.Context, harness string) {
+func (s *Service) RunFeed(ctx context.Context, harness string) { s.Feed(harness)(ctx) }
+
+// Feed registers the named harness's feed with Drain now and returns
+// RunFeed's body, as Dispatcher does for the dispatcher.
+func (s *Service) Feed(harness string) func(context.Context) {
 	l := s.startLoop()
-	defer s.stopLoop(l)
-	s.runFeed(ctx, harness, l)
+	return func(ctx context.Context) {
+		defer s.stopLoop(l)
+		if ctx.Err() == nil {
+			s.runFeed(ctx, harness, l)
+		}
+	}
 }
 
 // runFeed is RunFeed as the loop l, which the caller registered. While it

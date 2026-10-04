@@ -62,6 +62,11 @@ type API struct {
 	mu       sync.Mutex // guards services and orders run against Stop
 	services map[string]*loomagent.Service
 	wg       sync.WaitGroup
+
+	// ticker and now are the idle and retention timers' clock: time's own,
+	// or a test's.
+	ticker func(time.Duration) (<-chan time.Time, func())
+	now    func() time.Time
 }
 
 // Start opens the registry and wires the OpenCode harness. Each workspace's
@@ -95,11 +100,12 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		return nil, fmt.Errorf("agentwire: %w", err)
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	a := &API{store: st, tokens: tokens, opencode: oc, ctx: ctx, cancel: cancel, services: map[string]*loomagent.Service{}}
+	a := &API{store: st, tokens: tokens, opencode: oc, ctx: ctx, cancel: cancel, services: map[string]*loomagent.Service{},
+		ticker: realTicker, now: time.Now}
 	a.SetAPIBase(cfg.APIBase)
 	a.newSvc = func(ws string) (*loomagent.Service, func()) {
 		var svc *loomagent.Service
-		feed := sync.OnceFunc(func() { a.run(func(ctx context.Context) { svc.RunFeed(ctx, "opencode") }) })
+		feed := sync.OnceFunc(func() { a.runLoop(svc.Feed("opencode")) })
 		c := serviceConfig(st, ws, wt, cfg.Skills,
 			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}})
 		c.RecoverFirst = true              // writes wait for the dispatcher's start-up Reconcile
@@ -159,7 +165,7 @@ func (a *API) service(ws string) *loomagent.Service {
 	svc, feed := a.newSvc(ws)
 	a.services[ws] = svc
 	a.mu.Unlock()
-	a.run(svc.RunDispatcher)
+	a.runLoop(svc.Dispatcher())
 	if oc, _, err := a.store.ListAgents(a.ctx, loomstore.AgentFilter{WorkspaceID: ws, Harness: "opencode",
 		IncludeArchived: true, Limit: 1}); err != nil || len(oc) > 0 {
 		feed()
@@ -168,14 +174,23 @@ func (a *API) service(ws string) *loomagent.Service {
 }
 
 // run runs fn until Stop.
-func (a *API) run(fn func(context.Context)) {
+func (a *API) run(fn func(context.Context)) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.ctx.Err() != nil {
-		return
+		return false
 	}
 	a.wg.Add(1)
 	go func() { defer a.wg.Done(); fn(a.ctx) }()
+	return true
+}
+
+// runLoop runs a service loop already registered with Drain (Dispatcher,
+// Feed); after Stop it runs it with the done ctx, which only unregisters it.
+func (a *API) runLoop(fn func(context.Context)) {
+	if !a.run(fn) {
+		fn(a.ctx)
+	}
 }
 
 // lazyFeed starts the harness feed before the first session Open, so a
