@@ -27,6 +27,7 @@ tests:
         intent: Load the workspace before following the task deep link
       - wait:
           fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: The board has mounted, so the workspace is loaded before the deep link
       - run: >-
           agent-browser --session "$AFT_SESSION" open
           "$AFT_BASE_URL/ws/E2E-WS-TREV/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TREV-approve-task")"
@@ -57,15 +58,20 @@ tests:
     intent: A rejected task leaves review without the label and is open for another attempt; its dependent stays blocked
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV reject trev-reject.txt
+        intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" in-review E2E-WS-TREV reject
+        intent: The task waits in review with the code-review label, its dependent is blocked and its epic is open
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" reject E2E-WS-TREV reject
         intent: Reject sets the task to open without the label
       - open: /ws/E2E-WS-TREV/kanban
+        intent: Load the workspace before following the task deep link
       - wait:
           fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: The board has mounted, so the workspace is loaded before the deep link
       - run: >-
           agent-browser --session "$AFT_SESSION" open
           "$AFT_BASE_URL/ws/E2E-WS-TREV/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TREV-reject-task")"
+        intent: Open the rejected task
       - wait:
           fn: "(document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status') === 'open'"
         intent: The rejected task shows Open
@@ -74,16 +80,26 @@ tests:
     intent: P1.25 is unchanged; a task whose agent changed nothing closes
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV empty
+        intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" no-changes E2E-WS-TREV empty
+        intent: The empty attempt closed its task as No changes
 
   - name: PR per task, the task waits in review, Approve closes it and Reject reopens it
     intent: In trunk mode the same task states hold
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV-TRUNK approve trev-trunk-approve.txt
+        intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" in-review E2E-WS-TREV-TRUNK approve
+        intent: The task waits in review with the code-review label, its dependent is blocked and its epic is open
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" approve E2E-WS-TREV-TRUNK approve
+        intent: Approve applies the code and closes the task without the label; the dependent becomes ready
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV-TRUNK reject trev-trunk-reject.txt
+        intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" in-review E2E-WS-TREV-TRUNK reject
+        intent: The task waits in review with the code-review label, its dependent is blocked and its epic is open
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" reject E2E-WS-TREV-TRUNK reject
+        intent: Reject sets the task back to open without the label; its dependent stays blocked
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV-TRUNK empty
+        intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" no-changes E2E-WS-TREV-TRUNK empty
+        intent: The empty attempt closed its task as No changes
