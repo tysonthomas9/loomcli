@@ -18,7 +18,7 @@ LOCAL_MODE_COMPOSE_EXTRA := $(foreach file,$(LOCAL_MODE_COMPOSE_FILES),-f $(file
 LOCAL_MODE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CODEX_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CLAUDE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.claude.yml $(LOCAL_MODE_COMPOSE_EXTRA)
-LOCAL_MODE_AGENTS_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml $(if $(LOCAL_MODE_AGENTS_REAL),-f test/local-mode/docker-compose.agents-real.yml) $(LOCAL_MODE_COMPOSE_EXTRA)
+LOCAL_MODE_AGENTS_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml $(if $(LOCAL_MODE_AGENTS_REAL),-f test/local-mode/docker-compose.agents-real.yml $(if $(filter 1,$(LOCAL_MODE_CLAUDE_COPY)),-f test/local-mode/docker-compose.agents-claude-copy.yml)) $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_DAYTONA_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.daytona.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 export LOCAL_MODE_FLEETDB_IMAGE
 export LOCAL_MODE_LOOM_IMAGE
@@ -337,7 +337,8 @@ local-mode-agents-up: local-mode-frontend-dist
 	$(LOCAL_MODE_COMPOSE_SELECT); \
 	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS); \
 	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ]; then test/local-mode/real-opencode-copy.sh make "$(LOCAL_MODE_OPENCODE_COPY)"; fi; \
-	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ] && [ -n "$(LOCAL_MODE_CLAUDE_COPY)" ]; then \
+	case "$(LOCAL_MODE_CLAUDE_COPY)" in ""|1) ;; *) echo "LOCAL_MODE_CLAUDE_COPY must be 1 or unset" >&2; exit 1 ;; esac; \
+	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ] && [ "$(LOCAL_MODE_CLAUDE_COPY)" = 1 ]; then \
 	  test/local-mode/real-claude-copy.sh make "$(LOCAL_MODE_CLAUDE_COPY_PATH)"; \
 	  LOCAL_MODE_CLAUDE_AUTH="$(LOCAL_MODE_CLAUDE_COPY_PATH)"; export LOCAL_MODE_CLAUDE_AUTH; \
 	fi; \

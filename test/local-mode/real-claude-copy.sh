@@ -88,9 +88,15 @@ fail() {
   exit 1
 }
 rm -f -- "$tmp"
+# Any exit before the copy is published (a failed chmod or mv included)
+# removes the credential-bearing temp file.
+trap 'rm -f -- "$tmp"' EXIT
 
 min="${LOCAL_MODE_CLAUDE_MIN_MINUTES:-30}"
 case "$min" in ''|*[!0-9]*) fail "LOCAL_MODE_CLAUDE_MIN_MINUTES must be a whole number" ;; esac
+# Bounded (at most 4 digits, i.e. under a week) so the cutoff cannot overflow.
+[ "${#min}" -le 4 ] || fail "LOCAL_MODE_CLAUDE_MIN_MINUTES must be at most 9999"
+min=$((10#$min))
 until_ms=$(( ($(date +%s) + min * 60) * 1000 ))
 
 # One silent transform: keep only claudeAiOauth, without its refresh token
@@ -109,4 +115,5 @@ jq -e '.claudeAiOauth | has("refreshToken") | not' "$tmp" >/dev/null 2>&1 \
   || fail "could not remove the refresh token from the copy"
 chmod 600 "$tmp"
 mv -f -- "$tmp" "$copy"
+trap - EXIT
 echo "local-mode: copied the Claude login (no refresh token) to $copy (private to this project)"

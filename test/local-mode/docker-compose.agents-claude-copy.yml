@@ -1,0 +1,7 @@
+# Added by the Makefile only for LOCAL_MODE_AGENTS_REAL=1 LOCAL_MODE_CLAUDE_COPY=1:
+# tells the entrypoint the Claude login is the private, refresh-token-free
+# copy (test/local-mode/real-claude-copy.sh), so it marks onboarding done.
+services:
+  loom-local:
+    environment:
+      LOCAL_MODE_CLAUDE_COPY: "1"
