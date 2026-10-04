@@ -178,9 +178,13 @@ func TestRepeatedCycleReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	seen = append(seen, recv(t, re, 3)...)
-	quiet(t, re)
+	moveTo(t, s, "a1", StateActive) // a sentinel: re's next event is its, so re got nothing twice
+	if e := recv(t, re, 1)[0]; e.EventID != "a1:5:"+EventStateChanged {
+		t.Fatalf("re's next event %s; want the sentinel a1:5:%s", e.EventID, EventStateChanged)
+	}
+	seen = append(seen, rows(t, s, "a1", 0)[6])
 	want := []string{"a1:1:" + EventStateChanged, "a1:2:" + EventStateChanged, "a1:2:" + EventIdle,
-		"a1:3:" + EventStateChanged, "a1:4:" + EventStateChanged, "a1:4:" + EventIdle}
+		"a1:3:" + EventStateChanged, "a1:4:" + EventStateChanged, "a1:4:" + EventIdle, "a1:5:" + EventStateChanged}
 	if all := rows(t, s, "a1", 0); !slices.Equal(ids(seen), ids(all)) || !slices.Equal(ids(all), want) {
 		t.Fatalf("seen %v; want each of %v once", ids(seen), ids(all))
 	}
@@ -201,7 +205,17 @@ func collect(t *testing.T, s *Service, sub *Subscription, agents ...string) map[
 		}
 		got[e.AgentID] = append(got[e.AgentID], e)
 	}
-	quiet(t, sub)
+	for _, id := range agents { // a sentinel write: sub's next events are exactly its own
+		var last int64
+		if n := len(got[id]); n > 0 {
+			last = got[id][n-1].Seq
+		}
+		toggleAttention(t, s, id)
+		next := rows(t, s, id, last)
+		if e := recv(t, sub, len(next)); !slices.Equal(ids(e), ids(next)) {
+			t.Fatalf("%s: after the sentinel got %v; want %v", id, ids(e), ids(next))
+		}
+	}
 	return got
 }
 
@@ -243,11 +257,11 @@ func TestPublishOrderPerAgent(t *testing.T) {
 	if n := unheld.Load(); n != 0 {
 		t.Fatalf("%d commits were not under the lane", n)
 	}
-	got := collect(t, s, sub, agents...)
 	busIDs := map[string][]string{}
 	for _, e := range drain(bus) {
 		busIDs[e.AgentID] = append(busIDs[e.AgentID], e.EventID)
 	}
+	got := collect(t, s, sub, agents...)
 	for _, id := range agents {
 		if !slices.Equal(busIDs[id], ids(got[id])) {
 			t.Fatalf("%s: bus order %v; want commit order %v", id, busIDs[id], ids(got[id]))
