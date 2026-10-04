@@ -217,9 +217,15 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 		if err != nil {
 			return err
 		}
-		// A legacy slot stays legacy (its older records are known only by
-		// text); the reader rebuilds them all.
-		if notes.Legacy == "" {
+		// A legacy slot stays legacy, its notices NULL as putSlot's '{}'
+		// would otherwise drop: the reader rebuilds them all from the
+		// receipts, this batch's included.
+		if notes.Legacy != "" {
+			if _, err := tx.ExecContext(ctx, `UPDATE agent_slots SET notices = NULL WHERE agent_id = ? AND sender = ?`,
+				agentID, sender); err != nil {
+				return err
+			}
+		} else {
 			for _, n := range fresh {
 				notes.Keys = append(notes.Keys, n.Key)
 			}
@@ -237,12 +243,15 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 			if err != nil {
 				return err
 			}
-			body := any(nil)
+			body, notices := any(nil), any("{}")
 			if n.Key == in.RequestID {
 				body = in.Body
 			}
+			if notes.Legacy != "" {
+				notices = nil // continues a legacy slot
+			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender,
-				result_json, created_at, body, notices) VALUES (?,?,?,?,?,?,'{}')`, agentID, n.Key, sender, res, now, body); err != nil {
+				result_json, created_at, body, notices) VALUES (?,?,?,?,?,?,?)`, agentID, n.Key, sender, res, now, body, notices); err != nil {
 				return err
 			}
 		}

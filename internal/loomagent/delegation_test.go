@@ -633,3 +633,51 @@ func TestLegacySlotRepeatedRecordMessage(t *testing.T) {
 		t.Fatalf("legacy delivery = %+v", p)
 	}
 }
+
+// TestLegacySlotGetsRecordAfterUpgrade: a child's message and attempt-1
+// record wait in a slot saved before the upgrade; after it, the child's
+// attempt-2 record merges in before the handover. Get and the delivery show
+// the message and both records, and no raw record line.
+func TestLegacySlotGetsRecordAfterUpgrade(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := serviceAt(t, path, busy("L", "persistent", StateActive), childOf("c1", "L"))
+	useTestClock(s)
+	mustSendMsg(t, s, sendReq("L", "m1", "Heads up", child))
+	endAttempt(t, s, "c1", "completed")
+	dispatchOK(t, s, "L")
+	rollBackNotices(t, path)
+
+	s2 := serviceAt(t, path)
+	useTestClock(s2)
+	nextAttempt(t, s2, "c1")
+	endAttempt(t, s2, "c1", "failed")
+	dispatchOK(t, s2, "L")
+	want := []Completion{{"c1", 1}, {"c1", 2}}
+	info, err := s2.Get(ctx, "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(info.WaitingMessages) != 1 {
+		t.Fatalf("waiting = %+v", info.WaitingMessages)
+	}
+	if w := info.WaitingMessages[0]; w.Message != "Heads up" || !slices.Equal(w.Completions, want) {
+		t.Fatalf("waiting after upgrade = %q %+v", w.Message, w.Completions)
+	}
+	sl := deliverNext(t, s2, "L")
+	e := loomharness.Event{Type: loomharness.EventMessageDelivered, InputKey: "k-" + sl.RequestID, Sender: sl.Sender, Text: sl.Body}
+	row, err := s2.withCompletions(ctx, "L", nativeRow("L", "message.delivered", e), e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p struct {
+		Message     string
+		Completions []Completion
+	}
+	if err := json.Unmarshal(row.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Message != "Heads up" || !slices.Equal(p.Completions, want) {
+		t.Fatalf("delivery after upgrade = %+v", p)
+	}
+}
