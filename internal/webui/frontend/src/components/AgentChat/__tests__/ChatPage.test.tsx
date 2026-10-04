@@ -382,17 +382,11 @@ describe("WorkingRow motion", () => {
     render(<WorkingRow startedAt={null} step="Bash" />);
     expect(page.workingLive).toBeTruthy();
     expect(screen.getByText("Working...")).toHaveClass(page.workingLive!);
-    const css = readFileSync(
-      `${process.cwd()}/src/components/AgentChat/ChatPage.module.css`,
-      "utf8",
-    );
+    const css = readFileSync(`${__dirname}/../ChatPage.module.css`, "utf8");
     expect(css).toMatch(/\.workingLive\s*\{\s*animation:\s*working-pulse/);
     // Item 10: every chat keyframe animates only opacity and transform.
     for (const name of ["ChatPage", "ChatMarkdown", "ModelPicker"]) {
-      const sheet = readFileSync(
-        `${process.cwd()}/src/components/AgentChat/${name}.module.css`,
-        "utf8",
-      );
+      const sheet = readFileSync(`${__dirname}/../${name}.module.css`, "utf8");
       for (const [, body] of sheet.matchAll(/@keyframes[^{]*\{([\s\S]*?)\n\}/g))
         for (const [, prop] of body!.matchAll(/([a-z-]+)\s*:/g))
           expect(["opacity", "transform"], name).toContain(prop);
