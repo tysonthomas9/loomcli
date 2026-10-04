@@ -73,6 +73,56 @@ func completionsIn(body string, n loomstore.SlotNotices) (string, []Completion) 
 	return msg, found
 }
 
+// slotNotices is n, a slot's notices; for a slot saved before notices were
+// kept (n.Legacy), it rebuilds them: the trailing lines of body that are
+// records agentID saved for sender's child, exactly as text() wrote them,
+// ending with the n.Legacy record the slot last took. That provenance is
+// required, so only such a legacy slot is ever read this way; if the lines
+// do not match (a redacted record), the whole body counts as records, so a
+// raw record never shows as a message.
+func (s *Service) slotNotices(ctx context.Context, agentID, sender, body string,
+	n loomstore.SlotNotices) (loomstore.SlotNotices, error) {
+	if n.Legacy == "" {
+		return n, nil
+	}
+	last, ok := parseCompletionKey(n.Legacy)
+	if !ok || "agent:"+last.Child != sender {
+		return loomstore.SlotNotices{}, nil
+	}
+	byText := map[string]string{}
+	q := loomstore.EventQuery{AgentID: agentID, Kinds: []string{KindTaskCompleted}, Limit: 500}
+	for {
+		page, err := s.store.ListEvents(ctx, q)
+		if err != nil {
+			return n, err
+		}
+		for _, e := range page.Events {
+			var rec TaskCompleted
+			if json.Unmarshal(e.Payload, &rec) == nil && rec.Child == last.Child {
+				byText[rec.text()] = e.EventID
+			}
+		}
+		if !page.More {
+			break
+		}
+		q.After, q.Snapshot = page.Next, page.SnapshotSeq
+	}
+	lines := strings.Split(body, "\n")
+	i, keys := len(lines), []string{}
+	for i > 0 && byText[lines[i-1]] != "" {
+		keys = append([]string{byText[lines[i-1]]}, keys...)
+		i--
+	}
+	if len(keys) == 0 || keys[len(keys)-1] != n.Legacy {
+		return loomstore.SlotNotices{Keys: []string{n.Legacy}}, nil
+	}
+	at := 0
+	for _, l := range lines[:i] {
+		at += len(l) + 1
+	}
+	return loomstore.SlotNotices{Keys: keys, At: at}, nil
+}
+
 // parseCompletionKey reads a record key completionKey wrote.
 func parseCompletionKey(key string) (Completion, bool) {
 	rest, ok := strings.CutPrefix(key, KindTaskCompleted+":")

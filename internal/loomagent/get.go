@@ -51,7 +51,11 @@ func (s *Service) Get(ctx context.Context, agentID string) (AgentInfo, error) {
 	for _, sl := range slots {
 		if sl.State == loomstore.SlotWaiting {
 			w := WaitingMessage{Sender: sl.Sender, Text: sl.Body, Since: deref(sl.QueuedAt)}
-			if msg, done := completionsIn(sl.Body, notices[sl.Sender]); len(done) > 0 {
+			n, err := s.slotNotices(ctx, agentID, sl.Sender, sl.Body, notices[sl.Sender])
+			if err != nil {
+				return AgentInfo{}, err
+			}
+			if msg, done := completionsIn(sl.Body, n); len(done) > 0 {
 				w.Message, w.Completions = msg, done
 			}
 			out.WaitingMessages = append(out.WaitingMessages, w)

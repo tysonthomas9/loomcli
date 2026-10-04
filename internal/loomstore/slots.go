@@ -140,9 +140,20 @@ type Notice struct{ Key, Text string }
 // SlotNotices are the notices at the end of a slot's body: their keys in
 // the order added, and the byte offset in the body where the first begins
 // (the text before it, less its line break, is the sender's own message).
+//
+// Legacy is set instead on a slot saved before notices were kept (migration
+// 9) whose last addition was a task_completed notice: that notice's key,
+// for the reader to rebuild the rest from the records it saved.
 type SlotNotices struct {
-	Keys []string `json:"keys"`
-	At   int      `json:"at"`
+	Keys   []string `json:"keys"`
+	At     int      `json:"at"`
+	Legacy string   `json:"-"`
+}
+
+// legacyNotices reports whether a slot or receipt with notices raw and
+// request id requestID predates notices and last took a task_completed notice.
+func legacyNotices(raw sql.NullString, requestID string) bool {
+	return !raw.Valid && strings.HasPrefix(requestID, "task_completed:")
 }
 
 func readNotices(raw sql.NullString) (SlotNotices, error) {
@@ -189,7 +200,9 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 			if notes, err = readNotices(raw); err != nil {
 				return err
 			}
-			if len(notes.Keys) == 0 { // the records start after the waiting text and its line break
+			if legacyNotices(raw, cur.RequestID) {
+				notes.Legacy = cur.RequestID
+			} else if len(notes.Keys) == 0 { // the records start after the waiting text and its line break
 				notes.At = len(cur.Body) + 1
 			}
 		}
@@ -202,16 +215,20 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 		if err != nil {
 			return err
 		}
-		for _, n := range fresh {
-			notes.Keys = append(notes.Keys, n.Key)
-		}
-		b, err := json.Marshal(notes)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_slots SET notices = ? WHERE agent_id = ? AND sender = ?`,
-			string(b), agentID, sender); err != nil {
-			return err
+		// A legacy slot stays legacy (its older records are known only by
+		// text); the reader rebuilds them all.
+		if notes.Legacy == "" {
+			for _, n := range fresh {
+				notes.Keys = append(notes.Keys, n.Key)
+			}
+			b, err := json.Marshal(notes)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE agent_slots SET notices = ? WHERE agent_id = ? AND sender = ?`,
+				string(b), agentID, sender); err != nil {
+				return err
+			}
 		}
 		for _, n := range fresh {
 			res, err := result(n.Key, replaced)
@@ -461,26 +478,31 @@ func (s *Store) HandedText(ctx context.Context, agentID, nativeKey string) (text
 }
 
 // WaitingNotices returns the notices of each of agentID's waiting slots that
-// has any, by sender.
+// has any, or is legacy, by sender.
 func (s *Store) WaitingNotices(ctx context.Context, agentID string) (map[string]SlotNotices, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT sender, notices FROM agent_slots WHERE agent_id = ? AND state = ?
-		AND notices IS NOT NULL`, agentID, SlotWaiting)
+	rows, err := s.db.QueryContext(ctx, `SELECT sender, notices, request_id FROM agent_slots WHERE agent_id = ? AND state = ?`,
+		agentID, SlotWaiting)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	out := map[string]SlotNotices{}
 	for rows.Next() {
-		var sender string
+		var sender, requestID string
 		var raw sql.NullString
-		if err := rows.Scan(&sender, &raw); err != nil {
+		if err := rows.Scan(&sender, &raw, &requestID); err != nil {
 			return nil, err
 		}
 		n, err := readNotices(raw)
 		if err != nil {
 			return nil, err
 		}
-		out[sender] = n
+		if legacyNotices(raw, requestID) {
+			n.Legacy = requestID
+		}
+		if len(n.Keys) > 0 || n.Legacy != "" {
+			out[sender] = n
+		}
 	}
 	return out, rows.Err()
 }
@@ -490,15 +512,20 @@ func (s *Store) WaitingNotices(ctx context.Context, agentID string) (map[string]
 // receipt or a message with none).
 func (s *Store) HandedNotices(ctx context.Context, agentID, nativeKey string) (SlotNotices, error) {
 	var raw sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT notices FROM agent_send_receipts WHERE agent_id = ? AND native_key = ?
-		ORDER BY created_at DESC LIMIT 1`, agentID, nativeKey).Scan(&raw)
+	var requestID string
+	err := s.db.QueryRowContext(ctx, `SELECT notices, request_id FROM agent_send_receipts WHERE agent_id = ? AND native_key = ?
+		ORDER BY created_at DESC LIMIT 1`, agentID, nativeKey).Scan(&raw, &requestID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SlotNotices{}, nil
 	}
 	if err != nil {
 		return SlotNotices{}, err
 	}
-	return readNotices(raw)
+	n, err := readNotices(raw)
+	if legacyNotices(raw, requestID) {
+		n.Legacy = requestID
+	}
+	return n, err
 }
 
 // GetReceipt returns the receipt of the agent's Send requestID, or ErrNotFound.

@@ -12,6 +12,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"database/sql"
+
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
@@ -493,5 +495,81 @@ func TestWaitingCompletionsSplit(t *testing.T) {
 	}
 	if strings.Contains(string(row.Payload), "completions") {
 		t.Fatalf("user delivery split: %s", row.Payload)
+	}
+}
+
+// TestLegacyCompletionSlotsUpgrade: a store saved before slots kept their
+// notices, holding a handed slot (a child's message and its record) and a
+// waiting one (only a record), opens with the new schema; Get and the
+// delivery each show the record as one completion and the child's own text
+// as its message, with no raw record line, and a later plain message from
+// the child stays a message.
+func TestLegacyCompletionSlotsUpgrade(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := serviceAt(t, path, busy("L", "persistent", StateActive), childOf("c1", "L"), childOf("c2", "L"))
+	useTestClock(s)
+	mustSendMsg(t, s, sendReq("L", "m1", "Heads up:\nuse cursor paging", child))
+	endAttempt(t, s, "c1", "completed")
+	dispatchOK(t, s, "L")
+	handed := deliverNext(t, s, "L")
+	endAttempt(t, s, "c2", "failed")
+	dispatchOK(t, s, "L")
+
+	// Roll the file back to the prior schema: no notices columns.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"ALTER TABLE agent_slots DROP COLUMN notices", "ALTER TABLE agent_send_receipts DROP COLUMN notices",
+		"PRAGMA user_version = " + strconv.Itoa(v-1)} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	db.Close()
+
+	s2 := serviceAt(t, path)
+	useTestClock(s2)
+	waiting := func() map[string]WaitingMessage {
+		t.Helper()
+		info, err := s2.Get(ctx, "L")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]WaitingMessage{}
+		for _, w := range info.WaitingMessages {
+			out[w.Sender] = w
+		}
+		return out
+	}
+	w := waiting()["agent:c2"]
+	if w.Message != "" || !slices.Equal(w.Completions, []Completion{{"c2", 1}}) {
+		t.Fatalf("legacy waiting = %+v", w)
+	}
+	e := loomharness.Event{Type: loomharness.EventMessageDelivered, InputKey: "k-" + handed.RequestID,
+		Sender: handed.Sender, Text: handed.Body}
+	row, err := s2.withCompletions(ctx, "L", nativeRow("L", "message.delivered", e), e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p struct {
+		Message     string
+		Completions []Completion
+	}
+	if err := json.Unmarshal(row.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Message != "Heads up:\nuse cursor paging" || !slices.Equal(p.Completions, []Completion{{"c1", 1}}) {
+		t.Fatalf("legacy delivery = %+v", p)
+	}
+
+	mustSendMsg(t, s2, sendReq("L", "m2", "one more thing", child))
+	if w := waiting()["agent:c1"]; w.Message != "" || w.Completions != nil || w.Text != "one more thing" {
+		t.Fatalf("plain message after upgrade = %+v", w)
 	}
 }

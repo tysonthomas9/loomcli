@@ -524,6 +524,9 @@ func (s *Service) withCompletions(ctx context.Context, agentID string, row looms
 	if err != nil {
 		return row, err
 	}
+	if notes, err = s.slotNotices(ctx, agentID, e.Sender, e.Text, notes); err != nil {
+		return row, err
+	}
 	msg, done := completionsIn(e.Text, notes)
 	var p map[string]any
 	if err := json.Unmarshal(row.Payload, &p); err != nil {

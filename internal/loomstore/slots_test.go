@@ -528,3 +528,46 @@ func TestMigrationAttemptBoundaryBackfill(t *testing.T) {
 		}
 	}
 }
+
+// TestMigrationNoticesLegacy: a slot and a receipt saved before notices were
+// kept, whose last addition was a child's record, read back as legacy (their
+// record key, for the reader to rebuild from); others do not.
+func TestMigrationNoticesLegacy(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	all := migrations
+	defer func() { migrations = all }()
+	migrations = all[:len(all)-1] // the schema before notices
+	old := openAt(t, path)
+	if err := old.InsertAgent(ctx, agent("L", "interactive")); err != nil {
+		t.Fatal(err)
+	}
+	for _, sl := range [][2]string{{"agent:c1", "task_completed:c1:1"}, {"agent:c3", "m-plain"}} {
+		if _, err := old.db.ExecContext(ctx, `INSERT INTO agent_slots (agent_id, sender, request_id, body, source, state, queued_at, updated_at)
+			VALUES ('L', ?, ?, 'text', 'agent', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`, sl[0], sl[1], SlotWaiting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, r := range [][2]string{{"k2", "task_completed:c2:1"}, {"k4", "m-other"}} {
+		if _, err := old.db.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at, native_key)
+			VALUES ('L', ?, 'agent:x', '{}', '2026-01-01T00:00:00Z', ?)`, r[1], r[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old.Close()
+	migrations = all
+	s := openAt(t, path)
+	w, err := s.WaitingNotices(ctx, "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w) != 1 || w["agent:c1"].Legacy != "task_completed:c1:1" {
+		t.Fatalf("waiting notices = %+v", w)
+	}
+	for key, want := range map[string]string{"k2": "task_completed:c2:1", "k4": ""} {
+		n, err := s.HandedNotices(ctx, "L", key)
+		if err != nil || n.Legacy != want || len(n.Keys) != 0 {
+			t.Fatalf("handed %s = %+v %v", key, n, err)
+		}
+	}
+}
