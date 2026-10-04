@@ -102,18 +102,32 @@ const json = (body: unknown) =>
     headers: { "Content-Type": "application/json" },
   });
 
-function fakeFetch(input: string) {
+// While set, a full List reads the agents when it arrives but answers only
+// once released: a slow response that is stale when it lands.
+let holdFull: Promise<void> | null = null;
+function holdFullLists(): () => void {
+  let release = () => {};
+  holdFull = new Promise((r) => (release = r));
+  return () => {
+    holdFull = null;
+    release();
+  };
+}
+
+async function fakeFetch(input: string) {
   const url = new URL(input, "http://localhost");
   if (url.pathname.endsWith("/events/token")) return json({ token: "tok" });
   if (url.pathname.endsWith("/v1/agents")) {
     lists.push(url);
     const parent = url.searchParams.get("parent");
-    return json({
+    const body = {
       agents: [...agents.values()].filter(
         (a) => !parent || a.parent_agent_id === parent,
       ),
       next: "",
-    });
+    };
+    if (!parent && holdFull) await holdFull;
+    return json(body);
   }
   return new Response("{}", { status: 404 });
 }
@@ -124,6 +138,7 @@ beforeEach(() => {
   agents.clear();
   log.clear();
   lists = [];
+  holdFull = null;
   FakeEventSource.all = [];
   vi.stubGlobal("fetch", vi.fn(fakeFetch));
   vi.stubGlobal("EventSource", FakeEventSource);
@@ -161,6 +176,41 @@ describe("useAgentRoster", () => {
     await waitFor(() =>
       expect(result.current.roster.get("kid")?.state).toBe("active"),
     );
+  });
+
+  it("does not let a List read before a replayed change undo it when it lands late", async () => {
+    agents.set("lead", agent("lead", { preset: "lead" }));
+    commit("lead", "agent.state_changed", { from: "creating", to: "idle" });
+    const { result } = renderHook(() => useAgentRoster("ws1"));
+    await waitFor(() => expect(openStream()?.agents).toEqual(["lead"]));
+    act(() => openStream()!.register());
+    await waitFor(() =>
+      expect(result.current.roster.get("lead")).toBeDefined(),
+    );
+
+    // The child's reopened stream re-lists, and that List is slow: it reads
+    // the child idle but answers only after the replay made it active.
+    const release = holdFullLists();
+    const relists = () =>
+      lists.filter((u) => !u.searchParams.get("parent")).length;
+    const before = relists();
+    agents.set("kid", agent("kid", { parent_agent_id: "lead" }));
+    commit("kid", "agent.state_changed", { from: "creating", to: "idle" });
+    commit("lead", "child.created", { child: "kid" });
+    await waitFor(() => expect(openStream()?.agents).toEqual(["kid", "lead"]));
+    const next = openStream()!;
+    await waitFor(() => expect(relists()).toBeGreaterThan(before));
+
+    commit("kid", "agent.state_changed", { from: "idle", to: "active" });
+    act(() => next.register());
+    await waitFor(() =>
+      expect(result.current.roster.get("kid")?.state).toBe("active"),
+    );
+    await act(async () => release());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(result.current.roster.get("kid")?.state).toBe("active");
   });
 
   it("follows an agent with purged history without a cursor", async () => {

@@ -7,7 +7,12 @@ import {
   useSyncExternalStore,
 } from "react";
 import { AgentEventStream, listAgents } from "@/api/agentsv1";
-import type { Agent, AgentHistory, ListAgentsQuery } from "@/api/agentsv1";
+import type {
+  Agent,
+  AgentEvent,
+  AgentHistory,
+  ListAgentsQuery,
+} from "@/api/agentsv1";
 import {
   ROSTER_KINDS,
   applyActivity,
@@ -71,14 +76,42 @@ export function useAgentRoster(
   const [activity, setActivity] = useState<Activities>(new Map());
   const [error, setError] = useState<string | null>(null);
 
+  // Each List in flight collects the stream's events that arrive while it
+  // runs, and its result is the List with those events applied on top: a
+  // List read before a replayed or live change never undoes it (RR1).
+  const inflight = useRef(new Set<AgentEvent[]>());
+  const list = useCallback(
+    (
+      q: ListAgentsQuery,
+      merge: (r: Roster, agents: Agent[]) => Roster | null,
+    ) => {
+      const seen: AgentEvent[] = [];
+      inflight.current.add(seen);
+      return listAll(workspaceId, q)
+        .then((agents) =>
+          setRoster((r) => {
+            const next = merge(r, agents);
+            return next ? applyEvents(next, seen) : r;
+          }),
+        )
+        .finally(() => inflight.current.delete(seen));
+    },
+    [workspaceId],
+  );
+
+  // A full List replaces the roster, unless a later one already did.
+  const sent = useRef(0);
+  const done = useRef(0);
   const relist = useCallback(() => {
-    listAll(workspaceId)
-      .then((agents) => {
-        setRoster(upsert(new Map(), agents));
-        setError(null);
-      })
+    const n = ++sent.current;
+    list({}, (_, agents) => {
+      if (n < done.current) return null;
+      done.current = n;
+      return upsert(new Map(), agents);
+    })
+      .then(() => setError(null))
       .catch((err) => setError(message(err)));
-  }, [workspaceId]);
+  }, [list]);
 
   useEffect(() => relist(), [relist, openId]);
 
@@ -114,12 +147,11 @@ export function useAgentRoster(
         : {}),
       expired: purged ? purged.split(",") : [],
       onEvents: (added) => {
+        inflight.current.forEach((seen) => seen.push(...added));
         setRoster((r) => applyEvents(r, added));
         setActivity((m) => applyActivity(m, added));
         for (const parent of newChildParents(added))
-          listAll(workspaceId, { parent })
-            .then((kids) => setRoster((r) => upsert(r, kids)))
-            .catch((err) => setError(message(err)));
+          list({ parent }, upsert).catch((err) => setError(message(err)));
       },
       onNotice: (n) => {
         if (n.kind === "tool.started")
@@ -134,7 +166,7 @@ export function useAgentRoster(
     history.current = { ws: workspaceId, h: stream.history };
     void stream.connect();
     return () => stream.close();
-  }, [workspaceId, ids, purged, relist]);
+  }, [workspaceId, ids, purged, relist, list]);
 
   return { roster, error };
 }
