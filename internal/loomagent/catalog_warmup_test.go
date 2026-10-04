@@ -254,3 +254,34 @@ func TestCreateHungCatalogNotReady(t *testing.T) {
 		t.Fatal("create on a hung catalog did not return within 5s")
 	}
 }
+
+// nilCatalog is a wired harness that lists no models as a nil list.
+type nilCatalog struct{ *openRec }
+
+func (nilCatalog) Models(context.Context) ([]loomharness.Model, error) { return nil, nil }
+
+// MCS1: a wired harness listing a nil catalog is an empty list, not an
+// unwired one: Create and Update accept an unlisted model with the warning.
+func TestNilCatalogModelUnverified(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	s.harnesses["opencode"], s.catalogWait = nilCatalog{e.h}, 20*time.Millisecond
+	req := leadReq("r1")
+	req.Overrides.Model = "openai/bogus"
+	a, err := s.Create(ctx, req)
+	wantUnverified(t, e, a, err, "openai/bogus")
+
+	b, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: "r2"}, Preset: "lead", Name: "b", Repo: "/repo",
+		BaseRef: "main", Overrides: Overrides{Harness: "opencode"}})
+	if err != nil || b.ModelUnverified {
+		t.Fatalf("create with no model = unverified %v, %v", b.ModelUnverified, err)
+	}
+	b, err = s.Update(ctx, UpdateRequest{AgentID: b.AgentID, Model: "openai/other"})
+	if err != nil || deref(b.Model) != "openai/other" || !b.ModelUnverified {
+		t.Fatalf("update = %s unverified=%v, %v; want openai/other unverified", deref(b.Model), b.ModelUnverified, err)
+	}
+	if n := e.events(t, b.AgentID, KindModelUnverified); n != 1 {
+		t.Fatalf("model.unverified events after update = %d, want 1", n)
+	}
+}

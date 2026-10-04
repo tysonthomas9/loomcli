@@ -20,7 +20,9 @@ func (s *Service) Models(ctx context.Context, harness string) ([]loomharness.Mod
 }
 
 // catalog lists harness's models, or nil when it is not wired, then the
-// workspace's custom model ids it does not list (MCS3).
+// workspace's custom model ids it does not list (MCS3). A wired harness that
+// lists nothing (a nil list, as codex gives for none) is an empty catalog,
+// never nil, so a model it lacks is unverified (MCS1).
 func (s *Service) catalog(ctx context.Context, harness string) ([]loomharness.Model, error) {
 	h, ok := s.harnesses[harness]
 	if !ok {
@@ -29,6 +31,9 @@ func (s *Service) catalog(ctx context.Context, harness string) ([]loomharness.Mo
 	ms, err := h.Models(ctx)
 	if err != nil {
 		return nil, harnessErr(err)
+	}
+	if ms == nil {
+		ms = []loomharness.Model{}
 	}
 	s.mu.Lock()
 	if _, ok := s.listed[harness]; !ok {
