@@ -57,6 +57,7 @@ type ProcessSpec struct {
 	Dir       string             // the agent's worktree
 	Model     string
 	Effort    string // --effort; empty is the CLI's default
+	Persona   string // the preset persona, --append-system-prompt on every launch
 }
 
 // SessionID reserves the Claude session UUID for an Open key. It is derived,
@@ -221,6 +222,9 @@ func (p *Process) start(ctx context.Context, resume bool) error {
 	}
 	if p.spec.Effort != "" {
 		args = append(args, "--effort", p.spec.Effort)
+	}
+	if p.spec.Persona != "" {
+		args = append(args, "--append-system-prompt", p.spec.Persona)
 	}
 	cmd := exec.Command(p.cfg.Bin, append(args, p.cfg.Args...)...) //nolint:gosec // G204: the configured claude binary.
 	cmd.Dir, cmd.Env = p.spec.Dir, env

@@ -207,6 +207,38 @@ func TestClaudeSetModelAndMoveAtTurnBoundary(t *testing.T) {
 	}
 }
 
+// TestClaudePresetPersona: the preset persona reaches Claude as
+// --append-system-prompt on the first launch and on every resume, as it
+// reaches codex (developerInstructions) and OpenCode (the preset agent file).
+func TestClaudePresetPersona(t *testing.T) {
+	a, feed, f := newAdapter(t)
+	ctx := context.Background()
+	spec := loomharness.OpenSpec{Key: "agent-lead", Dir: t.TempDir(), Launch: loomharness.Launch{Root: f.root},
+		Preset: loomharness.PresetConfig{Name: "lead", Persona: "be the lead"}}
+	ref, err := a.Open(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := a.Session(ref)
+	prompt(t, s, "one")
+	until(t, feed, loomharness.EventTurnCompleted)
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	prompt(t, s, "two")
+	until(t, feed, loomharness.EventTurnCompleted)
+	got := launches(t, f.dumpPath)
+	if len(got) != 2 || !slices.Contains(got[1].Args, "--resume") {
+		t.Fatalf("want a launch then a --resume; got %d launches", len(got))
+	}
+	for _, l := range got {
+		i := slices.Index(l.Args, "--append-system-prompt")
+		if i < 0 || i+1 >= len(l.Args) || l.Args[i+1] != "be the lead" {
+			t.Fatalf("want --append-system-prompt %q; got %v", "be the lead", l.Args)
+		}
+	}
+}
+
 func TestClaudeReturnsActualNativeRef(t *testing.T) {
 	a, _, f := newAdapter(t)
 	ctx := context.Background()

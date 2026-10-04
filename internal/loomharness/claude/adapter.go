@@ -100,7 +100,7 @@ func (a *Adapter) Open(_ context.Context, spec loomharness.OpenSpec) (loomharnes
 	ref := loomharness.NativeRef{Root: root, NativeID: SessionID(spec.Key)}
 	s := a.session(ref)
 	s.mu.Lock()
-	s.spec.Launch, s.spec.Dir, s.spec.Model = l, spec.Dir, spec.Model
+	s.spec.Launch, s.spec.Dir, s.spec.Model, s.spec.Persona = l, spec.Dir, spec.Model, spec.Preset.Persona
 	s.mu.Unlock()
 	return ref, nil
 }
