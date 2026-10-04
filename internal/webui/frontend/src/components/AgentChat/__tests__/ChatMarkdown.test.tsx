@@ -87,4 +87,29 @@ describe("ChatMarkdown block memoisation", () => {
     expect(run?.style.opacity).toBe("0.25");
     expect(run?.parentElement?.textContent).toBe("Hello there");
   });
+
+  it("keeps each revealed run in the span it started in (no layout shift)", () => {
+    const { container, rerender } = render(
+      <ChatMarkdown
+        text={"Hello there my"}
+        streaming
+        fresh={[{ from: 5, opacity: 0.5 }]}
+      />,
+    );
+    const first = container.querySelector("[data-run]")!;
+    expect(first.textContent).toBe(" there my");
+    rerender(
+      <ChatMarkdown
+        text={"Hello there my friend"}
+        streaming
+        fresh={[
+          { from: 5, opacity: 1 },
+          { from: 14, opacity: 0.2 },
+        ]}
+      />,
+    );
+    expect(first.isConnected).toBe(true);
+    expect(first.textContent).toBe(" there my");
+    expect(container.querySelectorAll("[data-run]")).toHaveLength(2);
+  });
 });

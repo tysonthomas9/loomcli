@@ -41,7 +41,7 @@ export function nextReveal(
   return { pos: Math.max(next, k), shown: k };
 }
 
-/** A run revealed recently, from `from` to the next run, at this opacity. */
+/** A revealed run, from `from` to the next run, at its fade's opacity. */
 export interface FreshRun {
   from: number;
   opacity: number;
@@ -85,7 +85,7 @@ export function useSmoothText(
       s.arrivals = [];
       return;
     }
-    if (s.frame || (s.shown >= s.text.length && s.runs.length === 0)) return;
+    if (s.frame || s.shown >= s.text.length) return;
     const step = (now: number) => {
       const dt = s.last ? now - s.last : FRAME_MS;
       s.last = s.now = now;
@@ -100,11 +100,10 @@ export function useSmoothText(
       if (r.shown > s.shown) s.runs.push({ from: s.shown, at: now });
       s.pos = r.pos;
       s.shown = r.shown;
-      s.runs = s.runs.filter((run) => now - run.at < FADE_MS);
+      // Runs stay (at full opacity) so the spans that show them never move.
+      const fading = s.runs.some((run) => now - run.at < FADE_MS);
       s.frame =
-        s.shown < s.text.length || s.runs.length
-          ? requestAnimationFrame(step)
-          : 0;
+        s.shown < s.text.length || fading ? requestAnimationFrame(step) : 0;
       if (!s.frame) s.last = 0;
       render();
     };

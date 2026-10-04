@@ -666,7 +666,9 @@ describe("AgentChat", () => {
     act(() => s.opts.onNotice?.(delta("Hel")));
     act(() => s.opts.onNotice?.(delta("lo")));
     // The new word is revealed on the next animation frame.
-    expect(await screen.findByText("Hello")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-markdown")).toHaveTextContent(/^Hello$/),
+    );
     deliver(
       ev("item.completed", {
         itemId: "m1",

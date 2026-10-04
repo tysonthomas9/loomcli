@@ -140,7 +140,9 @@ describe("useSmoothText", () => {
     expect(result.current.fresh[0]?.from).toBe(2);
     expect(result.current.fresh[0]?.opacity).toBeLessThan(1);
     for (let i = 0; i < Math.ceil(FADE_MS / FRAME) + 1; i++) tick();
-    expect(result.current.fresh).toEqual([]);
+    // The run stays, faded in, so the span showing it never moves.
+    expect(result.current.fresh).toEqual([{ from: 2, opacity: 1 }]);
+    expect(frames).toHaveLength(0);
   });
 
   it("flushes everything at once when the turn ends", () => {

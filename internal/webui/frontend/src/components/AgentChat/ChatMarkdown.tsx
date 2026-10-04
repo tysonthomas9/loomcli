@@ -355,7 +355,11 @@ export function splitBlocks(text: string): string[] {
   return blocks;
 }
 
-/** Wraps the text from each fresh run's start in a span at its opacity. */
+/**
+ * Wraps each run in its own span, at its opacity while it fades. Runs only
+ * ever add spans after the last one, so no span changes what it shows and
+ * nothing already on screen moves (no layout shift).
+ */
 function fadeRuns(node: HNode, runs: readonly FreshRun[]) {
   if (!node.children) return;
   node.children = node.children.flatMap((child): HNode[] => {
@@ -372,11 +376,14 @@ function fadeRuns(node: HNode, runs: readonly FreshRun[]) {
     return cuts.map((from, i) => {
       const piece = value.slice(from - s, (cuts[i + 1] ?? e) - s);
       const run = runs.filter((r) => r.from <= from).pop();
-      if (!run || run.opacity >= 1) return { type: "text", value: piece };
+      if (!run) return { type: "text", value: piece };
       return {
         type: "element",
         tagName: "span",
-        properties: { dataFresh: "", style: `opacity:${run.opacity}` },
+        properties:
+          run.opacity < 1
+            ? { dataRun: "", dataFresh: "", style: `opacity:${run.opacity}` }
+            : { dataRun: "" },
         children: [{ type: "text", value: piece }],
       };
     });
@@ -393,7 +400,7 @@ function appendCaret(root: HNode) {
     if (
       last?.type !== "element" ||
       last.tagName === "pre" ||
-      last.properties?.dataFresh !== undefined
+      last.properties?.dataRun !== undefined
     )
       break;
     node = last;
@@ -467,10 +474,12 @@ export const ChatMarkdown = memo(function ChatMarkdown({
           streaming={streaming}
           fresh={
             streaming && i === blocks.length - 1
-              ? fresh.map((r) => ({
-                  ...r,
-                  from: Math.max(0, r.from - lastStart),
-                }))
+              ? fresh
+                  // The tail block's runs, and the one it starts inside.
+                  .filter(
+                    (_, k) => (fresh[k + 1]?.from ?? text.length) > lastStart,
+                  )
+                  .map((r) => ({ ...r, from: Math.max(0, r.from - lastStart) }))
               : undefined
           }
         />

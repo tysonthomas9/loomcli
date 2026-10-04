@@ -396,7 +396,10 @@ test("streaming reveals smoothly with no layout shift and the end kept in view",
   });
   await open(page, m);
   await expect(transcript(page).getByText("Earlier reply 29.")).toBeVisible();
-  // The 100ms recorder: layout-shift score and the gap under the last row.
+  // The model controls settle last (no catalog here, so "Unavailable").
+  await expect(page.getByText("Unavailable")).toBeVisible();
+  // The 100ms recorder: layout-shift score and the gap under the last row,
+  // from the end of the history load (its shifts are not streaming's).
   await page.evaluate(() => {
     const w = window as unknown as { __cls: number; __gaps: number[] };
     w.__cls = 0;
@@ -407,7 +410,7 @@ test("streaming reveals smoothly with no layout shift and the end kept in view",
         hadRecentInput: boolean;
       })[])
         if (!e.hadRecentInput) w.__cls += e.value;
-    }).observe({ type: "layout-shift", buffered: true });
+    }).observe({ type: "layout-shift" });
     const el = document.querySelector('[data-testid="chat-transcript"]')!;
     setInterval(
       () => w.__gaps.push(el.scrollHeight - el.scrollTop - el.clientHeight),
