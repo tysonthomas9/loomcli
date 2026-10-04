@@ -108,21 +108,11 @@ func (s *Service) slotNotices(ctx context.Context, agentID, sender, body string,
 			return out, nil
 		}
 		stamp := receipts[at].CreatedAt
-		batch := map[string]string{} // text -> key, of the records this Notify added
-		for _, r := range receipts {
-			if r.CreatedAt == stamp && strings.HasPrefix(r.RequestID, "task_completed:") && texts[r.RequestID] != "" {
-				batch[texts[r.RequestID]] = r.RequestID
-			}
-		}
-		lines := strings.Split(body, "\n")
-		i, keys := len(lines), []string{}
-		for i > 0 && len(keys) < len(batch) && batch[lines[i-1]] != "" {
-			keys = append([]string{batch[lines[i-1]]}, keys...)
-			i--
-		}
-		if len(keys) != len(batch) || len(keys) == 0 || keys[len(keys)-1] != key {
+		keys, i := batchLines(receipts, texts, stamp, body)
+		if len(keys) == 0 || keys[len(keys)-1] != key {
 			return out, nil
 		}
+		lines := strings.Split(body, "\n")
 		out.Keys = append(keys, out.Keys...)
 		if i == 0 {
 			out.At = 0
@@ -141,6 +131,28 @@ func (s *Service) slotNotices(ctx context.Context, agentID, sender, body string,
 		}
 		key = receipts[prev].RequestID
 	}
+}
+
+// batchLines returns the keys of the records one Notify added (receipts
+// stamped stamp, texts by key) in the order their lines end body, and the
+// index of the first such line; no keys unless every record is accounted for.
+func batchLines(receipts []loomstore.SenderReceipt, texts map[string]string, stamp, body string) ([]string, int) {
+	batch := map[string]string{} // text -> key
+	for _, r := range receipts {
+		if r.CreatedAt == stamp && strings.HasPrefix(r.RequestID, "task_completed:") && texts[r.RequestID] != "" {
+			batch[texts[r.RequestID]] = r.RequestID
+		}
+	}
+	lines := strings.Split(body, "\n")
+	i, keys := len(lines), []string{}
+	for i > 0 && len(keys) < len(batch) && batch[lines[i-1]] != "" {
+		keys = append([]string{batch[lines[i-1]]}, keys...)
+		i--
+	}
+	if len(keys) != len(batch) {
+		return nil, 0
+	}
+	return keys, i
 }
 
 // recordTexts maps each record agentID saved for child, by key, to the line

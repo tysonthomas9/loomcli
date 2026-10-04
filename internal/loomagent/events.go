@@ -243,12 +243,7 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 	f := newFold()
 	var rows []loomstore.Event
 	size := 0
-	// The history's usage rows get the cost the live feed gives them (an
-	// event saved here first is never saved again from the feed): each
-	// total's rise over the one before it, the first's over the newest saved
-	// total, which a repeat row (saved once already) leaves unused.
-	var lastTotal float64
-	baseline := false
+	var cost replayCost
 	for after := ""; ; {
 		page, err := sess.Messages(ctx, after, 100)
 		if err != nil {
@@ -259,19 +254,7 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 			if !ok || e.Session != ref {
 				continue // a delta is live only: a subscriber had it, or missed it with the gap
 			}
-			if e, err = s.withText(ctx, a.AgentID, e); err != nil {
-				return err
-			}
-			if hasCostTotal(e) {
-				if !baseline {
-					if lastTotal, err = s.store.LastCostTotal(ctx, a.AgentID, ref.NativeID); err != nil {
-						return err
-					}
-					baseline = true
-				}
-				e, lastTotal = costOver(e, lastTotal), e.Usage.CostTotalUSD
-			}
-			r, err := s.withCompletions(ctx, a.AgentID, nativeRow(a.AgentID, kind, e), e)
+			r, err := s.replayRow(ctx, a.AgentID, ref.NativeID, kind, e, &cost)
 			if err != nil {
 				return err
 			}
@@ -289,6 +272,36 @@ func (s *Service) replay(ctx context.Context, harness string, a loomstore.Agent)
 		return err
 	}
 	return s.applyFold(ctx, a.AgentID, f)
+}
+
+// replayCost is replay's running usage total. The history's usage rows get
+// the cost the live feed gives them (an event saved here first is never
+// saved again from the feed): each total's rise over the one before it, the
+// first's over the newest saved total, which a repeat row (saved once
+// already) leaves unused.
+type replayCost struct {
+	last     float64
+	baseline bool
+}
+
+// replayRow is the row replay saves for history event e, as the live feed
+// would save it.
+func (s *Service) replayRow(ctx context.Context, agentID, nativeID, kind string, e loomharness.Event,
+	c *replayCost) (loomstore.Event, error) {
+	e, err := s.withText(ctx, agentID, e)
+	if err != nil {
+		return loomstore.Event{}, err
+	}
+	if hasCostTotal(e) {
+		if !c.baseline {
+			if c.last, err = s.store.LastCostTotal(ctx, agentID, nativeID); err != nil {
+				return loomstore.Event{}, err
+			}
+			c.baseline = true
+		}
+		e, c.last = costOver(e, c.last), e.Usage.CostTotalUSD
+	}
+	return s.withCompletions(ctx, agentID, nativeRow(agentID, kind, e), e)
 }
 
 // fold is the net effect of a replayed history on its agent. It keeps every

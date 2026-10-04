@@ -194,18 +194,8 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 		var notes SlotNotices
 		if cur.State == SlotWaiting {
 			texts = append(texts, cur.Body)
-			var raw sql.NullString
-			if err := tx.QueryRowContext(ctx, `SELECT notices FROM agent_slots WHERE agent_id = ? AND sender = ?`,
-				agentID, sender).Scan(&raw); err != nil {
+			if notes, err = waitingNotices(ctx, tx, cur); err != nil {
 				return err
-			}
-			if notes, err = readNotices(raw); err != nil {
-				return err
-			}
-			if legacyNotices(raw, cur.RequestID) {
-				notes.Legacy = cur.RequestID
-			} else if len(notes.Keys) == 0 { // the records start after the waiting text and its line break
-				notes.At = len(cur.Body) + 1
 			}
 		}
 		for _, n := range fresh {
@@ -217,41 +207,15 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 		if err != nil {
 			return err
 		}
-		// A legacy slot stays legacy, its notices NULL as putSlot's '{}'
-		// would otherwise drop: the reader rebuilds them all from the
-		// receipts, this batch's included.
-		if notes.Legacy != "" {
-			if _, err := tx.ExecContext(ctx, `UPDATE agent_slots SET notices = NULL WHERE agent_id = ? AND sender = ?`,
-				agentID, sender); err != nil {
-				return err
-			}
-		} else {
-			for _, n := range fresh {
-				notes.Keys = append(notes.Keys, n.Key)
-			}
-			b, err := json.Marshal(notes)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE agent_slots SET notices = ? WHERE agent_id = ? AND sender = ?`,
-				string(b), agentID, sender); err != nil {
-				return err
-			}
+		if err := saveNotices(ctx, tx, in, notes, fresh); err != nil {
+			return err
 		}
 		for _, n := range fresh {
 			res, err := result(n.Key, replaced)
 			if err != nil {
 				return err
 			}
-			body, notices := any(nil), any("{}")
-			if n.Key == in.RequestID {
-				body = in.Body
-			}
-			if notes.Legacy != "" {
-				notices = nil // continues a legacy slot
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender,
-				result_json, created_at, body, notices) VALUES (?,?,?,?,?,?,?)`, agentID, n.Key, sender, res, now, body, notices); err != nil {
+			if err := noticeReceipt(ctx, tx, in, n.Key, res, now, notes.Legacy != ""); err != nil {
 				return err
 			}
 		}
@@ -259,6 +223,64 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 		return nil
 	})
 	return added, err
+}
+
+// waitingNotices are the notices of cur, a waiting slot, as Notify extends
+// them: legacy (cur saved before notices, ending in a record), or with At
+// past cur's text when it has none yet.
+func waitingNotices(ctx context.Context, tx *sql.Tx, cur Slot) (SlotNotices, error) {
+	var raw sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT notices FROM agent_slots WHERE agent_id = ? AND sender = ?`,
+		cur.AgentID, cur.Sender).Scan(&raw); err != nil {
+		return SlotNotices{}, err
+	}
+	notes, err := readNotices(raw)
+	if err != nil {
+		return notes, err
+	}
+	if legacyNotices(raw, cur.RequestID) {
+		notes.Legacy = cur.RequestID
+	} else if len(notes.Keys) == 0 { // the records start after the waiting text and its line break
+		notes.At = len(cur.Body) + 1
+	}
+	return notes, nil
+}
+
+// saveNotices stores notes plus fresh's keys on in's slot. A legacy slot
+// stays legacy, its notices NULL as putSlot's '{}' would otherwise drop: the
+// reader rebuilds them all from the receipts, this batch's included.
+func saveNotices(ctx context.Context, tx *sql.Tx, in SlotSend, notes SlotNotices, fresh []Notice) error {
+	if notes.Legacy != "" {
+		_, err := tx.ExecContext(ctx, `UPDATE agent_slots SET notices = NULL WHERE agent_id = ? AND sender = ?`,
+			in.AgentID, in.Sender)
+		return err
+	}
+	for _, n := range fresh {
+		notes.Keys = append(notes.Keys, n.Key)
+	}
+	b, err := json.Marshal(notes)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE agent_slots SET notices = ? WHERE agent_id = ? AND sender = ?`,
+		string(b), in.AgentID, in.Sender)
+	return err
+}
+
+// noticeReceipt stores the receipt of notice key, added to in's slot; the
+// last added (in's RequestID) keeps the whole slot text, and one continuing
+// a legacy slot keeps its notices NULL.
+func noticeReceipt(ctx context.Context, tx *sql.Tx, in SlotSend, key, res, now string, legacy bool) error {
+	body, notices := any(nil), any("{}")
+	if key == in.RequestID {
+		body = in.Body
+	}
+	if legacy {
+		notices = nil
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender,
+		result_json, created_at, body, notices) VALUES (?,?,?,?,?,?,?)`, in.AgentID, key, in.Sender, res, now, body, notices)
+	return err
 }
 
 // unreceipted returns the notices whose Key has no receipt on agentID.
