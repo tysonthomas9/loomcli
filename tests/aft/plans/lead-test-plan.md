@@ -483,20 +483,21 @@ asserting `create-agent-backend` exists and its value round-trips.
 
 ---
 
-**LED-D3 — Lead repo scope: workspace-wide vs pinned**
-*Tier:* product-correctness · *Status:* ready-to-write
-*Intent:* An operator deselects the preselected repo so a Lead agent gets
-workspace-wide scope, and separately pins one repo.
-*Steps:* two sub-flows in one case, mirroring `zz-agent-flow.test.yaml:246-256`:
+**LED-D3 — Lead repo scope: a repo is required**
+*Tier:* product-correctness · *Status:* written (`zz-lead-agent.test.yaml`, "lead repo scope requires a repo and refuses an empty choice")
+*Intent:* An operator picking a Lead sees that it needs a repo, and clearing the
+repo chip makes submit refuse instead of creating a workspace-wide Lead.
+*Steps:* select the Lead card with the preselected repo; then
 `click: { selector: "[data-testid='create-agent-repo-chips'] button", first: true }`
-before submit for the workspace-scope variant; leave it selected for the pinned one.
-*Assertions:* readback `cross_repo == true && repos == []` for the first,
-`cross_repo == false && repos == ["lead-repo"]` for the second. Also
-`expect: { text: "No repo selected — the agent gets workspace-wide scope." }` after
-deselect (hint swap at `CreateAgentModal.tsx:368-370`).
-*Edge rationale:* `crossRepo` is **derived**, not a toggle (`CreateAgentModal.tsx:220`);
-a lead with no worktree makes repo scope purely a record-level property, so it is
-easy to regress unnoticed.
+to clear it; submit.
+*Assertions:* with the repo selected the hint reads
+`Pick the repo this lead works in.`; after clearing it the hint is unchanged and
+`workspace-wide scope` does not appear; submit shows `create-agent-error` with
+`Pick a repo for the lead to work in.` and the dialog stays open.
+*Edge rationale:* a Lead always works in one repo (Tyson, 2026-10-03). The other
+templates still allow workspace scope, so the shared repo hint is easy to regress
+back to promising it for a Lead. Lead creation with a repo is covered by
+`agents-v1-lead-parity.test.yaml`.
 
 ---
 
