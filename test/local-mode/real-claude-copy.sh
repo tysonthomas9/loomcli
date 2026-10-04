@@ -45,6 +45,14 @@ outside_host() {
   local d h
   d="$(canon "$dir")/" h="$(canon "$hostdir")/"
   case "$d" in "$h"*) echo "local-mode: the Claude copy must live outside $hostdir" >&2; exit 2 ;; esac
+  # A symlinked claude-auth or project folder could point at another
+  # project's copy; refuse rather than write or delete through it.
+  local p
+  for p in "$dir" "$(dirname "$dir")"; do
+    if [ -L "$p" ] || { [ -e "$p" ] && [ ! -d "$p" ]; }; then
+      echo "local-mode: $p is a symlink or not a folder; remove it by hand" >&2; exit 2
+    fi
+  done
   if [ -L "$copy" ] || { [ -e "$copy" ] && [ ! -f "$copy" ]; }; then
     echo "local-mode: $copy is not a regular file; remove it by hand" >&2; exit 2
   fi
