@@ -1,0 +1,492 @@
+# Agent UI port (3.2t tabs and the T3 UI tickets UI1, UI2 and UI3) on an
+# Agent API lead, one case per shipped UI scenario. OpenCode runs for real or
+# as its emulator (LOOM_HARNESS_EMU=1); only the model is scripted, through
+# 2.0d's fake model ($AFT_FAKE_MODEL_URL), or through the emulator's scenario
+# file ($AFT_EMU_SCENARIOS) where a turn needs tool calls or reasoning.
+suite: agents-v1-ui
+classification: { area: agents, feature: agent-api-ui, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-ui-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 ui ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-ui","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  # ui-lead <name> <saved var>: an OpenCode lead made through the Agent API;
+  # its agent id goes to $AFT_WORK_DIR/<saved var>.
+  cat > "$AFT_WORK_DIR/ui-lead" <<'SH'
+  #!/bin/sh
+  set -e
+  printf '{"preset":"lead","name":"%s","repo":"%s","base_ref":"main","overrides":{"harness":"opencode"}}' \
+    "$1" "$AFT_WORK_DIR/agv1-ui-repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/v1/agents" \
+      -H "Content-Type: application/json" -H "Idempotency-Key: $1" -d @- |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])' > "$AFT_WORK_DIR/$2"
+  SH
+  chmod +x "$AFT_WORK_DIR/ui-lead"
+  # ui-turn <agent id> <turn JSON>: the agent's next turn. A turn with tools
+  # or reasoning is, on the emulator, the agent's one scenario turn (the
+  # emulator runs no tools and the fake model sends no reasoning); any other
+  # turn's text comes from the fake model, which records the request.
+  cat > "$AFT_WORK_DIR/ui-turn" <<'SH'
+  #!/bin/sh
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  python3 - "$1" "$2" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+  import json, os, sys, urllib.request
+  agent, turn, scenarios, model = sys.argv[1], json.loads(sys.argv[2]), sys.argv[3], sys.argv[4]
+  if scenarios and (turn.get("tools") or turn.get("reasoning")):
+      cur = json.load(open(scenarios)) if os.path.exists(scenarios) and os.path.getsize(scenarios) else {}
+      cur[agent] = [turn]
+      json.dump(cur, open(scenarios, "w"))
+  else:
+      steps = []
+      if turn.get("tools"):
+          steps.append({"tool_calls": [{"name": t["name"], "arguments": t["input"]} for t in turn["tools"]]})
+      steps.append({"text": turn["text"]})
+      req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                   headers={"Content-Type": "application/json"})
+      urllib.request.urlopen(req).read()
+  PY
+  SH
+  chmod +x "$AFT_WORK_DIR/ui-turn"
+teardown: |
+  set +e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI" >/dev/null
+
+tests:
+  # covers: 3.2t tabs; ?tab= kept on reload; Info rows; Diff of the lead's own commit
+  - name: 3.2t a lead opens on Chat | Info | Git | Diff | Files and each tab survives a reload
+    intent: An operator opens an Agent API lead, sees Chat selected among Chat, Info, Git, Diff and Files with no Terminal, and each of Info, Git, Diff and Files stays open with its content after a reload
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/ui-lead" "agv1-ui-tabs-${RUN_ID:-local}" uiTabsId
+          id="$(cat "$AFT_WORK_DIR/uiTabsId")"
+          wt="$(curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/v1/agents/$id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktree_path"])')"
+          echo "UI-TABS-NOTE" > "$wt/notes-ui.txt"
+          git -C "$wt" add notes-ui.txt
+          git -C "$wt" -c user.email=e2e@x -c user.name=e2e commit -q -m "add notes-ui"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id"
+        intent: "Create an OpenCode lead, commit a file in its own worktree, and open the lead"
+      - wait:
+          fn: >-
+            (() => { const tabs = Array.from(document.querySelectorAll('[data-testid=agent-editor-groups] button[draggable]')).map((b) => (b.textContent || '').trim());
+              const on = document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent;
+              return tabs.join('|') === 'Chat|Info|Git|Diff|Files' && on === 'Chat' &&
+                document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'; })()
+        intent: "Wait until the lead opens on Chat | Info | Git | Diff | Files with Chat selected and no Terminal"
+      - click: { role: button, name: "Info", exact: true }
+      - wait:
+          fn: &uiInfoShown >-
+            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '';
+              const id = location.pathname.split('/').pop();
+              return location.search === '?tab=info' && p.includes('Harness') && p.includes('opencode') &&
+                p.includes('loom/agent/' + id) && p.includes('agv1-ui-tabs-${RUN_ID:-local}'); })()
+        intent: "Wait until Info shows the lead's harness, name and own branch"
+      - reload: true
+      - wait:
+          fn: *uiInfoShown
+        intent: "Wait until a reload reopens Info with the same rows"
+      - click: { role: button, name: "Git", exact: true }
+      - wait:
+          fn: &uiGitShown >-
+            location.search === '?tab=git' &&
+            (document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '').includes('add notes-ui')
+        intent: "Wait until Git lists the lead's commit"
+      - reload: true
+      - wait:
+          fn: *uiGitShown
+        intent: "Wait until a reload reopens Git with the commit"
+      - click: { role: button, name: "Diff", exact: true }
+      - wait:
+          fn: &uiDiffShown >-
+            location.search === '?tab=diff' &&
+            (document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '').includes('notes-ui.txt')
+        intent: "Wait until Diff shows the committed file"
+      - reload: true
+      - wait:
+          fn: *uiDiffShown
+        intent: "Wait until a reload reopens Diff with the file"
+      - click: { selector: "[data-testid=agent-editor-groups] button[draggable]:nth-of-type(5)" }
+      - wait:
+          fn: &uiFilesShown >-
+            (() => { const id = location.pathname.split('/').pop();
+              const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              const root = p?.querySelector('[data-root-key^="agent:' + id + ':"]');
+              if (root && root.getAttribute('aria-expanded') === 'false') root.click();
+              return location.search === '?tab=files' &&
+                document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent === 'Files' &&
+                !!root && !!p.querySelector('[aria-label="notes-ui.txt"]'); })()
+        intent: "Wait until Files shows the lead's checkout"
+      - reload: true
+      - wait:
+          fn: *uiFilesShown
+        intent: "Wait until a reload reopens Files with the lead's checkout"
+      - click: { role: button, name: "Chat", exact: true }
+      - wait:
+          fn: >-
+            location.search !== '?tab=files' &&
+            document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent === 'Chat' &&
+            !!document.querySelector('[data-testid=chat-transcript]')
+        intent: "Wait until Chat is back with its transcript"
+
+  # covers: 3.2t read-only Git and Files (Tyson 03:04Z keeps the 403 block until 75ce5b07)
+  - name: 3.2t an Agent API lead's Git and Files are read-only in the UI and through the v5 routes
+    intent: An operator sees the lead's Git with no Create PR and its Files with a read-only editor and only Copy Path, and a reset or a file write through the v5 routes is refused with 403 and changes nothing
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/ui-lead" "agv1-ui-ro-${RUN_ID:-local}" uiRoId
+          id="$(cat "$AFT_WORK_DIR/uiRoId")"
+          wt="$(curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/v1/agents/$id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktree_path"])')"
+          echo "$wt" > "$AFT_WORK_DIR/uiRoWt"
+          echo "UI-RO-NOTE" > "$wt/notes-ro.txt"
+          git -C "$wt" add notes-ro.txt
+          git -C "$wt" -c user.email=e2e@x -c user.name=e2e commit -q -m "add notes-ro"
+          git -C "$wt" rev-parse HEAD > "$AFT_WORK_DIR/uiRoHead"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id?tab=git"
+        intent: "Create an OpenCode lead with one commit of its own and open its Git tab"
+      - wait:
+          fn: >-
+            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              const t = p?.textContent || '';
+              return t.includes('add notes-ro') && t.includes('loom/agent/' + location.pathname.split('/').pop()) &&
+                !Array.from(p.querySelectorAll('button')).some((b) => (b.textContent || '').includes('Create PR')); })()
+        intent: "Wait until Git shows the lead's branch and commit with no Create PR"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/uiRoId")"; wt="$(cat "$AFT_WORK_DIR/uiRoWt")"
+          code="$(curl -s -o "$AFT_WORK_DIR/ui-ro-reset.json" -w '%{http_code}' -X POST \
+            "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/agents/$id/git/reset" \
+            -H "Content-Type: application/json" -d '{"branch":"main","force":true,"push":false}')"
+          [ "$code" = 403 ] || { echo "git/reset gave $code"; cat "$AFT_WORK_DIR/ui-ro-reset.json"; exit 1; }
+          code="$(curl -s -o "$AFT_WORK_DIR/ui-ro-write.json" -w '%{http_code}' -X PUT \
+            "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/files?scope=agent&target=$id&path=ro-new.txt" \
+            -H "Content-Type: application/json" -H "If-None-Match: *" -d '{"content":"x"}')"
+          [ "$code" = 403 ] || { echo "file write gave $code"; cat "$AFT_WORK_DIR/ui-ro-write.json"; exit 1; }
+          [ "$(git -C "$wt" rev-parse HEAD)" = "$(cat "$AFT_WORK_DIR/uiRoHead")" ] || { echo "the lead's HEAD moved"; exit 1; }
+          [ -f "$wt/notes-ro.txt" ] && [ ! -e "$wt/ro-new.txt" ] || { echo "the worktree's files changed"; exit 1; }
+        intent: "A reset and a file write on the lead's worktree through the v5 routes are refused with 403, and its HEAD and files are unchanged"
+      - click: { selector: "[data-testid=agent-editor-groups] button[draggable]:nth-of-type(5)" }
+      - wait:
+          fn: >-
+            (() => { const id = location.pathname.split('/').pop();
+              const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              const root = p?.querySelector('[data-root-key^="agent:' + id + ':"]');
+              if (root && root.getAttribute('aria-expanded') === 'false') root.click();
+              return !!p?.querySelector('[aria-label="notes-ro.txt"]'); })()
+        intent: "Wait until Files lists the lead's checkout, opened to its files"
+      - click: { selector: "[role=tabpanel]:not([data-hidden]) [aria-label='notes-ro.txt']" }
+      - wait:
+          fn: >-
+            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              const cm = p?.querySelector('.cm-content');
+              return !!cm && (cm.textContent || '').includes('UI-RO-NOTE') && cm.getAttribute('contenteditable') === 'false' &&
+                !Array.from(p.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === 'Save'); })()
+        intent: "Wait until the file opens in a read-only editor with no Save"
+      - run: |
+          set -e
+          ab() { agent-browser --session "$AFT_SESSION" "$@"; }
+          ab eval "(() => { const el = document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"notes-ro.txt\"]');
+            const r = el.getBoundingClientRect();
+            el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.x + 4, clientY: r.y + 4 })); return true; })()" >/dev/null
+          items="$(ab eval "Array.from(document.querySelectorAll('[role=menuitem]')).map((m) => (m.textContent || '').trim()).join('|')")"
+          echo "context menu: $items"
+          case "$items" in *"Copy Path"*) ;; *) echo "no Copy Path" >&2; exit 1 ;; esac
+          for bad in Delete Rename "New File" "New Folder"; do
+            case "$items" in *"$bad"*) echo "context menu offers $bad" >&2; exit 1 ;; esac
+          done
+          ab press Escape >/dev/null
+        intent: "The file's context menu offers Copy Path and no Delete, Rename, New File or New Folder"
+
+  # covers: UI1 + UI1 fix; a PATCH between turns is used by the next turn
+  - name: UI1 an effort set between two turns is used by the next turn and shows in the composer
+    intent: An operator chats with a lead at its default effort, sets High effort through the Agent API, sees High in the composer, and the lead's next reply runs at effort high
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/ui-lead" "agv1-ui-effort-${RUN_ID:-local}" uiEffortId
+          id="$(cat "$AFT_WORK_DIR/uiEffortId")"
+          "$AFT_WORK_DIR/ui-turn" "$id" '{"text":"AGV1-UI-EFFORT-ONE"}'
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id"
+        intent: "Create an OpenCode lead, script its first reply and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode' &&
+            (document.querySelector('[data-chat-traits-picker]')?.textContent || '').trim() === 'Default'
+        intent: "Wait until the chat is ready with Default effort"
+      - fill: { label: Message, value: "ui effort first" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI-EFFORT-ONE')
+        budget: 90000
+        intent: "Wait until the first reply streams in"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/uiEffortId")"
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/ui-effort-1.json"
+          python3 - "$AFT_WORK_DIR/ui-effort-1.json" <<'PY'
+          import json, sys
+          turn = [r for r in json.load(open(sys.argv[1]))["requests"] if "ui effort first" in json.dumps(r)]
+          assert turn, "the first message never reached the model"
+          assert '"reasoning_effort": "high"' not in json.dumps(turn[-1]), turn[-1]
+          PY
+          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/v1/agents/$id" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-ui-effort-high-${RUN_ID:-local}" -d '{"effort":"high"}' >/dev/null
+          "$AFT_WORK_DIR/ui-turn" "$id" '{"text":"AGV1-UI-EFFORT-TWO"}'
+        intent: "Check the first turn did not run at high, then set effort high through PATCH and script the next reply"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('[data-chat-traits-picker]')?.textContent || '').includes('High')
+        intent: "Wait until the composer shows High"
+      - fill: { label: Message, value: "ui effort second" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI-EFFORT-TWO')
+        budget: 90000
+        intent: "Wait until the second reply streams in"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/ui-effort-2.json"
+          python3 - "$AFT_WORK_DIR/ui-effort-2.json" <<'PY'
+          import json, sys
+          turn = [r for r in json.load(open(sys.argv[1]))["requests"] if "ui effort second" in json.dumps(r)]
+          assert turn, "the second message never reached the model"
+          assert '"reasoning_effort": "high"' in json.dumps(turn[-1]), turn[-1]
+          PY
+        intent: "Check that the turn after the PATCH reached the model at effort high"
+
+  # covers: UI2 pickers; the effort menu lists only the model's declared options
+  - name: UI2 the effort menu lists only the model's options, and a Medium pick is saved and kept after a reload
+    intent: An operator opens the composer's model picker and effort menu, sees the model's provider and only Low, Medium and High, picks Medium, and still sees Medium after a reload with the pick saved on the agent
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/ui-lead" "agv1-ui-pick-${RUN_ID:-local}" uiPickId
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$(cat "$AFT_WORK_DIR/uiPickId")"
+        intent: "Create an OpenCode lead and open its chat"
+      - wait:
+          fn: >-
+            (() => { const m = document.querySelector('[data-chat-provider-model-picker]');
+              return !!m && !m.disabled && (m.textContent || '').includes('Emulator'); })()
+        intent: "Wait until the composer shows the lead's model"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+      - wait:
+          fn: >-
+            (() => { const d = document.querySelector('[data-model-picker-content]');
+              return !!d?.querySelector('[data-model-picker-provider="provider:emu"]') &&
+                (d.querySelector('[role=option][aria-selected=true]')?.textContent || '').includes('Emulator'); })()
+        intent: "Wait until the model picker shows the provider and the current model selected"
+      - press: Escape
+      - click: { selector: "[data-chat-traits-picker]" }
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[role=menuitemradio]')).map((b) => (b.textContent || '').trim()).join('|') === 'Low|Medium|High'
+        intent: "Wait until the effort menu lists exactly Low, Medium and High"
+      - click: { role: menuitemradio, name: Medium, exact: true }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-chat-traits-picker]')?.textContent || '').includes('Medium')
+        intent: "Wait until the effort control shows Medium"
+      - run: |
+          set -e
+          for i in $(seq 1 10); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/v1/agents/$(cat "$AFT_WORK_DIR/uiPickId")" > "$AFT_WORK_DIR/ui-pick.json"
+            python3 - "$AFT_WORK_DIR/ui-pick.json" <<'PY' && exit 0
+          import json, sys
+          spec = json.loads(json.load(open(sys.argv[1]))["spec_json"])
+          assert {"ID": "effort", "Value": "medium"} in spec.get("Options", []), spec
+          PY
+            sleep 1
+          done
+          exit 1
+        intent: "Check that the pick was saved on the agent"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('[data-chat-traits-picker]')?.textContent || '').includes('Medium')
+        intent: "Wait until a reload still shows Medium"
+
+  # covers: UI3 markdown table and highlighted code
+  - name: UI3 a reply's markdown table and Go code render as a table and a highlighted block, before and after a reload
+    intent: An operator reads a reply with a markdown table and a Go code block, and sees a real table and a syntax-highlighted block, also after a reload
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/ui-lead" "agv1-ui-md-${RUN_ID:-local}" uiMdId
+          id="$(cat "$AFT_WORK_DIR/uiMdId")"
+          "$AFT_WORK_DIR/ui-turn" "$id" '{"text":"Files:\n\n| Name | Lines |\n| --- | ---: |\n| README.md | 1 |\n\n```go\nfunc main() {\n\treturn\n}\n```\n\nAGV1-UI-MD"}'
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id"
+        intent: "Create an OpenCode lead, script a reply with a table and Go code, and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat is ready"
+      - fill: { label: Message, value: "ui markdown" }
+      - press: Enter
+      - wait:
+          fn: &uiMdRendered >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              const cells = Array.from(t?.querySelectorAll('table td') || []).map((c) => c.textContent);
+              const code = t?.querySelector('[data-testid=chat-codeblock][data-language=go]');
+              return (t?.textContent || '').includes('AGV1-UI-MD') && cells.includes('README.md') && cells.includes('1') &&
+                !(t.textContent || '').includes('| Name |') && !!code && (code.textContent || '').includes('func main()') &&
+                !!code.querySelector('pre code span'); })()
+        budget: 90000
+        intent: "Wait until the table renders as a table and the Go code as a highlighted block"
+      - reload: true
+      - wait:
+          fn: *uiMdRendered
+        intent: "Wait until a reload renders the same table and code block"
+
+  # covers: UI3 tool card with input, output and error
+  - name: UI3 a turn's tool calls show as one card that expands to each call's input, output and error
+    intent: An operator watches a lead run ls and a failing read, sees one summary card for both, and expands it to the ls input and output and the read's error
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/ui-lead" "agv1-ui-tools-${RUN_ID:-local}" uiToolsId
+          id="$(cat "$AFT_WORK_DIR/uiToolsId")"
+          "$AFT_WORK_DIR/ui-turn" "$id" '{"tools":[{"id":"call_ui_ls","name":"shell","input":{"command":"ls"},"output":"README.md"},{"id":"call_ui_read","name":"read","input":{"filePath":"missing-ui.txt"},"output":"","fail":"File not found: missing-ui.txt"}],"text":"AGV1-UI-TOOLS"}'
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id"
+        intent: "Create an OpenCode lead, script a turn that runs ls and reads a missing file, and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat is ready"
+      - fill: { label: Message, value: "ui tools" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              const g = t?.querySelector('[data-testid=tool-group]');
+              return !!g && (g.textContent || '').includes('Tool calls (2)') && (t.textContent || '').includes('AGV1-UI-TOOLS'); })()
+        budget: 90000
+        intent: "Wait until both calls show as one card above the reply"
+      - click: { testid: tool-group }
+      - wait:
+          fn: >-
+            (() => { const calls = Array.from(document.querySelectorAll('[data-testid=tool-call]'));
+              return calls.length === 2 && calls.some((c) => c.dataset.status === 'completed' && (c.textContent || '').includes('ls')) &&
+                calls.some((c) => c.dataset.status === 'failed' && !!c.querySelector('[aria-label="Tool call failed"]')); })()
+        intent: "Wait until the card expands to the ls call and the failed read"
+      - click: { selector: "[data-testid=tool-call][data-status=completed] [role=button]" }
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=tool-call][data-status=completed]')?.textContent || '';
+              return c.includes('Input') && c.includes('"command": "ls"') && c.includes('Output') && c.includes('README.md'); })()
+        intent: "Wait until the ls call shows its input and output"
+      - click: { selector: "[data-testid=tool-call][data-status=failed] [role=button]" }
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=tool-call][data-status=failed]')?.textContent || '';
+              return c.includes('Error') && c.includes('missing-ui.txt'); })()
+        intent: "Wait until the failed read shows its error"
+
+  # covers: UI3 reasoning (emulator tier: the fake model emits no reasoning)
+  - name: UI3 a turn's reasoning shows as a Thinking row that expands, and stays after a reload
+    intent: An operator sees a lead's reasoning as a collapsed Thinking row with a preview, expands it to the full reasoning, and finds it again after a reload
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/ui-lead" "agv1-ui-think-${RUN_ID:-local}" uiThinkId
+          id="$(cat "$AFT_WORK_DIR/uiThinkId")"
+          "$AFT_WORK_DIR/ui-turn" "$id" '{"reasoning":"AGV1-UI-THINKING weigh the options","text":"AGV1-UI-THOUGHT"}'
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id"
+        intent: "Create an OpenCode lead, script a turn that reasons before replying, and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat is ready"
+      - fill: { label: Message, value: "ui think" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI-THOUGHT')
+        budget: 90000
+        intent: "Wait until the reply streams in"
+      - run: |
+          set -e
+          if [ -z "${AFT_EMU_SCENARIOS:-}" ]; then
+            echo "real tier: the fake model emits no reasoning; the Thinking row is checked on the emulator tier"
+            exit 0
+          fi
+          ab() { agent-browser --session "$AFT_SESSION" "$@"; }
+          row='[data-testid=reasoning] [role=button]'
+          check() {
+            preview="$(ab eval "document.querySelector('$row')?.textContent || ''")"
+            echo "reasoning row: $preview"
+            case "$preview" in *Thinking*AGV1-UI-THINKING*) ;; *) echo "no Thinking row with the reasoning preview" >&2; exit 1 ;; esac
+            # The row can sit under the composer; click it where it shows.
+            ab eval "document.querySelector('$row').scrollIntoView({ block: 'center' })" >/dev/null
+            ab click "$row" >/dev/null
+            body="$(ab eval "document.querySelector('[data-testid=reasoning] pre')?.textContent || ''")"
+            echo "reasoning body: $body"
+            case "$body" in *"AGV1-UI-THINKING weigh the options"*) ;; *) echo "the Thinking row did not expand" >&2; exit 1 ;; esac
+          }
+          check
+          ab reload >/dev/null
+          for i in $(seq 1 30); do
+            [ "$(ab eval "!!document.querySelector('$row')")" = true ] && break
+            sleep 0.5
+          done
+          check
+        intent: "On the emulator, the reasoning shows as a Thinking row that expands to the full text, before and after a reload"
+
+  # covers: UI3 copy actions (code, table as Markdown, message)
+  - name: UI3 the copy actions copy a code block, a table as Markdown and the whole message
+    intent: An operator copies a reply's Go code, its table as Markdown and the whole message, and each button says Copied and puts the right text on the clipboard
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/ui-lead" "agv1-ui-copy-${RUN_ID:-local}" uiCopyId
+          id="$(cat "$AFT_WORK_DIR/uiCopyId")"
+          "$AFT_WORK_DIR/ui-turn" "$id" '{"text":"Files:\n\n| Name | Lines |\n| --- | ---: |\n| README.md | 1 |\n\n```go\nfunc main() {\n\treturn\n}\n```\n\nAGV1-UI-COPY"}'
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id"
+        intent: "Create an OpenCode lead, script a reply with a table and Go code, and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat is ready"
+      - fill: { label: Message, value: "ui copy" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              return (t?.textContent || '').includes('AGV1-UI-COPY') && !!t.querySelector('table') &&
+                !!t.querySelector('[data-testid=chat-codeblock]'); })()
+        budget: 90000
+        intent: "Wait until the reply with its table and code block is shown"
+      - wait:
+          fn: >-
+            (() => { window.__uiCopied = [];
+              Object.defineProperty(navigator, 'clipboard', { configurable: true,
+                value: { writeText: async (s) => { window.__uiCopied.push(s); } } });
+              return true; })()
+        intent: "Record clipboard writes, so each copy action's text can be checked in a headless browser"
+      - click: { role: button, name: "Copy code", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=chat-codeblock] button[aria-label="Copied"]') &&
+            window.__uiCopied.includes('func main() {\n\treturn\n}')
+        intent: "Wait until the code block's copy says Copied and copied the code"
+      - click: { role: button, name: "Copy as Markdown", exact: true }
+      - wait:
+          fn: >-
+            window.__uiCopied.includes('| Name | Lines |\n| --- | ---: |\n| README.md | 1 |')
+        intent: "Wait until the table copied as Markdown"
+      - click: { role: button, name: "Copy message", exact: true }
+      - wait:
+          fn: >-
+            window.__uiCopied.some((s) => s.startsWith('Files:') && s.includes('AGV1-UI-COPY'))
+        intent: "Wait until the message copy put the message's markdown on the clipboard"
