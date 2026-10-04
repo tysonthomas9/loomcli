@@ -105,7 +105,6 @@ func (a *Adapter) probeOnce(ctx context.Context) (loomharness.Capabilities, erro
 			Response struct {
 				Subtype   string          `json:"subtype"`
 				RequestID string          `json:"request_id"`
-				Error     string          `json:"error"`
 				Response  json.RawMessage `json:"response"`
 			} `json:"response"`
 		}
@@ -113,7 +112,8 @@ func (a *Adapter) probeOnce(ctx context.Context) (loomharness.Capabilities, erro
 			continue
 		}
 		if f.Response.Subtype != "success" {
-			return loomharness.Capabilities{}, fmt.Errorf("claude initialize: %s", cmp.Or(f.Response.Error, f.Response.Subtype))
+			// The CLI's error text is never kept: it could carry a credential.
+			return loomharness.Capabilities{}, errors.New("claude refused the initialize request")
 		}
 		return parseInit(f.Response.Response, time.Now())
 	}

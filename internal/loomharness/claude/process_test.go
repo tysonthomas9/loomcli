@@ -112,6 +112,11 @@ func fakeClaude() {
 				if os.Getenv("LOOM_FAKE_CLAUDE_INIT_FAIL") == "1" {
 					os.Exit(2)
 				}
+				if e := os.Getenv("LOOM_FAKE_CLAUDE_INIT_ERROR"); e != "" {
+					_ = out.Encode(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "error " + e,
+						"request_id": in.RequestID, "error": "auth failed for " + e}})
+					continue
+				}
 				_ = out.Encode(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success",
 					"request_id": in.RequestID, "response": json.RawMessage(os.Getenv("LOOM_FAKE_CLAUDE_INIT"))}})
 				continue

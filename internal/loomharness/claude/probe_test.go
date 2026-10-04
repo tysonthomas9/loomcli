@@ -1,8 +1,10 @@
 package claude
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
@@ -60,6 +62,39 @@ func TestClaudeProbeFails(t *testing.T) {
 	_, cfg := newFixture(t, "2.1.285", "LOOM_FAKE_CLAUDE_INIT_FAIL=1")
 	if _, err := New(cfg).probeOnce(context.Background()); err == nil {
 		t.Fatal("want an error")
+	}
+}
+
+// TestClaudeProbeRefusalHidesCLIText: a refused initialize is an error that
+// neither returns nor logs the CLI's error text, which could carry a
+// credential; the loop logs only that the probe failed.
+func TestClaudeProbeRefusalHidesCLIText(t *testing.T) {
+	const secret = "sk-ant-oat01-SENTINEL"
+	_, cfg := newFixture(t, "2.1.285", "LOOM_FAKE_CLAUDE_INIT_ERROR="+secret)
+	a := New(cfg)
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	var errs []error
+	ctx, cancel := context.WithCancel(context.Background())
+	a.probeLoop(ctx, time.Millisecond, func(ctx context.Context) (loomharness.Capabilities, error) {
+		if len(errs) == 1 { // the first probe's failure is logged by now
+			cancel()
+			return loomharness.Capabilities{}, ctx.Err()
+		}
+		caps, err := a.probeOnce(ctx)
+		errs = append(errs, err)
+		return caps, err
+	})
+	if errs[0] == nil || strings.Contains(errs[0].Error(), secret) {
+		t.Fatalf("probe error = %v", errs[0])
+	}
+	if !strings.Contains(buf.String(), "claude capability probe failed") || strings.Contains(buf.String(), secret) {
+		t.Fatalf("log = %s", buf.String())
+	}
+	if _, ok := a.Capabilities(); ok {
+		t.Fatal("a refused probe must not report capabilities")
 	}
 }
 
