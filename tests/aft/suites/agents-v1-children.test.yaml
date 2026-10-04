@@ -84,11 +84,10 @@ tests:
                 !document.body.textContent.includes('task_completed:'); })()
         budget: 90000
         intent: "Wait until the child's one result marker shows the Lead read it, the tray is gone and no raw task_completed text shows"
-      - click: { selector: "[data-testid=completion-record] button" }
       - wait:
           fn: >-
             (document.querySelector('[data-testid=completion-record]')?.textContent || '').includes('AGV1-KIDS-ONE')
-        intent: "Wait until view shows the child's summary on its marker"
+        intent: "Wait until the child's result card shows the first line of its summary (CL1 cards show it inline)"
       - wait:
           fn: >-
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
@@ -280,9 +279,9 @@ tests:
               const r = document.querySelector('[data-testid=completion-record]');
               return rows.length === 1 && rows[0].textContent.includes('agv1-tray-a-${RUN_ID:-local}') &&
                 !tray.querySelector('[aria-label="unread by the Lead"]') && !!r && r.dataset.delivery === 'delivered' &&
-                r.textContent.includes('Lead read the result') && !document.body.textContent.includes('task_completed:'); })()
+                !document.body.textContent.includes('task_completed:'); })()
         budget: 90000
-        intent: "Wait until the Lead read the second result: the dot is gone, the child left the tray and its marker says the Lead read it"
+        intent: "Wait until the Lead read the second result: the dot is gone, the child left the tray and its card is marked delivered"
       - run: |
           set -e
           lead="$(cat "$AFT_WORK_DIR/trayLeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents"
