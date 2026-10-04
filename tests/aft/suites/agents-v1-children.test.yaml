@@ -321,14 +321,15 @@ tests:
         intent: "Create an OpenCode lead through the Agent API"
       - run: |
           set -e
-          # The lead creates both children in one call; each child holds its
-          # turn (a tool the emulator does not run waits until interrupted).
+          # The lead creates both children in one step, one execute call each
+          # (the emulator runs one Code Mode call per execute); each child
+          # holds its turn (a tool the emulator does not run waits until
+          # interrupted).
           curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
           python3 -c 'import json,sys
-          mk = lambda n: "await tools.loom.agent_create(%s)" % json.dumps({"name": n, "brief": "do the task"})
-          code = mk(sys.argv[1]) + "; return " + mk(sys.argv[2])
+          mk = lambda n: {"name": "execute", "arguments": {"code": "return await tools.loom.agent_create(%s)" % json.dumps({"name": n, "brief": "do the task"})}}
           hold = {"next": "prompt", "tool_calls": [{"name": "df1_hold"}]}
-          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [{"name": "execute", "arguments": {"code": code}}]},
+          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [mk(sys.argv[1]), mk(sys.argv[2])]},
             {"next": "tool", "text": "AGV1-CL2-STARTED"}, hold, hold]}))' "agv1-cl2-a-${RUN_ID:-local}" "agv1-cl2-b-${RUN_ID:-local}" |
             curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-KIDS/chat/$(cat "$AFT_WORK_DIR/cl2LeadId")"
