@@ -4,17 +4,18 @@
 #   real-opencode-copy.sh make <copy>    before `up`
 #   real-opencode-copy.sh remove <copy>  after `down`
 #
-# `make` takes one SQLite online backup of the host's opencode.db, opened
-# read-only: no file is created in the host folder and the database and its
-# -wal are never written (with a -wal present, SQLite's reader locking updates
-# only the shared-memory index -shm, as any reader does), into
+# `make` copies the host's opencode.db (and its -wal) with plain reads into a
+# private snapshot, accepted only when the host files hash the same before and
+# after; SQLite never opens a host file, so nothing in the host folder is
+# created or written. SQLite then takes one online backup of the snapshot into
 # <copy>, a mode-600 file in a mode-700 folder owned by one compose project,
-# then runs quick_check on the copy. Any failure removes the partial copy and
-# exits nonzero, so the stack does not boot; there is no retry and no other
-# open mode. When <copy> already exists (a re-up of the same project) it is
-# kept as is. The container mounts only <copy>, read-only, and seeds its own
-# database on the loom-data volume from it; nothing is written back to the
-# host.
+# and runs quick_check on it. Any failure (a host write during the copy, a
+# damaged -wal, a failed backup or check) removes the partial copy and exits
+# nonzero, so the stack does not boot; there is no retry and no other mode.
+# When <copy> already exists (a re-up of the same project) it is kept if it
+# is still sound and private. The container mounts only <copy>, read-only, and
+# seeds its own database on the loom-data volume from it; nothing is written
+# back to the host.
 #
 # `remove` deletes <copy> and its folder (that project only).
 #
@@ -57,6 +58,7 @@ outside_host
 case "$cmd" in
   remove)
     rm -f -- "$copy" "$copy-wal" "$copy-shm" "$copy.tmp" "$copy.tmp-wal" "$copy.tmp-shm" "$copy.tmp-journal"
+    rm -rf -- "$dir"/snap.*
     rmdir -- "$dir" 2>/dev/null || true
     exit 0
     ;;
@@ -82,41 +84,59 @@ if [ ! -f "$db" ]; then
   echo "local-mode: no OpenCode database at $db; run \`opencode auth login\` on the host first (or set LOCAL_MODE_OPENCODE_DATA)" >&2
   exit 1
 fi
-# A WAL database closed cleanly has no -wal/-shm, and a read-only open cannot
-# create them, so it would fail. With no -wal the main file holds every
-# commit: read it as immutable (no locks, no -shm) and refuse when a -wal
-# appears or the file changes during the copy. With a -wal, use the normal
-# read-only reader protocol so committed WAL frames are included.
-# URI path: escape the characters SQLite's URI parser treats specially.
-upath="$(printf '%s' "$db" | sed -e 's/%/%25/g' -e 's/?/%3f/g' -e 's/#/%23/g' -e 's/ /%20/g')"
-if [ -e "$db-wal" ]; then
-  src="file:$upath?mode=ro"
-  wal=1
-else
-  src="file:$upath?mode=ro&immutable=1"
-  wal=0
+# SQLite never opens a host file: even a read-only reader writes read marks
+# into an existing -shm and creates a missing one. Instead, take a byte
+# snapshot of opencode.db and its -wal (plain reads) into this project's
+# folder, and accept it only when both files hash the same before and after
+# the copy. SQLite then recovers the snapshot privately and takes the online
+# backup from it. A -wal with a bad header, or a -wal with no -shm (a crashed
+# or damaged writer), refuses the boot: repair the host database first.
+digest() {
+  if [ ! -e "$1" ]; then echo absent
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 < "$1"
+  else sha256sum < "$1"; fi
+}
+if [ -e "$db-wal" ] && [ ! -e "$db-shm" ]; then
+  echo "local-mode: $db-wal exists without $db-shm (a crashed or damaged OpenCode write); repair the host database with OpenCode first; not starting the REAL stack" >&2
+  exit 1
 fi
-# Content digest of the host file (read-only); any byte change alters it.
-stamp() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 < "$db"; else sha256sum < "$db"; fi; }
-before=""
-[ "$wal" = 1 ] || before="$(stamp)"
+if [ -s "$db-wal" ]; then
+  magic="$(od -An -tx1 -N4 "$db-wal" 2>/dev/null | tr -d ' \n' || true)"
+  case "$magic" in
+    377f0682|377f0683) ;;
+    *) echo "local-mode: $db-wal is unreadable or damaged (bad WAL header); repair the host database with OpenCode first; not starting the REAL stack" >&2; exit 1 ;;
+  esac
+fi
 
+(umask 077; mkdir -p "$dir")
+chmod 700 "$dir"
+outside_host
 tmp="$copy.tmp"
+snap="$(mktemp -d "$dir/snap.XXXXXX")"
 fail() {
+  rm -rf -- "$snap"
   rm -f -- "$tmp" "$tmp-wal" "$tmp-shm" "$tmp-journal"
   rmdir -- "$dir" 2>/dev/null || true
   echo "local-mode: $1; not starting the REAL stack" >&2
   exit 1
 }
-(umask 077; mkdir -p "$dir")
-chmod 700 "$dir"
-outside_host
 rm -f -- "$tmp" "$tmp-wal" "$tmp-shm" "$tmp-journal"
-(umask 077; sqlite3 "$src" ".backup '$tmp'" >/dev/null 2>&1) \
+
+before="$(digest "$db") $(digest "$db-wal")"
+(
+  umask 077
+  cp -- "$db" "$snap/opencode.db"
+  if [ -e "$db-wal" ]; then cp -- "$db-wal" "$snap/opencode.db-wal"; fi
+) || fail "could not read $db"
+after="$(digest "$db") $(digest "$db-wal")"
+[ "$before" = "$after" ] \
+  || fail "$db changed during the copy (host OpenCode is writing); try again"
+snapped="$(digest "$snap/opencode.db") $(digest "$snap/opencode.db-wal")"
+[ "$snapped" = "$before" ] || fail "the snapshot of $db does not match the host file"
+
+(umask 077; sqlite3 "$snap/opencode.db" ".backup '$tmp'" >/dev/null 2>&1) \
   || fail "the online backup of $db failed"
-if [ "$wal" = 0 ] && { [ -e "$db-wal" ] || [ -e "$db-shm" ] || [ "$(stamp)" != "$before" ]; }; then
-  fail "$db changed during the copy (is host OpenCode running?); try again"
-fi
+rm -rf -- "$snap"
 # The backup keeps the source's WAL mode; switch the copy to a plain rollback
 # journal so it is one self-contained file (the stack's OpenCode picks its own
 # mode on its volume copy).

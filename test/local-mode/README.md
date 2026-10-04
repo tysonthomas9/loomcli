@@ -176,20 +176,26 @@ The host's OpenCode folder `~/.local/share/opencode` (or
 `LOCAL_MODE_OPENCODE_DATA`) is never mounted into the stack, read-write or
 read-only. Instead, each REAL stack gets a private copy of the login:
 
-- Before `up`, `real-opencode-copy.sh` takes one SQLite online backup of the
-  host's `opencode.db`, opened read-only (no file is created in the host
-  folder and the database and its `-wal` are never written; with a `-wal`
-  present, SQLite's reader locking updates only the `-shm` index, as any
-  reader does), into
+- Before `up`, `real-opencode-copy.sh` makes the copy without SQLite ever
+  opening a host file. Even a read-only SQLite reader writes into `-shm`, so
+  the script only reads the bytes of `opencode.db` and its `-wal` into a
+  private snapshot. It accepts the snapshot only when both host files hash
+  the same before and after the read. SQLite then recovers the snapshot
+  privately and takes one online backup of it into
   `~/.local/state/loom-local-mode/<project>/opencode.db` (`LOCAL_MODE_STATE_DIR`
   overrides `~/.local/state/loom-local-mode`), a mode-600 file in a mode-700
-  folder that belongs to that compose project only. It then runs
-  `PRAGMA quick_check` on the copy. If the backup or the check fails, `up`
-  stops with a clear message and boots nothing; it never retries in another
-  mode. That includes a host database whose `-wal`/`-shm` pair is damaged or
-  unreadable (for example `file is not a database`): the stack refuses to boot
-  until you repair the host database yourself, with OpenCode closed. A re-up of
-  the same project keeps its existing copy.
+  folder that belongs to that compose project only, and runs
+  `PRAGMA quick_check` on it. Nothing in the host folder is created or
+  written.
+- If anything fails, `up` stops with a clear message and boots nothing; it
+  never retries in another mode. Failures include: host OpenCode writing
+  during the read (run `up` again), a missing or unreadable host file, a
+  failed backup or check. A host database whose `-wal` is damaged or
+  unreadable, or that has a `-wal` with no `-shm` (a crashed writer), also
+  refuses to boot until you repair the host database yourself with OpenCode.
+- A re-up of the same project keeps its existing copy, but only if it is still
+  mode 600 in a 700 folder and passes `quick_check`; otherwise run
+  `make local-mode-agents-down` first.
 - The container mounts only that copy, read-only, and on first boot seeds its
   own OpenCode database on the `loom-data` volume from it. A `podman restart`
   keeps the stack's database.
@@ -201,10 +207,8 @@ read-only. Instead, each REAL stack gets a private copy of the login:
   restart reuses the old one).
 - `make local-mode-agents-down` (and `make local-mode-down`) remove that
   project's copy along with its volumes. Other projects' copies are untouched.
-- Several REAL stacks may run at once, and host OpenCode may keep running.
-  When host OpenCode has closed the database cleanly (no `opencode.db-wal`),
-  the copy reads the main file as immutable and refuses if it changes during
-  the copy; just run `up` again.
+- Several REAL stacks may run at once, and host OpenCode may keep running
+  (if it writes during the copy, run `up` again).
 
 The copy holds the login: never print, open or share it.
 

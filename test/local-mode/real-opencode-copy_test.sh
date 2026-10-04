@@ -50,8 +50,13 @@ PY
   # clean close leaves none, so model that.
   rm -f "$1/opencode.db-wal" "$1/opencode.db-shm"
 }
-# Names, sizes and mtimes of everything in a folder.
-listing() { find "$1" -mindepth 1 -exec stat -f '%N %z %m' {} + 2>/dev/null || find "$1" -mindepth 1 -exec stat -c '%n %s %Y' {} +; }
+# Name, size, mtime and SHA-256 of everything in a folder.
+listing() {
+  find "$1" -mindepth 1 | sort | while IFS= read -r f; do
+    printf '%s %s %s\n' "$f" "$(stat -f '%z %m' "$f" 2>/dev/null || stat -c '%s %Y' "$f")" \
+      "$({ shasum -a 256 < "$f" || sha256sum < "$f"; } 2>/dev/null || echo unreadable)"
+  done
+}
 mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"; }
 
 # --- 1. Clean (no -wal) host db is copied; host folder untouched. -----------
@@ -93,7 +98,7 @@ after="$(listing "$host")"
 echo finish > "$fifo"; wait "$writer"
 check "make succeeds while a host writer holds the WAL" '[ "$rc" = 0 ]'
 check "copy includes rows only in the host WAL" '[ "$(sqlite3 "$copy_b" "select count(*) from account where token = '"'"'wal-only'"'"'")" = 1 ]'
-check "host folder file set unchanged during a live-writer copy" '[ "$(printf "%s\n" "$before" | cut -d" " -f1)" = "$(printf "%s\n" "$after" | cut -d" " -f1)" ]'
+check "host folder byte-identical during a live-writer copy (db, -wal and -shm)" '[ "$before" = "$after" ]'
 
 # --- 4. A failed backup or quick_check refuses to boot, leaves nothing. -----
 printf 'not a database, just junk bytes %.0s' $(seq 1 300) > "$host/opencode.db"
@@ -126,6 +131,23 @@ check "unreadable host WAL: make refuses" '[ "$rc" != 0 ] && printf "%s" "$out" 
 check "unreadable host WAL: no copy left" '[ ! -e "$state/proj-e" ]'
 check "unreadable host WAL: host folder unchanged" '[ "$(listing "$host")" = "$before" ]'
 chmod 600 "$host/opencode.db-wal"
+
+# A -wal with no -shm (crashed or damaged writer): refuse before any read, so
+# no -shm is ever created in the host folder.
+rm -f "$host/opencode.db-shm"
+before="$(listing "$host")"
+out="$("$script" make "$state/proj-f/opencode.db" 2>&1)"; rc=$?
+check "host -wal without -shm: make refuses" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "without"'
+check "host -wal without -shm: no -shm created, host unchanged" '[ ! -e "$host/opencode.db-shm" ] && [ "$(listing "$host")" = "$before" ] && [ ! -e "$state/proj-f" ]'
+
+# A -wal with a bad header (damaged): refuse.
+: > "$host/opencode.db-shm"
+printf 'garbage-wal-header-and-more-bytes' > "$host/opencode.db-wal"
+before="$(listing "$host")"
+out="$("$script" make "$state/proj-g/opencode.db" 2>&1)"; rc=$?
+check "damaged host WAL header: make refuses" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "bad WAL header"'
+check "damaged host WAL header: host unchanged, no copy" '[ "$(listing "$host")" = "$before" ] && [ ! -e "$state/proj-g" ]'
+mkfake "$host"
 
 # --- 5. The copy may never live in the host folder. -------------------------
 mkfake "$host"
@@ -167,24 +189,49 @@ check "existing corrupt copy is refused" '[ "$rc" = 1 ]'
 "$script" remove "$state/proj-k/opencode.db"
 
 # --- 5c. A same-size change with the mtime restored during the copy is seen. -
-# A sqlite3 shim on PATH runs the real one, then rewrites one byte of the host
-# file in place (same size) and restores its mtime, right after the backup.
-real_sqlite="$(command -v sqlite3)"
+# A cp shim on PATH runs the real cp, then rewrites one byte of the host file
+# in place (same size) and restores its mtime, right after the snapshot read.
+real_cp="$(command -v cp)"
 mkdir -p "$T/shim"
-cat > "$T/shim/sqlite3" <<SH
+cat > "$T/shim/cp" <<SH
 #!/usr/bin/env bash
-"$real_sqlite" "\$@"; rc=\$?
-case "\$*" in *.backup*)
+"$real_cp" "\$@"; rc=\$?
+case "\$*" in *"$host/opencode.db "*)
   touch -r "$host/opencode.db" "$T/mtime"
   python3 -c 'import sys; f=open(sys.argv[1],"r+b"); f.seek(100); b=f.read(1); f.seek(100); f.write(bytes([b[0]^1])); f.close()' "$host/opencode.db"
   touch -r "$T/mtime" "$host/opencode.db" ;;
 esac
 exit \$rc
 SH
-chmod +x "$T/shim/sqlite3"
+chmod +x "$T/shim/cp"
 mkfake "$host"
 out="$(PATH="$T/shim:$PATH" "$script" make "$state/proj-m/opencode.db" 2>&1)"; rc=$?
 check "same-size, mtime-restored host change during the copy is refused" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "changed during the copy" && [ ! -e "$state/proj-m" ]'
+rm -f "$T/shim/cp"
+
+# --- 5d. sqlite3 is never pointed at a host file. ----------------------------
+real_sqlite="$(command -v sqlite3)"
+cat > "$T/shim/sqlite3" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$T/sqlite3.log"
+exec "$real_sqlite" "\$@"
+SH
+chmod +x "$T/shim/sqlite3"
+mkfake "$host"
+python3 - "$host/opencode.db" <<'PY'
+import sqlite3, sys, os
+c = sqlite3.connect(sys.argv[1]); c.execute("pragma wal_autocheckpoint=0")
+c.execute("insert into account(token) values ('y')"); c.commit()
+os._exit(0)
+PY
+before="$(listing "$host")"
+PATH="$T/shim:$PATH" "$script" make "$state/proj-n/opencode.db" >/dev/null 2>&1; rc=$?
+check "WAL host db (with -shm) copies; host folder byte-identical" '[ "$rc" = 0 ] && [ "$(listing "$host")" = "$before" ]'
+check "sqlite3 never receives a host path" '[ -s "$T/sqlite3.log" ] && ! grep -q "$host" "$T/sqlite3.log"'
+check "copy includes the WAL-only row" '[ "$(sqlite3 "$state/proj-n/opencode.db" "select count(*) from account where token = '"'"'y'"'"'")" = 1 ]'
+check "no snapshot left in the project folder" '[ "$(ls -A "$state/proj-n")" = opencode.db ]'
+rm -f "$T/shim/sqlite3"
+"$script" remove "$state/proj-n/opencode.db"
 mkfake "$host"
 
 # --- 6. remove deletes that project's copy only. ----------------------------
