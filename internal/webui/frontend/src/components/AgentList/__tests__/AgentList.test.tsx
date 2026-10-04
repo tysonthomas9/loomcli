@@ -23,6 +23,7 @@ import type {
   AgentStreamOptions,
   ListAgentsQuery,
 } from "@/api/agentsv1";
+import { agentColorIndex } from "@/hooks/agents/agentColor";
 
 const api = vi.hoisted(() => ({
   agents: [] as Agent[],
@@ -398,6 +399,16 @@ describe("AgentList", () => {
     expect(screen.getByRole("link", { name: "cx Worker codex" })).toBe(
       row("cx"),
     );
+  });
+
+  it("colours each row's avatar with the agent's own colour, as the Lead chat does", async () => {
+    renderList();
+    await waitFor(() => expect(row("kid")).not.toBeNull());
+    for (const id of ["lead", "kid"])
+      expect(row(id)!.querySelector("[data-agent-color]")).toHaveAttribute(
+        "data-agent-color",
+        String(agentColorIndex(id)),
+      );
   });
 
   it("shows a 20-character name in full, wrapping instead of cutting it off", async () => {

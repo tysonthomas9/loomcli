@@ -78,6 +78,12 @@
   font-weight: 600;
 }
 
+.avatar.badge {
+  border-color: var(--color-bg-card);
+  background: var(--agent-color);
+  color: #fff;
+}
+
 .avatar:first-child {
   margin-left: 0;
 }
@@ -310,30 +316,136 @@
   font-size: 0.8125rem;
 }
 
-.marker a {
+/* An agent's initials on its stable colour (CL1); see AgentBadge. */
+.badge {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-full);
+  background: var(--agent-color);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+/* A started child in the Started marker: avatar and name, a link. */
+.childChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--color-text-primary);
   font-weight: 600;
   text-decoration: none;
 }
 
-.marker a:hover {
+.childChip:hover {
   text-decoration: underline;
 }
 
-.view {
+/* The Started marker's folded agent_create calls: "2 tool calls ›". */
+.calls {
+  margin-left: 2px;
   padding: 0;
   border: 0;
   background: none;
-  color: var(--color-primary);
+  color: var(--color-text-muted);
   font: inherit;
+  font-size: 0.71875rem;
   cursor: pointer;
 }
 
-.markerBody {
-  width: 100%;
-  margin-top: 4px;
-  padding-left: 18px;
+.calls:hover {
   color: var(--color-text-primary);
+}
+
+.callsChevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.calls[aria-expanded="true"] .callsChevron {
+  transform: rotate(90deg);
+}
+
+/*
+ * A child's result as the E1 light card (CL1): no fill at rest, a faint
+ * outline and a 2px bar in the agent's colour at 55%; on hover a light fill
+ * and the bar at full colour. The whole card is one link.
+ */
+.card {
+  display: grid;
+  grid-template-columns: 18px auto 1fr auto auto;
+  align-items: center;
+  gap: 1px 10px;
+  padding: 7px 12px;
+  border: 1px solid
+    color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--agent-color) 55%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.card:hover {
+  border-color: color-mix(in srgb, var(--color-text-primary) 9%, transparent);
+  border-left-color: var(--agent-color);
+  background: color-mix(in srgb, var(--color-bg-card) 55%, transparent);
+}
+
+.card .badge {
+  opacity: 0.85;
+}
+
+.cardName {
+  color: var(--color-text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.cardState {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.cardOk {
+  color: color-mix(
+    in srgb,
+    var(--color-success) 80%,
+    var(--color-text-primary)
+  );
+}
+
+.cardFail {
+  color: var(--color-danger);
+}
+
+.cardTime {
+  grid-column: 4;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.cardGo {
+  grid-column: 5;
+  font-size: 0.875rem;
+}
+
+.cardResult {
+  grid-column: 2 / 6;
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardResult[data-failed="true"] {
+  color: var(--color-danger);
 }
 
 /* A message another agent sent on purpose: a named card, accent edge. */

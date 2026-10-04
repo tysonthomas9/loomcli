@@ -9,7 +9,13 @@ import { describe, expect, it } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Agent, AgentEvent, WaitingMessage } from "@/api/agentsv1";
-import { trayRows, trayWaves, type Activities, type ChatItem } from "@/hooks";
+import {
+  agentColorIndex,
+  trayRows,
+  trayWaves,
+  type Activities,
+  type ChatItem,
+} from "@/hooks";
 import { AgentTray } from "../AgentTray";
 
 const kid = (id: string, over: Partial<Agent> = {}): Agent =>
@@ -66,6 +72,24 @@ function Harness({
 }
 
 describe("AgentTray", () => {
+  it("shows each child's avatar in its own colour, with its initials", () => {
+    const roster = [
+      kid("agt_a", { name: "ui-test-agent-1" }),
+      kid("agt_b", { name: "ui-test-agent-2" }),
+    ];
+    render(<Harness roster={roster} items={[started(0, "agt_a", "agt_b")]} />);
+    const avatars = [
+      ...screen
+        .getByTestId("agent-tray")
+        .querySelectorAll("[data-agent-color]"),
+    ];
+    expect(avatars.map((a) => a.textContent)).toEqual(["U1", "U2"]);
+    expect(avatars.map((a) => a.getAttribute("data-agent-color"))).toEqual([
+      String(agentColorIndex("agt_a")),
+      String(agentColorIndex("agt_b")),
+    ]);
+  });
+
   it("is hidden when no child is working or waiting", () => {
     const { container } = render(
       <Harness roster={[kid("a", { state: "finished" })]} items={[]} />,

@@ -71,16 +71,19 @@ function entryIcon(entry: WorkEntry): IconName {
 export function WorkEntryRow({
   entry,
   inGroup,
+  label: bridge,
 }: {
   entry: WorkEntry;
   inGroup: boolean;
+  /** A Loom bridge call's plain label, in place of its name and input. */
+  label?: string | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
   const failed = entryFailed(entry);
   const tool = entry.kind === "tool" ? entry : null;
-  const heading = tool ? toolHeading(tool) : "Thinking";
+  const heading = bridge ?? (tool ? toolHeading(tool) : "Thinking");
   const text = entry.kind === "reasoning" ? entry.text : "";
-  const preview = tool ? toolPreview(tool) : firstLine(text);
+  const preview = bridge ? "" : tool ? toolPreview(tool) : firstLine(text);
   const input = tool ? prettyInput(tool.tool.input) : "";
   const output = tool ? (tool.tool.output ?? "") : text;
   const canExpand = !!(input || output.trim());
@@ -161,7 +164,7 @@ export function WorkEntryRow({
   );
 }
 
-/** A group's summary or "+N previous" toggle. */
+/** A group's summary or "Show N earlier steps" toggle. */
 export function WorkGroupToggleRow({
   row,
   onToggle,
@@ -191,13 +194,14 @@ export function WorkGroupToggleRow({
       </button>
     );
   }
-  const noun = row.onlyToolEntries
-    ? row.hiddenCount === 1
-      ? "tool call"
-      : "tool calls"
-    : row.hiddenCount === 1
-      ? "log entry"
-      : "log entries";
+  const plural = row.onlyToolEntries ? "tool calls" : "steps";
+  const noun =
+    row.hiddenCount === 1
+      ? row.onlyToolEntries
+        ? "tool call"
+        : "step"
+      : plural;
+  const more = `Show ${row.hiddenCount} earlier ${noun}`;
   return (
     <button
       type="button"
@@ -206,7 +210,7 @@ export function WorkGroupToggleRow({
       aria-expanded={row.expanded}
       aria-label={
         row.hasFailure && !row.expanded
-          ? `+${row.hiddenCount} previous ${noun}, includes a failure`
+          ? `${more}, includes a failure`
           : undefined
       }
       onClick={onToggle}
@@ -219,11 +223,35 @@ export function WorkGroupToggleRow({
         <Icon name="chevron" />
       </span>
       <span className={styles.toggleText}>
-        {row.expanded
-          ? `Show fewer ${row.onlyToolEntries ? "tool calls" : "log entries"}`
-          : `+${row.hiddenCount} previous ${noun}`}
+        {row.expanded ? `Hide earlier ${plural}` : more}
       </span>
     </button>
+  );
+}
+
+/**
+ * A Loom bridge call the Lead made (agent_get and the like) as one muted
+ * line, such as "· Checked ui-test-agent-1", never its raw input (CL1).
+ */
+export function BridgeCallRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "bridge" }>;
+}) {
+  const failed = entryFailed(row.entry);
+  return (
+    <div
+      className={styles.bridge}
+      data-testid="bridge-call"
+      data-status={row.entry.status}
+    >
+      <span aria-hidden="true">·</span>
+      <span>
+        {row.label}
+        {row.entry.status === "running" && "…"}
+      </span>
+      {failed && <span className={styles.bridgeFailed}>failed</span>}
+    </div>
   );
 }
 

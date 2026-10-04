@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -86,11 +86,17 @@ function deliver(...events: AgentEvent[]) {
   act(() => s.opts.onEvents?.(events));
 }
 
+// The router's path, to see where a card went.
+function Where() {
+  return <span data-testid="where">{useLocation().pathname}</span>;
+}
+
 async function mount(a: Agent) {
   api.getAgent.mockResolvedValue(a);
   const view = render(
     <MemoryRouter>
       <AgentChat workspaceId="w1" agentId="a1" />
+      <Where />
     </MemoryRouter>,
   );
   await screen.findByText(a.name);
@@ -162,21 +168,19 @@ describe("AgentChat", () => {
     expect(container.textContent).not.toMatch(/task_completed:/);
     expect(screen.getByText("make a child")).toBeInTheDocument();
     const started = screen.getByTestId("started-marker");
-    expect(started).toHaveTextContent("↳Started kid, kid2");
-    expect(started.querySelector("a")).toHaveAttribute(
-      "href",
-      "/ws/w1/chat/k1",
-    );
+    // Each child is its colour avatar (initials) and name, a link.
+    expect(started).toHaveTextContent("↳StartedKIkidKIkid2");
+    expect(
+      [...started.querySelectorAll("a")].map((a) => a.getAttribute("href")),
+    ).toEqual(["/ws/w1/chat/k1", "/ws/w1/chat/k2"]);
     const records = screen.getAllByTestId("completion-record");
     expect(records).toHaveLength(2);
-    expect(records[0]).toHaveTextContent(/^✕kid failed/);
-    expect(records[1]).toHaveTextContent(/^✓kid done · attempt 2/);
-    expect(records[1]).toHaveTextContent("Lead read the result");
-    // The summary opens on "view".
-    expect(screen.queryByText("second try")).toBeNull();
-    fireEvent.click(records[1].querySelector("button")!);
-    expect(screen.getByText("second try")).toBeInTheDocument();
-    expect(records[1]).toHaveTextContent("loom/k1@0123456");
+    expect(records[0]).toHaveTextContent(/^KIkid✕ failedfirst try$/);
+    expect(records[1]).toHaveTextContent(/^KIkid✓ done · attempt 2second try$/);
+    // No "Lead read the result" tag and no "view" button: the card is the link.
+    expect(records[1]).not.toHaveTextContent("Lead read the result");
+    expect(records[1].querySelector("button")).toBeNull();
+    expect(records[1]).toHaveAttribute("title", "loom/k1@0123456");
     // A message an agent sent on purpose is a named bubble with markdown.
     const from = screen.getAllByTestId("from-agent");
     expect(from.map((f) => f.textContent)).toEqual([
@@ -184,6 +188,109 @@ describe("AgentChat", () => {
       "from xfrom another agent",
     ]);
     expect(from[0].innerHTML).toContain("<strong>cursor</strong>");
+  });
+
+  it("shows a finished child as one E1 card that opens its chat", async () => {
+    await mount(agent());
+    deliver(
+      ev("child.created", { child: "k1", name: "ui-test-agent-1" }),
+      ev("child.created", { child: "k2", name: "ui-test-agent-2" }),
+      {
+        ...done(0, "node --test 3/3 passed · **smoke** OK\nsecond line"),
+        created_at: "2026-10-04T10:40:00Z",
+      },
+    );
+    const card = screen.getByTestId("completion-record");
+    expect(card).toHaveAttribute("role", "link");
+    expect(card).toHaveAttribute("tabindex", "0");
+    expect(card).toHaveTextContent(
+      /^U1ui-test-agent-1✓ donenode --test 3\/3 passed · smoke OK$/,
+    );
+    // The time and › show only on hover or focus.
+    expect(screen.queryByTestId("card-time")).toBeNull();
+    fireEvent.mouseEnter(card);
+    expect(screen.getByTestId("card-time")).toHaveTextContent(/10:40|\d:\d\d/);
+    expect(card).toHaveTextContent("›");
+    fireEvent.mouseLeave(card);
+    expect(screen.queryByTestId("card-time")).toBeNull();
+    fireEvent.focus(card);
+    expect(screen.getByTestId("card-time")).toBeInTheDocument();
+    fireEvent.blur(card);
+    expect(screen.queryByTestId("card-time")).toBeNull();
+    // The card, the Started marker and the tray share the child's colour.
+    const color = card.getAttribute("data-agent-color");
+    expect(color).toMatch(/^[0-7]$/);
+    const marker = screen.getByTestId("started-marker");
+    expect(
+      marker.querySelector('a[href="/ws/w1/chat/k1"] [data-agent-color]'),
+    ).toHaveAttribute("data-agent-color", color);
+    // Enter, Space and a click each open the child's chat.
+    expect(screen.getByTestId("where")).toHaveTextContent("/");
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(screen.getByTestId("where")).toHaveTextContent("/ws/w1/chat/k1");
+  });
+
+  it("opens a card's chat on Space and on click", async () => {
+    await mount(agent());
+    deliver(ev("child.created", { child: "k1", name: "kid" }), done(0, "ok"));
+    const card = screen.getByTestId("completion-record");
+    fireEvent.keyDown(card, { key: " " });
+    expect(screen.getByTestId("where")).toHaveTextContent("/ws/w1/chat/k1");
+    fireEvent.keyDown(card, { key: "a" });
+    fireEvent.click(card);
+    expect(screen.getByTestId("where")).toHaveTextContent("/ws/w1/chat/k1");
+  });
+
+  it("shows a failed child as the same card with a red ✕ and its error", async () => {
+    await mount(agent());
+    deliver(
+      ev("child.created", { child: "k1", name: "db-worker" }),
+      done(0, 'Failed: relation "channels" does not exist', "failed"),
+    );
+    const card = screen.getByTestId("completion-record");
+    expect(card).toHaveAttribute("data-outcome", "failed");
+    expect(card).toHaveTextContent("✕ failed");
+    expect(card).toHaveTextContent(
+      'Failed: relation "channels" does not exist',
+    );
+    expect(card.querySelector("[data-failed=true]")).not.toBeNull();
+  });
+
+  it("folds the Lead's agent_create calls into the Started marker and shows agent_get as one line", async () => {
+    const execute = (code: string) =>
+      ev("item.completed", {
+        itemKind: "tool",
+        tool: { name: "execute", input: JSON.stringify({ code }) },
+      });
+    const { container } = await mount(agent());
+    deliver(
+      ev("item.completed", {
+        itemKind: "message",
+        text: "Starting two UI test agents.",
+      }),
+      ev("child.created", { child: "k1", name: "ui-test-agent-1" }),
+      ev("child.created", { child: "k2", name: "ui-test-agent-2" }),
+      execute("return await tools.loom.agent_create({brief:'test 1'})"),
+      execute("return await tools.loom.agent_create({brief:'test 2'})"),
+      done(0, "node --test 3/3 passed"),
+      execute("return await tools.loom.agent_get({agent:'k1'})"),
+    );
+    // No "Used 2 tools" row and no raw Execute JSON.
+    expect(screen.queryByTestId("tool-group")).toBeNull();
+    expect(screen.queryByTestId("tool-call")).toBeNull();
+    expect(container.textContent).not.toMatch(/tools\.loom|Execute/);
+    const marker = screen.getByTestId("started-marker");
+    const calls = within(marker).getByRole("button", { name: /2 tool calls/ });
+    expect(calls).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("bridge-call")).toHaveTextContent(
+      "·Checked ui-test-agent-1",
+    );
+    // Expanding shows each call by its plain label.
+    fireEvent.click(calls);
+    expect(calls).toHaveAttribute("aria-expanded", "true");
+    const rows = screen.getAllByTestId("tool-call");
+    expect(rows).toHaveLength(2);
+    for (const r of rows) expect(r).toHaveTextContent("Started an agent");
   });
 
   it("folds a waiting result into its marker and shows only a child's own words", async () => {

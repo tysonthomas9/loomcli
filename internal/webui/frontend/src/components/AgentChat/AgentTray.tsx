@@ -16,6 +16,7 @@ import {
   type TrayRow,
   type TrayWave,
 } from "@/hooks";
+import { AgentBadge } from "./AgentBadge";
 import { ProviderIcon } from "./ProviderIcon";
 import { stepLabel } from "./timelineRows";
 import tray from "./AgentTray.module.css";
@@ -140,9 +141,13 @@ export function AgentTray({
       >
         <span className={tray.avatars} aria-hidden="true">
           {shown.map((r) => (
-            <span key={r.id} className={tray.avatar}>
-              <HarnessIcon harness={r.harness} />
-            </span>
+            <AgentBadge
+              key={r.id}
+              id={r.id}
+              name={r.name}
+              size={22}
+              className={tray.avatar}
+            />
           ))}
           {rows.length > shown.length && (
             <span className={tray.avatar}>+{rows.length - shown.length}</span>

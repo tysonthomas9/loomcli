@@ -4,6 +4,7 @@ import type { AgentEvent } from "@/api/agentsv1";
 import type { ChatItem } from "@/hooks";
 import {
   STEP_MAX,
+  bridgeLabel,
   deriveTimelineRows,
   stepLabel,
   summarizeToolGroup,
@@ -105,7 +106,7 @@ describe("timelineRows", () => {
     ]);
   });
 
-  it("shows a mixed group's last entry after +N previous log entries", () => {
+  it("shows a mixed group's last entry after Show N earlier steps", () => {
     const rows = deriveTimelineRows(
       [thought("r1"), tool("t1", "bash"), thought("r2")],
       new Set(),
@@ -231,5 +232,175 @@ describe("stepLabel", () => {
     expect(stepLabel(ev("delta", { itemKind: "message", text: "hi" }))).toBe(
       null,
     );
+  });
+});
+
+const exec = (
+  key: string,
+  code: string,
+  status: "running" | "completed" | "failed" = "completed",
+): Extract<ChatItem, { kind: "tool" }> => ({
+  key,
+  kind: "tool",
+  tool: { name: "execute", input: JSON.stringify({ code }) },
+  status,
+});
+const create = (key: string, status?: "completed" | "failed") =>
+  exec(
+    key,
+    "return await tools.loom.agent_create({brief:'run tests'})",
+    status,
+  );
+const startedItem = (key: string, ...ids: string[]): ChatItem => ({
+  key,
+  kind: "started",
+  children: ids.map((child) => ({ child, name: `ui-${child}` })),
+  at: "",
+});
+
+describe("Loom bridge calls (CL1)", () => {
+  const names = new Map([["agt_1", "ui-test-agent-1"]]);
+
+  it("labels agent_get as Checked <name>, never its raw input", () => {
+    const get = exec("g", "return await tools.loom.agent_get({agent:'agt_1'})");
+    expect(bridgeLabel(get, names)).toBe("Checked ui-test-agent-1");
+    expect(bridgeLabel({ ...get, status: "running" }, names)).toBe(
+      "Checking ui-test-agent-1",
+    );
+    // An id with no known name shows as the id.
+    expect(
+      bridgeLabel(
+        exec("g2", 'tools.loom.agent_get({ agent: "agt_9" })'),
+        names,
+      ),
+    ).toBe("Checked agt_9");
+  });
+
+  it("labels bridge tools called by name, as Claude and Codex call them", () => {
+    const named = (name: string, input: object) => ({
+      ...tool("n", name),
+      tool: { name, input: JSON.stringify(input) },
+    });
+    expect(
+      bridgeLabel(named("mcp__loom__agent_get", { agent: "agt_1" }), names),
+    ).toBe("Checked ui-test-agent-1");
+    expect(bridgeLabel(named("agent_list", {}), names)).toBe("Listed agents");
+    expect(
+      bridgeLabel(
+        named("loom/agent_send", { agent: "agt_1", text: "hi" }),
+        names,
+      ),
+    ).toBe("Messaged ui-test-agent-1");
+    expect(bridgeLabel(named("agent_archive", { agent: "agt_1" }), names)).toBe(
+      "Archived ui-test-agent-1",
+    );
+    expect(bridgeLabel(named("github_read", {}), names)).toBe("Read GitHub");
+  });
+
+  it("counts several calls in one execute", () => {
+    expect(
+      bridgeLabel(
+        exec(
+          "m",
+          "const a = await tools.loom.agent_get({agent:'agt_1'}); return tools.loom.agent_list({})",
+        ),
+        names,
+      ),
+    ).toBe("Checked ui-test-agent-1 and 1 more call");
+  });
+
+  it("leaves other tools alone", () => {
+    expect(bridgeLabel(tool("b", "bash"), names)).toBeNull();
+    expect(bridgeLabel(exec("e", "return 1 + 1"), names)).toBeNull();
+    expect(bridgeLabel(tool("x", "agent_getter"), names)).toBeNull();
+  });
+
+  it("shows a bridge call as its own muted row, not in a work group", () => {
+    const rows = deriveTimelineRows(
+      [
+        startedItem("s", "agt_1"),
+        text("m"),
+        thought("t"),
+        exec("g", "return await tools.loom.agent_get({agent:'agt_1'})"),
+      ],
+      new Set(),
+    );
+    expect(rows.map((r) => r.kind)).toEqual([
+      "started",
+      "item",
+      "work",
+      "bridge",
+    ]);
+    expect(rows[3]).toMatchObject({ label: "Checked ui-agt_1" });
+  });
+
+  it("folds the agent_create calls after a Started marker into it", () => {
+    const rows = deriveTimelineRows(
+      [
+        startedItem("s1", "k1"),
+        startedItem("s2", "k2"),
+        create("c1"),
+        create("c2"),
+      ],
+      new Set(),
+    );
+    // Back-to-back markers merge in chatItems; here one per item, then folded.
+    expect(rows.some((r) => r.kind === "work-toggle")).toBe(false);
+    expect(rows.filter((r) => r.kind === "started")).toHaveLength(1);
+    const [s] = rows;
+    expect(s).toMatchObject({ kind: "started", expanded: false });
+    if (s?.kind !== "started") throw new Error("no marker");
+    expect(s.item.children.map((c) => c.child)).toEqual(["k1", "k2"]);
+    expect(s.calls.map((c) => c.key)).toEqual(["c1", "c2"]);
+  });
+
+  it("folds create calls before a marker, and merges markers only they keep apart", () => {
+    const rows = deriveTimelineRows(
+      [
+        create("c1"),
+        startedItem("s1", "k1"),
+        create("c2"),
+        startedItem("s2", "k2"),
+      ],
+      new Set(),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "started", id: "s1" });
+    if (rows[0]?.kind !== "started") throw new Error("no marker");
+    expect(rows[0].calls.map((c) => c.key)).toEqual(["c1", "c2"]);
+    expect(rows[0].item.children.map((c) => c.child)).toEqual(["k1", "k2"]);
+  });
+
+  it("expands the folded calls as labelled work rows", () => {
+    const rows = deriveTimelineRows(
+      [startedItem("s1", "k1"), create("c1")],
+      new Set(["started:s1"]),
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["started", "work"]);
+    expect(rows[1]).toMatchObject({
+      inGroup: true,
+      label: "Started an agent",
+    });
+  });
+
+  it("keeps a failed or running create call out of the marker", () => {
+    const rows = deriveTimelineRows(
+      [startedItem("s1", "k1"), create("c1", "failed")],
+      new Set(),
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["started", "bridge"]);
+    if (rows[0]?.kind !== "started") throw new Error("no marker");
+    expect(rows[0].calls).toEqual([]);
+    const live = deriveTimelineRows(
+      [
+        startedItem("s1", "k1"),
+        { ...create("c2"), status: "running" as const },
+      ],
+      new Set(),
+    );
+    expect(live[1]).toMatchObject({
+      kind: "bridge",
+      label: "Starting an agent",
+    });
   });
 });

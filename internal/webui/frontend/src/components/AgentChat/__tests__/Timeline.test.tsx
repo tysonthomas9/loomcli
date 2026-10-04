@@ -227,7 +227,7 @@ describe("AgentChat timeline (UI3)", () => {
     // Reasoning then a tool call: the last entry shows, the rest folds.
     expect(screen.getByTestId("tool-call")).toHaveTextContent("Bashsleep 5");
     const more = screen.getByTestId("work-toggle");
-    expect(more).toHaveTextContent("+1 previous log entry");
+    expect(more).toHaveTextContent("Show 1 earlier step");
     fireEvent.click(more);
     const reasoning = screen.getByTestId("reasoning");
     fireEvent.click(within(reasoning).getByRole("button"));

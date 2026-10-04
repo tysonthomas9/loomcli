@@ -3,7 +3,13 @@ import { Link, useMatch } from "react-router-dom";
 import type { Agent } from "@/api/agentsv1";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { ProviderIcon } from "@/components/AgentChat";
-import { childrenByParent, useAgentRoster } from "@/hooks";
+import {
+  agentColor,
+  agentColorIndex,
+  agentInitials,
+  childrenByParent,
+  useAgentRoster,
+} from "@/hooks";
 import {
   agentDot,
   agentRoleLabel,
@@ -67,9 +73,16 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
                 <span
                   className={styles.avatar}
                   data-dot={dot}
+                  data-agent-color={agentColorIndex(a.agent_id)}
                   aria-hidden="true"
                 >
-                  <AgentAvatar name={a.name} compact />
+                  {/* The agent's own colour, as in the Lead chat and tray. */}
+                  <AgentAvatar
+                    name={a.name}
+                    color={agentColor(a.agent_id)}
+                    initials={agentInitials(a.name)}
+                    compact
+                  />
                   <span className={styles.dot} />
                 </span>
                 <span

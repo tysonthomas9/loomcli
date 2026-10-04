@@ -7,7 +7,7 @@ import type { AgentEvent } from "@/api/agentsv1";
 import type { ChatItem, ToolCall } from "@/hooks";
 import { argPreview, argPreviewFromJSON, truncate } from "@/utils/toolPreview";
 
-/** Work entries a mixed group shows before "+N previous log entries". */
+/** Work entries a mixed group shows before "Show N earlier steps". */
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
 
 export type ToolEntry = Extract<ChatItem, { kind: "tool" }>;
@@ -21,9 +21,32 @@ export type ToolGroupAction =
   | "search"
   | "other";
 
+export type StartedItem = Extract<ChatItem, { kind: "started" }>;
+
 export type TimelineRow =
   | { kind: "item"; id: string; item: ChatItem }
-  | { kind: "work"; id: string; entry: WorkEntry; inGroup: boolean }
+  | {
+      kind: "work";
+      id: string;
+      entry: WorkEntry;
+      inGroup: boolean;
+      /** A Loom bridge call's plain label, shown in place of its raw input. */
+      label?: string;
+    }
+  /**
+   * Children started back to back, with the Lead's agent_create calls that
+   * started them folded in ("2 tool calls ›"); expanding shows each call.
+   */
+  | {
+      kind: "started";
+      id: string;
+      item: StartedItem;
+      calls: ToolEntry[];
+      groupId: string;
+      expanded: boolean;
+    }
+  /** A Loom bridge call (agent_get and the like) as one muted line. */
+  | { kind: "bridge"; id: string; entry: ToolEntry; label: string }
   | {
       kind: "work-toggle";
       id: string;
@@ -222,39 +245,241 @@ export function stepLabel(e: AgentEvent, preview = true): string | null {
   return truncate(`▸ ${action}${shown}`, STEP_MAX);
 }
 
+const BRIDGE_NAME =
+  /(?:^|[^a-z])(agent_(?:create|list|get|send|archive)|github_read)$/i;
+const CODE_CALL = /tools\.loom\.(\w+)\s*\(/g;
+const AGENT_ARG = /\bagent\s*:\s*["'`]([^"'`]+)["'`]/;
+const NAME_ARG = /\bname\s*:\s*["'`]([^"'`]+)["'`]/;
+
+/** One Loom bridge tool call: the tool, and the agent or name it names. */
+export interface BridgeCall {
+  tool: string;
+  agent?: string;
+  name?: string;
+}
+
+function jsonInput(entry: ToolEntry): Record<string, unknown> | null {
+  try {
+    const v: unknown = JSON.parse(entry.tool.input ?? "");
+    return v && typeof v === "object" && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+
+/**
+ * The Loom bridge calls a tool call makes, or [] when it is not one: a
+ * bridge tool called by name (agent_get, mcp__loom__agent_get), or code
+ * mode's execute running tools.loom.agent_get({agent: ...}).
+ */
+export function bridgeCalls(entry: ToolEntry): BridgeCall[] {
+  const name = (entry.tool.name ?? "").trim();
+  const input = jsonInput(entry);
+  const direct = BRIDGE_NAME.exec(name)?.[1];
+  if (direct) {
+    const call: BridgeCall = { tool: direct.toLowerCase() };
+    const agent = str(input?.agent);
+    const n = str(input?.name);
+    if (agent) call.agent = agent;
+    if (n) call.name = n;
+    return [call];
+  }
+  const code = str(input?.code) ?? "";
+  const found = [...code.matchAll(CODE_CALL)];
+  return found.flatMap((m, i) => {
+    const tool = m[1]!;
+    if (!BRIDGE_NAME.test(tool)) return [];
+    const args = code.slice(m.index, found[i + 1]?.index ?? code.length);
+    const call: BridgeCall = { tool };
+    const agent = AGENT_ARG.exec(args)?.[1];
+    const n = NAME_ARG.exec(args)?.[1];
+    if (agent) call.agent = agent;
+    if (n) call.name = n;
+    return [call];
+  });
+}
+
+const BRIDGE_VERBS: Record<string, [done: string, running: string]> = {
+  agent_create: ["Started", "Starting"],
+  agent_list: ["Listed agents", "Listing agents"],
+  agent_get: ["Checked", "Checking"],
+  agent_send: ["Messaged", "Messaging"],
+  agent_archive: ["Archived", "Archiving"],
+  github_read: ["Read GitHub", "Reading GitHub"],
+};
+
+/** Who a bridge call is about, by name when known: "kid", "kid and kid2". */
+function whom(calls: BridgeCall[], names: ReadonlyMap<string, string>) {
+  const who = [
+    ...new Set(
+      calls.map((c) => (c.agent ? (names.get(c.agent) ?? c.agent) : c.name)),
+    ),
+  ].filter((w): w is string => !!w);
+  if (who.length === 0)
+    return calls.length > 1 ? `${calls.length} agents` : "an agent";
+  if (who.length <= 2) return who.join(" and ");
+  return `${who[0]} and ${who.length - 1} more`;
+}
+
+/**
+ * A bridge tool call as one plain line, never its raw input: "Checked
+ * ui-test-agent-1", "Messaging kid", "Listed agents"; null when the call is
+ * not a bridge call. names maps agent ids to names.
+ */
+export function bridgeLabel(
+  entry: ToolEntry,
+  names: ReadonlyMap<string, string>,
+): string | null {
+  const calls = bridgeCalls(entry);
+  const first = calls[0];
+  if (!first) return null;
+  const same = calls.filter((c) => c.tool === first.tool);
+  const [done, running] = BRIDGE_VERBS[first.tool] ?? [first.tool, first.tool];
+  const verb = entry.status === "running" ? running : done;
+  const about = ["agent_create", "agent_get", "agent_send", "agent_archive"];
+  let label = about.includes(first.tool)
+    ? `${verb} ${whom(same, names)}`
+    : verb;
+  const others = calls.length - same.length;
+  if (others > 0)
+    label += ` and ${others} more ${others === 1 ? "call" : "calls"}`;
+  return label;
+}
+
+/** A finished agent_create call, which the Started marker folds in. */
+const isCreateCall = (i: ChatItem): i is ToolEntry =>
+  i.kind === "tool" &&
+  i.status === "completed" &&
+  bridgeCalls(i).some((c) => c.tool === "agent_create");
+
+type Unit =
+  | ChatItem
+  | { kind: "started-unit"; item: StartedItem; calls: ToolEntry[] };
+
+/**
+ * Started markers with the agent_create calls next to them folded in, and
+ * markers that only those calls kept apart merged.
+ */
+function foldStarted(items: readonly ChatItem[]): Unit[] {
+  const out: Unit[] = [];
+  for (const item of items) {
+    const last = out[out.length - 1];
+    if (item.kind === "started") {
+      const calls: ToolEntry[] = [];
+      while (out.length > 0) {
+        const t = out[out.length - 1]!;
+        if (t.kind === "started-unit" || !isCreateCall(t)) break;
+        calls.unshift(t);
+        out.pop();
+      }
+      const prev = out[out.length - 1];
+      if (prev?.kind === "started-unit") {
+        prev.item = {
+          ...prev.item,
+          children: [...prev.item.children, ...item.children],
+        };
+        prev.calls.push(...calls);
+      } else out.push({ kind: "started-unit", item, calls });
+      continue;
+    }
+    if (last?.kind === "started-unit" && isCreateCall(item)) {
+      last.calls.push(item);
+      continue;
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+/** Each child's name, from the Started markers and result cards. */
+function agentNames(items: readonly ChatItem[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const i of items) {
+    if (i.kind === "started")
+      i.children.forEach((c) => names.set(c.child, c.name));
+    if (i.kind === "completion") names.set(i.record.child, i.name);
+  }
+  return names;
+}
+
 /**
  * The transcript's rows. Consecutive tool calls and reasoning form a work
  * group. A group of only tool calls is one summary row ("Ran 2 commands"),
  * or, while one runs, a live row naming it; expanding shows each call. A
- * mixed group shows its last entry after "+N previous log entries". Live
- * reasoning is one "Thinking" row.
+ * mixed group shows its last entry after "Show N earlier steps". Live
+ * reasoning is one "Thinking" row. A Started marker folds in the
+ * agent_create calls next to it, and any other Loom bridge call is one
+ * muted line ("Checked kid"), never raw tool input (CL1).
  */
 export function deriveTimelineRows(
   items: readonly ChatItem[],
   expandedGroups: ReadonlySet<string>,
 ): TimelineRow[] {
+  const names = agentNames(items);
+  const units = foldStarted(items);
+  const label = (e: WorkEntry) =>
+    e.kind === "tool" ? (bridgeLabel(e, names) ?? undefined) : undefined;
+  const isBridge = (u: Unit): u is ToolEntry =>
+    u.kind === "tool" && bridgeCalls(u).length > 0;
+  const isPlainWork = (u: Unit): u is WorkEntry =>
+    u.kind !== "started-unit" && isWork(u) && !isBridge(u);
   const rows: TimelineRow[] = [];
   let thinking = false;
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]!;
-    if (item.kind === "reasoning" && item.streaming) {
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i]!;
+    if (unit.kind === "started-unit") {
+      const groupId = `started:${unit.item.key}`;
+      const expanded = expandedGroups.has(groupId);
+      rows.push({
+        kind: "started",
+        id: unit.item.key,
+        item: unit.item,
+        calls: unit.calls,
+        groupId,
+        expanded,
+      });
+      if (expanded)
+        unit.calls.forEach((entry) =>
+          rows.push({
+            kind: "work",
+            id: entry.key,
+            entry,
+            inGroup: true,
+            ...(label(entry) ? { label: label(entry)! } : {}),
+          }),
+        );
+      continue;
+    }
+    if (unit.kind === "reasoning" && unit.streaming) {
       thinking = true;
       continue;
     }
-    if (!isWork(item)) {
-      rows.push({ kind: "item", id: item.key, item });
+    if (isBridge(unit)) {
+      rows.push({
+        kind: "bridge",
+        id: unit.key,
+        entry: unit,
+        label: bridgeLabel(unit, names)!,
+      });
       continue;
     }
-    const group: WorkEntry[] = [item];
-    while (i + 1 < items.length && isWork(items[i + 1]!)) {
-      group.push(items[++i] as WorkEntry);
+    if (!isPlainWork(unit)) {
+      rows.push({ kind: "item", id: unit.key, item: unit });
+      continue;
+    }
+    const group: WorkEntry[] = [unit];
+    while (i + 1 < units.length && isPlainWork(units[i + 1]!)) {
+      group.push(units[++i] as WorkEntry);
     }
     pushGroup(rows, group, expandedGroups);
   }
   if (thinking) rows.push({ kind: "thinking", id: "thinking" });
   return rows;
 }
-
 function pushGroup(
   rows: TimelineRow[],
   group: WorkEntry[],

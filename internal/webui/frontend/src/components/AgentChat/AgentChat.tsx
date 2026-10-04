@@ -3,16 +3,18 @@
 // apps/web/src/components/chat/MessagesTimeline.tsx at commit 2daff8c25.
 // Copyright (c) 2026 T3 Tools Inc. MIT License; see THIRD_PARTY_NOTICES.md.
 import {
-  Fragment,
+  type CSSProperties,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
+  agentColor,
+  agentColorIndex,
   latestTurnError,
   ownSender,
   senderAgent,
@@ -25,6 +27,7 @@ import {
 } from "@/hooks";
 import type { WaitingMessage } from "@/api/agentsv1";
 import type { ChatItem } from "@/hooks";
+import { AgentBadge } from "./AgentBadge";
 import { AgentTray, chatPath, HarnessIcon } from "./AgentTray";
 import { AskCard } from "./AskCard";
 import { ChatComposer } from "./ChatComposer";
@@ -43,8 +46,13 @@ import {
   isThreadErrorBannerDismissedForSession,
   ThreadErrorBanner,
 } from "./ThreadErrorBanner";
-import { deriveTimelineRows, type TimelineRow } from "./timelineRows";
 import {
+  deriveTimelineRows,
+  firstLine,
+  type TimelineRow,
+} from "./timelineRows";
+import {
+  BridgeCallRow,
   LiveWorkEntryRow,
   ThinkingActivityRow,
   WorkEntryRow,
@@ -321,6 +329,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
  * pb-4 (16px).
  */
 function rowKind(row: TimelineRow): string {
+  if (row.kind === "started") return "started";
   return row.kind === "item" ? row.item.kind : "work";
 }
 
@@ -388,12 +397,58 @@ function AgentName({ id, name }: { id: string; name: string }) {
   return <>{useRosterAgent(id)?.name ?? name}</>;
 }
 
-/** An agent's name as a link to its chat. */
-function NameLink({ ws, id, name }: { ws: string; id: string; name: string }) {
+/** A started child as its colour avatar and name, linking to its chat. */
+function ChildChip({ ws, id, name }: { ws: string; id: string; name: string }) {
+  const shown = useRosterAgent(id)?.name ?? name;
   return (
-    <Link to={chatPath(ws, id)}>
+    <Link className={tray.childChip} to={chatPath(ws, id)}>
+      <AgentBadge id={id} name={shown} size={16} />
       <AgentName id={id} name={name} />
     </Link>
+  );
+}
+
+/**
+ * Children started back to back as one quiet line (CL1): "↳ Started [U1]
+ * ui-test-agent-1 [U2] ui-test-agent-2 · 2 tool calls ›", the Lead's
+ * agent_create calls folded into the toggle.
+ */
+function StartedMarker({
+  row,
+  workspaceId,
+  onToggle,
+}: {
+  row: Extract<TimelineRow, { kind: "started" }>;
+  workspaceId: string;
+  onToggle: () => void;
+}) {
+  const time = clockTime(row.item.at);
+  const n = row.calls.length;
+  return (
+    <div
+      className={tray.marker}
+      data-testid="started-marker"
+      title={time ? `Started at ${time}` : undefined}
+    >
+      <span aria-hidden="true">↳</span>
+      <span>Started</span>
+      {row.item.children.map((c) => (
+        <ChildChip key={c.child} ws={workspaceId} id={c.child} name={c.name} />
+      ))}
+      {n > 0 && (
+        <button
+          type="button"
+          className={tray.calls}
+          aria-expanded={row.expanded}
+          onClick={onToggle}
+        >
+          {n} tool {n === 1 ? "call" : "calls"}{" "}
+          <span className={tray.callsChevron} aria-hidden="true">
+            ›
+          </span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -461,64 +516,82 @@ function AgentWaiting({
   );
 }
 
-/** A child result's one-line marker, with its delivery state and summary. */
-function CompletionMarker({
+/**
+ * A child's result as one E1 card (CL1): its colour avatar, name and
+ * outcome, then the result's first line. The whole card links to the
+ * child's chat (click, Enter or Space); the time and › show only on hover
+ * or focus.
+ */
+function CompletionCard({
   item,
   workspaceId,
 }: {
   item: Extract<ChatItem, { kind: "completion" }>;
   workspaceId: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+  const [reveal, setReveal] = useState({ hover: false, focus: false });
   const r = item.record;
   const ok = r.outcome === "completed";
+  const name = useRosterAgent(r.child)?.name ?? item.name;
   const time = clockTime(item.at);
   const where =
     r.branch && `${r.branch}${r.head ? `@${r.head.slice(0, 7)}` : ""}`;
+  const result = r.summary ? firstLine(r.summary, 400) : "";
+  const shown = reveal.hover || reveal.focus;
+  const open = () => navigate(chatPath(workspaceId, r.child));
   return (
     <div
-      className={tray.marker}
+      className={tray.card}
+      role="link"
+      tabIndex={0}
+      style={{ "--agent-color": agentColor(r.child) } as CSSProperties}
+      data-agent-color={agentColorIndex(r.child)}
       data-testid="completion-record"
       data-outcome={r.outcome}
       data-attempt={r.attempt}
       data-delivery={item.delivery}
       title={where || undefined}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      }}
+      onMouseEnter={() => setReveal((v) => ({ ...v, hover: true }))}
+      onMouseLeave={() => setReveal((v) => ({ ...v, hover: false }))}
+      onFocus={() => setReveal((v) => ({ ...v, focus: true }))}
+      onBlur={() => setReveal((v) => ({ ...v, focus: false }))}
     >
-      <span className={ok ? tray.ok : tray.fail} aria-hidden="true">
-        {ok ? "✓" : "✕"}
-      </span>
-      <span>
-        <NameLink ws={workspaceId} id={r.child} name={item.name} />{" "}
-        {ok ? "done" : r.outcome}
+      <AgentBadge id={r.child} name={name} size={18} />
+      <span className={tray.cardName}>{name}</span>
+      <span className={tray.cardState}>
+        <span className={ok ? tray.cardOk : tray.cardFail}>
+          {ok ? "✓ done" : `✕ ${r.outcome}`}
+        </span>
         {/* Attempts count from 0; people count from 1. */}
         {r.attempt > 0 && ` · attempt ${r.attempt + 1}`}
-        {time && ` · ${time}`}
+        {item.delivery === "waiting" && (
+          <span className={tray.tag} data-delivery="waiting">
+            waiting for Lead
+          </span>
+        )}
       </span>
-      {item.delivery === "waiting" && (
-        <span className={tray.tag} data-delivery="waiting">
-          waiting for Lead
+      {shown && time && (
+        <span className={tray.cardTime} data-testid="card-time">
+          {time}
         </span>
       )}
-      {item.delivery === "delivered" && (
-        <span className={tray.tag} data-delivery="delivered">
-          · Lead read the result
+      {shown && (
+        <span className={tray.cardGo} aria-hidden="true">
+          ›
         </span>
       )}
-      {r.summary && (
-        <button
-          type="button"
-          className={tray.view}
-          aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
-        >
-          {open ? "hide" : "view"}
-        </button>
-      )}
-      {open && r.summary && (
-        <div className={tray.markerBody}>
-          {where && <div className={tray.meta}>{where}</div>}
-          <LongText text={r.summary} />
-        </div>
+      {result && (
+        <span className={tray.cardResult} data-failed={!ok}>
+          {result}
+        </span>
       )}
     </div>
   );
@@ -537,7 +610,23 @@ function Row({
     case "item":
       return <Item item={row.item} workspaceId={workspaceId} />;
     case "work":
-      return <WorkEntryRow entry={row.entry} inGroup={row.inGroup} />;
+      return (
+        <WorkEntryRow
+          entry={row.entry}
+          inGroup={row.inGroup}
+          label={row.label}
+        />
+      );
+    case "started":
+      return (
+        <StartedMarker
+          row={row}
+          workspaceId={workspaceId}
+          onToggle={() => onToggle(row.groupId)}
+        />
+      );
+    case "bridge":
+      return <BridgeCallRow row={row} />;
     case "work-toggle":
       return (
         <WorkGroupToggleRow row={row} onToggle={() => onToggle(row.groupId)} />
@@ -586,26 +675,11 @@ function AgentMessage({
 
 function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
   switch (item.kind) {
-    case "started": {
-      const time = clockTime(item.at);
-      return (
-        <div className={tray.marker} data-testid="started-marker">
-          <span aria-hidden="true">↳</span>
-          <span>
-            Started{" "}
-            {item.children.map((c, i) => (
-              <Fragment key={c.child}>
-                {i > 0 && ", "}
-                <NameLink ws={workspaceId} id={c.child} name={c.name} />
-              </Fragment>
-            ))}
-            {time && ` · ${time}`}
-          </span>
-        </div>
-      );
-    }
+    // Started markers are their own rows (see deriveTimelineRows).
+    case "started":
+      return null;
     case "completion":
-      return <CompletionMarker item={item} workspaceId={workspaceId} />;
+      return <CompletionCard item={item} workspaceId={workspaceId} />;
     case "from_agent":
       return <FromAgent id={item.agent} name={item.name} text={item.text} />;
     case "turn_end":

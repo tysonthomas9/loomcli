@@ -77,3 +77,9 @@ export {
 export type { TrayCounts, TrayRow, TrayStatus, TrayWave } from "./agentTray";
 export { applyActivity, childrenByParent } from "./agentRoster";
 export type { Activities, Activity } from "./agentRoster";
+export {
+  AGENT_COLOR_COUNT,
+  agentColor,
+  agentColorIndex,
+  agentInitials,
+} from "./agentColor";
