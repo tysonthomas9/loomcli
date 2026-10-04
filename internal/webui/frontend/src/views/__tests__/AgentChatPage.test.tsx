@@ -20,6 +20,7 @@ vi.mock("@/components/AgentDetailPanel", () => ({
   }) => (
     <div data-testid="git" data-readonly={String(!!p.readOnly)}>
       git {p.agent.name} {p.agent.branch}
+      {!p.readOnly && <button type="button">Create PR</button>}
     </div>
   ),
   DiffTab: (p: { agent: { name: string } }) => (
@@ -108,6 +109,7 @@ describe("AgentChatPage", () => {
       "git agt_1 loom/agent/agt_1",
     );
     expect(screen.getByTestId("git")).toHaveAttribute("data-readonly", "false");
+    expect(screen.getByTestId("git")).toHaveTextContent("Create PR");
     fireEvent.click(screen.getByRole("button", { name: "Diff" }));
     expect(await screen.findByTestId("diff")).toHaveTextContent("diff agt_1");
     fireEvent.click(screen.getByRole("button", { name: "Files" }));

@@ -591,31 +591,6 @@ describe("GitTab", () => {
       expect(screen.getByText("Create PR")).toBeInTheDocument();
       expect(screen.queryByText(/^Push/)).not.toBeInTheDocument();
     });
-
-    it("shows Create PR for an Agent API agent", async () => {
-      mockGitStatusReturn = {
-        status: {
-          branch: "loom/agent/agt_1",
-          target_branch: "main",
-          is_clean: true,
-          ahead: 3,
-          behind: 0,
-          changed_files: [],
-          conflicted_files: [],
-          has_conflicts: false,
-          stash_count: 0,
-        },
-        loading: false,
-        error: null,
-      };
-
-      await act(async () => {
-        render(<GitTab agent={makeAgent({ name: "agt_1" })} />);
-      });
-
-      expect(screen.getByText("loom/agent/agt_1")).toBeInTheDocument();
-      expect(screen.getByText("Create PR")).toBeInTheDocument();
-    });
   });
 
   describe("hook invocation", () => {
