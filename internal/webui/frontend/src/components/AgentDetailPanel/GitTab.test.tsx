@@ -592,7 +592,7 @@ describe("GitTab", () => {
       expect(screen.queryByText(/^Push/)).not.toBeInTheDocument();
     });
 
-    it("hides Create PR when read-only", async () => {
+    it("shows Create PR for an Agent API agent", async () => {
       mockGitStatusReturn = {
         status: {
           branch: "loom/agent/agt_1",
@@ -610,11 +610,11 @@ describe("GitTab", () => {
       };
 
       await act(async () => {
-        render(<GitTab agent={makeAgent()} readOnly />);
+        render(<GitTab agent={makeAgent({ name: "agt_1" })} />);
       });
 
       expect(screen.getByText("loom/agent/agt_1")).toBeInTheDocument();
-      expect(screen.queryByText("Create PR")).not.toBeInTheDocument();
+      expect(screen.getByText("Create PR")).toBeInTheDocument();
     });
   });
 

@@ -2353,7 +2353,7 @@ describe("WorkspaceFileBrowser", () => {
     expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
   });
 
-  it("keeps an Agent API agent's worktree read-only even for editors", async () => {
+  it("lets editors write to an Agent API agent's worktree", async () => {
     mocks.listFileCheckouts.mockResolvedValue({
       checkouts: [
         { kind: "agent", agent: "agt_1", repo: "loomcli", exists: true },
@@ -2377,18 +2377,20 @@ describe("WorkspaceFileBrowser", () => {
     fireEvent.click(await screen.findByLabelText("main.ts"));
     expect(await screen.findByTestId("mock-codemirror")).toHaveAttribute(
       "data-readonly",
-      "true",
+      "false",
     );
-    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
 
     fireEvent.contextMenu(screen.getByLabelText("main.ts"));
-    expect(screen.getByRole("menuitem", { name: "Copy Path" })).toBeVisible();
-    for (const name of ["Delete", "Rename", "New File", "New Folder"]) {
-      expect(screen.queryByRole("menuitem", { name })).toBeNull();
+    for (const name of [
+      "Copy Path",
+      "Delete",
+      "Rename",
+      "New File",
+      "New Folder",
+    ]) {
+      expect(screen.getByRole("menuitem", { name })).toBeVisible();
     }
-    expect(
-      screen.queryByRole("button", { name: /Repair checkout/ }),
-    ).toBeNull();
   });
 
   it("re-reads an agent's changes when its hidden Files pane is shown (GT1)", async () => {

@@ -108,7 +108,7 @@ export function AgentChatPage(): JSX.Element {
             <div
               className={`${styles.realTabBody} ${styles.realTabBodyScroll}`}
             >
-              <GitTab agent={gitAgent} isActive={isActive} readOnly />
+              <GitTab agent={gitAgent} isActive={isActive} />
             </div>
           );
         case "diff":

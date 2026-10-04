@@ -25,8 +25,6 @@ import styles from "./GitTab.module.css";
 interface GitTabProps {
   agent: LoomAgentStatus;
   isActive?: boolean;
-  /** History only, no Create PR: Agent API agents publish elsewhere (W3). */
-  readOnly?: boolean;
 }
 
 const INITIAL_COMMIT_LIMIT = 10;
@@ -117,11 +115,7 @@ function GitBranchIcon(): JSX.Element {
   );
 }
 
-export function GitTab({
-  agent,
-  isActive,
-  readOnly = false,
-}: GitTabProps): JSX.Element {
+export function GitTab({ agent, isActive }: GitTabProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
   const {
     status: gitStatus,
@@ -252,12 +246,10 @@ export function GitTab({
               </p>
             )}
           </div>
-          {!readOnly && (
-            <div className={styles.historyHeaderAction}>{createPR.button}</div>
-          )}
+          <div className={styles.historyHeaderAction}>{createPR.button}</div>
         </header>
 
-        {!readOnly && createPR.form}
+        {createPR.form}
 
         <div className={styles.historyBody}>
           {commits.length > 0 ? (

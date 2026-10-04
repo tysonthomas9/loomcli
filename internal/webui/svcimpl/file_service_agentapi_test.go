@@ -57,7 +57,7 @@ func (m agentAPIFileOps) ListAgentAPIWorktrees(_ context.Context, ws string) []*
 
 // The Files browser's checkout list includes an Agent API agent's worktree,
 // outside the workspace folder, with its uncommitted change count, so its
-// Changes badge and Working tree show its edits (GT1). It stays read-only.
+// Changes badge and Working tree show its edits (GT1).
 func TestFileServiceImpl_ListFileCheckouts_IncludesAgentAPIAgents(t *testing.T) {
 	ctx := context.Background()
 	wsRoot, root := t.TempDir(), t.TempDir()
@@ -82,8 +82,5 @@ func TestFileServiceImpl_ListFileCheckouts_IncludesAgentAPIAgents(t *testing.T) 
 	}
 	if got == nil || got.Kind != "agent" || got.Repo != "repo-a" || !got.Exists || got.ChangeCount != 2 || got.Branch == "" {
 		t.Fatalf("agt_1 checkout = %+v in %+v", got, result.Checkouts)
-	}
-	if _, err := svc.RepairCheckout(ctx, "ws", service.FileCheckoutRepairRequest{Scope: "agent", Target: "agt_1"}); err == nil {
-		t.Fatal("repaired an Agent API agent's checkout")
 	}
 }

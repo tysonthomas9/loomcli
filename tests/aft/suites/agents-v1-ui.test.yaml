@@ -137,9 +137,9 @@ tests:
             !!document.querySelector('[data-testid=chat-transcript]')
         intent: "Wait until Chat is back with its transcript"
 
-  # covers: 3.2t read-only Git and Files (Tyson 03:04Z keeps the 403 block until 75ce5b07)
-  - name: 3.2t an Agent API lead's Git and Files are read-only in the UI and through the v5 routes
-    intent: An operator sees the lead's Git with no Create PR and its Files with a read-only editor and only Copy Path, and a reset or a file write through the v5 routes is refused with 403 and changes nothing
+  # covers: 3.2t Git and Files on an Agent API lead, with writes open (Tyson 2026-10-04, 75ce5b07)
+  - name: 3.2t an Agent API lead's Git and Files take writes in the UI and through the v5 routes
+    intent: An operator sees the lead's Git with Create PR and its Files with an editable editor and its edit actions, and a file write and a reset through the v5 routes go through and change the lead's worktree
     steps:
       - run: |
           set -e
@@ -150,7 +150,6 @@ tests:
           echo "UI-RO-NOTE" > "$wt/notes-ro.txt"
           git -C "$wt" add notes-ro.txt
           git -C "$wt" -c user.email=e2e@x -c user.name=e2e commit -q -m "add notes-ro"
-          git -C "$wt" rev-parse HEAD > "$AFT_WORK_DIR/uiRoHead"
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id?tab=git"
         intent: "Create an OpenCode lead with one commit of its own and open its Git tab"
       - wait:
@@ -158,22 +157,8 @@ tests:
             (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
               const t = p?.textContent || '';
               return t.includes('add notes-ro') && t.includes('loom/agent/' + location.pathname.split('/').pop()) &&
-                !Array.from(p.querySelectorAll('button')).some((b) => (b.textContent || '').includes('Create PR')); })()
-        intent: "Wait until Git shows the lead's branch and commit with no Create PR"
-      - run: |
-          set -e
-          id="$(cat "$AFT_WORK_DIR/uiRoId")"; wt="$(cat "$AFT_WORK_DIR/uiRoWt")"
-          code="$(curl -s -o "$AFT_WORK_DIR/ui-ro-reset.json" -w '%{http_code}' -X POST \
-            "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/agents/$id/git/reset" \
-            -H "Content-Type: application/json" -d '{"branch":"main","force":true,"push":false}')"
-          [ "$code" = 403 ] || { echo "git/reset gave $code"; cat "$AFT_WORK_DIR/ui-ro-reset.json"; exit 1; }
-          code="$(curl -s -o "$AFT_WORK_DIR/ui-ro-write.json" -w '%{http_code}' -X PUT \
-            "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/files?scope=agent&target=$id&path=ro-new.txt" \
-            -H "Content-Type: application/json" -H "If-None-Match: *" -d '{"content":"x"}')"
-          [ "$code" = 403 ] || { echo "file write gave $code"; cat "$AFT_WORK_DIR/ui-ro-write.json"; exit 1; }
-          [ "$(git -C "$wt" rev-parse HEAD)" = "$(cat "$AFT_WORK_DIR/uiRoHead")" ] || { echo "the lead's HEAD moved"; exit 1; }
-          [ -f "$wt/notes-ro.txt" ] && [ ! -e "$wt/ro-new.txt" ] || { echo "the worktree's files changed"; exit 1; }
-        intent: "A reset and a file write on the lead's worktree through the v5 routes are refused with 403, and its HEAD and files are unchanged"
+                Array.from(p.querySelectorAll('button')).some((b) => (b.textContent || '').includes('Create PR')); })()
+        intent: "Wait until Git shows the lead's branch and commit with Create PR"
       - click: { selector: "[data-testid=agent-editor-groups] button[draggable]:nth-of-type(5)" }
       - wait:
           fn: >-
@@ -188,9 +173,9 @@ tests:
           fn: >-
             (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
               const cm = p?.querySelector('.cm-content');
-              return !!cm && (cm.textContent || '').includes('UI-RO-NOTE') && cm.getAttribute('contenteditable') === 'false' &&
-                !Array.from(p.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === 'Save'); })()
-        intent: "Wait until the file opens in a read-only editor with no Save"
+              return !!cm && (cm.textContent || '').includes('UI-RO-NOTE') && cm.getAttribute('contenteditable') === 'true' &&
+                Array.from(p.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === 'Save'); })()
+        intent: "Wait until the file opens in an editable editor with Save"
       - run: |
           set -e
           ab() { agent-browser --session "$AFT_SESSION" "$@"; }
@@ -199,12 +184,26 @@ tests:
             el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.x + 4, clientY: r.y + 4 })); return true; })()" >/dev/null
           items="$(ab eval "Array.from(document.querySelectorAll('[role=menuitem]')).map((m) => (m.textContent || '').trim()).join('|')")"
           echo "context menu: $items"
-          case "$items" in *"Copy Path"*) ;; *) echo "no Copy Path" >&2; exit 1 ;; esac
-          for bad in Delete Rename "New File" "New Folder"; do
-            case "$items" in *"$bad"*) echo "context menu offers $bad" >&2; exit 1 ;; esac
+          for want in "Copy Path" Delete Rename "New File" "New Folder"; do
+            case "$items" in *"$want"*) ;; *) echo "context menu lacks $want" >&2; exit 1 ;; esac
           done
           ab press Escape >/dev/null
-        intent: "The file's context menu offers Copy Path and no Delete, Rename, New File or New Folder"
+        intent: "The file's context menu offers Copy Path, Delete, Rename, New File and New Folder"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/uiRoId")"; wt="$(cat "$AFT_WORK_DIR/uiRoWt")"
+          code="$(curl -s -o "$AFT_WORK_DIR/ui-ro-write.json" -w '%{http_code}' -X PUT \
+            "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/files?scope=agent&target=$id&path=ro-new.txt" \
+            -H "Content-Type: application/json" -H "If-None-Match: *" -d '{"content":"x"}')"
+          [ "$code" = 200 ] || { echo "file write gave $code"; cat "$AFT_WORK_DIR/ui-ro-write.json"; exit 1; }
+          [ "$(cat "$wt/ro-new.txt")" = x ] || { echo "the file write did not reach the worktree"; exit 1; }
+          code="$(curl -s -o "$AFT_WORK_DIR/ui-ro-reset.json" -w '%{http_code}' -X POST \
+            "$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/agents/$id/git/reset" \
+            -H "Content-Type: application/json" -d '{"branch":"main","force":true,"push":false}')"
+          [ "$code" = 200 ] || { echo "git/reset gave $code"; cat "$AFT_WORK_DIR/ui-ro-reset.json"; exit 1; }
+          [ "$(git -C "$wt" rev-parse HEAD)" = "$(git -C "$wt" rev-parse origin/main)" ] || { echo "the lead's HEAD is not at origin/main after the reset"; exit 1; }
+          [ ! -e "$wt/notes-ro.txt" ] || { echo "the reset left notes-ro.txt"; exit 1; }
+        intent: "A file write and a reset on the lead's worktree through the v5 routes answer 200: the new file lands, then HEAD moves to origin/main and drops the lead's commit"
 
   # covers: UI1 + UI1 fix; a PATCH between turns is used by the next turn
   - name: UI1 an effort set between two turns is used by the next turn and shows in the composer

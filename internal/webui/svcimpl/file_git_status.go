@@ -292,9 +292,6 @@ func (s *fileServiceImpl) RepairCheckout(ctx context.Context, wsID string, req s
 	if target == "" {
 		return nil, service.ErrValidation("target is required")
 	}
-	if err := s.refuseAgentAPIWrite(wsID, service.FileScope(scope), target, repo); err != nil {
-		return nil, err
-	}
 	result, err := s.fileOps.RepairCheckout(wsID, scope, target, repo, req.Force)
 	if err != nil {
 		if errors.Is(err, ops.ErrCheckoutTargetNotAllowed) || errors.Is(err, ops.ErrAgentRepoNotAllowed) {

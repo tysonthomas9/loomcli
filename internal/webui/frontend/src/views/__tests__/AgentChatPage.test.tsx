@@ -101,13 +101,13 @@ describe("AgentChatPage", () => {
     expect(screen.getByTestId("chat")).toHaveTextContent("chat agt_1");
   });
 
-  it("reads the agent's own worktree in Git, Diff and Files, Git read-only", async () => {
+  it("reads the agent's own worktree in Git, Diff and Files, Git with its actions", async () => {
     renderAt("/ws/ws1/chat/agt_1");
 
     expect(screen.getByTestId("git")).toHaveTextContent(
       "git agt_1 loom/agent/agt_1",
     );
-    expect(screen.getByTestId("git")).toHaveAttribute("data-readonly", "true");
+    expect(screen.getByTestId("git")).toHaveAttribute("data-readonly", "false");
     fireEvent.click(screen.getByRole("button", { name: "Diff" }));
     expect(await screen.findByTestId("diff")).toHaveTextContent("diff agt_1");
     fireEvent.click(screen.getByRole("button", { name: "Files" }));

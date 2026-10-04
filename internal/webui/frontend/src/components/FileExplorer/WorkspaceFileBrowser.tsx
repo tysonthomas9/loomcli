@@ -159,7 +159,7 @@ function FileBrowserInner({
   isActive = true,
 }: FileBrowserProps) {
   const { workspaceId, repos, workspace } = useWorkspaceContext();
-  const { agents, readOnly } = useBrowserAgents();
+  const agents = useBrowserAgents();
   const caps = modeCapabilities(mode);
   const hasCheckouts = caps.checkouts;
   const { showToast } = useToast();
@@ -172,7 +172,7 @@ function FileBrowserInner({
     error: capabilitiesError,
     retry: retryCapabilities,
   } = useFileCapabilities();
-  const canWrite = capabilities?.write === true && !readOnly;
+  const canWrite = capabilities?.write === true;
   const skillsCatalog = useSkillsCatalog(workspaceId, caps.skills);
   const invalidateSkillsCatalog = skillsCatalog.invalidate;
   const skillActions = useSkillsActions(workspaceId);
