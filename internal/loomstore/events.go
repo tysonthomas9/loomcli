@@ -250,19 +250,23 @@ func (s *Store) LastCostTotal(ctx context.Context, agentID, session string) (flo
 // that holds agentID's last message item in its current attempt, in order:
 // the whole final reply, which a harness may save as several message items
 // (OpenCode saves one per text part, so the last alone can be a one-line
-// stub). The turn starts after the last turn.started before that message,
-// and never before the attempt (attempt_after_seq). It is empty when the
-// attempt has no message.
+// stub). The turn is that message's turn_id: every message of the attempt
+// tagged with it (a codex history replay saves items with their turn_id but
+// no turn.started). An untagged message's turn starts after the last
+// turn.started before it. Never before the attempt (attempt_after_seq).
+// It is empty when the attempt has no message.
 func (s *Store) LastReply(ctx context.Context, agentID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `WITH
 		attempt AS (SELECT attempt_after_seq AS after FROM agents WHERE agent_id = ?1),
-		msgs AS (SELECT e.seq, json_extract(e.redacted_payload, '$.text') AS text FROM agent_events e, attempt
+		msgs AS (SELECT e.seq, COALESCE(e.turn_id, '') AS turn, json_extract(e.redacted_payload, '$.text') AS text
+			FROM agent_events e, attempt
 			WHERE e.agent_id = ?1 AND e.kind = 'item.completed' AND json_extract(e.redacted_payload, '$.itemKind') = 'message'
 			AND e.seq > attempt.after),
-		last AS (SELECT MAX(seq) AS seq FROM msgs),
+		last AS (SELECT seq, turn FROM msgs ORDER BY seq DESC LIMIT 1),
 		start AS (SELECT MAX((SELECT after FROM attempt), COALESCE((SELECT MAX(t.seq) FROM agent_events t, last
 			WHERE t.agent_id = ?1 AND t.kind = 'turn.started' AND t.seq < last.seq), 0)) AS seq)
-		SELECT COALESCE(msgs.text, '') FROM msgs, start WHERE msgs.seq > start.seq ORDER BY msgs.seq`, agentID)
+		SELECT COALESCE(msgs.text, '') FROM msgs, last, start
+		WHERE CASE WHEN last.turn <> '' THEN msgs.turn = last.turn ELSE msgs.seq > start.seq END ORDER BY msgs.seq`, agentID)
 	if err != nil {
 		return nil, err
 	}
