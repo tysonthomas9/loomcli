@@ -103,7 +103,7 @@ func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, e
 		}
 		r = Receipt{AgentID: in.AgentID, RequestID: in.RequestID, Sender: in.Sender, ResultJSON: res, CreatedAt: now}
 		_, err = tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at,
-			body, native_key) VALUES (?,?,?,?,?,?,?)`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt, in.Body, nativeKey)
+			body, native_key, notices) VALUES (?,?,?,?,?,?,?,'{}')`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt, in.Body, nativeKey)
 		return err
 	})
 	return r, retry, err
@@ -125,8 +125,8 @@ func putSlot(ctx context.Context, tx *sql.Tx, in SlotSend, cur Slot) (replaced b
 		return false, "", err
 	}
 	// A new body drops the slot's notices; Notify sets them after.
-	_, err = tx.ExecContext(ctx, `INSERT INTO agent_slots (`+slotCols+`) VALUES (?,?,?,?,?,?,?,?,?,?)
-		ON CONFLICT (agent_id, sender) DO UPDATE SET request_id = excluded.request_id, body = excluded.body, notices = NULL,
+	_, err = tx.ExecContext(ctx, `INSERT INTO agent_slots (`+slotCols+`, notices) VALUES (?,?,?,?,?,?,?,?,?,?,'{}')
+		ON CONFLICT (agent_id, sender) DO UPDATE SET request_id = excluded.request_id, body = excluded.body, notices = '{}',
 		source = excluded.source, state = excluded.state, native_key = excluded.native_key,
 		queued_at = excluded.queued_at, first = excluded.first, updated_at = excluded.updated_at`,
 		in.AgentID, in.Sender, in.RequestID, in.Body, in.Source, state, nativeKey, queuedAt,
@@ -152,6 +152,8 @@ type SlotNotices struct {
 
 // legacyNotices reports whether a slot or receipt with notices raw and
 // request id requestID predates notices and last took a task_completed notice.
+// Every row written since stores notices ('{}' when it has none), so NULL
+// means a row from before the upgrade, and only such a row is read by text.
 func legacyNotices(raw sql.NullString, requestID string) bool {
 	return !raw.Valid && strings.HasPrefix(requestID, "task_completed:")
 }
@@ -240,7 +242,7 @@ func (s *Store) Notify(ctx context.Context, agentID, sender, source string, noti
 				body = in.Body
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender,
-				result_json, created_at, body) VALUES (?,?,?,?,?,?)`, agentID, n.Key, sender, res, now, body); err != nil {
+				result_json, created_at, body, notices) VALUES (?,?,?,?,?,?,'{}')`, agentID, n.Key, sender, res, now, body); err != nil {
 				return err
 			}
 		}
@@ -268,8 +270,8 @@ func unreceipted(ctx context.Context, tx *sql.Tx, agentID string, notices []Noti
 // checked that r.RequestID has no receipt yet.
 func (s *Store) SaveReceipt(ctx context.Context, r Receipt) (Receipt, error) {
 	r.CreatedAt = Stamp(time.Now())
-	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at)
-		VALUES (?,?,?,?,?)`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at, notices)
+		VALUES (?,?,?,?,?,'{}')`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt)
 	return r, err
 }
 

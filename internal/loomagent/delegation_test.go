@@ -568,7 +568,9 @@ func TestLegacyCompletionSlotsUpgrade(t *testing.T) {
 		t.Fatalf("legacy delivery = %+v", p)
 	}
 
-	mustSendMsg(t, s2, sendReq("L", "m2", "one more thing", child))
+	// A row written since the upgrade is never read by text, even with a
+	// request id shaped like a record's.
+	mustSendMsg(t, s2, sendReq("L", "task_completed:c1:9", "one more thing", child))
 	if w := waiting()["agent:c1"]; w.Message != "" || w.Completions != nil || w.Text != "one more thing" {
 		t.Fatalf("plain message after upgrade = %+v", w)
 	}
