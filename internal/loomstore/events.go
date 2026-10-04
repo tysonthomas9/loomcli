@@ -253,7 +253,8 @@ func (s *Store) LastCostTotal(ctx context.Context, agentID, session string) (flo
 // stub). The turn is that message's turn_id: every message of the attempt
 // tagged with it (a codex history replay saves items with their turn_id but
 // no turn.started). An untagged message's turn starts after the last
-// turn.started before it. Never before the attempt (attempt_after_seq).
+// turn.started before it in the attempt; with none, only that message is
+// provably the reply. Never before the attempt (attempt_after_seq).
 // It is empty when the attempt has no message.
 func (s *Store) LastReply(ctx context.Context, agentID string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `WITH
@@ -263,10 +264,11 @@ func (s *Store) LastReply(ctx context.Context, agentID string) ([]string, error)
 			WHERE e.agent_id = ?1 AND e.kind = 'item.completed' AND json_extract(e.redacted_payload, '$.itemKind') = 'message'
 			AND e.seq > attempt.after),
 		last AS (SELECT seq, turn FROM msgs ORDER BY seq DESC LIMIT 1),
-		start AS (SELECT MAX((SELECT after FROM attempt), COALESCE((SELECT MAX(t.seq) FROM agent_events t, last
-			WHERE t.agent_id = ?1 AND t.kind = 'turn.started' AND t.seq < last.seq), 0)) AS seq)
+		start AS (SELECT MAX(t.seq) AS seq FROM agent_events t, last, attempt
+			WHERE t.agent_id = ?1 AND t.kind = 'turn.started' AND t.seq < last.seq AND t.seq > attempt.after)
 		SELECT COALESCE(msgs.text, '') FROM msgs, last, start
-		WHERE CASE WHEN last.turn <> '' THEN msgs.turn = last.turn ELSE msgs.seq > start.seq END ORDER BY msgs.seq`, agentID)
+		WHERE CASE WHEN last.turn <> '' THEN msgs.turn = last.turn
+			WHEN start.seq IS NOT NULL THEN msgs.seq > start.seq ELSE msgs.seq = last.seq END ORDER BY msgs.seq`, agentID)
 	if err != nil {
 		return nil, err
 	}

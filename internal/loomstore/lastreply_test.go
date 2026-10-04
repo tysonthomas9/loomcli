@@ -33,7 +33,7 @@ func TestLastReply(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, id := range []string{"codex", "parts", "untagged", "reopened", "silent"} {
+	for _, id := range []string{"codex", "parts", "untagged", "nomarker", "oldmarker", "reopened", "silent"} {
 		if err := s.InsertAgent(ctx, agent(id, "interactive")); err != nil {
 			t.Fatal(err)
 		}
@@ -52,6 +52,15 @@ func TestLastReply(t *testing.T) {
 	add("untagged", "turn.started", "", `{}`)
 	msg("untagged", "", "one")
 	msg("untagged", "", "two")
+	// Untagged with no turn.started: only the last message is provably the reply.
+	msg("nomarker", "", "Earlier reply")
+	msg("nomarker", "", "Final reply")
+	// A turn.started from an earlier attempt doesn't count.
+	add("oldmarker", "turn.started", "", `{}`)
+	msg("oldmarker", "", "attempt one")
+	reopen("oldmarker")
+	msg("oldmarker", "", "Earlier reply")
+	msg("oldmarker", "", "Final reply")
 	// A reopened attempt never quotes the earlier attempt, even in the same turn id.
 	msg("reopened", "t1", "attempt one")
 	reopen("reopened")
@@ -62,7 +71,7 @@ func TestLastReply(t *testing.T) {
 	add("silent", "turn.started", "t2", `{}`)
 
 	for id, want := range map[string][]string{"codex": {"Final reply"}, "parts": {"Findings: a, b.", "Review completed"},
-		"untagged": {"one", "two"}, "reopened": {"attempt two"}, "silent": nil} {
+		"untagged": {"one", "two"}, "nomarker": {"Final reply"}, "oldmarker": {"Final reply"}, "reopened": {"attempt two"}, "silent": nil} {
 		if got, err := s.LastReply(ctx, id); err != nil || !slices.Equal(got, want) {
 			t.Errorf("%s: LastReply = %q, %v; want %q", id, got, err, want)
 		}
