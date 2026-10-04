@@ -12,6 +12,8 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -193,6 +195,81 @@ func resolveDirectIssueBackend() backend.IssueBackend {
 		return t
 	}
 	return newFleetDBIssueBackend()
+}
+
+// DaemonAgentIssueBackend wraps the HTTP issue backend `loom data` uses so a
+// daemon-managed agent's mutations of its own claimed task go through the
+// daemon, like `loom claim/update/complete`: the lease fence applies, and a
+// close of a task whose work the run freezes for review holds the task in
+// review (D29, P1.26) instead of closing it. Other issues, reads, and any
+// process outside daemon supervision keep using direct unchanged.
+func DaemonAgentIssueBackend(direct backend.IssueBackend) backend.IssueBackend {
+	sock := os.Getenv("LOOM_DAEMON_SOCKET")
+	if direct == nil || sock == "" || IsFleetActive() {
+		return direct
+	}
+	client := NewAgentIPCClient(sock, os.Getenv("LOOM_AGENT_NAME"))
+	client.SessionID = os.Getenv("LOOM_SESSION_ID")
+	client.LeaseID = os.Getenv("LOOM_AGENT_LEASE_ID")
+	client.LeaseToken = os.Getenv("LOOM_AGENT_LEASE_TOKEN")
+	return &ownTaskIPCBackend{IssueBackend: direct, ipc: newIPCIssueBackend(client, direct), ownTask: agentOwnTask}
+}
+
+// agentOwnTask is the task the daemon assigned the agent, or the one it
+// claimed in its worktree.
+func agentOwnTask() string {
+	if task := strings.TrimSpace(os.Getenv("LOOM_ASSIGNED_TASK_ID")); task != "" {
+		return task
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if lock, _, err := CheckLock(dir); err == nil && lock != nil {
+		return lock.TaskID
+	}
+	return ""
+}
+
+// ownTaskIPCBackend routes mutations of the agent's own task through the
+// daemon IPC backend and everything else to the embedded direct backend.
+type ownTaskIPCBackend struct {
+	backend.IssueBackend
+	ipc     *ipcIssueBackend
+	ownTask func() string
+}
+
+func (b *ownTaskIPCBackend) owns(id string) bool {
+	own := b.ownTask()
+	return own != "" && id == own
+}
+
+func (b *ownTaskIPCBackend) Update(ctx context.Context, id string, params backend.UpdateParams) error {
+	if b.owns(id) {
+		return b.ipc.Update(ctx, id, params)
+	}
+	return b.IssueBackend.Update(ctx, id, params)
+}
+
+func (b *ownTaskIPCBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Duration) error {
+	if b.owns(id) {
+		return b.ipc.ClaimIssue(ctx, id, lockTTL)
+	}
+	return b.IssueBackend.ClaimIssue(ctx, id, lockTTL)
+}
+
+func (b *ownTaskIPCBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
+	if b.owns(id) {
+		return b.ipc.ReleaseIssueLock(ctx, id, actor)
+	}
+	return b.IssueBackend.ReleaseIssueLock(ctx, id, actor)
+}
+
+func (b *ownTaskIPCBackend) Close(ctx context.Context, id string, params backend.CloseParams) (*backend.CloseResult, error) {
+	if b.owns(id) {
+		return b.ipc.Close(ctx, id, params)
+	}
+	return b.IssueBackend.Close(ctx, id, params)
 }
 
 // --- IPC types (merged from ipc_types.go) ---
