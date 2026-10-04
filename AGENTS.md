@@ -34,6 +34,19 @@ reaches a real external/paid service, costs money / may mutate external state). 
 real/live path is blocked, report blocked/unverified — never fabricate state. See
 `docs/testing-terminology.md`.
 
+## No Sleeping in Tests
+
+A test that needs a timeout to pass is wrong; drain or await the persisted
+event. Don't `time.Sleep` or poll until something "eventually" holds. Drain the
+background loops instead (`loomagent.Service.Drain` returns once the dispatcher
+and feeds have handled everything queued, the item in flight included), or wait
+on the saved event or a signal from the test double. Drive periodic work with an
+injected clock rather than real time. A guard test
+(`internal/loomagent/nosleep_test.go`) fails on any new `time.Sleep` in
+`internal/loomagent` tests. Its allowlist,
+`internal/loomagent/testdata/sleep-allowlist.txt`, is only for tests that wait
+on real processes.
+
 ## Generated Workflow Bundles
 
 Do not commit `internal/workflows/builtin-dist/` or other generated Flue bundle
