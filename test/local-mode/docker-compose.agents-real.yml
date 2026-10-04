@@ -3,12 +3,13 @@
 # instead of the fake model, and the image's pinned codex and claude use the
 # host's codex and Claude logins.
 #
-# OpenCode: the host's OpenCode data folder (opencode.db holds the login) is
-# bound READ-WRITE at the container's OpenCode data path, so token refreshes
-# persist to the host and the host login keeps working. Stack sessions land in
-# the host's history. Only one REAL stack at a time (real-opencode-guard.sh,
-# via the label below), and the host's desktop OpenCode should not write the
-# database at the same time. Knob: LOCAL_MODE_OPENCODE_DATA.
+# OpenCode: the host's OpenCode data folder is NEVER mounted. Before `up`,
+# real-opencode-copy.sh takes one read-only online backup of the host's
+# opencode.db (which holds the login) into LOCAL_MODE_OPENCODE_COPY, a mode-600
+# file private to this compose project; it is mounted read-only below and the
+# entrypoint seeds the stack's own database on the loom-data volume from it.
+# Nothing is written back to the host; `down` removes both copies. Several
+# REAL stacks may run at once. Knob: LOCAL_MODE_OPENCODE_DATA (host folder).
 #
 # codex and Claude: each host credential file gets one read-only bind here, at
 # the path that harness reads, with a LOCAL_MODE_<HARNESS>_AUTH knob.
@@ -16,8 +17,6 @@
 
 services:
   loom-local:
-    labels:
-      loom.local-mode.opencode-host-data: "1"
     environment:
       LOCAL_MODE_AGENTS_REAL: "1"
       LOCAL_MODE_AGENTS_MODEL: "${LOCAL_MODE_AGENTS_MODEL:-}"
@@ -27,7 +26,7 @@ services:
       CODEX_HOME: /root/.loom/agents-codex
       CLAUDE_CONFIG_DIR: /root/.loom/agents-claude
     volumes:
-      - ${LOCAL_MODE_OPENCODE_DATA:-${HOME}/.local/share/opencode}:/root/.loom/agents-opencode/data/opencode:rw
+      - ${LOCAL_MODE_OPENCODE_COPY:?run REAL stacks through make local-mode-agents-up}:/run/secrets/opencode-seed.db:ro
       - ${LOCAL_MODE_CODEX_AUTH:-${HOME}/.codex/auth.json}:/root/.loom/agents-codex/auth.json:ro
       - ${LOCAL_MODE_CLAUDE_AUTH:-${HOME}/.claude/.credentials.json}:/root/.loom/agents-claude/.credentials.json:ro
       # Optional `claude setup-token` token; /dev/null (empty) when unset.

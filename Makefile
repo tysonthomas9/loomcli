@@ -26,6 +26,12 @@ export LOCAL_MODE_LOOM_CODEX_IMAGE
 export LOCAL_MODE_LOOM_CLAUDE_IMAGE
 export LOCAL_MODE_LOOM_AGENTS_IMAGE
 export LOCAL_MODE_COMPOSE_PROJECT
+# REAL Agent API stacks: the per-project private copy of the host's OpenCode
+# login (test/local-mode/real-opencode-copy.sh). Under $HOME so the podman VM
+# can bind it; `make local-mode-agents-down` / `local-mode-down` remove it.
+LOCAL_MODE_STATE_DIR ?= $(or $(XDG_STATE_HOME),$(HOME)/.local/state)/loom-local-mode
+LOCAL_MODE_OPENCODE_COPY = $(LOCAL_MODE_STATE_DIR)/$(LOCAL_MODE_COMPOSE_PROJECT)/opencode.db
+export LOCAL_MODE_OPENCODE_COPY
 LOCAL_MODE_COMPOSE_SELECT = \
 	if [ "$(strip $(LOCAL_MODE_COMPOSE))" != "" ]; then \
 	  compose="$(LOCAL_MODE_COMPOSE)"; \
@@ -324,8 +330,8 @@ local-mode-agents-up: local-mode-frontend-dist
 	@echo "Starting local-mode Agent API stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ]; then test/local-mode/real-opencode-guard.sh "$(LOCAL_MODE_COMPOSE_PROJECT)"; fi; \
 	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS); \
+	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ]; then test/local-mode/real-opencode-copy.sh make "$(LOCAL_MODE_OPENCODE_COPY)"; fi; \
 	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS); \
 	case " $(LOCAL_MODE_COMPOSE_UP_FLAGS) " in *" -d "*|*" --detach "*) ;; *) exit 0 ;; esac; \
 	echo "Waiting for loom-local to print [local-mode] ready..."; \
@@ -338,12 +344,14 @@ local-mode-agents-down:
 	@test "$(LOCAL_MODE_COMPOSE_PROJECT)" != loomcli-local-mode || { echo "set LOCAL_MODE_COMPOSE_PROJECT to your own project; loomcli-local-mode is the dogfood stack" >&2; exit 1; }
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) down -v --remove-orphans
+	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) down -v --remove-orphans; \
+	test/local-mode/real-opencode-copy.sh remove "$(LOCAL_MODE_OPENCODE_COPY)"
 
 local-mode-down:
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans
+	$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans; \
+	test/local-mode/real-opencode-copy.sh remove "$(LOCAL_MODE_OPENCODE_COPY)"
 
 local-mode-logs:
 	@set -e; \
