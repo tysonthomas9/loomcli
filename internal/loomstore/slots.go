@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -54,6 +55,9 @@ type SlotSend struct {
 	// purged the history, or ErrStateChanged if the agent is no longer
 	// finished; then nothing is stored.
 	Reopen bool
+	// Events are saved with the Send, in its transaction. One with no EventID
+	// is named <agent>:<revision>:<kind> of the revision Reopen bumps to.
+	Events []Event
 	// Result builds the Send's result JSON, stored as its receipt. replaced
 	// reports that this Send replaced the sender's waiting text.
 	Result func(replaced bool) (string, error)
@@ -68,6 +72,12 @@ var ErrSlotBusy = errors.New("loomstore: sender's slot is busy")
 // that receipt with retry true and changes nothing, whatever happened to the
 // slot since. Replacing waiting text keeps the slot's queued_at.
 func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, err error) {
+	r, _, retry, err = s.SendEvents(ctx, in)
+	return r, retry, err
+}
+
+// SendEvents is Send that also returns in.Events as saved. A retry saves none.
+func (s *Store) SendEvents(ctx context.Context, in SlotSend) (r Receipt, saved []Event, retry bool, err error) {
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		old, err := getReceipt(ctx, tx, in.AgentID, in.RequestID)
 		if err == nil {
@@ -86,7 +96,8 @@ func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, e
 		if cur.State == SlotHanded || (in.Hand && cur.State == SlotWaiting) {
 			return ErrSlotBusy
 		}
-		if err := reopen(ctx, tx, in); err != nil {
+		rev, err := reopen(ctx, tx, in)
+		if err != nil {
 			return err
 		}
 		replaced, now, err := putSlot(ctx, tx, in, cur)
@@ -104,9 +115,26 @@ func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, e
 		r = Receipt{AgentID: in.AgentID, RequestID: in.RequestID, Sender: in.Sender, ResultJSON: res, CreatedAt: now}
 		_, err = tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at,
 			body, native_key, notices) VALUES (?,?,?,?,?,?,?,'{}')`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt, in.Body, nativeKey)
-		return err
+		if err != nil {
+			return err
+		}
+		for _, e := range in.Events {
+			if e.AgentID != in.AgentID || (e.EventID == "" && !in.Reopen) {
+				return fmt.Errorf("loomstore: event %s of %s in a Send to %s", e.Kind, e.AgentID, in.AgentID)
+			}
+			if e.EventID == "" {
+				e.EventID = fmt.Sprintf("%s:%d:%s", in.AgentID, rev, e.Kind)
+			}
+			got, err := appendEvent(ctx, tx, e)
+			if err != nil {
+				return err
+			}
+			saved = append(saved, got)
+		}
+		commitStateCrash()
+		return nil
 	})
-	return r, retry, err
+	return r, saved, retry, err
 }
 
 // putSlot writes in into the sender's slot, whose current row is cur: a
@@ -309,31 +337,33 @@ func (s *Store) SaveReceipt(ctx context.Context, r Receipt) (Receipt, error) {
 // ErrHistoryPurged means the agent's history was purged under R29.
 var ErrHistoryPurged = errors.New("loomstore: agent history purged")
 
-// reopen starts the agent's next attempt when in.Reopen is set.
-func reopen(ctx context.Context, tx *sql.Tx, in SlotSend) error {
+// reopen starts the agent's next attempt when in.Reopen is set, bumping its
+// revision, and returns the new revision.
+func reopen(ctx context.Context, tx *sql.Tx, in SlotSend) (rev int64, err error) {
 	if !in.Reopen {
-		return nil
+		return 0, nil
 	}
 	agentID := in.AgentID
 	res, err := tx.ExecContext(ctx, `UPDATE agents SET state = 'active', attempt = attempt + 1, outcome = NULL,
-		finished_at = NULL, history_purge_failed_at = NULL, updated_at = ?,
+		finished_at = NULL, history_purge_failed_at = NULL, updated_at = ?, revision = revision + 1,
 		attempt_after_seq = (SELECT COALESCE(MAX(seq), 0) FROM agent_events WHERE agent_id = agents.agent_id)
 		WHERE agent_id = ? AND state = 'finished' AND deleted_at IS NULL
 		AND history_purged_at IS NULL`, Stamp(time.Now()), agentID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if n, _ := res.RowsAffected(); n == 1 {
-		return nil
+		err = tx.QueryRowContext(ctx, `SELECT revision FROM agents WHERE agent_id = ?`, agentID).Scan(&rev)
+		return rev, err
 	}
 	var purged sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT history_purged_at FROM agents WHERE agent_id = ?`, agentID).Scan(&purged); err != nil {
-		return err
+		return 0, err
 	}
 	if purged.Valid {
-		return ErrHistoryPurged
+		return 0, ErrHistoryPurged
 	}
-	return ErrStateChanged
+	return 0, ErrStateChanged
 }
 
 // nextQueuedAt returns now, or just after the agent's latest queued_at if the

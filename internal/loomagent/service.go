@@ -288,26 +288,43 @@ func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.
 	a.AttentionReason, a.RunningTurnID, a.Attempt = to.AttentionReason, to.RunningTurn, to.Attempt
 	a.Revision++
 	out := changeEvents(before, a)
-	rows := make([]loomstore.Event, len(out))
-	for i, e := range out {
-		b, err := json.Marshal(e)
-		if err != nil {
-			return before, err
-		}
-		rows[i] = loomstore.Event{AgentID: e.AgentID, Kind: e.Type, TurnID: e.TurnID, Payload: b}
+	rows, err := eventRows(out)
+	if err != nil {
+		return before, err
 	}
-	if _, err := s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, func(saved []loomstore.Event) {
-		for i, e := range out { // on the Bus too in commit order
-			e.EventID = saved[i].EventID
-			s.Bus.publish(e)
-		}
-	}); err != nil {
+	if _, err := s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, s.busPublish(out)); err != nil {
 		return before, err
 	}
 	if completed(a) && !completed(before) { // a child's attempt ended: tell its parent (§10.3)
 		s.tryRecordCompletion(ctx, a) // the change is committed; a failed record is retried
 	}
 	return a, nil
+}
+
+// eventRows are out as rows to save; each keeps its EventID ("" lets the
+// write name it).
+func eventRows(out []Event) ([]loomstore.Event, error) {
+	rows := make([]loomstore.Event, len(out))
+	for i, e := range out {
+		b, err := json.Marshal(e)
+		if err != nil {
+			return nil, err
+		}
+		rows[i] = loomstore.Event{AgentID: e.AgentID, EventID: e.EventID, Kind: e.Type, TurnID: e.TurnID, Payload: b}
+	}
+	return rows, nil
+}
+
+// busPublish publishes out, whose rows were saved as saved, on the Bus too,
+// in commit order. A write that saved nothing (a retry) publishes nothing.
+func (s *Service) busPublish(out []Event) func(saved []loomstore.Event) {
+	return func(saved []loomstore.Event) {
+		for i, row := range saved {
+			e := out[i]
+			e.EventID = row.EventID
+			s.Bus.publish(e)
+		}
+	}
 }
 
 // raiseAttention sets Attention{reason} beside a's state.

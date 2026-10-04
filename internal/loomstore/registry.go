@@ -347,8 +347,8 @@ func (a Agent) StateOf() AgentState {
 // ErrStateChanged means the agent's state columns no longer equal the expected ones.
 var ErrStateChanged = errors.New("loomstore: agent state changed")
 
-// commitStateCrash runs inside CommitState's transaction, after its writes
-// and before its COMMIT; tests crash there.
+// commitStateCrash runs inside CommitState's and SendEvents' transactions,
+// after their writes and before their COMMIT; tests crash there.
 var commitStateCrash = func() {}
 
 // CommitState is the one write of an agent's state change. In one

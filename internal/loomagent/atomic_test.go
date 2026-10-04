@@ -326,3 +326,99 @@ func TestReconnectNoGap(t *testing.T) {
 		cancel()
 	}
 }
+
+// TestSendReopenCrashAfterCommit: a crash between a reopening Send's commit
+// and its fanout leaves, after a restart, the row reopened, the slot and
+// receipt, and the agent.state_changed and message.waiting events, each
+// exactly once; a subscriber reconnecting from its cursor receives them, and
+// a retry of the Send adds nothing.
+func TestSendReopenCrashAfterCommit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := serviceAt(t, path, svcAgent("a1", "persistent", StateFinished))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	commitStateCrash = func() { panic("crash") }
+	t.Cleanup(func() { commitStateCrash = func() {} })
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("did not crash")
+			}
+		}()
+		_, _ = s.Send(ctx, sendReq("a1", "r1", "again", user))
+	}()
+	commitStateCrash = func() {}
+
+	s = serviceAt(t, path) // restart
+	want := []string{"a1:1:" + EventStateChanged, "a1:send:r1:" + EventWaiting}
+	check := func() {
+		t.Helper()
+		a := s.get(t, "a1")
+		if a.State != StateActive || a.Attempt != 2 || a.Revision != 1 || !slices.Equal(ids(rows(t, s, "a1", 0)), want) ||
+			!slices.Equal(waiting(t, s, "a1"), []string{"user:u=again"}) {
+			t.Fatalf("after restart: state %s attempt %d revision %d events %v waiting %q; want active, 2, 1, %v, [user:u=again]",
+				a.State, a.Attempt, a.Revision, ids(rows(t, s, "a1", 0)), waiting(t, s, "a1"), want)
+		}
+		if _, err := s.store.GetReceipt(ctx, "a1", "r1"); err != nil {
+			t.Fatalf("receipt: %v", err)
+		}
+	}
+	check()
+	re, err := s.events.Subscribe(ctx, map[string]int64{"a1": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := recv(t, re, 2); !slices.Equal(ids(e), want) {
+		t.Fatalf("reconnect got %v; want %v", ids(e), want)
+	}
+	bus := s.Bus.Subscribe("a1")
+	if r, err := s.Send(ctx, sendReq("a1", "r1", "again", user)); err != nil || r.State != loomstore.SlotWaiting {
+		t.Fatalf("retry = %+v, %v", r, err)
+	}
+	check()
+	if got := drain(bus); len(got) != 0 {
+		t.Fatalf("retry published %v", types(got))
+	}
+}
+
+// TestSendRetrySameRequestNoNewEvents: a Send whose message.waiting event
+// cannot be saved stores nothing, so its retry is a first Send that commits
+// the slot, receipt and event once; a further retry commits nothing new.
+func TestSendRetrySameRequestNoNewEvents(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := serviceAt(t, path, busy("a1", "persistent", StateActive))
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TRIGGER fail_insert BEFORE INSERT ON agent_events WHEN NEW.kind = 'message.waiting'
+		BEGIN SELECT RAISE(ABORT, 'injected write failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Send(ctx, sendReq("a1", "r1", "hello", user)); err == nil {
+		t.Fatal("Send succeeded; want the injected failure")
+	}
+	if _, err := db.Exec(`DROP TRIGGER fail_insert`); err != nil {
+		t.Fatal(err)
+	}
+	bus := s.Bus.Subscribe("a1")
+	first := mustSendMsg(t, s, sendReq("a1", "r1", "hello", user))
+	want := []string{"a1:send:r1:" + EventWaiting}
+	if got := ids(rows(t, s, "a1", 0)); !slices.Equal(got, want) {
+		t.Fatalf("after the retry: events %v; want %v", got, want)
+	}
+	if got := types(drain(bus)); !slices.Equal(got, []string{EventWaiting}) {
+		t.Fatalf("bus got %v; want one message.waiting", got)
+	}
+	if again := mustSendMsg(t, s, sendReq("a1", "r1", "hello", user)); again != first {
+		t.Fatalf("second retry = %+v; want %+v", again, first)
+	}
+	if got := ids(rows(t, s, "a1", 0)); !slices.Equal(got, want) || len(drain(bus)) != 0 {
+		t.Fatalf("second retry added events: %v", got)
+	}
+	if got := waiting(t, s, "a1"); !slices.Equal(got, []string{"user:u=hello"}) {
+		t.Fatalf("waiting = %q", got)
+	}
+}

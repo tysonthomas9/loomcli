@@ -51,7 +51,7 @@ func (l *EventLog) Append(ctx context.Context, e loomstore.Event) (loomstore.Eve
 // tests crash there.
 var appendAllCrash = func() {}
 
-// commitStateCrash runs between a CommitState's commit and its publication;
+// commitStateCrash runs between a commit's (CommitState, Send) COMMIT and its publication;
 // tests crash there.
 var commitStateCrash = func() {}
 
@@ -64,9 +64,18 @@ var commitStateCrash = func() {}
 // write or the commit fails, nothing is saved or published.
 func (l *EventLog) CommitState(ctx context.Context, agentID string, from, to loomstore.AgentState, rev int64,
 	events []loomstore.Event, publish func(saved []loomstore.Event)) ([]loomstore.Event, error) {
+	return l.commit(func() ([]loomstore.Event, error) {
+		return l.store.CommitState(ctx, agentID, from, to, rev, events)
+	}, publish)
+}
+
+// commit runs write, one transaction that returns the events it saved,
+// under the lane, then fans them out and publishes them, still under the
+// lane. If write fails, nothing is published.
+func (l *EventLog) commit(write func() ([]loomstore.Event, error), publish func(saved []loomstore.Event)) ([]loomstore.Event, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	saved, err := l.store.CommitState(ctx, agentID, from, to, rev, events)
+	saved, err := write()
 	if err != nil {
 		return nil, err
 	}

@@ -108,3 +108,51 @@ func deref(p *string) string {
 	}
 	return *p
 }
+
+// TestSendReopenCrashBeforeCommit: a crash after a reopening Send's writes
+// but before its COMMIT leaves, after a restart, the agent finished with no
+// slot, receipt, revision bump or event; the Send then commits them all once.
+func TestSendReopenCrashBeforeCommit(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	s := openAt(t, path)
+	a := agent("a1", "interactive")
+	a.State = "finished"
+	if err := s.InsertAgent(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	in := send("user", "r1", "again")
+	in.Reopen = true
+	in.Events = append(stateEvents("a1", "agent.state_changed"),
+		Event{AgentID: "a1", EventID: "a1:send:r1:message.waiting", Kind: "message.waiting", Payload: json.RawMessage(`{}`)})
+	commitStateCrash = func() { panic("crash") }
+	t.Cleanup(func() { commitStateCrash = func() {} })
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("did not crash")
+			}
+		}()
+		_, _, _, _ = s.SendEvents(ctx, in)
+	}()
+	commitStateCrash = func() {}
+	s.Close()
+
+	s = openAt(t, path)
+	got, _ := s.GetAgent(ctx, "a1")
+	sl, _ := s.Slots(ctx, "a1")
+	_, rerr := s.GetReceipt(ctx, "a1", "r1")
+	if got.State != "finished" || got.Attempt != a.Attempt || got.Revision != 0 || len(sl) != 0 ||
+		!errors.Is(rerr, ErrNotFound) || eventCount(t, s, "a1") != 0 {
+		t.Fatalf("after restart: state %s attempt %d revision %d slots %d receipt %v events %d; want nothing changed",
+			got.State, got.Attempt, got.Revision, len(sl), rerr, eventCount(t, s, "a1"))
+	}
+	_, saved, retry, err := s.SendEvents(ctx, in)
+	if err != nil || retry || len(saved) != 2 || saved[0].EventID != "a1:1:agent.state_changed" ||
+		saved[1].EventID != "a1:send:r1:message.waiting" {
+		t.Fatalf("Send after restart = %+v retry %t err %v", saved, retry, err)
+	}
+	if got, _ := s.GetAgent(ctx, "a1"); got.State != "active" || got.Revision != 1 || eventCount(t, s, "a1") != 2 {
+		t.Fatalf("after Send: state %s revision %d events %d; want active, 1, 2", got.State, got.Revision, eventCount(t, s, "a1"))
+	}
+}

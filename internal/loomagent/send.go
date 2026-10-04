@@ -50,8 +50,9 @@ type SendResult struct {
 
 // Send stores text in the sender's one slot (design v2 §4.9, §8.1.8): it
 // fills the slot, or replaces the waiting text while keeping its place. The
-// slot change and the RequestID receipt commit together, so a retry of any
-// earlier Send returns its stored result and changes nothing. Send to a
+// slot change, the RequestID receipt and the Send's events commit together
+// under the event lane, so a retry of any earlier Send returns its stored
+// result and changes nothing. Send to a
 // finished single task starts its next attempt and cancels its R29 history
 // deadline in that same transaction. Send never calls the harness itself:
 // it then runs the dispatcher (§8.1.1) under the same lock, which hands the
@@ -101,20 +102,44 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 		}
 	}
 	reopen := a.State == StateFinished
-	rec, retry, err := s.store.Send(ctx, loomstore.SlotSend{AgentID: a.AgentID, Sender: sender,
-		RequestID: req.RequestID, Body: req.Text, Source: req.Source, Reopen: reopen, First: interrupted != nil && *interrupted,
-		Result: func(replaced bool) (string, error) {
-			b, err := json.Marshal(SendResult{MessageID: messageID(a.AgentID, sender, req.RequestID),
-				State: loomstore.SlotWaiting, Replaced: replaced, Interrupted: interrupted})
-			return string(b), err
-		}})
+	out := sendEvents(a, sender, req.RequestID, reopen)
+	rows, err := eventRows(out)
+	if err != nil {
+		return SendResult{}, err
+	}
+	var rec loomstore.Receipt
+	var retry bool
+	_, err = s.events.commit(func() (saved []loomstore.Event, err error) {
+		rec, saved, retry, err = s.store.SendEvents(ctx, loomstore.SlotSend{AgentID: a.AgentID, Sender: sender,
+			RequestID: req.RequestID, Body: req.Text, Source: req.Source, Reopen: reopen, First: interrupted != nil && *interrupted,
+			Events: rows, Result: func(replaced bool) (string, error) {
+				b, err := json.Marshal(SendResult{MessageID: messageID(a.AgentID, sender, req.RequestID),
+					State: loomstore.SlotWaiting, Replaced: replaced, Interrupted: interrupted})
+				return string(b), err
+			}})
+		return saved, err
+	}, s.busPublish(out))
 	switch {
 	case err != nil:
 		return SendResult{}, sendErr(a.AgentID, err)
 	case retry:
 		return decodeResult(rec)
 	}
-	return s.accepted(ctx, a, rec, sender, reopen)
+	return s.accepted(ctx, a, rec)
+}
+
+// sendEvents are the events an accepted Send saves with its slot change:
+// a reopen's state change, named by the revision it bumps to, then
+// message.waiting, named by the Send's RequestID.
+func sendEvents(a loomstore.Agent, sender, requestID string, reopen bool) []Event {
+	var out []Event
+	if reopen {
+		after := a
+		after.State, after.Attempt, after.Outcome, after.FinishedAt = StateActive, a.Attempt+1, nil, nil
+		out = changeEvents(a, after)
+	}
+	return append(out, Event{AgentID: a.AgentID, EventID: a.AgentID + ":send:" + requestID + ":" + EventWaiting,
+		Type: EventWaiting, Reason: sender, Time: time.Now()})
 }
 
 // interruptTurn runs the interrupt step of a Send with Delivery interrupt,
@@ -168,20 +193,10 @@ func (s *Service) interruptTurn(ctx context.Context, a *loomstore.Agent, req Sen
 	return res, true, err
 }
 
-// accepted publishes an accepted Send's changes, then runs the dispatcher,
-// which hands the message over if no turn runs. It returns the receipt's
-// result: state handed if it was.
-func (s *Service) accepted(ctx context.Context, a loomstore.Agent, rec loomstore.Receipt, sender string, reopen bool) (SendResult, error) {
-	if reopen {
-		after := a
-		after.State, after.Attempt, after.Outcome, after.FinishedAt = StateActive, a.Attempt+1, nil, nil
-		if err := s.publishChange(ctx, a, after); err != nil {
-			return SendResult{}, err
-		}
-	}
-	if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventWaiting, Reason: sender, Time: time.Now()}); err != nil {
-		return SendResult{}, err
-	}
+// accepted runs the dispatcher after an accepted Send, which hands the
+// message over if no turn runs. It returns the receipt's result: state
+// handed if it was.
+func (s *Service) accepted(ctx context.Context, a loomstore.Agent, rec loomstore.Receipt) (SendResult, error) {
 	res, err := decodeResult(rec)
 	if err != nil {
 		return res, err
