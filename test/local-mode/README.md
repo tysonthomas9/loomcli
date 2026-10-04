@@ -56,7 +56,9 @@ Expected dogfood flow:
 - `LOCALMODE-1` is the seeded epic lane.
 - `local-planner` claims `LOCALMODE-2`, writes a design, and moves it to review.
 - `local-coder` claims `LOCALMODE-3`, writes and commits
-  `local-mode-agent-output.txt`, then closes the task.
+  `local-mode-agent-output.txt`, then finishes. Its task waits in review with
+  the `code-review` label until the revision is approved (closed) or
+  rejected (open again).
 - The task Sessions tab should show daemon-created sessions with logs,
   transcript presence, diff stats, and final status after each run exits.
 

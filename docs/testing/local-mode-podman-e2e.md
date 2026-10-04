@@ -69,7 +69,8 @@ make local-mode-verify
 ```
 
 The verifier polls the running stack until the planner task is in review with
-a design, the coder task is closed, both tasks have completed sessions and
+a design, the coder task is closed or waiting in code review (status review
+with the `code-review` label, D29), both tasks have completed sessions and
 transcript entries, and the coder session exposes a diff containing
 `local-mode-agent-output.txt`.
 
@@ -233,7 +234,8 @@ The expected run is:
 6. `codex-coder` starts through the same daemon path.
 7. It claims `LOCALMODE-2`, which already has an approved design.
 8. It writes `local-mode-agent-output.txt`, commits in its worktree, and
-   closes the task.
+   closes the task. Loom keeps the task in review with the `code-review`
+   label until its revision is approved (closed) or rejected (open again).
 9. Loom finalizes the FleetDB agent session with transcript, log, diff, and
    status metadata.
 

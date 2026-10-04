@@ -88,11 +88,16 @@ issue_status_is() {
     '(.data.status // .status // "") == $expected' >/dev/null
 }
 
-issue_status_closed() {
+# issue_finished_coding: the coder's run finished. A run whose committed work
+# Loom Git froze as a revision leaves its task in review with the code-review
+# label until Approve or Reject (D29, P1.26); otherwise the task is closed.
+issue_finished_coding() {
   task_id="$1"
   json="$(issue_json "$task_id")"
   printf '%s' "$json" | jq -e \
-    '(.data.status // .status // "") as $status | $status == "closed" or $status == "done"' >/dev/null
+    '(.data // .) as $issue | ($issue.status // "") as $status |
+     $status == "closed" or $status == "done" or
+     ($status == "review" and (($issue.labels // []) | index("code-review")) != null)' >/dev/null
 }
 
 issue_has_design() {
@@ -186,7 +191,7 @@ wait_for "planner completed session exists" task_has_completed_session "$PLAN_TA
 wait_for "planner transcript flag is set" task_has_transcript_flag "$PLAN_TASK_ID"
 wait_for "planner transcript has entries" transcript_has_entries "$PLAN_TASK_ID"
 
-wait_for "coder task is closed" issue_status_closed "$CODE_TASK_ID"
+wait_for "coder task is closed or waiting in code review" issue_finished_coding "$CODE_TASK_ID"
 wait_for "coder completed session exists" task_has_completed_session "$CODE_TASK_ID"
 wait_for "coder transcript flag is set" task_has_transcript_flag "$CODE_TASK_ID"
 wait_for "coder transcript has entries" transcript_has_entries "$CODE_TASK_ID"
