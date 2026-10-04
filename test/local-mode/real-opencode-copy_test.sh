@@ -46,6 +46,9 @@ c.execute("create table account(id integer primary key, token text)")
 c.execute("insert into account(token) values (?)", (sys.argv[2],))
 c.commit(); c.close()
 PY
+  # Some SQLite builds keep an empty -wal/-shm after a clean close; OpenCode's
+  # clean close leaves none, so model that.
+  rm -f "$1/opencode.db-wal" "$1/opencode.db-shm"
 }
 # Names, sizes and mtimes of everything in a folder.
 listing() { find "$1" -mindepth 1 -exec stat -f '%N %z %m' {} + 2>/dev/null || find "$1" -mindepth 1 -exec stat -c '%n %s %Y' {} +; }
@@ -130,6 +133,59 @@ mkfake "$host"
 check "copy path inside the host folder is refused" '[ "$rc" = 2 ] && [ ! -e "$host/sub" ]'
 "$script" make "relative/opencode.db" >/dev/null 2>&1; rc=$?
 check "relative copy path is refused" '[ "$rc" = 2 ]'
+
+ln -s "$host" "$T/alias"
+"$script" make "$T/alias/seed.db" >/dev/null 2>&1; rc=$?
+check "copy path through a symlink alias of the host folder is refused" '[ "$rc" = 2 ] && [ ! -e "$host/seed.db" ]'
+"$script" remove "$T/alias/opencode.db" >/dev/null 2>&1; rc=$?
+check "remove through a symlink alias of the host folder is refused" '[ "$rc" = 2 ] && [ -f "$host/opencode.db" ]'
+mkdir -p "$T/aliasparent"; ln -s "$host" "$T/aliasparent/sub"
+"$script" make "$T/aliasparent/sub/new/seed.db" >/dev/null 2>&1; rc=$?
+check "not-yet-existing folder under a host alias is refused" '[ "$rc" = 2 ] && [ ! -e "$host/new" ]'
+"$script" make "$state/x/../proj-z/opencode.db" >/dev/null 2>&1; rc=$?
+check "copy path with .. parts is refused" '[ "$rc" = 2 ]'
+mkdir -p "$state/proj-l"; chmod 700 "$state/proj-l"; ln -s "$host/opencode.db" "$state/proj-l/opencode.db"
+"$script" make "$state/proj-l/opencode.db" >/dev/null 2>&1; rc=$?
+check "copy that is a symlink (into the host folder) is refused" '[ "$rc" = 2 ]'
+rm -rf "$state/proj-l"
+
+# --- 5b. An existing copy is kept only when sound and private. --------------
+"$script" make "$state/proj-k/opencode.db" >/dev/null 2>&1
+chmod 644 "$state/proj-k/opencode.db"
+out="$("$script" make "$state/proj-k/opencode.db" 2>&1)"; rc=$?
+check "existing copy with mode 644 is refused" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "not private"'
+chmod 600 "$state/proj-k/opencode.db"
+"$script" make "$state/proj-k/opencode.db" >/dev/null 2>&1; rc=$?
+check "existing sound mode-600 copy is kept" '[ "$rc" = 0 ]'
+python3 - "$state/proj-k/opencode.db" <<'PY'
+import sys
+with open(sys.argv[1], "r+b") as f:
+    f.seek(4096); f.write(b"\xff" * 4096)
+PY
+"$script" make "$state/proj-k/opencode.db" >/dev/null 2>&1; rc=$?
+check "existing corrupt copy is refused" '[ "$rc" = 1 ]'
+"$script" remove "$state/proj-k/opencode.db"
+
+# --- 5c. A same-size change with the mtime restored during the copy is seen. -
+# A sqlite3 shim on PATH runs the real one, then rewrites one byte of the host
+# file in place (same size) and restores its mtime, right after the backup.
+real_sqlite="$(command -v sqlite3)"
+mkdir -p "$T/shim"
+cat > "$T/shim/sqlite3" <<SH
+#!/usr/bin/env bash
+"$real_sqlite" "\$@"; rc=\$?
+case "\$*" in *.backup*)
+  touch -r "$host/opencode.db" "$T/mtime"
+  python3 -c 'import sys; f=open(sys.argv[1],"r+b"); f.seek(100); b=f.read(1); f.seek(100); f.write(bytes([b[0]^1])); f.close()' "$host/opencode.db"
+  touch -r "$T/mtime" "$host/opencode.db" ;;
+esac
+exit \$rc
+SH
+chmod +x "$T/shim/sqlite3"
+mkfake "$host"
+out="$(PATH="$T/shim:$PATH" "$script" make "$state/proj-m/opencode.db" 2>&1)"; rc=$?
+check "same-size, mtime-restored host change during the copy is refused" '[ "$rc" = 1 ] && printf "%s" "$out" | grep -q "changed during the copy" && [ ! -e "$state/proj-m" ]'
+mkfake "$host"
 
 # --- 6. remove deletes that project's copy only. ----------------------------
 "$script" remove "$copy"; rc=$?

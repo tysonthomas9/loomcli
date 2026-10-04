@@ -177,8 +177,10 @@ The host's OpenCode folder `~/.local/share/opencode` (or
 read-only. Instead, each REAL stack gets a private copy of the login:
 
 - Before `up`, `real-opencode-copy.sh` takes one SQLite online backup of the
-  host's `opencode.db`, opened read-only (nothing is created or written in the
-  host folder), into
+  host's `opencode.db`, opened read-only (no file is created in the host
+  folder and the database and its `-wal` are never written; with a `-wal`
+  present, SQLite's reader locking updates only the `-shm` index, as any
+  reader does), into
   `~/.local/state/loom-local-mode/<project>/opencode.db` (`LOCAL_MODE_STATE_DIR`
   overrides `~/.local/state/loom-local-mode`), a mode-600 file in a mode-700
   folder that belongs to that compose project only. It then runs
