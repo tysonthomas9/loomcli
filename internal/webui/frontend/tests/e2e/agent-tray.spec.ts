@@ -597,6 +597,74 @@ function twoTestAgents(): Mock {
   };
 }
 
+// The Lead's real code mode delegation call: search, then call the result.
+const SPAWN =
+  "const s=search({namespace:'loom', query:'agent_create'}); " +
+  "for (const name of ['ui-test-agent-1','ui-test-agent-2']) await s[0].call({name, brief:'UI test'})";
+
+function searchFormLead(): Mock {
+  const m = twoTestAgents();
+  const isCreate = (e: ReturnType<typeof ev>) =>
+    JSON.stringify(e.payload).includes("agent_create");
+  const at = m.events.findIndex(isCreate);
+  const replaced = m.events[at]!;
+  const spawn = ev(
+    "item.completed",
+    {
+      itemKind: "tool",
+      tool: {
+        name: "execute",
+        input: JSON.stringify({ code: SPAWN }),
+        output: "{}",
+      },
+    },
+    T(39),
+  );
+  m.events = m.events.filter((e) => !isCreate(e));
+  m.events.splice(at, 0, {
+    ...spawn,
+    seq: replaced.seq,
+    event_id: replaced.event_id,
+  });
+  return m;
+}
+
+test("a Lead's search-form delegation call folds into the Started marker, its code only when expanded (CL4)", async ({
+  page,
+}) => {
+  await open(page, searchFormLead(), 900, 860, "Can you run 2 test agents");
+  const chat = page.getByTestId("chat-transcript");
+  await expect(chat).toContainText("No files were changed.");
+  for (const gone of ["Execute", "search(", '"code"', "tools.loom"])
+    await expect(chat).not.toContainText(gone);
+  const marker = page.getByTestId("started-marker");
+  await expect(marker).toContainText("ui-test-agent-1");
+  await expect(marker).toContainText("ui-test-agent-2");
+  const calls = marker.getByRole("button", { name: /1 tool call/ });
+  await expect(calls).toBeVisible();
+  const shots = async (name: string) => {
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate((t) => {
+        document.documentElement.dataset.theme = t;
+      }, theme);
+      if (SHOTS)
+        await page.screenshot({
+          path: `${SHOTS}/${name}-${theme}.png`,
+          animations: "disabled",
+        });
+    }
+  };
+  await shots("cl4-collapsed");
+  await calls.click();
+  const row = chat.getByTestId("tool-call");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("Ran code");
+  await expect(row).not.toContainText("search(");
+  await row.getByRole("button").click();
+  await expect(row).toContainText("search({namespace:'loom'");
+  await shots("cl4-expanded");
+});
+
 test("two children show as one Started marker and two E1 cards, no raw tool JSON (CL1)", async ({
   page,
 }) => {
