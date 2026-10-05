@@ -102,9 +102,17 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 2px solid var(--color-bg-soft, #faf8f3);
+  /* The sidebar's own background, so the dot reads in both themes. */
+  border: 2px solid var(--color-chrome);
   background: var(--color-status-idle, #9ca3af);
   pointer-events: none;
+}
+
+.errorHint {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-status-error, #ef4444);
+  padding: var(--space-2) 0;
 }
 
 .apiAgent[data-dot="working"] .dot {

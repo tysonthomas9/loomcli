@@ -18,7 +18,8 @@ import styles from "./CollapsedAgentRail.module.css";
  * The Agent API agents the expanded tree's AgentList shows, in its order,
  * from the same live roster: Leads, plus a child while it is at work or its
  * chat is open (SB2). Each opens its chat, and the open one is highlighted.
- * With none to show it renders `empty`.
+ * With none to show it renders `empty`; a failed list shows as an error, as
+ * the expanded list's alert does, not as no agents.
  */
 export function ApiAgentRailItems({
   workspaceId,
@@ -28,13 +29,22 @@ export function ApiAgentRailItems({
   empty?: ReactNode;
 }): JSX.Element {
   const activeId = useMatch("/ws/:ws/chat/:agentId")?.params.agentId;
-  const { roster } = useAgentRoster(workspaceId, activeId);
+  const { roster, error } = useAgentRoster(workspaceId, activeId);
   const agents = useMemo(
     () => sidebarAgents(roster, activeId, storedAgentApiOrder(workspaceId)),
     [roster, activeId, workspaceId],
   );
   const ws = encodeURIComponent(workspaceId);
-  if (agents.length === 0) return <>{empty}</>;
+  const alert = error ? (
+    <CompactRailHost
+      role="alert"
+      label={`Agent API agents unavailable: ${error}`}
+      className={styles.errorHint}
+    >
+      !
+    </CompactRailHost>
+  ) : null;
+  if (agents.length === 0) return <>{alert ?? empty}</>;
   return (
     <>
       {agents.map((a) => (
@@ -45,6 +55,7 @@ export function ApiAgentRailItems({
           selected={a.agent_id === activeId}
         />
       ))}
+      {alert}
     </>
   );
 }

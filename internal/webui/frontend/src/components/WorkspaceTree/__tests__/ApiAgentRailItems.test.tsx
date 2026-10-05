@@ -10,12 +10,16 @@ import "@testing-library/jest-dom";
 import type { Agent } from "@/api/agentsv1";
 
 const mockRoster = vi.hoisted(() => ({ current: new Map() }));
+const mockError = vi.hoisted(() => ({ current: null as string | null }));
 
 vi.mock("@/hooks", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks")>();
   return {
     ...actual,
-    useAgentRoster: () => ({ roster: mockRoster.current, error: null }),
+    useAgentRoster: () => ({
+      roster: mockRoster.current,
+      error: mockError.current,
+    }),
   };
 });
 
@@ -43,6 +47,7 @@ const at = (path: string, empty?: JSX.Element) =>
 
 beforeEach(() => {
   mockRoster.current = new Map();
+  mockError.current = null;
 });
 
 describe("ApiAgentRailItems", () => {
@@ -77,5 +82,16 @@ describe("ApiAgentRailItems", () => {
 
     expect(screen.queryAllByRole("link")).toHaveLength(0);
     expect(screen.getByText("No agents")).toBeInTheDocument();
+  });
+
+  it("shows a failed Agent API list as an error, not as No agents", () => {
+    mockError.current = "HTTP 502";
+
+    at("/ws/w1/home", <span>No agents</span>);
+
+    expect(screen.getByRole("alert")).toHaveAccessibleName(
+      "Agent API agents unavailable: HTTP 502",
+    );
+    expect(screen.queryByText("No agents")).not.toBeInTheDocument();
   });
 });
