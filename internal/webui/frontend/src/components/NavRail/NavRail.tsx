@@ -3,7 +3,7 @@
  * Icon-only navigation rail for switching between views.
  */
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ViewMode } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
@@ -304,6 +304,27 @@ export function NavRail({
       switcher.scrollLeft += b.right - w.right + 6;
   }, [activeWorkspaceId, workspaces]);
 
+  // Which ends of the sideways (mobile) switcher have workspaces scrolled out
+  // of view, so the rail can hint at them.
+  const [more, setMore] = useState({ left: false, right: false });
+  const updateMore = useCallback(() => {
+    const s = switcherRef.current;
+    if (!s) return;
+    const left = s.scrollLeft > 1;
+    const right = s.scrollLeft + s.clientWidth < s.scrollWidth - 1;
+    setMore((m) =>
+      m.left === left && m.right === right ? m : { left, right },
+    );
+  }, []);
+  useEffect(() => {
+    updateMore();
+    const s = switcherRef.current;
+    if (!s || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(updateMore);
+    ro.observe(s);
+    return () => ro.disconnect();
+  }, [updateMore, workspaces]);
+
   const renderButton = (item: NavItem) => {
     const isActive = (item.activeForViews ?? [item.id]).includes(activeView);
     const showBadge =
@@ -364,53 +385,74 @@ export function NavRail({
       {hasWorkspaceAvatars && (
         <>
           <div className={styles.wsDivider} aria-hidden="true" />
-          <section
-            ref={switcherRef}
-            className={styles.workspaceSwitcher}
-            aria-label="Workspace selector"
-          >
-            <div className={styles.workspaceList} ref={workspaceListRef}>
-              {workspaces?.map((ws) => {
-                const color = getAvatarColor(ws.name);
-                const isActive = ws.id === activeWorkspaceId;
-                return (
-                  <CompactRailHost
-                    key={ws.id}
-                    as="button"
-                    type="button"
-                    label={ws.name}
-                    aria-label={`Switch to ${ws.name}`}
-                    hostRef={isActive ? activeWorkspaceRef : undefined}
-                    className={styles.wsAvatar}
-                    data-active={isActive || undefined}
-                    onClick={() => onWorkspaceSwitch?.(ws.id)}
-                  >
-                    <span
-                      className={styles.wsAvatarCircle}
-                      style={{
-                        backgroundColor: color,
-                        color: shouldUseWhiteText(color) ? "#fff" : "#171717",
-                      }}
-                      aria-hidden="true"
-                    >
-                      {getCompactAvatarInitials(ws.name)}
-                    </span>
-                  </CompactRailHost>
-                );
-              })}
-            </div>
-            {onAddWorkspace && (
-              <CompactRailHost
-                as="button"
-                type="button"
-                label="Add workspace"
-                className={styles.wsAdd}
-                onClick={onAddWorkspace}
+          <div className={styles.switcherFrame}>
+            {more.left && (
+              <span
+                className={styles.moreHint}
+                data-more-hint="left"
+                aria-hidden="true"
               >
-                +
-              </CompactRailHost>
+                ‹
+              </span>
             )}
-          </section>
+            <section
+              ref={switcherRef}
+              className={styles.workspaceSwitcher}
+              aria-label="Workspace selector"
+              onScroll={updateMore}
+            >
+              <div className={styles.workspaceList} ref={workspaceListRef}>
+                {workspaces?.map((ws) => {
+                  const color = getAvatarColor(ws.name);
+                  const isActive = ws.id === activeWorkspaceId;
+                  return (
+                    <CompactRailHost
+                      key={ws.id}
+                      as="button"
+                      type="button"
+                      label={ws.name}
+                      aria-label={`Switch to ${ws.name}`}
+                      hostRef={isActive ? activeWorkspaceRef : undefined}
+                      className={styles.wsAvatar}
+                      data-active={isActive || undefined}
+                      onClick={() => onWorkspaceSwitch?.(ws.id)}
+                    >
+                      <span
+                        className={styles.wsAvatarCircle}
+                        style={{
+                          backgroundColor: color,
+                          color: shouldUseWhiteText(color) ? "#fff" : "#171717",
+                        }}
+                        aria-hidden="true"
+                      >
+                        {getCompactAvatarInitials(ws.name)}
+                      </span>
+                    </CompactRailHost>
+                  );
+                })}
+              </div>
+              {onAddWorkspace && (
+                <CompactRailHost
+                  as="button"
+                  type="button"
+                  label="Add workspace"
+                  className={styles.wsAdd}
+                  onClick={onAddWorkspace}
+                >
+                  +
+                </CompactRailHost>
+              )}
+            </section>
+            {more.right && (
+              <span
+                className={styles.moreHint}
+                data-more-hint="right"
+                aria-hidden="true"
+              >
+                ›
+              </span>
+            )}
+          </div>
           <div className={styles.wsDivider} aria-hidden="true" />
         </>
       )}

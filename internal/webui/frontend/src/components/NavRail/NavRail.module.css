@@ -81,6 +81,15 @@
   flex-shrink: 0;
 }
 
+/* Only the mobile bottom rail lays this out (see below). */
+.switcherFrame {
+  display: contents;
+}
+
+.moreHint {
+  display: none;
+}
+
 .workspaceSwitcher {
   display: flex;
   flex-direction: column;
@@ -324,17 +333,58 @@
   }
 
   /* One row: the avatars and Add take what the buttons leave and scroll
-     sideways, so every workspace stays reachable. */
-  .workspaceSwitcher {
+     sideways, so every workspace stays reachable. The window is a whole
+     number of 30px items (41px pitch with the 11px gap, plus 6px padding a
+     side) and snaps to them, so no avatar shows cut; the frame keeps 12px a
+     side for a chevron when more is off-screen that way. */
+  .switcherFrame {
+    position: relative;
+    display: flex;
     flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    container-type: inline-size;
+  }
+
+  .workspaceSwitcher {
+    flex: 0 0 auto;
     flex-direction: row;
     gap: 11px;
-    width: auto;
+    width: max(42px, calc(round(down, 100cqw - 25px, 41px) + 1px));
     min-width: 0;
     padding: 6px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 6px;
+  }
+
+  .workspaceSwitcher .wsAvatar,
+  .workspaceSwitcher .wsAdd {
+    scroll-snap-align: start;
+  }
+
+  .moreHint {
+    position: absolute;
+    top: 50%;
+    display: block;
+    width: 12px;
+    transform: translateY(-50%);
+    color: var(--color-text-secondary);
+    font-size: 18px;
+    line-height: 1;
+    text-align: center;
+    pointer-events: none;
+  }
+
+  .moreHint[data-more-hint="left"] {
+    left: 0;
+  }
+
+  .moreHint[data-more-hint="right"] {
+    right: 0;
   }
 
   .workspaceList {
