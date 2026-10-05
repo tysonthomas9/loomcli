@@ -21,6 +21,7 @@ import {
   upsert,
 } from "./agentRoster";
 import type { Activities, Roster } from "./agentRoster";
+import { ApiError } from "@/types/common";
 
 async function listAll(
   ws: string,
@@ -35,12 +36,16 @@ async function listAll(
     after = page.next;
   } while (after);
   // List leaves archived agents out; the open chat's agent is fetched, so the
-  // stream follows it and its unarchive shows its row again.
+  // stream follows it and its unarchive shows its row again. A deleted or
+  // missing one stays out.
   if (open && !out.some((a) => a.agent_id === open))
     out.push(
       ...(await getAgent(ws, open).then(
-        (a) => [a],
-        () => [],
+        (a) => (a.deleted_at ? [] : [a]),
+        (err) => {
+          if (err instanceof ApiError && err.status === 404) return [];
+          throw err;
+        },
       )),
     );
   return out;

@@ -165,7 +165,9 @@ beforeEach(() => {
   api.getAgent.mockReset();
   api.getAgent.mockImplementation((_ws: string, id: string) => {
     const a = api.agents.find((x) => x.agent_id === id);
-    return a ? Promise.resolve(a) : Promise.reject(new Error("not found"));
+    return a
+      ? Promise.resolve(a)
+      : Promise.reject(new ApiError(404, "Not Found"));
   });
 });
 
@@ -717,6 +719,28 @@ describe("AgentList", () => {
       ]),
     );
     await waitFor(() => expect(row("old")).not.toBeNull());
+  });
+
+  it("leaves a deleted open agent out of the list", async () => {
+    api.agents = [
+      agent("lead"),
+      agent("gone", { deleted_at: "2026-10-02T00:00:09Z" }),
+    ];
+    api.listAgents.mockImplementation((_ws: string, q: ListAgentsQuery) =>
+      serve(q).then((p) => ({
+        ...p,
+        agents: p.agents.filter((a) => !a.deleted_at),
+      })),
+    );
+    renderList("/ws/ws1/chat/gone");
+    await waitFor(() => expect(stream().opts.agents).toEqual(["lead"]));
+    expect(row("gone")).toBeNull();
+  });
+
+  it("shows the error when the open agent's Get fails", async () => {
+    api.getAgent.mockRejectedValue(new ApiError(503, "Service Unavailable"));
+    renderList("/ws/ws1/chat/old");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
   it("keeps an archived Lead's working child in the list", async () => {
