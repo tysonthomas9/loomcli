@@ -21,22 +21,26 @@ func TestDecideTurnCompletedTable(t *testing.T) {
 	handed := loomstore.Slot{AgentID: "a1", Sender: "user:u", RequestID: "r1", State: loomstore.SlotHanded}
 	waitingSlot := loomstore.Slot{AgentID: "a1", Sender: "agent:a2", RequestID: "r2", State: loomstore.SlotWaiting}
 	asking := busy("a1", "persistent", StateWaiting)
-	asking.WaitingOn = sp("ask_1")
+	asking.WaitingOn = sp("approval")
+	flagged := busy("a1", "persistent", StateActive) // reasons and attempt carry over
+	flagged.StateReason, flagged.AttentionReason, flagged.Attempt = sp("resumed"), sp(AttentionHarnessUnavailable), 3
 	for _, c := range []struct {
 		name string
 		in   turnInput
 		want string
 	}{
 		{"persistent", turnInput{Row: busy("a1", "persistent", StateActive), Slots: []loomstore.Slot{handed}, Event: done},
-			"ended deliver=[user:u/r1] state=idle outcome= running= waitingOn="},
+			"ended deliver=[user:u/r1] state=idle outcome= running= waitingOn= reason= attention= attempt=1"},
 		{"persistent waiting on an ask", turnInput{Row: asking, Event: done},
-			"ended deliver=[] state=idle outcome= running= waitingOn="},
+			"ended deliver=[] state=idle outcome= running= waitingOn= reason= attention= attempt=1"},
+		{"persistent with reasons", turnInput{Row: flagged, Event: done},
+			"ended deliver=[] state=idle outcome= running= waitingOn= reason=resumed attention=" + AttentionHarnessUnavailable + " attempt=3"},
 		{"single_task", turnInput{Row: busy("a1", "single_task", StateActive), Slots: []loomstore.Slot{handed}, Event: done},
-			"ended deliver=[user:u/r1] state=finished outcome=end_turn running= waitingOn="},
+			"ended deliver=[user:u/r1] state=finished outcome=end_turn running= waitingOn= reason= attention= attempt=1"},
 		{"stopping", turnInput{Row: busy("a1", "single_task", StateStopping), Event: done},
-			"ended deliver=[] state=stopping outcome= running= waitingOn="},
+			"ended deliver=[] state=stopping outcome= running= waitingOn= reason= attention= attempt=1"},
 		{"slots waiting", turnInput{Row: busy("a1", "single_task", StateActive), Slots: []loomstore.Slot{handed, waitingSlot}, Event: done},
-			"ended deliver=[user:u/r1] state=active outcome= running= waitingOn="},
+			"ended deliver=[user:u/r1] state=active outcome= running= waitingOn= reason= attention= attempt=1"},
 		{"stale turn ID", turnInput{Row: busy("a1", "persistent", StateActive), Slots: []loomstore.Slot{handed},
 			Event: loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: "turn_0"}}, "not ended"},
 		{"no running turn", turnInput{Row: svcAgent("a1", "persistent", StateIdle), Event: done}, "not ended"},
@@ -58,8 +62,9 @@ func turnDecisionString(d turnDecision) string {
 	for _, sl := range d.Deliver {
 		deliver = append(deliver, sl.Sender+"/"+sl.RequestID)
 	}
-	return fmt.Sprintf("ended deliver=[%s] state=%s outcome=%s running=%s waitingOn=%s", strings.Join(deliver, " "),
-		d.To.State, deref(d.To.Outcome), deref(d.To.RunningTurn), deref(d.To.WaitingOn))
+	return fmt.Sprintf("ended deliver=[%s] state=%s outcome=%s running=%s waitingOn=%s reason=%s attention=%s attempt=%d",
+		strings.Join(deliver, " "), d.To.State, deref(d.To.Outcome), deref(d.To.RunningTurn), deref(d.To.WaitingOn),
+		deref(d.To.StateReason), deref(d.To.AttentionReason), d.To.Attempt)
 }
 
 // TestTurnCompletedCrashAfterCommit: a single task's completion crashes
@@ -67,10 +72,15 @@ func turnDecisionString(d turnDecision) string {
 // with its outcome and its events saved once, and the completion arriving
 // again (a feed replay) changes nothing.
 func TestTurnCompletedCrashAfterCommit(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	path := filepath.Join(t.TempDir(), "loom.db")
 	s := serviceAt(t, path, busy("a1", "single_task", StateActive))
 	done := loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: "turn_1", StopReason: "end_turn"}
+	sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": LiveOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
 	bus := s.Bus.Subscribe("a1")
 	crashCommit(t, 1)
 	if !panics(func() { _ = s.turnCompleted(ctx, s.get(t, "a1"), done) }) {
@@ -78,6 +88,11 @@ func TestTurnCompletedCrashAfterCommit(t *testing.T) {
 	}
 	if got := drain(bus); len(got) != 0 {
 		t.Fatalf("published %v before the crash; want nothing", types(got))
+	}
+	select {
+	case e := <-sub.C:
+		t.Fatalf("event log fanned out %s before the crash; want nothing", e.EventID)
+	default:
 	}
 	s = serviceAt(t, path) // restart
 	a, ids0 := s.get(t, "a1"), ids(rows(t, s, "a1", 0))
