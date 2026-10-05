@@ -521,9 +521,10 @@ func TestUnarchiveOneTransaction(t *testing.T) {
 	}
 }
 
-// TestReconcileLegacyCreateIncompleteRetriedAtStart: a row a previous Loom
-// marked create_incomplete for a failure that was not permanent (any
-// failure did) gets one retry at the next start, which finishes it.
+// TestReconcileLegacyCreateIncompleteRetriedAtStart: an earlier Loom
+// marked any failed Create create_incomplete. The upgrade turns that mark,
+// on a row below done, into create_retrying, so reconcile retries it and
+// finishes it.
 func TestReconcileLegacyCreateIncompleteRetriedAtStart(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -532,10 +533,92 @@ func TestReconcileLegacyCreateIncompleteRetriedAtStart(t *testing.T) {
 	}
 	id := onlyRow(t, e).AgentID
 	execSQL(t, e, `UPDATE agents SET attention_reason = 'create_incomplete' WHERE agent_id = ?`, id)
+	var v int
+	db, err := sql.Open("sqlite", "file:"+e.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	execSQL(t, e, fmt.Sprintf("PRAGMA user_version = %d", min(v, 12)-1)) // the release before OR4a
+	st, err := loomstore.Open(ctx, e.path)                               // the upgrade
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	e.st = st
 	s := e.service(ServiceConfig{})
 	runDispatcher(t, s)
 	settled(t, s)
 	finished(t, e, id)
+}
+
+// TestReconcileBelowRowTerminal: a row an earlier Loom left below stepRow
+// (its first message never stored) only a retried Create request can
+// finish, so reconcile shows create_incomplete and does not retry it.
+func TestReconcileBelowRowTerminal(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	if !crashAt(t, "worktree")(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) }) {
+		t.Fatal("did not crash")
+	}
+	id := onlyRow(t, e).AgentID
+	execSQL(t, e, `UPDATE agents SET create_step = 0 WHERE agent_id = ?`, id)
+	s := e.service(ServiceConfig{})
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	c.tick(t)
+	settled(t, s)
+	if a := onlyRow(t, e); deref(a.AttentionReason) != AttentionCreateIncomplete {
+		t.Fatalf("Attention = %q; want create_incomplete", deref(a.AttentionReason))
+	}
+	if got := c.backoffs(); len(got) != 0 {
+		t.Fatalf("backoffs = %v; a row only its Create request can finish was retried", got)
+	}
+	if _, err := s.Create(ctx, leadReq("r1")); err != nil { // the retried request finishes it
+		t.Fatal(err)
+	}
+	finished(t, e, id)
+}
+
+// badModel is a harness whose sessions refuse SetModel as a bad request.
+type badModel struct{ loomharness.Harness }
+
+func (b badModel) Session(ref loomharness.NativeRef) loomharness.Session {
+	return badModelSession{b.Harness.Session(ref)}
+}
+
+type badModelSession struct{ loomharness.Session }
+
+func (badModelSession) SetModel(context.Context, string, []loomharness.Option) error {
+	return fmt.Errorf("opencode: unknown variant: %w", loomharness.ErrBadRequest)
+}
+
+// TestCreateSetModelBadRequestTerminal: the harness refusing the session's
+// model options as a bad request is permanent too: create_incomplete, no retry.
+func TestCreateSetModelBadRequestTerminal(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	e.h.Harness = badModel{e.h.Harness}
+	s := e.service(ServiceConfig{})
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	req := leadReq("r1")
+	req.Overrides.Model, req.Overrides.Effort = "fake-model", "high"
+	if _, err := s.Create(ctx, req); err == nil {
+		t.Fatal("Create succeeded")
+	}
+	settled(t, s)
+	if a := onlyRow(t, e); deref(a.AttentionReason) != AttentionCreateIncomplete {
+		t.Fatalf("Attention = %q; want create_incomplete", deref(a.AttentionReason))
+	}
+	if got := c.backoffs(); len(got) != 0 {
+		t.Fatalf("backoffs = %v; a bad request was retried", got)
+	}
 }
 
 // TestReconcileDeleteUnsavedWorkNotRetried: a Delete the user confirmed

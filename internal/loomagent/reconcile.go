@@ -79,15 +79,15 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 var reconcileBackoff, reconcileBackoffMax = 100 * time.Millisecond, 30 * time.Second
 
 // owes reports whether a, not deleted, has a lifecycle marker for
-// reconcileAgent: a Delete requested or a Create below done. With live, one
-// whose Attention says only the user can finish it is left out: a terminal
-// create_incomplete (a retried Create request can), or delete_incomplete
-// (the Delete may need the user's unsaved-work confirmation; a failing
-// retry stays queued with its backoff anyway).
+// reconcileAgent: a Delete requested, or a Create below done that is not
+// terminal (create_incomplete: only a retried Create request can finish
+// it). With live, a Delete showing delete_incomplete is left out too: it may
+// need the user's unsaved-work confirmation, and a failing retry stays
+// queued with its backoff anyway.
 func owes(a loomstore.Agent, live bool) bool {
 	r := deref(a.AttentionReason)
 	return a.DeletedAt == nil && ((a.DeleteRequested && (!live || r != AttentionDeleteIncomplete)) ||
-		(a.CreateStep < stepDone && (!live || r != AttentionCreateIncomplete)))
+		(a.CreateStep < stepDone && r != AttentionCreateIncomplete))
 }
 
 // reconcileAgent is the one entry point that finishes agentID's lifecycle
@@ -252,9 +252,8 @@ var sweepPause = func() {}
 // resync queues every agent of s with a lifecycle marker: a Create below
 // done, a Delete requested, a native session purge-pending. The dispatcher
 // runs it at each resubscription and on its retry clock, the one recovery
-// resync clock; at its start, with all, it also retries those only the
-// user can finish, once (an earlier Loom marked any failed Create
-// create_incomplete).
+// resync clock; at its start, with all, it also retries once a Delete
+// showing delete_incomplete.
 func (s *Service) resync(ctx context.Context, all bool) {
 	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, IncludeArchived: true})
 	pending, perr := s.store.PurgePending(ctx, s.workspaceID)

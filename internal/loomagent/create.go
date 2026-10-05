@@ -345,8 +345,8 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 	if err != nil {
 		return a, permanent{err}
 	}
-	if a.CreateStep < stepRow {
-		return a, fmt.Errorf("loomagent: %s was not fully inserted; retry its Create", a.AgentID)
+	if a.CreateStep < stepRow { // an earlier Loom's row without its first message: only its Create request has it
+		return a, permanent{fmt.Errorf("loomagent: %s was not fully inserted; retry its Create", a.AgentID)}
 	}
 	if a.CreateStep < stepWorktree {
 		if a, err = s.ensureWorktree(ctx, a); err != nil {
@@ -475,17 +475,22 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 	ref, err := h.Open(ctx, loomharness.OpenSpec{Key: a.AgentID, Launch: launch, Preset: cfg.Open,
 		Dir: deref(a.WorktreePath), Model: cfg.Model, Rules: rules, Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
-		cause := harnessErr(err)
-		if errors.Is(err, loomharness.ErrBadRequest) {
-			cause = permanent{cause}
-		}
-		return loomharness.NativeRef{}, s.leftover(ctx, a.AgentID, a.Harness, ref, cause)
+		return loomharness.NativeRef{}, s.leftover(ctx, a.AgentID, a.Harness, ref, openErr(err))
 	}
 	createCrash("recorded")
 	if err := s.owned(ctx, a.AgentID, a.Harness, ref); err != nil {
 		return ref, err
 	}
 	return ref, s.reapply(ctx, a.Harness, ref, cfg, true)
+}
+
+// openErr is harnessErr for a harness call that sets up a session; a bad
+// request is permanent (harnessErr keeps only err's text).
+func openErr(err error) error {
+	if errors.Is(err, loomharness.ErrBadRequest) {
+		return permanent{harnessErr(err)}
+	}
+	return harnessErr(err)
 }
 
 // owned records ref, which Open returned, as a's working session; a

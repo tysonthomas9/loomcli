@@ -404,7 +404,7 @@ func TestCompletionOwedAtUpgrade(t *testing.T) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{"DROP TABLE agent_completion_markers", fmt.Sprintf("PRAGMA user_version = %d", v-1)} {
+	for _, q := range []string{"DROP TABLE agent_completion_markers", fmt.Sprintf("PRAGMA user_version = %d", min(v, 11)-1)} {
 		if _, err := db.Exec(q); err != nil { // the release before the markers
 			t.Fatal(q, err)
 		}

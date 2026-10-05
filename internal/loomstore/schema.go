@@ -192,4 +192,9 @@ SELECT a.agent_id, a.attempt, a.parent_agent_id, a.outcome, COALESCE(a.branch, '
 WHERE a.parent_agent_id IS NOT NULL AND a.mode = 'single_task' AND a.outcome IS NOT NULL AND a.deleted_at IS NULL
   AND a.state IN ('finished', 'archived') AND NOT EXISTS (SELECT 1 FROM agent_events e
     WHERE e.agent_id = a.parent_agent_id AND e.event_id = 'task_completed:' || a.agent_id || ':' || a.attempt);
+`, `
+-- OR4a: create_incomplete now means a Create no retry can finish; before,
+-- any failed Create showed it. A row below done (5) that shows it retries.
+UPDATE agents SET attention_reason = 'create_retrying'
+WHERE attention_reason = 'create_incomplete' AND create_step < 5 AND deleted_at IS NULL;
 `}

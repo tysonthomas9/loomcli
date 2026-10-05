@@ -272,7 +272,7 @@ func (s *Service) reapply(ctx context.Context, harness string, ref loomharness.N
 	if len(opts) == 0 && (opened || cfg.Model == "") {
 		return nil
 	}
-	return harnessErr(s.harnesses[harness].Session(ref).SetModel(ctx, cfg.Model, opts))
+	return openErr(s.harnesses[harness].Session(ref).SetModel(ctx, cfg.Model, opts))
 }
 
 // Capabilities is harness's last capability probe, for repo's clone when
