@@ -37,10 +37,11 @@ const (
 //  3. backfills every session's native history: missed events are saved
 //     once, open asks are rebuilt and stale ones saved as ask.lost, and a
 //     turn that ended while Loom was down ends (a single task finishes once);
-//  4. ends a running turn the harness no longer runs, and settles handed
-//     messages: found is delivered, not_found goes back in line, unknown
-//     shows Attention delivery_unknown and is never resent; the dispatcher
-//     then hands the next one over.
+//  4. runs reconcileAgent on every other agent: it ends a running turn the
+//     harness no longer runs, and settles handed messages: found is
+//     delivered, not_found goes back in line, unknown shows Attention
+//     delivery_unknown and is never resent; the dispatcher then hands the
+//     next one over. One that fails is retried by the reconcile queue.
 //
 // RunFeed sends subscribers feed.gap before each pass, so they catch up.
 // A failure on one agent shows as its Attention, or for a failed history
@@ -68,8 +69,10 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 	}
 	failed, err := s.backfill(ctx, harness)
 	for _, a := range agents {
-		if !a.DeleteRequested && !failed[a.AgentID] && failed != nil {
-			s.failed(ctx, a.AgentID, AttentionHarnessUnavailable, s.settle(ctx, a.AgentID))
+		if !owes(a, false) && !failed[a.AgentID] && failed != nil {
+			if err := s.reconcileAgent(ctx, a.AgentID); err != nil {
+				s.retryLater(a.AgentID)
+			}
 		}
 	}
 	return err
@@ -97,22 +100,29 @@ func owes(a loomstore.Agent, live bool) bool {
 }
 
 // reconcileAgent is the one entry point that finishes agentID's lifecycle
-// markers (OR4a): its purge-pending native sessions, then a Delete it
-// requested or else its Create steps below done. Start-up, feed gaps, the
-// dispatcher's wakes, failures and the resync clock all come here. An error
+// markers (OR4a) and settles it (OR4b): the task_completed records owed
+// for its attempts, its purge-pending native sessions, then a Delete it
+// requested, or else its Create steps below done, or else its turn and
+// waiting or handed slots (settle). Start-up, feed gaps, the dispatcher's
+// wakes, failures and the resync clock all come here. An error
 // means retry; a permanent Create failure shows create_incomplete and
 // returns nil, as no retry can fix it. It takes each agent lock itself and
 // holds none across another's.
 func (s *Service) reconcileAgent(ctx context.Context, agentID string) error {
-	a, err := s.store.GetAgent(ctx, agentID)
-	if errors.Is(err, loomstore.ErrNotFound) || (err == nil && a.WorkspaceID != s.workspaceID) {
-		return nil
-	} else if err != nil {
+	err := s.recordMarkers(ctx, agentID) // owed to its parent even once it is gone
+	a, gerr := s.store.GetAgent(ctx, agentID)
+	if errors.Is(gerr, loomstore.ErrNotFound) || (gerr == nil && a.WorkspaceID != s.workspaceID) {
 		return err
+	} else if gerr != nil {
+		return errors.Join(err, gerr)
 	}
-	err = s.purgePending(ctx, agentID)
+	err = errors.Join(err, s.purgePending(ctx, agentID))
 	switch {
+	case a.DeletedAt != nil:
 	case !owes(a, false):
+		serr := s.settle(ctx, agentID)
+		s.failed(ctx, agentID, AttentionHarnessUnavailable, serr)
+		err = errors.Join(err, serr)
 	case a.DeleteRequested:
 		derr := s.delete(ctx, DeleteRequest{AgentID: agentID})
 		s.failed(ctx, agentID, AttentionDeleteIncomplete, derr)
@@ -260,15 +270,16 @@ func (s *Service) reconcileDue(ctx context.Context) bool {
 var sweepPause = func() {}
 
 // resync queues every agent of s with a lifecycle marker: a Create below
-// done, a Delete requested, a native session purge-pending. The dispatcher
-// runs it at each resubscription and on its retry clock, the one recovery
-// resync clock; at its start, with all, it also retries once a Delete
+// done, a Delete requested, a native session purge-pending, a completion
+// marker (by its child). The dispatcher runs it at each resubscription and
+// on its retry clock, the one recovery resync clock; at its start, with all, it also retries once a Delete
 // showing delete_incomplete.
 func (s *Service) resync(ctx context.Context, all bool) {
 	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, IncludeArchived: true})
 	pending, perr := s.store.PurgePending(ctx, s.workspaceID)
+	owed, merr := s.store.CompletionMarkers(ctx, s.workspaceID)
 	sweepPause()
-	if err = errors.Join(err, perr); err != nil {
+	if err = errors.Join(err, perr, merr); err != nil {
 		slog.Warn("loomagent: reconcile resync", "error", err)
 	}
 	for _, a := range agents {
@@ -278,6 +289,9 @@ func (s *Service) resync(ctx context.Context, all bool) {
 	}
 	for _, n := range pending {
 		s.enqueue(n.AgentID)
+	}
+	for _, m := range owed {
+		s.enqueue(m.Child)
 	}
 }
 

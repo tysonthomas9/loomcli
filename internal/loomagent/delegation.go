@@ -402,29 +402,18 @@ func (s *Service) readHead(ctx context.Context, a loomstore.Agent, rec *TaskComp
 	return nil
 }
 
-// tryRecordCompletion is recordCompletion that logs a failure and marks the
-// record owed, for the dispatcher to retry.
-func (s *Service) tryRecordCompletion(ctx context.Context, m loomstore.CompletionMarker) {
-	if err := s.recordCompletion(ctx, m); err != nil {
-		slog.Warn("loomagent: task_completed not saved; will retry", "agent", m.Child, "error", err)
-		s.owed.Store(true)
-	}
-}
-
-// recordCompletions saves every owed task_completed record in the
-// workspace, from its completion marker: an attempt that ended just before
-// a crash, or whose record failed to save. Each is saved once. It holds no
-// agent lock when called.
-func (s *Service) recordCompletions(ctx context.Context) {
+// recordMarkers saves child's owed task_completed records, from its
+// completion markers: an attempt that ended just before a crash, or whose
+// record failed to save. Each is saved once. It holds no agent lock when
+// called; an error means retry.
+func (s *Service) recordMarkers(ctx context.Context, child string) error {
 	owed, err := s.store.CompletionMarkers(ctx, s.workspaceID)
-	if err != nil {
-		slog.Warn("loomagent: task_completed sweep", "error", err)
-		s.owed.Store(true)
-		return
-	}
 	for _, m := range owed {
-		s.tryRecordCompletion(ctx, m)
+		if m.Child == child {
+			err = errors.Join(err, s.recordCompletion(ctx, m))
+		}
 	}
+	return err
 }
 
 // deliverCompletions puts a's saved task_completed records that no slot has

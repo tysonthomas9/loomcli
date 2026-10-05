@@ -309,34 +309,34 @@ func (s *Service) runDispatcher(ctx context.Context, l *loop) {
 	s.recoverAtStart(ctx)
 	for start := true; ctx.Err() == nil; start = false {
 		sub := s.Bus.Subscribe()
-		s.recordCompletions(ctx) // what ended before the subscription, or while it lagged
-		s.resync(ctx, start)
-		s.reconcileDue(ctx)
+		s.resync(ctx, start) // what ended before the subscription, or while it lagged
 		if ids, err := s.store.PendingAgents(ctx, s.workspaceID); err == nil {
-			for _, id := range ids {
-				_ = s.dispatchWake(ctx, id)
+			for _, id := range ids { // a restart: settle every agent with a waiting or handed slot
+				s.enqueue(id)
 			}
 		}
+		s.reconcileDue(ctx)
 		l.took() // the sweep is work a Drain must see
 		s.follow(ctx, sub, l)
 		s.Bus.Unsubscribe(sub)
 	}
 }
 
-// completionRetry is how often the dispatcher retries owed task_completed records.
-var completionRetry = 5 * time.Second
+// resyncInterval is how often the dispatcher resyncs the reconcile queue:
+// the one recovery clock.
+var resyncInterval = 5 * time.Second
 
 // follow dispatches on each agent.idle and task_completed until sub ends or
 // ctx does, runs the reconcile queue as agents are queued and their
-// backoffs end, on each tick of s.tick (the recovery resync clock) retries
-// owed task_completed records and resyncs the queue, and answers Drain once
-// sub's queued events and the due reconciles are handled.
+// backoffs end, resyncs the queue on each tick of s.tick (the recovery
+// resync clock), and answers Drain once sub's queued events and the due
+// reconciles are handled.
 func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
-	retry, stop := s.tick(completionRetry)
+	retry, stop := s.tick(resyncInterval)
 	defer stop()
 	handle := func(e Event) bool {
 		if e.Type == EventStateChanged && (e.To == StateFinished || e.To == StateArchived) {
-			s.recordCompletions(ctx) // an attempt may have ended: save its record, with no lock held
+			s.enqueue(e.AgentID) // an attempt may have ended: its marker is owed
 		}
 		if e.Type == EventIdle || e.Type == KindTaskCompleted {
 			_ = s.dispatchWake(ctx, e.AgentID)
@@ -350,9 +350,6 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 			return
 		case <-retry:
 			l.took()
-			if s.owed.Swap(false) {
-				s.recordCompletions(ctx)
-			}
 			s.resync(ctx, false)
 			s.reconcileDue(ctx)
 		case <-s.queueWake:

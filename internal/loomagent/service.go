@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -138,9 +137,6 @@ type Service struct {
 	// ready closes when start-up recovery is done (nil: no gate); recovered closes it.
 	ready     chan struct{}
 	recovered func()
-	// owed is set when a task_completed record could not be saved; the
-	// dispatcher retries the sweep while it is set.
-	owed atomic.Bool
 	// catalogWait bounds how long a create waits for a harness's model
 	// catalog to load after it boots, polling every catalogPoll (MC1).
 	catalogWait, catalogPoll time.Duration
@@ -152,7 +148,7 @@ type Service struct {
 	// stoppedWork sums the items stopped loops handled after their last
 	// Drain answer, under mu.
 	stoppedWork int
-	// tick is the dispatcher's completion-retry clock and after RunFeed's
+	// tick is the dispatcher's recovery resync clock and after RunFeed's
 	// backoff timer: time's own, or a test's.
 	tick  ticker
 	after func(time.Duration) <-chan time.Time

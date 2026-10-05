@@ -35,6 +35,23 @@ func endAttempt(t *testing.T, s *Service, id, outcome string) {
 	s.recordCompletions(context.Background())
 }
 
+// recordCompletions saves every owed task_completed record now, child by
+// child, as the reconcile queue does; a failure stays owed.
+func (s *Service) recordCompletions(ctx context.Context) {
+	for _, m := range owedMarkers(nil, s) {
+		_ = s.recordMarkers(ctx, m.Child)
+	}
+}
+
+// owedMarkers is s's workspace's completion markers.
+func owedMarkers(t *testing.T, s *Service) []loomstore.CompletionMarker {
+	ms, err := s.store.CompletionMarkers(context.Background(), s.workspaceID)
+	if err != nil && t != nil {
+		t.Fatal(err)
+	}
+	return ms
+}
+
 // finishTurn is endAttempt without the dispatcher: the record stays owed.
 func finishTurn(t *testing.T, s *Service, id, outcome string) {
 	t.Helper()
@@ -305,7 +322,8 @@ func (w *flakyStatus) Status(ctx context.Context, s WorkspaceSpec) (WorkspaceSta
 }
 
 // TestTaskCompletedPortFailureRetries: a failed Workspace.Status saves no
-// record; the dispatcher retries it and saves one, with the port's head.
+// record; the reconcile queue retries it after its backoff and saves one,
+// with the port's head.
 func TestTaskCompletedPortFailureRetries(t *testing.T) {
 	ws := &flakyStatus{headWorkspace: headWorkspace{branch: "loom/agent/c1", head: "abc123"}}
 	ws.fail.Store(true)
@@ -319,14 +337,16 @@ func TestTaskCompletedPortFailureRetries(t *testing.T) {
 	}
 	runDispatcher(t, s) // its start-up sweep fails too
 	for range 3 {       // retries while the port still fails save nothing
+		settled(t, s)
 		clk.tick(t)
+		clk.fire()
 	}
 	settled(t, s)
 	if got := completions(t, s, "L"); len(got) != 0 {
 		t.Fatalf("saved while failing: %+v", got)
 	}
 	ws.fail.Store(false)
-	clk.tick(t)
+	clk.fire() // the reconcile queue's backoff
 	drained(t, s, "the record is saved", func() bool { return len(completions(t, s, "L")) == 1 })
 	for range 3 { // nothing is owed: more ticks save nothing more
 		clk.tick(t)
@@ -935,8 +955,8 @@ func TestTaskCompletedWorkingCopyNotOwned(t *testing.T) {
 	if len(recs) != 2 || recs[1].Child != "feature" || recs[1].Branch != "loom/agent/feature" || recs[1].Head != "" {
 		t.Fatalf("records = %+v; want feature's, with its branch and no head", recs)
 	}
-	if s.owed.Load() {
-		t.Fatal("feature's record is owed; a not-owned working copy never clears on retry")
+	if n := len(owedMarkers(t, s)); n != 0 {
+		t.Fatalf("%d records owed; a not-owned working copy never clears on retry", n)
 	}
 	runDispatcher(t, s)
 	clk.tick(t)
