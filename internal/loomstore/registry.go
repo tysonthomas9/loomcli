@@ -347,7 +347,8 @@ func (a Agent) StateOf() AgentState {
 // ErrStateChanged means the agent's state columns no longer equal the expected ones.
 var ErrStateChanged = errors.New("loomstore: agent state changed")
 
-// commitStateCrash runs inside CommitState's and SendEvents' transactions,
+// commitStateCrash runs inside the transactions of CommitState (and its
+// CommitCreate and CommitArchive), SendEvents and TombstoneEvents,
 // after their writes and before their COMMIT; tests crash there.
 var commitStateCrash = func() {}
 
@@ -365,7 +366,16 @@ func (s *Store) CommitState(ctx context.Context, agentID string, from, to AgentS
 			return nil, fmt.Errorf("loomstore: event %s of %s in a state change of %s", e.Kind, e.AgentID, agentID)
 		}
 	}
-	return s.commitState(ctx, agentID, from, to, rev, 0, events)
+	return s.commitState(ctx, agentID, from, to, rev, 0, events, nil)
+}
+
+// CommitArchive is CommitState that, in the same transaction, also records
+// agentID's archive reason and R29 clock start as SetArchive does.
+func (s *Store) CommitArchive(ctx context.Context, agentID string, from, to AgentState, rev int64, reason *string,
+	at *time.Time, events []Event) ([]Event, error) {
+	return s.commitState(ctx, agentID, from, to, rev, 0, events, func(tx *sql.Tx) error {
+		return setArchive(ctx, tx, agentID, reason, at)
+	})
 }
 
 // CommitCreate is CommitState for Create's last step: the same transaction
@@ -374,10 +384,13 @@ func (s *Store) CommitState(ctx context.Context, agentID string, from, to AgentS
 // agent's event is saved only while that agent is not deleted; no lock of
 // that agent is needed, as its seq is allocated in the transaction.
 func (s *Store) CommitCreate(ctx context.Context, agentID string, from, to AgentState, rev, step int64, events []Event) ([]Event, error) {
-	return s.commitState(ctx, agentID, from, to, rev, step, events)
+	return s.commitState(ctx, agentID, from, to, rev, step, events, nil)
 }
 
-func (s *Store) commitState(ctx context.Context, agentID string, from, to AgentState, rev, step int64, events []Event) (saved []Event, err error) {
+// commitState is the one state-change transaction; also, when set, writes
+// more of agentID's row after the compare-and-set.
+func (s *Store) commitState(ctx context.Context, agentID string, from, to AgentState, rev, step int64, events []Event,
+	also func(*sql.Tx) error) (saved []Event, err error) {
 	now := Stamp(time.Now())
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE agents SET state = ?, state_reason = ?, waiting_on = ?, outcome = ?,
@@ -394,6 +407,11 @@ func (s *Store) commitState(ctx context.Context, agentID string, from, to AgentS
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrStateChanged
+		}
+		if also != nil {
+			if err := also(tx); err != nil {
+				return err
+			}
 		}
 		if saved, err = commitEvents(ctx, tx, agentID, rev+1, events); err != nil {
 			return err
@@ -497,12 +515,18 @@ func (s *Store) ListAgents(ctx context.Context, f AgentFilter) ([]Agent, string,
 // `at`, keeping an earlier start so a retried Archive never moves it. A nil
 // `at` clears both (Unarchive cancels the clock).
 func (s *Store) SetArchive(ctx context.Context, agentID string, reason *string, at *time.Time) error {
+	return setArchive(ctx, s.db, agentID, reason, at)
+}
+
+func setArchive(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, agentID string, reason *string, at *time.Time) error {
 	var stamp *string
 	if at != nil {
 		v := Stamp(*at)
 		stamp = &v
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE agents SET archive_reason = ?,
+	_, err := q.ExecContext(ctx, `UPDATE agents SET archive_reason = ?,
 		archived_at = CASE WHEN ? IS NULL THEN NULL ELSE COALESCE(archived_at, ?) END,
 		history_purge_failed_at = CASE WHEN ? IS NULL THEN NULL ELSE history_purge_failed_at END, updated_at = ?
 		WHERE agent_id = ?`, reason, stamp, stamp, stamp, Stamp(time.Now()), agentID)
@@ -519,15 +543,34 @@ func (s *Store) MarkDeleteRequested(ctx context.Context, agentID string) error {
 
 // Tombstone marks agentID deleted at now, keeping an earlier tombstone.
 func (s *Store) Tombstone(ctx context.Context, agentID string, now time.Time) error {
-	return s.tx(ctx, func(tx *sql.Tx) error {
+	_, err := s.TombstoneEvents(ctx, agentID, now, nil)
+	return err
+}
+
+// TombstoneEvents is Tombstone that, in the same transaction that sets
+// deleted_at and history_purged_at and deletes agentID's events, also saves
+// events as AppendEvent does: after the purge they are live only (seq 0).
+// It returns them.
+func (s *Store) TombstoneEvents(ctx context.Context, agentID string, now time.Time, events []Event) (saved []Event, err error) {
+	err = s.tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE agents SET deleted_at = COALESCE(deleted_at, ?),
 			history_purged_at = COALESCE(history_purged_at, ?), history_purge_failed_at = NULL, updated_at = ?
 			WHERE agent_id = ?`, Stamp(now), Stamp(now), Stamp(now), agentID); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM agent_events WHERE agent_id = ?`, agentID)
-		return err
+		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_events WHERE agent_id = ?`, agentID); err != nil {
+			return err
+		}
+		if saved, err = commitEvents(ctx, tx, agentID, 0, events); err != nil {
+			return err
+		}
+		commitStateCrash()
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return saved, nil
 }
 
 // AgentSpec is the agent columns Update changes: the spec, its version, the

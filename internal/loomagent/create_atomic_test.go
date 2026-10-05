@@ -15,12 +15,19 @@ import (
 // writing it, as a crash before COMMIT would; the returned func lifts it.
 func failSaving(t *testing.T, e *createEnv, kind string) func() {
 	t.Helper()
+	return failOn(t, e, `INSERT ON agent_events WHEN NEW.kind = '`+kind+`'`)
+}
+
+// failOn makes every agent_events write matching on (an event and its WHEN)
+// fail inside its transaction; the returned func lifts it.
+func failOn(t *testing.T, e *createEnv, on string) func() {
+	t.Helper()
 	db, err := sql.Open("sqlite", "file:"+e.path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	trigger := `CREATE TRIGGER fail_saving BEFORE INSERT ON agent_events WHEN NEW.kind = '` + kind + //nolint:gosec // G202: DDL takes no parameters; kind is a test constant.
-		`' BEGIN SELECT RAISE(ABORT, 'crash'); END`
+	trigger := `CREATE TRIGGER fail_saving BEFORE ` + on + //nolint:gosec // G202: DDL takes no parameters; on is a test constant.
+		` BEGIN SELECT RAISE(ABORT, 'crash'); END`
 	if _, err := db.Exec(trigger); err != nil {
 		t.Fatal(err)
 	}

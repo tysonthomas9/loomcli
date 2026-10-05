@@ -279,6 +279,20 @@ func (s *Service) repoPath(ctx context.Context, repo string) (string, error) {
 // loomstore.ErrStateChanged when another writer moved a first; that writer
 // alone publishes. On any error nothing is saved or published.
 func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.AgentState) (loomstore.Agent, error) {
+	return s.changeState(ctx, a, to, nil)
+}
+
+// archiveCols is the archive reason and R29 clock start an archive change
+// records (loomstore.SetArchive).
+type archiveCols struct {
+	reason *string
+	at     *time.Time
+}
+
+// changeState is setState that, when arch is set, also records arch in the
+// same transaction, and saves more events after the change's own.
+func (s *Service) changeState(ctx context.Context, a loomstore.Agent, to loomstore.AgentState, arch *archiveCols,
+	more ...Event) (loomstore.Agent, error) {
 	from := a.StateOf()
 	if to.State != from.State && !slices.Contains(transitions[from.State], to.State) {
 		return a, fmt.Errorf("loomagent: invalid state change %s -> %s", from.State, to.State)
@@ -287,12 +301,19 @@ func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.
 	a.State, a.StateReason, a.WaitingOn, a.Outcome = to.State, to.StateReason, to.WaitingOn, to.Outcome
 	a.AttentionReason, a.RunningTurnID, a.Attempt = to.AttentionReason, to.RunningTurn, to.Attempt
 	a.Revision++
-	out := changeEvents(before, a)
+	out := append(changeEvents(before, a), more...)
 	rows, err := eventRows(out)
 	if err != nil {
 		return before, err
 	}
-	if _, err := s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, s.busPublish(out)); err != nil {
+	if arch == nil {
+		_, err = s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, s.busPublish(out))
+	} else {
+		_, err = s.events.commit(func() ([]loomstore.Event, error) {
+			return s.store.CommitArchive(ctx, a.AgentID, from, to, before.Revision, arch.reason, arch.at, rows)
+		}, s.busPublish(out))
+	}
+	if err != nil {
 		return before, err
 	}
 	if completed(a) && !completed(before) { // a child's attempt ended: tell its parent (§10.3)
@@ -348,16 +369,6 @@ func (s *Service) handOver(ctx context.Context, a loomstore.Agent, nativeKey fun
 		return loomstore.Slot{}, err
 	}
 	return s.store.HandNext(ctx, a.AgentID, nativeKey)
-}
-
-// publishChange saves, then publishes, the events of a's committed change.
-func (s *Service) publishChange(ctx context.Context, before, after loomstore.Agent) error {
-	for _, c := range changeEvents(before, after) {
-		if err := s.emit(ctx, c); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // changeEvents are the events of a's change from before to after.

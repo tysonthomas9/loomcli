@@ -55,12 +55,9 @@ func (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {
 	case a.Mode == "single_task" && a.State != StateFinished:
 		return &Error{Code: CodeAgentBusy, Message: "single task is not finished; archive it as cancelled"}
 	case a.State == StateActive || a.State == StateWaiting:
-		if err := s.store.SetArchive(ctx, a.AgentID, sp(req.Reason), nil); err != nil {
-			return err
-		}
 		to := a.StateOf()
 		to.State = StateStopping
-		_, err = s.setState(ctx, a, to)
+		_, err = s.changeState(ctx, a, to, &archiveCols{reason: sp(req.Reason)})
 		return err
 	case a.State == StateStopping:
 		return nil
@@ -69,24 +66,25 @@ func (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {
 }
 
 // finishArchive moves a through stopping to archived and starts the R29
-// clock. It keeps a's outcome.
+// clock. It keeps a's outcome. Each move records the archive reason in its
+// transaction, so a restart finishes a stopping done archive; the move to
+// archived also records the clock and agent.archived.
 func (s *Service) finishArchive(ctx context.Context, a loomstore.Agent, reason string) error {
 	var err error
-	if a.State != StateArchived {
+	now := time.Now()
+	if a.State == StateArchived { // a repeat: keep the clock, save nothing new
+		err = s.store.SetArchive(ctx, a.AgentID, sp(reason), &now)
+	} else {
 		if a.State != StateStopping {
-			if a, err = s.setState(ctx, a, loomstore.AgentState{State: StateStopping, Outcome: a.Outcome, Attempt: a.Attempt}); err != nil {
+			if a, err = s.changeState(ctx, a, loomstore.AgentState{State: StateStopping, Outcome: a.Outcome, Attempt: a.Attempt},
+				&archiveCols{reason: sp(reason)}); err != nil {
 				return err
 			}
 		}
-		if a, err = s.setState(ctx, a, loomstore.AgentState{State: StateArchived, Outcome: a.Outcome, Attempt: a.Attempt}); err != nil {
-			return err
-		}
-		if err := s.emit(ctx, Event{AgentID: a.AgentID, Type: EventArchived, Reason: reason, Time: time.Now()}); err != nil {
-			return err
-		}
+		a, err = s.changeState(ctx, a, loomstore.AgentState{State: StateArchived, Outcome: a.Outcome, Attempt: a.Attempt},
+			&archiveCols{reason: sp(reason), at: &now}, Event{AgentID: a.AgentID, Type: EventArchived, Reason: reason, Time: now})
 	}
-	now := time.Now()
-	if err := s.store.SetArchive(ctx, a.AgentID, sp(reason), &now); err != nil {
+	if err != nil {
 		return err
 	}
 	return s.retireLaunch(ctx, a)
@@ -179,19 +177,30 @@ func (s *Service) delete(ctx context.Context, req DeleteRequest) error {
 			return err
 		}
 	}
-	now := time.Now()
-	if err := s.store.Tombstone(ctx, a.AgentID, now); err != nil {
+	if err := s.tombstone(ctx, a); err != nil {
 		return err
 	}
-	if err := s.retireLaunch(ctx, a); err != nil {
+	return s.retireLaunch(ctx, a)
+}
+
+// tombstone marks a deleted and purges its history in one transaction under
+// the event lane, then publishes its settled and agent.deleted events, live
+// only, as the history is gone.
+func (s *Service) tombstone(ctx context.Context, a loomstore.Agent) error {
+	now, after := time.Now(), a
+	after.DeletedAt = sp(loomstore.Stamp(now))
+	out := append(changeEvents(a, after), Event{AgentID: a.AgentID, Type: EventDeleted, Time: now})
+	for i := range out {
+		out[i].EventID = a.AgentID + ":deleted:" + out[i].Type
+	}
+	rows, err := eventRows(out)
+	if err != nil {
 		return err
 	}
-	before := a
-	a.DeletedAt = sp(loomstore.Stamp(now))
-	if err := s.publishChange(ctx, before, a); err != nil {
-		return err
-	}
-	return s.emit(ctx, Event{AgentID: a.AgentID, Type: EventDeleted, Time: now})
+	_, err = s.events.commit(func() ([]loomstore.Event, error) {
+		return s.store.TombstoneEvents(ctx, a.AgentID, now, rows)
+	}, s.busPublish(out))
+	return err
 }
 
 // deleteChildren refuses with children_live while a child is not settled,
