@@ -93,7 +93,7 @@ func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 			continue
 		}
 		var ok bool
-		if a, ok, err = s.recoverHanded(ctx, a, sl); err != nil || !ok {
+		if a, ok, err = s.recoverHanded(ctx, a, sl, slots); err != nil || !ok {
 			return a, err
 		}
 		if slots, err = s.store.Slots(ctx, a.AgentID); err != nil {
@@ -114,7 +114,7 @@ func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 // recoverHanded settles a message a crash left handed. It returns true when
 // no turn runs from it and dispatch may go on: it never landed and is back
 // in line, or it landed and its turn already ended.
-func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl loomstore.Slot) (loomstore.Agent, bool, error) {
+func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl loomstore.Slot, slots []loomstore.Slot) (loomstore.Agent, bool, error) {
 	sess, _, err := s.current(ctx, a)
 	if err != nil || sess == nil {
 		return a, false, errors.Join(err, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"})
@@ -125,7 +125,7 @@ func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl looms
 	}
 	switch landed {
 	case loomharness.LandedFound:
-		if err := s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID); err != nil {
+		if err := s.settleInput(ctx, a.AgentID, slots, deref(sl.NativeKey), s.store.MarkDelivered); err != nil {
 			return a, false, err
 		}
 		st, err := sess.Status(ctx)
@@ -146,7 +146,7 @@ func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl looms
 		a, err = s.setState(ctx, a, to)
 		return a, false, err
 	case loomharness.LandedNotFound:
-		return a, true, s.store.Requeue(ctx, a.AgentID, sl.Sender, sl.RequestID)
+		return a, true, s.settleInput(ctx, a.AgentID, slots, deref(sl.NativeKey), s.store.Requeue)
 	}
 	if deref(a.AttentionReason) == AttentionDeliveryUnknown {
 		return a, false, nil
@@ -191,6 +191,20 @@ func (s *Service) handOff(ctx context.Context, a loomstore.Agent) (loomstore.Age
 	return s.setState(ctx, a, to)
 }
 
+// settleInput applies f (MarkDelivered or Requeue) to every one of slots
+// handed with native key key: the slots of one input.
+func (s *Service) settleInput(ctx context.Context, agentID string, slots []loomstore.Slot, key string,
+	f func(ctx context.Context, agentID, sender, requestID string) error) error {
+	for _, sl := range slots {
+		if sl.State == loomstore.SlotHanded && deref(sl.NativeKey) == key {
+			if err := f(ctx, agentID, sl.Sender, sl.RequestID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // HarnessEvent applies one harness event of agentID's current session to its
 // slots and turn (the 1.6d feed calls it): message.delivered marks the
 // handed message delivered; turn.started names the running turn;
@@ -229,18 +243,14 @@ func (s *Service) turnStarted(ctx context.Context, a loomstore.Agent, e loomharn
 	return err
 }
 
-// delivered marks a's handed message with native key key delivered.
+// delivered marks a's handed input with native key key delivered: every
+// slot handed with it (OR4c batches records into one input).
 func (s *Service) delivered(ctx context.Context, a loomstore.Agent, key string) error {
 	slots, err := s.store.Slots(ctx, a.AgentID)
 	if err != nil {
 		return err
 	}
-	for _, sl := range slots {
-		if sl.State == loomstore.SlotHanded && deref(sl.NativeKey) == key {
-			return s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID)
-		}
-	}
-	return nil // already delivered
+	return s.settleInput(ctx, a.AgentID, slots, key, s.store.MarkDelivered) // none: already delivered
 }
 
 // turnCompleted ends a's running turn e. Only the running turn's own

@@ -406,34 +406,70 @@ func nextQueuedAt(ctx context.Context, tx *sql.Tx, agentID string) (string, erro
 
 // HandNext hands over the agent's next waiting slot, a First slot before
 // others and then the oldest by queued_at, setting its native key from
-// nativeKey. It returns ErrNotFound when nothing waits.
+// nativeKey. Every other waiting slot that holds task_completed records
+// goes with it, under the same key, as one input (OR4c): its body is the
+// slots' bodies in that order. It returns ErrNotFound when nothing waits.
 func (s *Store) HandNext(ctx context.Context, agentID string, nativeKey func(Slot) string) (Slot, error) {
 	var sl Slot
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		err := tx.QueryRowContext(ctx, `SELECT `+slotCols+` FROM agent_slots WHERE agent_id = ? AND state = ?
-			ORDER BY first DESC, queued_at, sender LIMIT 1`, agentID, SlotWaiting).Scan(sl.fields()...)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
+		rows, err := tx.QueryContext(ctx, `SELECT `+slotCols+`, notices FROM agent_slots WHERE agent_id = ? AND state = ?
+			ORDER BY first DESC, queued_at, sender`, agentID, SlotWaiting)
 		if err != nil {
 			return err
 		}
-		k := nativeKey(sl)
-		sl.State, sl.NativeKey, sl.UpdatedAt = SlotHanded, &k, Stamp(time.Now())
-		if _, err = tx.ExecContext(ctx, `UPDATE agent_slots SET state = ?, native_key = ?, updated_at = ?
-			WHERE agent_id = ? AND sender = ?`, sl.State, k, sl.UpdatedAt, agentID, sl.Sender); err != nil {
+		var batch []Slot
+		for rows.Next() {
+			var w Slot
+			var raw sql.NullString
+			if err := rows.Scan(append(w.fields(), &raw)...); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			n, err := readNotices(raw)
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			if len(batch) == 0 || len(n.Keys) > 0 || legacyNotices(raw, w.RequestID) { // records join the next input
+				batch = append(batch, w)
+			}
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 			return err
 		}
-		// The Send's receipt now reports the hand-over, so a later retry of it
-		// returns state handed (design v2 §4.9), and records the input key.
-		// It also keeps the slot's notices, which a delivery reports.
-		_, err = tx.ExecContext(ctx, `UPDATE agent_send_receipts SET native_key = ?,
-			result_json = CASE WHEN json_valid(result_json) THEN json_set(result_json, '$.state', ?) ELSE result_json END,
-			notices = (SELECT notices FROM agent_slots WHERE agent_id = ? AND sender = ?)
-			WHERE agent_id = ? AND request_id = ?`, k, SlotHanded, agentID, sl.Sender, agentID, sl.RequestID)
-		return err
+		if len(batch) == 0 {
+			return ErrNotFound
+		}
+		sl = batch[0]
+		k := nativeKey(sl)
+		sl.State, sl.NativeKey, sl.UpdatedAt = SlotHanded, &k, Stamp(time.Now())
+		bodies := make([]string, 0, len(batch))
+		for _, w := range batch {
+			bodies = append(bodies, w.Body)
+			if err := handSlot(ctx, tx, w, k, sl.UpdatedAt); err != nil {
+				return err
+			}
+		}
+		sl.Body = strings.Join(bodies, "\n")
+		return nil
 	})
 	return sl, err
+}
+
+// handSlot marks w handed under native key k.
+func handSlot(ctx context.Context, tx *sql.Tx, w Slot, k, at string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_slots SET state = ?, native_key = ?, updated_at = ?
+		WHERE agent_id = ? AND sender = ?`, SlotHanded, k, at, w.AgentID, w.Sender); err != nil {
+		return err
+	}
+	// The Send's receipt now reports the hand-over, so a later retry of it
+	// returns state handed (design v2 §4.9), and records the input key.
+	// It also keeps the slot's notices, which a delivery reports.
+	_, err := tx.ExecContext(ctx, `UPDATE agent_send_receipts SET native_key = ?,
+		result_json = CASE WHEN json_valid(result_json) THEN json_set(result_json, '$.state', ?) ELSE result_json END,
+		notices = (SELECT notices FROM agent_slots WHERE agent_id = ? AND sender = ?)
+		WHERE agent_id = ? AND request_id = ?`, k, SlotHanded, w.AgentID, w.Sender, w.AgentID, w.RequestID)
+	return err
 }
 
 // Requeue puts the sender's handed message requestID back to waiting,
