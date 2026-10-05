@@ -1,0 +1,522 @@
+package loomagent
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"slices"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
+	"github.com/tysonthomas9/loomcli/internal/loomstore"
+)
+
+// OR4a: create, delete and purge markers are finished through one
+// reconcile queue, retried with backoff until they succeed; only a
+// permanent Create failure is terminal.
+
+// onlyRow is e's one agent row.
+func onlyRow(t *testing.T, e *createEnv) loomstore.Agent {
+	t.Helper()
+	rows, _, err := e.st.ListAgents(context.Background(), loomstore.AgentFilter{IncludeArchived: true})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %d, %v; want one", len(rows), err)
+	}
+	return rows[0]
+}
+
+// execSQL runs q on e's store file, as a legacy writer would have.
+func execSQL(t *testing.T, e *createEnv, q string, args ...any) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+e.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(q, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// retrying fails unless a shows a non-terminal Attention while its Create is retried.
+func retrying(t *testing.T, a loomstore.Agent, when string) {
+	t.Helper()
+	if r := deref(a.AttentionReason); r == "" || r == AttentionCreateIncomplete || a.CreateStep >= stepDone {
+		t.Fatalf("%s: step %d Attention %q; want a non-terminal Attention while it retries", when, a.CreateStep, r)
+	}
+}
+
+// finished fails unless id finished its Create once, idle or running its
+// first turn, with no Attention left.
+func finished(t *testing.T, e *createEnv, id string) loomstore.Agent {
+	t.Helper()
+	a, err := e.st.GetAgent(context.Background(), id)
+	if err != nil || a.CreateStep != stepDone || a.State == StateCreating || a.AttentionReason != nil ||
+		e.events(t, id, KindAgentCreated) != 1 {
+		t.Fatalf("%s: %v state %s step %d Attention %q created %d; want one finished Create",
+			id, err, a.State, a.CreateStep, deref(a.AttentionReason), e.events(t, id, KindAgentCreated))
+	}
+	return a
+}
+
+// backoff is the reconcile backoff after n failures: 100 ms doubling to 30 s.
+func backoff(n int) []time.Duration {
+	out, d := []time.Duration{}, 100*time.Millisecond
+	for range n {
+		out = append(out, d)
+		d = min(2*d, 30*time.Second)
+	}
+	return out
+}
+
+// TestReconcileUnknownErrorKeepsRetrying: an unknown failure is never
+// terminal. Ten failures, each retried after a backoff that doubles from
+// 100 ms and caps at 30 s, then the Create finishes and clears its Attention.
+func TestReconcileUnknownErrorKeepsRetrying(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	var fails atomic.Int32
+	fails.Store(10)
+	s := e.service(ServiceConfig{Launch: func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
+		if fails.Add(-1) >= 0 {
+			return loomharness.Launch{}, errors.New("something unknown broke")
+		}
+		return loomharness.Launch{Root: "/root/opencode"}, nil
+	}})
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s) // its start-up sweep is done before the Create
+	if _, err := s.Create(ctx, leadReq("r1")); err == nil {
+		t.Fatal("Create succeeded")
+	}
+	for i := 1; fails.Load() >= 0; i++ {
+		retrying(t, onlyRow(t, e), fmt.Sprintf("after %d failures", i))
+		if n := c.fire(); n != 1 {
+			t.Fatalf("after %d failures: %d retries pending; want 1", i, n)
+		}
+		settled(t, s)
+	}
+	finished(t, e, onlyRow(t, e).AgentID)
+	if got := c.backoffs(); !slices.Equal(got, backoff(10)) {
+		t.Fatalf("backoffs = %v; want %v", got, backoff(10))
+	}
+	if c.fire() != 0 {
+		t.Fatal("a retry is still pending after the Create finished")
+	}
+}
+
+// TestCreateTransientFailureNotTerminal: Create's own finishCreate fails
+// with the harness unavailable. The row shows a non-terminal Attention, is
+// queued for reconcile, and finishes once the harness is back.
+func TestCreateTransientFailureNotTerminal(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s) // its start-up sweep is done before the Create
+	fh.FailOpen(fmt.Errorf("opencode is down: %w", loomharness.ErrUnavailable), false)
+	if _, err := s.Create(ctx, leadReq("r1")); err == nil {
+		t.Fatal("Create succeeded with the harness unavailable")
+	}
+	retrying(t, onlyRow(t, e), "harness unavailable")
+	fh.FailOpen(nil, false)
+	if c.fire() != 1 {
+		t.Fatal("the failed Create was not queued for reconcile")
+	}
+	settled(t, s)
+	finished(t, e, onlyRow(t, e).AgentID)
+}
+
+// TestReconcileBaseRefDisappearsThenReturns: the base branch goes away
+// after the row is written, so the worktree step fails; it is retried with
+// backoff under a non-terminal Attention, and once the branch is back the
+// next retry finishes the agent and clears the Attention.
+func TestReconcileBaseRefDisappearsThenReturns(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s) // its start-up sweep is done before the Create
+	e.ws.setEnsureErr(errors.New("fatal: invalid reference: main"))
+	if _, err := s.Create(ctx, leadReq("r1")); err == nil {
+		t.Fatal("Create succeeded without its base branch")
+	}
+	retrying(t, onlyRow(t, e), "base gone")
+	if c.fire() != 1 {
+		t.Fatal("no retry pending")
+	}
+	settled(t, s)
+	retrying(t, onlyRow(t, e), "base still gone")
+	e.ws.setEnsureErr(nil)
+	if c.fire() != 1 {
+		t.Fatal("no second retry pending")
+	}
+	settled(t, s)
+	finished(t, e, onlyRow(t, e).AgentID)
+	if got := c.backoffs(); !slices.Equal(got, backoff(2)) {
+		t.Fatalf("backoffs = %v; want %v", got, backoff(2))
+	}
+}
+
+// TestReconcileCreateCancelledAfterRow: the request is cancelled after the
+// row is written. The row shows a non-terminal Attention (not
+// create_incomplete), and reconcile finishes it, first message included.
+func TestReconcileCreateCancelledAfterRow(t *testing.T) {
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s) // its start-up sweep is done before the Create
+	ctx, cancel := context.WithCancel(context.Background())
+	createCrash = func(p string) {
+		if p == "worktree" {
+			cancel()
+		}
+	}
+	t.Cleanup(func() { createCrash = func(string) {} })
+	req := leadReq("r1")
+	req.FirstMessage = "hello"
+	if _, err := s.Create(ctx, req); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Create = %v; want context.Canceled", err)
+	}
+	createCrash = func(string) {}
+	retrying(t, onlyRow(t, e), "cancelled")
+	if c.fire() != 1 {
+		t.Fatal("the cancelled Create was not queued for reconcile")
+	}
+	settled(t, s)
+	handedOnce(t, e, finished(t, e, onlyRow(t, e).AgentID).AgentID)
+}
+
+// TestReconcileQueueFirstFailure: the first message cannot be stored, so
+// the row is not stored either; the retried Create makes the agent with the
+// message queued once.
+func TestReconcileQueueFirstFailure(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	req := leadReq("r1")
+	req.FirstMessage = "hello"
+	lift := failOn(t, e, `INSERT ON agent_send_receipts`)
+	if _, err := s.Create(ctx, req); err == nil {
+		t.Fatal("Create succeeded without its first message")
+	}
+	if rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true}); len(rows) != 0 {
+		t.Fatalf("rows = %d, first at step %d; want none without the first message", len(rows), rows[0].CreateStep)
+	}
+	lift()
+	a, err := s.Create(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handedOnce(t, e, finished(t, e, a.AgentID).AgentID)
+}
+
+// TestCreateInsertAndFirstMessageAtomic: a crash before the insert commits
+// leaves no row and no slot message; one after it leaves the row at stepRow
+// with the message queued once, which a restart hands over once.
+func TestCreateInsertAndFirstMessageAtomic(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	req := leadReq("r1")
+	req.FirstMessage = "hello"
+	lift := failOn(t, e, `INSERT ON agent_send_receipts`) // the insert's transaction fails before its COMMIT
+	_, _ = e.service(ServiceConfig{}).Create(ctx, req)
+	lift()
+	if rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true}); len(rows) != 0 {
+		slots, _ := e.st.Slots(ctx, rows[0].AgentID)
+		t.Fatalf("before commit: rows %d at step %d, slots %d; want none", len(rows), rows[0].CreateStep, len(slots))
+	}
+	run := crashAt(t, "worktree") // the first point after the commit
+	if !run(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, req) }) {
+		t.Fatal("did not crash")
+	}
+	row := onlyRow(t, e)
+	slots, _ := e.st.Slots(ctx, row.AgentID)
+	if row.CreateStep != stepRow || len(slots) != 1 || slots[0].State != loomstore.SlotWaiting {
+		t.Fatalf("after commit: step %d slots %+v; want stepRow with the message waiting once", row.CreateStep, slots)
+	}
+	restart(t, e)
+	handedOnce(t, e, finished(t, e, row.AgentID).AgentID)
+}
+
+// TestReconcileRestartAtEveryCreateStep: a serve that stopped at stepRow,
+// stepWorktree or stepSession finishes the Create at its next start, with
+// no request retry: the dispatcher's start reconciles every marker.
+func TestReconcileRestartAtEveryCreateStep(t *testing.T) {
+	for point, step := range map[string]int64{"worktree": stepRow, "open": stepWorktree, "created": stepSession} {
+		t.Run(point, func(t *testing.T) {
+			ctx := context.Background()
+			e := newCreateEnv(t)
+			req := leadReq("r1")
+			req.FirstMessage = "hello"
+			if !crashAt(t, point)(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, req) }) {
+				t.Fatal("did not crash")
+			}
+			if got := onlyRow(t, e).CreateStep; got != step {
+				t.Fatalf("crashed at step %d; want %d", got, step)
+			}
+			s := e.service(ServiceConfig{})
+			runDispatcher(t, s)
+			settled(t, s)
+			a := finished(t, e, onlyRow(t, e).AgentID)
+			handedOnce(t, e, a.AgentID)
+			if len(e.h.specs) != 1 {
+				t.Fatalf("opens = %d; want 1", len(e.h.specs))
+			}
+		})
+	}
+}
+
+// TestReconcileDuringInsertSeesNothing: a reconcile while Create runs never
+// sees the row below stepRow: before the insert commits there is no row,
+// and after it the row is at stepRow, where reconcile, taking the agent
+// lock first, finishes it. Create then finds it done; create_incomplete is
+// never written.
+func TestReconcileDuringInsertSeesNothing(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	hooked := false
+	createCrash = func(p string) {
+		rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+		switch p {
+		case "row":
+			if len(rows) != 0 {
+				t.Errorf("before the insert committed a reader saw the row at step %d", rows[0].CreateStep)
+			}
+			reconcile(t, s)
+		case "inserted":
+			hooked = true
+			if len(rows) != 1 || rows[0].CreateStep < stepRow {
+				t.Errorf("after the insert: rows %+v; want one at stepRow", rows)
+			}
+			reconcile(t, s)
+		}
+	}
+	t.Cleanup(func() { createCrash = func(string) {} })
+	a, err := s.Create(ctx, leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hooked {
+		t.Fatal("reconcile never ran between the insert and finishCreate")
+	}
+	finished(t, e, a.AgentID)
+	if n := e.events(t, a.AgentID, EventAttentionRaised); n != 0 {
+		t.Fatalf("Attention raised %d time(s) on a Create that only raced reconcile", n)
+	}
+}
+
+// TestReconcileAndCreateRaceFinishOnce: in either lock order the steps run
+// once and nothing deadlocks: reconcile first (between the insert and
+// finishCreate), or Create first (reconcile waits on the lock Create holds).
+func TestReconcileAndCreateRaceFinishOnce(t *testing.T) {
+	for _, first := range []string{"reconcile", "create"} {
+		t.Run(first, func(t *testing.T) {
+			ctx := context.Background()
+			e := newCreateEnv(t)
+			s := e.service(ServiceConfig{})
+			done, ran := make(chan error, 1), false
+			createCrash = func(p string) {
+				switch {
+				case first == "reconcile" && p == "inserted":
+					ran = true
+					done <- s.Reconcile(ctx, "opencode")
+				case first == "create" && p == "open" && !ran: // Create holds the agent lock
+					ran = true
+					go func() { done <- s.Reconcile(ctx, "opencode") }()
+				}
+			}
+			t.Cleanup(func() { createCrash = func(string) {} })
+			a, err := s.Create(ctx, leadReq("r1"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ran {
+				t.Fatal("reconcile never raced the Create")
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			finished(t, e, a.AgentID)
+			if len(e.h.specs) != 1 || len(e.ws.ensured) != 1 {
+				t.Fatalf("opens %d ensures %d; want each once", len(e.h.specs), len(e.ws.ensured))
+			}
+		})
+	}
+}
+
+// TestReconcileScansByCreateStep: a legacy row that is idle but below done
+// is finished by reconcile, which scans create_step, not the creating state.
+func TestReconcileScansByCreateStep(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	if !crashAt(t, "created")(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) }) {
+		t.Fatal("did not crash")
+	}
+	id := onlyRow(t, e).AgentID
+	execSQL(t, e, `UPDATE agents SET state = 'idle' WHERE agent_id = ?`, id)
+	reconcile(t, e.service(ServiceConfig{}))
+	finished(t, e, id)
+}
+
+// TestReconcileTerminalConfigUnloadable: a row whose stored config cannot
+// load can never finish: reconcile shows one terminal create_incomplete and
+// does not retry it, at start-up or on the resync clock.
+func TestReconcileTerminalConfigUnloadable(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	if !crashAt(t, "worktree")(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) }) {
+		t.Fatal("did not crash")
+	}
+	id := onlyRow(t, e).AgentID
+	execSQL(t, e, `UPDATE agents SET spec_json = '{' WHERE agent_id = ?`, id)
+	s := e.service(ServiceConfig{})
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	c.tick(t) // the resync clock
+	settled(t, s)
+	a := onlyRow(t, e)
+	if deref(a.AttentionReason) != AttentionCreateIncomplete || e.events(t, id, EventAttentionRaised) != 1 {
+		t.Fatalf("Attention %q raised %d time(s); want one create_incomplete", deref(a.AttentionReason),
+			e.events(t, id, EventAttentionRaised))
+	}
+	if got := c.backoffs(); len(got) != 0 || c.fire() != 0 {
+		t.Fatalf("backoffs = %v; a permanent failure was retried", got)
+	}
+}
+
+// TestCreateHarnessBadRequestTerminal: the harness refusing the session as
+// a bad request is permanent. A Create stopped before Open is reconciled at
+// the next start; Open's bad request shows create_incomplete once, with no
+// retry.
+func TestCreateHarnessBadRequestTerminal(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	if !crashAt(t, "open")(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) }) {
+		t.Fatal("did not crash")
+	}
+	e.h.Harness.(*fake.Harness).FailOpen(fmt.Errorf("opencode: unknown preset: %w", loomharness.ErrBadRequest), false)
+	s := e.service(ServiceConfig{})
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	c.tick(t) // the resync clock
+	settled(t, s)
+	a := onlyRow(t, e)
+	if deref(a.AttentionReason) != AttentionCreateIncomplete || e.events(t, a.AgentID, EventAttentionRaised) != 1 {
+		t.Fatalf("Attention %q raised %d time(s); want one create_incomplete", deref(a.AttentionReason),
+			e.events(t, a.AgentID, EventAttentionRaised))
+	}
+	if got := c.backoffs(); len(got) != 0 || len(e.h.specs) != 1 {
+		t.Fatalf("backoffs = %v, opens %d; a bad request was retried", got, len(e.h.specs))
+	}
+}
+
+// TestReconcilePurgeRetriesWithBackoff: a leftover session whose purge
+// fails stays purge-pending and is retried with backoff until it goes.
+func TestReconcilePurgeRetriesWithBackoff(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateIdle)
+	c := useTestClock(e.s)
+	runDispatcher(t, e.s)
+	settled(t, e.s)
+	e.fb.FailOpen(errors.New("open failed after creating"), true)
+	e.fb.FailPurge(errors.New("purge down"))
+	if _, err := e.s.Update(ctx, switchReq("r1", 1, "fb")); err == nil {
+		t.Fatal("switch succeeded with a failing Open")
+	}
+	e.fb.FailOpen(nil, false)
+	pending := func() []loomstore.NativeSession { p, _ := e.s.store.PurgePending(ctx, "ws"); return p }
+	left := pending()
+	if len(left) != 1 {
+		t.Fatalf("purge-pending = %v; want the leftover", left)
+	}
+	if c.fire() != 1 {
+		t.Fatal("the failed purge was not queued")
+	}
+	settled(t, e.s)
+	if len(pending()) != 1 {
+		t.Fatal("the purge went though it still fails")
+	}
+	e.fb.FailPurge(nil)
+	if c.fire() != 1 {
+		t.Fatal("no second retry pending")
+	}
+	settled(t, e.s)
+	if p := pending(); len(p) != 0 || exists(e.fb, loomharness.NativeRef{Root: left[0].NativeRoot, NativeID: left[0].NativeID}) {
+		t.Fatalf("purge-pending = %v after the purge recovered", p)
+	}
+	if got := c.backoffs(); !slices.Equal(got, backoff(2)) {
+		t.Fatalf("backoffs = %v; want %v", got, backoff(2))
+	}
+}
+
+// TestDeleteRetireFailureRetried: Retire fails after Delete purged the
+// agent. Retire runs before the tombstone, so the delete marker stays and
+// the next start re-runs Retire, then tombstones the agent.
+func TestDeleteRetireFailureRetried(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	var retired atomic.Int32
+	cfg := ServiceConfig{Retire: func(context.Context, loomstore.Agent) error {
+		if retired.Add(1) == 1 {
+			return errors.New("bridge removal failed")
+		}
+		return nil
+	}}
+	a, err := e.service(cfg).Create(ctx, leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.service(cfg).Delete(ctx, DeleteRequest{AgentID: a.AgentID}); err == nil {
+		t.Fatal("Delete succeeded although Retire failed")
+	}
+	s := e.service(cfg) // restart
+	runDispatcher(t, s)
+	settled(t, s)
+	row, _ := e.st.GetAgent(ctx, a.AgentID)
+	if retired.Load() != 2 || row.DeletedAt == nil {
+		t.Fatalf("Retire ran %d time(s), deleted %v; want it re-run, then the tombstone", retired.Load(), row.DeletedAt != nil)
+	}
+}
+
+// TestUnarchiveOneTransaction: Unarchive's clock reset and its state change
+// are one write. A failed state save leaves the agent archived with its R29
+// clock; the retry unarchives it.
+func TestUnarchiveOneTransaction(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	a, err := s.Create(ctx, leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: a.AgentID}); err != nil {
+		t.Fatal(err)
+	}
+	lift := failSaving(t, e, EventStateChanged)
+	if err := s.Unarchive(ctx, ArchiveRequest{AgentID: a.AgentID}); err == nil {
+		t.Fatal("Unarchive succeeded although its state change failed")
+	}
+	lift()
+	if row, _ := e.st.GetAgent(ctx, a.AgentID); row.State != StateArchived || row.ArchivedAt == nil || row.ArchiveReason == nil {
+		t.Fatalf("after a failed Unarchive: state %s archived_at %v reason %v; want archived with its clock",
+			row.State, row.ArchivedAt, row.ArchiveReason)
+	}
+	if err := s.Unarchive(ctx, ArchiveRequest{AgentID: a.AgentID}); err != nil {
+		t.Fatal(err)
+	}
+	if row, _ := e.st.GetAgent(ctx, a.AgentID); row.State != StateIdle || row.ArchivedAt != nil || row.ArchiveReason != nil {
+		t.Fatalf("after Unarchive: state %s archived_at %v", row.State, row.ArchivedAt)
+	}
+}

@@ -152,6 +152,8 @@ func (e *Error) Unwrap() error {
 		return loomharness.ErrUnavailable
 	case "session_missing":
 		return loomharness.ErrSessionNotFound
+	case "bad_request":
+		return loomharness.ErrBadRequest
 	}
 	return nil
 }

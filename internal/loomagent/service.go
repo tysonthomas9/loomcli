@@ -71,7 +71,8 @@ type ServiceConfig struct {
 	Harnesses map[string]loomharness.Harness
 	// Launch returns a's opaque launch input on harness; nil launches with none.
 	Launch func(ctx context.Context, a loomstore.Agent, harness string) (loomharness.Launch, error)
-	// Retire runs once a is archived or deleted, to remove what Launch left
+	// Retire runs once a is archived, or purged by its Delete just before
+	// the tombstone (so a failed one is retried), to remove what Launch left
 	// at rest (its bridge settings); the next Resume after an Unarchive
 	// launches it again. It must be safe to repeat; nil does nothing.
 	Retire func(ctx context.Context, a loomstore.Agent) error
@@ -155,6 +156,10 @@ type Service struct {
 	// backoff timer: time's own, or a test's.
 	tick  ticker
 	after func(time.Duration) <-chan time.Time
+	// queue is the reconcile queue by agent ID, under mu; queueWake tells
+	// the dispatcher it changed.
+	queue     map[string]*queued
+	queueWake chan struct{}
 }
 
 // New returns a Service for cfg.
@@ -165,6 +170,7 @@ func New(cfg ServiceConfig) *Service {
 		retire: cfg.Retire, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
 		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After,
+		queue: map[string]*queued{}, queueWake: make(chan struct{}, 1),
 		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
 	if cfg.RecoverFirst {
 		s.ready = make(chan struct{})

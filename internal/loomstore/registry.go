@@ -87,7 +87,11 @@ var (
 // InsertAgent inserts a. ProfileKey is fixed here and never changes. Native
 // session ownership is recorded separately with RecordNativeSession, once the
 // harness has returned the session's root.
-func (s *Store) InsertAgent(ctx context.Context, a Agent) error {
+func (s *Store) InsertAgent(ctx context.Context, a Agent) error { return insertAgent(ctx, s.db, a) }
+
+func insertAgent(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, a Agent) error {
 	now := Stamp(time.Now())
 	if a.CreatedAt == "" {
 		a.CreatedAt = now
@@ -101,8 +105,26 @@ func (s *Store) InsertAgent(ctx context.Context, a Agent) error {
 	f := a.fields()
 	f = f[:len(f)-2] // insertCols: a new agent has no failed purge and revision 0
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(f)), ",")
-	_, err := s.db.ExecContext(ctx, "INSERT INTO agents ("+insertCols+") VALUES ("+ph+")", f...) //nolint:gosec // G202: constant column list and placeholders only.
+	_, err := q.ExecContext(ctx, "INSERT INTO agents ("+insertCols+") VALUES ("+ph+")", f...) //nolint:gosec // G202: constant column list and placeholders only.
 	return err
+}
+
+// InsertCreate inserts a Create's row a and, when first is set, sends its
+// first message as Send does, in one transaction: no reader sees the row
+// without its message.
+func (s *Store) InsertCreate(ctx context.Context, a Agent, first *SlotSend) error {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		if err := insertAgent(ctx, tx, a); err != nil {
+			return err
+		}
+		if first != nil {
+			if _, _, _, err := sendTx(ctx, tx, *first); err != nil {
+				return err
+			}
+		}
+		commitStateCrash()
+		return nil
+	})
 }
 
 // GetAgent returns the agent row by id, tombstoned or not.
@@ -352,8 +374,8 @@ func (a Agent) StateOf() AgentState {
 var ErrStateChanged = errors.New("loomstore: agent state changed")
 
 // commitStateCrash runs inside the transactions of CommitState (and its
-// CommitCreate and CommitArchive), CommitSpec, SendEvents, TombstoneEvents and
-// DeliverCompletion, after their writes and before their COMMIT; tests crash there.
+// CommitCreate and CommitArchive), CommitSpec, SendEvents, InsertCreate,
+// TombstoneEvents and DeliverCompletion, after their writes and before their COMMIT; tests crash there.
 var commitStateCrash = func() {}
 
 // CommitState is the one write of an agent's state change. In one

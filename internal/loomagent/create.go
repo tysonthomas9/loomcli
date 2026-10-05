@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -61,8 +62,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (AgentInfo, err
 		a, err = s.insertCreate(ctx, req)
 	}
 	queued := true
-	if err == nil && a.CreateStep < stepRow {
-		createCrash("row")
+	if err == nil && a.CreateStep < stepRow { // a row written before its insert took the first message along
 		err = s.queueFirst(ctx, a, req)
 		queued = err == nil
 	}
@@ -74,20 +74,65 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (AgentInfo, err
 		return AgentInfo{}, err
 	}
 	id := a.AgentID
+	createCrash("inserted")
 	if a, err = s.finishCreate(ctx, id); err != nil {
 		s.createFailed(ctx, id, err)
+		if !isPermanent(err) {
+			s.retryLater(id)
+		}
 		return AgentInfo{}, err
 	}
 	return info(a), nil
 }
 
-// createFailed shows create_incomplete on agentID, whose Create failed after
-// its row was written; a retry or Reconcile finishes it and clears this. The
-// mark is saved even when the request was cancelled, within a bounded time.
+// permanent is a Create failure no retry can fix (OR4a): the row's stored
+// Config does not load, or the harness refused the session as a bad request.
+type permanent struct{ error }
+
+func (p permanent) Unwrap() error { return p.error }
+
+func isPermanent(err error) bool {
+	var p permanent
+	return errors.As(err, &p)
+}
+
+// createFailed shows why agentID's Create, whose row is written, has not
+// finished: the terminal create_incomplete for a permanent failure, else
+// create_retrying while reconcile retries it. It is saved even when the
+// request was cancelled, within a bounded time.
 func (s *Service) createFailed(ctx context.Context, agentID string, err error) {
+	if err == nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	s.failed(ctx, agentID, AttentionCreateIncomplete, err)
+	reason := AttentionCreateRetrying
+	if isPermanent(err) {
+		reason = AttentionCreateIncomplete
+	}
+	slog.Warn("loomagent: create did not finish", "agent", agentID, "reason", reason, "error", err)
+	if err := s.createAttention(ctx, agentID, reason); err != nil && !isCode(err, CodeAgentNotFound) {
+		slog.Warn("loomagent: could not raise Attention", "agent", agentID, "reason", reason, "error", err)
+	}
+}
+
+// createAttention shows reason on agentID under its lock, after checking
+// its Create is still below done; it replaces the other Create reason but no
+// other Attention.
+func (s *Service) createAttention(ctx context.Context, agentID, reason string) error {
+	defer s.lock(agentID)()
+	a, err := s.live(ctx, agentID)
+	cur := deref(a.AttentionReason)
+	if err != nil || a.CreateStep >= stepDone || cur == reason || (cur != "" && !createReason(cur)) {
+		return err
+	}
+	_, err = s.raiseAttention(ctx, a, reason)
+	return err
+}
+
+// createReason reports whether reason is one a Create below done shows.
+func createReason(reason string) bool {
+	return reason == AttentionCreateIncomplete || reason == AttentionCreateRetrying
 }
 
 // sameCreate checks a Create replayed by ExternalKey against the agent it
@@ -156,7 +201,7 @@ func (s *Service) checkCreate(ctx context.Context, req CreateRequest) (Preset, s
 }
 
 // insertCreate validates req, resolves its Config and inserts its row in
-// state creating (step 1).
+// state creating with its first message, in one transaction (step 1).
 func (s *Service) insertCreate(ctx context.Context, req CreateRequest) (loomstore.Agent, error) {
 	p, name, parent, err := s.checkCreate(ctx, req)
 	if err != nil {
@@ -185,7 +230,9 @@ func (s *Service) insertCreate(ctx context.Context, req CreateRequest) (loomstor
 		return loomstore.Agent{}, err
 	}
 	a := s.newRow(p, name, parent, req, cfg, string(spec))
-	if err := s.store.InsertAgent(ctx, a); err != nil {
+	a.CreateStep = stepRow
+	createCrash("row")
+	if err := s.store.InsertCreate(ctx, a, firstSend(a, req)); err != nil {
 		if strings.Contains(err.Error(), "agents.name") {
 			return a, nameTaken(name)
 		}
@@ -264,13 +311,22 @@ func (s *Service) withBackend(ctx context.Context, o Overrides) (Overrides, erro
 	return o, nil
 }
 
+// firstSend is req's first message for the creator's slot, or nil.
+func firstSend(a loomstore.Agent, req CreateRequest) *loomstore.SlotSend {
+	if req.FirstMessage == "" {
+		return nil
+	}
+	return &loomstore.SlotSend{AgentID: a.AgentID, Sender: req.Actor.Kind + ":" + req.Actor.ID,
+		RequestID: "create:" + req.RequestID, Body: req.FirstMessage, Source: "create",
+		Result: func(bool) (string, error) { return `{"result":"queued"}`, nil }}
+}
+
 // queueFirst puts req's first message in the creator's slot and finishes
-// step 1. The slot receipt makes a repeat a no-op.
+// step 1, for a row written before its insert took the message along. The
+// slot receipt makes a repeat a no-op.
 func (s *Service) queueFirst(ctx context.Context, a loomstore.Agent, req CreateRequest) error {
-	if req.FirstMessage != "" {
-		if _, _, err := s.store.Send(ctx, loomstore.SlotSend{AgentID: a.AgentID, Sender: req.Actor.Kind + ":" + req.Actor.ID,
-			RequestID: "create:" + req.RequestID, Body: req.FirstMessage, Source: "create",
-			Result: func(bool) (string, error) { return `{"result":"queued"}`, nil }}); err != nil {
+	if f := firstSend(a, req); f != nil {
+		if _, _, err := s.store.Send(ctx, *f); err != nil {
 			return err
 		}
 	}
@@ -278,7 +334,7 @@ func (s *Service) queueFirst(ctx context.Context, a loomstore.Agent, req CreateR
 }
 
 // finishCreate runs agentID's remaining Create steps from its create_step.
-// Every step is safe to repeat; Reconcile calls it for a row left creating.
+// Every step is safe to repeat; reconcileAgent calls it for a row below done.
 func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.Agent, error) {
 	defer s.lock(agentID)()
 	a, err := s.agent(ctx, agentID)
@@ -287,7 +343,7 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 	}
 	cfg, err := loadConfig(a)
 	if err != nil {
-		return a, err
+		return a, permanent{err}
 	}
 	if a.CreateStep < stepRow {
 		return a, fmt.Errorf("loomagent: %s was not fully inserted; retry its Create", a.AgentID)
@@ -318,17 +374,17 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 }
 
 // commitCreated is Create's last step, one transaction under the event lane
-// (Store.CommitCreate): a creating row moves to idle, clearing
-// create_incomplete; create_step becomes done; and the created events are
+// (Store.CommitCreate): a creating row moves to idle; a Create Attention
+// clears; create_step becomes done; and the created events are
 // saved, the parent's child.created only while the parent is not deleted.
 // It takes no parent lock. On any error nothing is saved or published.
 func (s *Service) commitCreated(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
 	before, to := a, a.StateOf()
 	if a.State == StateCreating {
 		to.State = StateIdle
-		if deref(to.AttentionReason) == AttentionCreateIncomplete {
-			to.AttentionReason = nil
-		}
+	}
+	if createReason(deref(to.AttentionReason)) {
+		to.AttentionReason = nil
 	}
 	a.State, a.AttentionReason, a.CreateStep = to.State, to.AttentionReason, stepDone
 	a.Revision++
@@ -419,7 +475,11 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 	ref, err := h.Open(ctx, loomharness.OpenSpec{Key: a.AgentID, Launch: launch, Preset: cfg.Open,
 		Dir: deref(a.WorktreePath), Model: cfg.Model, Rules: rules, Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
-		return loomharness.NativeRef{}, s.leftover(ctx, a.AgentID, a.Harness, ref, harnessErr(err))
+		cause := harnessErr(err)
+		if errors.Is(err, loomharness.ErrBadRequest) {
+			cause = permanent{cause}
+		}
+		return loomharness.NativeRef{}, s.leftover(ctx, a.AgentID, a.Harness, ref, cause)
 	}
 	createCrash("recorded")
 	if err := s.owned(ctx, a.AgentID, a.Harness, ref); err != nil {
@@ -441,7 +501,7 @@ func (s *Service) owned(ctx context.Context, agentID, harness string, ref loomha
 
 // leftover handles a failed Open: a non-zero ref it returned is a session it
 // created and could not remove, so it is recorded as owned and
-// purge-pending, then purged (PurgeLeftovers retries it). It returns cause,
+// purge-pending, then purged (reconcileAgent retries it). It returns cause,
 // with any recording or purge error joined.
 func (s *Service) leftover(ctx context.Context, agentID, harness string, ref loomharness.NativeRef, cause error) error {
 	if ref == (loomharness.NativeRef{}) {
@@ -452,6 +512,7 @@ func (s *Service) leftover(ctx context.Context, agentID, harness string, ref loo
 		return errors.Join(cause, err)
 	}
 	if err := s.purgeLeftover(ctx, n); err != nil {
+		s.retryLater(agentID)
 		return errors.Join(cause, err)
 	}
 	return cause
@@ -469,27 +530,17 @@ func (s *Service) purgeLeftover(ctx context.Context, n loomstore.NativeSession) 
 	return s.store.ClearPurgePending(ctx, n)
 }
 
-// sweepPause runs between the sweep's read of the pending list and its
-// purges; tests use it to interleave a re-Open.
-var sweepPause = func() {}
-
-// PurgeLeftovers retries every purge-pending session; the dispatcher runs it
-// at start-up, so a purge that failed is retried after a restart. Each purge
-// runs under its owner's agent lock, which Create and a harness switch hold
-// around Open, and only if the mark is still there: a re-Open that returned
-// the same session as a working one cleared it.
-func (s *Service) PurgeLeftovers(ctx context.Context) error {
+// purgePending purges agentID's purge-pending sessions (reconcileAgent
+// retries them). It reads the marks under the agent lock, which Create and
+// a harness switch hold around Open, so a re-Open that returned the same
+// session as a working one, clearing its mark, is never purged.
+func (s *Service) purgePending(ctx context.Context, agentID string) error {
+	defer s.lock(agentID)()
 	pending, err := s.store.PurgePending(ctx, s.workspaceID)
-	sweepPause()
 	for _, n := range pending {
-		err = errors.Join(err, func() error {
-			defer s.lock(n.AgentID)()
-			now, err := s.store.PurgePending(ctx, s.workspaceID)
-			if err != nil || !slices.Contains(now, n) {
-				return err
-			}
-			return s.purgeLeftover(ctx, n)
-		}())
+		if n.AgentID == agentID {
+			err = errors.Join(err, s.purgeLeftover(ctx, n))
+		}
 	}
 	return err
 }

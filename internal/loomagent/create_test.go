@@ -839,8 +839,9 @@ func TestCreateNeedsBaseRefBeforeRow(t *testing.T) {
 	}
 }
 
-// CR1: a Create that fails after its row is written shows create_incomplete
-// at once, rather than sitting in creating with nothing to say why.
+// CR1: a Create that fails after its row is written shows an Attention at
+// once, rather than sitting in creating with nothing to say why; an unknown
+// failure is retried (create_retrying), never terminal (OR4a).
 func TestCreateFailureAfterRowShowsAttention(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -851,8 +852,8 @@ func TestCreateFailureAfterRowShowsAttention(t *testing.T) {
 		t.Fatal("Create succeeded")
 	}
 	rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
-	if len(rows) != 1 || deref(rows[0].AttentionReason) != AttentionCreateIncomplete {
-		t.Fatalf("rows = %+v", rows)
+	if len(rows) != 1 || deref(rows[0].AttentionReason) != AttentionCreateRetrying {
+		t.Fatalf("rows = %d, Attention %q; want one retrying", len(rows), deref(rows[0].AttentionReason))
 	}
 	a, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) // a retry finishes it and clears the Attention
 	if err != nil {
@@ -883,22 +884,23 @@ func TestLateCreateIncompleteSkipsFinishedAgent(t *testing.T) {
 	}
 }
 
-// The other order: a reconcile flags create_incomplete while a Create is in
-// flight (row inserted, step 1 not yet recorded); the Create then finishes
-// and clears it, leaving no stale Attention on the idle agent.
+// The other order: a Create Attention is raised while a Create is in
+// flight (row inserted, before finishCreate); the Create then finishes and
+// clears it, leaving no stale Attention on the idle agent. (A first message
+// that cannot be stored, or a request cancelled after the row is written,
+// is TestReconcileQueueFirstFailure and TestReconcileCreateCancelledAfterRow.)
 func TestCreateClearsCreateIncompleteRaisedInFlight(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
 	s := e.service(ServiceConfig{})
 	createCrash = func(p string) {
-		if p != "row" {
+		if p != "inserted" {
 			return
 		}
-		rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
-		_, err := s.finishCreate(ctx, rows[0].AgentID) // what Reconcile does with a creating row
-		s.failed(ctx, rows[0].AgentID, AttentionCreateIncomplete, err)
-		if r, _ := e.st.GetAgent(ctx, rows[0].AgentID); deref(r.AttentionReason) != AttentionCreateIncomplete {
-			t.Errorf("in flight: Attention = %v; want create_incomplete raised", deref(r.AttentionReason))
+		id := onlyRow(t, e).AgentID
+		s.createFailed(ctx, id, errors.New("an earlier attempt failed"))
+		if r, _ := e.st.GetAgent(ctx, id); deref(r.AttentionReason) != AttentionCreateRetrying {
+			t.Errorf("in flight: Attention = %v; want create_retrying raised", deref(r.AttentionReason))
 		}
 	}
 	t.Cleanup(func() { createCrash = func(string) {} })
@@ -909,58 +911,5 @@ func TestCreateClearsCreateIncompleteRaisedInFlight(t *testing.T) {
 	row, _ := e.st.GetAgent(ctx, a.AgentID)
 	if row.State != StateIdle || row.AttentionReason != nil {
 		t.Fatalf("after Create: state %s Attention %v; want idle with none", row.State, deref(row.AttentionReason))
-	}
-}
-
-// A Create whose first message cannot be queued (step 1, right after the row
-// is written) shows create_incomplete too, not a bare creating row.
-func TestCreateQueueFirstFailureShowsAttention(t *testing.T) {
-	ctx := context.Background()
-	e := newCreateEnv(t)
-	s := e.service(ServiceConfig{})
-	createCrash = func(p string) {
-		if p != "row" {
-			return
-		}
-		rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
-		if _, _, err := e.st.Send(ctx, loomstore.SlotSend{AgentID: rows[0].AgentID, Sender: "user:local", RequestID: "busy",
-			Body: "x", Hand: true, NativeKey: "k", Result: func(bool) (string, error) { return `{}`, nil }}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Cleanup(func() { createCrash = func(string) {} })
-	req := leadReq("r1")
-	req.FirstMessage = "hello"
-	if _, err := s.Create(ctx, req); !errors.Is(err, loomstore.ErrSlotBusy) {
-		t.Fatalf("Create = %v; want the queueFirst failure", err)
-	}
-	rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
-	if len(rows) != 1 || rows[0].State != StateCreating || deref(rows[0].AttentionReason) != AttentionCreateIncomplete {
-		t.Fatalf("rows = %d, state %s, Attention %v; want one creating row with create_incomplete",
-			len(rows), rows[0].State, deref(rows[0].AttentionReason))
-	}
-}
-
-// A Create whose request is cancelled after its row is written still saves
-// create_incomplete: the mark does not use the cancelled request context.
-func TestCreateCancelAfterRowShowsAttention(t *testing.T) {
-	e := newCreateEnv(t)
-	s := e.service(ServiceConfig{})
-	ctx, cancel := context.WithCancel(context.Background())
-	createCrash = func(p string) {
-		if p == "row" {
-			cancel()
-		}
-	}
-	t.Cleanup(func() { createCrash = func(string) {} })
-	req := leadReq("r1")
-	req.FirstMessage = "hello"
-	if _, err := s.Create(ctx, req); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Create = %v; want context.Canceled", err)
-	}
-	rows, _, _ := e.st.ListAgents(context.Background(), loomstore.AgentFilter{IncludeArchived: true})
-	if len(rows) != 1 || rows[0].State != StateCreating || deref(rows[0].AttentionReason) != AttentionCreateIncomplete {
-		t.Fatalf("rows = %d, state %s, Attention %v; want one creating row with create_incomplete",
-			len(rows), rows[0].State, deref(rows[0].AttentionReason))
 	}
 }

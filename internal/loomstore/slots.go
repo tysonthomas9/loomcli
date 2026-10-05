@@ -79,6 +79,18 @@ func (s *Store) Send(ctx context.Context, in SlotSend) (r Receipt, retry bool, e
 // SendEvents is Send that also returns in.Events as saved. A retry saves none.
 func (s *Store) SendEvents(ctx context.Context, in SlotSend) (r Receipt, saved []Event, retry bool, err error) {
 	err = s.tx(ctx, func(tx *sql.Tx) error {
+		if r, saved, retry, err = sendTx(ctx, tx, in); err != nil {
+			return err
+		}
+		commitStateCrash()
+		return nil
+	})
+	return r, saved, retry, err
+}
+
+// sendTx is SendEvents in tx.
+func sendTx(ctx context.Context, tx *sql.Tx, in SlotSend) (r Receipt, saved []Event, retry bool, err error) {
+	err = func() error {
 		old, err := getReceipt(ctx, tx, in.AgentID, in.RequestID)
 		if err == nil {
 			r, retry = old, true
@@ -118,12 +130,9 @@ func (s *Store) SendEvents(ctx context.Context, in SlotSend) (r Receipt, saved [
 		if err != nil {
 			return err
 		}
-		if saved, err = sendEvents(ctx, tx, in, rev); err != nil {
-			return err
-		}
-		commitStateCrash()
-		return nil
-	})
+		saved, err = sendEvents(ctx, tx, in, rev)
+		return err
+	}()
 	return r, saved, retry, err
 }
 

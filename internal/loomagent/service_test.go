@@ -33,7 +33,8 @@ func svcAgent(id, mode, state string) loomstore.Agent {
 	return loomstore.Agent{AgentID: id, WorkspaceID: "ws", Name: id, ProfileKey: id, Preset: "lead",
 		PresetVersion: "1", Mode: mode, InteractionMode: "interactive", RoleKind: "interactive", SpecJSON: "{}",
 		SpecVersion: 1, OwnerKind: "user", OwnerID: "u", CreatedByKind: "user", CreatedByID: "u",
-		CreateRequestID: "req-" + id, Repo: "/repo", Harness: "fake", State: state, Attempt: 1}
+		CreateRequestID: "req-" + id, Repo: "/repo", Harness: "fake", State: state, Attempt: 1,
+		CreateStep: stepDone}
 }
 
 func (s *Service) get(t *testing.T, id string) loomstore.Agent {

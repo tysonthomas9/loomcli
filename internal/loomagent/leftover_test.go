@@ -17,8 +17,9 @@ func exists(h *fake.Harness, ref loomharness.NativeRef) bool {
 
 // TestCreateOpenLeftoverPurgedAcrossRestart: Create's Open fails but leaves
 // a session behind. Its ref is recorded as owned and purge-pending; the
-// purge fails, and after a restart the dispatcher's start-up sweep purges it
-// and drops the mark. Ownership stays recorded (R29).
+// purge fails, and after a restart the dispatcher's start-up reconcile
+// purges it and drops the mark, then finishes the Create with a new
+// session. The leftover's ownership stays recorded (R29).
 func TestCreateOpenLeftoverPurgedAcrossRestart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -50,8 +51,8 @@ func TestCreateOpenLeftoverPurgedAcrossRestart(t *testing.T) {
 		t.Fatal("the purge-pending mark was dropped but the session remains")
 	}
 	owned, err := e.st.NativeSessions(ctx, pending[0].AgentID)
-	if err != nil || len(owned) != 1 || owned[0].NativeID != ref.NativeID {
-		t.Fatalf("owned = %v, %v; want the leftover kept as owned", owned, err)
+	if err != nil || len(owned) != 2 || owned[0].NativeID != ref.NativeID {
+		t.Fatalf("owned = %v, %v; want the leftover kept as owned, then the working session", owned, err)
 	}
 }
 
@@ -90,7 +91,7 @@ func TestHarnessSwitchOpenLeftoverPurged(t *testing.T) {
 // TestCreateOpenLeftoverSweepRacesReopen: the start-up sweep reads a
 // purge-pending session, then pauses; a retried Create re-Opens the same
 // session as its working one, which clears the mark. When the sweep goes on
-// it re-checks the mark under the agent lock and leaves the session alone.
+// it reads the marks under the agent lock and leaves the session alone.
 func TestCreateOpenLeftoverSweepRacesReopen(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -107,7 +108,11 @@ func TestCreateOpenLeftoverSweepRacesReopen(t *testing.T) {
 	sweepPause = func() { close(paused); <-resume }
 	t.Cleanup(func() { sweepPause = func() {} })
 	swept := make(chan error, 1)
-	go func() { swept <- s.PurgeLeftovers(ctx) }()
+	go func() { // the dispatcher's start-up sweep
+		s.resync(ctx)
+		s.reconcileDue(ctx)
+		swept <- nil
+	}()
 	<-paused                                  // the sweep holds the pending ref
 	info, err := s.Create(ctx, leadReq("r1")) // the retry re-Opens the same session
 	if err != nil {

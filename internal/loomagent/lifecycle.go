@@ -109,14 +109,14 @@ func (s *Service) Unarchive(ctx context.Context, req ArchiveRequest) error {
 	if a.HistoryPurgedAt != nil {
 		return &Error{Code: CodeHistoryExpired, Message: a.AgentID}
 	}
-	if err := s.store.SetArchive(ctx, a.AgentID, nil, nil); err != nil || a.State != StateArchived {
-		return err
+	if a.State != StateArchived {
+		return s.store.SetArchive(ctx, a.AgentID, nil, nil)
 	}
 	to := loomstore.AgentState{State: StateIdle, Outcome: a.Outcome, Attempt: a.Attempt}
 	if a.Mode == "single_task" {
 		to.State = StateFinished
 	}
-	_, err = s.setState(ctx, a, to)
+	_, err = s.changeState(ctx, a, to, &archiveCols{}) // the clock is cleared in the state change's transaction
 	return err
 }
 
@@ -132,12 +132,17 @@ type DeleteRequest struct {
 // Delete checks children and unsaved work, then stops the agent, purges only
 // its recorded native sessions, removes its working copy (keeping the branch)
 // and tombstones the row (design v2 §4.8). Each step is safe to repeat; a
-// failure leaves the row stopping with its delete flag for Reconcile.
+// failure leaves the row stopping with its delete flag, and the reconcile
+// queue retries it.
 func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
 	if err := s.waitReady(ctx); err != nil {
 		return err
 	}
-	return s.delete(ctx, req)
+	err := s.delete(ctx, req)
+	if a, gerr := s.store.GetAgent(ctx, req.AgentID); err != nil && gerr == nil && owes(a) {
+		s.retryLater(req.AgentID)
+	}
+	return err
 }
 
 // delete is Delete without the start-up gate; Reconcile finishes a Delete with it.
@@ -188,10 +193,10 @@ func (s *Service) delete(ctx context.Context, req DeleteRequest) error {
 			return err
 		}
 	}
-	if err := s.tombstone(ctx, a); err != nil {
+	if err := s.retireLaunch(ctx, a); err != nil { // before the tombstone, so a failure is retried
 		return err
 	}
-	return s.retireLaunch(ctx, a)
+	return s.tombstone(ctx, a)
 }
 
 // tombstone marks a deleted and purges its history in one transaction under

@@ -283,9 +283,10 @@ func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomha
 
 // RunDispatcher wakes the dispatcher on agent.idle until ctx ends. With
 // RecoverFirst it first reconciles every wired harness once and then opens
-// the write gate. It then retries purge-pending native sessions and
+// the write gate. It then reconciles every lifecycle marker (resync) and
 // dispatches every agent with a pending slot (a restart), and does so again
-// whenever its subscription lags and is replaced. Drain waits for it.
+// whenever its subscription lags and is replaced. It runs the reconcile
+// queue too. Drain waits for it.
 func (s *Service) RunDispatcher(ctx context.Context) { s.Dispatcher()(ctx) }
 
 // Dispatcher registers s's dispatcher with Drain now and returns
@@ -309,7 +310,8 @@ func (s *Service) runDispatcher(ctx context.Context, l *loop) {
 	for ctx.Err() == nil {
 		sub := s.Bus.Subscribe()
 		s.recordCompletions(ctx) // what ended before the subscription, or while it lagged
-		_ = s.PurgeLeftovers(ctx)
+		s.resync(ctx)
+		s.reconcileDue(ctx)
 		if ids, err := s.store.PendingAgents(ctx, s.workspaceID); err == nil {
 			for _, id := range ids {
 				_ = s.dispatchWake(ctx, id)
@@ -325,8 +327,10 @@ func (s *Service) runDispatcher(ctx context.Context, l *loop) {
 var completionRetry = 5 * time.Second
 
 // follow dispatches on each agent.idle and task_completed until sub ends or
-// ctx does, retries owed task_completed records on each tick of s.tick, and
-// answers Drain once sub's queued events are handled.
+// ctx does, runs the reconcile queue as agents are queued and their
+// backoffs end, on each tick of s.tick (the recovery resync clock) retries
+// owed task_completed records and resyncs the queue, and answers Drain once
+// sub's queued events and the due reconciles are handled.
 func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 	retry, stop := s.tick(completionRetry)
 	defer stop()
@@ -340,6 +344,7 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 		return true
 	}
 	for {
+		id, backoff := s.nextRetry()
 		select {
 		case <-ctx.Done():
 			return
@@ -348,7 +353,19 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 			if s.owed.Swap(false) {
 				s.recordCompletions(ctx)
 			}
+			s.resync(ctx)
+			s.reconcileDue(ctx)
+		case <-s.queueWake:
+			l.took()
+			s.reconcileDue(ctx)
+		case <-backoff:
+			l.took()
+			s.fired(id, backoff)
+			s.reconcileDue(ctx)
 		case req := <-l.drain:
+			if s.reconcileDue(ctx) { // a backoff that ended, or an agent queued, is work this Drain must see
+				l.took()
+			}
 			if !settle(l, req, sub.C, handle) {
 				return
 			}

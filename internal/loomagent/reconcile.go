@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -14,7 +15,8 @@ import (
 // Attention reasons Reconcile raises (design v2 §5.1).
 const (
 	AttentionSessionMissing   = "session_missing"
-	AttentionCreateIncomplete = "create_incomplete"
+	AttentionCreateIncomplete = "create_incomplete" // terminal: the Create can never finish
+	AttentionCreateRetrying   = "create_retrying"   // the reconcile queue retries the Create
 	AttentionDeleteIncomplete = "delete_incomplete"
 )
 
@@ -22,8 +24,9 @@ const (
 // serve start or a harness restart (design v2 §4.14). RunFeed runs it each
 // time the feed connects or reports a gap, before it reads live events. In
 // order it:
-//  1. finishes rows left creating (recording the returned NativeRef before
-//     agent.created) and Deletes left half done;
+//  1. runs reconcileAgent on each row below done (recording the returned
+//     NativeRef before agent.created) or with a Delete left half done; one
+//     that fails is retried by the reconcile queue;
 //  2. resumes each session with a running or interrupted turn or an open
 //     ask that this process has not opened or resumed since it started or
 //     the harness restarted: Resume installs the current policy (an OpenCode
@@ -52,11 +55,10 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 	}
 	for _, a := range agents {
 		switch {
-		case a.DeleteRequested:
-			s.failed(ctx, a.AgentID, AttentionDeleteIncomplete, s.delete(ctx, DeleteRequest{AgentID: a.AgentID}))
-		case a.State == StateCreating:
-			_, err := s.finishCreate(ctx, a.AgentID) // clears create_incomplete when done
-			s.failed(ctx, a.AgentID, AttentionCreateIncomplete, err)
+		case owes(a):
+			if err := s.reconcileAgent(ctx, a.AgentID); err != nil {
+				s.retryLater(a.AgentID)
+			}
 		case a.State != StateArchived && (a.RunningTurnID != nil || len(s.openAsks(a.AgentID)) > 0):
 			if err := s.resumeLive(ctx, a.AgentID); err != nil {
 				slog.Warn("loomagent: reconcile could not resume a session", "agent", a.AgentID, "error", err)
@@ -70,6 +72,195 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 		}
 	}
 	return err
+}
+
+// reconcileBackoff is the first wait before the reconcile queue retries an
+// agent; each failure doubles it, up to reconcileBackoffMax.
+var reconcileBackoff, reconcileBackoffMax = 100 * time.Millisecond, 30 * time.Second
+
+// owes reports whether a has a lifecycle marker for reconcileAgent: a
+// Delete requested, or a Create below done that is not terminal
+// (create_incomplete: only a retried Create request can finish it), and is
+// not deleted.
+func owes(a loomstore.Agent) bool {
+	return a.DeletedAt == nil && (a.DeleteRequested ||
+		(a.CreateStep < stepDone && deref(a.AttentionReason) != AttentionCreateIncomplete))
+}
+
+// reconcileAgent is the one entry point that finishes agentID's lifecycle
+// markers (OR4a): its purge-pending native sessions, then a Delete it
+// requested or else its Create steps below done. Start-up, feed gaps, the
+// dispatcher's wakes, failures and the resync clock all come here. An error
+// means retry; a permanent Create failure shows create_incomplete and
+// returns nil, as no retry can fix it. It takes each agent lock itself and
+// holds none across another's.
+func (s *Service) reconcileAgent(ctx context.Context, agentID string) error {
+	a, err := s.store.GetAgent(ctx, agentID)
+	if errors.Is(err, loomstore.ErrNotFound) || (err == nil && a.WorkspaceID != s.workspaceID) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	err = s.purgePending(ctx, agentID)
+	switch {
+	case !owes(a):
+	case a.DeleteRequested:
+		derr := s.delete(ctx, DeleteRequest{AgentID: agentID})
+		s.failed(ctx, agentID, AttentionDeleteIncomplete, derr)
+		err = errors.Join(err, derr)
+	default:
+		_, cerr := s.finishCreate(ctx, agentID)
+		s.createFailed(ctx, agentID, cerr)
+		if !isPermanent(cerr) {
+			err = errors.Join(err, cerr)
+		}
+	}
+	return err
+}
+
+// queued is one agent in the reconcile queue, under s.mu.
+type queued struct {
+	wait    time.Duration    // the backoff before the next retry
+	timer   <-chan time.Time // fires when a retry is due; nil: due now
+	due     time.Time        // when timer fires
+	running bool
+	again   bool // queued again while running: run once more
+}
+
+// enqueue queues agentID for reconcile now, unless it is queued already (a
+// retry keeps its backoff).
+func (s *Service) enqueue(agentID string) {
+	s.mu.Lock()
+	if q, ok := s.queue[agentID]; !ok {
+		s.queue[agentID] = &queued{wait: reconcileBackoff}
+	} else if q.running {
+		q.again = true
+	}
+	s.mu.Unlock()
+	s.poke()
+}
+
+// retryLater queues agentID for reconcile after the first backoff, unless
+// it is queued already.
+func (s *Service) retryLater(agentID string) {
+	s.mu.Lock()
+	if _, ok := s.queue[agentID]; !ok {
+		q := &queued{wait: reconcileBackoff}
+		s.backOff(q)
+		s.queue[agentID] = q
+	}
+	s.mu.Unlock()
+	s.poke()
+}
+
+// backOff sets q's timer to its backoff and doubles the next, under s.mu.
+func (s *Service) backOff(q *queued) {
+	q.timer, q.due, q.running = s.after(q.wait), time.Now().Add(q.wait), false
+	q.wait = min(2*q.wait, reconcileBackoffMax)
+}
+
+// poke wakes the dispatcher to look at the reconcile queue.
+func (s *Service) poke() {
+	select {
+	case s.queueWake <- struct{}{}:
+	default:
+	}
+}
+
+// nextRetry is the timer of the queued agent whose retry is due first.
+func (s *Service) nextRetry() (string, <-chan time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, first := "", (*queued)(nil)
+	for k, q := range s.queue {
+		if q.timer != nil && (first == nil || q.due.Before(first.due)) {
+			id, first = k, q
+		}
+	}
+	if first == nil {
+		return "", nil
+	}
+	return id, first.timer
+}
+
+// fired marks agentID's retry due: its timer, which the dispatcher took, fired.
+func (s *Service) fired(agentID string, timer <-chan time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if q, ok := s.queue[agentID]; ok && q.timer == timer {
+		q.timer = nil
+	}
+}
+
+// takeDue takes one queued agent that is due: queued now, or its timer has fired.
+func (s *Service) takeDue() (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, q := range s.queue {
+		if q.running {
+			continue
+		}
+		if q.timer != nil {
+			select {
+			case <-q.timer:
+				q.timer = nil
+			default:
+				continue
+			}
+		}
+		q.running = true
+		return id, true
+	}
+	return "", false
+}
+
+// reconcileDue runs reconcileAgent on every due queued agent; one that
+// fails is retried after its backoff. It reports whether it ran any.
+func (s *Service) reconcileDue(ctx context.Context) bool {
+	ran := false
+	for id, ok := s.takeDue(); ok && ctx.Err() == nil; id, ok = s.takeDue() {
+		ran = true
+		err := s.reconcileAgent(ctx, id)
+		if err != nil {
+			slog.Warn("loomagent: reconcile will retry", "agent", id, "error", err)
+		}
+		s.mu.Lock()
+		switch q := s.queue[id]; {
+		case err != nil:
+			s.backOff(q)
+		case q.again:
+			q.running, q.again = false, false
+		default:
+			delete(s.queue, id)
+		}
+		s.mu.Unlock()
+	}
+	return ran
+}
+
+// sweepPause runs between resync's reads and its queueing; tests use it to
+// interleave a re-Open.
+var sweepPause = func() {}
+
+// resync queues every agent of s with a lifecycle marker: a Create below
+// done, a Delete requested, a native session purge-pending. The dispatcher
+// runs it at its start, at each resubscription and on its retry clock, the
+// one recovery resync clock.
+func (s *Service) resync(ctx context.Context) {
+	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, IncludeArchived: true})
+	pending, perr := s.store.PurgePending(ctx, s.workspaceID)
+	sweepPause()
+	if err = errors.Join(err, perr); err != nil {
+		slog.Warn("loomagent: reconcile resync", "error", err)
+	}
+	for _, a := range agents {
+		if owes(a) {
+			s.enqueue(a.AgentID)
+		}
+	}
+	for _, n := range pending {
+		s.enqueue(n.AgentID)
+	}
 }
 
 // recoverAtStart reconciles every wired harness once, then opens the write

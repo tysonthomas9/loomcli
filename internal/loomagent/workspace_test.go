@@ -4,6 +4,7 @@ import (
 	"context"
 	"go/build"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -38,9 +39,24 @@ func TestWorkspaceImportBoundary(t *testing.T) {
 type fakeWorkspace struct {
 	ensured []WorkspaceSpec
 	path    string // every Ensure's path; "" is /wt/<key>
+	mu      sync.Mutex
+	failing error // every Ensure fails with it, as with its base ref gone; under mu
+}
+
+// setEnsureErr makes every Ensure fail with err; nil restores it.
+func (f *fakeWorkspace) setEnsureErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failing = err
 }
 
 func (f *fakeWorkspace) Ensure(_ context.Context, s WorkspaceSpec) (WorkingCopy, error) {
+	f.mu.Lock()
+	err := f.failing
+	f.mu.Unlock()
+	if err != nil {
+		return WorkingCopy{}, err
+	}
 	f.ensured = append(f.ensured, s)
 	path := f.path
 	if path == "" {

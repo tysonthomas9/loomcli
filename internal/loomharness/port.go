@@ -282,6 +282,9 @@ var (
 	ErrUnavailable     = errors.New("loomharness: harness unavailable")
 	ErrBusy            = errors.New("loomharness: session busy")
 	ErrSessionNotFound = errors.New("loomharness: session not found")
+	// ErrBadRequest: the harness refused the request as invalid; repeating
+	// it fails the same way.
+	ErrBadRequest = errors.New("loomharness: bad request")
 	// ErrQuarantined: the session's policy is unconfirmed, so it refuses
 	// Prompt and Reply until Open or Resume confirms one.
 	ErrQuarantined = errors.New("loomharness: session quarantined: its policy is unconfirmed")
