@@ -810,6 +810,37 @@ describe("AgentChat lifecycle (1.8b)", () => {
     expect(screen.getByTestId("agent-delete")).toBeInTheDocument();
   });
 
+  it("offers Delete anyway on a dirty-work refusal and sends its fingerprint once", async () => {
+    await mount(agent());
+    api.deleteAgent.mockRejectedValueOnce(
+      new ApiError(409, "Conflict", {
+        error: "uncommitted changes in /wt/a1",
+        code: "unsaved_work",
+        paths: ["README.md"],
+        fingerprint: "f1",
+      }),
+    );
+    fireEvent.click(screen.getByTestId("agent-delete"));
+    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
+    const anyway = await screen.findByTestId("agent-delete-anyway");
+    expect(screen.getByRole("alert")).toHaveTextContent("README.md");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Delete anyway loses these changes.",
+    );
+    api.deleteAgent.mockResolvedValueOnce(undefined);
+    fireEvent.click(anyway);
+    expect(await screen.findByTestId("where")).toHaveTextContent("/ws/w1/home");
+    expect(api.deleteAgent).toHaveBeenCalledTimes(2);
+    expect(api.deleteAgent).toHaveBeenLastCalledWith(
+      "w1",
+      "a1",
+      expect.any(String),
+      {
+        fingerprint: "f1",
+      },
+    );
+  });
+
   it("leaves the chat once the delete succeeds", async () => {
     await mount(agent());
     api.deleteAgent.mockResolvedValue(undefined);

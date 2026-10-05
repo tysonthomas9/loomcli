@@ -1,13 +1,14 @@
 /**
  * Agent lifecycle in a real browser against a mocked Agent API (1.8b,
  * design v2 §4.7–§4.8): archive → read-only → unarchive, delete with a
- * dirty-work refusal, the attention banner, history expired, and the
+ * dirty-work refusal and Delete anyway, the attention banner, history expired, and the
  * harness-context divider on reload and on live replay.
  */
 import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 
 const BASE = "**/api/workspaces/w1";
+const SHOTS = process.env.DA1_SHOTS;
 
 let seq = 0;
 const ev = (kind: string, payload: object) => ({
@@ -77,7 +78,9 @@ async function open(page: Page, m: Mock) {
   );
   await page.route(`${BASE}/v1/agents/a1`, (r) => {
     if (r.request().method() !== "DELETE") return json(r, m.agent);
-    m.writes.push("delete");
+    const confirmed = r.request().url().includes("fingerprint=f1");
+    m.writes.push(confirmed ? "delete:f1" : "delete");
+    if (confirmed) return r.fulfill({ status: 204 });
     return json(
       r,
       {
@@ -161,6 +164,23 @@ test("delete asks first and shows the server's dirty-work refusal", async ({
   );
   await expect(page.getByTestId("agent-delete")).toBeVisible();
   expect(m.writes).toEqual(["delete"]);
+
+  await expect(page.getByRole("alert")).toContainText(
+    "Delete anyway loses these changes.",
+  );
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate((t) => {
+      document.documentElement.dataset.theme = t;
+    }, theme);
+    if (SHOTS)
+      await page.screenshot({
+        path: `${SHOTS}/da1-${theme}.png`,
+        animations: "disabled",
+      });
+  }
+  await page.getByTestId("agent-delete-anyway").click();
+  await expect(page).toHaveURL(/\/ws\/[^/]+\/home$/);
+  expect(m.writes).toEqual(["delete", "delete:f1"]);
 });
 
 test("an attention reason shows as a banner", async ({ page }) => {

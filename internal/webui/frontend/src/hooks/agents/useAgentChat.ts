@@ -41,8 +41,11 @@ export interface UseAgentChatReturn {
   runningSince: string | null;
   archive: () => Promise<void>;
   unarchive: () => Promise<void>;
-  /** Deletes the agent; the server refuses while it has unsaved work. */
-  remove: () => Promise<void>;
+  /** Deletes the agent; the server refuses while it has unsaved work unless
+   * fingerprint confirms exactly that work. */
+  remove: (fingerprint?: string) => Promise<void>;
+  /** The last Delete's unsaved_work fingerprint, for Delete anyway. */
+  unsaved: string | null;
   /** The saved history is gone (history_purged_at, or a history_expired error). */
   expired: boolean;
   /**
@@ -90,6 +93,7 @@ export function useAgentChat(
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [expiredErr, setExpiredErr] = useState(false);
+  const [unsaved, setUnsaved] = useState<string | null>(null);
   const [synced, setSynced] = useState(false);
 
   const refresh = useCallback(() => {
@@ -140,6 +144,7 @@ export function useAgentChat(
   const write = useCallback(
     async (call: () => Promise<unknown>, failed = "") => {
       setError(null);
+      setUnsaved(null);
       try {
         await call();
       } catch (err) {
@@ -204,11 +209,24 @@ export function useAgentChat(
   );
 
   const remove = useCallback(
-    () =>
+    (fingerprint?: string) =>
       write(
-        () => deleteAgent(workspaceId, agentId, newRequestId()),
+        () =>
+          deleteAgent(
+            workspaceId,
+            agentId,
+            newRequestId(),
+            fingerprint ? { fingerprint } : undefined,
+          ),
         "Not deleted: ",
-      ),
+      ).catch((err: unknown) => {
+        if (errorCode(err) === "unsaved_work")
+          setUnsaved(
+            ((err as ApiError).body as { fingerprint?: string }).fingerprint ??
+              null,
+          );
+        throw err;
+      }),
     [write, workspaceId, agentId],
   );
 
@@ -233,6 +251,7 @@ export function useAgentChat(
     archive,
     unarchive,
     remove,
+    unsaved,
     expired: expiredErr || !!agent?.history_purged_at,
     synced,
   };

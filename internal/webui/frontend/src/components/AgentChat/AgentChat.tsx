@@ -91,10 +91,15 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     archive,
     unarchive,
     remove,
+    unsaved,
     expired,
     synced,
   } = useAgentChat(workspaceId, agentId);
   const navigate = useNavigate();
+  const del = (fingerprint?: string) =>
+    remove(fingerprint).then(() =>
+      navigate(`/ws/${encodeURIComponent(workspaceId)}/home`),
+    );
   const compact = useNarrow(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX);
   const own = ownSender(useAuth().user?.id);
   const [draft, setDraft] = useState("");
@@ -181,11 +186,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
         onRename={(name) => update({ name })}
         onArchive={archive}
         onUnarchive={unarchive}
-        onDelete={() =>
-          remove().then(() =>
-            navigate(`/ws/${encodeURIComponent(workspaceId)}/home`),
-          )
-        }
+        onDelete={() => del()}
       />
 
       <div className={page.scroller}>
@@ -316,6 +317,21 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
           {error && (
             <div className={page.error} role="alert">
               {error}
+              {unsaved && (
+                <>
+                  {" "}
+                  Delete anyway loses these changes.{" "}
+                  <button
+                    type="button"
+                    className={page.headerAction}
+                    data-danger="true"
+                    data-testid="agent-delete-anyway"
+                    onClick={() => void del(unsaved).catch(() => {})}
+                  >
+                    Delete anyway
+                  </button>
+                </>
+              )}
             </div>
           )}
 
