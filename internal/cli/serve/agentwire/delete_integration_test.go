@@ -192,14 +192,14 @@ func attention(a loomstore.Agent) string {
 	return *a.AttentionReason
 }
 
-// servicePID is the pid the OpenCode service at base reports, or 0.
+// servicePID is the pid the OpenCode service at base reports within 2s, or 0.
 func servicePID(base, password string) int {
 	req, err := http.NewRequest("GET", base+"/api/info", nil)
 	if err != nil {
 		return 0
 	}
 	req.SetBasicAuth("opencode", password)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
 	if err != nil {
 		return 0
 	}
