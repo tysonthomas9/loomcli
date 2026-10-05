@@ -63,11 +63,11 @@ func TestDecideCreateTable(t *testing.T) {
 			return i
 		}(), "agent_not_found: agt_lead is deleted"},
 		{"valid lead", in(req("lead", "alpha", "main", ""), lead),
-			"row agt_1 ws alpha lead@2 persistent interactive interactive owner=user:u by=user:u parent= root= base=main branch=loom/agent/agt_1 creating profile=alpha req=r1 repo=/repo subject=// xkey= spec_v=1 step=0 harness= model="},
+			"row agt_1 ws alpha lead@2 persistent interactive interactive owner=user:u by=user:u parent= root= base=main branch=loom/agent/agt_1 creating profile=alpha req=r1 repo=/repo subject=// xkey= spec_v=1 step=0 harness= model= spec="},
 		{"lead named from the environment", func() createInput { i := in(req("lead", "", "main", ""), lead); i.EnvName = "boss"; return i }(),
-			"row agt_1 ws boss lead@2 persistent interactive interactive owner=user:u by=user:u parent= root= base=main branch=loom/agent/agt_1 creating profile=boss req=r1 repo=/repo subject=// xkey= spec_v=1 step=0 harness= model="},
+			"row agt_1 ws boss lead@2 persistent interactive interactive owner=user:u by=user:u parent= root= base=main branch=loom/agent/agt_1 creating profile=boss req=r1 repo=/repo subject=// xkey= spec_v=1 step=0 harness= model= spec="},
 		{"valid task from its lead's branch", func() createInput { i := in(req("task", "t", "", "agt_lead"), task); i.Parent = parent; return i }(),
-			"row agt_1 ws t task@1 single_task worker background owner=agent:agt_lead by=user:u parent=agt_lead root=agt_root base=loom/agent/agt_lead branch=loom/agent/agt_1 creating profile=t req=r1 repo=/repo subject=// xkey= spec_v=1 step=0 harness= model="},
+			"row agt_1 ws t task@1 single_task worker background owner=agent:agt_lead by=user:u parent=agt_lead root=agt_root base=loom/agent/agt_lead branch=loom/agent/agt_1 creating profile=t req=r1 repo=/repo subject=// xkey= spec_v=1 step=0 harness= model= spec="},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := createDecisionString(decideCreate(c.in)); got != c.want {
@@ -89,11 +89,11 @@ func createDecisionString(d createDecision, err error) string {
 		return "replay " + a.AgentID
 	}
 	return fmt.Sprintf("row %s %s %s %s@%s %s %s %s owner=%s:%s by=%s:%s parent=%s root=%s base=%s branch=%s %s "+
-		"profile=%s req=%s repo=%s subject=%s/%s/%s xkey=%s spec_v=%d step=%d harness=%s model=%s",
+		"profile=%s req=%s repo=%s subject=%s/%s/%s xkey=%s spec_v=%d step=%d harness=%s model=%s spec=%s",
 		a.AgentID, a.WorkspaceID, a.Name, a.Preset, a.PresetVersion, a.Mode, a.RoleKind, a.InteractionMode,
 		a.OwnerKind, a.OwnerID, a.CreatedByKind, a.CreatedByID, deref(a.ParentAgentID), deref(a.RootAgentID),
 		deref(a.BaseRef), deref(a.Branch), a.State, a.ProfileKey, a.CreateRequestID, a.Repo, deref(a.SubjectType),
-		deref(a.SubjectID), deref(a.SubjectVersion), deref(a.ExternalKey), a.SpecVersion, a.CreateStep, a.Harness, deref(a.Model))
+		deref(a.SubjectID), deref(a.SubjectVersion), deref(a.ExternalKey), a.SpecVersion, a.CreateStep, a.Harness, deref(a.Model), a.SpecJSON)
 }
 
 // unknownBase is a workspace whose CheckBase knows no ref.
@@ -170,10 +170,10 @@ func TestDecideCreatePrecedence(t *testing.T) {
 		{func(i *createInput) { i.TakenErr = nil }, `agent_name_taken: an agent named "t" already exists`},
 		{func(i *createInput) { i.Taken = false }, "repo does not resolve"},
 		{func(i *createInput) { i.RepoErr = nil }, "agent_not_found: agt_lead is deleted"},
-		{func(i *createInput) { i.ParentErr = nil }, "preset_invalid: Create needs a base_ref, the branch or commit the agent starts from"},
-		{func(i *createInput) { i.Req.BaseRef = "nope" },
-			`preset_invalid: base_ref "nope" is not a branch or commit in /repo: unknown revision`},
-		{func(i *createInput) { i.BaseErr = nil }, "row"},
+		{func(i *createInput) { i.Req.BaseRef = "nope" }, "agent_not_found: agt_lead is deleted"},
+		{func(i *createInput) { i.ParentErr = nil }, `preset_invalid: base_ref "nope" is not a branch or commit in /repo: unknown revision`},
+		{func(i *createInput) { i.Req.BaseRef = "" }, "preset_invalid: Create needs a base_ref, the branch or commit the agent starts from"},
+		{func(i *createInput) { i.Req.BaseRef, i.BaseErr = "nope", nil }, "row"},
 	} {
 		step.fix(&in)
 		got := "row"
@@ -189,8 +189,8 @@ func TestDecideCreatePrecedence(t *testing.T) {
 	}
 }
 
-// lookupSpy counts the repo resolutions and base checks a Create does; both
-// fail, as for an unknown repo and ref.
+// lookupSpy counts the repo resolutions and base checks a Create does;
+// every repo resolves and every base check fails, as for an unknown ref.
 type lookupSpy struct {
 	*fakeWorkspace
 	repos, bases int
@@ -203,13 +203,13 @@ func (l *lookupSpy) CheckBase(context.Context, string, string) error {
 
 func (l *lookupSpy) resolve(context.Context, Target, string) (string, error) {
 	l.repos++
-	return "", errors.New("repo does not resolve")
+	return "/repo", nil
 }
 
 // TestCreateLookupsKeepPrecedence: through the shell, a Create with no name
 // or no repo touches neither the repo nor git, and is refused for that;
-// one whose name is taken is refused agent_name_taken although its repo
-// and base would fail too.
+// one whose name is taken is refused agent_name_taken although its base
+// check fails too.
 func TestCreateLookupsKeepPrecedence(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
