@@ -626,9 +626,15 @@ func TestCreateSetModelBadRequestTerminal(t *testing.T) {
 // fingerprint cannot pass the unsaved-work check, so it shows
 // delete_incomplete and is not retried; the user's repeated Delete finishes it.
 func TestReconcileDeleteUnsavedWorkNotRetried(t *testing.T) {
+	t.Run("created", func(t *testing.T) { deleteUnsavedNotRetried(t, false) })
+	t.Run("creating", func(t *testing.T) { deleteUnsavedNotRetried(t, true) }) // its Create is below done too
+}
+
+func deleteUnsavedNotRetried(t *testing.T, creating bool) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
-	dws := &deleteWorkspace{Workspace: e.ws, status: WorkspaceStatus{Uncommitted: []string{"a.go"}, Fingerprint: "f1"}}
+	dws := &countStatus{deleteWorkspace: &deleteWorkspace{Workspace: e.ws,
+		status: WorkspaceStatus{Uncommitted: []string{"a.go"}, Fingerprint: "f1"}}}
 	var purges atomic.Int32
 	cfg := ServiceConfig{Purge: func(context.Context, loomstore.Agent, []loomstore.NativeSession) error {
 		if purges.Add(1) == 1 {
@@ -636,19 +642,27 @@ func TestReconcileDeleteUnsavedWorkNotRetried(t *testing.T) {
 		}
 		return nil
 	}}
-	a, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r1"))
-	if err != nil {
-		t.Fatal(err)
+	var a AgentInfo
+	if creating {
+		if !crashAt(t, "open")(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) }) {
+			t.Fatal("did not crash")
+		}
+		a.AgentID = onlyRow(t, e).AgentID
+	} else {
+		var err error
+		if a, err = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	s := e.service(cfg)
 	s.workspace = dws // its working copy has uncommitted work
 	c := useTestClock(s)
-	runDispatcher(t, s)
-	settled(t, s)
 	fp := wantCode(t, s.Delete(ctx, DeleteRequest{AgentID: a.AgentID}), CodeUnsavedWork).Fingerprint
 	if err := s.Delete(ctx, DeleteRequest{AgentID: a.AgentID, Fingerprint: fp}); err == nil {
 		t.Fatal("Delete succeeded although the purge failed")
 	}
+	runDispatcher(t, s) // after the Delete, so a creating agent is still below done
+	settled(t, s)
 	for range 3 {
 		c.fire()
 		settled(t, s)
@@ -658,10 +672,38 @@ func TestReconcileDeleteUnsavedWorkNotRetried(t *testing.T) {
 	if row, _ := e.st.GetAgent(ctx, a.AgentID); deref(row.AttentionReason) != AttentionDeleteIncomplete || row.DeletedAt != nil {
 		t.Fatalf("Attention %q deleted %v; want delete_incomplete, not deleted", deref(row.AttentionReason), row.DeletedAt != nil)
 	}
-	if got := c.backoffs(); len(got) > 1 {
-		t.Fatalf("backoffs = %v; a Delete that needs the user's fingerprint kept retrying", got)
+	if got := c.backoffs(); len(got) > 1 || dws.n.Load() != 3 { // the user's two Deletes and one retry
+		t.Fatalf("backoffs = %v, unsaved-work checks %d; a Delete that needs the user's fingerprint kept retrying",
+			got, dws.n.Load())
 	}
 	if err := s.Delete(ctx, DeleteRequest{AgentID: a.AgentID, Fingerprint: fp}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// countStatus counts the unsaved-work checks of a deleteWorkspace.
+type countStatus struct {
+	*deleteWorkspace
+	n atomic.Int32
+}
+
+func (c *countStatus) Status(ctx context.Context, s WorkspaceSpec) (WorkspaceStatus, error) {
+	c.n.Add(1)
+	return c.deleteWorkspace.Status(ctx, s)
+}
+
+// TestReconcileDueCancelledLeavesNothingRunning: a reconcile pass whose
+// context ends leaves no queued agent marked running, so the next pass
+// (a restarted dispatcher) still runs it.
+func TestReconcileDueCancelledLeavesNothingRunning(t *testing.T) {
+	s := newService(t, ServiceConfig{})
+	s.enqueue("a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.reconcileDue(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if q := s.queue["a1"]; q == nil || q.running {
+		t.Fatalf("queue entry = %+v; want a1 still queued, not running", q)
 	}
 }

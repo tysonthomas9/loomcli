@@ -153,7 +153,9 @@ func (e *Error) Unwrap() error {
 	case "session_missing":
 		return loomharness.ErrSessionNotFound
 	case "bad_request":
-		return loomharness.ErrBadRequest
+		if e.Status != http.StatusRequestTimeout && e.Status != http.StatusTooManyRequests { // those pass
+			return loomharness.ErrBadRequest
+		}
 	}
 	return nil
 }

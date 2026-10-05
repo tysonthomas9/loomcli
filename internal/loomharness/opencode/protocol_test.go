@@ -653,6 +653,16 @@ func TestProtocolErrorTranslation(t *testing.T) {
 	}
 }
 
+// A 400 is a bad request no retry fixes (ErrBadRequest); a 408 or 429,
+// also code bad_request, is temporary and is not.
+func TestProtocolBadRequestSentinel(t *testing.T) {
+	for status, want := range map[int]bool{400: true, 408: false, 429: false} {
+		if got := errors.Is(translate(status, []byte(`{}`)), loomharness.ErrBadRequest); got != want {
+			t.Errorf("%d: ErrBadRequest = %v; want %v", status, got, want)
+		}
+	}
+}
+
 func TestProtocolPolicyTranslation(t *testing.T) {
 	got, err := nativeRules([]loomharness.PermissionRule{
 		{Action: "*", Resource: "*", Effect: "deny"},

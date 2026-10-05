@@ -59,6 +59,7 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 			if err := s.reconcileAgent(ctx, a.AgentID); err != nil {
 				s.retryLater(a.AgentID)
 			}
+		case a.DeleteRequested: // a Delete waiting on its user: nothing to resume
 		case a.State != StateArchived && (a.RunningTurnID != nil || len(s.openAsks(a.AgentID)) > 0):
 			if err := s.resumeLive(ctx, a.AgentID); err != nil {
 				slog.Warn("loomagent: reconcile could not resume a session", "agent", a.AgentID, "error", err)
@@ -79,15 +80,20 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 var reconcileBackoff, reconcileBackoffMax = 100 * time.Millisecond, 30 * time.Second
 
 // owes reports whether a, not deleted, has a lifecycle marker for
-// reconcileAgent: a Delete requested, or a Create below done that is not
-// terminal (create_incomplete: only a retried Create request can finish
-// it). With live, a Delete showing delete_incomplete is left out too: it may
-// need the user's unsaved-work confirmation, and a failing retry stays
-// queued with its backoff anyway.
+// reconcileAgent: a Delete requested, which replaces any Create, or a
+// Create below done that is not terminal (create_incomplete: only a retried
+// Create request can finish it). With live, a Delete showing
+// delete_incomplete is left out: it may need the user's unsaved-work
+// confirmation, and a failing retry stays queued with its backoff anyway.
 func owes(a loomstore.Agent, live bool) bool {
 	r := deref(a.AttentionReason)
-	return a.DeletedAt == nil && ((a.DeleteRequested && (!live || r != AttentionDeleteIncomplete)) ||
-		(a.CreateStep < stepDone && r != AttentionCreateIncomplete))
+	switch {
+	case a.DeletedAt != nil:
+		return false
+	case a.DeleteRequested:
+		return !live || r != AttentionDeleteIncomplete
+	}
+	return a.CreateStep < stepDone && r != AttentionCreateIncomplete
 }
 
 // reconcileAgent is the one entry point that finishes agentID's lifecycle
@@ -225,7 +231,11 @@ func (s *Service) takeDue() (string, bool) {
 // fails is retried after its backoff. It reports whether it ran any.
 func (s *Service) reconcileDue(ctx context.Context) bool {
 	ran := false
-	for id, ok := s.takeDue(); ok && ctx.Err() == nil; id, ok = s.takeDue() {
+	for ctx.Err() == nil {
+		id, ok := s.takeDue()
+		if !ok {
+			break
+		}
 		ran = true
 		err := s.reconcileAgent(ctx, id)
 		if err != nil {
