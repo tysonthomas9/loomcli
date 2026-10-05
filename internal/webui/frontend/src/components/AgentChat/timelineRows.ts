@@ -244,7 +244,7 @@ export function stepLabel(e: AgentEvent, preview = true): string | null {
     key: e.event_id,
     kind: "tool",
     tool: p.tool ?? {},
-    status: "running",
+    status: e.kind === "tool.started" ? "running" : "completed",
   };
   const about = preview ? stepPreview(entry.tool.input) : "";
   const action = STEP_BY_ACTION[toolGroupAction(entry)] ?? toolHeading(entry);
@@ -255,7 +255,11 @@ export function stepLabel(e: AgentEvent, preview = true): string | null {
 const BRIDGE_NAME =
   /(?:^|[^a-z])(agent_(?:create|list|get|send|archive)|github_read)$/i;
 const CODE_CALL = /tools\.loom\.(\w+)\s*\(/g;
-/** A bridge tool the code names some other way, such as search({query:'agent_create'}). */
+/**
+ * A bridge tool that code using the loom namespace names some other way,
+ * such as search({namespace:'loom', query:'agent_create'}).
+ */
+const LOOM_NAMESPACE = /["'`]loom["'`]|\bloom\./;
 const CODE_MENTION =
   /\b(agent_(?:create|list|get|send|archive)|github_read)\b/g;
 const AGENT_ARG = /\bagent\s*:\s*["'`]([^"'`]+)["'`]/;
@@ -281,8 +285,17 @@ function jsonInput(entry: ToolEntry): Record<string, unknown> | null {
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 
-/** The code a code mode call (execute) ran, or undefined. */
-const codeOf = (entry: ToolEntry) => str(jsonInput(entry)?.code);
+/** The start of a code mode call's input, even one cut short when saved. */
+const CODE_INPUT = /^\s*\{\s*"code"\s*:\s*"/;
+
+/** The code a code mode call (execute) ran, or undefined for other tools. */
+function codeOf(entry: ToolEntry): string | undefined {
+  if (!/(?:^|[^a-z])execute$/i.test((entry.tool.name ?? "").trim())) return;
+  const raw = entry.tool.input ?? "";
+  const code = str(jsonInput(entry)?.code);
+  if (code || !CODE_INPUT.test(raw)) return code;
+  return raw.replace(CODE_INPUT, "").replace(/\\"/g, '"');
+}
 
 /**
  * The Loom bridge calls a tool call makes, or [] when it is not one: a
@@ -301,9 +314,12 @@ export function bridgeCalls(entry: ToolEntry): BridgeCall[] {
     if (n) call.name = n;
     return [call];
   }
-  const code = str(input?.code) ?? "";
+  const code = codeOf(entry) ?? str(input?.code) ?? "";
   const calls = [...code.matchAll(CODE_CALL)];
-  const found = calls.length ? calls : [...code.matchAll(CODE_MENTION)];
+  const found =
+    calls.length || !LOOM_NAMESPACE.test(code)
+      ? calls
+      : [...code.matchAll(CODE_MENTION)];
   return found.flatMap((m, i) => {
     const tool = m[1]!;
     if (!BRIDGE_NAME.test(tool)) return [];

@@ -8,6 +8,8 @@ import {
   deriveTimelineRows,
   stepLabel,
   summarizeToolGroup,
+  toolHeading,
+  toolPreview,
 } from "../timelineRows";
 
 const tool = (
@@ -402,5 +404,57 @@ describe("Loom bridge calls (CL1)", () => {
       kind: "bridge",
       label: "Starting an agent",
     });
+  });
+});
+
+describe("code mode headers (CL4)", () => {
+  const raw = (key: string, name: string, input: string) => ({
+    ...tool(key, name),
+    tool: { name, input },
+  });
+  const names = new Map<string, string>();
+
+  it("never previews an execute's code, even when its saved input was cut short", () => {
+    const cut = raw(
+      "c",
+      "execute",
+      "{\"code\":\"const s=search({namespace:'loom', query:'agent_create'}); await s[0].ca",
+    );
+    expect(toolHeading(cut)).toBe("Ran code");
+    expect(toolPreview(cut)).toBe("");
+    expect(bridgeLabel(cut, names)).toBe("Started an agent");
+  });
+
+  it("names a bridge tool only in code that uses the loom namespace", () => {
+    const other = exec("o", "// agent_create is not called here\nreturn 1");
+    expect(bridgeLabel(other, names)).toBeNull();
+    const rows = deriveTimelineRows(
+      [startedItem("s", "k1"), create("c1"), other],
+      new Set(),
+    );
+    expect(rows[0]).toMatchObject({ kind: "started", calls: [{ key: "c1" }] });
+  });
+
+  it("leaves the heading and preview of other tools with a code argument alone", () => {
+    const py = raw("p", "python", JSON.stringify({ code: "print(1)" }));
+    expect(toolHeading(py)).toBe("Python");
+    expect(toolPreview(py)).not.toBe("");
+  });
+
+  it("shows a finished execute in the tray as Ran code", () => {
+    const e = (kind: string): AgentEvent => ({
+      agent_id: "c",
+      seq: 0,
+      event_id: "e",
+      kind,
+      turn_id: "t",
+      payload: {
+        itemKind: "tool",
+        tool: { name: "execute", input: JSON.stringify({ code: "return 1" }) },
+      },
+      created_at: "",
+    });
+    expect(stepLabel(e("tool.started"))).toBe("▸ Running code");
+    expect(stepLabel(e("item.completed"))).toBe("▸ Ran code");
   });
 });
