@@ -101,14 +101,27 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 			return r, err
 		}
 	}
+	rec, retry, err := s.commitSend(ctx, a, req, sender, interrupted)
+	switch {
+	case err != nil:
+		return SendResult{}, sendErr(a.AgentID, err)
+	case retry:
+		return decodeResult(rec)
+	}
+	return s.accepted(ctx, a, rec)
+}
+
+// commitSend saves req's slot change, receipt and events (sendEvents) in one
+// transaction under the event lane, then publishes the events. A finished a
+// starts its next attempt in it. retry reports that req already had a receipt.
+func (s *Service) commitSend(ctx context.Context, a loomstore.Agent, req SendRequest, sender string,
+	interrupted *bool) (rec loomstore.Receipt, retry bool, err error) {
 	reopen := a.State == StateFinished
 	out := sendEvents(a, sender, req.RequestID, reopen)
 	rows, err := eventRows(out)
 	if err != nil {
-		return SendResult{}, err
+		return rec, false, err
 	}
-	var rec loomstore.Receipt
-	var retry bool
 	_, err = s.events.commit(func() (saved []loomstore.Event, err error) {
 		rec, saved, retry, err = s.store.SendEvents(ctx, loomstore.SlotSend{AgentID: a.AgentID, Sender: sender,
 			RequestID: req.RequestID, Body: req.Text, Source: req.Source, Reopen: reopen, First: interrupted != nil && *interrupted,
@@ -119,13 +132,7 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 			}})
 		return saved, err
 	}, s.busPublish(out))
-	switch {
-	case err != nil:
-		return SendResult{}, sendErr(a.AgentID, err)
-	case retry:
-		return decodeResult(rec)
-	}
-	return s.accepted(ctx, a, rec)
+	return rec, retry, err
 }
 
 // sendEvents are the events an accepted Send saves with its slot change:

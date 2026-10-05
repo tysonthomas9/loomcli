@@ -118,23 +118,32 @@ func (s *Store) SendEvents(ctx context.Context, in SlotSend) (r Receipt, saved [
 		if err != nil {
 			return err
 		}
-		for _, e := range in.Events {
-			if e.AgentID != in.AgentID || (e.EventID == "" && !in.Reopen) {
-				return fmt.Errorf("loomstore: event %s of %s in a Send to %s", e.Kind, e.AgentID, in.AgentID)
-			}
-			if e.EventID == "" {
-				e.EventID = fmt.Sprintf("%s:%d:%s", in.AgentID, rev, e.Kind)
-			}
-			got, err := appendEvent(ctx, tx, e)
-			if err != nil {
-				return err
-			}
-			saved = append(saved, got)
+		if saved, err = sendEvents(ctx, tx, in, rev); err != nil {
+			return err
 		}
 		commitStateCrash()
 		return nil
 	})
 	return r, saved, retry, err
+}
+
+// sendEvents appends in.Events in tx, naming one with no EventID by rev, the
+// revision in.Reopen bumped to.
+func sendEvents(ctx context.Context, tx *sql.Tx, in SlotSend, rev int64) (saved []Event, err error) {
+	for _, e := range in.Events {
+		if e.AgentID != in.AgentID || (e.EventID == "" && !in.Reopen) {
+			return nil, fmt.Errorf("loomstore: event %s of %s in a Send to %s", e.Kind, e.AgentID, in.AgentID)
+		}
+		if e.EventID == "" {
+			e.EventID = fmt.Sprintf("%s:%d:%s", in.AgentID, rev, e.Kind)
+		}
+		got, err := appendEvent(ctx, tx, e)
+		if err != nil {
+			return nil, err
+		}
+		saved = append(saved, got)
+	}
+	return saved, nil
 }
 
 // putSlot writes in into the sender's slot, whose current row is cur: a
