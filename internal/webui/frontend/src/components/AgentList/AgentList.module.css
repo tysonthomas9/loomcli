@@ -9,13 +9,16 @@
   padding: 0;
 }
 
-.list .list {
+/* A row's children, pinned under it. */
+.children {
   padding-left: 12px;
 }
 
 /* The old agent rows' look (AgentCard compact). */
 .row {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 0.5rem;
   padding: 0.35rem 0.75rem;

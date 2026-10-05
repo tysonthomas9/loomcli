@@ -23,16 +23,36 @@ import type {
   AgentStreamOptions,
   ListAgentsQuery,
 } from "@/api/agentsv1";
+import type { DragEndEvent } from "@dnd-kit/core";
 import { agentColorIndex } from "@/hooks/agents/agentColor";
 
 const api = vi.hoisted(() => ({
   agents: [] as Agent[],
   listAgents: vi.fn(),
+  archiveAgent: vi.fn(),
   streams: [] as { opts: AgentStreamOptions; closed: boolean }[],
+  // Each sortable list's onDragEnd, in render order (last render wins).
+  dragEnds: [] as ((e: DragEndEvent) => void)[],
 }));
+
+// jsdom has no layout for a pointer drag, so tests call each list's
+// onDragEnd as dnd-kit would on a drop.
+vi.mock("@dnd-kit/core", async () => {
+  const actual =
+    await vi.importActual<typeof import("@dnd-kit/core")>("@dnd-kit/core");
+  return {
+    ...actual,
+    DndContext: (props: Parameters<typeof actual.DndContext>[0]) => {
+      if (props.onDragEnd) api.dragEnds.push(props.onDragEnd);
+      return <actual.DndContext {...props} />;
+    },
+  };
+});
 
 vi.mock("@/api/agentsv1", () => ({
   listAgents: api.listAgents,
+  archiveAgent: api.archiveAgent,
+  newRequestId: () => "req-1",
   AgentEventStream: class {
     closed = false;
     constructor(
@@ -118,6 +138,10 @@ function renderList(at = "/ws/ws1/chat/lead") {
 
 beforeEach(() => {
   api.streams = [];
+  api.dragEnds = [];
+  localStorage.clear();
+  api.archiveAgent.mockReset();
+  api.archiveAgent.mockResolvedValue(undefined);
   api.agents = [
     agent("lead"),
     agent("other", { harness: "claude" }),
@@ -136,10 +160,8 @@ describe("AgentList", () => {
     const lead = row("lead")!;
     expect(lead).toHaveAttribute("href", "/ws/ws1/chat/lead");
     expect(lead).toHaveAttribute("aria-current", "page");
-    const leadItem = lead.closest("li")!;
-    expect(within(leadItem.querySelector("ul")!).getByRole("link")).toBe(
-      row("kid"),
-    );
+    const leadKids = screen.getByRole("group", { name: "lead children" });
+    expect(within(leadKids).getByRole("link")).toBe(row("kid"));
     // The harness is a logo named for it; no harness or state words show.
     expect(
       within(row("other")!).getByRole("img", { name: "claude" }),
@@ -195,9 +217,9 @@ describe("AgentList", () => {
         ev("kid", "agent.state_changed", { from: "finished", to: "active" }),
       ]),
     );
-    expect(row("lead")!.closest("li")!.querySelector("ul")).toContainElement(
-      row("kid"),
-    );
+    expect(
+      screen.getByRole("group", { name: "lead children" }),
+    ).toContainElement(row("kid"));
   });
 
   it("lists a lead's children on child.created and subscribes the new child", async () => {
@@ -267,8 +289,9 @@ describe("AgentList", () => {
     await waitFor(() => expect(names()).toHaveLength(4));
     // Lead first, its worker child nested under it, then the rest, then Background.
     expect(names()).toEqual(["lead", "kid", "review", "worker"]);
-    const lead = row("lead")!.closest("li")!;
-    expect(lead).toContainElement(row("kid"));
+    expect(
+      screen.getByRole("group", { name: "lead children" }),
+    ).toContainElement(row("kid"));
     const bg = screen.getByTestId("agent-list-background");
     const bgNames = within(bg)
       .getAllByTestId("agent-list-name")
@@ -345,7 +368,9 @@ describe("AgentList", () => {
     renderList("/ws/ws1/chat/done");
     await waitFor(() => expect(row("done")).not.toBeNull());
     expect(row("done")).toHaveAttribute("aria-current", "page");
-    expect(row("lead")!.closest("li")).toContainElement(row("done"));
+    expect(
+      screen.getByRole("group", { name: "lead children" }),
+    ).toContainElement(row("done"));
     act(() => navigate("/ws/ws1/chat/lead"));
     await waitFor(() => expect(row("done")).toBeNull());
     expect(row("lead")).toHaveAttribute("aria-current", "page");
@@ -359,7 +384,9 @@ describe("AgentList", () => {
     ];
     renderList("/ws/ws1/agents");
     await waitFor(() => expect(names()).toHaveLength(3));
-    expect(row("mid")!.closest("li")).toContainElement(row("deep"));
+    expect(
+      screen.getByRole("group", { name: "mid children" }),
+    ).toContainElement(row("deep"));
   });
 
   it("renders the AgentCard look: role line, status dot and the harness logo per harness", async () => {
@@ -440,5 +467,86 @@ describe("AgentList", () => {
     );
     const rule = /\.row:hover \{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(rule).toMatch(/text-decoration: none/);
+  });
+
+  it("reorders Leads by drag, keeps each child under its Lead, and keeps the order after a reload", async () => {
+    api.agents = [
+      agent("lead", { preset: "lead" }),
+      agent("lead2", { preset: "lead" }),
+      agent("kid", { parent_agent_id: "lead", state: "active" }),
+    ];
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/ws/ws1/agents"]}>
+        <AgentList workspaceId="ws1" />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(names()).toEqual(["lead", "kid", "lead2"]));
+    // Leads have a drag handle; a child does not drag on its own.
+    expect(screen.getByLabelText("Drag to reorder lead")).toBeInTheDocument();
+    expect(screen.getByLabelText("Drag to reorder lead2")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Drag to reorder kid")).toBeNull();
+
+    // Drop lead2 on lead; its child moves with lead.
+    act(() =>
+      api.dragEnds.at(-1)!({
+        active: { id: "lead2" },
+        over: { id: "lead" },
+      } as unknown as DragEndEvent),
+    );
+    expect(names()).toEqual(["lead2", "lead", "kid"]);
+    expect(
+      within(screen.getByRole("group", { name: "lead children" })).getByRole(
+        "link",
+      ),
+    ).toBe(row("kid"));
+
+    // A reload reads the saved order, as the fleet rows do.
+    unmount();
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toEqual(["lead2", "lead", "kid"]));
+  });
+
+  it("archives an agent from the hover action, and the row leaves the list", async () => {
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "Archive other" }));
+    // The chat header's Archive call.
+    await waitFor(() =>
+      expect(api.archiveAgent).toHaveBeenCalledWith("ws1", "other", "req-1"),
+    );
+    await waitFor(() => expect(row("other")).toBeNull());
+    expect(row("lead")).not.toBeNull();
+  });
+
+  it("archives a child from the right-click menu, leaving its Lead", async () => {
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    fireEvent.contextMenu(row("kid")!, { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+    await waitFor(() =>
+      expect(api.archiveAgent).toHaveBeenCalledWith("ws1", "kid", "req-1"),
+    );
+    await waitFor(() => expect(row("kid")).toBeNull());
+    expect(names()).toEqual(["lead", "other"]);
+  });
+
+  it("keeps the row when the archive fails", async () => {
+    api.archiveAgent.mockRejectedValueOnce(new Error("agent_busy"));
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "Archive other" }));
+    await waitFor(() => expect(api.archiveAgent).toHaveBeenCalled());
+    expect(row("other")).not.toBeNull();
+  });
+
+  it("drops an archived agent from the list when the stream says so", async () => {
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    act(() =>
+      stream().opts.onEvents?.([
+        ev("other", "agent.state_changed", { from: "idle", to: "archived" }),
+      ]),
+    );
+    await waitFor(() => expect(row("other")).toBeNull());
   });
 });

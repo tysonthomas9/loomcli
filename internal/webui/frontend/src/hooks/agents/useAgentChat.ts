@@ -22,6 +22,16 @@ import { ApiError } from "@/types/common";
 import { REFRESH_KINDS, addDelta, chatItems, settle } from "./agentChatModel";
 import type { ChatItem, Streaming } from "./agentChatModel";
 
+/** Archives an agent by id: the chat header's Archive call, for the sidebar. */
+export function useArchiveAgent(
+  workspaceId: string,
+): (agentId: string) => Promise<void> {
+  return useCallback(
+    (agentId: string) => archiveAgent(workspaceId, agentId, newRequestId()),
+    [workspaceId],
+  );
+}
+
 export interface UseAgentChatReturn {
   agent: Agent | null;
   items: ChatItem[];

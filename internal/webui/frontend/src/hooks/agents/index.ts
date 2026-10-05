@@ -49,7 +49,7 @@ export type {
   UseClaimHoldReturn,
 } from "./useClaimHold";
 
-export { useAgentChat } from "./useAgentChat";
+export { useAgentChat, useArchiveAgent } from "./useAgentChat";
 export type { UseAgentChatReturn } from "./useAgentChat";
 export { latestTurnError, ownSender, senderAgent } from "./agentChatModel";
 export type {
