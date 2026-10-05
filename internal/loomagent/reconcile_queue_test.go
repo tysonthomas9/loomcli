@@ -792,3 +792,32 @@ func TestDeleteCancelledAfterMarkQueued(t *testing.T) {
 		t.Fatal("the cancelled Delete was not queued for its retry")
 	}
 }
+
+// TestBadRequestLeftoverUnrecordedRetried: Open refuses as a bad request
+// but leaves a session, and recording it purge-pending fails. Nothing
+// would find that session, so the failure is not terminal: the retry
+// records it (the fake's re-Open by key hands the same session back, so
+// the Create adopts it as its working one).
+func TestBadRequestLeftoverUnrecordedRetried(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	fh.FailOpen(fmt.Errorf("opencode: unknown preset: %w", loomharness.ErrBadRequest), true)
+	lift := failOn(t, e, `INSERT ON native_purge_pending`)
+	if _, err := s.Create(ctx, leadReq("r1")); err == nil {
+		t.Fatal("Create succeeded")
+	}
+	lift()
+	if c.fire() != 1 {
+		t.Fatal("the unrecorded leftover's Create was not queued for a retry")
+	}
+	settled(t, s)
+	a := onlyRow(t, e)
+	if owned, _ := e.st.NativeSessions(ctx, a.AgentID); len(owned) != 1 {
+		t.Fatalf("owned = %v; want the leftover recorded", owned)
+	}
+}

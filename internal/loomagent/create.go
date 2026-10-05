@@ -517,6 +517,9 @@ func (s *Service) leftover(ctx context.Context, agentID, harness string, ref loo
 	}
 	n := loomstore.NativeSession{AgentID: agentID, Harness: harness, NativeRoot: ref.Root, NativeID: ref.NativeID}
 	if err := s.store.RecordPurgePending(ctx, n); err != nil {
+		if p, ok := cause.(permanent); ok { // nothing marks the session yet: retry until something does
+			cause = p.error
+		}
 		return errors.Join(cause, err)
 	}
 	if err := s.purgeLeftover(ctx, n); err != nil {
