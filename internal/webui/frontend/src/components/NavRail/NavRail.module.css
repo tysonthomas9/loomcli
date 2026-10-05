@@ -297,6 +297,7 @@
 @media (width <= 768px) {
   .navRail {
     flex-direction: row;
+    gap: 0;
     width: 100%;
     min-width: unset;
     height: var(--nav-bottom-height);
@@ -312,12 +313,37 @@
   }
 
   .navButton {
+    flex-shrink: 0;
     width: var(--touch-target-min);
     height: var(--touch-target-min);
   }
 
-  .spacer {
+  .spacer,
+  .wsDivider {
     display: none;
+  }
+
+  /* One row: the avatars and Add take what the buttons leave and scroll
+     sideways, so every workspace stays reachable. */
+  .workspaceSwitcher {
+    flex: 1 1 0;
+    flex-direction: row;
+    gap: 11px;
+    width: auto;
+    min-width: 0;
+    padding: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .workspaceList {
+    flex-direction: row;
+    flex-shrink: 0;
+    width: auto;
+    max-height: none;
+    padding: 0;
+    overflow: visible;
   }
 
   .tooltip {
