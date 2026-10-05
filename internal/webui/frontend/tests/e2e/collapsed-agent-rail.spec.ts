@@ -35,6 +35,8 @@ const agent = (id: string, over: object = {}) => ({
   agent_id: id,
   name: id,
   harness: "opencode",
+  repo: "/repos/loomcli",
+  branch: `agent/${id}`,
   preset: "lead",
   role_kind: "interactive",
   state: "idle",
@@ -175,10 +177,17 @@ test("the collapsed rail lists Agent API Leads and working children, opens a cha
 
   if (SHOTS) {
     for (const theme of ["light", "dark"] as const) {
+      // The app's own theme setting, read on load.
       await page.evaluate(
-        (t) => document.documentElement.setAttribute("data-theme", t),
+        (t) => localStorage.setItem("cortex:theme", t),
         theme,
       );
+      await page.reload();
+      await expect(railAgent(page, "lead2")).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await page.screenshot({
         path: `${SHOTS}/rail1-collapsed-${theme}.png`,
         clip: { x: 0, y: 0, width: 420, height: 520 },
