@@ -361,13 +361,20 @@ func (s *Service) settle(ctx context.Context, agentID string) error {
 	if err != nil || a.State == StateCreating {
 		return err
 	}
+	sess, _, err := s.current(ctx, a)
+	gone := err == nil && sess == nil || errors.Is(err, errUnrecorded) // no retry wires the harness or records the session
 	if a.RunningTurnID == nil {
-		_, err = s.wake(ctx, a)
+		if _, err = s.dispatch(ctx, a); err != nil && gone { // not wake: a failed hand-over is retried
+			err = permanent{err}
+		}
 		return err
 	}
-	sess, _, err := s.current(ctx, a)
-	if err != nil || sess == nil { // no retry wires the harness or records the session
-		return permanent{errors.Join(err, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"})}
+	if err != nil || sess == nil {
+		err = errors.Join(err, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"})
+		if gone {
+			err = permanent{err}
+		}
+		return err
 	}
 	st, err := sess.Status(ctx)
 	if errors.Is(err, loomharness.ErrSessionNotFound) {
@@ -424,7 +431,7 @@ func (s *Service) endLostTurn(ctx context.Context, a loomstore.Agent, sess loomh
 		landed, err := sess.HasInput(ctx, deref(sl.NativeKey))
 		switch {
 		case err != nil || landed == loomharness.LandedUnknown:
-			if a.AttentionReason == nil {
+			if r := deref(a.AttentionReason); r == "" || r == AttentionHarnessUnavailable { // it replaces a failed settle's
 				_, err = s.raiseAttention(ctx, a, AttentionDeliveryUnknown)
 				return err
 			}

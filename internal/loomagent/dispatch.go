@@ -177,7 +177,7 @@ func (s *Service) handOff(ctx context.Context, a loomstore.Agent) (loomstore.Age
 	}
 	dispatchCrash("handed")
 	if err := sess.Prompt(ctx, loomharness.Input{Key: *sl.NativeKey, Text: sl.Body}); err != nil {
-		return a, harnessErr(err)
+		return a, openErr(err) // a bad request is not retried
 	}
 	dispatchCrash("prompted")
 	to := a.StateOf()

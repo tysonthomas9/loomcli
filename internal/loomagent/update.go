@@ -245,13 +245,17 @@ func (s *Service) current(ctx context.Context, a loomstore.Agent) (loomharness.S
 	}
 	switch len(refs) {
 	case 0:
-		return nil, loomharness.NativeRef{}, fmt.Errorf("loomagent: %s's current session is not recorded", a.AgentID)
+		return nil, loomharness.NativeRef{}, fmt.Errorf("loomagent: %s's current session %w", a.AgentID, errUnrecorded)
 	case 1:
 		return h.Session(refs[0]), refs[0], nil
 	}
-	return nil, loomharness.NativeRef{}, fmt.Errorf("loomagent: %s's current session %s is recorded under %d roots and has no saved root",
-		a.AgentID, *a.HarnessSessionID, len(refs))
+	return nil, loomharness.NativeRef{}, fmt.Errorf("loomagent: %s's current session %s is recorded under %d roots and has no saved root: %w",
+		a.AgentID, *a.HarnessSessionID, len(refs), errUnrecorded)
 }
+
+// errUnrecorded is an agent's current session that its recorded sessions
+// do not name exactly; no retry changes that.
+var errUnrecorded = errors.New("is not recorded")
 
 // appendEvent saves one agent-level event; a repeated eventID is a no-op.
 func (s *Service) appendEvent(ctx context.Context, agentID, kind, eventID string, payload any) error {

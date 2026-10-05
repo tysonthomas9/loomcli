@@ -337,3 +337,78 @@ func TestReconcileUnwiredHarnessNotRetried(t *testing.T) {
 		t.Fatalf("Attention %q backoffs %v; want harness_unavailable and no retry", r, clk.backoffs())
 	}
 }
+
+// waitingLead creates an idle lead with message u1 waiting: break runs
+// before the send, so its hand-over fails, and Loom then restarts.
+func waitingLead(t *testing.T, e *createEnv, broken func(loomstore.Agent)) (loomstore.Agent, loomharness.NativeRef) {
+	t.Helper()
+	s1 := e.service(ServiceConfig{})
+	a, ref := newLead(t, e, s1, "alpha")
+	broken(a)
+	_, _ = s1.Send(context.Background(), sendReq(a.AgentID, "u1", "go", user))
+	if st := slotState(t, s1, a.AgentID, "u1"); st != loomstore.SlotWaiting {
+		t.Fatalf("setup: u1 %s", st)
+	}
+	return a, ref
+}
+
+// TestReconcileFailedHandOffRetries: after a restart the hand-over of a
+// waiting message fails while the harness cannot install its rules. The
+// queue retries it after its backoff and hands it over once.
+func TestReconcileFailedHandOffRetries(t *testing.T) {
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	a, ref := waitingLead(t, e, func(loomstore.Agent) { fh.FailInstall(errors.New("install failed")) })
+	s := e.service(ServiceConfig{}) // the restart
+	clk := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	fh.FailInstall(nil)
+	if clk.fire() != 1 {
+		t.Fatal("no retry pending")
+	}
+	settled(t, s)
+	if turnsRun(e, ref) != 1 || slotState(t, s, a.AgentID, "u1") == loomstore.SlotWaiting {
+		t.Fatalf("turns %d slot %s; want u1 handed over once", turnsRun(e, ref), slotState(t, s, a.AgentID, "u1"))
+	}
+}
+
+// TestReconcileUnrecordedSessionNotRetried: an idle lead's message waits
+// but its current session is not recorded as its own. Settling it shows
+// harness_unavailable and queues no retry: none can record it.
+func TestReconcileUnrecordedSessionNotRetried(t *testing.T) {
+	e := newCreateEnv(t)
+	a, _ := waitingLead(t, e, func(a loomstore.Agent) {
+		execSQL(t, e, `UPDATE agents SET harness_session_id = 'ses_unrecorded' WHERE agent_id = ?`, a.AgentID)
+	})
+	s := e.service(ServiceConfig{}) // the restart
+	clk := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	if r := deref(s.get(t, a.AgentID).AttentionReason); r != AttentionHarnessUnavailable || len(clk.backoffs()) != 0 {
+		t.Fatalf("Attention %q backoffs %v; want harness_unavailable and no retry", r, clk.backoffs())
+	}
+}
+
+// TestReconcileRetryShowsDeliveryUnknown: a feed gap's settle fails once on
+// Status and shows harness_unavailable; the retry finds the lost turn's
+// input unknown, and the lead shows delivery_unknown instead, resending
+// nothing.
+func TestReconcileRetryShowsDeliveryUnknown(t *testing.T) {
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	clk := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	a, ref := lostTurn(t, e, loomharness.LandedUnknown)
+	fail := &atomic.Int32{}
+	s.harnesses["opencode"] = statusOnce{e.h, fail}
+	fail.Store(1)
+	reconcile(t, s)
+	settled(t, s)
+	clk.fire()
+	settled(t, s)
+	if r := deref(s.get(t, a.AgentID).AttentionReason); r != AttentionDeliveryUnknown || turnsRun(e, ref) != 0 {
+		t.Fatalf("Attention %q turns %d; want delivery_unknown, nothing resent", r, turnsRun(e, ref))
+	}
+}
