@@ -306,21 +306,20 @@ func (s *Service) changeState(ctx context.Context, a loomstore.Agent, to loomsto
 	if err != nil {
 		return before, err
 	}
-	var owed []loomstore.CompletionMarker
-	if completed(a) && !completed(before) { // a child's attempt ended: its parent is owed its record (§10.3)
-		m, err := s.marker(ctx, a)
-		if err != nil {
-			return before, err
+	_, err = s.events.commit(func() ([]loomstore.Event, error) {
+		var owed []loomstore.CompletionMarker
+		if completed(a) && !completed(before) { // a child's attempt ended: its parent is owed its record (§10.3)
+			m, err := s.marker(ctx, a) // read under the lane, so no append slips between it and the commit
+			if err != nil {
+				return nil, err
+			}
+			owed = append(owed, m)
 		}
-		owed = append(owed, m)
-	}
-	if arch == nil {
-		_, err = s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, s.busPublish(out), owed...)
-	} else {
-		_, err = s.events.commit(func() ([]loomstore.Event, error) {
-			return s.store.CommitArchive(ctx, a.AgentID, from, to, before.Revision, arch.reason, arch.at, rows, owed...)
-		}, s.busPublish(out))
-	}
+		if arch == nil {
+			return s.store.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, owed...)
+		}
+		return s.store.CommitArchive(ctx, a.AgentID, from, to, before.Revision, arch.reason, arch.at, rows, owed...)
+	}, s.busPublish(out))
 	if err != nil {
 		return before, err
 	}

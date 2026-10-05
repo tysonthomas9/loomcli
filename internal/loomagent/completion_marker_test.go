@@ -420,3 +420,68 @@ func TestCompletionOwedAtUpgrade(t *testing.T) {
 		t.Fatalf("markers left = %d", n)
 	}
 }
+
+// TestCompletionArchiveAfterDelivery: archiving a finished child whose
+// record was delivered (finished, stopping, archived) saves and publishes
+// no second record.
+func TestCompletionArchiveAfterDelivery(t *testing.T) {
+	ctx := context.Background()
+	path := dbPath(t)
+	s := markerService(t, ServiceConfig{}, path, busy("L", "persistent", StateActive), childOf("c1", "L"))
+	endAttempt(t, s, "c1", "completed")
+	sub := s.Bus.Subscribe("L")
+	defer s.Bus.Unsubscribe(sub)
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: "c1", Reason: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	s.recordCompletions(ctx)
+	if got := published(sub); len(got) != 0 {
+		t.Fatalf("archive republished the record: %+v", got)
+	}
+	if got, n := completions(t, s, "L"), markers(t, path); len(got) != 1 || n != 0 {
+		t.Fatalf("records %+v, markers %d; want one and none", got, n)
+	}
+}
+
+// TestCompletionGoneParentFailingStatus: a marker owed to a deleted parent
+// is dropped even while the child's Workspace.Status keeps failing.
+func TestCompletionGoneParentFailingStatus(t *testing.T) {
+	ctx := context.Background()
+	path := dbPath(t)
+	ws := &flakyStatus{headWorkspace: headWorkspace{branch: "loom/agent/c1", head: "abc"}}
+	ws.fail.Store(true)
+	c := childOf("c1", "L")
+	c.WorktreePath, c.Branch = sp("/wt/c1"), sp("loom/agent/c1")
+	s := markerService(t, ServiceConfig{Workspace: ws}, path, busy("L", "persistent", StateActive), c)
+	if err := s.store.Tombstone(ctx, "L", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	finishTurn(t, s, "c1", "completed") // its marker is owed to the deleted parent
+	s.recordCompletions(ctx)
+	if n := markers(t, path); n != 0 {
+		t.Fatalf("markers left = %d", n)
+	}
+}
+
+// TestCompletionChildDeletedDuringDelivery: the child is deleted after
+// delivery read its head and before delivery commits; the record has no
+// head and child_deleted.
+func TestCompletionChildDeletedDuringDelivery(t *testing.T) {
+	ctx := context.Background()
+	path := dbPath(t)
+	c := childOf("c1", "L")
+	c.WorktreePath, c.Branch = sp("/wt/c1"), sp("loom/agent/c1")
+	ws := &hookStatus{headWorkspace: headWorkspace{branch: "loom/agent/c1", head: "abc"}}
+	s := markerService(t, ServiceConfig{Workspace: ws}, path, busy("L", "persistent", StateActive), c)
+	ws.hook = func() {
+		if err := s.store.Tombstone(ctx, "c1", time.Now()); err != nil {
+			t.Error(err)
+		}
+	}
+	endAttempt(t, s, "c1", "completed")
+	evs := kinds(rows(t, s, "L", 0), KindTaskCompleted)
+	got := completions(t, s, "L")
+	if len(got) != 1 || got[0].Head != "" || !strings.Contains(string(evs[0].Payload), `"child_deleted":true`) {
+		t.Fatalf("records = %+v; want one with no head and child_deleted", got)
+	}
+}

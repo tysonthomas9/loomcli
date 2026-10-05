@@ -50,12 +50,14 @@ func (s *Store) CompletionMarkers(ctx context.Context, workspaceID string) ([]Co
 	return out, rows.Err()
 }
 
-// DeliverCompletion appends e, m's record on m.Parent, and deletes m, in one
-// transaction. When m is no longer owed (already delivered, or dropped with
-// its parent's Delete or history purge), or m.Parent is deleted or its
-// history purged, it deletes m and appends nothing. It returns the saved
-// event, if any.
-func (s *Store) DeliverCompletion(ctx context.Context, m CompletionMarker, e Event) (saved []Event, err error) {
+// DeliverCompletion appends m's record on m.Parent, as event builds it
+// (told whether m.Child is deleted now), and deletes m, in one transaction.
+// When m is no longer owed (already delivered, or dropped with its parent's
+// Delete or history purge), m.Parent is deleted or its history purged, or
+// the record is already saved, it deletes m and appends nothing. It returns
+// the saved event, if any.
+func (s *Store) DeliverCompletion(ctx context.Context, m CompletionMarker,
+	event func(childDeleted bool) (Event, error)) (saved []Event, err error) {
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM agent_completion_markers WHERE child_agent_id = ? AND attempt = ?`,
 			m.Child, m.Attempt)
@@ -72,6 +74,18 @@ func (s *Store) DeliverCompletion(ctx context.Context, m CompletionMarker, e Eve
 			return err
 		}
 		if n, _ := res.RowsAffected(); n > 0 && !gone {
+			var childLive bool
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE agent_id = ? AND deleted_at IS NULL`,
+				m.Child).Scan(&childLive); err != nil {
+				return err
+			}
+			e, err := event(!childLive)
+			if err != nil {
+				return err
+			}
+			if _, err := getEvent(ctx, tx, e.AgentID, e.EventID); !errors.Is(err, sql.ErrNoRows) {
+				return err // already saved (a repeat marker), or a failed read
+			}
 			got, err := appendEvent(ctx, tx, e)
 			if err != nil {
 				return err

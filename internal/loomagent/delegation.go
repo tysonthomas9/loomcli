@@ -330,17 +330,22 @@ func (s *Service) readResult(ctx context.Context, m *loomstore.CompletionMarker)
 // deletes m in one transaction, under the parent's lock alone (never the
 // child's), with the head from the Workspace port (R32), and wakes the
 // parent's dispatcher, which puts it in the child's slot there. A child
-// deleted meanwhile still gets its record, from m, with no head. A parent
-// deleted or with its history purged gets none, and m is dropped. A repeat
-// changes nothing.
+// deleted before that transaction still gets its record, from m, with no
+// head and ChildDeleted. A parent deleted or with its history purged gets
+// none, and m is dropped. A repeat changes nothing.
 func (s *Service) recordCompletion(ctx context.Context, m loomstore.CompletionMarker) error {
 	defer s.lock(m.Parent)()
 	rec := TaskCompleted{Child: m.Child, Attempt: m.Attempt, Outcome: m.Outcome, Branch: m.Branch, Summary: m.Summary,
 		Result: m.Result}
+	p, err := s.store.GetAgent(ctx, m.Parent)
+	if err != nil && !errors.Is(err, loomstore.ErrNotFound) {
+		return err
+	}
+	read := err == nil && p.DeletedAt == nil && p.HistoryPurgedAt == nil // a gone parent needs no head: m is dropped
 	a, err := s.store.GetAgent(ctx, m.Child)
 	switch {
 	case errors.Is(err, loomstore.ErrNotFound) || err == nil && a.DeletedAt != nil:
-		rec.ChildDeleted = true
+		read = false
 	case err != nil:
 		return err
 	case m.Backfilled: // saved by the upgrade: read what the child's history holds
@@ -349,7 +354,7 @@ func (s *Service) recordCompletion(ctx context.Context, m loomstore.CompletionMa
 		}
 		rec.Summary, rec.Result = m.Summary, m.Result
 	}
-	if !rec.ChildDeleted && a.WorktreePath != nil && s.workspace != nil { // a failed Status saves nothing, unless retrying cannot help
+	if read && a.WorktreePath != nil && s.workspace != nil { // a failed Status saves nothing, unless retrying cannot help
 		repo, err := s.repoPath(ctx, a.Repo)
 		if err != nil {
 			return err
@@ -365,11 +370,13 @@ func (s *Service) recordCompletion(ctx context.Context, m loomstore.CompletionMa
 			rec.Branch, rec.Head = st.Branch, st.HEAD
 		}
 	}
-	e, err := eventRow(m.Parent, KindTaskCompleted, completionKey(m.Child, m.Attempt), rec)
-	if err != nil {
-		return err
+	event := func(childDeleted bool) (loomstore.Event, error) {
+		if childDeleted {
+			rec.Branch, rec.Head, rec.ChildDeleted = m.Branch, "", true
+		}
+		return eventRow(m.Parent, KindTaskCompleted, completionKey(m.Child, m.Attempt), rec)
 	}
-	_, err = s.events.commit(func() ([]loomstore.Event, error) { return s.store.DeliverCompletion(ctx, m, e) },
+	_, err = s.events.commit(func() ([]loomstore.Event, error) { return s.store.DeliverCompletion(ctx, m, event) },
 		func(saved []loomstore.Event) {
 			if len(saved) > 0 {
 				s.Bus.publish(Event{AgentID: m.Parent, Type: KindTaskCompleted, Reason: m.Child, Outcome: rec.Outcome,
