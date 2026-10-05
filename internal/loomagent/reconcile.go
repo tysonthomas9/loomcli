@@ -388,7 +388,7 @@ func (s *Service) settle(ctx context.Context, agentID string) error {
 	if ended, err := endedNatively(ctx, sess, *a.RunningTurnID); err != nil || ended {
 		return openErr(err) // it ended after the backfill read: the feed or the next backfill applies its end
 	}
-	return s.endLostTurn(ctx, a, sess)
+	return s.endLostTurn(ctx, a, sess, s.dispatch) // not wake: the queue retries a failed hand-over
 }
 
 // endedNatively reports whether sess's history, read after its Status showed
@@ -417,8 +417,10 @@ func endedNatively(ctx context.Context, sess loomharness.Session, running string
 // one whose fate is unknown shows Attention delivery_unknown and the turn
 // stays until a user acts. The end of a turn that ran is saved as a native
 // end would be (same EventID), so the chat shows the turn's note and keeps
-// it on a reload.
-func (s *Service) endLostTurn(ctx context.Context, a loomstore.Agent, sess loomharness.Session) error {
+// it on a reload. next then hands over the next message: dispatch, whose
+// error the reconcile queue retries, or wake, which shows it as Attention.
+func (s *Service) endLostTurn(ctx context.Context, a loomstore.Agent, sess loomharness.Session,
+	next func(context.Context, loomstore.Agent) (loomstore.Agent, error)) error {
 	slots, err := s.store.Slots(ctx, a.AgentID)
 	if err != nil {
 		return err
@@ -454,6 +456,6 @@ func (s *Service) endLostTurn(ctx context.Context, a loomstore.Agent, sess loomh
 	if err != nil || !ended {
 		return err
 	}
-	_, err = s.dispatch(ctx, a) // not wake: a failed hand-over is retried
+	_, err = next(ctx, a)
 	return err
 }

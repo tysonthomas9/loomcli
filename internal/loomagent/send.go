@@ -288,7 +288,7 @@ func (s *Service) endUnrunTurn(ctx context.Context, a loomstore.Agent) (bool, er
 	if ended, err := endedNatively(ctx, sess, *a.RunningTurnID); err != nil || ended {
 		return false, harnessErr(err) // the feed applies its end
 	}
-	return true, s.endLostTurn(ctx, a, sess)
+	return true, s.endLostTurn(ctx, a, sess, s.wake) // a failed hand-over shows as Attention: the Send goes on
 }
 
 // sessionInterrupt is the default Interrupt hook (Send, Archive cancelled,

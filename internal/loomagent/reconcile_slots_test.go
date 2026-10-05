@@ -457,3 +457,21 @@ func TestReconcileMissingSessionNotRetried(t *testing.T) {
 		t.Fatalf("Attention %q backoffs %v; want Attention and no retry", deref(r), clk.backoffs())
 	}
 }
+
+// TestInterruptSendKeepsMessageOnFailedHandOff: a Send that interrupts a
+// lost turn puts the turn's input, which never landed, back in line, and
+// handing it over fails while the harness cannot install its rules. The
+// Send still succeeds and its own message waits in line.
+func TestInterruptSendKeepsMessageOnFailedHandOff(t *testing.T) {
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	a, _ := lostTurn(t, e, loomharness.LandedNotFound)
+	s := e.service(ServiceConfig{}) // the restart
+	fh.FailInstall(errors.New("install failed"))
+	if _, err := s.Send(context.Background(), interruptReq(a.AgentID, "c2", "stop and do this", child)); err != nil {
+		t.Fatalf("interrupting Send: %v", err)
+	}
+	if st := slotState(t, s, a.AgentID, "c2"); st != loomstore.SlotWaiting {
+		t.Fatalf("c2 %s; want it waiting in line", st)
+	}
+}
