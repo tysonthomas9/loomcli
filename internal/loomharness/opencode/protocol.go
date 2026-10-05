@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -210,7 +211,7 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 func (c *Client) do(ctx context.Context, method, path string, in any) (*http.Response, error) {
 	if c.ready != nil {
 		if err := c.ready(ctx); err != nil {
-			return nil, fmt.Errorf("opencode %s %s: %w", method, path, err)
+			return nil, fmt.Errorf("opencode %s %s: %w: %w", method, path, loomharness.ErrNotSent, err)
 		}
 	}
 	base, password := c.endpoint()
@@ -234,6 +235,9 @@ func (c *Client) do(ctx context.Context, method, path string, in any) (*http.Res
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if op := (*net.OpError)(nil); errors.As(err, &op) && op.Op == "dial" { // no connection: nothing sent
+			err = fmt.Errorf("%w: %w", loomharness.ErrNotSent, err)
 		}
 		return nil, fmt.Errorf("opencode %s %s: %w: %w", method, path, loomharness.ErrUnavailable, err)
 	}

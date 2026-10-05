@@ -7,8 +7,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"sync"
 
@@ -179,9 +181,11 @@ func (c *Conn) send(v any) error {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
 	if err := c.Err(); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", loomharness.ErrNotSent, err)
 	}
-	if err := c.enc.Encode(v); err != nil {
+	if err := c.enc.Encode(v); errors.Is(err, io.ErrClosedPipe) || errors.Is(err, os.ErrClosed) {
+		return fmt.Errorf("codex: write: %w: %w: %w", loomharness.ErrNotSent, loomharness.ErrUnavailable, err) // our end closed: nothing written
+	} else if err != nil {
 		return fmt.Errorf("codex: write: %w: %w", loomharness.ErrUnavailable, err)
 	}
 	return nil

@@ -431,7 +431,7 @@ func (s *Session) Resume(context.Context, loomharness.Launch, []loomharness.Perm
 
 // Reply answers an ask through the permission tool (5.2); until then it fails.
 func (s *Session) Reply(context.Context, string, loomharness.Reply) error {
-	return fmt.Errorf("claude: Reply is not available until the 5.2 permission tool: %w", loomharness.ErrUnavailable)
+	return fmt.Errorf("claude: Reply is not available until the 5.2 permission tool: %w: %w", loomharness.ErrNotSent, loomharness.ErrUnavailable)
 }
 
 // HasInput reads the transcript (5.2b); until then it fails.

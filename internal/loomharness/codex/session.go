@@ -273,7 +273,7 @@ func (s *Session) Reply(_ context.Context, askID string, r loomharness.Reply) er
 	ask, ok := s.a.asks[s.ref.Root][askID]
 	s.a.mu.Unlock()
 	if !ok || ask.ThreadID != s.ref.NativeID {
-		return fmt.Errorf("codex: ask %s is not open on thread %s", askID, s.ref.NativeID)
+		return fmt.Errorf("codex: ask %s is not open on thread %s: %w", askID, s.ref.NativeID, loomharness.ErrNotSent)
 	}
 	result, err := answer(ask, r)
 	if err != nil {
@@ -284,7 +284,7 @@ func (s *Session) Reply(_ context.Context, askID string, r loomharness.Reply) er
 	delete(s.a.asks[s.ref.Root], askID) // answered once; serverRequest/resolved follows
 	s.a.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("codex: ask %s was answered or lost meanwhile", askID)
+		return fmt.Errorf("codex: ask %s was answered or lost meanwhile: %w", askID, loomharness.ErrNotSent)
 	}
 	return ask.Respond(result)
 }

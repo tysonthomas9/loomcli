@@ -288,4 +288,8 @@ var (
 	// ErrQuarantined: the session's policy is unconfirmed, so it refuses
 	// Prompt and Reply until Open or Resume confirms one.
 	ErrQuarantined = errors.New("loomharness: session quarantined: its policy is unconfirmed")
+	// ErrNotSent: the call failed before any of its request reached the
+	// harness (no connection, or refused before writing), so it had no
+	// effect there and may be made again.
+	ErrNotSent = errors.New("loomharness: request not sent")
 )
