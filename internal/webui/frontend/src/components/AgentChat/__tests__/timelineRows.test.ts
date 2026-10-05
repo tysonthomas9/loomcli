@@ -446,6 +446,18 @@ describe("code mode headers (CL4)", () => {
     });
   });
 
+  it("folds loom code cut short before its agent_create into the marker next to it", () => {
+    const cut = raw(
+      "c",
+      "execute",
+      `{"code":"const s=search({namespace:'loom', query:'agents'}); /* 16 KiB…`,
+    );
+    const rows = deriveTimelineRows([startedItem("s", "k1"), cut], new Set());
+    expect(rows).toEqual([
+      expect.objectContaining({ kind: "started", calls: [cut] }),
+    ]);
+  });
+
   it("shows such code with no marker next to it as a plain expandable row", () => {
     const only = exec("o", search);
     expect(bridgeLabel(only, names)).toBeNull();
