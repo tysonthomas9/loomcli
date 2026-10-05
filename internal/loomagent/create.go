@@ -54,13 +54,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (AgentInfo, err
 		key = "create:xkey:" + req.ExternalKey
 	}
 	unlock := s.lock(key)
-	a, err := s.store.FindCreated(ctx, s.workspaceID, req.ExternalKey, req.RequestID)
-	switch {
-	case err == nil && req.ExternalKey != "":
-		err = s.sameCreate(ctx, a, req)
-	case errors.Is(err, loomstore.ErrNotFound):
-		a, err = s.insertCreate(ctx, req)
-	}
+	a, err := s.commitCreate(ctx, req)
 	queued := true
 	if err == nil && a.CreateStep < stepRow { // a row written before its insert took the first message along
 		err = s.queueFirst(ctx, a, req)
@@ -135,13 +129,132 @@ func createReason(reason string) bool {
 	return reason == AttentionCreateIncomplete || reason == AttentionCreateRetrying
 }
 
+// commitCreate finds an earlier Create with req's ExternalKey or
+// RequestID, reads the facts decideCreate needs, and returns the earlier
+// agent or inserts the new row (step 1). The facts are read up front, so a
+// Create refused by an early check still does the later reads; each is a
+// read only.
+func (s *Service) commitCreate(ctx context.Context, req CreateRequest) (loomstore.Agent, error) {
+	in := createInput{Req: req, WorkspaceID: s.workspaceID}
+	prior, err := s.store.FindCreated(ctx, s.workspaceID, req.ExternalKey, req.RequestID)
+	switch {
+	case err == nil:
+		in.Prior = &prior
+	case !errors.Is(err, loomstore.ErrNotFound):
+		return prior, err
+	}
+	if in.Prior == nil || req.ExternalKey != "" {
+		if in.Preset, err = s.presets.Get(ctx, req.Preset); err != nil {
+			return prior, err
+		}
+	}
+	if in.Prior == nil {
+		s.createFacts(ctx, &in)
+	}
+	d, err := decideCreate(in)
+	if err != nil || d.Replay {
+		return d.Row, err
+	}
+	return s.insertCreate(ctx, req, in.Preset, d.Row)
+}
+
+// createFacts reads into in what decideCreate checks a new Create against:
+// the default lead name, whether the name is taken, the repo, the parent
+// and the base ref.
+func (s *Service) createFacts(ctx context.Context, in *createInput) {
+	req := in.Req
+	in.EnvName, in.ID = os.Getenv("LOOM_AGENT_NAME"), "agt_"+strings.ReplaceAll(uuid.Must(uuid.NewV7()).String(), "-", "")
+	if name := createName(in.Preset, req.Name, in.EnvName); name != "" {
+		taken, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Name: name,
+			IncludeArchived: true, Limit: 1})
+		in.Taken, in.TakenErr = len(taken) > 0, err
+	}
+	repo, err := s.repoPath(ctx, req.Repo)
+	in.RepoErr = err
+	if req.Parent != "" {
+		in.Parent, in.ParentErr = s.live(ctx, req.Parent)
+	}
+	if req.BaseRef != "" && err == nil {
+		in.BaseErr = s.workspace.CheckBase(ctx, repo, req.BaseRef)
+	}
+}
+
+// createInput is what decideCreate decides a Create from: the request, its
+// workspace, an earlier Create with its ExternalKey or RequestID, and for a
+// new one the facts the shell read and the new agent's ID.
+type createInput struct {
+	Req         CreateRequest
+	WorkspaceID string
+	Prior       *loomstore.Agent
+	Preset      Preset // unset for a RequestID replay
+	EnvName     string // LOOM_AGENT_NAME, a lead's default name
+	Taken       bool   // an agent has the name
+	TakenErr    error
+	RepoErr     error // the repo does not resolve
+	Parent      loomstore.Agent
+	ParentErr   error // Req.Parent is not live
+	BaseErr     error // CheckBase of Req.BaseRef failed
+	ID          string
+}
+
+// createDecision is the earlier agent to replay, or the creating row to
+// insert, without its resolved Config (harness, model, spec).
+type createDecision struct {
+	Replay bool
+	Row    loomstore.Agent
+}
+
+// decideCreate is Create's checks and row, with no I/O. A replay by
+// ExternalKey must match the earlier agent's owner and spec; a new Create
+// is checked in order: name and repo, parent required, name taken, repo,
+// parent live, base ref present (a task starts from its lead's branch) and
+// known.
+func decideCreate(in createInput) (createDecision, error) {
+	p, req := in.Preset, in.Req
+	if in.Prior != nil {
+		if req.ExternalKey != "" {
+			if err := sameCreate(p, *in.Prior, req); err != nil {
+				return createDecision{}, err
+			}
+		}
+		return createDecision{Replay: true, Row: *in.Prior}, nil
+	}
+	name := createName(p, req.Name, in.EnvName)
+	switch {
+	case name == "" || req.Repo == "":
+		return createDecision{}, invalid("Create needs a Name and a Repo")
+	case p.OwnerKind == "parent" && req.Parent == "":
+		return createDecision{}, invalid(p.Name + " needs a Parent")
+	case in.TakenErr != nil:
+		return createDecision{}, in.TakenErr
+	case in.Taken:
+		return createDecision{}, nameTaken(name)
+	case in.RepoErr != nil:
+		return createDecision{}, in.RepoErr
+	case req.Parent != "" && in.ParentErr != nil:
+		return createDecision{}, in.ParentErr
+	case req.BaseRef == "" && in.Parent.Branch == nil:
+		return createDecision{}, invalid("Create needs a base_ref, the branch or commit the agent starts from")
+	case req.BaseRef != "" && in.BaseErr != nil:
+		return createDecision{}, invalid(fmt.Sprintf("base_ref %q is not a branch or commit in %s: %v", req.BaseRef, req.Repo, in.BaseErr))
+	}
+	return createDecision{Row: newRow(in.WorkspaceID, in.ID, p, name, in.Parent, req)}, nil
+}
+
+// createName is req's agent name: a lead with none takes LOOM_AGENT_NAME,
+// else "lead".
+func createName(p Preset, name, env string) string {
+	if name == "" && p.Name == "lead" {
+		if name = env; name == "" {
+			name = "lead"
+		}
+	}
+	return name
+}
+
 // sameCreate checks a Create replayed by ExternalKey against the agent it
 // made: the compared spec is the preset, subject type and id, repo and parent.
-func (s *Service) sameCreate(ctx context.Context, a loomstore.Agent, req CreateRequest) error {
-	p, err := s.presets.Get(ctx, req.Preset)
-	if err != nil {
-		return err
-	}
+func sameCreate(p Preset, a loomstore.Agent, req CreateRequest) error {
 	if p.OwnerKind == "user" && (a.OwnerKind != req.Actor.Kind || a.OwnerID != req.Actor.ID) {
 		return &Error{Code: CodeExternalKeyTaken, Message: fmt.Sprintf("%s is owned by %s:%s", req.ExternalKey, a.OwnerKind, a.OwnerID)}
 	}
@@ -152,61 +265,10 @@ func (s *Service) sameCreate(ctx context.Context, a loomstore.Agent, req CreateR
 	return nil
 }
 
-// checkCreate validates req with no side effect and returns its preset,
-// name and parent.
-func (s *Service) checkCreate(ctx context.Context, req CreateRequest) (Preset, string, loomstore.Agent, error) {
-	var parent loomstore.Agent
-	p, err := s.presets.Get(ctx, req.Preset)
-	if err != nil {
-		return p, "", parent, err
-	}
-	name := req.Name
-	if name == "" && p.Name == "lead" {
-		if name = os.Getenv("LOOM_AGENT_NAME"); name == "" {
-			name = "lead"
-		}
-	}
-	if name == "" || req.Repo == "" {
-		return p, name, parent, invalid("Create needs a Name and a Repo")
-	}
-	if p.OwnerKind == "parent" && req.Parent == "" {
-		return p, name, parent, invalid(p.Name + " needs a Parent")
-	}
-	taken, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Name: name,
-		IncludeArchived: true, Limit: 1})
-	if err != nil {
-		return p, name, parent, err
-	}
-	if len(taken) > 0 {
-		return p, name, parent, nameTaken(name)
-	}
-	repo, err := s.repoPath(ctx, req.Repo)
-	if err != nil {
-		return p, name, parent, err
-	}
-	if req.Parent != "" {
-		if parent, err = s.live(ctx, req.Parent); err != nil {
-			return p, name, parent, err
-		}
-	}
-	if req.BaseRef == "" && parent.Branch == nil { // a task starts from its lead's branch
-		return p, name, parent, invalid("Create needs a base_ref, the branch or commit the agent starts from")
-	}
-	if req.BaseRef != "" {
-		if err := s.workspace.CheckBase(ctx, repo, req.BaseRef); err != nil {
-			return p, name, parent, invalid(fmt.Sprintf("base_ref %q is not a branch or commit in %s: %v", req.BaseRef, req.Repo, err))
-		}
-	}
-	return p, name, parent, nil
-}
-
-// insertCreate validates req, resolves its Config and inserts its row in
-// state creating with its first message, in one transaction (step 1).
-func (s *Service) insertCreate(ctx context.Context, req CreateRequest) (loomstore.Agent, error) {
-	p, name, parent, err := s.checkCreate(ctx, req)
-	if err != nil {
-		return loomstore.Agent{}, err
-	}
+// insertCreate resolves req's Config onto the checked row a and inserts it
+// in state creating with its first message, in one transaction (step 1).
+func (s *Service) insertCreate(ctx context.Context, req CreateRequest, p Preset, a loomstore.Agent) (loomstore.Agent, error) {
+	var err error
 	if req.Overrides, err = s.withBackend(ctx, req.Overrides); err != nil {
 		return loomstore.Agent{}, err
 	}
@@ -229,12 +291,11 @@ func (s *Service) insertCreate(ctx context.Context, req CreateRequest) (loomstor
 	if err != nil {
 		return loomstore.Agent{}, err
 	}
-	a := s.newRow(p, name, parent, req, cfg, string(spec))
-	a.CreateStep = stepRow
+	a.Harness, a.Model, a.SpecJSON, a.CreateStep = cfg.Harness, opt(cfg.Model), string(spec), stepRow
 	createCrash("row")
 	if err := s.store.InsertCreate(ctx, a, firstSend(a, req)); err != nil {
 		if strings.Contains(err.Error(), "agents.name") {
-			return a, nameTaken(name)
+			return a, nameTaken(a.Name)
 		}
 		return a, err
 	}
@@ -256,20 +317,19 @@ func nameTaken(name string) error {
 	return &Error{Code: CodeAgentNameTaken, Message: fmt.Sprintf("an agent named %q already exists", name)}
 }
 
-// newRow builds the creating row for req with its resolved Config.
-func (s *Service) newRow(p Preset, name string, parent loomstore.Agent, req CreateRequest, cfg Config, spec string) loomstore.Agent {
-	id := "agt_" + strings.ReplaceAll(uuid.Must(uuid.NewV7()).String(), "-", "")
-	a := loomstore.Agent{AgentID: id, WorkspaceID: s.workspaceID, Name: name, ProfileKey: name, Preset: p.Name,
+// newRow builds the creating row id for req, without its resolved Config.
+func newRow(workspaceID, id string, p Preset, name string, parent loomstore.Agent, req CreateRequest) loomstore.Agent {
+	a := loomstore.Agent{AgentID: id, WorkspaceID: workspaceID, Name: name, ProfileKey: name, Preset: p.Name,
 		PresetVersion: fmt.Sprint(p.Version), Mode: p.Mode, InteractionMode: "interactive", RoleKind: p.RoleKind,
-		SpecJSON: spec, SpecVersion: 1, OwnerKind: req.Actor.Kind, OwnerID: req.Actor.ID,
+		SpecVersion: 1, OwnerKind: req.Actor.Kind, OwnerID: req.Actor.ID,
 		CreatedByKind: req.Actor.Kind, CreatedByID: req.Actor.ID, CreateRequestID: req.RequestID,
-		Repo: req.Repo, Harness: cfg.Harness, State: StateCreating}
+		Repo: req.Repo, State: StateCreating}
 	if p.RoleKind == "worker" {
 		a.InteractionMode = "background"
 	}
 	switch p.OwnerKind {
 	case "workspace":
-		a.OwnerKind, a.OwnerID = "workspace", s.workspaceID
+		a.OwnerKind, a.OwnerID = "workspace", workspaceID
 	case "parent":
 		a.OwnerKind, a.OwnerID = "agent", req.Parent
 	}
@@ -281,7 +341,7 @@ func (s *Service) newRow(p Preset, name string, parent loomstore.Agent, req Crea
 		a.ParentAgentID, a.RootAgentID = &req.Parent, &root
 	}
 	a.SubjectType, a.SubjectID, a.SubjectVersion = opt(req.Subject.Type), opt(req.Subject.ID), opt(req.Subject.Version)
-	a.ExternalKey, a.Model = opt(req.ExternalKey), opt(cfg.Model)
+	a.ExternalKey = opt(req.ExternalKey)
 	a.BaseRef = opt(req.BaseRef)
 	if a.BaseRef == nil && parent.Branch != nil {
 		a.BaseRef = parent.Branch // a task branches from its lead's branch tip
