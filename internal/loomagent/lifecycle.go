@@ -39,7 +39,7 @@ func (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {
 		return s.finishArchive(ctx, a, deref(a.ArchiveReason))
 	}
 	if req.Reason == ArchiveCancelled {
-		if a, err = s.stop(ctx, a); err != nil {
+		if a, err = s.stop(ctx, a, &archiveCols{reason: sp(req.Reason)}); err != nil {
 			return err
 		}
 		if a.Mode == "single_task" {
@@ -141,13 +141,19 @@ func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
 }
 
 // delete is Delete without the start-up gate; Reconcile finishes a Delete with it.
+// A cascade deletes the children first, each under its own lock only.
 func (s *Service) delete(ctx context.Context, req DeleteRequest) error {
+	if req.Cascade {
+		if err := s.deleteChildren(ctx, req.AgentID, true); err != nil {
+			return err
+		}
+	}
 	defer s.lock(req.AgentID)()
 	a, err := s.agent(ctx, req.AgentID)
 	if err != nil || a.DeletedAt != nil {
 		return err
 	}
-	if err := s.deleteChildren(ctx, a.AgentID, req.Cascade); err != nil {
+	if err := s.deleteChildren(ctx, a.AgentID, false); err != nil {
 		return err
 	}
 	spec, err := s.checkUnsaved(ctx, a, req.Fingerprint)
@@ -158,7 +164,7 @@ func (s *Service) delete(ctx context.Context, req DeleteRequest) error {
 		return err
 	}
 	if a.State != StateArchived {
-		if a, err = s.stop(ctx, a); err != nil {
+		if a, err = s.stop(ctx, a, nil); err != nil {
 			return err
 		}
 	}
@@ -248,14 +254,14 @@ func (s *Service) checkUnsaved(ctx context.Context, a loomstore.Agent, fingerpri
 	return spec, nil
 }
 
-// stop marks a stopping, interrupts its running turn and withdraws every
-// waiting message.
-func (s *Service) stop(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
+// stop marks a stopping, recording arch when set in the same transaction,
+// interrupts its running turn and withdraws every waiting message.
+func (s *Service) stop(ctx context.Context, a loomstore.Agent, arch *archiveCols) (loomstore.Agent, error) {
 	var err error
 	if a.State != StateStopping {
 		to := a.StateOf()
 		to.State, to.WaitingOn, to.AttentionReason = StateStopping, nil, nil
-		if a, err = s.setState(ctx, a, to); err != nil {
+		if a, err = s.changeState(ctx, a, to, arch); err != nil {
 			return a, err
 		}
 	}

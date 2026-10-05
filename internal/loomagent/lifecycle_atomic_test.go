@@ -185,3 +185,65 @@ func TestDeleteCrashAfterCommit(t *testing.T) {
 	}
 	deletedClean(t, e, lead.AgentID)
 }
+
+// TestArchiveCancelledStoppingKeepsReason: Archive as cancelled commits its
+// reason with the move to stopping, so a failed move to archived leaves a
+// stopping row that says why.
+func TestArchiveCancelledStoppingKeepsReason(t *testing.T) {
+	ctx, e := context.Background(), newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	lead, _ := newLead(t, e, s, "lead")
+	failSaving(t, e, EventArchived)
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: lead.AgentID, Reason: ArchiveCancelled}); err == nil {
+		t.Fatal("Archive did not fail")
+	}
+	if row := s.get(t, lead.AgentID); row.State != StateStopping || deref(row.ArchiveReason) != ArchiveCancelled {
+		t.Fatalf("after the failed commit: %s, reason %q; want stopping, cancelled", row.State, deref(row.ArchiveReason))
+	}
+}
+
+// TestDeleteCascadeOneLockAtATime: a cascading Delete never holds the
+// parent's lock while it deletes a child.
+func TestDeleteCascadeOneLockAtATime(t *testing.T) {
+	child := svcAgent("c1", "single_task", StateFinished)
+	child.ParentAgentID = sp("p1")
+	var s *Service
+	both := false
+	s = newService(t, ServiceConfig{Purge: func(_ context.Context, a loomstore.Agent, _ []loomstore.NativeSession) error {
+		if m := s.agentLock("p1"); a.AgentID == "c1" && !m.TryLock() {
+			both = true
+		} else if a.AgentID == "c1" {
+			m.Unlock()
+		}
+		return nil
+	}}, svcAgent("p1", "persistent", StateIdle), child)
+	if err := s.Delete(context.Background(), DeleteRequest{AgentID: "p1", Cascade: true}); err != nil {
+		t.Fatal(err)
+	}
+	if both || s.get(t, "c1").DeletedAt == nil || s.get(t, "p1").DeletedAt == nil {
+		t.Fatalf("held both locks %v; c1 deleted %v, p1 deleted %v", both, s.get(t, "c1").DeletedAt, s.get(t, "p1").DeletedAt)
+	}
+}
+
+// TestDeletePublishesLiveOnly: Delete publishes settled and agent.deleted
+// after its commit, with fixed IDs and no saved row.
+func TestDeletePublishesLiveOnly(t *testing.T) {
+	ctx, e := context.Background(), newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	lead, _ := newLead(t, e, s, "lead")
+	sub := s.Bus.Subscribe(lead.AgentID)
+	if err := s.Delete(ctx, DeleteRequest{AgentID: lead.AgentID}); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, ev := range drain(sub) {
+		if ev.Type == EventDeleted || ev.Type == EventSettled {
+			ids = append(ids, ev.EventID)
+		}
+	}
+	want := []string{lead.AgentID + ":deleted:" + EventSettled, lead.AgentID + ":deleted:" + EventDeleted}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("published %v, want %v", ids, want)
+	}
+	deletedClean(t, e, lead.AgentID)
+}
