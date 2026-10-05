@@ -290,3 +290,22 @@ func TestHarnessSwitchFailureSavedWithItsDrop(t *testing.T) {
 		t.Fatalf("history %v; want one of switch_failed and harness.changed", history(t, e.createEnv, "a1"))
 	}
 }
+
+// TestHarnessSwitchFailureWriteErrorRetried: when harness.switch_failed
+// cannot be saved, the switch stays pending and its agent is queued for
+// reconcile, which runs it again.
+func TestHarnessSwitchFailureWriteErrorRetried(t *testing.T) {
+	e := newSpecEnv(t)
+	e.harnesses["fb"].(*fake.Harness).FailOpen(errors.New("down"), false)
+	defer failOn(t, e.createEnv, `DELETE ON agent_update_requests`)()
+	s := e.start()
+	if _, err := s.Update(context.Background(), switchReq("r1", 1, "fb")); err == nil {
+		t.Fatal("switch did not fail")
+	}
+	s.mu.Lock()
+	q := s.queue["a1"]
+	s.mu.Unlock()
+	if q == nil {
+		t.Fatal("a1 not queued for reconcile")
+	}
+}

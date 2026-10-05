@@ -101,7 +101,8 @@ func (s *Service) beginSwitch(ctx context.Context, a loomstore.Agent, req Update
 }
 
 // switchFailed saves req's harness.switch_failed on a and drops its pending
-// record in one write (Store.FailSwitch); it returns cause.
+// record in one write (Store.FailSwitch); it returns cause. If that write
+// fails, the switch stays pending and reconcile is queued to run it again.
 func (s *Service) switchFailed(ctx context.Context, a loomstore.Agent, req UpdateRequest, cause error) error {
 	e, err := eventRow(a.AgentID, KindError, fmt.Sprintf("harness.switch_failed:v%d:%s", a.SpecVersion, req.RequestID),
 		map[string]any{"op": "harness_switch", "harness": req.Harness, "error": cause.Error()})
@@ -112,7 +113,8 @@ func (s *Service) switchFailed(ctx context.Context, a loomstore.Agent, req Updat
 		got, err := s.store.FailSwitch(ctx, e, req.RequestID)
 		return []loomstore.Event{got}, err
 	}, func([]loomstore.Event) {}); err != nil {
-		return err
+		s.retryLater(a.AgentID) // still pending: reconcile runs it again
+		return errors.Join(cause, err)
 	}
 	return cause
 }
