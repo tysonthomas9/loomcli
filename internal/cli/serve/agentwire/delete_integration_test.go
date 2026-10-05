@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,8 @@ func TestDeleteIdleOpenCodeAgentReal(t *testing.T) {
 		home, _ := os.UserHomeDir()
 		bin = filepath.Join(home, ".loom/harness/opencode/2.0.19/opencode")
 	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull) // no host git config: hooks, signing or includes
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	sbx, env := openCodeSandbox(t)
@@ -102,12 +105,13 @@ func TestDeleteIdleOpenCodeAgentReal(t *testing.T) {
 		insert("restart", loomagent.StateStopping, filepath.Join(sbx, "worktrees", "repo", "restart"), true)
 		dctx, stop := context.WithCancel(ctx)
 		defer stop()
-		go service().RunDispatcher(dctx) // a restarted Loom: its start-up resync retries the Delete
-		for deadline := time.Now().Add(30 * time.Second); !deleted("restart"); time.Sleep(20 * time.Millisecond) {
-			if time.Now().After(deadline) {
-				row, _ := st.GetAgent(ctx, "restart")
-				t.Fatalf("after 30s: state %s, Attention %q; want the tombstone", row.State, attention(row))
-			}
+		svc := service() // a restarted Loom: its dispatcher's start-up resync retries the Delete
+		go svc.Dispatcher()(dctx)
+		if err := svc.Drain(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if row, _ := st.GetAgent(ctx, "restart"); row.DeletedAt == nil {
+			t.Fatalf("after the retry: state %s, Attention %q; want the tombstone", row.State, attention(row))
 		}
 	})
 }
@@ -128,9 +132,11 @@ func openCodeSandbox(t *testing.T) (string, []string) {
 	}
 	t.Cleanup(func() {
 		var reg struct {
-			PID int `json:"pid"`
+			URL, Password string
+			PID           int
 		}
-		if b, err := os.ReadFile(filepath.Join(sbx, "state/opencode/service.json")); err == nil && json.Unmarshal(b, &reg) == nil && reg.PID > 0 {
+		if b, err := os.ReadFile(filepath.Join(sbx, "state/opencode/service.json")); err == nil && json.Unmarshal(b, &reg) == nil &&
+			reg.PID > 0 && servicePID(reg.URL, reg.Password) == reg.PID { // the sandbox's service, not a reused pid
 			_ = syscall.Kill(reg.PID, syscall.SIGTERM)
 			for i := 0; i < 100 && syscall.Kill(reg.PID, 0) == nil; i++ {
 				time.Sleep(100 * time.Millisecond)
@@ -172,4 +178,25 @@ func attention(a loomstore.Agent) string {
 		return ""
 	}
 	return *a.AttentionReason
+}
+
+// servicePID is the pid the OpenCode service at base reports, or 0.
+func servicePID(base, password string) int {
+	req, err := http.NewRequest("GET", base+"/api/info", nil)
+	if err != nil {
+		return 0
+	}
+	req.SetBasicAuth("opencode", password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	var info struct {
+		PID int `json:"pid"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&info) != nil {
+		return 0
+	}
+	return info.PID
 }

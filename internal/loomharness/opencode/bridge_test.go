@@ -131,9 +131,10 @@ func TestOpenWaitsForBridgeTools(t *testing.T) {
 
 // TestUnbridgeGoneLocation: removing the bridge of a location whose
 // directory is gone, which OpenCode has not loaded, succeeds: OpenCode
-// answers 500 there, and holds no bridge for it. A Delete removes the
-// working copy first, so for an idle agent every Retire hit that 500 and
-// the agent stayed stopping. Any other failure is still reported.
+// answers 500 there, for its MCP list too, and holds no bridge for it. A
+// Delete removes the working copy first, so for an idle agent every Retire
+// hit that 500 and the agent stayed stopping. A 500 from a loaded location,
+// whose directory is gone or not, is still reported: it may hold the bridge.
 func TestUnbridgeGoneLocation(t *testing.T) {
 	st := newStore()
 	c := fakeServer(t, st)
@@ -141,10 +142,14 @@ func TestUnbridgeGoneLocation(t *testing.T) {
 	if err := c.unbridge(ctx, filepath.Join(t.TempDir(), "removed")); err != nil {
 		t.Fatalf("unbridge of a gone, unloaded location = %v; want nil", err)
 	}
+	loaded := filepath.Join(t.TempDir(), "loaded")
 	st.mu.Lock()
-	st.mcpDown = true
+	st.mcpDown, st.bridges = true, map[string]map[string]any{loaded: {"type": "local"}}
 	st.mu.Unlock()
 	if err := c.unbridge(ctx, t.TempDir()); err == nil {
 		t.Fatal("unbridge with OpenCode failing = nil; want the error")
+	}
+	if err := c.unbridge(ctx, loaded); err == nil {
+		t.Fatal("unbridge of a loaded location whose directory is gone, with OpenCode failing = nil; want the error")
 	}
 }

@@ -99,14 +99,15 @@ type mcpServer struct {
 }
 
 // unbridge removes the "loom" MCP server of location dir; one already gone
-// (404) is removed. So is one whose directory is gone: OpenCode answers 500
-// for a location it has not loaded and cannot load, which holds no bridge
-// (a loaded one still answers 204 or 404). A Delete removes the working
-// copy before it calls Retire.
+// (404) is removed. So is one OpenCode cannot load: OpenCode 2.0.19
+// answers 500 for a location it has not loaded whose directory is gone,
+// and such a location holds no bridge. A loaded location still answers its
+// MCP list, so a 500 there is reported. A Delete removes the working copy
+// before it calls Retire.
 func (c *Client) unbridge(ctx context.Context, dir string) error {
 	c.settled.Delete(dir)
 	err := c.call(ctx, "DELETE", "/api/experimental/mcp/loom?location[directory]="+url.QueryEscape(dir), nil, nil)
-	if e := (*Error)(nil); errors.As(err, &e) && (e.Status == http.StatusNotFound || e.Status == http.StatusInternalServerError && gone(dir)) {
+	if e := (*Error)(nil); errors.As(err, &e) && (e.Status == http.StatusNotFound || e.Status == http.StatusInternalServerError && c.unloadable(ctx, dir)) {
 		return nil
 	}
 	if err != nil {
@@ -115,10 +116,15 @@ func (c *Client) unbridge(ctx context.Context, dir string) error {
 	return nil
 }
 
-// gone reports whether dir no longer exists.
-func gone(dir string) bool {
-	_, err := os.Stat(dir)
-	return os.IsNotExist(err)
+// unloadable reports whether location dir is one OpenCode cannot load: its
+// directory is gone and OpenCode answers 500 for its MCP list too.
+func (c *Client) unloadable(ctx context.Context, dir string) bool {
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		return false
+	}
+	err := c.call(ctx, "GET", "/api/mcp?location[directory]="+url.QueryEscape(dir), nil, nil)
+	e := (*Error)(nil)
+	return errors.As(err, &e) && e.Status == http.StatusInternalServerError
 }
 
 // catalogSettle is the bounded wait, after /api/mcp reports the loom server

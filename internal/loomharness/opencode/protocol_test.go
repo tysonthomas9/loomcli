@@ -104,8 +104,14 @@ func fakeServer(t *testing.T, st *store) *Client {
 	mux.HandleFunc("GET /api/mcp", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
+		dir := r.URL.Query().Get("location[directory]")
+		_, ok := st.bridges[dir]
+		if _, err := os.Stat(dir); !ok && os.IsNotExist(err) {
+			w.WriteHeader(500) // as DELETE: OpenCode 2.0.19 cannot load a location whose directory is gone
+			return
+		}
 		data := []map[string]any{}
-		if _, ok := st.bridges[r.URL.Query().Get("location[directory]")]; ok {
+		if ok {
 			status := st.mcp
 			if status == "" {
 				status = "connected"
