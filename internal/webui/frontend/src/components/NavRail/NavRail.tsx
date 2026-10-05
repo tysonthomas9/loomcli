@@ -281,6 +281,7 @@ export function NavRail({
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
   const activeWorkspaceRef = useRef<HTMLButtonElement>(null);
   const workspaceListRef = useRef<HTMLDivElement>(null);
+  const switcherRef = useRef<HTMLElement>(null);
 
   // Keep the active workspace in view (like block: "nearest") by scrolling the
   // list itself. scrollIntoView would also move the browser's Tab starting
@@ -293,6 +294,14 @@ export function NavRail({
     const b = button.getBoundingClientRect();
     if (b.top < l.top) list.scrollTop -= l.top - b.top;
     else if (b.bottom > l.bottom) list.scrollTop += b.bottom - l.bottom;
+    // On the mobile bottom rail the switcher scrolls sideways instead; 6px
+    // leaves room for the active ring.
+    const switcher = switcherRef.current;
+    if (!switcher) return;
+    const w = switcher.getBoundingClientRect();
+    if (b.left - 6 < w.left) switcher.scrollLeft -= w.left - b.left + 6;
+    else if (b.right + 6 > w.right)
+      switcher.scrollLeft += b.right - w.right + 6;
   }, [activeWorkspaceId, workspaces]);
 
   const renderButton = (item: NavItem) => {
@@ -356,6 +365,7 @@ export function NavRail({
         <>
           <div className={styles.wsDivider} aria-hidden="true" />
           <section
+            ref={switcherRef}
             className={styles.workspaceSwitcher}
             aria-label="Workspace selector"
           >

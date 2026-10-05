@@ -8,14 +8,16 @@ import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 
 const NAME = "slack-researcher";
-const WORKSPACES = ["LOCALMODE", "loomcli", "docs-site", "infra"].map(
+// The open workspace (w1) is last, so on a phone it starts off the visible
+// part of the switcher and has to be scrolled into view.
+const WORKSPACES = ["loomcli", "docs-site", "infra", "LOCALMODE"].map(
   (name, i) => ({
-    id: i === 0 ? "w1" : `w${i + 1}`,
+    id: name === "LOCALMODE" ? "w1" : `w${i + 2}`,
     name,
     path: `/workspaces/${name}`,
-    active: i === 0,
+    active: name === "LOCALMODE",
     repo_count: 1,
-    is_default: i === 0,
+    is_default: name === "LOCALMODE",
   }),
 );
 const workspace = {
@@ -170,25 +172,55 @@ for (const size of [
         String(c.label),
       ).toBeLessThan(4);
 
+    // The open workspace is shown, ring included, without scrolling.
+    const switcher = rail.getByRole("region", { name: "Workspace selector" });
+    const sw = (await switcher.boundingBox())!;
+    const active = (await rail
+      .getByRole("button", { name: "Switch to LOCALMODE" })
+      .boundingBox())!;
+    expect(active.x - 4).toBeGreaterThanOrEqual(sw.x);
+    expect(active.x + active.width + 4).toBeLessThanOrEqual(sw.x + sw.width);
+
     // The workspace switcher stays reachable: each avatar and Add can be
     // clicked (scrolled to if needed, nothing on top of it).
     for (const w of WORKSPACES)
       await rail
         .getByRole("button", { name: `Switch to ${w.name}` })
         .click({ trial: true });
-    await rail.getByRole("button", { name: "Add workspace" }).click({
-      trial: true,
-    });
+    const add = rail.getByRole("button", { name: "Add workspace" });
+    await add.click({ trial: true });
+
+    // Its tooltip stays on screen too.
+    await add.focus();
+    await expect(
+      page.getByRole("tooltip", { name: "Add workspace" }),
+    ).toBeVisible();
+    expect((await overflowing(page)).out, "with the tooltip open").toEqual([]);
+    await add.blur();
 
     // The name is not cut off.
     const title = page.getByRole("heading", { name: NAME });
     const cut = await title.evaluate((e) => e.scrollWidth > e.clientWidth);
     expect(cut, "agent name truncated").toBe(false);
 
-    // The composer is fully above the rail and nothing covers it.
-    const composer = page.getByPlaceholder("Ask anything...");
-    const c = (await composer.boundingBox())!;
+    // The whole composer, footer and Send included, is above the rail and
+    // nothing covers it.
+    const prompt = page.getByPlaceholder("Ask anything...");
+    const form = page.locator("form").filter({ has: prompt });
+    const c = (await form.boundingBox())!;
     expect(c.y + c.height).toBeLessThanOrEqual(box.y);
-    await composer.click({ trial: true });
+    await prompt.click({ trial: true });
+    // Send is disabled while empty, so hit-test each control instead.
+    const covered = await form.evaluate((f) =>
+      Array.from(f.querySelectorAll("button")).flatMap((b) => {
+        const r = b.getBoundingClientRect();
+        const top = document.elementFromPoint(
+          r.left + r.width / 2,
+          r.top + r.height / 2,
+        );
+        return top && b.contains(top) ? [] : [b.getAttribute("aria-label")];
+      }),
+    );
+    expect(covered, "composer controls under something").toEqual([]);
   });
 }

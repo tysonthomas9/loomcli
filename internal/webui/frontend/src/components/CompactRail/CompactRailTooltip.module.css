@@ -32,3 +32,11 @@
   border: 4px solid transparent;
   border-right-color: var(--color-text-primary);
 }
+
+.tooltipPortal[data-placement="top"] {
+  transform: translateY(-100%);
+}
+
+.tooltipPortal[data-placement="top"]::after {
+  display: none;
+}
