@@ -151,7 +151,9 @@ func openCodeSandbox(t *testing.T) (string, []string) {
 			for i := 0; i < 100 && syscall.Kill(reg.PID, 0) == nil; i++ {
 				time.Sleep(100 * time.Millisecond)
 			}
-			_ = syscall.Kill(reg.PID, syscall.SIGKILL)
+			if servicePID(reg.URL, reg.Password) == reg.PID { // still the sandbox's service, hung
+				_ = syscall.Kill(reg.PID, syscall.SIGKILL)
+			}
 		}
 		_ = os.RemoveAll(sbx)
 	})
