@@ -202,6 +202,8 @@ WHERE attention_reason = 'create_incomplete' AND create_step < 5 AND deleted_at 
 -- it binds its request and payload; state is claimed until the outcome is
 -- known: replied, or unknown (no evidence either way; never replied again).
 -- An ask is its ID on its turn: codex reuses an ID on a later connection.
+-- A released claim (its Reply never sent) stays, so its request stays bound
+-- to its turn's ask; only one claim on an ask is not released.
 CREATE TABLE IF NOT EXISTS agent_ask_claims (
   agent_id     TEXT NOT NULL REFERENCES agents(agent_id),
   ask_id       TEXT NOT NULL,
@@ -210,6 +212,7 @@ CREATE TABLE IF NOT EXISTS agent_ask_claims (
   payload_hash TEXT NOT NULL,
   state        TEXT NOT NULL,
   created_at   TEXT NOT NULL,
-  PRIMARY KEY (agent_id, ask_id, turn_id)
+  PRIMARY KEY (agent_id, ask_id, turn_id, request_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS agent_ask_claims_one ON agent_ask_claims(agent_id, ask_id, turn_id) WHERE state != 'released';
 `}

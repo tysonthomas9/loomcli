@@ -122,13 +122,16 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 // heldClaim is the claim already on req's ask ID that decides its outcome,
 // a claim a crash left pending settled first: the one req itself made, on
 // any turn (a late retry never answers a later ask with its ID), else the
-// latest. held is false when there is none, or only one on an earlier ask
-// with this ID (ask, open, has another turn).
+// latest not released. held is false when the ask can be claimed: there is
+// no such claim, the latest is on an earlier ask with this ID (ask, open,
+// has another turn), or req's own claim on this ask was released. req's
+// released claim on an ask no longer open is ask_not_found.
 func (s *Service) heldClaim(ctx context.Context, a loomstore.Agent, req RespondRequest, ask Ask, open bool) (c loomstore.AskClaim, held bool, err error) {
 	err = loomstore.ErrNotFound
 	if req.RequestID != "" { // a Respond with no key has no retry to tell apart
 		c, err = s.store.AskClaim(ctx, a.AgentID, req.AskID, req.RequestID)
 	}
+	own := err == nil
 	if errors.Is(err, loomstore.ErrNotFound) {
 		if c, err = s.store.AskClaim(ctx, a.AgentID, req.AskID); err == nil && open && c.TurnID != ask.TurnID {
 			err = loomstore.ErrNotFound // the claim is on an earlier ask with this ID
@@ -140,11 +143,17 @@ func (s *Service) heldClaim(ctx context.Context, a loomstore.Agent, req RespondR
 		return c, false, err
 	}
 	if c.State == loomstore.ClaimPending {
-		if c, err = s.settleLeftClaim(ctx, a, c); errors.Is(err, loomstore.ErrNotFound) {
-			return c, false, nil // released: the ask is still pending natively
+		if c, err = s.settleLeftClaim(ctx, a, c); err != nil {
+			return c, false, err
 		}
 	}
-	return c, err == nil, err
+	switch {
+	case c.State != loomstore.ClaimReleased:
+		return c, true, nil
+	case own && !(open && c.TurnID == ask.TurnID):
+		return c, false, &Error{Code: CodeAskNotFound, Message: req.AskID} // req's ask is gone; a later one is not its
+	}
+	return c, false, nil // never sent: the ask can be claimed again
 }
 
 // answerHash is the hash of req's answer, which its claim binds.
@@ -181,7 +190,7 @@ func notSent(err error) bool {
 func (s *Service) replied(ctx context.Context, a loomstore.Agent, sess loomharness.Session, ask Ask, c loomstore.AskClaim, rerr error) error {
 	state := loomstore.ClaimReplied
 	if rerr != nil && notSent(rerr) {
-		state = ""
+		state = loomstore.ClaimReleased
 	} else if rerr != nil {
 		state, _ = nativeOutcome(ctx, sess, c) // an unread history is no evidence: unknown
 	}
@@ -196,9 +205,9 @@ func (s *Service) replied(ctx context.Context, a loomstore.Agent, sess loomharne
 	switch {
 	case state == loomstore.ClaimUnknown:
 		return &Error{Code: CodeReplyUnknown, Message: rerr.Error()}
-	case state == "" && errors.Is(rerr, loomharness.ErrQuarantined):
+	case state == loomstore.ClaimReleased && errors.Is(rerr, loomharness.ErrQuarantined):
 		return errors.Join(harnessErr(rerr), s.quarantined(ctx, a, ask))
-	case state == "":
+	case state == loomstore.ClaimReleased:
 		return harnessErr(rerr)
 	}
 	s.setAsk(a.AgentID, Ask{ID: ask.ID}, false)
@@ -206,7 +215,7 @@ func (s *Service) replied(ctx context.Context, a loomstore.Agent, sess loomharne
 }
 
 // nativeOutcome is the claim state sess's native history proves for c's
-// ask, whose Reply may have gone out: "" (released) while it is still
+// ask, whose Reply may have gone out: released while it is still
 // pending, replied once it is resolved, and unknown with no evidence either
 // way. A failed history read returns unknown and its error.
 func nativeOutcome(ctx context.Context, sess loomharness.Session, c loomstore.AskClaim) (string, error) {
@@ -220,7 +229,7 @@ func nativeOutcome(ctx context.Context, sess loomharness.Session, c loomstore.As
 			switch {
 			case e.AskID != c.AskID || (e.TurnID != "" && c.TurnID != "" && e.TurnID != c.TurnID):
 			case e.Type == loomharness.EventAskOpened:
-				state = ""
+				state = loomstore.ClaimReleased
 			case e.Type == loomharness.EventAskResolved:
 				state = loomstore.ClaimReplied
 			default:
@@ -278,7 +287,7 @@ func (s *Service) settleClaims(ctx context.Context, a loomstore.Agent, sess loom
 }
 
 // settleLeftClaim settles c, a claim a crash left pending that start-up has
-// not yet settled, and returns it as it then is (ErrNotFound: released).
+// not yet settled, and returns c as it then is.
 func (s *Service) settleLeftClaim(ctx context.Context, a loomstore.Agent, c loomstore.AskClaim) (loomstore.AskClaim, error) {
 	a, err := s.resumeOnce(ctx, a)
 	if err != nil {
@@ -291,7 +300,7 @@ func (s *Service) settleLeftClaim(ctx context.Context, a loomstore.Agent, c loom
 	if _, err := s.settleClaims(ctx, a, sess); err != nil {
 		return c, err
 	}
-	return s.store.AskClaim(ctx, a.AgentID, c.AskID)
+	return s.store.GetAskClaim(ctx, c)
 }
 
 // quarantineCleanup bounds saving a quarantined ask's loss, which runs even

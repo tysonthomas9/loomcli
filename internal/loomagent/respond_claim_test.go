@@ -30,10 +30,10 @@ func answer(a loomstore.Agent, requestID, decision string) RespondRequest {
 	return RespondRequest{Envelope: Envelope{RequestID: requestID}, AgentID: a.AgentID, AskID: "a1", Decision: decision}
 }
 
-// claimState is the state of a's claim on a1, or "" when it has none.
+// claimState is the state of r1's claim on a's a1, or "" when it has none.
 func claimState(t *testing.T, s *Service, a loomstore.Agent) string {
 	t.Helper()
-	c, err := s.store.AskClaim(context.Background(), a.AgentID, "a1")
+	c, err := s.store.AskClaim(context.Background(), a.AgentID, "a1", "r1")
 	if errors.Is(err, loomstore.ErrNotFound) {
 		return ""
 	} else if err != nil {
@@ -124,7 +124,7 @@ func TestRespondCrashBeforeReply(t *testing.T) {
 			}
 			continue
 		}
-		if st := claimState(t, s, a); st != "" || len(replies) != 0 {
+		if st := claimState(t, s, a); st != loomstore.ClaimReleased || len(replies) != 0 {
 			t.Fatalf("claim %q replies %d; want released and none", st, len(replies))
 		}
 		if err := s.Respond(ctx, answer(a, "r2", "allow_once")); err != nil || len(replies) != 1 {
@@ -204,7 +204,7 @@ func TestRespondAmbiguousReplyPending(t *testing.T) {
 	s, a := onAsk(t, e, tweaked{replies: &replies})
 	s.harnesses["opencode"] = tweaked{Harness: e.h, replies: &replies, replyErr: errors.New("connection reset")}
 	wantCode(t, s.Respond(ctx, answer(a, "r1", "allow_once")), CodeHarnessError)
-	if st, r := claimState(t, s, a), deref(s.get(t, a.AgentID).AttentionReason); st != "" || r != "" {
+	if st, r := claimState(t, s, a), deref(s.get(t, a.AgentID).AttentionReason); st != loomstore.ClaimReleased || r != "" {
 		t.Fatalf("claim %q Attention %q; want released and none", st, r)
 	}
 	s.harnesses["opencode"] = tweaked{Harness: e.h, replies: &replies}
@@ -243,7 +243,7 @@ func TestRespondNotSentReleasesClaim(t *testing.T) {
 	notSent := fmt.Errorf("dial: %w: %w", loomharness.ErrNotSent, loomharness.ErrUnavailable)
 	s.harnesses["opencode"] = tweaked{Harness: e.h, replies: &replies, replyErr: notSent, gone: "a1"}
 	wantCode(t, s.Respond(ctx, answer(a, "r1", "allow_once")), CodeHarnessUnavailable)
-	if st, r := claimState(t, s, a), deref(s.get(t, a.AgentID).AttentionReason); st != "" || r != "" {
+	if st, r := claimState(t, s, a), deref(s.get(t, a.AgentID).AttentionReason); st != loomstore.ClaimReleased || r != "" {
 		t.Fatalf("claim %q Attention %q; want released and none", st, r)
 	}
 	s.harnesses["opencode"] = tweaked{Harness: e.h, replies: &replies}
@@ -330,5 +330,88 @@ func TestRestartSettledClaimClosesAsk(t *testing.T) {
 	reconcile(t, s)
 	if st, got := claimState(t, s, a), askIDs(t, s, a.AgentID); st != loomstore.ClaimReplied || !slices.Equal(got, []string{"a2:approval"}) {
 		t.Fatalf("claim %q open asks %v; want replied and only a2", st, got)
+	}
+}
+
+// notSentOnce is a harness whose first Reply fails before it is sent.
+type notSentOnce struct {
+	loomharness.Harness
+	calls *atomic.Int32
+}
+
+func (h notSentOnce) Session(ref loomharness.NativeRef) loomharness.Session {
+	return notSentOnceSession{h.Harness.Session(ref), h.calls}
+}
+
+type notSentOnceSession struct {
+	loomharness.Session
+	calls *atomic.Int32
+}
+
+func (x notSentOnceSession) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
+	if x.calls.Add(1) == 1 {
+		return fmt.Errorf("dial: %w", loomharness.ErrNotSent)
+	}
+	return x.Session.Reply(ctx, askID, r)
+}
+
+// TestRespondReleasedRetryLaterTurn: r1's Reply on turn 1 was never sent,
+// and r0 then answered that ask. Turn 2 reuses the ask ID. A late retry of
+// r1 is for turn 1's ask, which is gone: ask_not_found, and no Reply.
+func TestRespondReleasedRetryLaterTurn(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	calls := &atomic.Int32{}
+	s.harnesses["opencode"] = notSentOnce{e.h, calls}
+	stop := runFeed(t, s, "opencode")
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	e.h.Harness.(*fake.Harness).Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}, {Delta: "one"}}},
+		fake.Turn{Steps: []fake.Step{{Ask: "a1"}, {Delta: "two"}}})
+	for i := range 2 {
+		mustSendMsg(t, s, sendReq(a.AgentID, fmt.Sprintf("u%d", i), "go", user))
+		drained(t, s, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+		if i == 0 {
+			wantCode(t, s.Respond(ctx, answer(a, "r1", "allow_once")), CodeHarnessError)
+			if err := s.Respond(ctx, answer(a, "r0", "allow_once")); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			wantCode(t, s.Respond(ctx, answer(a, "r1", "allow_once")), CodeAskNotFound)
+			if err := s.Respond(ctx, answer(a, "r2", "allow_once")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		drained(t, s, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+	}
+	if n := calls.Load(); n != 3 {
+		t.Fatalf("Replies = %d; want 3 (r1 unsent, r0, r2)", n)
+	}
+}
+
+// TestRespondLeftClaimOwnOutcome: r1's claim, on an earlier turn's ask with
+// this ID, was left pending; r2 has since answered the open ask. A retry of
+// r1 settles r1's own claim (no evidence: reply_unknown), never taking r2's
+// outcome, and sends nothing.
+func TestRespondLeftClaimOwnOutcome(t *testing.T) {
+	ctx := context.Background()
+	var replies []loomharness.Reply
+	s, a := onAsk(t, newCreateEnv(t), tweaked{replies: &replies})
+	turn := s.openAsks(a.AgentID)[0].TurnID
+	for _, c := range []loomstore.AskClaim{
+		{AgentID: a.AgentID, AskID: "a1", TurnID: "t-old", RequestID: "r1", PayloadHash: answerHash(answer(a, "r1", "allow_once"))},
+		{AgentID: a.AgentID, AskID: "a1", TurnID: turn, RequestID: "r2", PayloadHash: answerHash(answer(a, "r2", "allow_once"))},
+	} {
+		if _, won, err := s.store.ClaimAsk(ctx, c); err != nil || !won {
+			t.Fatalf("claim %s: won %v, %v", c.RequestID, won, err)
+		}
+	}
+	if err := s.store.SettleAskClaim(ctx, loomstore.AskClaim{AgentID: a.AgentID, AskID: "a1", TurnID: turn, RequestID: "r2"}, loomstore.ClaimReplied); err != nil {
+		t.Fatal(err)
+	}
+	wantCode(t, s.Respond(ctx, answer(a, "r1", "allow_once")), CodeReplyUnknown)
+	if len(replies) != 0 {
+		t.Fatalf("replies = %d; want none", len(replies))
 	}
 }
