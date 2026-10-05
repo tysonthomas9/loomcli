@@ -2,7 +2,9 @@ package loomagent
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -138,4 +140,76 @@ func TestCoalescePerChildHistoryUnchanged(t *testing.T) {
 	if !slices.Equal(got, keys("c1", "c2")) {
 		t.Fatalf("records = %v; want one per child attempt", got)
 	}
+}
+
+// deliveredRow saves lead's delivery of the input handed with key as the
+// feed does (its text and the records it carried), and returns its payload.
+func deliveredRow(t *testing.T, s *Service, lead, key string) (text string, done []Completion) {
+	t.Helper()
+	ctx := context.Background()
+	e, err := s.withText(ctx, lead, loomharness.Event{Type: loomharness.EventMessageDelivered, InputKey: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := s.withCompletions(ctx, lead, nativeRow(lead, "message.delivered", e), e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p struct{ Completions []Completion }
+	if err := json.Unmarshal(row.Payload, &p); err != nil {
+		t.Fatal(err)
+	}
+	return e.Text, p.Completions
+}
+
+// inputKey is the native key lead's slot from sender was handed with.
+func inputKey(t *testing.T, s *Service, lead, sender string) string {
+	t.Helper()
+	slots, err := s.store.Slots(context.Background(), lead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sl := range slots {
+		if sl.Sender == sender {
+			return deref(sl.NativeKey)
+		}
+	}
+	t.Fatalf("no slot from %s", sender)
+	return ""
+}
+
+// TestCoalesceDeliveryNamesEveryRecord: the delivery of a batched input
+// carries every record's text and names every record it carried.
+func TestCoalesceDeliveryNamesEveryRecord(t *testing.T) {
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	lead, _ := leadWithKids(t, e, s, "c1", "c2")
+	finishKids(t, s, "c1", "c2")
+	dispatchOK(t, s, lead.AgentID)
+	text, done := deliveredRow(t, s, lead.AgentID, inputKey(t, s, lead.AgentID, "agent:c1"))
+	if len(done) != 2 || done[0].Child != "c1" || done[1].Child != "c2" ||
+		!strings.Contains(text, `child="c1"`) || !strings.Contains(text, `child="c2"`) {
+		t.Fatalf("delivery text %q completions %+v; want both records", text, done)
+	}
+}
+
+// TestCoalesceUserMessageGoesAlone: a user's message that is next in line
+// is handed over alone, its delivery naming no record; the two records
+// then go out together as the following input.
+func TestCoalesceUserMessageGoesAlone(t *testing.T) {
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	lead, ref := leadWithKids(t, e, s, "c1", "c2")
+	mustSendMsg(t, s, sendReq(lead.AgentID, "u0", "start", user))                            // the lead's turn runs
+	mustSendMsg(t, s, sendReq(lead.AgentID, "u1", "next", ActorRef{Kind: "user", ID: "u2"})) // u1 waits, first in line
+	finishKids(t, s, "c1", "c2")
+	finishTurn(t, s, lead.AgentID, "completed")
+	if got := handedReqs(t, s, lead.AgentID, append([]string{"u1"}, keys("c1", "c2")...)...); !slices.Equal(got, []string{"u1"}) {
+		t.Fatalf("handed with the user's message = %v; want u1 alone", got)
+	}
+	if text, done := deliveredRow(t, s, lead.AgentID, inputKey(t, s, lead.AgentID, "user:u2")); text != "next" || len(done) != 0 {
+		t.Fatalf("user delivery text %q completions %+v", text, done)
+	}
+	finishTurn(t, s, lead.AgentID, "completed")
+	oneInput(t, e, s, lead, ref, 3, "c1", "c2")
 }
