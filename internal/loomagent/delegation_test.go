@@ -26,8 +26,17 @@ func childOf(id, parent string) loomstore.Agent {
 	return a
 }
 
-// endAttempt ends c's running turn with outcome, as the harness feed does.
+// endAttempt ends c's running turn with outcome, as the harness feed does,
+// then saves the task_completed record that leaves owed, as the dispatcher
+// does on that state change.
 func endAttempt(t *testing.T, s *Service, id, outcome string) {
+	t.Helper()
+	finishTurn(t, s, id, outcome)
+	s.recordCompletions(context.Background())
+}
+
+// finishTurn is endAttempt without the dispatcher: the record stays owed.
+func finishTurn(t *testing.T, s *Service, id, outcome string) {
 	t.Helper()
 	a := s.get(t, id)
 	if err := s.turnCompleted(context.Background(), a, loomharness.Event{TurnID: *a.RunningTurnID, StopReason: outcome}); err != nil {
@@ -94,14 +103,8 @@ func TestTaskCompletedTwoAttemptsBeforeLeadReads(t *testing.T) {
 	if got := waiting(t, s, "L"); !slices.Equal(got, want) {
 		t.Fatalf("lead slots = %q", got)
 	}
-	// Retry both attempts' records and deliveries: nothing changes.
-	for _, attempt := range []int64{1, 2} {
-		a := s.get(t, "c1")
-		a.Attempt = attempt
-		if err := s.recordCompletion(ctx, a); err != nil {
-			t.Fatal(err)
-		}
-	}
+	// Retry the records and deliveries: nothing changes.
+	s.recordCompletions(ctx)
 	s.recordCompletions(ctx)
 	dispatchOK(t, s, "L")
 	if got := waiting(t, s, "L"); !slices.Equal(got, want) {
@@ -121,11 +124,8 @@ func TestTaskCompletedOlderAttemptAfterDelivery(t *testing.T) {
 	endAttempt(t, s, "c1", "completed")
 	dispatchOK(t, s, "L")
 	deliverNext(t, s, "L")
-	old := s.get(t, "c1")
 	nextAttempt(t, s, "c1")
-	if err := s.recordCompletion(ctx, old); err != nil {
-		t.Fatal(err)
-	}
+	s.recordCompletions(ctx)
 	dispatchOK(t, s, "L")
 	if got := waiting(t, s, "L"); len(got) != 0 {
 		t.Fatalf("redelivered: %q", got)
@@ -179,6 +179,7 @@ func TestTaskCompletedCancelledAndAttention(t *testing.T) {
 	if err := s.Archive(ctx, ArchiveRequest{AgentID: "c1", Reason: ArchiveCancelled}); err != nil {
 		t.Fatal(err)
 	}
+	s.recordCompletions(ctx) // the dispatcher's sweep on the archive
 	if got := completions(t, s, "L"); len(got) != 1 || got[0].Outcome != ArchiveCancelled || got[0].Attempt != 1 {
 		t.Fatalf("records = %+v", got)
 	}
@@ -224,10 +225,9 @@ func TestTaskCompletedWorkspaceResult(t *testing.T) {
 		}
 	}
 	endAttempt(t, s, "c1", "completed")
+	s.recordCompletions(ctx)
 	ws.head = "def456"
-	if err := s.recordCompletion(ctx, s.get(t, "c1")); err != nil {
-		t.Fatal(err)
-	}
+	s.recordCompletions(ctx)
 	got := completions(t, s, "L")
 	if len(got) != 1 || got[0].Branch != "loom/agent/c1" || got[0].Head != "abc123" || got[0].Summary != "fixed it; tests pass" {
 		t.Fatalf("records = %+v", got)
@@ -241,9 +241,8 @@ func TestTaskCompletedWorkspaceResult(t *testing.T) {
 // TestTaskCompletedSweepAfterCrash: a crash after the child finished but
 // before its record was saved; the start-up sweep saves it once.
 func TestTaskCompletedSweepAfterCrash(t *testing.T) {
-	c := childOf("c1", "L")
-	c.State, c.RunningTurnID, c.Outcome = StateFinished, nil, sp("completed")
-	s := newService(t, ServiceConfig{}, busy("L", "persistent", StateActive), c)
+	s := newService(t, ServiceConfig{}, busy("L", "persistent", StateActive), childOf("c1", "L"))
+	finishTurn(t, s, "c1", "completed")
 	s.recordCompletions(context.Background())
 	s.recordCompletions(context.Background())
 	if got := completions(t, s, "L"); len(got) != 1 || got[0].Attempt != 1 {
@@ -591,9 +590,10 @@ func rollBackNotices(t *testing.T, path string) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{"ALTER TABLE agents DROP COLUMN revision", // OR2's migration came after
+	for _, q := range []string{"DROP TABLE agent_completion_markers", // OR3c's and OR2's migrations came after
+		"ALTER TABLE agents DROP COLUMN revision",
 		"ALTER TABLE agent_slots DROP COLUMN notices", "ALTER TABLE agent_send_receipts DROP COLUMN notices",
-		"PRAGMA user_version = " + strconv.Itoa(v-2)} {
+		"PRAGMA user_version = " + strconv.Itoa(v-3)} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -799,6 +799,7 @@ func TestLeadOneInputPerChildResult(t *testing.T) {
 	runFeed(t, s, "opencode")
 	runDispatcher(t, s)
 	reconcile(t, s)
+	settled(t, s) // the dispatcher saves the records
 	keys := []string{}
 	for _, rec := range completions(t, s, lead.AgentID) {
 		keys = append(keys, completionKey(rec.Child, rec.Attempt))

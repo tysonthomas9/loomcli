@@ -306,18 +306,23 @@ func (s *Service) changeState(ctx context.Context, a loomstore.Agent, to loomsto
 	if err != nil {
 		return before, err
 	}
+	var owed []loomstore.CompletionMarker
+	if completed(a) && !completed(before) { // a child's attempt ended: its parent is owed its record (§10.3)
+		m, err := s.marker(ctx, a)
+		if err != nil {
+			return before, err
+		}
+		owed = append(owed, m)
+	}
 	if arch == nil {
-		_, err = s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, s.busPublish(out))
+		_, err = s.events.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, s.busPublish(out), owed...)
 	} else {
 		_, err = s.events.commit(func() ([]loomstore.Event, error) {
-			return s.store.CommitArchive(ctx, a.AgentID, from, to, before.Revision, arch.reason, arch.at, rows)
+			return s.store.CommitArchive(ctx, a.AgentID, from, to, before.Revision, arch.reason, arch.at, rows, owed...)
 		}, s.busPublish(out))
 	}
 	if err != nil {
 		return before, err
-	}
-	if completed(a) && !completed(before) { // a child's attempt ended: tell its parent (§10.3)
-		s.tryRecordCompletion(ctx, a) // the change is committed; a failed record is retried
 	}
 	return a, nil
 }

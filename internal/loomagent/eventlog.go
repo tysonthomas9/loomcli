@@ -61,11 +61,12 @@ var commitStateCrash = func() {}
 // the row from (from, rev) to `to`, bumping the revision, and saves events
 // (loomstore.CommitState); only after the commit does it publish them, to
 // its subscribers and then, still under the lane, through publish. If any
-// write or the commit fails, nothing is saved or published.
+// write or the commit fails, nothing is saved or published. owed are saved
+// in the same transaction.
 func (l *EventLog) CommitState(ctx context.Context, agentID string, from, to loomstore.AgentState, rev int64,
-	events []loomstore.Event, publish func(saved []loomstore.Event)) ([]loomstore.Event, error) {
+	events []loomstore.Event, publish func(saved []loomstore.Event), owed ...loomstore.CompletionMarker) ([]loomstore.Event, error) {
 	return l.commit(func() ([]loomstore.Event, error) {
-		return l.store.CommitState(ctx, agentID, from, to, rev, events)
+		return l.store.CommitState(ctx, agentID, from, to, rev, events, owed...)
 	}, publish)
 }
 

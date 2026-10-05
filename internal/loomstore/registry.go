@@ -313,9 +313,10 @@ func (s *Store) isDue(ctx context.Context, pred, agentID string, now time.Time) 
 }
 
 // MarkHistoryPurged re-checks that agentID is still due at now, then sets
-// history_purged_at and deletes its agent_events, in one transaction, so a
-// sweep racing Unarchive or Send never purges early (ErrNotDue). Call it only
-// after native content removal is verified.
+// history_purged_at and deletes its agent_events and the completion markers
+// owed to it (a purged history saves no later record), in one transaction,
+// so a sweep racing Unarchive or Send never purges early (ErrNotDue). Call it
+// only after native content removal is verified.
 func (s *Store) MarkHistoryPurged(ctx context.Context, agentID string, now time.Time) error {
 	cutoff := Stamp(now.Add(-HistoryRetention))
 	return s.tx(ctx, func(tx *sql.Tx) error {
@@ -327,8 +328,10 @@ func (s *Store) MarkHistoryPurged(ctx context.Context, agentID string, now time.
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrNotDue
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM agent_events WHERE agent_id = ?`, agentID)
-		return err
+		if _, err = tx.ExecContext(ctx, `DELETE FROM agent_events WHERE agent_id = ?`, agentID); err != nil {
+			return err
+		}
+		return dropMarkers(ctx, tx, agentID)
 	})
 }
 
@@ -349,8 +352,8 @@ func (a Agent) StateOf() AgentState {
 var ErrStateChanged = errors.New("loomstore: agent state changed")
 
 // commitStateCrash runs inside the transactions of CommitState (and its
-// CommitCreate and CommitArchive), CommitSpec, SendEvents and TombstoneEvents,
-// after their writes and before their COMMIT; tests crash there.
+// CommitCreate and CommitArchive), CommitSpec, SendEvents, TombstoneEvents and
+// DeliverCompletion, after their writes and before their COMMIT; tests crash there.
 var commitStateCrash = func() {}
 
 // CommitState is the one write of an agent's state change. In one
@@ -360,21 +363,23 @@ var commitStateCrash = func() {}
 // events as AppendEvent does, each with no EventID named <agent>:<revision>:<kind>
 // of the new revision. Both are saved or neither. It returns the saved events.
 // A turn ending in finished (from active or waiting) also sets finished_at,
-// the background R29 deadline, in the same statement.
-func (s *Store) CommitState(ctx context.Context, agentID string, from, to AgentState, rev int64, events []Event) ([]Event, error) {
+// the background R29 deadline, in the same statement. owed, the completion
+// markers of an attempt the change ends, are saved in it too.
+func (s *Store) CommitState(ctx context.Context, agentID string, from, to AgentState, rev int64, events []Event,
+	owed ...CompletionMarker) ([]Event, error) {
 	for _, e := range events {
 		if e.AgentID != agentID {
 			return nil, fmt.Errorf("loomstore: event %s of %s in a state change of %s", e.Kind, e.AgentID, agentID)
 		}
 	}
-	return s.commitState(ctx, agentID, from, to, rev, 0, events, nil)
+	return s.commitState(ctx, agentID, from, to, rev, 0, events, owed, nil)
 }
 
 // CommitArchive is CommitState that, in the same transaction, also records
 // agentID's archive reason and R29 clock start as SetArchive does.
 func (s *Store) CommitArchive(ctx context.Context, agentID string, from, to AgentState, rev int64, reason *string,
-	at *time.Time, events []Event) ([]Event, error) {
-	return s.commitState(ctx, agentID, from, to, rev, 0, events, func(tx *sql.Tx) error {
+	at *time.Time, events []Event, owed ...CompletionMarker) ([]Event, error) {
+	return s.commitState(ctx, agentID, from, to, rev, 0, events, owed, func(tx *sql.Tx) error {
 		return setArchive(ctx, tx, agentID, reason, at)
 	})
 }
@@ -385,13 +390,13 @@ func (s *Store) CommitArchive(ctx context.Context, agentID string, from, to Agen
 // agent's event is saved only while that agent is not deleted; no lock of
 // that agent is needed, as its seq is allocated in the transaction.
 func (s *Store) CommitCreate(ctx context.Context, agentID string, from, to AgentState, rev, step int64, events []Event) ([]Event, error) {
-	return s.commitState(ctx, agentID, from, to, rev, step, events, nil)
+	return s.commitState(ctx, agentID, from, to, rev, step, events, nil, nil)
 }
 
 // commitState is the one state-change transaction; also, when set, writes
-// more of agentID's row after the compare-and-set.
+// more of agentID's row after the compare-and-set; owed are saved with it.
 func (s *Store) commitState(ctx context.Context, agentID string, from, to AgentState, rev, step int64, events []Event,
-	also func(*sql.Tx) error) (saved []Event, err error) {
+	owed []CompletionMarker, also func(*sql.Tx) error) (saved []Event, err error) {
 	now := Stamp(time.Now())
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE agents SET state = ?, state_reason = ?, waiting_on = ?, outcome = ?,
@@ -416,6 +421,11 @@ func (s *Store) commitState(ctx context.Context, agentID string, from, to AgentS
 		}
 		if saved, err = commitEvents(ctx, tx, agentID, rev+1, events); err != nil {
 			return err
+		}
+		for _, m := range owed {
+			if err := insertMarker(ctx, tx, m); err != nil {
+				return err
+			}
 		}
 		commitStateCrash()
 		return nil
@@ -549,7 +559,8 @@ func (s *Store) Tombstone(ctx context.Context, agentID string, now time.Time) er
 }
 
 // TombstoneEvents is Tombstone that, in the same transaction that sets
-// deleted_at and history_purged_at and deletes agentID's events, also saves
+// deleted_at and history_purged_at and deletes agentID's events and the
+// completion markers owed to it (a deleted parent gets no record), also saves
 // events as AppendEvent does: after the purge they are live only (seq 0).
 // It returns them.
 func (s *Store) TombstoneEvents(ctx context.Context, agentID string, now time.Time, events []Event) (saved []Event, err error) {
@@ -560,6 +571,9 @@ func (s *Store) TombstoneEvents(ctx context.Context, agentID string, now time.Ti
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_events WHERE agent_id = ?`, agentID); err != nil {
+			return err
+		}
+		if err := dropMarkers(ctx, tx, agentID); err != nil {
 			return err
 		}
 		if saved, err = commitEvents(ctx, tx, agentID, 0, events); err != nil {

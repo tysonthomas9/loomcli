@@ -171,4 +171,25 @@ ALTER TABLE agent_slots ADD COLUMN notices TEXT;
 ALTER TABLE agent_send_receipts ADD COLUMN notices TEXT;
 `, `
 ALTER TABLE agents ADD COLUMN revision INTEGER NOT NULL DEFAULT 0; -- OR2: bumped by one with every state change; its events are named <agent>:<revision>:<kind>
+`, `
+-- OR3c: a child attempt's task_completed owed to its parent, saved with the
+-- state change that ends the attempt and deleted with the record's append.
+CREATE TABLE agent_completion_markers (
+  child_agent_id  TEXT NOT NULL,
+  attempt         INTEGER NOT NULL,
+  parent_agent_id TEXT NOT NULL,
+  outcome         TEXT NOT NULL,
+  branch          TEXT NOT NULL,
+  summary         TEXT,            -- NULL on a marker the upgrade saved: read it from the child
+  result          TEXT,
+  created_at      TEXT NOT NULL,
+  PRIMARY KEY (child_agent_id, attempt)
+);
+CREATE INDEX agent_completion_markers_parent ON agent_completion_markers(parent_agent_id);
+-- An attempt that ended before the upgrade with its record still unsaved.
+INSERT INTO agent_completion_markers (child_agent_id, attempt, parent_agent_id, outcome, branch, created_at)
+SELECT a.agent_id, a.attempt, a.parent_agent_id, a.outcome, COALESCE(a.branch, ''), a.updated_at FROM agents a
+WHERE a.parent_agent_id IS NOT NULL AND a.mode = 'single_task' AND a.outcome IS NOT NULL AND a.deleted_at IS NULL
+  AND a.state IN ('finished', 'archived') AND NOT EXISTS (SELECT 1 FROM agent_events e
+    WHERE e.agent_id = a.parent_agent_id AND e.event_id = 'task_completed:' || a.agent_id || ':' || a.attempt);
 `}

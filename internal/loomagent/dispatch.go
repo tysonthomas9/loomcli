@@ -306,9 +306,9 @@ func (s *Service) Dispatcher() func(context.Context) {
 func (s *Service) runDispatcher(ctx context.Context, l *loop) {
 	ctx = within(ctx)
 	s.recoverAtStart(ctx)
-	s.recordCompletions(ctx)
 	for ctx.Err() == nil {
 		sub := s.Bus.Subscribe()
+		s.recordCompletions(ctx) // what ended before the subscription, or while it lagged
 		_ = s.PurgeLeftovers(ctx)
 		if ids, err := s.store.PendingAgents(ctx, s.workspaceID); err == nil {
 			for _, id := range ids {
@@ -331,6 +331,9 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 	retry, stop := s.tick(completionRetry)
 	defer stop()
 	handle := func(e Event) bool {
+		if e.Type == EventStateChanged && (e.To == StateFinished || e.To == StateArchived) {
+			s.recordCompletions(ctx) // an attempt may have ended: save its record, with no lock held
+		}
 		if e.Type == EventIdle || e.Type == KindTaskCompleted {
 			_ = s.dispatchWake(ctx, e.AgentID)
 		}

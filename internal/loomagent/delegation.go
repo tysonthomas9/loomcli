@@ -43,6 +43,9 @@ type TaskCompleted struct {
 	// last turn), its end kept within resultCap; records saved before it
 	// have only Summary.
 	Result string `json:"result,omitempty"`
+	// ChildDeleted is set when the child was deleted before its record
+	// was saved: the record has no head.
+	ChildDeleted bool `json:"child_deleted,omitempty"`
 }
 
 // result is what the lead's notice quotes: Result, or Summary on a record
@@ -301,21 +304,52 @@ func completed(a loomstore.Agent) bool {
 		(a.State == StateFinished || a.State == StateArchived)
 }
 
-// recordCompletion saves a's task_completed record on its parent once per
-// attempt, with the branch and head from the Workspace port (R32), and
-// wakes the parent's dispatcher, which puts it in a's slot there. A repeat
-// for the same attempt changes nothing, so the record keeps the branch and
-// head of its first save. It takes no parent lock.
-func (s *Service) recordCompletion(ctx context.Context, a loomstore.Agent) error {
-	if !completed(a) {
-		return nil
-	}
-	parent, key := *a.ParentAgentID, completionKey(a.AgentID, a.Attempt)
-	if ok, err := s.store.HasEvent(ctx, parent, key); err != nil || ok {
+// marker is the completion marker of a's attempt, which the change ending
+// it saves: a's outcome, branch and last reply as its history holds them now.
+func (s *Service) marker(ctx context.Context, a loomstore.Agent) (loomstore.CompletionMarker, error) {
+	m := loomstore.CompletionMarker{Parent: *a.ParentAgentID, Child: a.AgentID, Attempt: a.Attempt, Outcome: *a.Outcome,
+		Branch: deref(a.Branch)}
+	return m, s.readResult(ctx, &m)
+}
+
+// readResult reads m's summary and result from its child's history.
+func (s *Service) readResult(ctx context.Context, m *loomstore.CompletionMarker) error {
+	summary, err := s.store.LastMessage(ctx, m.Child)
+	if err != nil {
 		return err
 	}
-	rec := TaskCompleted{Child: a.AgentID, Attempt: a.Attempt, Outcome: *a.Outcome, Branch: deref(a.Branch)}
-	if a.WorktreePath != nil && s.workspace != nil { // a failed Status saves nothing, unless retrying cannot help
+	reply, err := s.store.LastReply(ctx, m.Child)
+	if err != nil {
+		return err
+	}
+	m.Summary, m.Result = clip(summary, summaryCap), clipHead(strings.Join(reply, "\n\n"), resultCap)
+	return nil
+}
+
+// recordCompletion saves m's task_completed record on its parent and
+// deletes m in one transaction, under the parent's lock alone (never the
+// child's), with the head from the Workspace port (R32), and wakes the
+// parent's dispatcher, which puts it in the child's slot there. A child
+// deleted meanwhile still gets its record, from m, with no head. A parent
+// deleted or with its history purged gets none, and m is dropped. A repeat
+// changes nothing.
+func (s *Service) recordCompletion(ctx context.Context, m loomstore.CompletionMarker) error {
+	defer s.lock(m.Parent)()
+	rec := TaskCompleted{Child: m.Child, Attempt: m.Attempt, Outcome: m.Outcome, Branch: m.Branch, Summary: m.Summary,
+		Result: m.Result}
+	a, err := s.store.GetAgent(ctx, m.Child)
+	switch {
+	case errors.Is(err, loomstore.ErrNotFound) || err == nil && a.DeletedAt != nil:
+		rec.ChildDeleted = true
+	case err != nil:
+		return err
+	case m.Backfilled: // saved by the upgrade: read what the child's history holds
+		if err := s.readResult(ctx, &m); err != nil {
+			return err
+		}
+		rec.Summary, rec.Result = m.Summary, m.Result
+	}
+	if !rec.ChildDeleted && a.WorktreePath != nil && s.workspace != nil { // a failed Status saves nothing, unless retrying cannot help
 		repo, err := s.repoPath(ctx, a.Repo)
 		if err != nil {
 			return err
@@ -331,46 +365,42 @@ func (s *Service) recordCompletion(ctx context.Context, a loomstore.Agent) error
 			rec.Branch, rec.Head = st.Branch, st.HEAD
 		}
 	}
-	summary, err := s.store.LastMessage(ctx, a.AgentID)
+	e, err := eventRow(m.Parent, KindTaskCompleted, completionKey(m.Child, m.Attempt), rec)
 	if err != nil {
 		return err
 	}
-	rec.Summary = clip(summary, summaryCap)
-	reply, err := s.store.LastReply(ctx, a.AgentID)
-	if err != nil {
-		return err
-	}
-	rec.Result = clipHead(strings.Join(reply, "\n\n"), resultCap)
-	if err := s.appendEvent(ctx, parent, KindTaskCompleted, key, rec); err != nil {
-		return err
-	}
-	s.Bus.publish(Event{AgentID: parent, Type: KindTaskCompleted, Reason: a.AgentID, Outcome: rec.Outcome,
-		Attempt: rec.Attempt, Time: time.Now()})
-	return nil
+	_, err = s.events.commit(func() ([]loomstore.Event, error) { return s.store.DeliverCompletion(ctx, m, e) },
+		func(saved []loomstore.Event) {
+			if len(saved) > 0 {
+				s.Bus.publish(Event{AgentID: m.Parent, Type: KindTaskCompleted, Reason: m.Child, Outcome: rec.Outcome,
+					Attempt: rec.Attempt, Time: time.Now()})
+			}
+		})
+	return err
 }
 
-// tryRecordCompletion is recordCompletion for a change already committed:
-// a failure is logged and marks the record owed, for the dispatcher to retry.
-func (s *Service) tryRecordCompletion(ctx context.Context, a loomstore.Agent) {
-	if err := s.recordCompletion(ctx, a); err != nil {
-		slog.Warn("loomagent: task_completed not saved; will retry", "agent", a.AgentID, "error", err)
+// tryRecordCompletion is recordCompletion that logs a failure and marks the
+// record owed, for the dispatcher to retry.
+func (s *Service) tryRecordCompletion(ctx context.Context, m loomstore.CompletionMarker) {
+	if err := s.recordCompletion(ctx, m); err != nil {
+		slog.Warn("loomagent: task_completed not saved; will retry", "agent", m.Child, "error", err)
 		s.owed.Store(true)
 	}
 }
 
 // recordCompletions saves every owed task_completed record in the
-// workspace: an attempt that ended just before a crash, or whose record
-// failed to save. Each is saved once.
+// workspace, from its completion marker: an attempt that ended just before
+// a crash, or whose record failed to save. Each is saved once. It holds no
+// agent lock when called.
 func (s *Service) recordCompletions(ctx context.Context) {
-	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Mode: "single_task",
-		IncludeArchived: true})
+	owed, err := s.store.CompletionMarkers(ctx, s.workspaceID)
 	if err != nil {
 		slog.Warn("loomagent: task_completed sweep", "error", err)
 		s.owed.Store(true)
 		return
 	}
-	for _, a := range agents {
-		s.tryRecordCompletion(ctx, a)
+	for _, m := range owed {
+		s.tryRecordCompletion(ctx, m)
 	}
 }
 
