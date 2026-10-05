@@ -42,29 +42,32 @@ func TestDecideCreateTable(t *testing.T) {
 			"replay agt_0"},
 		{"duplicate external key, same spec", func() createInput { i := in(xkey, lead); i.Prior = &prior; return i }(), "replay agt_0"},
 		{"duplicate external key, other spec", func() createInput { i := in(conflict, lead); i.Prior = &prior; return i }(),
-			string(CodeExternalKeyConflict)},
+			"external_key_conflict: k1 exists with a different spec"},
 		{"name taken", func() createInput { i := in(req("lead", "alpha", "main", ""), lead); i.Taken = true; return i }(),
-			string(CodeAgentNameTaken)},
-		{"no name or repo", in(CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "task", Name: "t"}, task),
-			string(CodePresetInvalid)},
-		{"task without a parent", in(req("task", "t", "main", ""), task), string(CodePresetInvalid)},
-		{"missing base_ref, no parent branch", in(req("lead", "alpha", "", ""), lead), string(CodePresetInvalid)},
+			`agent_name_taken: an agent named "alpha" already exists`},
+		{"no repo", in(CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "task", Name: "t", Parent: "agt_lead"}, task),
+			"preset_invalid: Create needs a Name and a Repo"},
+		{"no name", in(CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "task", Repo: "/repo", Parent: "agt_lead"}, task),
+			"preset_invalid: Create needs a Name and a Repo"},
+		{"task without a parent", in(req("task", "t", "main", ""), task), "preset_invalid: task needs a Parent"},
+		{"missing base_ref, no parent branch", in(req("lead", "alpha", "", ""), lead),
+			"preset_invalid: Create needs a base_ref, the branch or commit the agent starts from"},
 		{"unknown base_ref", func() createInput {
 			i := in(req("lead", "alpha", "nope", ""), lead)
 			i.BaseErr = errors.New("unknown revision")
 			return i
-		}(), string(CodePresetInvalid)},
+		}(), `preset_invalid: base_ref "nope" is not a branch or commit in /repo: unknown revision`},
 		{"dead parent", func() createInput {
 			i := in(req("task", "t", "", "agt_lead"), task)
 			i.ParentErr = &Error{Code: CodeAgentNotFound, Message: "agt_lead is deleted"}
 			return i
-		}(), string(CodeAgentNotFound)},
+		}(), "agent_not_found: agt_lead is deleted"},
 		{"valid lead", in(req("lead", "alpha", "main", ""), lead),
-			"row agt_1 ws alpha lead@2 persistent interactive interactive owner=user:u by=user:u parent= root= base=main branch=loom/agent/agt_1 creating"},
+			"row agt_1 ws alpha lead@2 persistent interactive interactive owner=user:u by=user:u parent= root= base=main branch=loom/agent/agt_1 creating profile=alpha req=r1 repo=/repo subject=// xkey= spec_v=1 step=0 harness= model="},
 		{"lead named from the environment", func() createInput { i := in(req("lead", "", "main", ""), lead); i.EnvName = "boss"; return i }(),
-			"row agt_1 ws boss lead@2 persistent interactive interactive owner=user:u by=user:u parent= root= base=main branch=loom/agent/agt_1 creating"},
+			"row agt_1 ws boss lead@2 persistent interactive interactive owner=user:u by=user:u parent= root= base=main branch=loom/agent/agt_1 creating profile=boss req=r1 repo=/repo subject=// xkey= spec_v=1 step=0 harness= model="},
 		{"valid task from its lead's branch", func() createInput { i := in(req("task", "t", "", "agt_lead"), task); i.Parent = parent; return i }(),
-			"row agt_1 ws t task@1 single_task worker background owner=agent:agt_lead by=user:u parent=agt_lead root=agt_root base=loom/agent/agt_lead branch=loom/agent/agt_1 creating"},
+			"row agt_1 ws t task@1 single_task worker background owner=agent:agt_lead by=user:u parent=agt_lead root=agt_root base=loom/agent/agt_lead branch=loom/agent/agt_1 creating profile=t req=r1 repo=/repo subject=// xkey= spec_v=1 step=0 harness= model="},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := createDecisionString(decideCreate(c.in)); got != c.want {
@@ -77,7 +80,7 @@ func TestDecideCreateTable(t *testing.T) {
 // createDecisionString is a readable form of decideCreate's outcome.
 func createDecisionString(d createDecision, err error) string {
 	if e, ok := err.(*Error); ok {
-		return string(e.Code)
+		return string(e.Code) + ": " + e.Message
 	} else if err != nil {
 		return err.Error()
 	}
@@ -85,10 +88,12 @@ func createDecisionString(d createDecision, err error) string {
 	if d.Replay {
 		return "replay " + a.AgentID
 	}
-	return fmt.Sprintf("row %s %s %s %s@%s %s %s %s owner=%s:%s by=%s:%s parent=%s root=%s base=%s branch=%s %s",
+	return fmt.Sprintf("row %s %s %s %s@%s %s %s %s owner=%s:%s by=%s:%s parent=%s root=%s base=%s branch=%s %s "+
+		"profile=%s req=%s repo=%s subject=%s/%s/%s xkey=%s spec_v=%d step=%d harness=%s model=%s",
 		a.AgentID, a.WorkspaceID, a.Name, a.Preset, a.PresetVersion, a.Mode, a.RoleKind, a.InteractionMode,
 		a.OwnerKind, a.OwnerID, a.CreatedByKind, a.CreatedByID, deref(a.ParentAgentID), deref(a.RootAgentID),
-		deref(a.BaseRef), deref(a.Branch), a.State)
+		deref(a.BaseRef), deref(a.Branch), a.State, a.ProfileKey, a.CreateRequestID, a.Repo, deref(a.SubjectType),
+		deref(a.SubjectID), deref(a.SubjectVersion), deref(a.ExternalKey), a.SpecVersion, a.CreateStep, a.Harness, deref(a.Model))
 }
 
 // unknownBase is a workspace whose CheckBase knows no ref.
@@ -113,17 +118,21 @@ func TestCreateUnknownBaseBeforeInsert(t *testing.T) {
 	}
 }
 
-// TestCreateCrashAtInsertCommit: a Create crashes at its row's commit; after
-// a restart the same Create finishes one agent, with its first message
-// handed over once and agent.created saved once.
+// TestCreateCrashAtInsertCommit: a Create crashes just after its row and
+// first message commit (step 1, before the worktree); after a restart the
+// same Create finishes that one agent, with its first message handed over
+// once and agent.created saved once.
 func TestCreateCrashAtInsertCommit(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
 	req := leadReq("r1")
 	req.FirstMessage = "hello"
-	crashCommit(t, 1)
-	if !panics(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, req) }) {
+	if !crashAt(t, "inserted")(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, req) }) {
 		t.Fatal("Create did not crash")
+	}
+	rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+	if len(rows) != 1 || rows[0].CreateStep != stepRow || len(e.ws.ensured) != 0 {
+		t.Fatalf("at the crash: rows %d, ensures %d; want one row at step 1 and no worktree", len(rows), len(e.ws.ensured))
 	}
 	s := e.service(ServiceConfig{}) // restart
 	runDispatcher(t, s)
@@ -132,11 +141,11 @@ func TestCreateCrashAtInsertCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	settled(t, s)
-	rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+	rows, _, _ = e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
 	slots, _ := e.st.Slots(ctx, a.AgentID)
-	if len(rows) != 1 || rows[0].CreateStep != stepDone || len(slots) != 1 || slots[0].State != loomstore.SlotHanded ||
-		e.events(t, a.AgentID, KindAgentCreated) != 1 {
-		t.Fatalf("after restart: rows %d step %d slots %+v created %d; want one finished agent, its message handed once",
+	if len(rows) != 1 || rows[0].AgentID != a.AgentID || rows[0].CreateStep != stepDone || len(slots) != 1 ||
+		slots[0].State != loomstore.SlotHanded || e.events(t, a.AgentID, KindAgentCreated) != 1 {
+		t.Fatalf("after restart: rows %d step %d slots %+v created %d; want the one agent finished, its message handed once",
 			len(rows), rows[0].CreateStep, slots, e.events(t, a.AgentID, KindAgentCreated))
 	}
 }
