@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -137,5 +138,96 @@ func TestCreateCrashAtInsertCommit(t *testing.T) {
 		e.events(t, a.AgentID, KindAgentCreated) != 1 {
 		t.Fatalf("after restart: rows %d step %d slots %+v created %d; want one finished agent, its message handed once",
 			len(rows), rows[0].CreateStep, slots, e.events(t, a.AgentID, KindAgentCreated))
+	}
+}
+
+// TestDecideCreatePrecedence pins Create's refusal order: with every fact
+// failing at once, a failed read (a store error, a repo that does not
+// resolve, a dead parent, an unknown base) never replaces an earlier
+// refusal. Each step clears the refusal before it and gets the next.
+func TestDecideCreatePrecedence(t *testing.T) {
+	task := Preset{Name: "task", Version: 1, Mode: "single_task", RoleKind: "worker", OwnerKind: "parent"}
+	in := createInput{Req: CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "task", Actor: user},
+		Preset: task, WorkspaceID: "ws", ID: "agt_1",
+		TakenErr: errors.New("store down"), Taken: true, RepoErr: errors.New("repo does not resolve"),
+		ParentErr: &Error{Code: CodeAgentNotFound, Message: "agt_lead is deleted"}, BaseErr: errors.New("unknown revision")}
+	for _, step := range []struct {
+		fix  func(*createInput)
+		want string
+	}{
+		{func(*createInput) {}, "preset_invalid: Create needs a Name and a Repo"},
+		{func(i *createInput) { i.Req.Name, i.Req.Repo = "t", "/repo" }, "preset_invalid: task needs a Parent"},
+		{func(i *createInput) { i.Req.Parent = "agt_lead" }, "store down"},
+		{func(i *createInput) { i.TakenErr = nil }, `agent_name_taken: an agent named "t" already exists`},
+		{func(i *createInput) { i.Taken = false }, "repo does not resolve"},
+		{func(i *createInput) { i.RepoErr = nil }, "agent_not_found: agt_lead is deleted"},
+		{func(i *createInput) { i.ParentErr = nil }, "preset_invalid: Create needs a base_ref, the branch or commit the agent starts from"},
+		{func(i *createInput) { i.Req.BaseRef = "nope" },
+			`preset_invalid: base_ref "nope" is not a branch or commit in /repo: unknown revision`},
+		{func(i *createInput) { i.BaseErr = nil }, "row"},
+	} {
+		step.fix(&in)
+		got := "row"
+		if _, err := decideCreate(in); err != nil {
+			got = err.Error()
+			if e, ok := err.(*Error); ok {
+				got = string(e.Code) + ": " + e.Message
+			}
+		}
+		if got != step.want {
+			t.Fatalf("decideCreate = %q; want %q", got, step.want)
+		}
+	}
+}
+
+// lookupSpy counts the repo resolutions and base checks a Create does; both
+// fail, as for an unknown repo and ref.
+type lookupSpy struct {
+	*fakeWorkspace
+	repos, bases int
+}
+
+func (l *lookupSpy) CheckBase(context.Context, string, string) error {
+	l.bases++
+	return errors.New("unknown revision")
+}
+
+func (l *lookupSpy) resolve(context.Context, Target, string) (string, error) {
+	l.repos++
+	return "", errors.New("repo does not resolve")
+}
+
+// TestCreateLookupsKeepPrecedence: through the shell, a Create with no name
+// or no repo touches neither the repo nor git, and is refused for that;
+// one whose name is taken is refused agent_name_taken although its repo
+// and base would fail too.
+func TestCreateLookupsKeepPrecedence(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	spy := &lookupSpy{fakeWorkspace: e.ws}
+	if _, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r0")); err != nil { // takes the name alpha
+		t.Fatal(err)
+	}
+	s := e.service(ServiceConfig{ResolveRepo: spy.resolve})
+	s.workspace = spy
+	for _, c := range []struct {
+		name       string
+		edit       func(*CreateRequest)
+		want       Code
+		noLookups  bool // with no name or repo nothing is looked up
+		wantPrefix string
+	}{
+		{"no repo", func(r *CreateRequest) { r.Repo = "" }, CodePresetInvalid, true, "Create needs a Name and a Repo"},
+		{"no name", func(r *CreateRequest) { r.Preset, r.Name = "task", "" }, CodePresetInvalid, true, "Create needs a Name and a Repo"},
+		{"name taken", func(*CreateRequest) {}, CodeAgentNameTaken, false, "an agent named"},
+	} {
+		spy.repos, spy.bases = 0, 0
+		req := leadReq("r-" + c.name)
+		c.edit(&req)
+		got := wantCode(t, mustFail(s.Create(ctx, req)), c.want)
+		if !strings.HasPrefix(got.Message, c.wantPrefix) || (c.noLookups && spy.repos+spy.bases > 0) {
+			t.Fatalf("%s: %q, %d repo and %d base lookups; want %q, no lookups %t", c.name, got.Message, spy.repos, spy.bases,
+				c.wantPrefix, c.noLookups)
+		}
 	}
 }

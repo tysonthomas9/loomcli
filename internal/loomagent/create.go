@@ -131,9 +131,9 @@ func createReason(reason string) bool {
 
 // commitCreate finds an earlier Create with req's ExternalKey or
 // RequestID, reads the facts decideCreate needs, and returns the earlier
-// agent or inserts the new row (step 1). The facts are read up front, so a
-// Create refused by an early check still does the later reads; each is a
-// read only.
+// agent or inserts the new row (step 1). The facts are read up front, but
+// decideCreate checks them in order, so a failed read never replaces an
+// earlier refusal; with no name or repo nothing is read.
 func (s *Service) commitCreate(ctx context.Context, req CreateRequest) (loomstore.Agent, error) {
 	in := createInput{Req: req, WorkspaceID: s.workspaceID}
 	prior, err := s.store.FindCreated(ctx, s.workspaceID, req.ExternalKey, req.RequestID)
@@ -159,16 +159,19 @@ func (s *Service) commitCreate(ctx context.Context, req CreateRequest) (loomstor
 }
 
 // createFacts reads into in what decideCreate checks a new Create against:
-// the default lead name, whether the name is taken, the repo, the parent
-// and the base ref.
+// the default lead name, and, once there is a name and a repo, whether the
+// name is taken, the repo, the parent and the base ref. A failed read is
+// kept as its error.
 func (s *Service) createFacts(ctx context.Context, in *createInput) {
 	req := in.Req
 	in.EnvName, in.ID = os.Getenv("LOOM_AGENT_NAME"), "agt_"+strings.ReplaceAll(uuid.Must(uuid.NewV7()).String(), "-", "")
-	if name := createName(in.Preset, req.Name, in.EnvName); name != "" {
-		taken, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Name: name,
-			IncludeArchived: true, Limit: 1})
-		in.Taken, in.TakenErr = len(taken) > 0, err
+	name := createName(in.Preset, req.Name, in.EnvName)
+	if name == "" || req.Repo == "" { // refused first; nothing to look up
+		return
 	}
+	taken, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, Name: name,
+		IncludeArchived: true, Limit: 1})
+	in.Taken, in.TakenErr = len(taken) > 0, err
 	repo, err := s.repoPath(ctx, req.Repo)
 	in.RepoErr = err
 	if req.Parent != "" {
