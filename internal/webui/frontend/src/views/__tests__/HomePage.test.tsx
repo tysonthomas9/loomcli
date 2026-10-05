@@ -11,9 +11,11 @@ import {
   NO_WORKSPACE_VIEW_ACTIONS,
   NO_WORKSPACE_VIEW_DATA,
 } from "@/contexts/WorkspaceViewContext";
-import type { Issue } from "@/types";
+import type { Agent } from "@/api/agentsv1";
+import type { Issue, LoomAgentStatus } from "@/types";
 
 const mockUpdateIssue = vi.hoisted(() => vi.fn());
+const mockRoster = vi.hoisted(() => ({ current: new Map() }));
 
 const mockData = {
   ...NO_WORKSPACE_VIEW_DATA,
@@ -107,6 +109,13 @@ vi.mock("@/hooks/workspace", async (importOriginal) => {
   return { ...actual, useRecentActivity: () => [] };
 });
 
+// The sidebar's shared Agent API roster (RAIL1).
+vi.mock("@/hooks/agents/useAgentRoster", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/agents/useAgentRoster")>();
+  return { ...actual, useRoster: () => mockRoster.current };
+});
+
 vi.mock("@/components/IssueViewGuard", () => ({
   IssueViewGuard: ({
     isLoading,
@@ -144,6 +153,7 @@ beforeEach(() => {
   mockActions.refetch.mockResolvedValue(undefined);
   mockData.issues = [];
   mockData.agents = [];
+  mockRoster.current = new Map();
   mockData.isLoading = false;
   mockData.error = null;
 });
@@ -335,6 +345,46 @@ describe("HomePage", () => {
       "queue-clear",
     );
     expect(screen.queryByTestId("operator-queue")).not.toBeInTheDocument();
+  });
+
+  it("counts the sidebar's idle Agent API agents with the fleet's in the idle stat", () => {
+    const api = (id: string, over: Partial<Agent> = {}): Agent =>
+      ({
+        agent_id: id,
+        name: id,
+        harness: "opencode",
+        preset: "lead",
+        role_kind: "interactive",
+        state: "idle",
+        parent_agent_id: null,
+        created_at: "2026-10-04T00:00:00Z",
+        ...over,
+      }) as Agent;
+    mockData.agents = [
+      { name: "local-coder", status: "idle" },
+      { name: "local-planner", status: "idle" },
+    ] as LoomAgentStatus[];
+    // Two idle Leads and a finished Lead count; a working Lead, its working
+    // child, a finished (hidden) child and an archived Lead do not.
+    mockRoster.current = new Map(
+      [
+        api("l1"),
+        api("l2", { state: "finished", outcome: "completed" }),
+        api("l3", { state: "waiting" }),
+        api("l4"),
+        api("l5", { state: "active" }),
+        api("k1", { parent_agent_id: "l5", state: "active", preset: "task" }),
+        api("k2", { parent_agent_id: "l1", state: "finished", preset: "task" }),
+        api("gone", { state: "archived" }),
+      ].map((a) => [a.agent_id, a]),
+    );
+
+    render(<HomePage />);
+
+    const idle = screen
+      .getAllByTestId("queue-stat")
+      .find((el) => el.dataset.stat === "idle");
+    expect(idle).toHaveTextContent("5 agents");
   });
 
   it("uses the standard loading and error guard states", () => {
