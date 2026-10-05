@@ -304,14 +304,16 @@ export function NavRail({
       switcher.scrollLeft += b.right - w.right + 6;
   }, [activeWorkspaceId, workspaces]);
 
+  const hasAdd = Boolean(onAddWorkspace);
   // Which ends of the sideways (mobile) switcher have workspaces scrolled out
   // of view, so the rail can hint at them.
   const [more, setMore] = useState({ left: false, right: false });
   const updateMore = useCallback(() => {
     const s = switcherRef.current;
     if (!s) return;
-    const left = s.scrollLeft > 1;
-    const right = s.scrollLeft + s.clientWidth < s.scrollWidth - 1;
+    // Within the 4px padding nothing is hidden (a snap can stop there).
+    const left = s.scrollLeft > 4;
+    const right = s.scrollLeft + s.clientWidth < s.scrollWidth - 4;
     setMore((m) =>
       m.left === left && m.right === right ? m : { left, right },
     );
@@ -323,7 +325,7 @@ export function NavRail({
     const ro = new ResizeObserver(updateMore);
     ro.observe(s);
     return () => ro.disconnect();
-  }, [updateMore, workspaces]);
+  }, [updateMore, workspaces, hasAdd]);
 
   const renderButton = (item: NavItem) => {
     const isActive = (item.activeForViews ?? [item.id]).includes(activeView);
@@ -401,36 +403,41 @@ export function NavRail({
               aria-label="Workspace selector"
               onScroll={updateMore}
             >
-              <div className={styles.workspaceList} ref={workspaceListRef}>
-                {workspaces?.map((ws) => {
-                  const color = getAvatarColor(ws.name);
-                  const isActive = ws.id === activeWorkspaceId;
-                  return (
-                    <CompactRailHost
-                      key={ws.id}
-                      as="button"
-                      type="button"
-                      label={ws.name}
-                      aria-label={`Switch to ${ws.name}`}
-                      hostRef={isActive ? activeWorkspaceRef : undefined}
-                      className={styles.wsAvatar}
-                      data-active={isActive || undefined}
-                      onClick={() => onWorkspaceSwitch?.(ws.id)}
-                    >
-                      <span
-                        className={styles.wsAvatarCircle}
-                        style={{
-                          backgroundColor: color,
-                          color: shouldUseWhiteText(color) ? "#fff" : "#171717",
-                        }}
-                        aria-hidden="true"
+              {/* No empty list: its gap would push Add off a one-item window. */}
+              {workspaces && workspaces.length > 0 && (
+                <div className={styles.workspaceList} ref={workspaceListRef}>
+                  {workspaces.map((ws) => {
+                    const color = getAvatarColor(ws.name);
+                    const isActive = ws.id === activeWorkspaceId;
+                    return (
+                      <CompactRailHost
+                        key={ws.id}
+                        as="button"
+                        type="button"
+                        label={ws.name}
+                        aria-label={`Switch to ${ws.name}`}
+                        hostRef={isActive ? activeWorkspaceRef : undefined}
+                        className={styles.wsAvatar}
+                        data-active={isActive || undefined}
+                        onClick={() => onWorkspaceSwitch?.(ws.id)}
                       >
-                        {getCompactAvatarInitials(ws.name)}
-                      </span>
-                    </CompactRailHost>
-                  );
-                })}
-              </div>
+                        <span
+                          className={styles.wsAvatarCircle}
+                          style={{
+                            backgroundColor: color,
+                            color: shouldUseWhiteText(color)
+                              ? "#fff"
+                              : "#171717",
+                          }}
+                          aria-hidden="true"
+                        >
+                          {getCompactAvatarInitials(ws.name)}
+                        </span>
+                      </CompactRailHost>
+                    );
+                  })}
+                </div>
+              )}
               {onAddWorkspace && (
                 <CompactRailHost
                   as="button"

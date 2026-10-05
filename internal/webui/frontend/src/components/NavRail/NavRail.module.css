@@ -334,9 +334,9 @@
 
   /* One row: the avatars and Add take what the buttons leave and scroll
      sideways, so every workspace stays reachable. The window is a whole
-     number of 30px items (41px pitch with the 11px gap, plus 6px padding a
-     side) and snaps to them, so no avatar shows cut; the frame keeps 12px a
-     side for a chevron when more is off-screen that way. */
+     number of 30px items (41px pitch with the 11px gap, plus 4px padding a
+     side for the active ring) and snaps to them, so no avatar shows cut; the
+     frame keeps 12px a side for a chevron when more is off-screen that way. */
   .switcherFrame {
     position: relative;
     display: flex;
@@ -351,14 +351,18 @@
     flex: 0 0 auto;
     flex-direction: row;
     gap: 11px;
-    width: max(42px, calc(round(down, 100cqw - 25px, 41px) + 1px));
+    /* Never wider than the slot: on the smallest phones it is under one
+       item with its padding, and the snap still shows that item whole. */
+    width: min(100cqw, max(38px, calc(round(down, 100cqw - 21px, 41px) - 3px)));
     min-width: 0;
-    padding: 6px;
+    padding: 4px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
     scroll-snap-type: x mandatory;
-    scroll-padding-inline: 6px;
+    /* The snap area must stay at least one item wide (30px) even in a 36px
+       slot, or the browser stops snapping inside it. */
+    scroll-padding-inline: 4px 2px;
   }
 
   .workspaceSwitcher .wsAvatar,
