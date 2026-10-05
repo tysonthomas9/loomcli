@@ -79,7 +79,7 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 	s.mu.Lock()
 	ask, ok := s.asks[a.AgentID][req.AskID]
 	s.mu.Unlock()
-	if c, held, err := s.heldClaim(ctx, a, req.AskID, ask, ok); err != nil {
+	if c, held, err := s.heldClaim(ctx, a, req, ask, ok); err != nil {
 		return err
 	} else if held {
 		return claimResult(c, req.RequestID, hash)
@@ -119,12 +119,22 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 	return s.replied(cleanup, a, sess, ask, c, rerr)
 }
 
-// heldClaim is the claim already on askID that decides a Respond's outcome,
-// a claim a crash left pending settled first; held is false when there is
-// none, or only one on an earlier ask with this ID (ask, open, has another turn).
-func (s *Service) heldClaim(ctx context.Context, a loomstore.Agent, askID string, ask Ask, open bool) (c loomstore.AskClaim, held bool, err error) {
-	c, err = s.store.AskClaim(ctx, a.AgentID, askID)
-	if errors.Is(err, loomstore.ErrNotFound) || (err == nil && open && c.TurnID != ask.TurnID) {
+// heldClaim is the claim already on req's ask ID that decides its outcome,
+// a claim a crash left pending settled first: the one req itself made, on
+// any turn (a late retry never answers a later ask with its ID), else the
+// latest. held is false when there is none, or only one on an earlier ask
+// with this ID (ask, open, has another turn).
+func (s *Service) heldClaim(ctx context.Context, a loomstore.Agent, req RespondRequest, ask Ask, open bool) (c loomstore.AskClaim, held bool, err error) {
+	err = loomstore.ErrNotFound
+	if req.RequestID != "" { // a Respond with no key has no retry to tell apart
+		c, err = s.store.AskClaim(ctx, a.AgentID, req.AskID, req.RequestID)
+	}
+	if errors.Is(err, loomstore.ErrNotFound) {
+		if c, err = s.store.AskClaim(ctx, a.AgentID, req.AskID); err == nil && open && c.TurnID != ask.TurnID {
+			err = loomstore.ErrNotFound // the claim is on an earlier ask with this ID
+		}
+	}
+	if errors.Is(err, loomstore.ErrNotFound) {
 		return c, false, nil
 	} else if err != nil {
 		return c, false, err
@@ -175,12 +185,17 @@ func (s *Service) replied(ctx context.Context, a loomstore.Agent, sess loomharne
 	} else if rerr != nil {
 		state, _ = nativeOutcome(ctx, sess, c) // an unread history is no evidence: unknown
 	}
+	if state == loomstore.ClaimUnknown { // Attention first: a terminal claim is never settled again
+		if err := s.replyUnknown(ctx, a); err != nil {
+			return errors.Join(harnessErr(rerr), err)
+		}
+	}
 	if err := s.store.SettleAskClaim(ctx, c, state); err != nil {
 		return errors.Join(harnessErr(rerr), err)
 	}
 	switch {
 	case state == loomstore.ClaimUnknown:
-		return errors.Join(&Error{Code: CodeReplyUnknown, Message: rerr.Error()}, s.replyUnknown(ctx, a))
+		return &Error{Code: CodeReplyUnknown, Message: rerr.Error()}
 	case state == "" && errors.Is(rerr, loomharness.ErrQuarantined):
 		return errors.Join(harnessErr(rerr), s.quarantined(ctx, a, ask))
 	case state == "":
@@ -241,17 +256,19 @@ func (s *Service) settleClaims(ctx context.Context, a loomstore.Agent, sess loom
 		if state, err = nativeOutcome(ctx, sess, c); err != nil {
 			break
 		}
+		if state == loomstore.ClaimUnknown && a.AttentionReason == nil { // Attention first, as in replied
+			if a, err = s.raiseAttention(ctx, a, AttentionReplyUnknown); err != nil {
+				break
+			}
+		}
 		if err = s.store.SettleAskClaim(ctx, c, state); err != nil {
 			break
 		}
 		s.mu.Lock()
 		ask, open := s.asks[a.AgentID][c.AskID]
 		s.mu.Unlock()
-		switch {
-		case state == loomstore.ClaimReplied && open && ask.TurnID == c.TurnID:
+		if state == loomstore.ClaimReplied && open && ask.TurnID == c.TurnID {
 			s.setAsk(a.AgentID, ask, false)
-		case state == loomstore.ClaimUnknown && a.AttentionReason == nil:
-			a, err = s.raiseAttention(ctx, a, AttentionReplyUnknown)
 		}
 	}
 	if err == nil && len(claims) > 0 {

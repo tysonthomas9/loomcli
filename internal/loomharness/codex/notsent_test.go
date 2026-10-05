@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -31,7 +30,8 @@ func (halfWriter) Close() error                  { return nil }
 // nothing is.
 func TestRespondPartlyWrittenMaySend(t *testing.T) {
 	for n, want := range map[int]bool{0: true, 5: false} {
-		c := NewConn(strings.NewReader(""), halfWriter{n}, nil)
+		r, _ := io.Pipe() // never written: the connection stays up
+		c := NewConn(r, halfWriter{n}, nil)
 		err := c.Respond(json.RawMessage(`7`), map[string]string{"decision": "accept"})
 		if err == nil || errors.Is(err, loomharness.ErrNotSent) != want {
 			t.Errorf("%d bytes written: %v; want ErrNotSent %v", n, err, want)

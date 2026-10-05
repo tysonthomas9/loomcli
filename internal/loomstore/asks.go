@@ -43,11 +43,16 @@ func (s *Store) ClaimAsk(ctx context.Context, c AskClaim) (held AskClaim, won bo
 	return held, false, err
 }
 
-// AskClaim returns the latest claim on agentID's ask ID askID, or ErrNotFound.
-func (s *Store) AskClaim(ctx context.Context, agentID, askID string) (AskClaim, error) {
+// AskClaim returns the latest claim on agentID's ask ID askID, or with a
+// requestID the latest that request made; else ErrNotFound.
+func (s *Store) AskClaim(ctx context.Context, agentID, askID string, requestID ...string) (AskClaim, error) {
 	var c AskClaim
-	err := s.db.QueryRowContext(ctx, `SELECT `+claimCols+` FROM agent_ask_claims WHERE agent_id = ? AND ask_id = ?
-		ORDER BY created_at DESC, rowid DESC LIMIT 1`, agentID, askID).Scan(c.fields()...)
+	q, args := ``, []any{agentID, askID}
+	if len(requestID) > 0 {
+		q, args = ` AND request_id = ?`, append(args, requestID[0])
+	}
+	err := s.db.QueryRowContext(ctx, `SELECT `+claimCols+` FROM agent_ask_claims WHERE agent_id = ? AND ask_id = ?`+q+`
+		ORDER BY created_at DESC, rowid DESC LIMIT 1`, args...).Scan(c.fields()...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrNotFound
 	}

@@ -253,11 +253,14 @@ func TestRespondNotSentReleasesClaim(t *testing.T) {
 }
 
 // TestRespondReusedAskIDLaterTurn: codex reuses an ask ID on a later turn.
-// That is a new ask: its claim is new, and it is answered.
+// That is a new ask: its claim is new, and it is answered. A delayed retry
+// of the first turn's request gets its own outcome and answers nothing.
 func TestRespondReusedAskIDLaterTurn(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
 	s := e.service(ServiceConfig{})
+	var replies []loomharness.Reply
+	s.harnesses["opencode"] = tweaked{Harness: e.h, replies: &replies}
 	stop := runFeed(t, s, "opencode")
 	defer stop()
 	a, _ := newLead(t, e, s, "alpha")
@@ -266,10 +269,18 @@ func TestRespondReusedAskIDLaterTurn(t *testing.T) {
 	for i, id := range []string{"r1", "r2"} {
 		mustSendMsg(t, s, sendReq(a.AgentID, fmt.Sprintf("u%d", i), "go", user))
 		drained(t, s, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+		if i == 1 { // r1 retried late, after the turn it answered
+			if err := s.Respond(ctx, answer(a, "r1", "allow_once")); err != nil || len(replies) != 1 {
+				t.Fatalf("late retry of r1 = %v, replies %d; want its success and no new Reply", err, len(replies))
+			}
+		}
 		if err := s.Respond(ctx, answer(a, id, "allow_once")); err != nil {
 			t.Fatalf("turn %d: %v", i+1, err)
 		}
 		drained(t, s, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+	}
+	if len(replies) != 2 {
+		t.Fatalf("replies = %d; want one per turn", len(replies))
 	}
 }
 
