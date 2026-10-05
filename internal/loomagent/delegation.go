@@ -375,7 +375,7 @@ func (s *Service) recordCompletion(ctx context.Context, m loomstore.CompletionMa
 	return err
 }
 
-// readHead sets rec's head, and its branch when the port reports one, from
+// readHead sets rec's head, and its branch when the marker saved none, from
 // a's working copy (R32). A failed Status saves nothing, unless retrying
 // cannot help.
 func (s *Service) readHead(ctx context.Context, a loomstore.Agent, rec *TaskCompleted) error {
@@ -395,7 +395,7 @@ func (s *Service) readHead(ctx context.Context, a loomstore.Agent, rec *TaskComp
 		return fmt.Errorf("loomagent: task_completed workspace status: %w", err)
 	default:
 		rec.Head = st.HEAD
-		if st.Branch != "" { // none when the working copy is gone: keep the marker's
+		if rec.Branch == "" { // the attempt's branch is the marker's; a detached one takes the port's
 			rec.Branch = st.Branch
 		}
 	}

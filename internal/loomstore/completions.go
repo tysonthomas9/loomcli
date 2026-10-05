@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -19,11 +20,15 @@ type CompletionMarker struct {
 	Backfilled      bool // saved by the upgrade: Summary and Result were not read; read them from the child
 }
 
-// insertMarker saves m in tx; a repeat of the same attempt changes nothing.
+// insertMarker saves m in tx; a repeat of the same attempt, owed or
+// already recorded (task_completed:<child>:<attempt> on the parent),
+// changes nothing.
 func insertMarker(ctx context.Context, tx *sql.Tx, m CompletionMarker) error {
 	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO agent_completion_markers
-		(child_agent_id, attempt, parent_agent_id, outcome, branch, summary, result, created_at) VALUES (?,?,?,?,?,?,?,?)`,
-		m.Child, m.Attempt, m.Parent, m.Outcome, m.Branch, m.Summary, m.Result, Stamp(time.Now()))
+		(child_agent_id, attempt, parent_agent_id, outcome, branch, summary, result, created_at)
+		SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM agent_events WHERE agent_id = ? AND event_id = ?)`,
+		m.Child, m.Attempt, m.Parent, m.Outcome, m.Branch, m.Summary, m.Result, Stamp(time.Now()),
+		m.Parent, fmt.Sprintf("task_completed:%s:%d", m.Child, m.Attempt))
 	return err
 }
 

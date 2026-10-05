@@ -523,3 +523,37 @@ func TestCompletionBackfillAfterReopen(t *testing.T) {
 		t.Fatalf("records = %+v; want attempt 1's with no later reply", got)
 	}
 }
+
+// TestCompletionBranchFromMarker: the working copy moved to another branch
+// before delivery; the record keeps the attempt's branch from the marker.
+func TestCompletionBranchFromMarker(t *testing.T) {
+	c := childOf("c1", "L")
+	c.WorktreePath, c.Branch = sp("/wt/c1"), sp("loom/agent/c1")
+	ws := &headWorkspace{branch: "later", head: "abc"}
+	s := markerService(t, ServiceConfig{Workspace: ws}, dbPath(t), busy("L", "persistent", StateActive), c)
+	endAttempt(t, s, "c1", "completed")
+	if got := completions(t, s, "L"); len(got) != 1 || got[0].Branch != "loom/agent/c1" || got[0].Head != "abc" {
+		t.Fatalf("records = %+v; want the marker's branch and the port's head", got)
+	}
+}
+
+// TestCompletionArchiveDeliveredNoMarker: archiving a child whose record was
+// delivered owes nothing, so a failing Workspace.Status leaves no marker
+// retried forever.
+func TestCompletionArchiveDeliveredNoMarker(t *testing.T) {
+	ctx := context.Background()
+	path := dbPath(t)
+	ws := &flakyStatus{headWorkspace: headWorkspace{branch: "loom/agent/c1", head: "abc"}}
+	c := childOf("c1", "L")
+	c.WorktreePath, c.Branch = sp("/wt/c1"), sp("loom/agent/c1")
+	s := markerService(t, ServiceConfig{Workspace: ws}, path, busy("L", "persistent", StateActive), c)
+	endAttempt(t, s, "c1", "completed")
+	ws.fail.Store(true)
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: "c1", Reason: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	s.recordCompletions(ctx)
+	if got, n := completions(t, s, "L"), markers(t, path); len(got) != 1 || n != 0 {
+		t.Fatalf("records %+v, markers %d; want one and none", got, n)
+	}
+}
