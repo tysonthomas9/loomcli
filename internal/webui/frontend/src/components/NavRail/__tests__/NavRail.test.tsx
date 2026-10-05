@@ -400,6 +400,105 @@ describe("NavRail", () => {
       expect(WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX).toBe(210);
     });
 
+    // The active workspace is kept in view by scrolling the list itself, not
+    // with scrollIntoView: that also moves the browser's Tab starting point to
+    // the button, so the first Tab on a fresh load skipped the skip link.
+    describe("keeps the active workspace in view", () => {
+      function renderWithRects(
+        active: string,
+        button: { top: number; bottom: number },
+      ) {
+        let scrollTop = 40;
+        const scrollTopSet = vi.fn((v: number) => {
+          scrollTop = v;
+        });
+        const savedScrollTop = Object.getOwnPropertyDescriptor(
+          HTMLElement.prototype,
+          "scrollTop",
+        );
+        const savedScrollIntoView = Object.getOwnPropertyDescriptor(
+          Element.prototype,
+          "scrollIntoView",
+        );
+        Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+          configurable: true,
+          get: () => scrollTop,
+          set: scrollTopSet,
+        });
+        const scrollIntoView = vi.fn();
+        Object.defineProperty(Element.prototype, "scrollIntoView", {
+          configurable: true,
+          writable: true,
+          value: scrollIntoView,
+        });
+        const rect = vi
+          .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+          .mockImplementation(function (this: HTMLElement) {
+            const r =
+              this.getAttribute("aria-label") === `Switch to ${active}`
+                ? button
+                : this.parentElement?.getAttribute("aria-label") ===
+                    "Workspace selector"
+                  ? { top: 100, bottom: 310 }
+                  : { top: 0, bottom: 0 };
+            return {
+              ...r,
+              left: 0,
+              right: 0,
+              width: 0,
+              height: r.bottom - r.top,
+              x: 0,
+              y: r.top,
+              toJSON: () => r,
+            } as DOMRect;
+          });
+        try {
+          render(
+            <NavRail
+              activeView="kanban"
+              onChange={() => {}}
+              workspaces={manyWorkspaces}
+              activeWorkspaceId={
+                manyWorkspaces.find((w) => w.name === active)!.id
+              }
+              onWorkspaceSwitch={() => {}}
+            />,
+          );
+        } finally {
+          rect.mockRestore();
+          const restore = (
+            proto: object,
+            key: string,
+            saved: PropertyDescriptor | undefined,
+          ) => {
+            if (saved) Object.defineProperty(proto, key, saved);
+            else delete (proto as Record<string, unknown>)[key];
+          };
+          restore(HTMLElement.prototype, "scrollTop", savedScrollTop);
+          restore(Element.prototype, "scrollIntoView", savedScrollIntoView);
+        }
+        return { scrollTop: () => scrollTop, scrollTopSet, scrollIntoView };
+      }
+
+      it("scrolls the list down when the active workspace is below it", () => {
+        const r = renderWithRects("Workspace 7", { top: 330, bottom: 362 });
+        expect(r.scrollIntoView).not.toHaveBeenCalled();
+        expect(r.scrollTop()).toBe(40 + 52);
+      });
+
+      it("scrolls the list up when the active workspace is above it", () => {
+        const r = renderWithRects("Workspace 0", { top: 80, bottom: 112 });
+        expect(r.scrollIntoView).not.toHaveBeenCalled();
+        expect(r.scrollTop()).toBe(40 - 20);
+      });
+
+      it("leaves the list alone when the active workspace is in view", () => {
+        const r = renderWithRects("Workspace 3", { top: 150, bottom: 182 });
+        expect(r.scrollIntoView).not.toHaveBeenCalled();
+        expect(r.scrollTopSet).not.toHaveBeenCalled();
+      });
+    });
+
     it("renders workspace selector with dividers and pinned add button", () => {
       render(
         <NavRail

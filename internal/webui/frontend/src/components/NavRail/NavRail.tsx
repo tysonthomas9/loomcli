@@ -280,9 +280,19 @@ export function NavRail({
 }: NavRailProps): JSX.Element {
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
   const activeWorkspaceRef = useRef<HTMLButtonElement>(null);
+  const workspaceListRef = useRef<HTMLDivElement>(null);
 
+  // Keep the active workspace in view (like block: "nearest") by scrolling the
+  // list itself. scrollIntoView would also move the browser's Tab starting
+  // point to the button, so the first Tab would skip the skip link.
   useEffect(() => {
-    activeWorkspaceRef.current?.scrollIntoView?.({ block: "nearest" });
+    const list = workspaceListRef.current;
+    const button = activeWorkspaceRef.current;
+    if (!list || !button) return;
+    const l = list.getBoundingClientRect();
+    const b = button.getBoundingClientRect();
+    if (b.top < l.top) list.scrollTop -= l.top - b.top;
+    else if (b.bottom > l.bottom) list.scrollTop += b.bottom - l.bottom;
   }, [activeWorkspaceId, workspaces]);
 
   const renderButton = (item: NavItem) => {
@@ -349,7 +359,7 @@ export function NavRail({
             className={styles.workspaceSwitcher}
             aria-label="Workspace selector"
           >
-            <div className={styles.workspaceList}>
+            <div className={styles.workspaceList} ref={workspaceListRef}>
               {workspaces?.map((ws) => {
                 const color = getAvatarColor(ws.name);
                 const isActive = ws.id === activeWorkspaceId;
