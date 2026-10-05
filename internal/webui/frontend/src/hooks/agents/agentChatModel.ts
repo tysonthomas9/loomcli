@@ -42,7 +42,7 @@ export interface ToolCall {
 export type ToolStatus = "running" | "completed" | "failed";
 
 export type ChatItem =
-  | { key: string; kind: "user"; text: string }
+  | { key: string; kind: "user"; text: string; at?: string }
   /** A message another agent sent on purpose, such as a child's agent_send. */
   | {
       key: string;
@@ -51,7 +51,13 @@ export type ChatItem =
       name: string;
       text: string;
     }
-  | { key: string; kind: "agent"; text: string; streaming?: boolean }
+  | {
+      key: string;
+      kind: "agent";
+      text: string;
+      streaming?: boolean;
+      at?: string;
+    }
   | { key: string; kind: "reasoning"; text: string; streaming?: boolean }
   | { key: string; kind: "tool"; tool: ToolCall; status: ToolStatus }
   | { key: string; kind: "turn_end"; reason: string; error?: string }
@@ -110,7 +116,8 @@ function itemFor(
   switch (e.kind) {
     case "message.delivered": {
       const from = senderAgent(p.sender);
-      if (!from) return { key, kind: "user", text: p.text ?? "" };
+      if (!from)
+        return { key, kind: "user", text: p.text ?? "", at: e.created_at };
       // Records show on their completion cards: only the rest is a message.
       const text = p.completions ? (p.message ?? "") : (p.text ?? "");
       if (!text.trim()) return null;
@@ -130,7 +137,7 @@ function itemFor(
       }
       if (p.itemKind === "reasoning")
         return { key, kind: "reasoning", text: p.text ?? "" };
-      return { key, kind: "agent", text: p.text ?? "" };
+      return { key, kind: "agent", text: p.text ?? "", at: e.created_at };
     case "agent.turn_completed":
       return p.stopReason && p.stopReason !== "completed"
         ? {

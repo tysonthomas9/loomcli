@@ -194,6 +194,11 @@
   padding-bottom: 8px;
 }
 
+/* One agent's messages back to back sit closer (UI6). */
+.row[data-kind="agent"]:has(+ .row[data-kind="agent"]) {
+  padding-bottom: 4px;
+}
+
 .row[data-kind="working"] {
   padding-bottom: 6px;
 }
@@ -224,6 +229,7 @@
 
 /* UserTimelineRow */
 .userRow {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -288,26 +294,36 @@
   color: var(--color-text-primary);
 }
 
-.userMeta,
-.messageMeta {
+/* Every message's hover pill (UI6): laid over the message, taking no space. */
+.messageActions {
+  position: absolute;
+  right: 4px;
+  bottom: -12px;
+  z-index: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
+  padding: 1px 2px 1px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-primary);
+  box-shadow: 0 1px 3px color-mix(in srgb, #000 12%, transparent);
+  font-size: 0.6875rem;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.2s;
 }
 
-.userMeta {
-  max-width: 80%;
-  justify-content: flex-end;
-  padding-right: 4px;
+.messageTime {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
-.userRow:hover .userMeta,
-.userMeta:focus-within,
-.agentMessage:hover .messageMeta,
-.messageMeta:focus-within {
+.userRow:hover .messageActions,
+.agentMessage:hover .messageActions,
+.messageActions:focus-within {
   opacity: 1;
+  pointer-events: auto;
 }
 
 /* AssistantTimelineRow */
@@ -315,10 +331,6 @@
   position: relative;
   min-width: 0;
   padding: 2px 4px;
-}
-
-.messageMeta {
-  margin-top: 6px;
 }
 
 /* The waiting message: a user bubble that has not been delivered yet. */

@@ -38,8 +38,13 @@ import {
   ComposerModelControls,
 } from "./ComposerModelControls";
 import { LONG_TEXT_LIMIT, LongText } from "./LongText";
-import { MessageCopyButton } from "./MessageCopyButton";
-import { useLinger, UserMessage, WorkingRow } from "./MessageRows";
+import {
+  clockTime,
+  MessageActions,
+  useLinger,
+  UserMessage,
+  WorkingRow,
+} from "./MessageRows";
 import { useSmoothText } from "./useSmoothText";
 import {
   dismissThreadErrorBannerForSession,
@@ -590,17 +595,6 @@ function StartedMarker({
   );
 }
 
-/** A clock time such as 2:45 PM, or "" when the stamp does not parse. */
-function clockTime(at: string): string {
-  const t = Date.parse(at);
-  return Number.isNaN(t)
-    ? ""
-    : new Date(t).toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-      });
-}
-
 /** A message another agent sent on purpose: "from <name>", as markdown. */
 function FromAgent({
   id,
@@ -785,9 +779,11 @@ function Row({
 function AgentMessage({
   text,
   streaming,
+  at,
 }: {
   text: string;
   streaming: boolean;
+  at?: string | undefined;
 }) {
   const [all, setAll] = useState(false);
   const smooth = useSmoothText(text, streaming);
@@ -804,11 +800,7 @@ function AgentMessage({
           Show all ({text.length.toLocaleString()} characters)
         </button>
       )}
-      {!streaming && text.trim() && (
-        <div className={page.messageMeta}>
-          <MessageCopyButton text={text} />
-        </div>
-      )}
+      {!streaming && text.trim() && <MessageActions text={text} at={at} />}
     </div>
   );
 }
@@ -845,9 +837,15 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
         </div>
       );
     case "agent":
-      return <AgentMessage text={item.text} streaming={!!item.streaming} />;
+      return (
+        <AgentMessage
+          text={item.text}
+          streaming={!!item.streaming}
+          at={item.at}
+        />
+      );
     case "user":
-      return <UserMessage text={item.text} />;
+      return <UserMessage text={item.text} at={item.at} />;
     // Tool calls and reasoning are work rows (see deriveTimelineRows).
     case "tool":
     case "reasoning":

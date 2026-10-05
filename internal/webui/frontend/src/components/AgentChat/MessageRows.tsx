@@ -22,15 +22,56 @@ export function shouldCollapseUserMessage(text: string): boolean {
   );
 }
 
+/** A clock time such as 2:45 PM, or "" when the stamp does not parse. */
+export function clockTime(at: string | undefined): string {
+  const t = Date.parse(at ?? "");
+  return Number.isNaN(t)
+    ? ""
+    : new Date(t).toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+}
+
+/**
+ * Every message's hover pill (UI6): its time, copy, and that role's own
+ * actions, laid over the message so it takes no space.
+ */
+export function MessageActions({
+  text,
+  at,
+  copyLabel,
+  children,
+}: {
+  text: string;
+  at?: string | undefined;
+  copyLabel?: string;
+  children?: ReactNode;
+}) {
+  const time = clockTime(at);
+  return (
+    <div className={styles.messageActions} data-testid="message-actions">
+      {time && <span className={styles.messageTime}>{time}</span>}
+      <MessageCopyButton
+        text={text}
+        {...(copyLabel ? { label: copyLabel } : {})}
+      />
+      {children}
+    </div>
+  );
+}
+
 /**
  * T3's user bubble: right-aligned, at most 80% wide, a long message folded
- * with a fade until "Show full message", and a copy button under it on hover.
+ * with a fade until "Show full message", and the hover pill under it.
  */
 export function UserMessage({
   text,
+  at,
   footer,
 }: {
   text: string;
+  at?: string | undefined;
   footer?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -62,9 +103,7 @@ export function UserMessage({
         )}
       </div>
       {text.trim() && (
-        <div className={styles.userMeta}>
-          <MessageCopyButton text={text} label="Copy your message" />
-        </div>
+        <MessageActions text={text} at={at} copyLabel="Copy your message" />
       )}
     </div>
   );

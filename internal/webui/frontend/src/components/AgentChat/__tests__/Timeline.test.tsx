@@ -49,6 +49,10 @@ vi.mock("@/api/agentsv1", () => ({
 }));
 
 import { AgentChat } from "../AgentChat";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const css = readFileSync(resolve(__dirname, "../ChatPage.module.css"), "utf8");
 
 function agent(over: Partial<Agent> = {}): Agent {
   return {
@@ -153,6 +157,49 @@ describe("AgentChat timeline (UI3)", () => {
     expect(copy.closest("li")).toHaveTextContent(/^done$/);
     fireEvent.click(copy);
     expect(writeText).toHaveBeenCalledWith("**done**");
+  });
+
+  it("shows the same hover pill, time and copy, on user and agent messages (UI6)", async () => {
+    await mount(agent());
+    const at = "2026-10-04T20:15:00Z";
+    deliver(
+      {
+        ...ev("message.delivered", { sender: "user:local", text: "hi" }),
+        created_at: at,
+      },
+      {
+        ...ev("item.completed", { itemKind: "message", text: "one" }),
+        created_at: at,
+      },
+      {
+        ...ev("item.completed", { itemKind: "message", text: "two" }),
+        created_at: at,
+      },
+    );
+    const pills = screen.getAllByTestId("message-actions");
+    expect(pills).toHaveLength(3);
+    const time = new Date(at).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    for (const pill of pills) {
+      expect(pill).toHaveTextContent(time);
+      expect(
+        within(pill).getByRole("button", { name: /^Copy/ }),
+      ).toBeInTheDocument();
+      expect(pill.className).toBe(pills[0]!.className);
+    }
+    expect(
+      within(pills[0]!).getByRole("button", { name: "Copy your message" }),
+    ).toBeInTheDocument();
+  });
+
+  it("lays the pill over the message and packs one agent's messages closer (UI6)", () => {
+    const pill = css.match(/\.messageActions \{[^}]*\}/)?.[0] ?? "";
+    expect(pill).toMatch(/position: absolute/);
+    expect(css).toMatch(
+      /\.row\[data-kind="agent"\]:has\(\+ \.row\[data-kind="agent"\]\) \{\s*padding-bottom: 4px;/,
+    );
   });
 
   it("groups tool calls under a summary that expands to each call's input and output", async () => {
