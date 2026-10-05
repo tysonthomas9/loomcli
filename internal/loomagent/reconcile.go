@@ -450,5 +450,10 @@ func (s *Service) endLostTurn(ctx context.Context, a loomstore.Agent, sess loomh
 			return err
 		}
 	}
-	return s.turnCompleted(ctx, a, end)
+	a, ended, err := s.endTurn(ctx, a, end)
+	if err != nil || !ended {
+		return err
+	}
+	_, err = s.dispatch(ctx, a) // not wake: a failed hand-over is retried
+	return err
 }

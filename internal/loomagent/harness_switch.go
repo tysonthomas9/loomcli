@@ -3,6 +3,7 @@ package loomagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -154,7 +155,9 @@ func (s *Service) resume(ctx context.Context, a loomstore.Agent) (loomstore.Agen
 		return a, err
 	}
 	got, err := sess.Resume(ctx, l, rules)
-	if err != nil {
+	if errors.Is(err, loomharness.ErrSessionNotFound) {
+		return a, permanent{harnessErr(err)} // no retry brings a missing session back
+	} else if err != nil {
 		return a, harnessErr(err)
 	}
 	if err := s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: a.AgentID, Harness: a.Harness,

@@ -412,3 +412,48 @@ func TestReconcileRetryShowsDeliveryUnknown(t *testing.T) {
 		t.Fatalf("Attention %q turns %d; want delivery_unknown, nothing resent", r, turnsRun(e, ref))
 	}
 }
+
+// TestReconcileLostTurnRedispatchRetries: settling a lost turn puts its
+// input, which never landed, back in line; handing it over again fails
+// while the harness cannot install its rules. The queue retries it after
+// its backoff and hands it over once.
+func TestReconcileLostTurnRedispatchRetries(t *testing.T) {
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	clk := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	a, ref := lostTurn(t, e, loomharness.LandedNotFound)
+	fh.FailInstall(errors.New("install failed"))
+	reconcile(t, s) // the feed gap
+	settled(t, s)
+	fh.FailInstall(nil)
+	if clk.fire() != 1 {
+		t.Fatal("no retry pending")
+	}
+	settled(t, s)
+	if turnsRun(e, ref) != 1 || slotState(t, s, a.AgentID, "u1") == loomstore.SlotWaiting {
+		t.Fatalf("turns %d slot %s; want u1 handed over once", turnsRun(e, ref), slotState(t, s, a.AgentID, "u1"))
+	}
+}
+
+// TestReconcileMissingSessionNotRetried: an idle lead's message waits but
+// the harness no longer has its session, so Resume finds none. Settling it
+// shows Attention once and queues no retry: none brings the session back.
+func TestReconcileMissingSessionNotRetried(t *testing.T) {
+	e := newCreateEnv(t)
+	a, _ := waitingLead(t, e, func(a loomstore.Agent) {
+		ref := loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}
+		if err := e.h.Purge(context.Background(), []loomharness.NativeRef{ref}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	s := e.service(ServiceConfig{}) // the restart
+	clk := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	if r := s.get(t, a.AgentID).AttentionReason; r == nil || len(clk.backoffs()) != 0 {
+		t.Fatalf("Attention %q backoffs %v; want Attention and no retry", deref(r), clk.backoffs())
+	}
+}

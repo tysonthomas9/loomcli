@@ -247,22 +247,33 @@ func (s *Service) delivered(ctx context.Context, a loomstore.Agent, key string) 
 // completion counts: one for any other turn ID, such as an older turn's late
 // completion, or one before turn.started named the turn, changes nothing.
 func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomharness.Event) error {
+	a, ended, err := s.endTurn(ctx, a, e)
+	if err != nil || !ended {
+		return err
+	}
+	_, err = s.wake(ctx, a)
+	return err
+}
+
+// endTurn is turnCompleted without its wake: it reports whether e ended
+// a's running turn.
+func (s *Service) endTurn(ctx context.Context, a loomstore.Agent, e loomharness.Event) (loomstore.Agent, bool, error) {
 	if a.RunningTurnID == nil || *a.RunningTurnID != e.TurnID {
-		return nil // not the running turn
+		return a, false, nil // not the running turn
 	}
 	slots, err := s.store.Slots(ctx, a.AgentID)
 	if err != nil {
-		return err
+		return a, false, err
 	}
 	for _, sl := range slots { // a turn that ran had its input delivered
 		if sl.State == loomstore.SlotHanded {
 			if err := s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID); err != nil {
-				return err
+				return a, false, err
 			}
 		}
 	}
 	if err := s.endTurnAsks(ctx, a, e.TurnID); err != nil {
-		return err
+		return a, false, err
 	}
 	more := slices.ContainsFunc(slots, func(sl loomstore.Slot) bool { return sl.State == loomstore.SlotWaiting })
 	to := a.StateOf()
@@ -274,11 +285,8 @@ func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomha
 	default:
 		to.State = StateIdle
 	}
-	if a, err = s.setState(ctx, a, to); err != nil {
-		return err
-	}
-	_, err = s.wake(ctx, a)
-	return err
+	a, err = s.setState(ctx, a, to)
+	return a, err == nil, err
 }
 
 // RunDispatcher wakes the dispatcher on agent.idle until ctx ends. With
