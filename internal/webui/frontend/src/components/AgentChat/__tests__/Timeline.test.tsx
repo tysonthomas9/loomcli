@@ -209,6 +209,18 @@ describe("AgentChat timeline (UI3)", () => {
     );
   });
 
+  it("puts a user's pill left of the bubble, top-aligned, over none of its text (UI7)", async () => {
+    await mount(agent());
+    deliver(ev("message.delivered", { sender: "user:local", text: "hi" }));
+    const pill = screen.getByTestId("message-actions");
+    // Anchored to the bubble, so it can sit just outside it.
+    expect(pill.parentElement?.className).toMatch(/userBubble/);
+    const rule =
+      css.match(/\.userBubble > \.messageActions \{[^}]*\}/)?.[0] ?? "";
+    expect(rule).toMatch(/right: calc\(100% \+ \d+px\);/);
+    expect(rule).not.toMatch(/bottom:/);
+  });
+
   it("groups tool calls under a summary that expands to each call's input and output", async () => {
     await mount(agent());
     deliver(

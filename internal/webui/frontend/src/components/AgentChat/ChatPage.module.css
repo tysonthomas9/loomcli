@@ -317,6 +317,11 @@
   transition: opacity 0.2s;
 }
 
+/* A user's pill sits just left of the bubble, top-aligned, over no text (UI7). */
+.userBubble > .messageActions {
+  right: calc(100% + 4px);
+}
+
 .messageTime {
   color: var(--color-text-secondary);
   white-space: nowrap;

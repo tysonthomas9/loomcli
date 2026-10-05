@@ -527,3 +527,45 @@ test("one agent's one-line messages sit close, and the hover pill takes no space
       });
   }
 });
+
+test("a user's hover pill sits left of the bubble, over none of it (UI7)", async ({
+  page,
+}) => {
+  const at = "2026-10-04T20:15:00Z";
+  const user = (text: string) => ({
+    ...ev("message.delivered", { sender: "user:local", text }),
+    created_at: at,
+  });
+  const long =
+    "Please run the API reviewer and the test runner on the branch, then report the result here with any failures and the files they touched.";
+  await open(page, mock({ events: [user("report the result."), user(long)] }));
+  const rows = transcript(page).locator("li");
+  for (const [name, text] of [
+    ["short", "report the result."],
+    ["long", "Please run the API reviewer"],
+  ] as const) {
+    const row = rows.filter({ hasText: text });
+    const bubble = row.locator("[class*=userBubble]");
+    const before = (await bubble.boundingBox())!;
+    await row.hover();
+    const pill = row.getByTestId("message-actions");
+    await expect(pill).toBeVisible();
+    const p = (await pill.boundingBox())!;
+    const b = (await bubble.boundingBox())!;
+    expect(b, `${name}: no layout shift`).toEqual(before);
+    // Left of the bubble and top-aligned with it, so the boxes never meet.
+    expect(p.x + p.width, `${name}: pill right edge`).toBeLessThanOrEqual(b.x);
+    expect(Math.abs(p.y - b.y), `${name}: top-aligned`).toBeLessThanOrEqual(1);
+    expect(p.x, `${name}: inside the transcript`).toBeGreaterThanOrEqual(0);
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate((t) => {
+        document.documentElement.dataset.theme = t;
+      }, theme);
+      if (SHOTS)
+        await page.screenshot({
+          path: `${SHOTS}/ui7-${name}-${theme}.png`,
+          animations: "disabled",
+        });
+    }
+  }
+});

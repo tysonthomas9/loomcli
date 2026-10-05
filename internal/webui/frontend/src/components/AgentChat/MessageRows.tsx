@@ -63,7 +63,7 @@ export function MessageActions({
 
 /**
  * T3's user bubble: right-aligned, at most 80% wide, a long message folded
- * with a fade until "Show full message", and the hover pill under it.
+ * with a fade until "Show full message", and the hover pill just left of it (UI7).
  */
 export function UserMessage({
   text,
@@ -101,10 +101,10 @@ export function UserMessage({
             {footer && <div className={styles.userFooterEnd}>{footer}</div>}
           </div>
         )}
+        {text.trim() && (
+          <MessageActions text={text} at={at} copyLabel="Copy your message" />
+        )}
       </div>
-      {text.trim() && (
-        <MessageActions text={text} at={at} copyLabel="Copy your message" />
-      )}
     </div>
   );
 }
