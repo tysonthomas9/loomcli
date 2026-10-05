@@ -124,8 +124,9 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 // any turn (a late retry never answers a later ask with its ID), else the
 // latest not released. held is false when the ask can be claimed: there is
 // no such claim, the latest is on an earlier ask with this ID (ask, open,
-// has another turn), or req's own claim on this ask was released. req's
-// released claim on an ask no longer open is ask_not_found.
+// has another turn), or req's own claim on this ask was released with the
+// same answer. req's released claim on an ask no longer open is
+// ask_not_found; with another answer, it is held (conflict).
 func (s *Service) heldClaim(ctx context.Context, a loomstore.Agent, req RespondRequest, ask Ask, open bool) (c loomstore.AskClaim, held bool, err error) {
 	err = loomstore.ErrNotFound
 	if req.RequestID != "" { // a Respond with no key has no retry to tell apart
@@ -152,6 +153,8 @@ func (s *Service) heldClaim(ctx context.Context, a loomstore.Agent, req RespondR
 		return c, true, nil
 	case own && !(open && c.TurnID == ask.TurnID):
 		return c, false, &Error{Code: CodeAskNotFound, Message: req.AskID} // req's ask is gone; a later one is not its
+	case own && c.PayloadHash != answerHash(req):
+		return c, true, nil // req keeps its answer even unsent: conflict
 	}
 	return c, false, nil // never sent: the ask can be claimed again
 }

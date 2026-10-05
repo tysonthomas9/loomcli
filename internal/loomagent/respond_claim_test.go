@@ -415,3 +415,19 @@ func TestRespondLeftClaimOwnOutcome(t *testing.T) {
 		t.Fatalf("replies = %d; want none", len(replies))
 	}
 }
+
+// TestRespondReleasedRetryChangedAnswer: r1's Reply never left Loom, so its
+// claim was released; r1 retried with another answer is a conflict, and
+// nothing is sent.
+func TestRespondReleasedRetryChangedAnswer(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s, a := onAsk(t, e, tweaked{})
+	calls := &atomic.Int32{}
+	s.harnesses["opencode"] = notSentOnce{e.h, calls}
+	wantCode(t, s.Respond(ctx, answer(a, "r1", "allow_once")), CodeHarnessError)
+	wantCode(t, s.Respond(ctx, answer(a, "r1", "deny")), CodeConflict)
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("Reply attempts = %d; want only the unsent first", n)
+	}
+}
