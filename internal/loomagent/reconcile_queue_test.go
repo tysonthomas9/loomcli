@@ -707,3 +707,45 @@ func TestReconcileDueCancelledLeavesNothingRunning(t *testing.T) {
 		t.Fatalf("queue entry = %+v; want a1 still queued, not running", q)
 	}
 }
+
+// TestCreateStopsOnceDeleteRequested: a Delete that runs between the
+// insert and finishCreate wins. The Create opens nothing for the deleted
+// agent, and its failure shows no Create Attention over the Delete's.
+func TestCreateStopsOnceDeleteRequested(t *testing.T) {
+	for _, purgeFails := range []bool{false, true} {
+		t.Run(fmt.Sprint("purgeFails=", purgeFails), func(t *testing.T) {
+			ctx := context.Background()
+			e := newCreateEnv(t)
+			s := e.service(ServiceConfig{Purge: func(context.Context, loomstore.Agent, []loomstore.NativeSession) error {
+				if purgeFails {
+					return errors.New("purge down")
+				}
+				return nil
+			}})
+			createCrash = func(p string) {
+				if p == "inserted" {
+					_ = s.Delete(ctx, DeleteRequest{AgentID: onlyRow(t, e).AgentID})
+				}
+			}
+			t.Cleanup(func() { createCrash = func(string) {} })
+			if _, err := s.Create(ctx, leadReq("r1")); err == nil {
+				t.Fatal("Create succeeded for an agent deleted meanwhile")
+			}
+			row, _ := e.st.GetAgent(ctx, onlyRowAny(t, e).AgentID)
+			if len(e.h.specs) != 0 || len(e.ws.ensured) != 0 || createReason(deref(row.AttentionReason)) {
+				t.Fatalf("opens %d ensures %d Attention %q; want nothing made, no Create Attention",
+					len(e.h.specs), len(e.ws.ensured), deref(row.AttentionReason))
+			}
+		})
+	}
+}
+
+// onlyRowAny is e's one agent row, deleted or not.
+func onlyRowAny(t *testing.T, e *createEnv) loomstore.Agent {
+	t.Helper()
+	rows, _, err := e.st.ListAgents(context.Background(), loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %d, %v; want one", len(rows), err)
+	}
+	return rows[0]
+}

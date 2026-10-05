@@ -117,13 +117,13 @@ func (s *Service) createFailed(ctx context.Context, agentID string, err error) {
 }
 
 // createAttention shows reason on agentID under its lock, after checking
-// its Create is still below done; it replaces the other Create reason but no
+// its Create is still below done and no Delete replaced it; it replaces the other Create reason but no
 // other Attention.
 func (s *Service) createAttention(ctx context.Context, agentID, reason string) error {
 	defer s.lock(agentID)()
 	a, err := s.live(ctx, agentID)
 	cur := deref(a.AttentionReason)
-	if err != nil || a.CreateStep >= stepDone || cur == reason || (cur != "" && !createReason(cur)) {
+	if err != nil || a.CreateStep >= stepDone || a.DeleteRequested || cur == reason || (cur != "" && !createReason(cur)) {
 		return err
 	}
 	_, err = s.raiseAttention(ctx, a, reason)
@@ -340,6 +340,9 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 	a, err := s.agent(ctx, agentID)
 	if err != nil || a.CreateStep >= stepDone {
 		return a, err
+	}
+	if a.DeletedAt != nil || a.DeleteRequested { // a Delete won: make nothing for it
+		return a, &Error{Code: CodeAgentNotFound, Message: agentID + " is being deleted"}
 	}
 	cfg, err := loadConfig(a)
 	if err != nil {
