@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"maps"
@@ -361,6 +362,9 @@ func (s *Service) settle(ctx context.Context, agentID string) error {
 	if err != nil || a.State == StateCreating {
 		return err
 	}
+	if a, err = s.finishSwitch(ctx, a); err != nil {
+		return err
+	}
 	sess, _, err := s.current(ctx, a)
 	gone := err == nil && sess == nil || errors.Is(err, errUnrecorded) // no retry wires the harness or records the session
 	if err == nil && sess != nil {
@@ -468,4 +472,26 @@ func (s *Service) endLostTurn(ctx context.Context, a loomstore.Agent, sess loomh
 	}
 	_, err = next(ctx, a)
 	return err
+}
+
+// finishSwitch runs a's pending harness switch again, if it has one (OR5d),
+// and returns a as it left it: switched, or on its old harness with
+// harness.switch_failed. It fails only while the switch stays pending.
+func (s *Service) finishSwitch(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
+	r, err := s.store.PendingSwitch(ctx, a.AgentID)
+	if errors.Is(err, loomstore.ErrNotFound) {
+		return a, nil
+	} else if err != nil {
+		return a, err
+	}
+	var req UpdateRequest
+	if err := json.Unmarshal([]byte(r.Payload), &req); err != nil {
+		return a, err
+	}
+	if _, err := s.switchHarness(ctx, a, req, r.OpenKey); err != nil {
+		if _, perr := s.store.PendingSwitch(ctx, a.AgentID); !errors.Is(perr, loomstore.ErrNotFound) {
+			return a, errors.Join(err, perr)
+		}
+	}
+	return s.live(ctx, a.AgentID)
 }

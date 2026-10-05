@@ -651,9 +651,11 @@ func (s *Store) CompareAndSetSpec(ctx context.Context, agentID string, fromVersi
 // change. In one transaction it sets agentID's spec columns to `to` and
 // bumps its revision by one, only if its spec_version still equals
 // fromVersion, its revision still equals rev and it is not deleted
-// (otherwise ErrSpecChanged), and saves events as CommitState does. Both are
-// saved or neither. It returns the saved events.
-func (s *Store) CommitSpec(ctx context.Context, agentID string, fromVersion, rev int64, to AgentSpec, events []Event) (saved []Event, err error) {
+// (otherwise ErrSpecChanged), saves events as CommitState does and saves
+// rec, when given, as the request's record. All are saved or none. It
+// returns the saved events.
+func (s *Store) CommitSpec(ctx context.Context, agentID string, fromVersion, rev int64, to AgentSpec, events []Event,
+	rec *UpdateRecord) (saved []Event, err error) {
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE agents SET name = ?, spec_json = ?, harness = ?, model = ?,
 		harness_session_id = ?, harness_session_root = ?, last_request_id = ?, spec_version = ?, updated_at = ?,
@@ -668,6 +670,11 @@ func (s *Store) CommitSpec(ctx context.Context, agentID string, fromVersion, rev
 		}
 		if saved, err = commitEvents(ctx, tx, agentID, rev+1, events); err != nil {
 			return err
+		}
+		if rec != nil {
+			if err := saveUpdateRecord(ctx, tx, *rec); err != nil {
+				return err
+			}
 		}
 		commitStateCrash()
 		return nil

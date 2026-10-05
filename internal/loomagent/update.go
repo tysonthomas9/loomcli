@@ -3,6 +3,8 @@ package loomagent
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,17 +40,18 @@ type UpdateRequest struct {
 }
 
 // Update changes an agent's name, model and its options, or harness. Every
-// accepted change bumps the spec version; a retry with the last applied
-// RequestID returns the current agent. A single task that is not finished
-// may change only its name.
+// accepted change bumps the spec version; a retry of an applied RequestID
+// returns its saved result (OR5d). While a harness switch is pending, any
+// other request is agent_busy. A single task that is not finished may
+// change only its name.
 func (s *Service) Update(ctx context.Context, req UpdateRequest) (AgentInfo, error) {
 	defer s.lockReady(ctx, req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
 	if err != nil {
 		return AgentInfo{}, err
 	}
-	if req.RequestID != "" && deref(a.LastRequestID) == req.RequestID {
-		return info(a), nil
+	if got, done, err := s.replayUpdate(ctx, a, req); done || err != nil {
+		return got, err
 	}
 	if req.Expect != nil && req.Expect.SpecVersion != nil && *req.Expect.SpecVersion != a.SpecVersion {
 		return AgentInfo{}, &Error{Code: CodeSpecVersionMismatch, Message: fmt.Sprintf("spec version is %d", a.SpecVersion)}
@@ -57,7 +60,7 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (AgentInfo, err
 		return AgentInfo{}, err
 	}
 	if req.Harness != "" && req.Harness != a.Harness {
-		return s.switchHarness(ctx, a, req)
+		return s.switchHarness(ctx, a, req, "")
 	}
 	to := a.SpecOf()
 	if req.Name != "" {
@@ -69,24 +72,101 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (AgentInfo, err
 		}
 	}
 	if to.Name == a.Name && deref(to.Model) == deref(a.Model) && to.SpecJSON == a.SpecJSON {
-		return info(a), nil
+		return info(a), s.saveReceipt(ctx, a, req, loomstore.RequestDone)
 	}
-	a, err = s.commitSpec(ctx, a, to, req.RequestID, KindAgentUpdated)
+	a, err = s.commitSpec(ctx, a, to, req, KindAgentUpdated)
 	if err != nil {
 		return AgentInfo{}, err
 	}
 	return info(a), nil
 }
 
+// replayUpdate answers req from a's request history, done when it did: an applied
+// request returns its saved result, and a pending switch of req runs again.
+// Any other request waits out a pending switch as agent_busy; a request
+// applied before records were kept is its agent's last.
+func (s *Service) replayUpdate(ctx context.Context, a loomstore.Agent, req UpdateRequest) (AgentInfo, bool, error) {
+	var got AgentInfo
+	if req.RequestID != "" {
+		r, err := s.store.UpdateRecord(ctx, a.AgentID, req.RequestID)
+		switch {
+		case errors.Is(err, loomstore.ErrNotFound):
+		case err != nil:
+			return got, true, err
+		case r.PayloadHash != updateHash(req):
+			return got, true, &Error{Code: CodeConflict, Message: req.RequestID + " was used for another update"}
+		case r.Status == loomstore.RequestSwitching:
+			got, err = s.switchHarness(ctx, a, req, r.OpenKey)
+			return got, true, err
+		default:
+			return got, true, json.Unmarshal([]byte(r.Result), &got)
+		}
+	}
+	if _, err := s.store.PendingSwitch(ctx, a.AgentID); !errors.Is(err, loomstore.ErrNotFound) {
+		if err == nil {
+			err = &Error{Code: CodeAgentBusy, Message: a.AgentID + " is switching harness"}
+		}
+		return got, true, err
+	}
+	if req.RequestID != "" && deref(a.LastRequestID) == req.RequestID { // applied before its record was kept
+		return info(a), true, nil
+	}
+	return got, false, nil
+}
+
+// saveReceipt saves req's record on a, unchanged by it, with status; a
+// request without an ID has none.
+func (s *Service) saveReceipt(ctx context.Context, a loomstore.Agent, req UpdateRequest, status string) error {
+	if req.RequestID == "" {
+		return nil
+	}
+	r, err := receipt(a, a, req, status)
+	if err != nil {
+		return err
+	}
+	return s.store.SaveUpdateRecord(ctx, r)
+}
+
+// receipt is req's record, applied to before as after: done with after's
+// result, or switching to req.Harness with its Open key.
+func receipt(before, after loomstore.Agent, req UpdateRequest, status string) (loomstore.UpdateRecord, error) {
+	r := loomstore.UpdateRecord{AgentID: before.AgentID, RequestID: req.RequestID, Kind: loomstore.RequestUpdate,
+		PayloadHash: updateHash(req), Status: status, FromHarness: before.Harness, ToHarness: after.Harness,
+		TargetSpecVersion: after.SpecVersion}
+	if req.Harness != "" && req.Harness != before.Harness {
+		r.Kind, r.ToHarness, r.OpenKey, r.TargetSpecVersion = loomstore.RequestSwitch, req.Harness, openKey(before), before.SpecVersion+1
+	}
+	b, err := json.Marshal(req)
+	r.Payload = string(b)
+	if err == nil && status == loomstore.RequestDone {
+		b, err = json.Marshal(info(after))
+		r.Result = string(b)
+	}
+	return r, err
+}
+
+// updateHash is the hash of req without its RequestID, which its record binds.
+func updateHash(req UpdateRequest) string {
+	req.RequestID = ""
+	b, _ := json.Marshal(req)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// openKey is the Open key of a's switch to its next spec version.
+func openKey(a loomstore.Agent) string {
+	return a.AgentID + "@" + strconv.FormatInt(a.SpecVersion+1, 10)
+}
+
 // commitSpec bumps a's spec version and revision, records requestID and
 // saves the change's `kind` event (agent.updated or harness.changed), with
 // model.unverified when the model or harness changed to an unverified
-// model, in one transaction under the event lane (Store.CommitSpec). On any
-// error nothing is saved or published.
-func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstore.AgentSpec, requestID, kind string) (loomstore.Agent, error) {
+// model, and req's record done, in one transaction under the event lane
+// (Store.CommitSpec). On any error nothing is saved or published.
+func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstore.AgentSpec, req UpdateRequest, kind string) (loomstore.Agent, error) {
 	to.SpecVersion = a.SpecVersion + 1
-	if requestID != "" {
-		to.LastRequestID = &requestID
+	if req.RequestID != "" {
+		to.LastRequestID = &req.RequestID
 	}
 	before := a
 	a.Name, a.SpecJSON, a.Harness, a.Model = to.Name, to.SpecJSON, to.Harness, to.Model
@@ -97,8 +177,16 @@ func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstor
 	if err != nil {
 		return before, err
 	}
+	var rec *loomstore.UpdateRecord
+	if req.RequestID != "" {
+		r, err := receipt(before, a, req, loomstore.RequestDone)
+		if err != nil {
+			return before, err
+		}
+		rec = &r
+	}
 	_, err = s.events.commit(func() ([]loomstore.Event, error) {
-		return s.store.CommitSpec(ctx, a.AgentID, before.SpecVersion, before.Revision, to, rows)
+		return s.store.CommitSpec(ctx, a.AgentID, before.SpecVersion, before.Revision, to, rows, rec)
 	}, func([]loomstore.Event) {})
 	switch {
 	case errors.Is(err, loomstore.ErrSpecChanged):

@@ -215,4 +215,25 @@ CREATE TABLE IF NOT EXISTS agent_ask_claims (
   PRIMARY KEY (agent_id, ask_id, turn_id, request_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_ask_claims_one ON agent_ask_claims(agent_id, ask_id, turn_id) WHERE state != 'released';
+`, `
+-- OR5d: each Update and harness switch request an agent applied, so a retry
+-- of any of them returns its saved result. A switch saves its row as
+-- switching, with its request and Open key, before it stops the turn; its
+-- commit saves it done. An agent has at most one switch pending.
+CREATE TABLE IF NOT EXISTS agent_update_requests (
+  agent_id            TEXT NOT NULL REFERENCES agents(agent_id),
+  request_id          TEXT NOT NULL,
+  kind                TEXT NOT NULL,
+  payload_hash        TEXT NOT NULL,
+  status              TEXT NOT NULL,
+  payload             TEXT NOT NULL,
+  from_harness        TEXT NOT NULL,
+  to_harness          TEXT NOT NULL,
+  open_key            TEXT NOT NULL,
+  target_spec_version INTEGER NOT NULL,
+  result              TEXT NOT NULL,
+  created_at          TEXT NOT NULL,
+  PRIMARY KEY (agent_id, request_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_update_requests_switching ON agent_update_requests(agent_id) WHERE status = 'switching';
 `}

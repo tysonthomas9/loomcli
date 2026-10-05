@@ -169,10 +169,12 @@ func TestUpdateNameAndModel(t *testing.T) {
 	if err != nil || got.Name != "lead-x" || got.SpecVersion != 2 {
 		t.Fatalf("rename = %+v, %v", got, err)
 	}
-	if got, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "r1"}, AgentID: "a1", Name: "again"}); err != nil ||
+	if got, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "r1"}, AgentID: "a1", Name: "lead-x"}); err != nil ||
 		got.Name != "lead-x" || got.SpecVersion != 2 {
 		t.Fatalf("retry = %+v, %v", got, err)
 	}
+	_, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "r1"}, AgentID: "a1", Name: "again"})
+	wantCode(t, err, CodeConflict) // r1 is bound to its first payload
 	stale := int64(1)
 	_, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{Expect: &Expect{SpecVersion: &stale}}, AgentID: "a1", Name: "y"})
 	wantCode(t, err, CodeSpecVersionMismatch)
