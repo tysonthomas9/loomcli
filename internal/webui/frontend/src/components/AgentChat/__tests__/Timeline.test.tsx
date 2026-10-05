@@ -221,7 +221,7 @@ describe("AgentChat timeline (UI3)", () => {
     expect(rule).not.toMatch(/bottom:/);
     // The bubble always leaves the pill room, even on a narrow chat column.
     const bubble = css.match(/\n\.userBubble \{[^}]*\}/)?.[0] ?? "";
-    expect(bubble).toMatch(/max-width: min\(80%, calc\(100% - \d+px\)\);/);
+    expect(bubble).toMatch(/max-width: min\(80%, calc\(100% - [\d.]+rem\)\);/);
     // A waiting bubble has no pill, so it keeps its full 80%.
     const waiting = css.match(/\.waiting \.userBubble \{[^}]*\}/)?.[0] ?? "";
     expect(waiting).toMatch(/max-width: 80%;/);

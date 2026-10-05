@@ -579,4 +579,22 @@ test("a user's hover pill sits left of the bubble, over none of it (UI7)", async
         });
     }
   }
+  // A larger default font grows the pill; the bubble's room grows with it.
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "24px";
+  });
+  const row = rows.filter({ hasText: "Please run the API reviewer" });
+  await page.mouse.move(0, 0);
+  await row.hover();
+  const pill = row.getByTestId("message-actions");
+  await expect(
+    pill.getByRole("button", { name: "Copy your message" }),
+  ).toBeVisible();
+  const p = (await pill.boundingBox())!;
+  const r = (await row.boundingBox())!;
+  const b = (await row.locator("[class*=userBubble]").boundingBox())!;
+  expect(p.x, "24px font: not clipped by its row").toBeGreaterThanOrEqual(r.x);
+  expect(p.x + p.width, "24px font: left of the bubble").toBeLessThanOrEqual(
+    b.x,
+  );
 });

@@ -238,8 +238,11 @@
 
 .userBubble {
   position: relative;
-  /* Room left of the bubble for its hover pill, even on a narrow column (UI7). */
-  max-width: min(80%, calc(100% - 104px));
+  /*
+   * Room left of the bubble for its hover pill, even on a narrow column; in
+   * rem, so it grows with the font as the pill does (UI7).
+   */
+  max-width: min(80%, calc(100% - 6.5rem));
   min-width: 0;
   padding: 12px;
   border-radius: 1rem; /* rounded-2xl */
