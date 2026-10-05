@@ -7,7 +7,7 @@
 import { IssueDetailPanel, ToastContainer } from "@/components";
 import { AgentChat } from "@/components/AgentChat";
 import { AgentList, WorkspaceTree } from "@/components/WorkspaceTree";
-import { Route, Routes } from "react-router-dom";
+import { NavigationType, UNSAFE_LocationContext } from "react-router-dom";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel";
 import { SessionNamePrompt } from "@/components/TerminalView/layout";
 import { HelpPopover } from "@/components/TerminalView/controls";
@@ -632,9 +632,21 @@ export function AgentChatFixture(): JSX.Element {
         <div style={{ display: "flex", height: "100%" }}>
           <div style={{ width: 220, flexShrink: 0 }}>
             {params.get("open") === "1" ? (
-              <Routes location={`/ws/${ws}/chat/${agent}`}>
-                <Route path="*" element={list} />
-              </Routes>
+              <UNSAFE_LocationContext.Provider
+                value={{
+                  location: {
+                    pathname: `/ws/${ws}/chat/${agent}`,
+                    search: "",
+                    hash: "",
+                    state: null,
+                    key: "open",
+                    unstable_mask: undefined,
+                  },
+                  navigationType: NavigationType.Pop,
+                }}
+              >
+                {list}
+              </UNSAFE_LocationContext.Provider>
             ) : (
               list
             )}
