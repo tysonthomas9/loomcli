@@ -2,7 +2,9 @@
  * Agent lifecycle in a real browser against a mocked Agent API (1.8b,
  * design v2 §4.7–§4.8): archive → read-only → unarchive, delete with a
  * dirty-work refusal and Delete anyway, the attention banner, history expired, and the
- * harness-context divider on reload and on live replay.
+ * harness-context divider on reload and on live replay. Archive and Delete
+ * are in the sidebar row's right-click menu (SB4), so those cases open the
+ * chat with the sidebar beside it.
  */
 import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
@@ -33,6 +35,7 @@ const mock = (agent: object = {}, events: Mock["events"] = []): Mock => ({
     name: "lead",
     harness: "opencode",
     state: "idle",
+    created_at: "2026-10-04T00:00:00Z",
     running_turn_id: null,
     archived_at: null,
     attention_reason: null,
@@ -52,7 +55,7 @@ const json = (route: Route, body: unknown, status = 200) =>
     body: JSON.stringify(body),
   });
 
-async function open(page: Page, m: Mock) {
+async function open(page: Page, m: Mock, query = "") {
   await page.route("**/api/config", (r) => json(r, { mode: "open" }));
   await page.route(`${BASE}/events/token`, (r) => r.fulfill({ status: 404 }));
   // A route cannot hold an SSE response open: the page gets an EventSource
@@ -73,6 +76,10 @@ async function open(page: Page, m: Mock) {
       }
     } as unknown as typeof EventSource;
   });
+  // The sidebar's List.
+  await page.route(/\/api\/workspaces\/w1\/v1\/agents(\?.*)?$/, (r) =>
+    json(r, { agents: [m.agent], next: "" }),
+  );
   await page.route(`${BASE}/v1/agents/a1/events*`, (r) =>
     json(r, { events: m.events, snapshot_seq: seq, next: seq, more: false }),
   );
@@ -103,8 +110,9 @@ async function open(page: Page, m: Mock) {
     };
     return r.fulfill({ status: 204 });
   });
-  await page.goto("/test/agent-chat");
-  await expect(page.getByText(String(m.agent.name))).toBeVisible();
+  await page.goto(`/test/agent-chat${query}`);
+  // The name shows in the chat title, and in the sidebar row with ?sidebar=1.
+  await expect(page.getByText(String(m.agent.name)).first()).toBeVisible();
 }
 
 // Sends saved events on the open EventSource, committed first as on the server.
@@ -124,6 +132,14 @@ async function push(page: Page, m: Mock, ...frames: Mock["events"]) {
   );
 }
 
+// The sidebar row's right-click menu item (SB4).
+async function rowMenu(page: Page, item: "Archive" | "Delete") {
+  await page.getByRole("link", { name: "lead Agent opencode" }).click({
+    button: "right",
+  });
+  await page.getByRole("menuitem", { name: item }).click();
+}
+
 const composer = (page: Page) =>
   page.getByRole("textbox", { name: "Message", exact: true });
 
@@ -135,10 +151,20 @@ test("archive makes the chat read-only with the days left; unarchive restores it
   page,
 }) => {
   const m = mock({}, [ev("message.delivered", { text: "earlier work" })]);
-  await open(page, m);
+  await open(page, m, "?sidebar=1&w=800");
   await expect(composer(page)).toBeVisible();
+  await expect(page.getByTestId("agent-archive")).toHaveCount(0);
 
-  await page.getByTestId("agent-archive").click();
+  await rowMenu(page, "Archive");
+  await expect(
+    page.getByRole("link", { name: "lead Agent opencode" }),
+  ).toHaveCount(0);
+  // The chat hears of it from the stream, as from any other client.
+  await push(
+    page,
+    m,
+    ev("agent.state_changed", { from: "idle", to: "archived" }),
+  );
   await expect(page.getByTestId("agent-archived-notice")).toContainText(
     "History expires in 30 days.",
   );
@@ -148,7 +174,6 @@ test("archive makes the chat read-only with the days left; unarchive restores it
   await page.getByTestId("agent-unarchive").click();
   await expect(composer(page)).toBeVisible();
   await expect(page.getByTestId("agent-archived-notice")).toHaveCount(0);
-  await expect(page.getByTestId("agent-archive")).toBeVisible();
   expect(m.writes).toEqual(["archive", "unarchive"]);
 });
 
@@ -156,19 +181,18 @@ test("delete asks first and shows the server's dirty-work refusal", async ({
   page,
 }) => {
   const m = mock();
-  await open(page, m);
-  await page.getByTestId("agent-delete").click();
+  await open(page, m, "?sidebar=1&w=800");
+  await expect(page.getByTestId("agent-delete")).toHaveCount(0);
+  await rowMenu(page, "Delete");
   expect(m.writes).toEqual([]);
-  await page.getByTestId("agent-delete-confirm").click();
-  await expect(page.getByRole("alert")).toContainText(
+  await page.getByTestId("confirm-dialog-confirm").click();
+  const refusal = page.getByRole("alertdialog", { name: "Not deleted" });
+  await expect(refusal).toContainText(
     "Not deleted: uncommitted changes in /wt/a1: main.go",
   );
-  await expect(page.getByTestId("agent-delete")).toBeVisible();
   expect(m.writes).toEqual(["delete"]);
 
-  await expect(page.getByRole("alert")).toContainText(
-    "Delete anyway loses these changes.",
-  );
+  await expect(refusal).toContainText("Delete anyway loses these changes.");
   for (const theme of ["light", "dark"]) {
     await page.evaluate((t) => {
       document.documentElement.dataset.theme = t;
@@ -179,8 +203,12 @@ test("delete asks first and shows the server's dirty-work refusal", async ({
         animations: "disabled",
       });
   }
+  // No second confirm: the row leaves the sidebar.
   await page.getByTestId("agent-delete-anyway").click();
-  await expect(page).toHaveURL(/\/ws\/[^/]+\/home$/);
+  await expect(
+    page.getByRole("link", { name: "lead Agent opencode" }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
   expect(m.writes).toEqual(["delete", "delete:f1"]);
 });
 

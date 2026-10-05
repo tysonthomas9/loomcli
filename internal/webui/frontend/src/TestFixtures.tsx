@@ -6,6 +6,7 @@
 
 import { IssueDetailPanel, ToastContainer } from "@/components";
 import { AgentChat } from "@/components/AgentChat";
+import { AgentList } from "@/components/AgentList";
 import { WorkspaceTree } from "@/components/WorkspaceTree";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel";
 import { SessionNamePrompt } from "@/components/TerminalView/layout";
@@ -608,7 +609,8 @@ function RosterFixture({ ws }: { ws: string }): null {
 
 /**
  * AgentChat for one agent, read from ?ws=&agent= (defaults w1 and a1), in a
- * ?w=&h= box (default 480×640); ?roster=1 also runs the sidebar's roster.
+ * ?w=&h= box (default 480×640); ?roster=1 also runs the sidebar's roster,
+ * and ?sidebar=1 shows the sidebar's Agent API rows beside the chat.
  * The e2e spec mocks the Agent API routes.
  */
 export function AgentChatFixture(): JSX.Element {
@@ -623,7 +625,16 @@ export function AgentChatFixture(): JSX.Element {
       }}
     >
       {params.get("roster") === "1" && <RosterFixture ws={ws} />}
-      <AgentChat workspaceId={ws} agentId={params.get("agent") ?? "a1"} />
+      {params.get("sidebar") === "1" ? (
+        <div style={{ display: "flex", height: "100%" }}>
+          <div style={{ width: 220, flexShrink: 0 }}>
+            <AgentList workspaceId={ws} />
+          </div>
+          <AgentChat workspaceId={ws} agentId={params.get("agent") ?? "a1"} />
+        </div>
+      ) : (
+        <AgentChat workspaceId={ws} agentId={params.get("agent") ?? "a1"} />
+      )}
     </div>
   );
 }

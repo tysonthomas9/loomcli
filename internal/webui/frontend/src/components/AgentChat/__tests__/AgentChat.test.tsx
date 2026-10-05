@@ -789,34 +789,35 @@ describe("AgentChat", () => {
 });
 
 describe("AgentChat lifecycle (1.8b)", () => {
-  it("archives, then shows read-only history with the days left; unarchive restores the composer", async () => {
+  it("has no Archive or Delete in the header; the harness and state chips stay (SB4)", async () => {
     await mount(agent());
-    expect(screen.getByLabelText("Message")).toBeInTheDocument();
-    api.archiveAgent.mockResolvedValue(undefined);
+    // Archive and Delete moved to the sidebar row's menu.
+    expect(screen.queryByTestId("agent-archive")).toBeNull();
+    expect(screen.queryByTestId("agent-delete")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /archive|delete/i }),
+    ).toBeNull();
+    expect(screen.getByTestId("harness-label")).toBeInTheDocument();
+    expect(screen.getByText(agent().state)).toBeInTheDocument();
+  });
+
+  it("shows an archived agent's read-only history with the days left; unarchive restores the composer", async () => {
+    // Archive itself is in the sidebar row's menu (SB4, AgentList tests).
     const archived = new Date(Date.now() - 5 * 86_400_000).toISOString();
-    api.getAgent.mockResolvedValue(
-      agent({ state: "archived", archived_at: archived }),
-    );
-    fireEvent.click(screen.getByTestId("agent-archive"));
+    await mount(agent({ state: "archived", archived_at: archived }));
     expect(
       await screen.findByTestId("agent-archived-notice"),
     ).toHaveTextContent("History expires in 25 days.");
-    expect(api.archiveAgent).toHaveBeenCalledWith(
-      "w1",
-      "a1",
-      expect.any(String),
-    );
     expect(screen.queryByLabelText("Message")).toBeNull();
-    expect(screen.queryByTestId("agent-archive")).toBeNull();
 
     api.unarchiveAgent.mockResolvedValue(undefined);
     api.getAgent.mockResolvedValue(agent());
     fireEvent.click(screen.getByTestId("agent-unarchive"));
     expect(await screen.findByLabelText("Message")).toBeInTheDocument();
     expect(screen.queryByTestId("agent-archived-notice")).toBeNull();
+    expect(screen.queryByTestId("agent-unarchive")).toBeNull();
     expect(api.unarchiveAgent).toHaveBeenCalledTimes(1);
   });
-
   it("counts the days left before the 30-day expiry", () => {
     const now = Date.parse("2026-10-04T00:00:00Z");
     expect(daysLeftText("2026-10-04T00:00:00Z", now)).toBe(
@@ -828,121 +829,6 @@ describe("AgentChat lifecycle (1.8b)", () => {
     expect(daysLeftText("2026-08-01T00:00:00Z", now)).toBe(
       "History expires in 0 days.",
     );
-  });
-
-  it("deletes only after a confirmation and shows the server's dirty-work refusal plainly", async () => {
-    await mount(agent());
-    fireEvent.click(screen.getByTestId("agent-delete"));
-    expect(api.deleteAgent).not.toHaveBeenCalled();
-    api.deleteAgent.mockRejectedValue(
-      new ApiError(409, "Conflict", {
-        error: "uncommitted changes in /wt/a1",
-        code: "unsaved_work",
-        paths: ["main.go", "notes.md"],
-        fingerprint: "f1",
-      }),
-    );
-    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Not deleted: uncommitted changes in /wt/a1: main.go, notes.md",
-    );
-    expect(screen.getByTestId("where")).toHaveTextContent("/");
-    expect(screen.getByTestId("agent-delete")).toBeInTheDocument();
-  });
-
-  it("offers Delete anyway on a dirty-work refusal and sends its fingerprint once", async () => {
-    await mount(agent());
-    api.deleteAgent.mockRejectedValueOnce(
-      new ApiError(409, "Conflict", {
-        error: "uncommitted changes in /wt/a1",
-        code: "unsaved_work",
-        paths: ["README.md"],
-        fingerprint: "f1",
-      }),
-    );
-    fireEvent.click(screen.getByTestId("agent-delete"));
-    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
-    await screen.findByTestId("agent-delete-anyway");
-    expect(screen.getByRole("alert")).toHaveTextContent("README.md");
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Delete anyway loses these changes.",
-    );
-    // A later, unrelated error drops the button and its stale fingerprint.
-    api.getAgent.mockRejectedValueOnce(new Error("offline"));
-    deliver(ev("agent.state_changed"));
-    await waitFor(() =>
-      expect(screen.queryByTestId("agent-delete-anyway")).toBeNull(),
-    );
-    // A refresh failing while the refusal lands also wins over the button.
-    const refusal = () =>
-      new ApiError(409, "Conflict", {
-        error: "uncommitted changes in /wt/a1",
-        code: "unsaved_work",
-        paths: ["README.md"],
-        fingerprint: "f1",
-      });
-    api.deleteAgent.mockImplementationOnce(() => {
-      api.getAgent.mockRejectedValueOnce(new Error("offline"));
-      const s = api.streams[api.streams.length - 1];
-      s.opts.onEvents?.([ev("agent.state_changed")]);
-      return Promise.reject(refusal());
-    });
-    fireEvent.click(screen.getByTestId("agent-delete"));
-    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("offline"),
-    );
-    await act(() => Promise.resolve());
-    expect(screen.queryByTestId("agent-delete-anyway")).toBeNull();
-    // So does a Send that started before the refusal and fails after it.
-    let failSend: (e: Error) => void = () => {};
-    api.sendMessage.mockReturnValueOnce(
-      new Promise((_, reject) => (failSend = reject)),
-    );
-    fireEvent.change(screen.getByLabelText("Message"), {
-      target: { value: "hi" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
-    api.deleteAgent.mockRejectedValueOnce(refusal());
-    fireEvent.click(screen.getByTestId("agent-delete"));
-    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
-    await screen.findByTestId("agent-delete-anyway");
-    await act(async () => failSend(new Error("send failed")));
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("send failed"),
-    );
-    expect(screen.queryByTestId("agent-delete-anyway")).toBeNull();
-    api.deleteAgent.mockRejectedValueOnce(
-      new ApiError(409, "Conflict", {
-        error: "uncommitted changes in /wt/a1",
-        code: "unsaved_work",
-        paths: ["README.md"],
-        fingerprint: "f1",
-      }),
-    );
-    fireEvent.click(screen.getByTestId("agent-delete"));
-    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
-    api.deleteAgent.mockResolvedValueOnce(undefined);
-    fireEvent.click(await screen.findByTestId("agent-delete-anyway"));
-    expect(await screen.findByTestId("where")).toHaveTextContent("/ws/w1/home");
-    expect(api.deleteAgent).toHaveBeenCalledTimes(5);
-    expect(api.deleteAgent).toHaveBeenLastCalledWith(
-      "w1",
-      "a1",
-      expect.any(String),
-      {
-        fingerprint: "f1",
-      },
-    );
-  });
-
-  it("leaves the chat once the delete succeeds", async () => {
-    await mount(agent());
-    api.deleteAgent.mockResolvedValue(undefined);
-    fireEvent.click(screen.getByTestId("agent-delete"));
-    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
-    expect(await screen.findByTestId("where")).toHaveTextContent("/ws/w1/home");
   });
 
   it("shows the attention reason in a banner, and none once it clears", async () => {

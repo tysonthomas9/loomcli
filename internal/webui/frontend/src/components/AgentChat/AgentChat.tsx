@@ -93,7 +93,6 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     respond,
     update,
     runningSince,
-    archive,
     unarchive,
     remove,
     unsaved,
@@ -189,9 +188,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
         agent={agent}
         expired={expired}
         onRename={(name) => update({ name })}
-        onArchive={archive}
         onUnarchive={unarchive}
-        onDelete={() => del()}
       />
 
       <div className={page.scroller}>
