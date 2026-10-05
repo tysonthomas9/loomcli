@@ -112,7 +112,7 @@ func sendTx(ctx context.Context, tx *sql.Tx, in SlotSend) (r Receipt, saved []Ev
 		if err != nil {
 			return err
 		}
-		replaced, now, err := putSlot(ctx, tx, in, cur)
+		replaced, now, err := keepRecords(ctx, tx, &in, cur)
 		if err != nil {
 			return err
 		}
@@ -290,6 +290,27 @@ func waitingNotices(ctx context.Context, tx *sql.Tx, cur Slot) (SlotNotices, err
 		notes.At = len(cur.Body) + 1
 	}
 	return notes, nil
+}
+
+// keepRecords is putSlot for a Send: the records waiting in cur, the
+// sender's slot, stay after in's message (in.Body becomes the whole slot
+// text), so a new message replaces only the sender's own text. A legacy
+// slot's records are not kept (migration 9).
+func keepRecords(ctx context.Context, tx *sql.Tx, in *SlotSend, cur Slot) (replaced bool, now string, err error) {
+	var notes SlotNotices
+	if cur.State == SlotWaiting {
+		if notes, err = waitingNotices(ctx, tx, cur); err != nil {
+			return false, "", err
+		}
+	}
+	if notes.Legacy != "" || len(notes.Keys) == 0 {
+		return putSlot(ctx, tx, *in, cur)
+	}
+	in.Body, notes.At = in.Body+"\n"+cur.Body[notes.At:], len(in.Body)+1
+	if replaced, now, err = putSlot(ctx, tx, *in, cur); err != nil {
+		return false, "", err
+	}
+	return replaced, now, saveNotices(ctx, tx, *in, notes, nil)
 }
 
 // saveNotices stores notes plus fresh's keys on in's slot. A legacy slot
