@@ -82,6 +82,17 @@ func TestTurnCompletedCrashAfterCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	bus := s.Bus.Subscribe("a1")
+	probe := func(id string) { // a live event; once it arrives, everything fanned out before it has too
+		t.Helper()
+		if err := s.appendEvent(ctx, "a1", "note", id, nil); err != nil {
+			t.Fatal(err)
+		}
+		if e := recv(t, sub, 1)[0]; e.EventID != id {
+			t.Fatalf("event log sent %s; want the probe %s", e.EventID, id)
+		}
+		drain(bus)
+	}
+	probe("before")
 	crashCommit(t, 1)
 	if !panics(func() { _ = s.turnCompleted(ctx, s.get(t, "a1"), done) }) {
 		t.Fatal("turnCompleted did not crash")
@@ -89,11 +100,7 @@ func TestTurnCompletedCrashAfterCommit(t *testing.T) {
 	if got := drain(bus); len(got) != 0 {
 		t.Fatalf("published %v before the crash; want nothing", types(got))
 	}
-	select {
-	case e := <-sub.C:
-		t.Fatalf("event log fanned out %s before the crash; want nothing", e.EventID)
-	default:
-	}
+	probe("after")         // the crashed completion's events would arrive first
 	s = serviceAt(t, path) // restart
 	a, ids0 := s.get(t, "a1"), ids(rows(t, s, "a1", 0))
 	if a.State != StateFinished || deref(a.Outcome) != "end_turn" || a.RunningTurnID != nil ||
