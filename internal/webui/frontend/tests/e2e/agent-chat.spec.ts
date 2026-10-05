@@ -600,11 +600,14 @@ test("a user's hover pill sits left of the bubble, over none of it (UI7)", async
 });
 
 test.describe("in a locale with a long time format", () => {
-  test.use({ locale: "as-IN" });
-
   test("a user's pill stays whole in its row, the time cut short before copy (UI7)", async ({
     page,
   }) => {
+    // Playwright's Chromium lacks Assamese ICU data and falls back to
+    // "5:59 AM", so force the as-IN format codex measured.
+    await page.addInitScript(() => {
+      Date.prototype.toLocaleTimeString = () => "অপৰাহ্ন ১২.৫৯";
+    });
     const long =
       "Please run the API reviewer and the test runner on the branch, then report the result here with any failures and the files they touched.";
     await open(
