@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -216,4 +217,76 @@ func TestHarnessSwitchRetryWhileSwitching(t *testing.T) {
 		t.Fatal(err)
 	}
 	switchedOnce(t, e, h, 1)
+}
+
+// TestHarnessSwitchWithoutRequestIDCrashAfterStop: a switch without a
+// RequestID is pending too; reconcile finishes it after a crash.
+func TestHarnessSwitchWithoutRequestIDCrashAfterStop(t *testing.T) {
+	e := newSpecEnv(t)
+	crash := crashDispatchAt(t, "switch_stopped")
+	if !crash(func() { _ = update(t, e, switchReq("", 1, "fb")) }) {
+		t.Fatal("switch did not crash after the stop")
+	}
+	wantCode(t, update(t, e, rename("r2", "n2")), CodeAgentBusy)
+	if err := e.start().reconcileAgent(context.Background(), "a1"); err != nil {
+		t.Fatal(err)
+	}
+	specAgrees(t, e, 2, "a1", "fb", "fake-model", "", KindHarnessChanged)
+}
+
+// TestPendingSwitchQueuedForResync: an agent with a pending switch is
+// queued at restart even with nothing else owed, so a source harness that
+// is not wired does not leave it agent_busy.
+func TestPendingSwitchQueuedForResync(t *testing.T) {
+	e := newSpecEnv(t)
+	crash := crashDispatchAt(t, "switch_stopped")
+	if !crash(func() { _ = update(t, e, switchReq("r1", 1, "fb")) }) {
+		t.Fatal("switch did not crash after the stop")
+	}
+	ids, err := e.st.PendingAgents(context.Background(), "ws")
+	if err != nil || !slices.Contains(ids, "a1") {
+		t.Fatalf("pending agents %v, %v; want a1", ids, err)
+	}
+}
+
+// TestDoneRequestBusyWhileSwitchPending: while r1's switch is pending, a
+// retry of the done r0 is agent_busy too; after reconcile it replays.
+func TestDoneRequestBusyWhileSwitchPending(t *testing.T) {
+	e := newSpecEnv(t)
+	if err := update(t, e, rename("r0", "n0")); err != nil {
+		t.Fatal(err)
+	}
+	beforeSwitchCommit = func() { panic("crash") }
+	t.Cleanup(func() { beforeSwitchCommit = func() {} })
+	if !panics(func() { _ = update(t, e, switchReq("r1", 2, "fb")) }) {
+		t.Fatal("switch did not crash")
+	}
+	beforeSwitchCommit = func() {}
+	wantCode(t, update(t, e, rename("r0", "n0")), CodeAgentBusy)
+	if err := e.start().reconcileAgent(context.Background(), "a1"); err != nil {
+		t.Fatal(err)
+	}
+	replays(t, e, rename("r0", "n0"), 2, "n0", "fa")
+}
+
+// TestHarnessSwitchFailureSavedWithItsDrop: harness.switch_failed and the
+// drop of the pending record are one write; when it fails, the switch stays
+// pending and its rerun ends with exactly one of switch_failed and
+// harness.changed.
+func TestHarnessSwitchFailureSavedWithItsDrop(t *testing.T) {
+	e := newSpecEnv(t)
+	fb := e.harnesses["fb"].(*fake.Harness)
+	fb.FailOpen(errors.New("down"), false)
+	lift := failOn(t, e.createEnv, `DELETE ON agent_update_requests`)
+	if err := update(t, e, switchReq("r1", 1, "fb")); err == nil {
+		t.Fatal("switch did not fail")
+	}
+	lift()
+	fb.FailOpen(nil, false)
+	if err := e.start().reconcileAgent(context.Background(), "a1"); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.events(t, "a1", KindError) + e.events(t, "a1", KindHarnessChanged); n != 1 {
+		t.Fatalf("history %v; want one of switch_failed and harness.changed", history(t, e.createEnv, "a1"))
+	}
 }

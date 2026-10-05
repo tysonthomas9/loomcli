@@ -57,11 +57,18 @@ func (s *Store) SaveUpdateRecord(ctx context.Context, r UpdateRecord) error {
 	return saveUpdateRecord(ctx, s.db, r)
 }
 
-// DropPendingSwitch removes agentID's request requestID if it is switching.
-func (s *Store) DropPendingSwitch(ctx context.Context, agentID, requestID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM agent_update_requests WHERE agent_id = ? AND request_id = ? AND status = ?`,
-		agentID, requestID, RequestSwitching)
-	return err
+// FailSwitch saves e, as AppendEvent does, and drops e's agent's request
+// requestID if it is switching, in one transaction. It returns the saved e.
+func (s *Store) FailSwitch(ctx context.Context, e Event, requestID string) (got Event, err error) {
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		if got, err = appendEvent(ctx, tx, e); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM agent_update_requests WHERE agent_id = ? AND request_id = ? AND status = ?`,
+			e.AgentID, requestID, RequestSwitching)
+		return err
+	})
+	return got, err
 }
 
 func saveUpdateRecord(ctx context.Context, db interface {

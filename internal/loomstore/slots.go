@@ -562,7 +562,9 @@ func (s *Store) PendingAgents(ctx context.Context, workspaceID string) ([]string
 		UNION SELECT e.agent_id FROM agent_events e JOIN agents a USING (agent_id)
 		WHERE e.kind = 'task_completed' AND a.deleted_at IS NULL AND a.workspace_id = ?
 		AND NOT EXISTS (SELECT 1 FROM agent_send_receipts r WHERE r.agent_id = e.agent_id AND r.request_id = e.event_id)
-		ORDER BY 1`, SlotWaiting, SlotHanded, workspaceID, workspaceID)
+		UNION SELECT u.agent_id FROM agent_update_requests u JOIN agents a USING (agent_id)
+		WHERE u.status = ? AND a.deleted_at IS NULL AND a.workspace_id = ?
+		ORDER BY 1`, SlotWaiting, SlotHanded, workspaceID, workspaceID, RequestSwitching, workspaceID)
 	if err != nil {
 		return nil, err
 	}

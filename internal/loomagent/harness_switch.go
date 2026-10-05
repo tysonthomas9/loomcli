@@ -91,21 +91,30 @@ func (s *Service) beginSwitch(ctx context.Context, a loomstore.Agent, req Update
 		err = s.switchFailed(ctx, a, req, err)
 	case key != "" && key != openKey(a): // the spec moved: never seen, as the commit saves the record done
 		err = s.switchFailed(ctx, a, req, &Error{Code: CodeSpecVersionMismatch, Message: fmt.Sprintf("spec version is %d", a.SpecVersion)})
-	case err == nil && key == "":
-		err = s.saveReceipt(ctx, a, req, loomstore.RequestSwitching)
+	case err == nil && key == "": // saved without a RequestID too, so settle can finish it
+		var r loomstore.UpdateRecord
+		if r, err = receipt(a, a, req, loomstore.RequestSwitching); err == nil {
+			err = s.store.SaveUpdateRecord(ctx, r)
+		}
 	}
 	return h, cfg, model, rules, err
 }
 
 // switchFailed saves req's harness.switch_failed on a and drops its pending
-// record; it returns cause.
+// record in one write (Store.FailSwitch); it returns cause.
 func (s *Service) switchFailed(ctx context.Context, a loomstore.Agent, req UpdateRequest, cause error) error {
-	id := fmt.Sprintf("harness.switch_failed:v%d:%s", a.SpecVersion, req.RequestID)
-	if err := s.appendEvent(ctx, a.AgentID, KindError, id,
-		map[string]any{"op": "harness_switch", "harness": req.Harness, "error": cause.Error()}); err != nil {
+	e, err := eventRow(a.AgentID, KindError, fmt.Sprintf("harness.switch_failed:v%d:%s", a.SpecVersion, req.RequestID),
+		map[string]any{"op": "harness_switch", "harness": req.Harness, "error": cause.Error()})
+	if err != nil {
 		return err
 	}
-	return errors.Join(cause, s.store.DropPendingSwitch(ctx, a.AgentID, req.RequestID))
+	if _, err := s.events.commit(func() ([]loomstore.Event, error) {
+		got, err := s.store.FailSwitch(ctx, e, req.RequestID)
+		return []loomstore.Event{got}, err
+	}, func([]loomstore.Event) {}); err != nil {
+		return err
+	}
+	return cause
 }
 
 // switchTarget validates a switch of a to req.Harness and returns the

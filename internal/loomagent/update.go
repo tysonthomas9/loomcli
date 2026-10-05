@@ -81,12 +81,19 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (AgentInfo, err
 	return info(a), nil
 }
 
-// replayUpdate answers req from a's request history, done when it did: an applied
-// request returns its saved result, and a pending switch of req runs again.
-// Any other request waits out a pending switch as agent_busy; a request
-// applied before records were kept is its agent's last.
+// replayUpdate answers req from a's request history, done when it did:
+// while a switch is pending every other request is agent_busy and the
+// switch's own request runs it again; an applied request returns its saved
+// result, and one applied before records were kept is its agent's last.
 func (s *Service) replayUpdate(ctx context.Context, a loomstore.Agent, req UpdateRequest) (AgentInfo, bool, error) {
 	var got AgentInfo
+	p, err := s.store.PendingSwitch(ctx, a.AgentID)
+	switch {
+	case err == nil && (req.RequestID == "" || p.RequestID != req.RequestID):
+		return got, true, &Error{Code: CodeAgentBusy, Message: a.AgentID + " is switching harness"}
+	case err != nil && !errors.Is(err, loomstore.ErrNotFound):
+		return got, true, err
+	}
 	if req.RequestID != "" {
 		r, err := s.store.UpdateRecord(ctx, a.AgentID, req.RequestID)
 		switch {
@@ -101,12 +108,6 @@ func (s *Service) replayUpdate(ctx context.Context, a loomstore.Agent, req Updat
 		default:
 			return got, true, json.Unmarshal([]byte(r.Result), &got)
 		}
-	}
-	if _, err := s.store.PendingSwitch(ctx, a.AgentID); !errors.Is(err, loomstore.ErrNotFound) {
-		if err == nil {
-			err = &Error{Code: CodeAgentBusy, Message: a.AgentID + " is switching harness"}
-		}
-		return got, true, err
 	}
 	if req.RequestID != "" && deref(a.LastRequestID) == req.RequestID { // applied before its record was kept
 		return info(a), true, nil
@@ -178,7 +179,7 @@ func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstor
 		return before, err
 	}
 	var rec *loomstore.UpdateRecord
-	if req.RequestID != "" {
+	if req.RequestID != "" || kind == KindHarnessChanged { // a switch's record was pending, with or without an ID
 		r, err := receipt(before, a, req, loomstore.RequestDone)
 		if err != nil {
 			return before, err
