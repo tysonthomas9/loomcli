@@ -15,7 +15,7 @@ import (
 
 // effort is the --effort option (low, medium, high, xhigh, max; the CLI
 // defaults to high).
-var effort = loomharness.OptionDescriptor{ID: loomharness.OptionEffort, Label: "Reasoning", Type: loomharness.OptionSelect,
+var effort = loomharness.OptionDescriptor{ID: loomharness.OptionEffort, Label: "Effort", Type: loomharness.OptionSelect,
 	Current: "high", Choices: []loomharness.OptionChoice{{ID: "low", Label: "Low"}, {ID: "medium", Label: "Medium"},
 		{ID: "high", Label: "High", Default: true}, {ID: "xhigh", Label: "Extra High"}, {ID: "max", Label: "Max"}}}
 

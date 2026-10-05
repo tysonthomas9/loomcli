@@ -92,9 +92,9 @@ func variantOption(m wireModel) (loomharness.OptionDescriptor, bool) {
 		return loomharness.OptionDescriptor{}, false
 	}
 	def := defaultVariant(m.ProviderID, ids)
-	d := loomharness.OptionDescriptor{ID: loomharness.OptionEffort, Label: "Variant", Type: loomharness.OptionSelect, Current: def}
+	d := loomharness.OptionDescriptor{ID: loomharness.OptionEffort, Label: "Effort", Type: loomharness.OptionSelect, Current: def}
 	for _, id := range ids {
-		d.Choices = append(d.Choices, loomharness.OptionChoice{ID: id, Label: titleCase(id), Default: id == def})
+		d.Choices = append(d.Choices, loomharness.OptionChoice{ID: id, Label: choiceLabel(id), Default: id == def})
 	}
 	return d, true
 }
@@ -115,6 +115,15 @@ func defaultVariant(provider string, ids []string) string {
 		}
 	}
 	return ""
+}
+
+// choiceLabel is a variant's display name: "Extra High" for xhigh (as the
+// claude and codex catalogs show it), else the id title-cased.
+func choiceLabel(id string) string {
+	if id == "xhigh" {
+		return "Extra High"
+	}
+	return titleCase(id)
 }
 
 func titleCase(s string) string {

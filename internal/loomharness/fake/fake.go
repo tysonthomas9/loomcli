@@ -115,7 +115,7 @@ func (h *Harness) Name() string { return "fake" }
 func (h *Harness) Models(context.Context) ([]loomharness.Model, error) {
 	return []loomharness.Model{{ID: "fake-model", Name: "Fake model", Provider: "fake", ProviderName: "Fake",
 		ContextLimit: 1000, Input: []string{"text"}, Default: true,
-		Options: []loomharness.OptionDescriptor{{ID: loomharness.OptionEffort, Label: "Reasoning", Type: loomharness.OptionSelect,
+		Options: []loomharness.OptionDescriptor{{ID: loomharness.OptionEffort, Label: "Effort", Type: loomharness.OptionSelect,
 			Current: "medium", Choices: []loomharness.OptionChoice{{ID: "low", Label: "Low"},
 				{ID: "medium", Label: "Medium", Default: true}, {ID: "high", Label: "High"}}}}}}, nil
 }

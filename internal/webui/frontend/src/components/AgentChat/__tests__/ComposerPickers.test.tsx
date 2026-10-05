@@ -65,7 +65,7 @@ import {
 
 const effort = (def: string, ids: string[]) => ({
   id: "effort",
-  label: "Variant",
+  label: "Effort",
   type: "select" as const,
   current_value: def,
   options: ids.map((id) => ({
@@ -167,7 +167,7 @@ describe("composer model and effort pickers (UI2)", () => {
     expect(api.listHarnessModels).toHaveBeenCalledWith("w1", "opencode");
     expect(modelButton()).toHaveAccessibleName("Model: GPT-5.5");
     expect(
-      screen.getByRole("button", { name: "Variant: Medium" }),
+      screen.getByRole("button", { name: "Effort: Medium" }),
     ).toBeInTheDocument();
   });
 
@@ -182,7 +182,7 @@ describe("composer model and effort pickers (UI2)", () => {
     );
     expect(modelButton()).toHaveAccessibleName("Model: GPT-5.5");
     expect(
-      screen.getByRole("button", { name: "Variant: High" }),
+      screen.getByRole("button", { name: "Effort: High" }),
     ).toBeInTheDocument();
   });
 
@@ -256,7 +256,7 @@ describe("composer model and effort pickers (UI2)", () => {
 
   it("lists only the effort choices the model declares and PATCHes the pick", async () => {
     await mount(agent({ model: "openai/gpt-5.5-mini" }));
-    fireEvent.click(screen.getByRole("button", { name: "Variant: Low" }));
+    fireEvent.click(screen.getByRole("button", { name: "Effort: Low" }));
     const items = screen.getAllByRole("menuitemradio");
     expect(items.map((i) => i.textContent)).toEqual(["Minimal", "LowDefault"]);
     expect(items[1]).toHaveAttribute("aria-checked", "true");
@@ -277,7 +277,7 @@ describe("composer model and effort pickers (UI2)", () => {
     d.options = d.options!.map(({ id, label }) => ({ id, label }));
     api.listHarnessModels.mockResolvedValue(noDefault);
     await mount(agent());
-    fireEvent.click(screen.getByRole("button", { name: "Variant: Default" }));
+    fireEvent.click(screen.getByRole("button", { name: "Effort: Default" }));
     expect(
       screen
         .getAllByRole("menuitemradio")
@@ -289,7 +289,7 @@ describe("composer model and effort pickers (UI2)", () => {
     await mount(agent({ model: "anthropic/claude-sonnet-5" }));
     expect(modelButton()).toHaveAccessibleName("Model: Claude Sonnet 5");
     expect(
-      screen.queryByRole("button", { name: /Variant/ }),
+      screen.queryByRole("button", { name: /Effort/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -306,7 +306,7 @@ describe("composer model and effort pickers (UI2)", () => {
     await mount(agent({ mode: "single_task", state: "running" }));
     expect(modelButton()).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "Variant: Medium" }),
+      screen.getByRole("button", { name: "Effort: Medium" }),
     ).toBeDisabled();
     expect(screen.getByRole("note")).toHaveTextContent(
       "A single task's model is fixed until it finishes",
@@ -352,7 +352,7 @@ describe("composer model and effort pickers (UI2)", () => {
       expect(api.listHarnessModels).toHaveBeenCalledTimes(3);
       expect(modelButton()).toHaveAccessibleName("Model: GPT-5.5");
       expect(
-        screen.getByRole("button", { name: "Variant: High" }),
+        screen.getByRole("button", { name: "Effort: High" }),
       ).toBeInTheDocument();
     });
 
@@ -412,7 +412,7 @@ describe("composer model and effort pickers (UI2)", () => {
     );
     await mount(agent());
     expect(
-      screen.queryByRole("button", { name: /Variant/ }),
+      screen.queryByRole("button", { name: /Effort/ }),
     ).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", { name: "More composer controls" }),
@@ -433,7 +433,7 @@ describe("composer model and effort pickers (UI2)", () => {
       expect(api.listHarnessModels).toHaveBeenLastCalledWith("w1", harness);
       expect(modelButton()).toHaveAccessibleName("Model: GPT-5.5");
       expect(
-        screen.getByRole("button", { name: "Variant: Medium" }),
+        screen.getByRole("button", { name: "Effort: Medium" }),
       ).toBeInTheDocument();
       view.unmount();
     }

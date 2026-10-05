@@ -34,7 +34,7 @@ func catalogModel(m protocol.Model) loomharness.Model {
 	if len(m.SupportedReasoningEfforts) == 0 {
 		return out
 	}
-	d := loomharness.OptionDescriptor{ID: loomharness.OptionEffort, Label: "Reasoning", Type: loomharness.OptionSelect}
+	d := loomharness.OptionDescriptor{ID: loomharness.OptionEffort, Label: "Effort", Type: loomharness.OptionSelect}
 	for _, e := range m.SupportedReasoningEfforts {
 		label := effortLabels[e.ReasoningEffort]
 		if label == "" {
