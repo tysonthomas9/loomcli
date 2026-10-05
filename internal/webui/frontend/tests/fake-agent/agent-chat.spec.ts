@@ -48,7 +48,7 @@ test("a lead chats the same on OpenCode, codex and Claude", async ({
     await page.goto(`/test/agent-chat?ws=w1&agent=${agent_id}`);
     await expect(page.getByTestId("harness-label")).toHaveText(harness);
     const transcript = page.getByTestId("chat-transcript");
-    const input = page.getByLabel("Message");
+    const input = page.getByRole("textbox", { name: "Message" });
     const turnsDone = async () => {
       const r = await request.get(
         `${API}/api/workspaces/w1/v1/agents/${agent_id}/events`,
