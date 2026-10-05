@@ -749,3 +749,46 @@ func onlyRowAny(t *testing.T, e *createEnv) loomstore.Agent {
 	}
 	return rows[0]
 }
+
+// TestCreateAfterReconcileAndDeleteFails: reconcile finishes the Create
+// between its insert and finishCreate, then a Delete wins; the Create
+// reports the agent gone, not created.
+func TestCreateAfterReconcileAndDeleteFails(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	createCrash = func(p string) {
+		if p == "inserted" {
+			reconcile(t, s)
+			if err := s.Delete(ctx, DeleteRequest{AgentID: onlyRow(t, e).AgentID}); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	t.Cleanup(func() { createCrash = func(string) {} })
+	if _, err := s.Create(ctx, leadReq("r1")); !isCode(err, CodeAgentNotFound) {
+		t.Fatalf("Create = %v; want agent_not_found for the agent deleted meanwhile", err)
+	}
+}
+
+// TestDeleteCancelledAfterMarkQueued: a Delete whose request is cancelled
+// after its mark is still queued for its retry.
+func TestDeleteCancelledAfterMarkQueued(t *testing.T) {
+	e := newCreateEnv(t)
+	a, err := e.service(ServiceConfig{}).Create(context.Background(), leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := e.service(ServiceConfig{Purge: func(context.Context, loomstore.Agent, []loomstore.NativeSession) error {
+		cancel()
+		return context.Canceled
+	}})
+	c := useTestClock(s)
+	if err := s.Delete(ctx, DeleteRequest{AgentID: a.AgentID}); err == nil {
+		t.Fatal("Delete succeeded")
+	}
+	if c.fire() != 1 {
+		t.Fatal("the cancelled Delete was not queued for its retry")
+	}
+}

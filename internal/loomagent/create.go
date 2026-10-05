@@ -338,11 +338,11 @@ func (s *Service) queueFirst(ctx context.Context, a loomstore.Agent, req CreateR
 func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.Agent, error) {
 	defer s.lock(agentID)()
 	a, err := s.agent(ctx, agentID)
+	if err == nil && (a.DeletedAt != nil || a.DeleteRequested) { // a Delete won: make nothing for it
+		return a, &Error{Code: CodeAgentNotFound, Message: agentID + " is being deleted"}
+	}
 	if err != nil || a.CreateStep >= stepDone {
 		return a, err
-	}
-	if a.DeletedAt != nil || a.DeleteRequested { // a Delete won: make nothing for it
-		return a, &Error{Code: CodeAgentNotFound, Message: agentID + " is being deleted"}
 	}
 	cfg, err := loadConfig(a)
 	if err != nil {
