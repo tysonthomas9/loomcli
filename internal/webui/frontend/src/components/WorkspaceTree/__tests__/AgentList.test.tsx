@@ -743,6 +743,17 @@ describe("AgentList", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
+  it("ignores a failed Get from a List a newer one replaced", async () => {
+    let fail: (err: unknown) => void = () => {};
+    api.getAgent.mockReturnValueOnce(new Promise((_, rej) => (fail = rej)));
+    renderList("/ws/ws1/chat/old");
+    await waitFor(() => expect(api.getAgent).toHaveBeenCalled());
+    act(() => navigate("/ws/ws1/chat/lead"));
+    await waitFor(() => expect(names()).toHaveLength(3));
+    await act(async () => fail(new ApiError(503, "Service Unavailable")));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("keeps an archived Lead's working child in the list", async () => {
     api.agents = [
       agent("lead", { preset: "lead" }),

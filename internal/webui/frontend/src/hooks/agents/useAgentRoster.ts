@@ -133,8 +133,11 @@ export function useAgentRoster(
       },
       open.current,
     )
-      .then(() => setError(null))
-      .catch((err) => setError(message(err)));
+      // Only the latest List's outcome sets or clears the error.
+      .then(
+        () => n === sent.current && setError(null),
+        (err) => n === sent.current && setError(message(err)),
+      );
   }, [list]);
 
   useEffect(() => {

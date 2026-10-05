@@ -24,7 +24,6 @@ const api = vi.hoisted(() => ({
   respondToAsk: vi.fn(),
   archiveAgent: vi.fn(),
   unarchiveAgent: vi.fn(),
-  deleteAgent: vi.fn(),
   streams: [] as { opts: AgentStreamOptions; events: AgentEvent[] }[],
   ids: 0,
   user: null as { id: string } | null,
@@ -41,7 +40,6 @@ vi.mock("@/api/agentsv1", () => ({
   respondToAsk: api.respondToAsk,
   archiveAgent: api.archiveAgent,
   unarchiveAgent: api.unarchiveAgent,
-  deleteAgent: api.deleteAgent,
   updateAgent: () => Promise.resolve({}),
   listHarnessModels: (_ws: string, harness: string) =>
     Promise.resolve({ harness, providers: [] }),
