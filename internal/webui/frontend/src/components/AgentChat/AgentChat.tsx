@@ -601,11 +601,13 @@ function FromAgent({
   name,
   text,
   waiting,
+  at,
 }: {
   id: string;
   name: string;
   text: string;
   waiting?: boolean;
+  at?: string | undefined;
 }) {
   const a = useRosterAgent(id);
   return (
@@ -622,6 +624,7 @@ function FromAgent({
         </span>
       </div>
       <ChatMarkdown text={text} streaming={false} />
+      {!waiting && <MessageActions text={text} at={at} />}
     </div>
   );
 }
@@ -813,7 +816,14 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
     case "completion":
       return <CompletionCard item={item} workspaceId={workspaceId} />;
     case "from_agent":
-      return <FromAgent id={item.agent} name={item.name} text={item.text} />;
+      return (
+        <FromAgent
+          id={item.agent}
+          name={item.name}
+          text={item.text}
+          at={item.at}
+        />
+      );
     // A fresh native context; the transcript above stays readable.
     case "harness_changed":
       return (

@@ -175,9 +175,13 @@ describe("AgentChat timeline (UI3)", () => {
         ...ev("item.completed", { itemKind: "message", text: "two" }),
         created_at: at,
       },
+      {
+        ...ev("message.delivered", { sender: "agent:x9", text: "note" }),
+        created_at: at,
+      },
     );
     const pills = screen.getAllByTestId("message-actions");
-    expect(pills).toHaveLength(3);
+    expect(pills).toHaveLength(4);
     const time = new Date(at).toLocaleTimeString([], {
       hour: "numeric",
       minute: "2-digit",
@@ -197,6 +201,9 @@ describe("AgentChat timeline (UI3)", () => {
   it("lays the pill over the message and packs one agent's messages closer (UI6)", () => {
     const pill = css.match(/\.messageActions \{[^}]*\}/)?.[0] ?? "";
     expect(pill).toMatch(/position: absolute/);
+    // Inside its own message's top edge, never over the next message.
+    expect(pill).toMatch(/top: 0;/);
+    expect(pill).not.toMatch(/bottom:/);
     expect(css).toMatch(
       /\.row\[data-kind="agent"\]:has\(\+ \.row\[data-kind="agent"\]\) \{\s*padding-bottom: 4px;/,
     );

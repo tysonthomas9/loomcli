@@ -50,6 +50,7 @@ export type ChatItem =
       agent: string;
       name: string;
       text: string;
+      at?: string;
     }
   | {
       key: string;
@@ -127,6 +128,7 @@ function itemFor(
         agent: from,
         name: names.get(from) ?? from,
         text,
+        at: e.created_at,
       };
     }
     case "item.completed":

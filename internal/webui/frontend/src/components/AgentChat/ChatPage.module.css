@@ -181,6 +181,7 @@
 
 /* One timeline row: centred at the column width, T3's row spacing. */
 .row {
+  position: relative;
   width: 100%;
   max-width: var(--chat-column);
   min-width: 0;
@@ -229,7 +230,6 @@
 
 /* UserTimelineRow */
 .userRow {
-  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -294,11 +294,14 @@
   color: var(--color-text-primary);
 }
 
-/* Every message's hover pill (UI6): laid over the message, taking no space. */
+/*
+ * Every message's hover pill (UI6): laid over its own message's top right
+ * corner, taking no space and never covering the next message.
+ */
 .messageActions {
   position: absolute;
+  top: 0;
   right: 4px;
-  bottom: -12px;
   z-index: 1;
   display: flex;
   align-items: center;
@@ -319,8 +322,7 @@
   white-space: nowrap;
 }
 
-.userRow:hover .messageActions,
-.agentMessage:hover .messageActions,
+.row:hover .messageActions,
 .messageActions:focus-within {
   opacity: 1;
   pointer-events: auto;
