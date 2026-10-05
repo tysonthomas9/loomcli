@@ -247,3 +247,20 @@ func TestDeletePublishesLiveOnly(t *testing.T) {
 	}
 	deletedClean(t, e, lead.AgentID)
 }
+
+// TestArchiveBusyStoppingRollsBack: Archive of an active agent records its
+// reason only with the move to stopping; a failed move leaves neither.
+func TestArchiveBusyStoppingRollsBack(t *testing.T) {
+	ctx, e := context.Background(), newCreateEnv(t)
+	if err := e.st.InsertAgent(ctx, svcAgent("a1", "persistent", StateActive)); err != nil {
+		t.Fatal(err)
+	}
+	s := e.service(ServiceConfig{})
+	failSaving(t, e, EventStateChanged)
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: "a1"}); err == nil {
+		t.Fatal("Archive did not fail")
+	}
+	if row := s.get(t, "a1"); row.State != StateActive || row.ArchiveReason != nil || len(history(t, e, "a1")) != 0 {
+		t.Fatalf("after the failed commit: %s, reason %q, history %v", row.State, deref(row.ArchiveReason), history(t, e, "a1"))
+	}
+}
