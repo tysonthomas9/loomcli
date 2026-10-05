@@ -520,6 +520,64 @@ describe("NavRail", () => {
       expect(screen.getByLabelText("Add workspace")).toBeInTheDocument();
     });
 
+    it("puts nothing before Add when there are no workspaces", () => {
+      render(
+        <NavRail
+          activeView="kanban"
+          onChange={() => {}}
+          workspaces={[]}
+          onAddWorkspace={() => {}}
+        />,
+      );
+      const selector = screen.getByRole("region", {
+        name: "Workspace selector",
+      });
+      expect(selector.children).toHaveLength(1);
+      expect(selector.firstElementChild).toBe(
+        screen.getByLabelText("Add workspace"),
+      );
+    });
+
+    it("re-checks the off-screen hint when Add appears", () => {
+      // A one-item window: the selector overflows only once Add is there.
+      const isSelector = (el: HTMLElement) =>
+        el.getAttribute("aria-label") === "Workspace selector";
+      const sw = vi
+        .spyOn(HTMLElement.prototype, "scrollWidth", "get")
+        .mockImplementation(function (this: HTMLElement) {
+          if (!isSelector(this)) return 0;
+          return this.querySelector('[aria-label="Add workspace"]') ? 83 : 42;
+        });
+      const cw = vi
+        .spyOn(HTMLElement.prototype, "clientWidth", "get")
+        .mockImplementation(function (this: HTMLElement) {
+          return isSelector(this) ? 42 : 0;
+        });
+      // jsdom does not clamp scrollLeft, so pin it at the start.
+      const sl = vi
+        .spyOn(Element.prototype, "scrollLeft", "get")
+        .mockReturnValue(0);
+      const workspaces = [{ id: "one", name: "One" }];
+      const props = {
+        activeView: "kanban" as const,
+        onChange: () => {},
+        workspaces,
+        activeWorkspaceId: "one",
+      };
+      try {
+        const { container, rerender } = render(<NavRail {...props} />);
+        expect(container.querySelector("[data-more-hint]")).toBeNull();
+        rerender(<NavRail {...props} onAddWorkspace={() => {}} />);
+        expect(
+          container.querySelector('[data-more-hint="right"]'),
+        ).not.toBeNull();
+      } finally {
+        sw.mockRestore();
+        cw.mockRestore();
+        sl.mockRestore();
+      }
+    });
+
     it("shows workspace name in a hover tooltip", () => {
       render(
         <NavRail

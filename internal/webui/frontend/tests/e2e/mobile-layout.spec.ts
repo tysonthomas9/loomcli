@@ -284,8 +284,12 @@ function switcherView(page: Page) {
   });
 }
 
+// 360: a small phone, the switcher's slot is narrower than one item and its
+// padding. 470: two items show with more off-screen.
 for (const size of [
+  { width: 360, height: 800 },
   { width: 390, height: 844 },
+  { width: 470, height: 844 },
   { width: 557, height: 844 },
 ]) {
   test(`switcher at ${size.width}px: whole items only, with a hint where more is off-screen`, async ({
@@ -310,28 +314,56 @@ for (const size of [
 
     const max = await switcher.evaluate((s) => s.scrollWidth - s.clientWidth);
 
-    // Wherever a scroll leaves it (odd offsets included), once it settles no
-    // avatar or Add is partly shown, and each side with hidden items says so.
-    for (let x = 0; x <= max + 13; x += 13) {
-      await switcher.evaluate((s, left) => s.scrollTo({ left }), x);
+    // Settled: the same scroll position on two polls in a row, then nothing
+    // cut. Returns the view it settled on.
+    const settled = async (label: string) => {
+      let prev = NaN;
       await expect
         .poll(async () => {
-          const a = await switcherView(page);
-          await page.waitForTimeout(150);
-          const b = await switcherView(page);
-          return a.scrollLeft === b.scrollLeft ? b.cut : ["still scrolling"];
-        }, `scrolled to ${x}`)
+          const v = await switcherView(page);
+          const still = v.scrollLeft === prev;
+          prev = v.scrollLeft;
+          return still ? v.cut : ["still scrolling"];
+        }, label)
         .toEqual([]);
       const v = await switcherView(page);
       const want = [
         ...(v.moreLeft ? ["left"] : []),
         ...(v.moreRight ? ["right"] : []),
       ];
-      expect(v.hints, `hints at scrollLeft ${v.scrollLeft}`).toEqual(want);
+      expect(v.hints, `${label}: hints at scrollLeft ${v.scrollLeft}`).toEqual(
+        want,
+      );
+      return v;
+    };
+
+    // The switcher stays in its slot: it overlaps no other rail button.
+    const overlaps = await page.evaluate(() => {
+      const nav = document.querySelector('nav[aria-label="Primary"]')!;
+      const s = nav.querySelector('[aria-label="Workspace selector"]')!;
+      const w = s.getBoundingClientRect();
+      return Array.from(nav.querySelectorAll("button"))
+        .filter((b) => !s.contains(b))
+        .filter((b) => {
+          const r = b.getBoundingClientRect();
+          return r.right > w.left + 0.5 && r.left < w.right - 0.5;
+        })
+        .map((b) => b.getAttribute("aria-label"));
+    });
+    expect(overlaps, "rail buttons under the switcher").toEqual([]);
+
+    // As loaded, with the open workspace scrolled into view.
+    await settled("as loaded");
+
+    // Wherever a scroll leaves it (odd offsets included), once it settles no
+    // avatar or Add is partly shown, and each side with hidden items says so.
+    for (let x = 0; x <= max + 13; x += 13) {
+      await switcher.evaluate((s, left) => s.scrollTo({ left }), x);
+      await settled(`scrolled to ${x}`);
     }
 
-    // On a phone, some workspace is off-screen at some point, so the hint is
+    // Below 557 some workspace is off-screen at some point, so the hint is
     // actually exercised there.
-    if (size.width === 390) expect(max).toBeGreaterThan(0);
+    if (size.width < 557) expect(max).toBeGreaterThan(0);
   });
 }
