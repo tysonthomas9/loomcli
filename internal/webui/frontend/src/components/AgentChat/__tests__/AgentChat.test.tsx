@@ -340,7 +340,7 @@ describe("AgentChat", () => {
     // Expanded, each row still shows its code.
     fireEvent.click(within(marker).getByRole("button", { name: /tool call/ }));
     const rows = screen.getAllByTestId("tool-call");
-    expect(rows[0]).toHaveTextContent("Started an agent");
+    expect(rows[0]).toHaveTextContent("Ran code");
     for (const r of rows) fireEvent.click(within(r).getByRole("button"));
     expect(rows[0]).toHaveTextContent("search({namespace:'loom'");
     expect(rows[1]).toHaveTextContent("fs.readdir('.')");

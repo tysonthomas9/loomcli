@@ -136,7 +136,7 @@ function summaryAction(
 
 /** A tool call's heading: its name, capitalized; code it ran as "Ran code". */
 export function toolHeading(entry: ToolEntry): string {
-  if (codeOf(entry) !== undefined)
+  if (isExecute(entry))
     return entry.status === "running" ? "Running code" : "Ran code";
   const name = entry.tool.name?.trim() || "Tool call";
   return name.charAt(0).toUpperCase() + name.slice(1);
@@ -147,9 +147,7 @@ export function toolHeading(entry: ToolEntry): string {
  * never the code it ran (CL4).
  */
 export function toolPreview(entry: ToolEntry): string {
-  return codeOf(entry) !== undefined
-    ? ""
-    : argPreviewFromJSON(entry.tool.input);
+  return isExecute(entry) ? "" : argPreviewFromJSON(entry.tool.input);
 }
 
 /** Reasoning's first line as plain text: no emphasis, code or heading marks. */
@@ -255,13 +253,6 @@ export function stepLabel(e: AgentEvent, preview = true): string | null {
 const BRIDGE_NAME =
   /(?:^|[^a-z])(agent_(?:create|list|get|send|archive)|github_read)$/i;
 const CODE_CALL = /tools\.loom\.(\w+)\s*\(/g;
-/**
- * A bridge tool that code using the loom namespace names some other way,
- * such as search({namespace:'loom', query:'agent_create'}).
- */
-const LOOM_NAMESPACE = /["'`]loom["'`]|\bloom\./;
-const CODE_MENTION =
-  /\b(agent_(?:create|list|get|send|archive)|github_read)\b/g;
 const AGENT_ARG = /\bagent\s*:\s*["'`]([^"'`]+)["'`]/;
 const NAME_ARG = /\bname\s*:\s*["'`]([^"'`]+)["'`]/;
 
@@ -285,17 +276,9 @@ function jsonInput(entry: ToolEntry): Record<string, unknown> | null {
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 
-/** The start of a code mode call's input, even one cut short when saved. */
-const CODE_INPUT = /^\s*\{\s*"code"\s*:\s*"/;
-
-/** The code a code mode call (execute) ran, or undefined for other tools. */
-function codeOf(entry: ToolEntry): string | undefined {
-  if (!/(?:^|[^a-z])execute$/i.test((entry.tool.name ?? "").trim())) return;
-  const raw = entry.tool.input ?? "";
-  const code = str(jsonInput(entry)?.code);
-  if (code || !CODE_INPUT.test(raw)) return code;
-  return raw.replace(CODE_INPUT, "").replace(/\\"/g, '"');
-}
+/** A code mode call (execute), whose input is code, never a preview. */
+const isExecute = (entry: ToolEntry) =>
+  /(?:^|[^a-z])execute$/i.test((entry.tool.name ?? "").trim());
 
 /**
  * The Loom bridge calls a tool call makes, or [] when it is not one: a
@@ -314,12 +297,8 @@ export function bridgeCalls(entry: ToolEntry): BridgeCall[] {
     if (n) call.name = n;
     return [call];
   }
-  const code = codeOf(entry) ?? str(input?.code) ?? "";
-  const calls = [...code.matchAll(CODE_CALL)];
-  const found =
-    calls.length || !LOOM_NAMESPACE.test(code)
-      ? calls
-      : [...code.matchAll(CODE_MENTION)];
+  const code = str(input?.code) ?? "";
+  const found = [...code.matchAll(CODE_CALL)];
   return found.flatMap((m, i) => {
     const tool = m[1]!;
     if (!BRIDGE_NAME.test(tool)) return [];
@@ -380,11 +359,18 @@ export function bridgeLabel(
   return label;
 }
 
-/** A finished agent_create call, which the Started marker folds in. */
+/**
+ * A finished agent_create call, which the Started marker next to it folds
+ * in: one the bridge parses, or loom code naming agent_create another way,
+ * such as search({namespace:'loom', query:'agent_create'}) (CL4).
+ */
 const isCreateCall = (i: ChatItem): i is ToolEntry =>
   i.kind === "tool" &&
   i.status === "completed" &&
-  bridgeCalls(i).some((c) => c.tool === "agent_create");
+  (bridgeCalls(i).some((c) => c.tool === "agent_create") ||
+    (isExecute(i) &&
+      /\bagent_create\b/.test(i.tool.input ?? "") &&
+      /["'`]loom\b|\bloom\./.test(i.tool.input ?? "")));
 
 type Unit =
   | ChatItem

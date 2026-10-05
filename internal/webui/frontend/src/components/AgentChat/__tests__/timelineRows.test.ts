@@ -414,25 +414,53 @@ describe("code mode headers (CL4)", () => {
   });
   const names = new Map<string, string>();
 
-  it("never previews an execute's code, even when its saved input was cut short", () => {
+  const search = "const s=search({namespace:'loom', query:'agent_create'})";
+
+  it("never previews an execute's input, even cut short with code not first", () => {
     const cut = raw(
       "c",
       "execute",
-      "{\"code\":\"const s=search({namespace:'loom', query:'agent_create'}); await s[0].ca",
+      `{"timeout":5,"code":"${search}; await s[0].ca`,
     );
     expect(toolHeading(cut)).toBe("Ran code");
     expect(toolPreview(cut)).toBe("");
-    expect(bridgeLabel(cut, names)).toBe("Started an agent");
   });
 
-  it("names a bridge tool only in code that uses the loom namespace", () => {
-    const other = exec("o", "// agent_create is not called here\nreturn 1");
-    expect(bridgeLabel(other, names)).toBeNull();
+  it("folds loom code naming agent_create into the Started marker next to it", () => {
+    const mixed = exec(
+      "m",
+      `await tools.loom.agent_list({}); ${search}; await s[0].call({})`,
+    );
     const rows = deriveTimelineRows(
+      [
+        startedItem("s", "k1"),
+        exec("c", `${search}; await s[0].call({})`),
+        mixed,
+      ],
+      new Set(),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kind: "started",
+      calls: [{ key: "c" }, { key: "m" }],
+    });
+  });
+
+  it("shows such code with no marker next to it as a plain expandable row", () => {
+    const only = exec("o", search);
+    expect(bridgeLabel(only, names)).toBeNull();
+    const rows = deriveTimelineRows(
+      [text("t"), only],
+      new Set(["work-group:o"]),
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["item", "work-toggle", "work"]);
+    // Code outside the loom namespace never folds.
+    const other = exec("x", "// agent_create is not called here\nreturn 1");
+    const next = deriveTimelineRows(
       [startedItem("s", "k1"), create("c1"), other],
       new Set(),
     );
-    expect(rows[0]).toMatchObject({ kind: "started", calls: [{ key: "c1" }] });
+    expect(next[0]).toMatchObject({ kind: "started", calls: [{ key: "c1" }] });
   });
 
   it("leaves the heading and preview of other tools with a code argument alone", () => {
