@@ -188,11 +188,12 @@ test("delete asks first and shows the server's dirty-work refusal", async ({
   await page.getByTestId("confirm-dialog-confirm").click();
   const refusal = page.getByRole("alertdialog", { name: "Not deleted" });
   await expect(refusal).toContainText(
-    "Not deleted: uncommitted changes in /wt/a1: main.go",
+    "Uncommitted changes in /wt/a1: main.go. Delete anyway loses these changes.",
   );
   expect(m.writes).toEqual(["delete"]);
 
-  await expect(refusal).toContainText("Delete anyway loses these changes.");
+  // The title says Not deleted; the body does not repeat it.
+  await expect(refusal).not.toContainText("Not deleted:");
   for (const theme of ["light", "dark"]) {
     await page.evaluate((t) => {
       document.documentElement.dataset.theme = t;

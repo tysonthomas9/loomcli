@@ -617,10 +617,13 @@ describe("AgentList", () => {
     const refusal = await screen.findByRole("alertdialog", {
       name: "Not deleted",
     });
-    expect(refusal).toHaveTextContent(
-      "Not deleted: uncommitted changes in /wt/other: main.go, notes.md",
-    );
-    expect(refusal).toHaveTextContent("Delete anyway loses these changes.");
+    // The title says Not deleted; the body does not repeat it.
+    expect(
+      within(refusal).getByText(
+        "Uncommitted changes in /wt/other: main.go, notes.md. Delete anyway loses these changes.",
+      ),
+    ).toBeInTheDocument();
+    expect(refusal).not.toHaveTextContent("Not deleted:");
     expect(row("other")).not.toBeNull();
 
     fireEvent.click(screen.getByTestId("agent-delete-anyway"));

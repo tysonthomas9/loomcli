@@ -30,7 +30,7 @@ vi.mock("@/hooks", async () => {
   };
 });
 
-vi.mock("@/components/AgentList", () => ({
+vi.mock("../AgentList", () => ({
   AgentList: () => <nav aria-label="Agent API agents" />,
 }));
 

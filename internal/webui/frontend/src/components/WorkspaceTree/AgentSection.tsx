@@ -7,7 +7,7 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
-import { AgentList } from "@/components/AgentList";
+import { AgentList } from "./AgentList";
 
 import {
   useAgentStoreInstance,

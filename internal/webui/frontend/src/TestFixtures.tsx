@@ -6,8 +6,7 @@
 
 import { IssueDetailPanel, ToastContainer } from "@/components";
 import { AgentChat } from "@/components/AgentChat";
-import { AgentList } from "@/components/AgentList";
-import { WorkspaceTree } from "@/components/WorkspaceTree";
+import { AgentList, WorkspaceTree } from "@/components/WorkspaceTree";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel";
 import { SessionNamePrompt } from "@/components/TerminalView/layout";
 import { HelpPopover } from "@/components/TerminalView/controls";

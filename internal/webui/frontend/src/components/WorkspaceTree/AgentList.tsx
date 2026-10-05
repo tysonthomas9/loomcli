@@ -5,12 +5,9 @@ import type { Agent } from "@/api/agentsv1";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { ProviderIcon } from "@/components/AgentChat";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import {
-  SortableAgentList,
-  type SortableAgentItem,
-} from "@/components/WorkspaceTree/SortableAgentList";
-import { SortableAgentRow } from "@/components/WorkspaceTree/SortableAgentRow";
-import { AgentContextMenu } from "@/components/WorkspaceTree/menus/AgentContextMenu";
+import { SortableAgentList, type SortableAgentItem } from "./SortableAgentList";
+import { SortableAgentRow } from "./SortableAgentRow";
+import { AgentContextMenu } from "./menus/AgentContextMenu";
 import {
   agentColor,
   agentColorIndex,
@@ -164,7 +161,7 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
     } else if (refusal.unsaved) {
       setRefused({ ...refusal, agent: a });
     } else {
-      showToast(refusal.error, { type: "error" });
+      showToast(`Not deleted: ${refusal.error}`, { type: "error" });
     }
   };
   const openMenu = useCallback(
@@ -311,7 +308,8 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
         <ConfirmDialog
           isOpen
           title="Not deleted"
-          message={`${refused.error} Delete anyway loses these changes.`}
+          // The title says Not deleted, so the body starts with the reason.
+          message={`${refused.error.charAt(0).toUpperCase()}${refused.error.slice(1)}. Delete anyway loses these changes.`}
           confirmLabel="Delete anyway"
           confirmTestId="agent-delete-anyway"
           cancelLabel="Keep agent"
