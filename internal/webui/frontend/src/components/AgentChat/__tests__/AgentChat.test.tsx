@@ -306,6 +306,46 @@ describe("AgentChat", () => {
     for (const r of rows) expect(r).toHaveTextContent("Started an agent");
   });
 
+  it("never shows a Lead's raw execute code in a row header, only when expanded (CL4)", async () => {
+    const execute = (code: string) =>
+      ev("item.completed", {
+        itemKind: "tool",
+        tool: { name: "execute", input: JSON.stringify({ code }) },
+      });
+    const spawn =
+      "const s=search({namespace:'loom', query:'agent_create'}); " +
+      "for (const name of ['ui-test-agent-1','ui-test-agent-2']) await s[0].call({name})";
+    const { container } = await mount(agent());
+    deliver(
+      ev("item.completed", { itemKind: "reasoning", text: "Plan the tests" }),
+      ev("child.created", { child: "k1", name: "ui-test-agent-1" }),
+      ev("child.created", { child: "k2", name: "ui-test-agent-2" }),
+      execute(spawn),
+      ev("item.completed", { itemKind: "reasoning", text: "Count files" }),
+      execute("return (await fs.readdir('.')).length"),
+      // The agents-v1-lead bridge case.
+      execute("return await tools.loom.agent_list({})"),
+    );
+    expect(container.textContent).not.toMatch(
+      /Execute|"code"|search\(|readdir|tools\.loom/,
+    );
+    const marker = screen.getByTestId("started-marker");
+    expect(marker).toHaveTextContent(
+      "↳StartedU1ui-test-agent-1U2ui-test-agent-21 tool call ›",
+    );
+    expect(screen.getByTestId("tool-call")).toHaveTextContent(/^.?Ran code/);
+    expect(screen.getByTestId("bridge-call")).toHaveTextContent(
+      "·Listed agents",
+    );
+    // Expanded, each row still shows its code.
+    fireEvent.click(within(marker).getByRole("button", { name: /tool call/ }));
+    const rows = screen.getAllByTestId("tool-call");
+    expect(rows[0]).toHaveTextContent("Started an agent");
+    for (const r of rows) fireEvent.click(within(r).getByRole("button"));
+    expect(rows[0]).toHaveTextContent("search({namespace:'loom'");
+    expect(rows[1]).toHaveTextContent("fs.readdir('.')");
+  });
+
   it("folds a waiting result into its marker and shows only a child's own words", async () => {
     const { container } = await mount(
       agent({

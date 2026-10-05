@@ -134,15 +134,22 @@ function summaryAction(
   return actions.size === 1 ? actions.values().next().value! : "mixed";
 }
 
-/** A tool call's heading: its name, capitalized. */
+/** A tool call's heading: its name, capitalized; code it ran as "Ran code". */
 export function toolHeading(entry: ToolEntry): string {
+  if (codeOf(entry) !== undefined)
+    return entry.status === "running" ? "Running code" : "Ran code";
   const name = entry.tool.name?.trim() || "Tool call";
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-/** The thing a tool call is about (its command, path or query), or "". */
+/**
+ * The thing a tool call is about (its command, path or query), or "";
+ * never the code it ran (CL4).
+ */
 export function toolPreview(entry: ToolEntry): string {
-  return argPreviewFromJSON(entry.tool.input);
+  return codeOf(entry) !== undefined
+    ? ""
+    : argPreviewFromJSON(entry.tool.input);
 }
 
 /** Reasoning's first line as plain text: no emphasis, code or heading marks. */
@@ -248,6 +255,9 @@ export function stepLabel(e: AgentEvent, preview = true): string | null {
 const BRIDGE_NAME =
   /(?:^|[^a-z])(agent_(?:create|list|get|send|archive)|github_read)$/i;
 const CODE_CALL = /tools\.loom\.(\w+)\s*\(/g;
+/** A bridge tool the code names some other way, such as search({query:'agent_create'}). */
+const CODE_MENTION =
+  /\b(agent_(?:create|list|get|send|archive)|github_read)\b/g;
 const AGENT_ARG = /\bagent\s*:\s*["'`]([^"'`]+)["'`]/;
 const NAME_ARG = /\bname\s*:\s*["'`]([^"'`]+)["'`]/;
 
@@ -271,6 +281,9 @@ function jsonInput(entry: ToolEntry): Record<string, unknown> | null {
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 
+/** The code a code mode call (execute) ran, or undefined. */
+const codeOf = (entry: ToolEntry) => str(jsonInput(entry)?.code);
+
 /**
  * The Loom bridge calls a tool call makes, or [] when it is not one: a
  * bridge tool called by name (agent_get, mcp__loom__agent_get), or code
@@ -289,7 +302,8 @@ export function bridgeCalls(entry: ToolEntry): BridgeCall[] {
     return [call];
   }
   const code = str(input?.code) ?? "";
-  const found = [...code.matchAll(CODE_CALL)];
+  const calls = [...code.matchAll(CODE_CALL)];
+  const found = calls.length ? calls : [...code.matchAll(CODE_MENTION)];
   return found.flatMap((m, i) => {
     const tool = m[1]!;
     if (!BRIDGE_NAME.test(tool)) return [];
