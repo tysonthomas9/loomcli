@@ -27,6 +27,41 @@ test.describe("Keyboard: Focus management", () => {
     await expect(skipLink).toHaveText("Skip to main content");
   });
 
+  test("Skip link stays hidden until reached by keyboard", async ({
+    page, mockApi,
+  }) => {
+    await bootApp(page, mockApi);
+    const skipLink = page.locator('a[href="#main-content"]');
+    const main = page.locator("#main-content");
+
+    // Hidden on load and after mouse clicks.
+    await expect(skipLink).not.toBeInViewport();
+    const box = await main.boundingBox();
+    if (!box) throw new Error("main content has no bounding box");
+    await page.mouse.click(box.x + box.width - 5, box.y + box.height - 5);
+    await expect(skipLink).not.toBeInViewport();
+
+    // Tab from the start of the page reveals it.
+    await page.evaluate(function () {
+      document.body.focus();
+    });
+    await page.keyboard.press("Tab");
+    await expect(skipLink).toBeFocused();
+    await expect(skipLink).toBeInViewport();
+
+    // Activating it moves focus into the main content: the next Tab lands
+    // inside <main>, not on the header controls after the link.
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/#main-content$/);
+    await page.keyboard.press("Tab");
+    expect(
+      await page.evaluate(function () {
+        const m = document.getElementById("main-content");
+        return !!m && m !== document.activeElement && m.contains(document.activeElement);
+      }),
+    ).toBe(true);
+  });
+
   test("CreateIssueModal: Tab cycles within modal fields", async ({
     page, mockApi,
   }) => {

@@ -147,8 +147,9 @@
  * =========================== */
 .skipLink {
   position: absolute;
+  top: 0;
   left: var(--space-4);
-  transform: translateY(-100%);
+  transform: translateY(-200%);
   background: var(--color-primary);
   color: var(--color-text-inverse);
   padding: var(--space-2) var(--space-4);
@@ -160,17 +161,7 @@
   transition: transform var(--transition-fast);
 }
 
-.skipLink:focus {
-  transform: translateY(var(--space-2));
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-.skipLink:focus:not(:focus-visible) {
-  transform: translateY(var(--space-2));
-  outline: none;
-}
-
+/* Shown only on keyboard focus (:focus-visible), never on mouse focus. */
 .skipLink:focus-visible {
   transform: translateY(var(--space-2));
   outline: 2px solid var(--color-primary);
