@@ -203,9 +203,15 @@ func TestChildCreatedParentDeletedRace(t *testing.T) {
 	e := newCreateEnv(t)
 	s := e.service(ServiceConfig{})
 	lead, _ := newLead(t, e, s, "lead")
-	createCrash = func(p string) {
+	db, err := sql.Open("sqlite", "file:"+e.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createCrash = func(p string) { // deleted_at alone: the check, not the purge rule, must skip the event
 		if p == "created" {
-			if err := e.st.Tombstone(ctx, lead.AgentID, time.Now()); err != nil {
+			if _, err := db.Exec(`UPDATE agents SET deleted_at = ? WHERE agent_id = ?`,
+				loomstore.Stamp(time.Now()), lead.AgentID); err != nil {
 				t.Error(err)
 			}
 		}
