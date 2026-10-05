@@ -297,7 +297,7 @@ func (s *Service) stop(ctx context.Context, a loomstore.Agent, arch *archiveCols
 		if sl.State != loomstore.SlotWaiting {
 			continue
 		}
-		res, err := s.store.ClearSlot(ctx, a.AgentID, sl.Sender)
+		res, err := s.store.ClearSlot(ctx, a.AgentID, sl.Sender, false)
 		if err != nil {
 			return a, err
 		}

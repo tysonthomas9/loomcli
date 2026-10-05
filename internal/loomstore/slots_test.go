@@ -128,7 +128,7 @@ func TestReceiptStaleRequestIDHasNoEffect(t *testing.T) {
 	retry(s, "r1", "three", SlotWaiting, r1) // after delivery: newer text untouched
 	retry(s, "r2", "three", SlotWaiting, r2)
 
-	if out, err := s.ClearSlot(ctx, "a1", "user:u"); err != nil || out != Withdrawn {
+	if out, err := s.ClearSlot(ctx, "a1", "user:u", true); err != nil || out != Withdrawn {
 		t.Fatalf("ClearSlot = %s, %v", out, err)
 	}
 	retry(s, "r3", "three", SlotWithdrawn, r3) // after withdrawal: stays withdrawn
@@ -145,7 +145,7 @@ func TestReceiptStaleRequestIDHasNoEffect(t *testing.T) {
 func TestSlotGuardsAndWithdraw(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newSlotStore(t)
-	if out, _ := s.ClearSlot(ctx, "a1", "user:u"); out != NothingWaiting {
+	if out, _ := s.ClearSlot(ctx, "a1", "user:u", true); out != NothingWaiting {
 		t.Fatalf("clear empty = %s", out)
 	}
 	mustSend(t, s, send("user:u", "r1", "one"))
@@ -160,7 +160,7 @@ func TestSlotGuardsAndWithdraw(t *testing.T) {
 	if _, err := s.HandNext(ctx, "a1", nativeKey); err != nil {
 		t.Fatal(err)
 	}
-	if out, _ := s.ClearSlot(ctx, "a1", "user:u"); out != AlreadyHanded {
+	if out, _ := s.ClearSlot(ctx, "a1", "user:u", true); out != AlreadyHanded {
 		t.Fatalf("clear handed = %s", out)
 	}
 	if _, _, err := s.Send(ctx, send("user:u", "r3", "three")); !errors.Is(err, ErrSlotBusy) {

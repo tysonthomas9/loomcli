@@ -602,21 +602,35 @@ const (
 
 // ClearSlot withdraws the sender's waiting message (Withdraw, or Archive
 // cancelled and Delete). It returns Withdrawn, NothingWaiting or AlreadyHanded.
-func (s *Store) ClearSlot(ctx context.Context, agentID, sender string) (string, error) {
+// With records (Withdraw), completion records waiting after the message are
+// not the sender's and stay waiting; a slot holding only records then has
+// nothing to withdraw. Without, the whole slot is cleared.
+func (s *Store) ClearSlot(ctx context.Context, agentID, sender string, records bool) (string, error) {
 	out := NothingWaiting
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		var state string
-		err := tx.QueryRowContext(ctx, `SELECT state FROM agent_slots WHERE agent_id = ? AND sender = ?`,
-			agentID, sender).Scan(&state)
+		var cur Slot
+		err := tx.QueryRowContext(ctx, `SELECT `+slotCols+` FROM agent_slots WHERE agent_id = ? AND sender = ?`,
+			agentID, sender).Scan(cur.fields()...)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return nil
 		case err != nil:
 			return err
-		case state == SlotHanded:
+		case cur.State == SlotHanded:
 			out = AlreadyHanded
 			return nil
-		case state != SlotWaiting:
+		case cur.State != SlotWaiting:
+			return nil
+		}
+		notes, err := waitingNotices(ctx, tx, cur)
+		if err != nil {
+			return err
+		}
+		if records && notes.Legacy == "" && len(notes.Keys) > 0 {
+			if notes.At > 0 {
+				out = Withdrawn
+				return dropMessage(ctx, tx, cur, notes)
+			}
 			return nil
 		}
 		out = Withdrawn
@@ -625,6 +639,25 @@ func (s *Store) ClearSlot(ctx context.Context, agentID, sender string) (string, 
 		return err
 	})
 	return out, err
+}
+
+// dropMessage withdraws the sender's own text from cur, a waiting slot whose
+// records (notes) follow it, leaving the records waiting in its place: the
+// last record names the slot again, its receipt keeping the slot's text.
+func dropMessage(ctx context.Context, tx *sql.Tx, cur Slot, notes SlotNotices) error {
+	body, key := cur.Body[notes.At:], notes.Keys[len(notes.Keys)-1]
+	notes.At = 0
+	b, err := json.Marshal(notes)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_slots SET request_id = ?, body = ?, notices = ?, updated_at = ?
+		WHERE agent_id = ? AND sender = ?`, key, body, string(b), Stamp(time.Now()), cur.AgentID, cur.Sender); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE agent_send_receipts SET body = ? WHERE agent_id = ? AND request_id = ?`,
+		body, cur.AgentID, key)
+	return err
 }
 
 // Slots lists the agent's slots in delivery order: First, then oldest.

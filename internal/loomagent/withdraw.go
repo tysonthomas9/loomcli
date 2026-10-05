@@ -33,7 +33,7 @@ func (s *Service) Withdraw(ctx context.Context, req WithdrawRequest) (WithdrawRe
 		return WithdrawResult{}, err
 	}
 	sender := senderOf(req.Actor)
-	res, err := s.store.ClearSlot(ctx, a.AgentID, sender)
+	res, err := s.store.ClearSlot(ctx, a.AgentID, sender, true)
 	if err != nil {
 		return WithdrawResult{}, err
 	}
