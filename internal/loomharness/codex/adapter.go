@@ -82,6 +82,13 @@ func (a *Adapter) LaunchFor(projectDir, profileKey string) (loomharness.Launch, 
 // thread/list searchTerm finds it, after a restart too (probed on 0.157.1;
 // threadSource is not persisted). Before that message codex lists nothing
 // for it and it has no history, so this process remembers what it opened.
+//
+// That record stays in memory on purpose. Such a thread has no rollout, so
+// it does not outlive its app-server, a child of this process: after a
+// restart thread/read still names it, but thread/resume fails with "no
+// rollout found" and thread/turns/list with "missing source rollout"
+// (probed on 0.157.1). A record kept on disk would make a restarted Open
+// return that dead thread; a new Open opening a fresh one is right.
 const markerPrefix = "loom:"
 
 // Open returns the thread for spec.Key in spec.Dir on spec.Launch.Root's
