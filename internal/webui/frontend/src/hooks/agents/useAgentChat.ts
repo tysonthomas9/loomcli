@@ -32,6 +32,45 @@ export function useArchiveAgent(
   );
 }
 
+/** A Delete the server refused: its text, and unsaved_work's fingerprint. */
+export interface DeleteRefusal {
+  error: string;
+  /** The fingerprint Delete anyway sends; null unless unsaved_work. */
+  unsaved: string | null;
+}
+
+/**
+ * Deletes an agent by id for the sidebar: null once deleted, else the refusal
+ * as the chat showed it ("Not deleted: ..." with the files it names).
+ */
+export function useDeleteAgent(
+  workspaceId: string,
+): (agentId: string, fingerprint?: string) => Promise<DeleteRefusal | null> {
+  return useCallback(
+    async (agentId: string, fingerprint?: string) => {
+      try {
+        await deleteAgent(
+          workspaceId,
+          agentId,
+          newRequestId(),
+          fingerprint ? { fingerprint } : undefined,
+        );
+        return null;
+      } catch (err) {
+        return {
+          error: "Not deleted: " + message(err),
+          unsaved:
+            errorCode(err) === "unsaved_work"
+              ? (((err as ApiError).body as { fingerprint?: string })
+                  .fingerprint ?? null)
+              : null,
+        };
+      }
+    },
+    [workspaceId],
+  );
+}
+
 export interface UseAgentChatReturn {
   agent: Agent | null;
   items: ChatItem[];

@@ -18,6 +18,8 @@ export interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: "danger" | "default";
+  /** The confirm button's test id. */
+  confirmTestId?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -29,6 +31,7 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   variant = "default",
+  confirmTestId = "confirm-dialog-confirm",
   onConfirm,
   onCancel,
 }: ConfirmDialogProps): JSX.Element | null {
@@ -104,7 +107,7 @@ export function ConfirmDialog({
             type="button"
             className={`${styles.confirmButton} ${variant === "danger" ? styles.confirmDanger : ""}`}
             onClick={onConfirm}
-            data-testid="confirm-dialog-confirm"
+            data-testid={confirmTestId}
           >
             {confirmLabel}
           </button>

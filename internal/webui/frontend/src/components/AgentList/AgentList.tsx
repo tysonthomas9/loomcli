@@ -1,9 +1,10 @@
 import type React from "react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useMatch } from "react-router-dom";
+import { Link, useMatch, useNavigate } from "react-router-dom";
 import type { Agent } from "@/api/agentsv1";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { ProviderIcon } from "@/components/AgentChat";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   SortableAgentList,
   type SortableAgentItem,
@@ -17,6 +18,8 @@ import {
   childrenByParent,
   useAgentRoster,
   useArchiveAgent,
+  useDeleteAgent,
+  type DeleteRefusal,
 } from "@/hooks";
 import {
   agentDot,
@@ -49,7 +52,9 @@ export interface AgentListProps {
  * Background group, as in the old Lead UI rail. A child shows only while it
  * is at work or its chat is open (SB2). Top-level rows drag to reorder
  * (children move with their row), and every row archives from a hover
- * action or its right-click menu, as the fleet rows do (SB4).
+ * action or its right-click menu, as the fleet rows do; the menu also
+ * deletes, after a confirm, with DA1's Delete anyway on an unsaved-work
+ * refusal (SB4).
  */
 export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   // The agent whose chat is open.
@@ -60,14 +65,20 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   const [bgOpen, setBgOpen] = useState(true);
   const { showToast } = useToast();
   const archiveAgent = useArchiveAgent(workspaceId);
+  const deleteAgent = useDeleteAgent(workspaceId);
+  const navigate = useNavigate();
   const [order, setOrder] = useState(() => storedOrder(workspaceId));
   useEffect(() => setOrder(storedOrder(workspaceId)), [workspaceId]);
-  // Archived here: a busy agent stays stopping until its turn ends.
-  const [archived, setArchived] = useState<ReadonlySet<string>>(new Set());
+  // Archived or deleted here: a busy agent stays stopping until its turn
+  // ends, and a delete reaches the stream later.
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [menu, setMenu] = useState<{ id: string; x: number; y: number }>();
+  // The agent whose Delete waits on its confirm.
+  const [confirming, setConfirming] = useState<Agent>();
+  // An unsaved-work refusal, which offers Delete anyway (DA1).
+  const [refused, setRefused] = useState<DeleteRefusal & { agent: Agent }>();
 
-  const shown = (a: Agent) =>
-    a.state !== "archived" && !archived.has(a.agent_id);
+  const shown = (a: Agent) => a.state !== "archived" && !gone.has(a.agent_id);
   const top = (kids.get("") ?? []).filter(shown);
   const isWorker = (a: Agent) => a.role_kind === "worker";
   const isLead = (a: Agent) => a.preset === "lead";
@@ -97,7 +108,7 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
       setMenu(undefined);
       try {
         await archiveAgent(id);
-        setArchived((s) => new Set(s).add(id));
+        setGone((s) => new Set(s).add(id));
       } catch (err) {
         const why = err instanceof Error ? `: ${err.message}` : "";
         showToast(`Failed to archive agent${why}`, { type: "error" });
@@ -105,6 +116,20 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
     },
     [archiveAgent, showToast],
   );
+  // Delete anyway sends the refusal's fingerprint, with no second confirm.
+  const remove = async (a: Agent, fingerprint?: string) => {
+    setConfirming(undefined);
+    setRefused(undefined);
+    const refusal = await deleteAgent(a.agent_id, fingerprint);
+    if (!refusal) {
+      setGone((s) => new Set(s).add(a.agent_id));
+      if (a.agent_id === activeId) navigate(`/ws/${ws}/home`);
+    } else if (refusal.unsaved) {
+      setRefused({ ...refusal, agent: a });
+    } else {
+      showToast(refusal.error, { type: "error" });
+    }
+  };
   const openMenu = useCallback(
     (e: React.MouseEvent, id: string) =>
       setMenu({ id, x: e.clientX, y: e.clientY }),
@@ -232,8 +257,35 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
         onArchive={() => {
           if (menu) void archive(menu.id);
         }}
+        onDelete={() => setConfirming(menu && roster.get(menu.id))}
         onClose={() => setMenu(undefined)}
       />
+      {confirming && (
+        <ConfirmDialog
+          isOpen
+          title="Delete agent"
+          message={`Delete ${confirming.name}? This cannot be undone.`}
+          confirmLabel="Delete agent"
+          variant="danger"
+          onConfirm={() => void remove(confirming)}
+          onCancel={() => setConfirming(undefined)}
+        />
+      )}
+      {refused && (
+        <ConfirmDialog
+          isOpen
+          title="Not deleted"
+          message={`${refused.error} Delete anyway loses these changes.`}
+          confirmLabel="Delete anyway"
+          confirmTestId="agent-delete-anyway"
+          cancelLabel="Keep agent"
+          variant="danger"
+          onConfirm={() =>
+            void remove(refused.agent, refused.unsaved ?? undefined)
+          }
+          onCancel={() => setRefused(undefined)}
+        />
+      )}
     </nav>
   );
 }

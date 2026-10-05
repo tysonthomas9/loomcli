@@ -49,8 +49,8 @@ export type {
   UseClaimHoldReturn,
 } from "./useClaimHold";
 
-export { useAgentChat, useArchiveAgent } from "./useAgentChat";
-export type { UseAgentChatReturn } from "./useAgentChat";
+export { useAgentChat, useArchiveAgent, useDeleteAgent } from "./useAgentChat";
+export type { DeleteRefusal, UseAgentChatReturn } from "./useAgentChat";
 export { latestTurnError, ownSender, senderAgent } from "./agentChatModel";
 export type {
   ChatItem,

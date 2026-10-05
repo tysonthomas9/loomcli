@@ -1,6 +1,7 @@
 /**
  * AgentContextMenu — context menu for sidebar agent rows.
- * Actions: Archive (hard-delete via workspace agent DELETE).
+ * Actions: Archive (hard-delete via workspace agent DELETE), and Delete
+ * where the caller offers it (Agent API rows).
  * Follows WorkspaceContextMenu pattern for positioning and lifecycle.
  */
 
@@ -17,6 +18,8 @@ export interface AgentContextMenuProps {
   isOpen: boolean;
   position: ContextMenuPosition;
   onArchive: () => void;
+  /** Shows Delete; the caller confirms before deleting. */
+  onDelete?: (() => void) | undefined;
   onClose: () => void;
 }
 
@@ -24,6 +27,7 @@ export function AgentContextMenu({
   isOpen,
   position,
   onArchive,
+  onDelete,
   onClose,
 }: AgentContextMenuProps): JSX.Element | null {
   const menuRef = useContextMenuLifecycle(isOpen, position, onClose);
@@ -32,6 +36,11 @@ export function AgentContextMenu({
     onArchive();
     onClose();
   }, [onArchive, onClose]);
+
+  const handleDeleteClick = useCallback(() => {
+    onDelete?.();
+    onClose();
+  }, [onDelete, onClose]);
 
   const handleKeyDown = useCallback(
     (action: () => void) => (e: KeyboardEvent<HTMLButtonElement>) => {
@@ -64,6 +73,18 @@ export function AgentContextMenu({
         <ArchiveIcon className={menuStyles.menuItemIcon} />
         Archive
       </button>
+      {onDelete && (
+        <button
+          type="button"
+          className={`${menuStyles.menuItem} ${menuStyles.dangerItem}`}
+          onClick={handleDeleteClick}
+          onKeyDown={handleKeyDown(handleDeleteClick)}
+          role="menuitem"
+          data-testid="agent-context-menu-delete"
+        >
+          Delete
+        </button>
+      )}
     </div>
   );
 }

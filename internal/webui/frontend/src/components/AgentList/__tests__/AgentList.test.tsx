@@ -10,7 +10,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { MemoryRouter, useNavigate } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import type { NavigateFunction } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
@@ -25,11 +25,14 @@ import type {
 } from "@/api/agentsv1";
 import type { DragEndEvent } from "@dnd-kit/core";
 import { agentColorIndex } from "@/hooks/agents/agentColor";
+import { KeyboardShortcutProvider } from "@/hooks/ui";
+import { ApiError } from "@/types/common";
 
 const api = vi.hoisted(() => ({
   agents: [] as Agent[],
   listAgents: vi.fn(),
   archiveAgent: vi.fn(),
+  deleteAgent: vi.fn(),
   streams: [] as { opts: AgentStreamOptions; closed: boolean }[],
   // Each sortable list's onDragEnd, in render order (last render wins).
   dragEnds: [] as ((e: DragEndEvent) => void)[],
@@ -52,6 +55,7 @@ vi.mock("@dnd-kit/core", async () => {
 vi.mock("@/api/agentsv1", () => ({
   listAgents: api.listAgents,
   archiveAgent: api.archiveAgent,
+  deleteAgent: api.deleteAgent,
   newRequestId: () => "req-1",
   AgentEventStream: class {
     closed = false;
@@ -124,15 +128,18 @@ const row = (name: string) =>
 let navigate: NavigateFunction = () => {};
 function Nav() {
   navigate = useNavigate();
-  return null;
+  return <p data-testid="where">{useLocation().pathname}</p>;
 }
 
 function renderList(at = "/ws/ws1/chat/lead") {
   render(
-    <MemoryRouter initialEntries={[at]}>
-      <Nav />
-      <AgentList workspaceId="ws1" />
-    </MemoryRouter>,
+    // ConfirmDialog registers an Escape layer, as in the app.
+    <KeyboardShortcutProvider>
+      <MemoryRouter initialEntries={[at]}>
+        <Nav />
+        <AgentList workspaceId="ws1" />
+      </MemoryRouter>
+    </KeyboardShortcutProvider>,
   );
 }
 
@@ -142,6 +149,8 @@ beforeEach(() => {
   localStorage.clear();
   api.archiveAgent.mockReset();
   api.archiveAgent.mockResolvedValue(undefined);
+  api.deleteAgent.mockReset();
+  api.deleteAgent.mockResolvedValue(undefined);
   api.agents = [
     agent("lead"),
     agent("other", { harness: "claude" }),
@@ -548,5 +557,104 @@ describe("AgentList", () => {
       ]),
     );
     await waitFor(() => expect(row("other")).toBeNull());
+  });
+
+  // Delete moved from the chat header to the sidebar menu (SB4); DA1's
+  // refusal and Delete anyway follow it.
+  const menuDelete = (name: string) => {
+    fireEvent.contextMenu(row(name)!, { clientX: 10, clientY: 20 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+  };
+  const unsavedWork = (paths: string[]) =>
+    new ApiError(409, "Conflict", {
+      error: "uncommitted changes in /wt/other",
+      code: "unsaved_work",
+      paths,
+      fingerprint: "f1",
+    });
+
+  it("deletes from the right-click menu only after a confirm, and the row leaves", async () => {
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    menuDelete("other");
+    expect(api.deleteAgent).not.toHaveBeenCalled();
+    const confirm = screen.getByRole("alertdialog", { name: "Delete agent" });
+    expect(confirm).toHaveTextContent("other");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(api.deleteAgent).not.toHaveBeenCalled();
+    expect(row("other")).not.toBeNull();
+
+    menuDelete("other");
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await waitFor(() =>
+      expect(api.deleteAgent).toHaveBeenCalledWith(
+        "ws1",
+        "other",
+        "req-1",
+        undefined,
+      ),
+    );
+    await waitFor(() => expect(row("other")).toBeNull());
+    expect(screen.getByTestId("where")).toHaveTextContent("/ws/ws1/agents");
+  });
+
+  it("leaves the open chat once its agent's delete succeeds", async () => {
+    renderList("/ws/ws1/chat/other");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    menuDelete("other");
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent("/ws/ws1/home"),
+    );
+  });
+
+  it("shows an unsaved-work refusal with its files and Delete anyway, which sends the fingerprint with no second confirm (DA1)", async () => {
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    api.deleteAgent.mockRejectedValueOnce(unsavedWork(["main.go", "notes.md"]));
+    menuDelete("other");
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    const refusal = await screen.findByRole("alertdialog", {
+      name: "Not deleted",
+    });
+    expect(refusal).toHaveTextContent(
+      "Not deleted: uncommitted changes in /wt/other: main.go, notes.md",
+    );
+    expect(refusal).toHaveTextContent("Delete anyway loses these changes.");
+    expect(row("other")).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId("agent-delete-anyway"));
+    await waitFor(() => expect(row("other")).toBeNull());
+    expect(api.deleteAgent).toHaveBeenCalledTimes(2);
+    expect(api.deleteAgent).toHaveBeenLastCalledWith("ws1", "other", "req-1", {
+      fingerprint: "f1",
+    });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("keeps the agent when the refusal is dismissed, and offers no Delete anyway for other errors", async () => {
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    api.deleteAgent.mockRejectedValueOnce(unsavedWork(["README.md"]));
+    menuDelete("other");
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    const refusal = await screen.findByRole("alertdialog", {
+      name: "Not deleted",
+    });
+    fireEvent.click(
+      within(refusal).getByRole("button", { name: "Keep agent" }),
+    );
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(api.deleteAgent).toHaveBeenCalledTimes(1);
+
+    api.deleteAgent.mockRejectedValueOnce(
+      new ApiError(500, "Server Error", { error: "boom" }),
+    );
+    menuDelete("other");
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await waitFor(() => expect(api.deleteAgent).toHaveBeenCalledTimes(2));
+    await act(() => Promise.resolve());
+    expect(screen.queryByTestId("agent-delete-anyway")).toBeNull();
+    expect(row("other")).not.toBeNull();
   });
 });
