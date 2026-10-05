@@ -101,7 +101,7 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 			return r, err
 		}
 	}
-	rec, retry, err := s.commitSend(ctx, a, req, sender, interrupted)
+	rec, retry, err := s.commitSend(ctx, a, req, interrupted)
 	switch {
 	case err != nil:
 		return SendResult{}, sendErr(a.AgentID, err)
@@ -111,42 +111,92 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 	return s.accepted(ctx, a, rec)
 }
 
-// commitSend saves req's slot change, receipt and events (sendEvents) in one
-// transaction under the event lane, then publishes the events. A finished a
-// starts its next attempt in it. retry reports that req already had a receipt.
-func (s *Service) commitSend(ctx context.Context, a loomstore.Agent, req SendRequest, sender string,
-	interrupted *bool) (rec loomstore.Receipt, retry bool, err error) {
+// sendInput is what decideSend decides from: the agent's row and slots, the
+// request (its Actor set), the request's earlier receipt if any, and for
+// Delivery interrupt whether a running turn was stopped.
+type sendInput struct {
+	Row         loomstore.Agent
+	Slots       []loomstore.Slot
+	Req         SendRequest
+	Prior       *loomstore.Receipt
+	Interrupted *bool
+}
+
+// sendDecision is a Send's decision. Retry: the request's earlier receipt
+// answers it. Otherwise Row is the agent after the Send, Events are the
+// events it saves with Slot, its slot change (without the event rows and
+// result, which the shell adds).
+type sendDecision struct {
+	Retry  bool
+	Row    loomstore.Agent
+	Events []Event
+	Slot   loomstore.SlotSend
+}
+
+// decideSend is Send's decision, pure: no store or harness call. A retry
+// is answered before any state check; a deleted, archived, stopping or
+// still-creating agent refuses it, and so does a sender whose previous
+// message is being handed over. Otherwise the message fills or replaces
+// the sender's slot (first after an interrupt), and a finished single task
+// starts its next attempt (Reopen): the row goes active with the next
+// attempt and no outcome, saving its state change before message.waiting.
+func decideSend(in sendInput) (sendDecision, error) {
+	a, req := in.Row, in.Req
+	switch {
+	case in.Prior != nil:
+		return sendDecision{Retry: true}, nil
+	case a.DeletedAt != nil:
+		return sendDecision{}, &Error{Code: CodeAgentNotFound, Message: a.AgentID + " is deleted"}
+	}
+	if err := sendable(a); err != nil {
+		return sendDecision{}, err
+	}
+	sender := senderOf(req.Actor)
+	if slices.ContainsFunc(in.Slots, func(sl loomstore.Slot) bool { return sl.Sender == sender && sl.State == loomstore.SlotHanded }) {
+		return sendDecision{}, sendErr(a.AgentID, loomstore.ErrSlotBusy)
+	}
+	d := sendDecision{Row: a}
 	reopen := a.State == StateFinished
-	out := sendEvents(a, sender, req.RequestID, reopen)
-	rows, err := eventRows(out)
+	if reopen {
+		d.Row.State, d.Row.Attempt, d.Row.Outcome, d.Row.FinishedAt = StateActive, a.Attempt+1, nil, nil
+		d.Events = changeEvents(a, d.Row)
+	}
+	d.Events = append(d.Events, Event{AgentID: a.AgentID, EventID: a.AgentID + ":send:" + req.RequestID + ":" + EventWaiting,
+		Type: EventWaiting, Reason: sender, Time: time.Now()})
+	d.Slot = loomstore.SlotSend{AgentID: a.AgentID, Sender: sender, RequestID: req.RequestID, Body: req.Text,
+		Source: req.Source, Reopen: reopen, First: in.Interrupted != nil && *in.Interrupted}
+	return d, nil
+}
+
+// commitSend decides req on a and its slots (decideSend), then saves the
+// slot change, receipt and events in one transaction under the event lane
+// and publishes the events. retry reports that req already had a receipt:
+// Send answered a retry before, so this is one that raced it.
+func (s *Service) commitSend(ctx context.Context, a loomstore.Agent, req SendRequest,
+	interrupted *bool) (rec loomstore.Receipt, retry bool, err error) {
+	slots, err := s.store.Slots(ctx, a.AgentID)
 	if err != nil {
 		return rec, false, err
 	}
-	_, err = s.events.commit(func() (saved []loomstore.Event, err error) {
-		rec, saved, retry, err = s.store.SendEvents(ctx, loomstore.SlotSend{AgentID: a.AgentID, Sender: sender,
-			RequestID: req.RequestID, Body: req.Text, Source: req.Source, Reopen: reopen, First: interrupted != nil && *interrupted,
-			Events: rows, Result: func(replaced bool) (string, error) {
-				b, err := json.Marshal(SendResult{MessageID: messageID(a.AgentID, sender, req.RequestID),
-					State: loomstore.SlotWaiting, Replaced: replaced, Interrupted: interrupted})
-				return string(b), err
-			}})
-		return saved, err
-	}, s.busPublish(out))
-	return rec, retry, err
-}
-
-// sendEvents are the events an accepted Send saves with its slot change:
-// a reopen's state change, named by the revision it bumps to, then
-// message.waiting, named by the Send's RequestID.
-func sendEvents(a loomstore.Agent, sender, requestID string, reopen bool) []Event {
-	var out []Event
-	if reopen {
-		after := a
-		after.State, after.Attempt, after.Outcome, after.FinishedAt = StateActive, a.Attempt+1, nil, nil
-		out = changeEvents(a, after)
+	d, err := decideSend(sendInput{Row: a, Slots: slots, Req: req, Interrupted: interrupted})
+	if err != nil {
+		return rec, false, err
 	}
-	return append(out, Event{AgentID: a.AgentID, EventID: a.AgentID + ":send:" + requestID + ":" + EventWaiting,
-		Type: EventWaiting, Reason: sender, Time: time.Now()})
+	rows, err := eventRows(d.Events)
+	if err != nil {
+		return rec, false, err
+	}
+	in := d.Slot
+	in.Events, in.Result = rows, func(replaced bool) (string, error) {
+		b, err := json.Marshal(SendResult{MessageID: messageID(a.AgentID, in.Sender, in.RequestID),
+			State: loomstore.SlotWaiting, Replaced: replaced, Interrupted: interrupted})
+		return string(b), err
+	}
+	_, err = s.events.commit(func() (saved []loomstore.Event, err error) {
+		rec, saved, retry, err = s.store.SendEvents(ctx, in)
+		return saved, err
+	}, s.busPublish(d.Events))
+	return rec, retry, err
 }
 
 // interruptTurn runs the interrupt step of a Send with Delivery interrupt,
