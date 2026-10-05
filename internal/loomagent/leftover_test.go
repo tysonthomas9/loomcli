@@ -109,7 +109,7 @@ func TestCreateOpenLeftoverSweepRacesReopen(t *testing.T) {
 	t.Cleanup(func() { sweepPause = func() {} })
 	swept := make(chan error, 1)
 	go func() { // the dispatcher's start-up sweep
-		s.resync(ctx)
+		s.resync(ctx, true)
 		s.reconcileDue(ctx)
 		swept <- nil
 	}()

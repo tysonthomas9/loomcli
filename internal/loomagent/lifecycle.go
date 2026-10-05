@@ -139,7 +139,7 @@ func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
 		return err
 	}
 	err := s.delete(ctx, req)
-	if a, gerr := s.store.GetAgent(ctx, req.AgentID); err != nil && gerr == nil && owes(a) {
+	if a, gerr := s.store.GetAgent(ctx, req.AgentID); err != nil && gerr == nil && owes(a, false) {
 		s.retryLater(req.AgentID)
 	}
 	return err

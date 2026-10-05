@@ -307,10 +307,10 @@ func (s *Service) Dispatcher() func(context.Context) {
 func (s *Service) runDispatcher(ctx context.Context, l *loop) {
 	ctx = within(ctx)
 	s.recoverAtStart(ctx)
-	for ctx.Err() == nil {
+	for start := true; ctx.Err() == nil; start = false {
 		sub := s.Bus.Subscribe()
 		s.recordCompletions(ctx) // what ended before the subscription, or while it lagged
-		s.resync(ctx)
+		s.resync(ctx, start)
 		s.reconcileDue(ctx)
 		if ids, err := s.store.PendingAgents(ctx, s.workspaceID); err == nil {
 			for _, id := range ids {
@@ -353,7 +353,7 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 			if s.owed.Swap(false) {
 				s.recordCompletions(ctx)
 			}
-			s.resync(ctx)
+			s.resync(ctx, false)
 			s.reconcileDue(ctx)
 		case <-s.queueWake:
 			l.took()

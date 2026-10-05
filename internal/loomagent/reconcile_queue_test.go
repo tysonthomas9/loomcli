@@ -520,3 +520,65 @@ func TestUnarchiveOneTransaction(t *testing.T) {
 		t.Fatalf("after Unarchive: state %s archived_at %v", row.State, row.ArchivedAt)
 	}
 }
+
+// TestReconcileLegacyCreateIncompleteRetriedAtStart: a row a previous Loom
+// marked create_incomplete for a failure that was not permanent (any
+// failure did) gets one retry at the next start, which finishes it.
+func TestReconcileLegacyCreateIncompleteRetriedAtStart(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	if !crashAt(t, "open")(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) }) {
+		t.Fatal("did not crash")
+	}
+	id := onlyRow(t, e).AgentID
+	execSQL(t, e, `UPDATE agents SET attention_reason = 'create_incomplete' WHERE agent_id = ?`, id)
+	s := e.service(ServiceConfig{})
+	runDispatcher(t, s)
+	settled(t, s)
+	finished(t, e, id)
+}
+
+// TestReconcileDeleteUnsavedWorkNotRetried: a Delete the user confirmed
+// over unsaved work fails after its mark. A retry without the user's
+// fingerprint cannot pass the unsaved-work check, so it shows
+// delete_incomplete and is not retried; the user's repeated Delete finishes it.
+func TestReconcileDeleteUnsavedWorkNotRetried(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	dws := &deleteWorkspace{Workspace: e.ws, status: WorkspaceStatus{Uncommitted: []string{"a.go"}, Fingerprint: "f1"}}
+	var purges atomic.Int32
+	cfg := ServiceConfig{Purge: func(context.Context, loomstore.Agent, []loomstore.NativeSession) error {
+		if purges.Add(1) == 1 {
+			return errors.New("purge down")
+		}
+		return nil
+	}}
+	a, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := e.service(cfg)
+	s.workspace = dws // its working copy has uncommitted work
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	fp := wantCode(t, s.Delete(ctx, DeleteRequest{AgentID: a.AgentID}), CodeUnsavedWork).Fingerprint
+	if err := s.Delete(ctx, DeleteRequest{AgentID: a.AgentID, Fingerprint: fp}); err == nil {
+		t.Fatal("Delete succeeded although the purge failed")
+	}
+	for range 3 {
+		c.fire()
+		settled(t, s)
+		c.tick(t)
+		settled(t, s)
+	}
+	if row, _ := e.st.GetAgent(ctx, a.AgentID); deref(row.AttentionReason) != AttentionDeleteIncomplete || row.DeletedAt != nil {
+		t.Fatalf("Attention %q deleted %v; want delete_incomplete, not deleted", deref(row.AttentionReason), row.DeletedAt != nil)
+	}
+	if got := c.backoffs(); len(got) > 1 {
+		t.Fatalf("backoffs = %v; a Delete that needs the user's fingerprint kept retrying", got)
+	}
+	if err := s.Delete(ctx, DeleteRequest{AgentID: a.AgentID, Fingerprint: fp}); err != nil {
+		t.Fatal(err)
+	}
+}

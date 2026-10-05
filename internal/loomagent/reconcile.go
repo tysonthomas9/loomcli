@@ -55,7 +55,7 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 	}
 	for _, a := range agents {
 		switch {
-		case owes(a):
+		case owes(a, true):
 			if err := s.reconcileAgent(ctx, a.AgentID); err != nil {
 				s.retryLater(a.AgentID)
 			}
@@ -78,13 +78,16 @@ func (s *Service) Reconcile(ctx context.Context, harness string) error {
 // agent; each failure doubles it, up to reconcileBackoffMax.
 var reconcileBackoff, reconcileBackoffMax = 100 * time.Millisecond, 30 * time.Second
 
-// owes reports whether a has a lifecycle marker for reconcileAgent: a
-// Delete requested, or a Create below done that is not terminal
-// (create_incomplete: only a retried Create request can finish it), and is
-// not deleted.
-func owes(a loomstore.Agent) bool {
-	return a.DeletedAt == nil && (a.DeleteRequested ||
-		(a.CreateStep < stepDone && deref(a.AttentionReason) != AttentionCreateIncomplete))
+// owes reports whether a, not deleted, has a lifecycle marker for
+// reconcileAgent: a Delete requested or a Create below done. With live, one
+// whose Attention says only the user can finish it is left out: a terminal
+// create_incomplete (a retried Create request can), or delete_incomplete
+// (the Delete may need the user's unsaved-work confirmation; a failing
+// retry stays queued with its backoff anyway).
+func owes(a loomstore.Agent, live bool) bool {
+	r := deref(a.AttentionReason)
+	return a.DeletedAt == nil && ((a.DeleteRequested && (!live || r != AttentionDeleteIncomplete)) ||
+		(a.CreateStep < stepDone && (!live || r != AttentionCreateIncomplete)))
 }
 
 // reconcileAgent is the one entry point that finishes agentID's lifecycle
@@ -103,11 +106,13 @@ func (s *Service) reconcileAgent(ctx context.Context, agentID string) error {
 	}
 	err = s.purgePending(ctx, agentID)
 	switch {
-	case !owes(a):
+	case !owes(a, false):
 	case a.DeleteRequested:
 		derr := s.delete(ctx, DeleteRequest{AgentID: agentID})
 		s.failed(ctx, agentID, AttentionDeleteIncomplete, derr)
-		err = errors.Join(err, derr)
+		if !isCode(derr, CodeUnsavedWork) { // only the user's Delete, with its fingerprint, gets past it
+			err = errors.Join(err, derr)
+		}
 	default:
 		_, cerr := s.finishCreate(ctx, agentID)
 		s.createFailed(ctx, agentID, cerr)
@@ -141,13 +146,15 @@ func (s *Service) enqueue(agentID string) {
 }
 
 // retryLater queues agentID for reconcile after the first backoff, unless
-// it is queued already.
+// it is queued already; one running is run once more.
 func (s *Service) retryLater(agentID string) {
 	s.mu.Lock()
-	if _, ok := s.queue[agentID]; !ok {
+	if q, ok := s.queue[agentID]; !ok {
 		q := &queued{wait: reconcileBackoff}
 		s.backOff(q)
 		s.queue[agentID] = q
+	} else if q.running {
+		q.again = true
 	}
 	s.mu.Unlock()
 	s.poke()
@@ -244,9 +251,11 @@ var sweepPause = func() {}
 
 // resync queues every agent of s with a lifecycle marker: a Create below
 // done, a Delete requested, a native session purge-pending. The dispatcher
-// runs it at its start, at each resubscription and on its retry clock, the
-// one recovery resync clock.
-func (s *Service) resync(ctx context.Context) {
+// runs it at each resubscription and on its retry clock, the one recovery
+// resync clock; at its start, with all, it also retries those only the
+// user can finish, once (an earlier Loom marked any failed Create
+// create_incomplete).
+func (s *Service) resync(ctx context.Context, all bool) {
 	agents, _, err := s.store.ListAgents(ctx, loomstore.AgentFilter{WorkspaceID: s.workspaceID, IncludeArchived: true})
 	pending, perr := s.store.PurgePending(ctx, s.workspaceID)
 	sweepPause()
@@ -254,7 +263,7 @@ func (s *Service) resync(ctx context.Context) {
 		slog.Warn("loomagent: reconcile resync", "error", err)
 	}
 	for _, a := range agents {
-		if owes(a) {
+		if owes(a, !all) {
 			s.enqueue(a.AgentID)
 		}
 	}
