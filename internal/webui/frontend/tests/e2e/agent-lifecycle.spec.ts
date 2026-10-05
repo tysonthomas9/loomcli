@@ -76,7 +76,8 @@ async function open(page: Page, m: Mock) {
   await page.route(`${BASE}/v1/agents/a1/events*`, (r) =>
     json(r, { events: m.events, snapshot_seq: seq, next: seq, more: false }),
   );
-  await page.route(`${BASE}/v1/agents/a1`, (r) => {
+  // With or without the Delete anyway ?fingerprint= query.
+  await page.route(/\/api\/workspaces\/w1\/v1\/agents\/a1(\?.*)?$/, (r) => {
     if (r.request().method() !== "DELETE") return json(r, m.agent);
     const confirmed = r.request().url().includes("fingerprint=f1");
     m.writes.push(confirmed ? "delete:f1" : "delete");
