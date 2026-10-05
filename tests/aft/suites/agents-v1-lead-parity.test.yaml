@@ -519,10 +519,11 @@ tests:
       - wait:
           fn: >-
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
-              const top = Array.from(nav?.querySelectorAll(':scope > ul > li') || []);
-              const lead = top.find((li) => (li.querySelector(':scope > a')?.textContent || '').includes('par-tree-${RUN_ID:-local}'));
-              const nested = Array.from(lead?.querySelectorAll(':scope > ul > li > a') || []).map((a) => a.textContent || '');
-              const topNames = top.map((li) => li.querySelector(':scope > a')?.textContent || '');
+              const top = Array.from(nav?.querySelectorAll('[data-testid=sortable-agent-item]') || []).filter((el) => !el.parentElement?.closest('[data-testid=sortable-agent-item]'));
+              const row = (el) => el.querySelector(':scope > [data-testid=sortable-agent-row] > a');
+              const lead = top.find((el) => (row(el)?.textContent || '').includes('par-tree-${RUN_ID:-local}'));
+              const nested = Array.from(lead?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []).map((a) => a.textContent || '');
+              const topNames = top.map((el) => row(el)?.textContent || '');
               return !!lead && nested.some((t) => t.includes('par-tree-kid-${RUN_ID:-local}')) &&
                 !topNames.some((t) => t.includes('par-tree-kid-${RUN_ID:-local}')); })()
         budget: 30000

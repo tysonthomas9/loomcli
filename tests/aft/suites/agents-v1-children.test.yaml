@@ -106,7 +106,7 @@ tests:
           fn: >-
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
               const lead = Array.from(nav?.querySelectorAll('a') || []).find((a) => (a.textContent || '').startsWith('agv1-kids-lead-${RUN_ID:-local}'));
-              const kids = Array.from(lead?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kids = Array.from(lead?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
               return kids.length === 1 && (kids[0].textContent || '').startsWith('agv1-kid-${RUN_ID:-local}') &&
                 kids[0].getAttribute('aria-current') === 'page' &&
                 Array.from(nav.querySelectorAll('a')).filter((a) => (a.textContent || '').startsWith('agv1-kid-${RUN_ID:-local}')).length === 1; })()
@@ -451,7 +451,7 @@ tests:
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
               const all = Array.from(nav?.querySelectorAll('a') || []);
               const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
-              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kids = Array.from(leadRow?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
               const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
               const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
               const at = (a) => !!a && location.pathname === a.getAttribute('href');
@@ -471,7 +471,7 @@ tests:
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
               const all = Array.from(nav?.querySelectorAll('a') || []);
               const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
-              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kids = Array.from(leadRow?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
               const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
               const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
               const at = (a) => !!a && location.pathname === a.getAttribute('href');
@@ -485,7 +485,7 @@ tests:
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
               const all = Array.from(nav?.querySelectorAll('a') || []);
               const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
-              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kids = Array.from(leadRow?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
               const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
               const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
               const at = (a) => !!a && location.pathname === a.getAttribute('href');
@@ -498,7 +498,7 @@ tests:
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
               const all = Array.from(nav?.querySelectorAll('a') || []);
               const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
-              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kids = Array.from(leadRow?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
               const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
               const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
               const at = (a) => !!a && location.pathname === a.getAttribute('href');
@@ -517,7 +517,7 @@ tests:
             (() => { const nav = document.querySelector('nav[aria-label=Agents]');
               const all = Array.from(nav?.querySelectorAll('a') || []);
               const leadRow = all.find((a) => (a.textContent || '').startsWith('agv1-kids-side-${RUN_ID:-local}'));
-              const kids = Array.from(leadRow?.closest('li')?.querySelectorAll(':scope > ul > li > a') || []);
+              const kids = Array.from(leadRow?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
               const kid = (n) => kids.filter((a) => (a.textContent || '').startsWith(n));
               const anywhere = (n) => all.filter((a) => (a.textContent || '').startsWith(n)).length;
               const at = (a) => !!a && location.pathname === a.getAttribute('href');
