@@ -262,24 +262,53 @@ function switcherView(page: Page) {
       document.querySelectorAll<HTMLElement>(
         'nav[aria-label="Primary"] [data-more-hint]',
       ),
-    )
-      .filter((h) => {
-        const cs = getComputedStyle(h);
-        const r = h.getBoundingClientRect();
-        return (
-          cs.visibility !== "hidden" &&
-          Number(cs.opacity) > 0.5 &&
-          r.width > 0 &&
-          r.height > 0
-        );
-      })
-      .map((h) => h.dataset.moreHint);
+    ).filter((h) => {
+      const cs = getComputedStyle(h);
+      const r = h.getBoundingClientRect();
+      return (
+        cs.visibility !== "hidden" &&
+        Number(cs.opacity) > 0.5 &&
+        r.width > 0 &&
+        r.height > 0
+      );
+    });
+    // A hint must not sit on what it points past: any item where it shows,
+    // or another rail button's icon.
+    const nav = document.querySelector('nav[aria-label="Primary"]')!;
+    const marks = [
+      ...items.map((b) => {
+        const r = b.getBoundingClientRect();
+        const left = Math.max(r.left, w.left);
+        const right = Math.min(r.right, w.right);
+        return { label: b.getAttribute("aria-label"), left, right, r };
+      }),
+      ...Array.from(nav.querySelectorAll("button svg"))
+        .filter((i) => !s.contains(i))
+        .map((i) => {
+          const r = i.getBoundingClientRect();
+          const label = i.closest("button")!.getAttribute("aria-label");
+          return { label: `${label} icon`, left: r.left, right: r.right, r };
+        }),
+    ].filter((m) => m.right - m.left > 0.5);
+    const covered = hints.flatMap((h) => {
+      const r = h.getBoundingClientRect();
+      return marks
+        .filter(
+          (m) =>
+            r.left < m.right - 0.5 &&
+            r.right > m.left + 0.5 &&
+            r.top < m.r.bottom &&
+            r.bottom > m.r.top,
+        )
+        .map((m) => `${h.dataset.moreHint} hint over ${m.label}`);
+    });
     return {
+      covered,
       scrollLeft: s.scrollLeft,
       cut,
       moreLeft: hidden.includes("left"),
       moreRight: hidden.includes("right"),
-      hints: hints.sort(),
+      hints: hints.map((h) => h.dataset.moreHint).sort(),
     };
   });
 }
@@ -334,6 +363,7 @@ for (const size of [
       expect(v.hints, `${label}: hints at scrollLeft ${v.scrollLeft}`).toEqual(
         want,
       );
+      expect(v.covered, `${label}: hints over items or icons`).toEqual([]);
       return v;
     };
 
