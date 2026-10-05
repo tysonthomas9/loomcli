@@ -40,7 +40,8 @@ type Agent struct {
 	// HistoryPurgeFailedAt is set while a due history purge has failed (an
 	// incomplete expiry); whatever ends the deadline clears it.
 	HistoryPurgeFailedAt *string
-	// Revision counts the agent's state changes; CommitState bumps it.
+	// Revision counts the agent's state and spec changes; CommitState and
+	// CommitSpec bump it.
 	Revision int64
 	// LastSeq is the agent's latest committed event seq, read in the same
 	// statement as the row. Only GetAgent and ListAgents set it.

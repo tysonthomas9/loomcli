@@ -51,19 +51,21 @@ func (e *specEnv) start() *Service {
 	return s
 }
 
-// specAgrees fails unless a1 is at spec version ver on harness h with
-// last request req, and has exactly one of each of kinds, each named by the
-// revision that saved it; it returns a1's history.
-func specAgrees(t *testing.T, e *specEnv, ver int64, h, req string, kinds ...string) []string {
+// specAgrees fails unless a1 is at spec version ver and revision ver-1
+// (each spec change bumps both) with name, harness h, model and last request
+// req, and has exactly one of each of kinds, each named by the revision that
+// saved it; it returns a1's history.
+func specAgrees(t *testing.T, e *specEnv, ver int64, name, h, model, req string, kinds ...string) []string {
 	t.Helper()
 	row, err := e.st.GetAgent(context.Background(), "a1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ids := history(t, e.createEnv, "a1")
-	if row.SpecVersion != ver || row.Harness != h || deref(row.LastRequestID) != req {
-		t.Fatalf("row at v%d on %s req %q, history %v; want v%d on %s req %q", row.SpecVersion, row.Harness,
-			deref(row.LastRequestID), ids, ver, h, req)
+	got := fmt.Sprintf("v%d r%d %s %s %s %s", row.SpecVersion, row.Revision, row.Name, row.Harness, deref(row.Model),
+		deref(row.LastRequestID))
+	if want := fmt.Sprintf("v%d r%d %s %s %s %s", ver, ver-1, name, h, model, req); got != want {
+		t.Fatalf("row %q, history %v; want %q", got, ids, want)
 	}
 	for _, k := range kinds {
 		if want := fmt.Sprintf("a1:%d:%s", row.Revision, k); e.events(t, "a1", k) != 1 || !slices.Contains(ids, want) {
@@ -104,15 +106,12 @@ func TestUpdateCrashBeforeCommit(t *testing.T) {
 	if err := update(t, e, renameReq()); err == nil {
 		t.Fatal("Update did not fail")
 	}
-	specAgrees(t, e, 1, "fa", "")
-	if row, _ := e.st.GetAgent(context.Background(), "a1"); row.Name != "a1" {
-		t.Fatalf("name %q saved without agent.updated", row.Name)
-	}
+	specAgrees(t, e, 1, "a1", "fa", "fake-model", "")
 	lift()
 	if err := update(t, e, renameReq()); err != nil {
 		t.Fatal(err)
 	}
-	retryAddsNothing(t, e, renameReq(), specAgrees(t, e, 2, "fa", "r1", KindAgentUpdated))
+	retryAddsNothing(t, e, renameReq(), specAgrees(t, e, 2, "renamed", "fa", "fake-model", "r1", KindAgentUpdated))
 }
 
 // TestUpdateCrashAfterCommit: Update crashes after its commit, before
@@ -123,7 +122,7 @@ func TestUpdateCrashAfterCommit(t *testing.T) {
 	if !panics(func() { _ = update(t, e, renameReq()) }) {
 		t.Fatal("Update did not crash")
 	}
-	retryAddsNothing(t, e, renameReq(), specAgrees(t, e, 2, "fa", "r1", KindAgentUpdated))
+	retryAddsNothing(t, e, renameReq(), specAgrees(t, e, 2, "renamed", "fa", "fake-model", "r1", KindAgentUpdated))
 }
 
 // TestHarnessSwitchCommitCrashBeforeCommit: harness.changed fails inside
@@ -135,12 +134,12 @@ func TestHarnessSwitchCommitCrashBeforeCommit(t *testing.T) {
 	if err := update(t, e, switchReq("r1", 1, "fb")); err == nil {
 		t.Fatal("switch did not fail")
 	}
-	specAgrees(t, e, 1, "fa", "")
+	specAgrees(t, e, 1, "a1", "fa", "fake-model", "")
 	lift()
 	if err := update(t, e, switchReq("r1", 1, "fb")); err != nil {
 		t.Fatal(err)
 	}
-	retryAddsNothing(t, e, switchReq("r1", 1, "fb"), specAgrees(t, e, 2, "fb", "r1", KindHarnessChanged))
+	retryAddsNothing(t, e, switchReq("r1", 1, "fb"), specAgrees(t, e, 2, "a1", "fb", "fake-model", "r1", KindHarnessChanged))
 }
 
 // TestHarnessSwitchCommitCrashAfterCommit: the switch crashes after its
@@ -152,7 +151,7 @@ func TestHarnessSwitchCommitCrashAfterCommit(t *testing.T) {
 	if !panics(func() { _ = update(t, e, switchReq("r1", 1, "fb")) }) {
 		t.Fatal("switch did not crash")
 	}
-	retryAddsNothing(t, e, switchReq("r1", 1, "fb"), specAgrees(t, e, 2, "fb", "r1", KindHarnessChanged))
+	retryAddsNothing(t, e, switchReq("r1", 1, "fb"), specAgrees(t, e, 2, "a1", "fb", "fake-model", "r1", KindHarnessChanged))
 }
 
 // TestUpdateUnverifiedModelCrashAfterCommitBeforeFanout: an Update to an
@@ -166,7 +165,7 @@ func TestUpdateUnverifiedModelCrashAfterCommitBeforeFanout(t *testing.T) {
 	if !panics(func() { _ = update(t, e, req) }) {
 		t.Fatal("Update did not crash")
 	}
-	ids := specAgrees(t, e, 2, "fa", "r1", KindAgentUpdated, KindModelUnverified)
+	ids := specAgrees(t, e, 2, "a1", "fa", "openai/other", "r1", KindAgentUpdated, KindModelUnverified)
 	s := e.start()
 	sub, err := s.events.Subscribe(ctx, map[string]int64{"a1": 0})
 	if err != nil {
