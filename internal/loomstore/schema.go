@@ -197,4 +197,17 @@ WHERE a.parent_agent_id IS NOT NULL AND a.mode = 'single_task' AND a.outcome IS 
 -- any failed Create showed it. A row below done (5) that shows it retries.
 UPDATE agents SET attention_reason = 'create_retrying'
 WHERE attention_reason = 'create_incomplete' AND create_step < 5 AND deleted_at IS NULL;
+`, `
+-- OR5a: one claim per ask, saved before its Reply. The first Respond to save
+-- it binds its request and payload; state is claimed until the outcome is
+-- known: replied, or unknown (no evidence either way; never replied again).
+CREATE TABLE IF NOT EXISTS agent_ask_claims (
+  agent_id     TEXT NOT NULL REFERENCES agents(agent_id),
+  ask_id       TEXT NOT NULL,
+  request_id   TEXT NOT NULL,
+  payload_hash TEXT NOT NULL,
+  state        TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (agent_id, ask_id)
+);
 `}

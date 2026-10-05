@@ -363,6 +363,11 @@ func (s *Service) settle(ctx context.Context, agentID string) error {
 	}
 	sess, _, err := s.current(ctx, a)
 	gone := err == nil && sess == nil || errors.Is(err, errUnrecorded) // no retry wires the harness or records the session
+	if err == nil && sess != nil {
+		if a, err = s.settleClaims(ctx, a, sess); err != nil {
+			return err
+		}
+	}
 	if a.RunningTurnID == nil {
 		if _, err = s.dispatch(ctx, a); err != nil && gone { // not wake: a failed hand-over is retried
 			err = permanent{err}

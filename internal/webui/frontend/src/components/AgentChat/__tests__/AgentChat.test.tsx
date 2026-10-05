@@ -534,6 +534,21 @@ describe("AgentChat", () => {
     );
   });
 
+  it("hides a card another request already answered", async () => {
+    api.respondToAsk.mockRejectedValue(
+      new ApiError(409, "Conflict", { error: "x", code: "already_answered" }),
+    );
+    await mount(
+      agent({ open_asks: [{ id: "Q1", type: "question", about: "Which?" }] }),
+    );
+    fireEvent.change(screen.getByLabelText("Write custom answer"), {
+      target: { value: "B" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
+    await vi.waitFor(() => expect(screen.queryByTestId("ask-card")).toBeNull());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("answers a question, and hides a card answered elsewhere", async () => {
     api.respondToAsk.mockRejectedValue(
       new ApiError(404, "Not Found", { error: "x", code: "ask_not_found" }),

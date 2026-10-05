@@ -2,6 +2,8 @@ package loomagent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -57,10 +59,31 @@ func (s *Service) openAsks(agentID string) []Ask {
 // unknown, answered or lost ask fails with ask_not_found. A decision is
 // passed as given, never narrowed: a harness that cannot keep allow_always
 // fails the reply, Respond returns that error and the ask stays open.
+//
+// Each ask takes at most one Reply (OR5a): a claim on (agent, ask), saved
+// before the Reply, binds the first Respond's request and answer. A retry
+// of it returns its outcome; the same request with another answer fails
+// with conflict, and another request with already_answered. A Reply that
+// fails before it is sent releases the claim. One that fails after it may
+// have gone out is settled by the native ask: still pending releases the
+// claim, resolved is a success, and no evidence either way is terminal:
+// reply_unknown, shown as Attention, and never sent again.
 func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 	defer s.lockReady(ctx, req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
 	if err != nil {
+		return err
+	}
+	hash := answerHash(req)
+	c, err := s.store.AskClaim(ctx, a.AgentID, req.AskID)
+	if err == nil && c.State == loomstore.ClaimPending { // left by a crash: settle it first
+		if c, err = s.settleLeftClaim(ctx, a, c); err != nil {
+			return err
+		}
+	}
+	if err == nil {
+		return claimResult(c, req.RequestID, hash)
+	} else if !errors.Is(err, loomstore.ErrNotFound) {
 		return err
 	}
 	s.mu.Lock()
@@ -87,15 +110,143 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 	if err != nil || sess == nil {
 		return &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"}
 	}
-	if err := sess.Reply(ctx, req.AskID, r); errors.Is(err, loomharness.ErrQuarantined) {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), quarantineCleanup)
-		defer cancel() // the Reply may have used up ctx; the loss must still be saved
-		return errors.Join(harnessErr(err), s.quarantined(cleanup, a, ask))
-	} else if err != nil {
-		return harnessErr(err)
+	c = loomstore.AskClaim{AgentID: a.AgentID, AskID: req.AskID, RequestID: req.RequestID, PayloadHash: hash}
+	if got, err := s.store.ClaimAsk(ctx, c); err != nil {
+		return err
+	} else if got.RequestID != c.RequestID || got.PayloadHash != hash {
+		return claimResult(got, req.RequestID, hash)
 	}
-	s.setAsk(a.AgentID, Ask{ID: req.AskID}, false)
+	dispatchCrash("claimed")
+	rerr := sess.Reply(ctx, req.AskID, r)
+	dispatchCrash("replied")
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), quarantineCleanup)
+	defer cancel() // the Reply may have used up ctx; its outcome must still be saved
+	return s.replied(cleanup, a, sess, ask, rerr)
+}
+
+// answerHash is the hash of req's answer, which its claim binds.
+func answerHash(req RespondRequest) string {
+	b, _ := json.Marshal([]any{req.Decision, req.Answer, req.Answers})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// claimResult is the outcome a Respond of requestID with answer hash gets
+// from c, the claim already on its ask.
+func claimResult(c loomstore.AskClaim, requestID, hash string) error {
+	switch {
+	case c.RequestID != requestID:
+		return &Error{Code: CodeAlreadyAnswered, Message: c.AskID + " answered by " + c.RequestID}
+	case c.PayloadHash != hash:
+		return &Error{Code: CodeConflict, Message: requestID + " answered " + c.AskID + " differently"}
+	case c.State == loomstore.ClaimReplied:
+		return nil
+	}
+	return &Error{Code: CodeReplyUnknown, Message: c.AskID + ": its answer may not have reached the harness"}
+}
+
+// notSent reports whether a Reply that failed with err was never sent: the
+// harness refused it, or it never left Loom.
+func notSent(err error) bool {
+	return errors.Is(err, loomharness.ErrNotSent) || errors.Is(err, loomharness.ErrBadRequest) ||
+		errors.Is(err, errors.ErrUnsupported) || errors.Is(err, loomharness.ErrQuarantined)
+}
+
+// replied saves the outcome of ask's Reply, which returned rerr, on its claim.
+func (s *Service) replied(ctx context.Context, a loomstore.Agent, sess loomharness.Session, ask Ask, rerr error) error {
+	state := loomstore.ClaimReplied
+	if rerr != nil && notSent(rerr) {
+		state = ""
+	} else if rerr != nil {
+		state, _ = nativeOutcome(ctx, sess, ask.ID) // an unread history is no evidence: unknown
+	}
+	if err := s.store.SettleAskClaim(ctx, a.AgentID, ask.ID, state); err != nil {
+		return errors.Join(harnessErr(rerr), err)
+	}
+	switch {
+	case state == loomstore.ClaimUnknown:
+		return errors.Join(&Error{Code: CodeReplyUnknown, Message: rerr.Error()}, s.replyUnknown(ctx, a))
+	case state == "" && errors.Is(rerr, loomharness.ErrQuarantined):
+		return errors.Join(harnessErr(rerr), s.quarantined(ctx, a, ask))
+	case state == "":
+		return harnessErr(rerr)
+	}
+	s.setAsk(a.AgentID, Ask{ID: ask.ID}, false)
 	return s.syncWaiting(ctx, a)
+}
+
+// nativeOutcome is the claim state sess's native history proves for askID,
+// whose Reply may have gone out: "" (released) while it is still pending,
+// replied once it is resolved, and unknown with no evidence either way. A
+// failed history read returns unknown and its error.
+func nativeOutcome(ctx context.Context, sess loomharness.Session, askID string) (string, error) {
+	state := loomstore.ClaimUnknown
+	for after := ""; ; {
+		page, err := sess.Messages(ctx, after, 100)
+		if err != nil {
+			return loomstore.ClaimUnknown, err
+		}
+		for _, e := range page.Events {
+			switch {
+			case e.AskID != askID:
+			case e.Type == loomharness.EventAskOpened:
+				state = ""
+			case e.Type == loomharness.EventAskResolved:
+				state = loomstore.ClaimReplied
+			default:
+				state = loomstore.ClaimUnknown
+			}
+		}
+		if after = page.Next; after == "" {
+			return state, nil
+		}
+	}
+}
+
+// replyUnknown shows reply_unknown on a unless it already shows Attention.
+func (s *Service) replyUnknown(ctx context.Context, a loomstore.Agent) error {
+	if a.AttentionReason != nil {
+		return nil
+	}
+	_, err := s.raiseAttention(ctx, a, AttentionReplyUnknown)
+	return err
+}
+
+// settleClaims settles each claim a crash left pending on a (its Reply's
+// outcome unsaved) by the native ask, never by replying again. A claim
+// whose history cannot be read stays pending, and the error means retry.
+func (s *Service) settleClaims(ctx context.Context, a loomstore.Agent, sess loomharness.Session) (loomstore.Agent, error) {
+	claims, err := s.store.PendingAskClaims(ctx, a.AgentID)
+	for _, c := range claims {
+		if err != nil {
+			break
+		}
+		var state string
+		if state, err = nativeOutcome(ctx, sess, c.AskID); err != nil {
+			break
+		}
+		if err = s.store.SettleAskClaim(ctx, a.AgentID, c.AskID, state); err == nil && state == loomstore.ClaimUnknown && a.AttentionReason == nil {
+			a, err = s.raiseAttention(ctx, a, AttentionReplyUnknown)
+		}
+	}
+	return a, err
+}
+
+// settleLeftClaim settles c, a claim a crash left pending that start-up has
+// not yet settled, and returns it as it then is (ErrNotFound: released).
+func (s *Service) settleLeftClaim(ctx context.Context, a loomstore.Agent, c loomstore.AskClaim) (loomstore.AskClaim, error) {
+	a, err := s.resumeOnce(ctx, a)
+	if err != nil {
+		return c, err
+	}
+	sess, _, err := s.current(ctx, a)
+	if err != nil || sess == nil {
+		return c, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"}
+	}
+	if _, err := s.settleClaims(ctx, a, sess); err != nil {
+		return c, err
+	}
+	return s.store.AskClaim(ctx, a.AgentID, c.AskID)
 }
 
 // quarantineCleanup bounds saving a quarantined ask's loss, which runs even

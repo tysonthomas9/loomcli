@@ -19,6 +19,7 @@ var dispatchCrash = func(string) {}
 const (
 	AttentionHarnessUnavailable = "harness_unavailable"
 	AttentionDeliveryUnknown    = "delivery_unknown"
+	AttentionReplyUnknown       = "reply_unknown" // an answer's Reply may not have landed
 )
 
 // defaultInputKey is the native input key when ServiceConfig.InputKey is nil:

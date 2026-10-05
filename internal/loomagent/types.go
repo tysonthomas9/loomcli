@@ -29,6 +29,12 @@ const (
 	CodeHistoryExpired      Code = "history_expired"
 	CodeCursorExpired       Code = "cursor_expired"
 	CodeWorktreeTaken       Code = "worktree_taken"
+	// OR5a: a Respond's claim on its ask. conflict: the same request with
+	// another answer; already_answered: another request claimed the ask;
+	// reply_unknown: its Reply may or may not have landed, and is never sent again.
+	CodeConflict        Code = "conflict"
+	CodeAlreadyAnswered Code = "already_answered"
+	CodeReplyUnknown    Code = "reply_unknown"
 )
 
 // Error is a loomagent error. Allowed lists the accepted values for

@@ -135,7 +135,7 @@ func TestGetOpenAsksIntegration(t *testing.T) {
 	if err := s1.Respond(ctx, RespondRequest{AgentID: alpha.AgentID, AskID: "a1", Decision: "allow_once"}); err != nil {
 		t.Fatal(err)
 	}
-	wantCode(t, s1.Respond(ctx, RespondRequest{AgentID: alpha.AgentID, AskID: "a1", Decision: "allow_once"}), CodeAskNotFound)
+	wantCode(t, s1.Respond(ctx, RespondRequest{Envelope: Envelope{RequestID: "r2"}, AgentID: alpha.AgentID, AskID: "a1", Decision: "allow_once"}), CodeAlreadyAnswered)
 	drained(t, s1, "the question opens and alpha waits on input", func() bool {
 		a := s1.get(t, alpha.AgentID)
 		return slices.Equal(askIDs(t, s1, alpha.AgentID), []string{"q1:question"}) && a.State == StateWaiting && deref(a.WaitingOn) == "input"

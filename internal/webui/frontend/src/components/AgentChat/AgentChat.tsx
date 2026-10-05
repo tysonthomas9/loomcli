@@ -395,6 +395,8 @@ export function daysLeftText(archivedAt: string, now = Date.now()): string {
 const ATTENTION: Record<string, string> = {
   harness_unavailable: "the harness is unavailable.",
   delivery_unknown: "a message may not have been delivered.",
+  reply_unknown:
+    "an answer may not have reached the agent. Stop the turn to continue.",
   history_too_large: "the history is too large to load in full.",
   session_missing: "the native session is missing.",
   create_incomplete: "creating the agent did not finish.",

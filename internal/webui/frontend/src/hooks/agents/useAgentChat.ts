@@ -216,14 +216,17 @@ export function useAgentChat(
     [write, workspaceId, agentId],
   );
 
-  // An answered ask hides at once; ask_not_found means it was answered
-  // elsewhere or lost, so it hides too. Other errors re-enable the card.
+  // An answered ask hides at once; ask_not_found or already_answered means
+  // it was answered elsewhere or lost, so it hides too. Other errors
+  // re-enable the card.
   const respond = useCallback(
     async (askId: string, body: RespondBody) => {
       await write(() =>
         respondToAsk(workspaceId, agentId, askId, body, newRequestId()).catch(
           (err) => {
-            if (errorCode(err) !== "ask_not_found") throw err;
+            const code = errorCode(err);
+            if (code !== "ask_not_found" && code !== "already_answered")
+              throw err;
           },
         ),
       );
