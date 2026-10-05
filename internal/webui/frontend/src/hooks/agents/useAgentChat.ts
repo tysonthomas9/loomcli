@@ -99,7 +99,10 @@ export function useAgentChat(
   const refresh = useCallback(() => {
     getAgent(workspaceId, agentId)
       .then(setAgent)
-      .catch((err) => setError(message(err)));
+      .catch((err) => {
+        setUnsaved(null);
+        setError(message(err));
+      });
   }, [workspaceId, agentId]);
 
   useEffect(() => {

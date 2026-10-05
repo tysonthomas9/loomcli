@@ -822,15 +822,31 @@ describe("AgentChat lifecycle (1.8b)", () => {
     );
     fireEvent.click(screen.getByTestId("agent-delete"));
     fireEvent.click(screen.getByTestId("agent-delete-confirm"));
-    const anyway = await screen.findByTestId("agent-delete-anyway");
+    await screen.findByTestId("agent-delete-anyway");
     expect(screen.getByRole("alert")).toHaveTextContent("README.md");
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Delete anyway loses these changes.",
     );
+    // A later, unrelated error drops the button and its stale fingerprint.
+    api.getAgent.mockRejectedValueOnce(new Error("offline"));
+    deliver(ev("agent.state_changed"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("agent-delete-anyway")).toBeNull(),
+    );
+    api.deleteAgent.mockRejectedValueOnce(
+      new ApiError(409, "Conflict", {
+        error: "uncommitted changes in /wt/a1",
+        code: "unsaved_work",
+        paths: ["README.md"],
+        fingerprint: "f1",
+      }),
+    );
+    fireEvent.click(screen.getByTestId("agent-delete"));
+    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
     api.deleteAgent.mockResolvedValueOnce(undefined);
-    fireEvent.click(anyway);
+    fireEvent.click(await screen.findByTestId("agent-delete-anyway"));
     expect(await screen.findByTestId("where")).toHaveTextContent("/ws/w1/home");
-    expect(api.deleteAgent).toHaveBeenCalledTimes(2);
+    expect(api.deleteAgent).toHaveBeenCalledTimes(3);
     expect(api.deleteAgent).toHaveBeenLastCalledWith(
       "w1",
       "a1",
