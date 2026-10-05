@@ -321,6 +321,8 @@
 /* A user's pill sits just left of the bubble, top-aligned, over no text (UI7). */
 .userBubble > .messageActions {
   right: calc(100% + 4px);
+  /* Its own width: placed off the bubble's edge it would shrink and squeeze copy. */
+  width: max-content;
 }
 
 .messageTime {

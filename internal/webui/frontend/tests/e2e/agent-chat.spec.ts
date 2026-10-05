@@ -553,6 +553,15 @@ test("a user's hover pill sits left of the bubble, over none of it (UI7)", async
     const p = (await pill.boundingBox())!;
     const b = (await bubble.boundingBox())!;
     expect(b, `${name}: no layout shift`).toEqual(before);
+    // The pill holds its whole copy button, not just the time.
+    const copy = pill.getByRole("button", { name: "Copy your message" });
+    await expect(copy).toBeVisible();
+    const c = (await copy.boundingBox())!;
+    expect(c.width, `${name}: copy button width`).toBeGreaterThanOrEqual(14);
+    expect(c.x, `${name}: copy inside the pill`).toBeGreaterThanOrEqual(p.x);
+    expect(c.x + c.width, `${name}: copy inside the pill`).toBeLessThanOrEqual(
+      p.x + p.width,
+    );
     // Left of the bubble and top-aligned with it, so the boxes never meet.
     expect(p.x + p.width, `${name}: pill right edge`).toBeLessThanOrEqual(b.x);
     expect(Math.abs(p.y - b.y), `${name}: top-aligned`).toBeLessThanOrEqual(1);
