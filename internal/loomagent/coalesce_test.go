@@ -3,11 +3,14 @@ package loomagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
@@ -212,4 +215,53 @@ func TestCoalesceUserMessageGoesAlone(t *testing.T) {
 	}
 	finishTurn(t, s, lead.AgentID, "completed")
 	oneInput(t, e, s, lead, ref, 3, "c1", "c2")
+}
+
+// hasInputOnce is a harness whose HasInput answers truly on its first call
+// and fails on the second.
+type hasInputOnce struct {
+	loomharness.Harness
+	calls *atomic.Int32
+}
+
+func (h hasInputOnce) Session(ref loomharness.NativeRef) loomharness.Session {
+	return hasInputOnceSession{h.Harness.Session(ref), h.calls}
+}
+
+type hasInputOnceSession struct {
+	loomharness.Session
+	calls *atomic.Int32
+}
+
+func (x hasInputOnceSession) HasInput(ctx context.Context, key string) (loomharness.Landed, error) {
+	if x.calls.Add(1) == 2 {
+		return loomharness.LandedUnknown, errors.New("history read failed")
+	}
+	return x.Session.HasInput(ctx, key)
+}
+
+// TestCoalesceLostInputSettledOnce: a batched input of two records never
+// landed before the harness crashed. Settling the lost turn asks about that
+// one input once, so both records go back in line together and are handed
+// over again as one input, not split between handed and waiting.
+func TestCoalesceLostInputSettledOnce(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	lead, ref := leadWithKids(t, e, s, "c1", "c2")
+	fh.Script(lead.AgentID, fake.Turn{Delivery: loomharness.LandedNotFound})
+	finishKids(t, s, "c1", "c2")
+	dispatchOK(t, s, lead.AgentID)
+	if err := fh.Restart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.harnesses["opencode"] = hasInputOnce{e.h, &atomic.Int32{}}
+	if err := s.settle(ctx, lead.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if r := deref(s.get(t, lead.AgentID).AttentionReason); r != "" {
+		t.Fatalf("Attention %q; want the input settled as never landed", r)
+	}
+	oneInput(t, e, s, lead, ref, 1, "c1", "c2")
 }

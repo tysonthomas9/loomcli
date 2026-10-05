@@ -425,12 +425,17 @@ func (s *Service) endLostTurn(ctx context.Context, a loomstore.Agent, sess loomh
 	if err != nil {
 		return err
 	}
-	requeued := false
+	requeued, asked := false, map[string]loomharness.Landed{} // one input may span slots (OR4c): ask once per key
 	for _, sl := range slots {
 		if sl.State != loomstore.SlotHanded {
 			continue
 		}
-		landed, err := sess.HasInput(ctx, deref(sl.NativeKey))
+		landed, ok := asked[deref(sl.NativeKey)]
+		var err error
+		if !ok {
+			landed, err = sess.HasInput(ctx, deref(sl.NativeKey))
+			asked[deref(sl.NativeKey)] = landed
+		}
 		switch {
 		case err != nil || landed == loomharness.LandedUnknown:
 			if r := deref(a.AttentionReason); r == "" || r == AttentionHarnessUnavailable { // it replaces a failed settle's
