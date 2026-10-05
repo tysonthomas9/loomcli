@@ -236,3 +236,102 @@ for (const size of [
       }
   });
 }
+
+/**
+ * Where the switcher scroller sits, which items it shows whole or not at all,
+ * which it cuts, and which side shows the "more" hint (MB1b).
+ */
+function switcherView(page: Page) {
+  return page.evaluate(() => {
+    const s = document.querySelector<HTMLElement>(
+      'nav[aria-label="Primary"] [aria-label="Workspace selector"]',
+    )!;
+    const w = s.getBoundingClientRect();
+    const items = Array.from(s.querySelectorAll("button"));
+    const cut: string[] = [];
+    const hidden: ("left" | "right")[] = [];
+    for (const b of items) {
+      const r = b.getBoundingClientRect();
+      const shown = Math.min(r.right, w.right) - Math.max(r.left, w.left);
+      if (shown <= 0.5) hidden.push(r.right <= w.left + 0.5 ? "left" : "right");
+      else if (shown < r.width - 0.5)
+        cut.push(`${b.getAttribute("aria-label")} shows ${shown.toFixed(1)}px`);
+    }
+    // A hint is a visible element marked data-more-hint.
+    const hints = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        'nav[aria-label="Primary"] [data-more-hint]',
+      ),
+    )
+      .filter((h) => {
+        const cs = getComputedStyle(h);
+        const r = h.getBoundingClientRect();
+        return (
+          cs.visibility !== "hidden" &&
+          Number(cs.opacity) > 0.5 &&
+          r.width > 0 &&
+          r.height > 0
+        );
+      })
+      .map((h) => h.dataset.moreHint);
+    return {
+      scrollLeft: s.scrollLeft,
+      cut,
+      moreLeft: hidden.includes("left"),
+      moreRight: hidden.includes("right"),
+      hints: hints.sort(),
+    };
+  });
+}
+
+for (const size of [
+  { width: 390, height: 844 },
+  { width: 557, height: 844 },
+]) {
+  test(`switcher at ${size.width}px: whole items only, with a hint where more is off-screen`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await open(page);
+    const switcher = page
+      .locator('nav[aria-label="Primary"]')
+      .getByRole("region", { name: "Workspace selector" });
+    // As opened: the open workspace in view (MB1B_SHOTS=<dir> saves it).
+    const shots = process.env.MB1B_SHOTS;
+    if (shots)
+      for (const theme of ["light", "dark"]) {
+        await page.evaluate((t) => {
+          document.documentElement.dataset.theme = t;
+        }, theme);
+        await page.screenshot({
+          path: `${shots}/mb1b-${size.width}-${theme}.png`,
+        });
+      }
+
+    const max = await switcher.evaluate((s) => s.scrollWidth - s.clientWidth);
+
+    // Wherever a scroll leaves it (odd offsets included), once it settles no
+    // avatar or Add is partly shown, and each side with hidden items says so.
+    for (let x = 0; x <= max + 13; x += 13) {
+      await switcher.evaluate((s, left) => s.scrollTo({ left }), x);
+      await expect
+        .poll(async () => {
+          const a = await switcherView(page);
+          await page.waitForTimeout(150);
+          const b = await switcherView(page);
+          return a.scrollLeft === b.scrollLeft ? b.cut : ["still scrolling"];
+        }, `scrolled to ${x}`)
+        .toEqual([]);
+      const v = await switcherView(page);
+      const want = [
+        ...(v.moreLeft ? ["left"] : []),
+        ...(v.moreRight ? ["right"] : []),
+      ];
+      expect(v.hints, `hints at scrollLeft ${v.scrollLeft}`).toEqual(want);
+    }
+
+    // On a phone, some workspace is off-screen at some point, so the hint is
+    // actually exercised there.
+    if (size.width === 390) expect(max).toBeGreaterThan(0);
+  });
+}
