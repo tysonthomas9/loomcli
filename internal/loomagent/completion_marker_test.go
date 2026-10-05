@@ -485,3 +485,41 @@ func TestCompletionChildDeletedDuringDelivery(t *testing.T) {
 		t.Fatalf("records = %+v; want one with no head and child_deleted", got)
 	}
 }
+
+// TestCompletionKeepsMarkerBranch: a Workspace.Status that reports no
+// branch (the working copy is gone) keeps the branch the marker saved.
+func TestCompletionKeepsMarkerBranch(t *testing.T) {
+	c := childOf("c1", "L")
+	c.WorktreePath, c.Branch = sp("/wt/c1"), sp("loom/agent/c1")
+	s := markerService(t, ServiceConfig{Workspace: &headWorkspace{}}, dbPath(t), busy("L", "persistent", StateActive), c)
+	endAttempt(t, s, "c1", "completed")
+	if got := completions(t, s, "L"); len(got) != 1 || got[0].Branch != "loom/agent/c1" {
+		t.Fatalf("records = %+v; want the marker's branch", got)
+	}
+}
+
+// TestCompletionBackfillAfterReopen: a marker the upgrade saved is
+// delivered after its child began its next attempt; the record quotes no
+// reply of that later attempt.
+func TestCompletionBackfillAfterReopen(t *testing.T) {
+	ctx := context.Background()
+	path := dbPath(t)
+	s := markerService(t, ServiceConfig{}, path, busy("L", "persistent", StateActive), childOf("c1", "L"))
+	finishTurn(t, s, "c1", "completed")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE agent_completion_markers SET summary = NULL, result = NULL`); err != nil { // as the upgrade saves it
+		t.Fatal(err)
+	}
+	nextAttempt(t, s, "c1")
+	if err := s.appendEvent(ctx, "c1", "item.completed", "item:new", map[string]string{"itemKind": "message", "text": "attempt 2 reply"}); err != nil {
+		t.Fatal(err)
+	}
+	s.recordCompletions(ctx)
+	if got := completions(t, s, "L"); len(got) != 1 || got[0].Attempt != 1 || got[0].Summary != "" || got[0].Result != "" {
+		t.Fatalf("records = %+v; want attempt 1's with no later reply", got)
+	}
+}

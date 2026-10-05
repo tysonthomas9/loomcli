@@ -348,26 +348,15 @@ func (s *Service) recordCompletion(ctx context.Context, m loomstore.CompletionMa
 		read = false
 	case err != nil:
 		return err
-	case m.Backfilled: // saved by the upgrade: read what the child's history holds
+	case m.Backfilled && a.Attempt == m.Attempt: // saved by the upgrade: read what the child's history holds for it
 		if err := s.readResult(ctx, &m); err != nil {
 			return err
 		}
 		rec.Summary, rec.Result = m.Summary, m.Result
 	}
-	if read && a.WorktreePath != nil && s.workspace != nil { // a failed Status saves nothing, unless retrying cannot help
-		repo, err := s.repoPath(ctx, a.Repo)
-		if err != nil {
+	if read {
+		if err := s.readHead(ctx, a, &rec); err != nil {
 			return err
-		}
-		st, err := s.workspace.Status(ctx, WorkspaceSpec{Key: a.AgentID, Repo: repo, BaseRef: deref(a.BaseRef),
-			Branch: deref(a.Branch), Detached: a.Branch == nil})
-		switch {
-		case errors.Is(err, ErrWorkspaceNotOwned): // no retry clears it: tell the parent without a head
-			slog.Warn("loomagent: task_completed without head; working copy not the agent's", "agent", a.AgentID, "error", err)
-		case err != nil:
-			return fmt.Errorf("loomagent: task_completed workspace status: %w", err)
-		default:
-			rec.Branch, rec.Head = st.Branch, st.HEAD
 		}
 	}
 	event := func(childDeleted bool) (loomstore.Event, error) {
@@ -384,6 +373,33 @@ func (s *Service) recordCompletion(ctx context.Context, m loomstore.CompletionMa
 			}
 		})
 	return err
+}
+
+// readHead sets rec's head, and its branch when the port reports one, from
+// a's working copy (R32). A failed Status saves nothing, unless retrying
+// cannot help.
+func (s *Service) readHead(ctx context.Context, a loomstore.Agent, rec *TaskCompleted) error {
+	if a.WorktreePath == nil || s.workspace == nil {
+		return nil
+	}
+	repo, err := s.repoPath(ctx, a.Repo)
+	if err != nil {
+		return err
+	}
+	st, err := s.workspace.Status(ctx, WorkspaceSpec{Key: a.AgentID, Repo: repo, BaseRef: deref(a.BaseRef),
+		Branch: deref(a.Branch), Detached: a.Branch == nil})
+	switch {
+	case errors.Is(err, ErrWorkspaceNotOwned): // no retry clears it: tell the parent without a head
+		slog.Warn("loomagent: task_completed without head; working copy not the agent's", "agent", a.AgentID, "error", err)
+	case err != nil:
+		return fmt.Errorf("loomagent: task_completed workspace status: %w", err)
+	default:
+		rec.Head = st.HEAD
+		if st.Branch != "" { // none when the working copy is gone: keep the marker's
+			rec.Branch = st.Branch
+		}
+	}
+	return nil
 }
 
 // tryRecordCompletion is recordCompletion that logs a failure and marks the
