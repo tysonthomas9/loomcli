@@ -28,6 +28,9 @@ type AgentInfo struct {
 
 func info(a loomstore.Agent) AgentInfo {
 	a.HarnessSessionID, a.HarnessSessionRoot = nil, nil
+	if a.DeletedAt != nil {
+		a.State = StateDeleted
+	}
 	cfg, _ := loadConfig(a)
 	return AgentInfo{Agent: a, Compute: "local", ModelUnverified: cfg.ModelUnverified}
 }

@@ -1770,22 +1770,24 @@ type AgentV1 struct {
 	Model   *string `json:"model"`
 
 	// ModelUnverified The harness's model list did not include the model when it was chosen; it was passed through and the harness decides whether it runs (see the model.unverified event).
-	ModelUnverified bool                    `json:"model_unverified"`
-	Name            string                  `json:"name"`
-	OpenAsks        []AgentV1Ask            `json:"open_asks"`
-	Outcome         *string                 `json:"outcome"`
-	OwnerId         string                  `json:"owner_id"`
-	OwnerKind       string                  `json:"owner_kind"`
-	ParentAgentId   *string                 `json:"parent_agent_id"`
-	Preset          string                  `json:"preset"`
-	PresetVersion   string                  `json:"preset_version"`
-	ProfileKey      string                  `json:"profile_key"`
-	Repo            string                  `json:"repo"`
-	RoleKind        string                  `json:"role_kind"`
-	RootAgentId     *string                 `json:"root_agent_id"`
-	RunningTurnId   *string                 `json:"running_turn_id"`
-	SpecJson        string                  `json:"spec_json"`
-	SpecVersion     int64                   `json:"spec_version"`
+	ModelUnverified bool         `json:"model_unverified"`
+	Name            string       `json:"name"`
+	OpenAsks        []AgentV1Ask `json:"open_asks"`
+	Outcome         *string      `json:"outcome"`
+	OwnerId         string       `json:"owner_id"`
+	OwnerKind       string       `json:"owner_kind"`
+	ParentAgentId   *string      `json:"parent_agent_id"`
+	Preset          string       `json:"preset"`
+	PresetVersion   string       `json:"preset_version"`
+	ProfileKey      string       `json:"profile_key"`
+	Repo            string       `json:"repo"`
+	RoleKind        string       `json:"role_kind"`
+	RootAgentId     *string      `json:"root_agent_id"`
+	RunningTurnId   *string      `json:"running_turn_id"`
+	SpecJson        string       `json:"spec_json"`
+	SpecVersion     int64        `json:"spec_version"`
+
+	// State creating, idle, active, waiting, stopping, finished or archived; deleted once deleted_at is set.
 	State           string                  `json:"state"`
 	StateReason     *string                 `json:"state_reason"`
 	SubjectId       *string                 `json:"subject_id"`

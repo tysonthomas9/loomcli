@@ -22,6 +22,7 @@ const (
 	StateStopping = "stopping"
 	StateFinished = "finished"
 	StateArchived = "archived"
+	StateDeleted  = "deleted" // read only: Get and List show a tombstoned agent so; its row keeps the state Delete left
 )
 
 // transitions is the one state machine: the states each state may move to.
