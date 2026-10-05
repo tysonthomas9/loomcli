@@ -391,6 +391,18 @@
     right: 0;
   }
 
+  /* No room beside a one-item window (smallest phones): the chevrons sit just
+     outside it, in the blank edge of the neighbouring buttons. */
+  @container (width < 62px) {
+    .moreHint[data-more-hint="left"] {
+      left: -12px;
+    }
+
+    .moreHint[data-more-hint="right"] {
+      right: -12px;
+    }
+  }
+
   .workspaceList {
     flex-direction: row;
     flex-shrink: 0;
