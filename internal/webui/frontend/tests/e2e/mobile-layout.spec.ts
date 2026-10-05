@@ -7,6 +7,8 @@
 import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 
+// MB1_SHOTS=<dir> also saves light and dark screenshots at each width.
+const SHOTS = process.env.MB1_SHOTS;
 const NAME = "slack-researcher";
 // The open workspace (w1) is last, so on a phone it starts off the visible
 // part of the switcher and has to be scrolled into view.
@@ -222,5 +224,15 @@ for (const size of [
       }),
     );
     expect(covered, "composer controls under something").toEqual([]);
+
+    if (SHOTS)
+      for (const theme of ["light", "dark"]) {
+        await page.evaluate((t) => {
+          document.documentElement.dataset.theme = t;
+        }, theme);
+        await page.screenshot({
+          path: `${SHOTS}/mb1-${size.width}-${theme}.png`,
+        });
+      }
   });
 }
