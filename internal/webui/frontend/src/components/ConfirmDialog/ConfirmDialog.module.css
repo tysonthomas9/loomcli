@@ -76,6 +76,15 @@
   background: var(--color-danger);
 }
 
-.confirmDanger:hover {
+/* Same specificity as .confirmButton:hover and later, so a danger confirm
+   never turns the primary blue on hover or keyboard focus. */
+.confirmDanger:hover,
+.confirmDanger:focus-visible {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
   opacity: 0.9;
+}
+
+.confirmDanger:focus-visible {
+  outline-color: var(--color-danger);
 }

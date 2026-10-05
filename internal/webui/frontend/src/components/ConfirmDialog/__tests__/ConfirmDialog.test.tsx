@@ -9,6 +9,8 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { KeyboardShortcutProvider } from "@/hooks";
 
@@ -271,5 +273,43 @@ describe("ConfirmDialog", () => {
         "button",
       );
     });
+  });
+});
+
+// jsdom does not cascade CSS modules, so this reads the rules (SB4).
+describe("ConfirmDialog danger button CSS", () => {
+  // Comments out, then each rule as its selectors and declarations, in order.
+  const rules = readFileSync(
+    resolve(__dirname, "../ConfirmDialog.module.css"),
+    "utf8",
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("}")
+    .map((r) => r.split("{"))
+    .filter((r) => r.length === 2)
+    .map(([sel, body], i) => ({
+      i,
+      selectors: sel!.split(",").map((x) => x.trim()),
+      // The last background declaration in a rule is the one that applies.
+      background: [...body!.matchAll(/(?:^|;)\s*background:\s*([^;]+)/g)]
+        .at(-1)?.[1]
+        ?.trim(),
+    }));
+  // The last rule for a selector that sets a background wins the cascade.
+  const winner = (selector: string) =>
+    rules.filter((r) => r.selectors.includes(selector) && r.background).at(-1);
+
+  it("keeps the danger colour on hover and keyboard focus, never the primary blue", () => {
+    const primaryHover = winner(".confirmButton:hover")!;
+    expect(primaryHover.background).toBe("var(--color-primary-hover)");
+    for (const state of [
+      ".confirmDanger:hover",
+      ".confirmDanger:focus-visible",
+    ]) {
+      const danger = winner(state);
+      expect(danger?.background, state).toBe("var(--color-danger)");
+      // Same specificity as .confirmButton:hover, so it must come later.
+      expect(danger!.i, state).toBeGreaterThan(primaryHover.i);
+    }
   });
 });

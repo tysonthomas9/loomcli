@@ -179,10 +179,13 @@ describe("AgentList", () => {
       const text = row(name)!.textContent ?? "";
       expect(text).not.toMatch(/opencode|claude|idle|active/);
     }
-    expect(stream().opts).toMatchObject({
-      agents: ["kid", "lead", "other"],
-      live: true,
-    });
+    // The roster opens its stream in an effect after the rows render.
+    await waitFor(() =>
+      expect(stream().opts).toMatchObject({
+        agents: ["kid", "lead", "other"],
+        live: true,
+      }),
+    );
   });
 
   it("shares the roster with chat child cards over the one stream", async () => {
