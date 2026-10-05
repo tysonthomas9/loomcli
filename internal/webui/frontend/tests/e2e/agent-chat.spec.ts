@@ -598,3 +598,47 @@ test("a user's hover pill sits left of the bubble, over none of it (UI7)", async
     b.x,
   );
 });
+
+test.describe("in a locale with a long time format", () => {
+  test.use({ locale: "as-IN" });
+
+  test("a user's pill stays whole in its row, the time cut short before copy (UI7)", async ({
+    page,
+  }) => {
+    const long =
+      "Please run the API reviewer and the test runner on the branch, then report the result here with any failures and the files they touched.";
+    await open(
+      page,
+      mock({
+        events: [
+          {
+            ...ev("message.delivered", { sender: "user:local", text: long }),
+            created_at: "2026-10-04T12:59:00Z",
+          },
+        ],
+      }),
+    );
+    const row = transcript(page)
+      .locator("li")
+      .filter({ hasText: "Please run" });
+    await row.hover();
+    const pill = row.getByTestId("message-actions");
+    const copy = pill.getByRole("button", { name: "Copy your message" });
+    await expect(copy).toBeVisible();
+    const p = (await pill.boundingBox())!;
+    const r = (await row.boundingBox())!;
+    const b = (await row.locator("[class*=userBubble]").boundingBox())!;
+    const c = (await copy.boundingBox())!;
+    expect(p.x, "not clipped by its row").toBeGreaterThanOrEqual(r.x);
+    expect(p.x + p.width, "left of the bubble").toBeLessThanOrEqual(b.x);
+    expect(c.width, "copy whole").toBeGreaterThanOrEqual(14);
+    expect(c.x + c.width, "copy inside the pill").toBeLessThanOrEqual(
+      p.x + p.width,
+    );
+    if (SHOTS)
+      await page.screenshot({
+        path: `${SHOTS}/ui7-as-IN.png`,
+        animations: "disabled",
+      });
+  });
+});

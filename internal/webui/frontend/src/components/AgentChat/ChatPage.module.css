@@ -326,10 +326,20 @@
   right: calc(100% + 4px);
   /* Its own width: placed off the bubble's edge it would shrink and squeeze copy. */
   width: max-content;
+  /* Never wider than the room the bubble leaves, so the row never clips it. */
+  max-width: calc(6.5rem - 4px);
+}
+
+/* Actions keep their size; only the time gives way, cut short with "…". */
+.messageActions > button {
+  flex-shrink: 0;
 }
 
 .messageTime {
+  min-width: 0;
+  overflow: hidden;
   color: var(--color-text-secondary);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
