@@ -112,18 +112,21 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 }
 
 // sendInput is what decideSend decides from: the agent's row and slots, the
-// request (its Actor set), the request's earlier receipt if any, and for
-// Delivery interrupt whether a running turn was stopped.
+// request (its Actor set), the request's earlier receipt if any, for
+// Delivery interrupt whether a running turn was stopped, and the clock its
+// events are stamped with.
 type sendInput struct {
 	Row         loomstore.Agent
 	Slots       []loomstore.Slot
 	Req         SendRequest
 	Prior       *loomstore.Receipt
 	Interrupted *bool
+	Now         time.Time
 }
 
 // sendDecision is a Send's decision. Retry: the request's earlier receipt
-// answers it. Otherwise Row is the agent after the Send, Events are the
+// answers it. Otherwise Row is the agent after the Send (but for the
+// columns the store sets: updated_at, attempt_after_seq), Events are the
 // events it saves with Slot, its slot change (without the event rows and
 // result, which the shell adds).
 type sendDecision struct {
@@ -133,7 +136,8 @@ type sendDecision struct {
 	Slot   loomstore.SlotSend
 }
 
-// decideSend is Send's decision, pure: no store or harness call. A retry
+// decideSend is Send's decision, pure: it calls no store or harness, and
+// its result depends only on in (events are stamped in.Now). A retry
 // is answered before any state check; a deleted, archived, stopping or
 // still-creating agent refuses it, and so does a sender whose previous
 // message is being handed over. Otherwise the message fills or replaces
@@ -159,41 +163,51 @@ func decideSend(in sendInput) (sendDecision, error) {
 	reopen := a.State == StateFinished
 	if reopen {
 		d.Row.State, d.Row.Attempt, d.Row.Outcome, d.Row.FinishedAt = StateActive, a.Attempt+1, nil, nil
+		d.Row.HistoryPurgeFailedAt, d.Row.Revision = nil, a.Revision+1
 		d.Events = changeEvents(a, d.Row)
 	}
 	d.Events = append(d.Events, Event{AgentID: a.AgentID, EventID: a.AgentID + ":send:" + req.RequestID + ":" + EventWaiting,
-		Type: EventWaiting, Reason: sender, Time: time.Now()})
+		Type: EventWaiting, Reason: sender})
+	for i := range d.Events {
+		d.Events[i].Time = in.Now
+	}
 	d.Slot = loomstore.SlotSend{AgentID: a.AgentID, Sender: sender, RequestID: req.RequestID, Body: req.Text,
 		Source: req.Source, Reopen: reopen, First: in.Interrupted != nil && *in.Interrupted}
 	return d, nil
 }
 
-// commitSend decides req on a and its slots (decideSend), then saves the
-// slot change, receipt and events in one transaction under the event lane
-// and publishes the events. retry reports that req already had a receipt:
-// Send answered a retry before, so this is one that raced it.
+// commitSend decides req on a, its slots and req's receipt (decideSend),
+// then saves the slot change, receipt and events in one transaction under
+// the event lane and publishes the events. retry reports that req already
+// had a receipt: Send answered a retry before the lock, so this is one that
+// raced it (the store's transaction checks again).
 func (s *Service) commitSend(ctx context.Context, a loomstore.Agent, req SendRequest,
 	interrupted *bool) (rec loomstore.Receipt, retry bool, err error) {
-	slots, err := s.store.Slots(ctx, a.AgentID)
-	if err != nil {
+	in := sendInput{Row: a, Req: req, Interrupted: interrupted, Now: time.Now()}
+	if rec, err = s.store.GetReceipt(ctx, a.AgentID, req.RequestID); err == nil {
+		in.Prior = &rec
+	} else if !errors.Is(err, loomstore.ErrNotFound) {
 		return rec, false, err
 	}
-	d, err := decideSend(sendInput{Row: a, Slots: slots, Req: req, Interrupted: interrupted})
-	if err != nil {
+	if in.Slots, err = s.store.Slots(ctx, a.AgentID); err != nil {
 		return rec, false, err
+	}
+	d, err := decideSend(in)
+	if err != nil || d.Retry {
+		return rec, d.Retry, err
 	}
 	rows, err := eventRows(d.Events)
 	if err != nil {
 		return rec, false, err
 	}
-	in := d.Slot
-	in.Events, in.Result = rows, func(replaced bool) (string, error) {
-		b, err := json.Marshal(SendResult{MessageID: messageID(a.AgentID, in.Sender, in.RequestID),
+	slot := d.Slot
+	slot.Events, slot.Result = rows, func(replaced bool) (string, error) {
+		b, err := json.Marshal(SendResult{MessageID: messageID(a.AgentID, slot.Sender, slot.RequestID),
 			State: loomstore.SlotWaiting, Replaced: replaced, Interrupted: interrupted})
 		return string(b), err
 	}
 	_, err = s.events.commit(func() (saved []loomstore.Event, err error) {
-		rec, saved, retry, err = s.store.SendEvents(ctx, in)
+		rec, saved, retry, err = s.store.SendEvents(ctx, slot)
 		return saved, err
 	}, s.busPublish(d.Events))
 	return rec, retry, err
