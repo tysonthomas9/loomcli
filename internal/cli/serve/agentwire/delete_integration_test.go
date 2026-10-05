@@ -3,6 +3,7 @@ package agentwire
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -23,11 +24,11 @@ import (
 
 // TestDeleteIdleOpenCodeAgentReal (DEL1): with the service serve wires and
 // the pinned OpenCode build, deleting an idle agent reaches the tombstone,
-// both through a live Delete and when a restarted Loom finds the Delete left
-// half done (stopping, flagged, Attention delete_incomplete, its working
-// copy gone). OpenCode never loaded the agent's location, so once the
-// Delete removes the working copy OpenCode answers its Retire (Unbridge)
-// with 500; that used to fail every retry and leave the agent stopping.
+// both through a live Delete and when a restarted Loom finds a Delete that
+// failed after it removed the working copy. OpenCode never loaded the
+// agent's location, so once the Delete removes the working copy OpenCode
+// answers its Retire (Unbridge) with 500; that used to fail every retry and
+// leave the agent stopping.
 // LOOM_REAL_OPENCODE=1 enables it; LOOM_OPENCODE_BIN overrides the binary.
 func TestDeleteIdleOpenCodeAgentReal(t *testing.T) {
 	if os.Getenv("LOOM_REAL_OPENCODE") != "1" {
@@ -63,22 +64,18 @@ func TestDeleteIdleOpenCodeAgentReal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := func() *loomagent.Service {
+	service := func(r func(context.Context, loomstore.Agent) error) *loomagent.Service {
 		c := serviceConfig(st, "ws", wt, nil, map[string]loomharness.Harness{"opencode": oc})
-		c.Retire = retire(oc)
+		c.Retire = r
 		return loomagent.New(c)
 	}
-	insert := func(id, state, path string, flagged bool) {
+	insert := func(id, path string) {
 		t.Helper()
 		base, branch := "main", "loom/agent/"+id
 		row := loomstore.Agent{AgentID: id, WorkspaceID: "ws", Name: id, ProfileKey: id, Preset: "lead", PresetVersion: "1",
 			Mode: "persistent", InteractionMode: "interactive", RoleKind: "interactive", SpecJSON: "{}", SpecVersion: 1,
 			OwnerKind: "user", OwnerID: "u", CreatedByKind: "user", CreatedByID: "u", CreateRequestID: "r-" + id,
-			Repo: repo, BaseRef: &base, Branch: &branch, WorktreePath: &path, Harness: "opencode", State: state, CreateStep: 5}
-		if flagged {
-			reason := loomagent.AttentionDeleteIncomplete
-			row.DeleteRequested, row.AttentionReason = true, &reason
-		}
+			Repo: repo, BaseRef: &base, Branch: &branch, WorktreePath: &path, Harness: "opencode", State: loomagent.StateIdle, CreateStep: 5}
 		if err := st.InsertAgent(ctx, row); err != nil {
 			t.Fatal(err)
 		}
@@ -88,30 +85,43 @@ func TestDeleteIdleOpenCodeAgentReal(t *testing.T) {
 		return err == nil && row.DeletedAt != nil
 	}
 
-	t.Run("live", func(t *testing.T) {
-		w, err := wt.Ensure(ctx, agentworktree.Spec{Key: "live", Repo: repo, BaseRef: "main", Branch: "loom/agent/live"})
+	worktree := func(id string) string {
+		t.Helper()
+		w, err := wt.Ensure(ctx, agentworktree.Spec{Key: id, Repo: repo, BaseRef: "main", Branch: "loom/agent/" + id})
 		if err != nil {
 			t.Fatal(err)
 		}
-		insert("live", loomagent.StateIdle, w.Path, false)
-		if err := service().Delete(ctx, loomagent.DeleteRequest{AgentID: "live"}); err != nil || !deleted("live") {
+		insert(id, w.Path)
+		return w.Path
+	}
+
+	t.Run("live", func(t *testing.T) {
+		path := worktree("live")
+		if err := service(retire(oc)).Delete(ctx, loomagent.DeleteRequest{AgentID: "live"}); err != nil || !deleted("live") {
 			t.Fatalf("Delete = %v, tombstoned %t; want nil and the tombstone", err, deleted("live"))
 		}
-		if _, err := os.Stat(w.Path); !os.IsNotExist(err) {
-			t.Fatalf("working copy %s still there: %v", w.Path, err)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("working copy %s still there: %v", path, err)
 		}
 	})
 	t.Run("after restart", func(t *testing.T) {
-		insert("restart", loomagent.StateStopping, filepath.Join(sbx, "worktrees", "repo", "restart"), true)
+		path := worktree("restart")
+		down := func(context.Context, loomstore.Agent) error { return errors.New("loom stopped") } // Loom stopped after the working copy went
+		if err := service(down).Delete(ctx, loomagent.DeleteRequest{AgentID: "restart"}); err == nil {
+			t.Fatal("Delete succeeded although Retire failed")
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) || deleted("restart") {
+			t.Fatalf("before the restart: working copy %v, tombstoned %t; want it removed and not tombstoned", err, deleted("restart"))
+		}
 		dctx, stop := context.WithCancel(ctx)
 		defer stop()
-		svc := service() // a restarted Loom: its dispatcher's start-up resync retries the Delete
+		svc := service(retire(oc)) // the restarted Loom: its dispatcher's start-up resync retries the Delete
 		go svc.Dispatcher()(dctx)
 		if err := svc.Drain(ctx); err != nil {
 			t.Fatal(err)
 		}
 		if row, _ := st.GetAgent(ctx, "restart"); row.DeletedAt == nil {
-			t.Fatalf("after the retry: state %s, Attention %q; want the tombstone", row.State, attention(row))
+			t.Fatalf("after the restart: state %s, Attention %q; want the tombstone", row.State, attention(row))
 		}
 	})
 }
