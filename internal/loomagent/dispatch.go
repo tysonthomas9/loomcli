@@ -267,37 +267,76 @@ func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomha
 }
 
 // endTurn is turnCompleted without its wake: it reports whether e ended
-// a's running turn.
+// a's running turn. It decides on a and its slots (decideTurnCompleted),
+// then marks the handed input delivered, ends the turn's asks and commits
+// the state.
 func (s *Service) endTurn(ctx context.Context, a loomstore.Agent, e loomharness.Event) (loomstore.Agent, bool, error) {
 	if a.RunningTurnID == nil || *a.RunningTurnID != e.TurnID {
-		return a, false, nil // not the running turn
+		return a, false, nil // not the running turn: no store read
 	}
 	slots, err := s.store.Slots(ctx, a.AgentID)
 	if err != nil {
 		return a, false, err
 	}
-	for _, sl := range slots { // a turn that ran had its input delivered
-		if sl.State == loomstore.SlotHanded {
-			if err := s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID); err != nil {
-				return a, false, err
-			}
+	d := decideTurnCompleted(turnInput{Row: a, Slots: slots, Event: e})
+	for _, sl := range d.Deliver {
+		if err := s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID); err != nil {
+			return a, false, err
 		}
 	}
 	if err := s.endTurnAsks(ctx, a, e.TurnID); err != nil {
 		return a, false, err
 	}
-	more := slices.ContainsFunc(slots, func(sl loomstore.Slot) bool { return sl.State == loomstore.SlotWaiting })
-	to := a.StateOf()
-	to.RunningTurn, to.WaitingOn = nil, nil
+	a, err = s.setState(ctx, a, d.To)
+	return a, err == nil, err
+}
+
+// turnInput is what decideTurnCompleted decides from: the agent's row, its
+// slots and the turn.completed event.
+type turnInput struct {
+	Row   loomstore.Agent
+	Slots []loomstore.Slot
+	Event loomharness.Event
+}
+
+// turnDecision is a turn completion's decision. Ended: the event ends the
+// row's running turn; then Deliver are the handed slots its input was, now
+// delivered, and To is the row's state after it.
+type turnDecision struct {
+	Ended   bool
+	Deliver []loomstore.Slot
+	To      loomstore.AgentState
+}
+
+// decideTurnCompleted is turn completion's decision, pure: no store or
+// harness call. Only the running turn's own completion counts: one for any
+// other turn ID, such as an older turn's late completion, or one before
+// turn.started named the turn, ends nothing. The turn's handed input was
+// delivered. The turn and any ask it waited on clear; with a message still
+// waiting, or the agent stopping, the state stays for the dispatcher or the
+// stop; else a single task finishes with the turn's stop reason as its
+// outcome and a persistent agent goes idle.
+func decideTurnCompleted(in turnInput) turnDecision {
+	a, e := in.Row, in.Event
+	if a.RunningTurnID == nil || *a.RunningTurnID != e.TurnID {
+		return turnDecision{}
+	}
+	d := turnDecision{Ended: true, To: a.StateOf()}
+	for _, sl := range in.Slots {
+		if sl.State == loomstore.SlotHanded {
+			d.Deliver = append(d.Deliver, sl)
+		}
+	}
+	more := slices.ContainsFunc(in.Slots, func(sl loomstore.Slot) bool { return sl.State == loomstore.SlotWaiting })
+	d.To.RunningTurn, d.To.WaitingOn = nil, nil
 	switch {
 	case a.State == StateStopping || more:
 	case a.Mode == "single_task":
-		to.State, to.Outcome = StateFinished, &e.StopReason
+		d.To.State, d.To.Outcome = StateFinished, &e.StopReason
 	default:
-		to.State = StateIdle
+		d.To.State = StateIdle
 	}
-	a, err = s.setState(ctx, a, to)
-	return a, err == nil, err
+	return d
 }
 
 // RunDispatcher wakes the dispatcher on agent.idle until ctx ends. With
