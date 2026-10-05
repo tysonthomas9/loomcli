@@ -203,7 +203,10 @@ test("delete asks first and shows the server's dirty-work refusal", async ({
         animations: "disabled",
       });
   }
-  // No second confirm: the row leaves the sidebar.
+  // No second confirm: the row leaves the sidebar. The fixture has no
+  // /ws/:ws/chat/:id route, so leaving the open chat for /ws/w1/home is
+  // covered by AgentList.test.tsx ("leaves the open chat once its agent's
+  // delete succeeds").
   await page.getByTestId("agent-delete-anyway").click();
   await expect(
     page.getByRole("link", { name: "lead Agent opencode" }),
