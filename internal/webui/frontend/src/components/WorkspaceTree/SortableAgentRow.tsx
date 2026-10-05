@@ -29,8 +29,10 @@ interface ContentRow {
   /** The agent's name, for the archive and drag labels. */
   label: string;
   children: ReactNode;
-  /** No drag handle: the row moves with the row it sits under. */
+  /** No drag handle and no drop target: the row moves with its parent. */
   pinned?: boolean | undefined;
+  /** Shown under the row (its children), dragged with it as one unit. */
+  below?: ReactNode;
 }
 
 export type SortableAgentRowProps = RowActions & (FleetRow | ContentRow);
@@ -48,7 +50,10 @@ export function SortableAgentRow(props: SortableAgentRowProps): JSX.Element {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id, disabled: pinned });
+  } = useSortable({
+    id,
+    disabled: { draggable: pinned, droppable: pinned },
+  });
 
   const style: React.CSSProperties = {
     transform: transform
@@ -61,10 +66,9 @@ export function SortableAgentRow(props: SortableAgentRowProps): JSX.Element {
   const onAgentClick = fleet?.onAgentClick;
   const handleClick = onAgentClick ? () => onAgentClick(id) : undefined;
 
-  return (
+  const row = (
     <div
-      ref={setNodeRef}
-      style={style}
+      {...(fleet ? { ref: setNodeRef, style } : {})}
       className={styles.agentRow}
       data-dragging={isDragging || undefined}
       data-testid="sortable-agent-row"
@@ -111,7 +115,13 @@ export function SortableAgentRow(props: SortableAgentRowProps): JSX.Element {
           {...listeners}
           aria-label={`Drag to reorder ${label}`}
           onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            // Keep dnd-kit's keyboard sensor, and keep the key off the row.
+            (listeners?.onKeyDown as React.KeyboardEventHandler | undefined)?.(
+              event,
+            );
+            event.stopPropagation();
+          }}
         >
           <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor">
             <circle cx="2" cy="2" r="1.2" />
@@ -123,6 +133,19 @@ export function SortableAgentRow(props: SortableAgentRowProps): JSX.Element {
           </svg>
         </span>
       )}
+    </div>
+  );
+  if (fleet) return row;
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={styles.sortableItem}
+      data-dragging={isDragging || undefined}
+      data-testid="sortable-agent-item"
+    >
+      {row}
+      {(props as ContentRow).below}
     </div>
   );
 }

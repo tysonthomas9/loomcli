@@ -657,4 +657,64 @@ describe("AgentList", () => {
     expect(screen.queryByTestId("agent-delete-anyway")).toBeNull();
     expect(row("other")).not.toBeNull();
   });
+
+  // Codex review of SB4.
+  it("drags a row with its children as one unit", async () => {
+    renderList();
+    await waitFor(() => expect(names()).toHaveLength(3));
+    const item = (name: string) =>
+      row(name)!.closest("[data-testid=sortable-agent-item]");
+    expect(item("lead")).toContainElement(row("kid"));
+    expect(item("lead")).not.toContainElement(row("other"));
+  });
+
+  it("shows a row again once its archived agent is unarchived", async () => {
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "Archive other" }));
+    await waitFor(() => expect(row("other")).toBeNull());
+    act(() =>
+      stream().opts.onEvents!([
+        ev("other", "agent.state_changed", { from: "idle", to: "archived" }),
+      ]),
+    );
+    act(() =>
+      stream().opts.onEvents!([
+        ev("other", "agent.state_changed", { from: "archived", to: "idle" }),
+      ]),
+    );
+    await waitFor(() => expect(row("other")).not.toBeNull());
+  });
+
+  it("keeps an archived Lead's working child in the list", async () => {
+    api.agents = [
+      agent("lead", { preset: "lead" }),
+      agent("kid", { parent_agent_id: "lead", state: "active" }),
+      agent("done", { parent_agent_id: "lead", state: "finished" }),
+    ];
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toEqual(["lead", "kid"]));
+    act(() =>
+      stream().opts.onEvents!([
+        ev("lead", "agent.state_changed", { from: "idle", to: "archived" }),
+      ]),
+    );
+    await waitFor(() => expect(names()).toEqual(["kid"]));
+  });
+
+  it("closes the row menu when the workspace changes", async () => {
+    const tree = (ws: string) => (
+      <KeyboardShortcutProvider>
+        <MemoryRouter initialEntries={["/ws/ws1/agents"]}>
+          <AgentList workspaceId={ws} />
+        </MemoryRouter>
+      </KeyboardShortcutProvider>
+    );
+    const { rerender } = render(tree("ws1"));
+    await waitFor(() => expect(names()).toHaveLength(3));
+    fireEvent.contextMenu(row("other")!, { clientX: 10, clientY: 20 });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    rerender(tree("ws2"));
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
 });

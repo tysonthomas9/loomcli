@@ -1,5 +1,5 @@
 import type React from "react";
-import { Fragment, useCallback, type ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 
 import {
   DndContext,
@@ -41,14 +41,14 @@ interface FleetList {
 }
 
 /**
- * A row with its own content (Agent API agents). `after` (its pinned
- * children) follows the row and moves with it in the order.
+ * A row with its own content (Agent API agents). `below` (its pinned
+ * children) shows under the row and drags with it as one unit.
  */
 export interface SortableAgentItem {
   id: string;
   label: string;
   content: ReactNode;
-  after?: ReactNode;
+  below?: ReactNode;
 }
 
 interface ItemList {
@@ -121,17 +121,16 @@ export function SortableAgentList(
                 />
               ))
             : items!.map((item) => (
-                <Fragment key={item.id}>
-                  <SortableAgentRow
-                    id={item.id}
-                    label={item.label}
-                    onArchive={onArchive}
-                    onContextMenu={onAgentContextMenu}
-                  >
-                    {item.content}
-                  </SortableAgentRow>
-                  {item.after}
-                </Fragment>
+                <SortableAgentRow
+                  key={item.id}
+                  id={item.id}
+                  label={item.label}
+                  below={item.below}
+                  onArchive={onArchive}
+                  onContextMenu={onAgentContextMenu}
+                >
+                  {item.content}
+                </SortableAgentRow>
               ))}
         </div>
       </SortableContext>

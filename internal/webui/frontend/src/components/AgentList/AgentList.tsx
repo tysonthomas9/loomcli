@@ -1,5 +1,5 @@
 import type React from "react";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useMatch, useNavigate } from "react-router-dom";
 import type { Agent } from "@/api/agentsv1";
 import { AgentAvatar } from "@/components/AgentAvatar";
@@ -60,7 +60,6 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   // The agent whose chat is open.
   const activeId = useMatch("/ws/:ws/chat/:agentId")?.params.agentId;
   const { roster, error } = useAgentRoster(workspaceId, activeId);
-  const kids = useMemo(() => childrenByParent(roster), [roster]);
   const ws = encodeURIComponent(workspaceId);
   const [bgOpen, setBgOpen] = useState(true);
   const { showToast } = useToast();
@@ -68,7 +67,6 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   const deleteAgent = useDeleteAgent(workspaceId);
   const navigate = useNavigate();
   const [order, setOrder] = useState(() => storedOrder(workspaceId));
-  useEffect(() => setOrder(storedOrder(workspaceId)), [workspaceId]);
   // Archived or deleted here: a busy agent stays stopping until its turn
   // ends, and a delete reaches the stream later.
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
@@ -78,8 +76,47 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   // An unsaved-work refusal, which offers Delete anyway (DA1).
   const [refused, setRefused] = useState<DeleteRefusal & { agent: Agent }>();
 
-  const shown = (a: Agent) => a.state !== "archived" && !gone.has(a.agent_id);
-  const top = (kids.get("") ?? []).filter(shown);
+  // A new workspace starts from its own saved order, with nothing open.
+  useEffect(() => {
+    setOrder(storedOrder(workspaceId));
+    setGone(new Set());
+    setMenu(undefined);
+    setConfirming(undefined);
+    setRefused(undefined);
+  }, [workspaceId]);
+  // The stream takes over from gone once it reports the archive or delete,
+  // so an agent unarchived later shows again.
+  useEffect(
+    () =>
+      setGone((g) => {
+        const pending = (id: string) => {
+          const a = roster.get(id);
+          return a != null && a.state !== "archived";
+        };
+        const next = new Set([...g].filter(pending));
+        return next.size === g.size ? g : next;
+      }),
+    [roster, gone],
+  );
+
+  // Children of a hidden (archived) parent rise to the top while at work.
+  const kids = useMemo(
+    () =>
+      childrenByParent(
+        new Map(
+          [...roster].filter(
+            ([id, a]) => a.state !== "archived" && !gone.has(id),
+          ),
+        ),
+      ),
+    [roster, gone],
+  );
+  const top = (kids.get("") ?? []).filter(
+    (a) =>
+      !a.parent_agent_id ||
+      !roster.has(a.parent_agent_id) ||
+      childVisible(a, kids, activeId),
+  );
   const isWorker = (a: Agent) => a.role_kind === "worker";
   const isLead = (a: Agent) => a.preset === "lead";
   const fullOrder = mergeAgentSectionOrder(
@@ -190,7 +227,7 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   const children = (a: Agent): JSX.Element | null => {
     const list = kids
       .get(a.agent_id)
-      ?.filter((k) => shown(k) && childVisible(k, kids, activeId));
+      ?.filter((k) => childVisible(k, kids, activeId));
     if (!list?.length) return null;
     return (
       <div
@@ -199,18 +236,17 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
         className={styles.children}
       >
         {list.map((k) => (
-          <Fragment key={k.agent_id}>
-            <SortableAgentRow
-              id={k.agent_id}
-              label={k.name}
-              pinned
-              onArchive={archive}
-              onContextMenu={openMenu}
-            >
-              {link(k)}
-            </SortableAgentRow>
-            {children(k)}
-          </Fragment>
+          <SortableAgentRow
+            key={k.agent_id}
+            id={k.agent_id}
+            label={k.name}
+            pinned
+            below={children(k)}
+            onArchive={archive}
+            onContextMenu={openMenu}
+          >
+            {link(k)}
+          </SortableAgentRow>
         ))}
       </div>
     );
@@ -223,7 +259,7 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
           id: a.agent_id,
           label: a.name,
           content: link(a),
-          after: children(a),
+          below: children(a),
         }),
       )}
       fullOrder={fullOrder}
