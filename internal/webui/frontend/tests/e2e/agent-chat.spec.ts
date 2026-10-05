@@ -6,6 +6,8 @@ import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 
 const BASE = "**/api/workspaces/w1";
+// DF1_SHOTS=<dir> also saves the UI6 screenshots, as agent-tray.spec does.
+const SHOTS = process.env.DF1_SHOTS;
 const XSS = `<img src=x onerror="window.pwned=1"><script>window.pwned=1</script>`;
 const LONG = "y".repeat(5000);
 
@@ -440,4 +442,88 @@ test("streaming reveals smoothly with no layout shift and the end kept in view",
   expect(r.gaps.length).toBeGreaterThan(10);
   expect(Math.max(...r.gaps)).toBeLessThanOrEqual(0);
   expect(r.cls).toBe(0);
+});
+
+test("one agent's one-line messages sit close, and the hover pill takes no space (UI6)", async ({
+  page,
+}) => {
+  const at = "2026-10-04T20:15:00Z";
+  const stamp = (e: ReturnType<typeof ev>) => ({ ...e, created_at: at });
+  const say = (text: string) =>
+    stamp(ev("item.completed", { itemKind: "message", text }));
+  const wide =
+    "The review is done and every check passed, so the branch is ready to merge once you have looked over the summary below and the two notes about naming.";
+  await open(
+    page,
+    mock({
+      events: [
+        stamp(
+          ev("message.delivered", {
+            sender: "user:local",
+            text: "Run the reviewers",
+          }),
+        ),
+        say("api-reviewer completed its review."),
+        say("test-runner completed all tests."),
+        say(wide),
+      ],
+    }),
+  );
+  const md = transcript(page).getByTestId("chat-markdown");
+  await expect(md).toHaveCount(3);
+  const box = async (i: number) => (await md.nth(i).boundingBox())!;
+  const gap = (await box(1)).y - ((await box(0)).y + (await box(0)).height);
+  test.info().annotations.push({ type: "gap", description: `${gap}px` });
+  console.log(`UI6 gap between one-line agent messages: ${gap}px`);
+  expect(gap).toBeLessThan(16);
+  // The pill shows on hover, with the time, and moves nothing.
+  const time = await page.evaluate(
+    (t) =>
+      new Date(t).toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    at,
+  );
+  const before = await box(1);
+  const rows = transcript(page).locator("li");
+  const agentRow = rows.filter({ hasText: "api-reviewer completed" });
+  await agentRow.hover();
+  const pill = agentRow.getByTestId("message-actions");
+  await expect(pill).toBeVisible();
+  await expect(pill).toHaveText(time);
+  await expect(
+    pill.getByRole("button", { name: "Copy message" }),
+  ).toBeVisible();
+  expect(await box(1)).toEqual(before);
+  // It stays on its own message, clear of the next one.
+  const p = (await pill.boundingBox())!;
+  expect(p.y + p.height).toBeLessThanOrEqual(before.y);
+  const userRow = rows.filter({ hasText: "Run the reviewers" });
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate((t) => {
+      document.documentElement.dataset.theme = t;
+    }, theme);
+    await page.mouse.move(0, 0);
+    if (SHOTS)
+      await page.screenshot({
+        path: `${SHOTS}/ui6-spacing-${theme}.png`,
+        animations: "disabled",
+      });
+    await userRow.hover();
+    await expect(userRow.getByTestId("message-actions")).toHaveText(time);
+    if (SHOTS)
+      await page.screenshot({
+        path: `${SHOTS}/ui6-user-hover-${theme}.png`,
+        animations: "disabled",
+      });
+    const wideRow = rows.filter({ hasText: "The review is done" });
+    await wideRow.hover();
+    await expect(wideRow.getByTestId("message-actions")).toBeVisible();
+    if (SHOTS)
+      await page.screenshot({
+        path: `${SHOTS}/ui6-agent-hover-${theme}.png`,
+        animations: "disabled",
+      });
+  }
 });
