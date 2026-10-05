@@ -265,3 +265,25 @@ func TestCoalesceLostInputSettledOnce(t *testing.T) {
 	}
 	oneInput(t, e, s, lead, ref, 1, "c1", "c2")
 }
+
+// TestCoalesceMessageWithRecordLeads: c2's record-only slot is first in
+// line, and c1's slot holds c1's own message and then its record. The next
+// input carries both records, c1's message leading, so the lead narrates
+// once; its delivery shows c1's message and names both records.
+func TestCoalesceMessageWithRecordLeads(t *testing.T) {
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	lead, ref := leadWithKids(t, e, s, "c1", "c2")
+	mustSendMsg(t, s, sendReq(lead.AgentID, "u0", "start", user)) // the lead's turn runs
+	finishKids(t, s, "c2")
+	dispatchOK(t, s, lead.AgentID) // c2's record waits, first in line
+	mustSendMsg(t, s, sendReq(lead.AgentID, "m1", "heads up from c1", child))
+	finishKids(t, s, "c1")
+	dispatchOK(t, s, lead.AgentID) // c1's record follows c1's message in its slot
+	finishTurn(t, s, lead.AgentID, "completed")
+	oneInput(t, e, s, lead, ref, 2, "c1", "c2")
+	text, done := deliveredRow(t, s, lead.AgentID, inputKey(t, s, lead.AgentID, "agent:c1"))
+	if !strings.HasPrefix(text, "heads up from c1\n") || len(done) != 2 {
+		t.Fatalf("delivery text %q completions %+v; want c1's message first and both records", text, done)
+	}
+}

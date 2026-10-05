@@ -448,7 +448,10 @@ func (s *Store) HandNext(ctx context.Context, agentID string, nativeKey func(Slo
 }
 
 // nextInput is the agent's waiting slots that HandNext hands over as one
-// input, in order, with the records they carry.
+// input, in order, with the records they carry. The input is the next slot
+// in line; when that slot holds records (saved with notices), the first
+// waiting slot whose records follow its sender's own message leads instead,
+// and every other slot that holds only records follows it.
 func nextInput(ctx context.Context, tx *sql.Tx, agentID string) ([]Slot, SlotNotices, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT `+slotCols+`, notices FROM agent_slots WHERE agent_id = ? AND state = ?
 		ORDER BY first DESC, queued_at, sender`, agentID, SlotWaiting)
@@ -456,29 +459,45 @@ func nextInput(ctx context.Context, tx *sql.Tx, agentID string) ([]Slot, SlotNot
 		return nil, SlotNotices{}, err
 	}
 	defer func() { _ = rows.Close() }()
-	var batch []Slot
-	var notes SlotNotices
-	for rows.Next() {
-		var w Slot
-		var raw sql.NullString
-		if err := rows.Scan(append(w.fields(), &raw)...); err != nil {
-			return nil, notes, err
-		}
-		n, err := readNotices(raw)
-		if err != nil {
-			return nil, notes, err
-		}
-		switch {
-		case len(batch) == 0:
-			notes = n
-		case len(notes.Keys) == 0 || !raw.Valid || len(n.Keys) == 0 || n.At != 0:
-			continue // the input is not records, or w holds more than records
-		default:
-			notes.Keys = append(notes.Keys, n.Keys...)
-		}
-		batch = append(batch, w)
+	type waiting struct {
+		slot  Slot
+		notes SlotNotices
+		saved bool // saved with its notices (not a migration-9 legacy row)
 	}
-	return batch, notes, rows.Err()
+	var all []waiting
+	for rows.Next() {
+		var w waiting
+		var raw sql.NullString
+		if err := rows.Scan(append(w.slot.fields(), &raw)...); err != nil {
+			return nil, SlotNotices{}, err
+		}
+		if w.notes, err = readNotices(raw); err != nil {
+			return nil, SlotNotices{}, err
+		}
+		w.saved = raw.Valid
+		all = append(all, w)
+	}
+	if err := rows.Err(); err != nil || len(all) == 0 {
+		return nil, SlotNotices{}, err
+	}
+	records := func(w waiting) bool { return w.saved && len(w.notes.Keys) > 0 }
+	if !records(all[0]) {
+		return []Slot{all[0].slot}, all[0].notes, nil
+	}
+	head := all[0]
+	for _, w := range all {
+		if records(w) && w.notes.At > 0 { // a message with records leads
+			head = w
+			break
+		}
+	}
+	batch, notes := []Slot{head.slot}, head.notes
+	for _, w := range all {
+		if w.slot.Sender != head.slot.Sender && records(w) && w.notes.At == 0 {
+			batch, notes.Keys = append(batch, w.slot), append(notes.Keys, w.notes.Keys...)
+		}
+	}
+	return batch, notes, nil
 }
 
 // handSlot marks w handed under native key k. The Send's receipt now
