@@ -74,31 +74,39 @@ export function CollapsedAgentRail({
     return ordered.filter(isPRReviewerAgent);
   }, [fleetAgents, workspaceConfigAgents, workspace?.name, prsView]);
 
+  const emptyHint = (
+    <CompactRailHost label="No agents" className={styles.emptyHint}>
+      —
+    </CompactRailHost>
+  );
+
   return (
     <nav
       className={styles.rail}
       aria-label="Agents"
       data-testid="collapsed-agent-rail"
     >
-      {agents.length === 0 && !showApi ? (
-        <CompactRailHost label="No agents" className={styles.emptyHint}>
-          —
-        </CompactRailHost>
-      ) : (
-        agents.map((agent) => (
-          <AgentAvatarButton
-            key={agent.name}
-            agent={agent}
-            selected={
-              selectedAgentName != null &&
-              agent.name.toLowerCase() === selectedAgentName.toLowerCase()
-            }
-            size={32}
-            onClick={() => onAgentClick?.(agent.name)}
-          />
-        ))
-      )}
-      {showApi ? <ApiAgentRailItems workspaceId={workspaceId} /> : null}
+      {agents.map((agent) => (
+        <AgentAvatarButton
+          key={agent.name}
+          agent={agent}
+          selected={
+            selectedAgentName != null &&
+            agent.name.toLowerCase() === selectedAgentName.toLowerCase()
+          }
+          size={32}
+          onClick={() => onAgentClick?.(agent.name)}
+        />
+      ))}
+      {/* The hint shows when neither the fleet nor the Agent API has one. */}
+      {showApi ? (
+        <ApiAgentRailItems
+          workspaceId={workspaceId}
+          empty={agents.length === 0 ? emptyHint : null}
+        />
+      ) : agents.length === 0 ? (
+        emptyHint
+      ) : null}
       {addClick ? (
         <CompactRailHost
           as="button"

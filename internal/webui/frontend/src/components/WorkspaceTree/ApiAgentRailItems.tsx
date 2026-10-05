@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { ReactNode } from "react";
 import { Link, useMatch } from "react-router-dom";
 
 import type { Agent } from "@/api/agentsv1";
@@ -17,11 +18,14 @@ import styles from "./CollapsedAgentRail.module.css";
  * The Agent API agents the expanded tree's AgentList shows, in its order,
  * from the same live roster: Leads, plus a child while it is at work or its
  * chat is open (SB2). Each opens its chat, and the open one is highlighted.
+ * With none to show it renders `empty`.
  */
 export function ApiAgentRailItems({
   workspaceId,
+  empty,
 }: {
   workspaceId: string;
+  empty?: ReactNode;
 }): JSX.Element {
   const activeId = useMatch("/ws/:ws/chat/:agentId")?.params.agentId;
   const { roster } = useAgentRoster(workspaceId, activeId);
@@ -30,6 +34,7 @@ export function ApiAgentRailItems({
     [roster, activeId, workspaceId],
   );
   const ws = encodeURIComponent(workspaceId);
+  if (agents.length === 0) return <>{empty}</>;
   return (
     <>
       {agents.map((a) => (
