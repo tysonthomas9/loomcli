@@ -76,9 +76,12 @@ async function open(page: Page, m: Mock, query = "") {
       }
     } as unknown as typeof EventSource;
   });
-  // The sidebar's List.
+  // The sidebar's List, which leaves archived agents out.
   await page.route(/\/api\/workspaces\/w1\/v1\/agents(\?.*)?$/, (r) =>
-    json(r, { agents: [m.agent], next: "" }),
+    json(r, {
+      agents: m.agent.state === "archived" ? [] : [m.agent],
+      next: "",
+    }),
   );
   await page.route(`${BASE}/v1/agents/a1/events*`, (r) =>
     json(r, { events: m.events, snapshot_seq: seq, next: seq, more: false }),
@@ -115,7 +118,8 @@ async function open(page: Page, m: Mock, query = "") {
   await expect(page.getByText(String(m.agent.name)).first()).toBeVisible();
 }
 
-// Sends saved events on the open EventSource, committed first as on the server.
+// Sends saved events on every open EventSource (the chat's and the sidebar's),
+// committed first as on the server.
 async function push(page: Page, m: Mock, ...frames: Mock["events"]) {
   m.events.push(...frames);
   type Sources = { __sse: (EventTarget & { closed: boolean })[] };
@@ -124,9 +128,11 @@ async function push(page: Page, m: Mock, ...frames: Mock["events"]) {
   );
   await page.evaluate(
     (data) => {
-      const s = (window as unknown as Sources).__sse.find((x) => !x.closed)!;
-      for (const d of data)
-        s.dispatchEvent(new MessageEvent("event", { data: d }));
+      for (const s of (window as unknown as Sources).__sse.filter(
+        (x) => !x.closed,
+      ))
+        for (const d of data)
+          s.dispatchEvent(new MessageEvent("event", { data: d }));
     },
     frames.map((f) => JSON.stringify(f)),
   );
@@ -175,6 +181,26 @@ test("archive makes the chat read-only with the days left; unarchive restores it
   await expect(composer(page)).toBeVisible();
   await expect(page.getByTestId("agent-archived-notice")).toHaveCount(0);
   expect(m.writes).toEqual(["archive", "unarchive"]);
+});
+
+test("an archived agent unarchived from its chat after a reload shows in the sidebar again", async ({
+  page,
+}) => {
+  const m = mock({ state: "archived", archived_at: new Date().toISOString() });
+  await open(page, m, "?sidebar=1&open=1&w=800");
+  await expect(page.getByTestId("agent-archived-notice")).toBeVisible();
+  const row = page.getByRole("link", { name: "lead Agent opencode" });
+  await expect(row).toHaveCount(0);
+
+  await page.getByTestId("agent-unarchive").click();
+  await expect(composer(page)).toBeVisible();
+  await push(
+    page,
+    m,
+    ev("agent.state_changed", { from: "archived", to: "idle" }),
+  );
+  await expect(row).toBeVisible();
+  expect(m.writes).toEqual(["unarchive"]);
 });
 
 test("delete asks first and shows the server's dirty-work refusal", async ({
