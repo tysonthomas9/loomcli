@@ -833,6 +833,27 @@ describe("AgentChat lifecycle (1.8b)", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("agent-delete-anyway")).toBeNull(),
     );
+    // A refresh failing while the refusal lands also wins over the button.
+    const refusal = () =>
+      new ApiError(409, "Conflict", {
+        error: "uncommitted changes in /wt/a1",
+        code: "unsaved_work",
+        paths: ["README.md"],
+        fingerprint: "f1",
+      });
+    api.deleteAgent.mockImplementationOnce(() => {
+      api.getAgent.mockRejectedValueOnce(new Error("offline"));
+      const s = api.streams[api.streams.length - 1];
+      s.opts.onEvents?.([ev("agent.state_changed")]);
+      return Promise.reject(refusal());
+    });
+    fireEvent.click(screen.getByTestId("agent-delete"));
+    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("offline"),
+    );
+    await act(() => Promise.resolve());
+    expect(screen.queryByTestId("agent-delete-anyway")).toBeNull();
     api.deleteAgent.mockRejectedValueOnce(
       new ApiError(409, "Conflict", {
         error: "uncommitted changes in /wt/a1",
@@ -846,7 +867,7 @@ describe("AgentChat lifecycle (1.8b)", () => {
     api.deleteAgent.mockResolvedValueOnce(undefined);
     fireEvent.click(await screen.findByTestId("agent-delete-anyway"));
     expect(await screen.findByTestId("where")).toHaveTextContent("/ws/w1/home");
-    expect(api.deleteAgent).toHaveBeenCalledTimes(3);
+    expect(api.deleteAgent).toHaveBeenCalledTimes(4);
     expect(api.deleteAgent).toHaveBeenLastCalledWith(
       "w1",
       "a1",
