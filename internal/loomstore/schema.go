@@ -201,13 +201,15 @@ WHERE attention_reason = 'create_incomplete' AND create_step < 5 AND deleted_at 
 -- OR5a: one claim per ask, saved before its Reply. The first Respond to save
 -- it binds its request and payload; state is claimed until the outcome is
 -- known: replied, or unknown (no evidence either way; never replied again).
+-- An ask is its ID on its turn: codex reuses an ID on a later connection.
 CREATE TABLE IF NOT EXISTS agent_ask_claims (
   agent_id     TEXT NOT NULL REFERENCES agents(agent_id),
   ask_id       TEXT NOT NULL,
+  turn_id      TEXT NOT NULL,
   request_id   TEXT NOT NULL,
   payload_hash TEXT NOT NULL,
   state        TEXT NOT NULL,
   created_at   TEXT NOT NULL,
-  PRIMARY KEY (agent_id, ask_id)
+  PRIMARY KEY (agent_id, ask_id, turn_id)
 );
 `}

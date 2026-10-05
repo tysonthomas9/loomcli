@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
@@ -247,5 +249,75 @@ func TestRespondNotSentReleasesClaim(t *testing.T) {
 	s.harnesses["opencode"] = tweaked{Harness: e.h, replies: &replies}
 	if err := s.Respond(ctx, answer(a, "r1", "allow_once")); err != nil || len(replies) != 2 {
 		t.Fatalf("Respond = %v replies %d; want success and two", err, len(replies))
+	}
+}
+
+// TestRespondReusedAskIDLaterTurn: codex reuses an ask ID on a later turn.
+// That is a new ask: its claim is new, and it is answered.
+func TestRespondReusedAskIDLaterTurn(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	stop := runFeed(t, s, "opencode")
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	e.h.Harness.(*fake.Harness).Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}, {Delta: "one"}}},
+		fake.Turn{Steps: []fake.Step{{Ask: "a1"}, {Delta: "two"}}})
+	for i, id := range []string{"r1", "r2"} {
+		mustSendMsg(t, s, sendReq(a.AgentID, fmt.Sprintf("u%d", i), "go", user))
+		drained(t, s, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+		if err := s.Respond(ctx, answer(a, id, "allow_once")); err != nil {
+			t.Fatalf("turn %d: %v", i+1, err)
+		}
+		drained(t, s, "the turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+	}
+}
+
+// lateResolve is a harness whose first history read leaves out every
+// ask.resolved, as one read just before an ask resolved.
+type lateResolve struct {
+	loomharness.Harness
+	reads *atomic.Int32
+}
+
+func (h lateResolve) Session(ref loomharness.NativeRef) loomharness.Session {
+	return lateResolveSession{h.Harness.Session(ref), h.reads}
+}
+
+type lateResolveSession struct {
+	loomharness.Session
+	reads *atomic.Int32
+}
+
+func (x lateResolveSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
+	page, err := x.Session.Messages(ctx, after, limit)
+	if x.reads.Add(1) == 1 {
+		page.Events = slices.DeleteFunc(page.Events, func(e loomharness.Event) bool { return e.Type == loomharness.EventAskResolved })
+	}
+	return page, err
+}
+
+// TestRestartSettledClaimClosesAsk: Loom crashed after a1's Reply landed.
+// The backfill read the history just before a1 resolved, so a1 is open
+// again; settling its claim as replied also closes it, leaving the turn
+// waiting on a2 only.
+func TestRestartSettledClaimClosesAsk(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	stop := runFeed(t, s, "opencode")
+	a, _ := newLead(t, e, s, "alpha")
+	e.h.Harness.(*fake.Harness).Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}, {Ask: "a2"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	drained(t, s, "a1 opens", func() bool { return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) })
+	stop()
+	if !crashDispatchAt(t, "replied")(func() { _ = s.Respond(ctx, answer(a, "r1", "allow_once")) }) {
+		t.Fatal("did not crash")
+	}
+	s = e.service(ServiceConfig{}) // the restart
+	s.harnesses["opencode"] = lateResolve{e.h, &atomic.Int32{}}
+	reconcile(t, s)
+	if st, got := claimState(t, s, a), askIDs(t, s, a.AgentID); st != loomstore.ClaimReplied || !slices.Equal(got, []string{"a2:approval"}) {
+		t.Fatalf("claim %q open asks %v; want replied and only a2", st, got)
 	}
 }

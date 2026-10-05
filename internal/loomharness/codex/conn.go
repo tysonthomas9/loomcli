@@ -7,10 +7,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"sync"
 
@@ -51,8 +49,7 @@ func (e *RPCError) Error() string { return fmt.Sprintf("codex: %s (%d)", e.Messa
 // id and routes notifications and server requests by thread, and answers go
 // back on the same connection.
 type Conn struct {
-	w        io.Closer
-	enc      *json.Encoder
+	w        io.WriteCloser
 	wmu      sync.Mutex
 	fallback Handler
 
@@ -69,7 +66,7 @@ type Conn struct {
 // with no route, plus a Gap with no ThreadID when the connection ends; if it
 // is nil, unrouted server requests are answered with an error, never dropped.
 func NewConn(r io.Reader, w io.WriteCloser, fallback Handler) *Conn {
-	c := &Conn{w: w, enc: json.NewEncoder(w), fallback: fallback,
+	c := &Conn{w: w, fallback: fallback,
 		pending: map[string]chan reply{}, routes: map[string]route{}, done: make(chan struct{})}
 	go c.read(r)
 	return c
@@ -183,8 +180,12 @@ func (c *Conn) send(v any) error {
 	if err := c.Err(); err != nil {
 		return fmt.Errorf("%w: %w", loomharness.ErrNotSent, err)
 	}
-	if err := c.enc.Encode(v); errors.Is(err, io.ErrClosedPipe) || errors.Is(err, os.ErrClosed) {
-		return fmt.Errorf("codex: write: %w: %w: %w", loomharness.ErrNotSent, loomharness.ErrUnavailable, err) // our end closed: nothing written
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	if n, err := c.w.Write(append(b, '\n')); err != nil && n == 0 {
+		return fmt.Errorf("codex: write: %w: %w: %w", loomharness.ErrNotSent, loomharness.ErrUnavailable, err) // nothing written
 	} else if err != nil {
 		return fmt.Errorf("codex: write: %w: %w", loomharness.ErrUnavailable, err)
 	}

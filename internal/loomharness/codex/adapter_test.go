@@ -734,6 +734,9 @@ func TestCodexReply(t *testing.T) {
 				if c.r.Always && !errors.Is(err, errors.ErrUnsupported) {
 					t.Fatalf("Always not offered: %v, want ErrUnsupported", err)
 				}
+				if !errors.Is(err, loomharness.ErrNotSent) { // refused before any write
+					t.Fatalf("refused Reply: %v, want ErrNotSent", err)
+				}
 				err = s.Reply(ctx, "srv-1", deny) // the ask stays open: it can still be denied
 			}
 			if err != nil {

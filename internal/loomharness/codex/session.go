@@ -277,7 +277,7 @@ func (s *Session) Reply(_ context.Context, askID string, r loomharness.Reply) er
 	}
 	result, err := answer(ask, r)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", loomharness.ErrNotSent, err) // refused before any write
 	}
 	s.a.mu.Lock()
 	_, ok = s.a.asks[s.ref.Root][askID]

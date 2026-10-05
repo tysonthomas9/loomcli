@@ -14,33 +14,40 @@ const (
 	ClaimUnknown = "unknown"
 )
 
-// AskClaim is the one claim on an agent's ask, saved before its Reply.
+// AskClaim is the one claim on an agent's ask (its ID on its turn), saved
+// before its Reply.
 type AskClaim struct {
-	AgentID, AskID, RequestID, PayloadHash, State, CreatedAt string
+	AgentID, AskID, TurnID, RequestID, PayloadHash, State, CreatedAt string
 }
 
-const claimCols = `agent_id, ask_id, request_id, payload_hash, state, created_at`
+const claimCols = `agent_id, ask_id, turn_id, request_id, payload_hash, state, created_at`
 
 func (c *AskClaim) fields() []any {
-	return []any{&c.AgentID, &c.AskID, &c.RequestID, &c.PayloadHash, &c.State, &c.CreatedAt}
+	return []any{&c.AgentID, &c.AskID, &c.TurnID, &c.RequestID, &c.PayloadHash, &c.State, &c.CreatedAt}
 }
 
-// ClaimAsk saves c, pending, unless the ask already has a claim, and returns
-// the claim that holds the ask: c, or the earlier one.
-func (s *Store) ClaimAsk(ctx context.Context, c AskClaim) (AskClaim, error) {
+// ClaimAsk saves c, pending, unless the ask already has a claim. It returns
+// the claim that holds the ask, and won when that is c, saved by this call.
+func (s *Store) ClaimAsk(ctx context.Context, c AskClaim) (held AskClaim, won bool, err error) {
 	c.State, c.CreatedAt = ClaimPending, Stamp(time.Now())
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO agent_ask_claims (`+claimCols+`) VALUES (?,?,?,?,?,?)
-		ON CONFLICT (agent_id, ask_id) DO NOTHING`, c.AgentID, c.AskID, c.RequestID, c.PayloadHash, c.State, c.CreatedAt); err != nil {
-		return AskClaim{}, err
+	res, err := s.db.ExecContext(ctx, `INSERT INTO agent_ask_claims (`+claimCols+`) VALUES (?,?,?,?,?,?,?)
+		ON CONFLICT (agent_id, ask_id, turn_id) DO NOTHING`, c.AgentID, c.AskID, c.TurnID, c.RequestID, c.PayloadHash, c.State, c.CreatedAt)
+	if err != nil {
+		return AskClaim{}, false, err
 	}
-	return s.AskClaim(ctx, c.AgentID, c.AskID)
+	if n, _ := res.RowsAffected(); n == 1 {
+		return c, true, nil
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT `+claimCols+` FROM agent_ask_claims WHERE agent_id = ? AND ask_id = ? AND turn_id = ?`,
+		c.AgentID, c.AskID, c.TurnID).Scan(held.fields()...)
+	return held, false, err
 }
 
-// AskClaim returns the claim on agentID's ask askID, or ErrNotFound.
+// AskClaim returns the latest claim on agentID's ask ID askID, or ErrNotFound.
 func (s *Store) AskClaim(ctx context.Context, agentID, askID string) (AskClaim, error) {
 	var c AskClaim
-	err := s.db.QueryRowContext(ctx, `SELECT `+claimCols+` FROM agent_ask_claims WHERE agent_id = ? AND ask_id = ?`,
-		agentID, askID).Scan(c.fields()...)
+	err := s.db.QueryRowContext(ctx, `SELECT `+claimCols+` FROM agent_ask_claims WHERE agent_id = ? AND ask_id = ?
+		ORDER BY created_at DESC, rowid DESC LIMIT 1`, agentID, askID).Scan(c.fields()...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrNotFound
 	}
@@ -66,14 +73,14 @@ func (s *Store) PendingAskClaims(ctx context.Context, agentID string) ([]AskClai
 	return out, rows.Err()
 }
 
-// SettleAskClaim records the outcome of agentID's pending claim on askID:
-// replied or unknown, or "" to release it (its Reply was never sent), so the
-// ask can be answered again.
-func (s *Store) SettleAskClaim(ctx context.Context, agentID, askID, state string) error {
-	q := `UPDATE agent_ask_claims SET state = ? WHERE agent_id = ? AND ask_id = ? AND state = ?`
-	args := []any{state, agentID, askID, ClaimPending}
+// SettleAskClaim records the outcome of c, a pending claim: replied or
+// unknown, or "" to release it (its Reply was never sent), so the ask can
+// be answered again.
+func (s *Store) SettleAskClaim(ctx context.Context, c AskClaim, state string) error {
+	q := `UPDATE agent_ask_claims SET state = ? WHERE agent_id = ? AND ask_id = ? AND turn_id = ? AND state = ?`
+	args := []any{state, c.AgentID, c.AskID, c.TurnID, ClaimPending}
 	if state == "" {
-		q, args = `DELETE FROM agent_ask_claims WHERE agent_id = ? AND ask_id = ? AND state = ?`, args[1:]
+		q, args = `DELETE FROM agent_ask_claims WHERE agent_id = ? AND ask_id = ? AND turn_id = ? AND state = ?`, args[1:]
 	}
 	_, err := s.db.ExecContext(ctx, q, args...)
 	return err
