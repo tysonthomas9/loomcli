@@ -94,16 +94,9 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     update,
     runningSince,
     unarchive,
-    remove,
-    unsaved,
     expired,
     synced,
   } = useAgentChat(workspaceId, agentId);
-  const navigate = useNavigate();
-  const del = (fingerprint?: string) =>
-    remove(fingerprint).then(() =>
-      navigate(`/ws/${encodeURIComponent(workspaceId)}/home`),
-    );
   const compact = useNarrow(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX);
   const own = ownSender(useAuth().user?.id);
   const [draft, setDraft] = useState("");
@@ -319,21 +312,6 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
           {error && (
             <div className={page.error} role="alert">
               {error}
-              {unsaved && (
-                <>
-                  {" "}
-                  Delete anyway loses these changes.{" "}
-                  <button
-                    type="button"
-                    className={page.headerAction}
-                    data-danger="true"
-                    data-testid="agent-delete-anyway"
-                    onClick={() => void del(unsaved).catch(() => {})}
-                  >
-                    Delete anyway
-                  </button>
-                </>
-              )}
             </div>
           )}
 

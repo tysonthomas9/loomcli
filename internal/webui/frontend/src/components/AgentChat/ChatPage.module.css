@@ -716,11 +716,6 @@
   color: var(--color-text-primary);
 }
 
-.headerAction[data-danger="true"] {
-  border-color: var(--color-danger);
-  color: var(--color-danger);
-}
-
 .headerAction:disabled {
   opacity: 0.5;
   cursor: default;

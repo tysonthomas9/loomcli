@@ -31,6 +31,7 @@ import { ApiError } from "@/types/common";
 const api = vi.hoisted(() => ({
   agents: [] as Agent[],
   listAgents: vi.fn(),
+  getAgent: vi.fn(),
   archiveAgent: vi.fn(),
   deleteAgent: vi.fn(),
   streams: [] as { opts: AgentStreamOptions; closed: boolean }[],
@@ -54,6 +55,7 @@ vi.mock("@dnd-kit/core", async () => {
 
 vi.mock("@/api/agentsv1", () => ({
   listAgents: api.listAgents,
+  getAgent: api.getAgent,
   archiveAgent: api.archiveAgent,
   deleteAgent: api.deleteAgent,
   newRequestId: () => "req-1",
@@ -160,6 +162,11 @@ beforeEach(() => {
   api.listAgents.mockImplementation((_ws: string, q: ListAgentsQuery) =>
     serve(q),
   );
+  api.getAgent.mockReset();
+  api.getAgent.mockImplementation((_ws: string, id: string) => {
+    const a = api.agents.find((x) => x.agent_id === id);
+    return a ? Promise.resolve(a) : Promise.reject(new Error("not found"));
+  });
 });
 
 describe("AgentList", () => {
@@ -690,6 +697,26 @@ describe("AgentList", () => {
       ]),
     );
     await waitFor(() => expect(row("other")).not.toBeNull());
+  });
+
+  it("shows an archived agent again once it is unarchived from its chat after a reload", async () => {
+    // List leaves archived agents out, so the open chat's agent is fetched.
+    api.agents = [agent("lead"), agent("old", { state: "archived" })];
+    api.listAgents.mockImplementation((_ws: string, q: ListAgentsQuery) =>
+      serve(q).then((p) => ({
+        ...p,
+        agents: p.agents.filter((a) => a.state !== "archived"),
+      })),
+    );
+    renderList("/ws/ws1/chat/old");
+    await waitFor(() => expect(stream().opts.agents).toContain("old"));
+    expect(row("old")).toBeNull();
+    act(() =>
+      stream().opts.onEvents!([
+        ev("old", "agent.state_changed", { from: "archived", to: "idle" }),
+      ]),
+    );
+    await waitFor(() => expect(row("old")).not.toBeNull());
   });
 
   it("keeps an archived Lead's working child in the list", async () => {

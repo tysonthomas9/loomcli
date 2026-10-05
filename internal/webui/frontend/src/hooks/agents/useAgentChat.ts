@@ -88,11 +88,6 @@ export interface UseAgentChatReturn {
   runningSince: string | null;
   archive: () => Promise<void>;
   unarchive: () => Promise<void>;
-  /** Deletes the agent; the server refuses while it has unsaved work unless
-   * fingerprint confirms exactly that work. */
-  remove: (fingerprint?: string) => Promise<void>;
-  /** The last Delete's unsaved_work fingerprint, for Delete anyway. */
-  unsaved: string | null;
   /** The saved history is gone (history_purged_at, or a history_expired error). */
   expired: boolean;
   /**
@@ -140,16 +135,12 @@ export function useAgentChat(
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [expiredErr, setExpiredErr] = useState(false);
-  const [unsaved, setUnsaved] = useState<string | null>(null);
   const [synced, setSynced] = useState(false);
 
   const refresh = useCallback(() => {
     getAgent(workspaceId, agentId)
       .then(setAgent)
-      .catch((err) => {
-        setUnsaved(null);
-        setError(message(err));
-      });
+      .catch((err) => setError(message(err)));
   }, [workspaceId, agentId]);
 
   useEffect(() => {
@@ -192,20 +183,12 @@ export function useAgentChat(
 
   // Runs one write; on failure shows the error and rethrows it.
   const write = useCallback(
-    async (call: () => Promise<unknown>, failed = "") => {
+    async (call: () => Promise<unknown>) => {
       setError(null);
-      setUnsaved(null);
       try {
         await call();
       } catch (err) {
-        setError(failed + message(err));
-        // Set with its refusal text, so no other error can sit beside it.
-        setUnsaved(
-          errorCode(err) === "unsaved_work"
-            ? (((err as ApiError).body as { fingerprint?: string })
-                .fingerprint ?? null)
-            : null,
-        );
+        setError(message(err));
         if (errorCode(err) === "history_expired") setExpiredErr(true);
         throw err;
       }
@@ -265,21 +248,6 @@ export function useAgentChat(
     [write, workspaceId, agentId],
   );
 
-  const remove = useCallback(
-    (fingerprint?: string) =>
-      write(
-        () =>
-          deleteAgent(
-            workspaceId,
-            agentId,
-            newRequestId(),
-            fingerprint ? { fingerprint } : undefined,
-          ),
-        "Not deleted: ",
-      ),
-    [write, workspaceId, agentId],
-  );
-
   const runningTurn = agent?.running_turn_id ?? null;
   const runningSince = useMemo(
     () => turnStartedAt(events, runningTurn),
@@ -300,8 +268,6 @@ export function useAgentChat(
     runningSince,
     archive,
     unarchive,
-    remove,
-    unsaved,
     expired: expiredErr || !!agent?.history_purged_at,
     synced,
   };

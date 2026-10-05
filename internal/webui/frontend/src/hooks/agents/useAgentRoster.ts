@@ -6,7 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { AgentEventStream, listAgents } from "@/api/agentsv1";
+import { AgentEventStream, getAgent, listAgents } from "@/api/agentsv1";
 import type {
   Agent,
   AgentEvent,
@@ -22,7 +22,11 @@ import {
 } from "./agentRoster";
 import type { Activities, Roster } from "./agentRoster";
 
-async function listAll(ws: string, q: ListAgentsQuery = {}): Promise<Agent[]> {
+async function listAll(
+  ws: string,
+  q: ListAgentsQuery = {},
+  open?: string,
+): Promise<Agent[]> {
   const out: Agent[] = [];
   let after = "";
   do {
@@ -30,6 +34,15 @@ async function listAll(ws: string, q: ListAgentsQuery = {}): Promise<Agent[]> {
     out.push(...page.agents);
     after = page.next;
   } while (after);
+  // List leaves archived agents out; the open chat's agent is fetched, so the
+  // stream follows it and its unarchive shows its row again.
+  if (open && !out.some((a) => a.agent_id === open))
+    out.push(
+      ...(await getAgent(ws, open).then(
+        (a) => [a],
+        () => [],
+      )),
+    );
   return out;
 }
 
@@ -84,10 +97,11 @@ export function useAgentRoster(
     (
       q: ListAgentsQuery,
       merge: (r: Roster, agents: Agent[]) => Roster | null,
+      open?: string,
     ) => {
       const seen: AgentEvent[] = [];
       inflight.current.add(seen);
-      return listAll(workspaceId, q)
+      return listAll(workspaceId, q, open)
         .then((agents) =>
           setRoster((r) => {
             const next = merge(r, agents);
@@ -102,18 +116,26 @@ export function useAgentRoster(
   // A full List replaces the roster, unless a later one already did.
   const sent = useRef(0);
   const done = useRef(0);
+  const open = useRef(openId);
   const relist = useCallback(() => {
     const n = ++sent.current;
-    list({}, (_, agents) => {
-      if (n < done.current) return null;
-      done.current = n;
-      return upsert(new Map(), agents);
-    })
+    list(
+      {},
+      (_, agents) => {
+        if (n < done.current) return null;
+        done.current = n;
+        return upsert(new Map(), agents);
+      },
+      open.current,
+    )
       .then(() => setError(null))
       .catch((err) => setError(message(err)));
   }, [list]);
 
-  useEffect(() => relist(), [relist, openId]);
+  useEffect(() => {
+    open.current = openId;
+    relist();
+  }, [relist, openId]);
 
   // The roster as of the last render, for the stream's starting cursors.
   const latest = useRef(roster);
