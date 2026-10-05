@@ -371,7 +371,8 @@ const isCreateCall = (i: ChatItem): i is ToolEntry =>
   (bridgeCalls(i).some((c) => c.tool === "agent_create") ||
     (isExecute(i) &&
       /["'`]loom\b|\bloom\./.test(i.tool.input ?? "") &&
-      (/\bagent_create\b/.test(i.tool.input ?? "") || !jsonInput(i))));
+      (/\bagent_create\b/.test(i.tool.input ?? "") ||
+        (!jsonInput(i) && !/tools\.loom\.\w+\s*\(/.test(i.tool.input ?? "")))));
 
 type Unit =
   | ChatItem

@@ -458,6 +458,16 @@ describe("code mode headers (CL4)", () => {
     ]);
   });
 
+  it("never folds cut loom code that calls another bridge tool", () => {
+    const cut = raw(
+      "l",
+      "execute",
+      `{"code":"await tools.loom.agent_list({}); /* 16 KiB…`,
+    );
+    const rows = deriveTimelineRows([startedItem("s", "k1"), cut], new Set());
+    expect(rows[0]).toMatchObject({ kind: "started", calls: [] });
+  });
+
   it("shows such code with no marker next to it as a plain expandable row", () => {
     const only = exec("o", search);
     expect(bridgeLabel(only, names)).toBeNull();
