@@ -222,6 +222,9 @@ describe("AgentChat timeline (UI3)", () => {
     // The bubble always leaves the pill room, even on a narrow chat column.
     const bubble = css.match(/\n\.userBubble \{[^}]*\}/)?.[0] ?? "";
     expect(bubble).toMatch(/max-width: min\(80%, calc\(100% - \d+px\)\);/);
+    // A waiting bubble has no pill, so it keeps its full 80%.
+    const waiting = css.match(/\.waiting \.userBubble \{[^}]*\}/)?.[0] ?? "";
+    expect(waiting).toMatch(/max-width: 80%;/);
   });
 
   it("groups tool calls under a summary that expands to each call's input and output", async () => {

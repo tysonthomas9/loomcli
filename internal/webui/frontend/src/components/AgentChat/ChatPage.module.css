@@ -349,6 +349,8 @@
 }
 
 .waiting .userBubble {
+  /* No hover pill here, so no room kept for one (UI7). */
+  max-width: 80%;
   border: 1px dashed var(--chat-outline);
   background: transparent;
 }
