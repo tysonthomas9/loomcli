@@ -24,11 +24,11 @@ export function useCompactRailTooltip(label: string): {
   visible: boolean;
 } {
   const [visible, setVisible] = useState(false);
-  const [position, setPosition] = useState({
-    top: 0,
-    left: 0,
-    above: false,
-  });
+  const [position, setPosition] = useState<{
+    top: number;
+    left: number;
+    flip?: "top" | "bottom";
+  }>({ top: 0, left: 0 });
   const anchorEl = useRef<HTMLElement | null>(null);
   const tooltipEl = useRef<HTMLSpanElement | null>(null);
   const tooltipId = useId();
@@ -44,25 +44,27 @@ export function useCompactRailTooltip(label: string): {
     setPosition({
       top: rect.top + rect.height / 2,
       left: rect.right + 8,
-      above: false,
     });
   }, []);
 
   // A tooltip that would run past the right edge (the mobile bottom rail)
-  // goes above its anchor instead, kept inside the viewport.
+  // goes above its anchor instead, or below when there is no room above,
+  // kept inside the viewport.
   useLayoutEffect(() => {
     const tip = tooltipEl.current;
     const anchor = anchorEl.current;
-    if (!visible || position.above || !tip || !anchor) return;
+    if (!visible || position.flip || !tip || !anchor) return;
     const vw = window.innerWidth;
-    const width = tip.getBoundingClientRect().width;
+    const box = tip.getBoundingClientRect();
+    const width = Math.min(box.width, vw - 8);
     if (position.left + width <= vw - 4) return;
     const rect = anchor.getBoundingClientRect();
     const centered = rect.left + rect.width / 2 - width / 2;
+    const below = rect.top - 8 - box.height < 4;
     setPosition({
-      top: rect.top - 8,
+      top: below ? rect.bottom + 8 : rect.top - 8,
       left: Math.max(4, Math.min(centered, vw - width - 4)),
-      above: true,
+      flip: below ? "bottom" : "top",
     });
   }, [visible, position]);
 
@@ -92,11 +94,13 @@ export function useCompactRailTooltip(label: string): {
           ref={tooltipEl}
           id={tooltipId}
           className={tooltipStyles.tooltipPortal}
-          data-placement={position.above ? "top" : undefined}
+          data-placement={position.flip}
           role="tooltip"
           style={{
             top: `${position.top}px`,
             left: `${position.left}px`,
+            // Wraps only a label wider than the viewport (width: max-content).
+            maxWidth: "calc(100vw - 8px)",
           }}
         >
           {label}
