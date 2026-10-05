@@ -153,11 +153,12 @@ export function useAgentChat(
       } catch (err) {
         setError(failed + message(err));
         // Set with its refusal text, so no other error can sit beside it.
-        if (errorCode(err) === "unsaved_work")
-          setUnsaved(
-            ((err as ApiError).body as { fingerprint?: string }).fingerprint ??
-              null,
-          );
+        setUnsaved(
+          errorCode(err) === "unsaved_work"
+            ? (((err as ApiError).body as { fingerprint?: string })
+                .fingerprint ?? null)
+            : null,
+        );
         if (errorCode(err) === "history_expired") setExpiredErr(true);
         throw err;
       }

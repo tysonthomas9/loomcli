@@ -854,6 +854,25 @@ describe("AgentChat lifecycle (1.8b)", () => {
     );
     await act(() => Promise.resolve());
     expect(screen.queryByTestId("agent-delete-anyway")).toBeNull();
+    // So does a Send that started before the refusal and fails after it.
+    let failSend: (e: Error) => void = () => {};
+    api.sendMessage.mockReturnValueOnce(
+      new Promise((_, reject) => (failSend = reject)),
+    );
+    fireEvent.change(screen.getByLabelText("Message"), {
+      target: { value: "hi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(api.sendMessage).toHaveBeenCalledTimes(1));
+    api.deleteAgent.mockRejectedValueOnce(refusal());
+    fireEvent.click(screen.getByTestId("agent-delete"));
+    fireEvent.click(screen.getByTestId("agent-delete-confirm"));
+    await screen.findByTestId("agent-delete-anyway");
+    await act(async () => failSend(new Error("send failed")));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("send failed"),
+    );
+    expect(screen.queryByTestId("agent-delete-anyway")).toBeNull();
     api.deleteAgent.mockRejectedValueOnce(
       new ApiError(409, "Conflict", {
         error: "uncommitted changes in /wt/a1",
@@ -867,7 +886,7 @@ describe("AgentChat lifecycle (1.8b)", () => {
     api.deleteAgent.mockResolvedValueOnce(undefined);
     fireEvent.click(await screen.findByTestId("agent-delete-anyway"));
     expect(await screen.findByTestId("where")).toHaveTextContent("/ws/w1/home");
-    expect(api.deleteAgent).toHaveBeenCalledTimes(4);
+    expect(api.deleteAgent).toHaveBeenCalledTimes(5);
     expect(api.deleteAgent).toHaveBeenLastCalledWith(
       "w1",
       "a1",
