@@ -141,9 +141,14 @@ func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
 }
 
 // delete is Delete without the start-up gate; Reconcile finishes a Delete with it.
-// A cascade deletes the children first, each under its own lock only.
+// A cascade deletes the children of a live agent first, each under its own
+// lock only.
 func (s *Service) delete(ctx context.Context, req DeleteRequest) error {
 	if req.Cascade {
+		a, err := s.agent(ctx, req.AgentID)
+		if err != nil || a.DeletedAt != nil {
+			return err
+		}
 		if err := s.deleteChildren(ctx, req.AgentID, true); err != nil {
 			return err
 		}

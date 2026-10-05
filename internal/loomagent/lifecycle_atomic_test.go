@@ -264,3 +264,19 @@ func TestArchiveBusyStoppingRollsBack(t *testing.T) {
 		t.Fatalf("after the failed commit: %s, reason %q, history %v", row.State, deref(row.ArchiveReason), history(t, e, "a1"))
 	}
 }
+
+// TestDeleteCascadeRepeatKeepsChildren: a cascading Delete repeated on an
+// agent already deleted without cascade leaves its settled children alone.
+func TestDeleteCascadeRepeatKeepsChildren(t *testing.T) {
+	ctx, child := context.Background(), svcAgent("c1", "single_task", StateFinished)
+	child.ParentAgentID = sp("p1")
+	s := newService(t, ServiceConfig{}, svcAgent("p1", "persistent", StateIdle), child)
+	for _, cascade := range []bool{false, true} {
+		if err := s.Delete(ctx, DeleteRequest{AgentID: "p1", Cascade: cascade}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.get(t, "p1").DeletedAt == nil || s.get(t, "c1").DeletedAt != nil {
+		t.Fatalf("p1 deleted %v, c1 deleted %v; want only p1", s.get(t, "p1").DeletedAt, s.get(t, "c1").DeletedAt)
+	}
+}
