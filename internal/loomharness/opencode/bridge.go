@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"time"
 
@@ -98,17 +99,26 @@ type mcpServer struct {
 }
 
 // unbridge removes the "loom" MCP server of location dir; one already gone
-// (404) is removed.
+// (404) is removed. So is one whose directory is gone: OpenCode answers 500
+// for a location it has not loaded and cannot load, which holds no bridge
+// (a loaded one still answers 204 or 404). A Delete removes the working
+// copy before it calls Retire.
 func (c *Client) unbridge(ctx context.Context, dir string) error {
 	c.settled.Delete(dir)
 	err := c.call(ctx, "DELETE", "/api/experimental/mcp/loom?location[directory]="+url.QueryEscape(dir), nil, nil)
-	if e := (*Error)(nil); errors.As(err, &e) && e.Status == http.StatusNotFound {
+	if e := (*Error)(nil); errors.As(err, &e) && (e.Status == http.StatusNotFound || e.Status == http.StatusInternalServerError && gone(dir)) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("opencode bridge for %s: %w", dir, err)
 	}
 	return nil
+}
+
+// gone reports whether dir no longer exists.
+func gone(dir string) bool {
+	_, err := os.Stat(dir)
+	return os.IsNotExist(err)
 }
 
 // catalogSettle is the bounded wait, after /api/mcp reports the loom server

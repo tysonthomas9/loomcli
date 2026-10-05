@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"reflect"
 	"regexp"
 	"slices"
@@ -56,6 +57,7 @@ type store struct {
 	mcp      string                    // a registered loom MCP server's /api/mcp status; "" is connected
 	bridges  map[string]map[string]any // location dir -> the loom MCP config PUT there
 	puts     int                       // PUT /api/experimental/mcp/loom calls
+	mcpDown  bool                      // DELETE /api/experimental/mcp/loom fails
 }
 
 func newStore() *store {
@@ -133,7 +135,12 @@ func fakeServer(t *testing.T, st *store) *Client {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		dir := r.URL.Query().Get("location[directory]")
-		if _, ok := st.bridges[dir]; !ok {
+		_, ok := st.bridges[dir]
+		if _, err := os.Stat(dir); st.mcpDown || (!ok && os.IsNotExist(err)) {
+			w.WriteHeader(500) // OpenCode 2.0.19 cannot load a location whose directory is gone
+			return
+		}
+		if !ok {
 			reply(w, 404, map[string]string{"_tag": "McpServerNotFoundError", "message": "loom"})
 			return
 		}
