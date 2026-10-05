@@ -319,7 +319,7 @@ func eventRows(out []Event) ([]loomstore.Event, error) {
 // in commit order. A write that saved nothing (a retry) publishes nothing.
 func (s *Service) busPublish(out []Event) func(saved []loomstore.Event) {
 	return func(saved []loomstore.Event) {
-		for i, row := range saved {
+		for i, row := range saved[:min(len(saved), len(out))] { // out's rows come first
 			e := out[i]
 			e.EventID = row.EventID
 			s.Bus.publish(e)

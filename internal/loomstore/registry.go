@@ -355,20 +355,39 @@ var commitStateCrash = func() {}
 // transaction it sets agentID's state columns to `to` and bumps its revision
 // by one, only if the columns still equal `from`, the revision still equals
 // rev and the agent is not deleted (otherwise ErrStateChanged), and appends
-// events as AppendEvent does, each with EventID <agent>:<revision>:<kind> of
-// the new revision. Both are saved or neither. It returns the saved events.
+// events as AppendEvent does, each with no EventID named <agent>:<revision>:<kind>
+// of the new revision. Both are saved or neither. It returns the saved events.
 // A turn ending in finished (from active or waiting) also sets finished_at,
 // the background R29 deadline, in the same statement.
-func (s *Store) CommitState(ctx context.Context, agentID string, from, to AgentState, rev int64, events []Event) (saved []Event, err error) {
+func (s *Store) CommitState(ctx context.Context, agentID string, from, to AgentState, rev int64, events []Event) ([]Event, error) {
+	for _, e := range events {
+		if e.AgentID != agentID {
+			return nil, fmt.Errorf("loomstore: event %s of %s in a state change of %s", e.Kind, e.AgentID, agentID)
+		}
+	}
+	return s.commitState(ctx, agentID, from, to, rev, 0, events)
+}
+
+// CommitCreate is CommitState for Create's last step: the same transaction
+// also raises create_step to step, and saves events that keep their EventID
+// (agent.created, a parent's child.created) as AppendEvent does. Another
+// agent's event is saved only while that agent is not deleted; no lock of
+// that agent is needed, as its seq is allocated in the transaction.
+func (s *Store) CommitCreate(ctx context.Context, agentID string, from, to AgentState, rev, step int64, events []Event) ([]Event, error) {
+	return s.commitState(ctx, agentID, from, to, rev, step, events)
+}
+
+func (s *Store) commitState(ctx context.Context, agentID string, from, to AgentState, rev, step int64, events []Event) (saved []Event, err error) {
 	now := Stamp(time.Now())
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE agents SET state = ?, state_reason = ?, waiting_on = ?, outcome = ?,
 		attention_reason = ?, running_turn_id = ?, attempt = ?, updated_at = ?, revision = revision + 1,
+		create_step = MAX(create_step, ?),
 		finished_at = CASE WHEN ? = 'finished' AND state IN ('active','waiting') THEN ? ELSE finished_at END
 		WHERE agent_id = ? AND deleted_at IS NULL AND state = ? AND state_reason IS ? AND waiting_on IS ?
 		AND outcome IS ? AND attention_reason IS ? AND running_turn_id IS ? AND attempt = ? AND revision = ?`,
 			to.State, to.StateReason, to.WaitingOn, to.Outcome, to.AttentionReason, to.RunningTurn, to.Attempt,
-			now, to.State, now, agentID, from.State, from.StateReason, from.WaitingOn, from.Outcome,
+			now, step, to.State, now, agentID, from.State, from.StateReason, from.WaitingOn, from.Outcome,
 			from.AttentionReason, from.RunningTurn, from.Attempt, rev)
 		if err != nil {
 			return err
@@ -376,21 +395,41 @@ func (s *Store) CommitState(ctx context.Context, agentID string, from, to AgentS
 		if n, _ := res.RowsAffected(); n == 0 {
 			return ErrStateChanged
 		}
-		for _, e := range events {
-			if e.AgentID != agentID {
-				return fmt.Errorf("loomstore: event of %s in a state change of %s", e.AgentID, agentID)
-			}
-			e.EventID = fmt.Sprintf("%s:%d:%s", agentID, rev+1, e.Kind)
-			got, err := appendEvent(ctx, tx, e)
-			if err != nil {
-				return err
-			}
-			saved = append(saved, got)
+		if saved, err = commitEvents(ctx, tx, agentID, rev+1, events); err != nil {
+			return err
 		}
 		commitStateCrash()
 		return nil
 	})
 	return saved, err
+}
+
+// commitEvents saves events in agentID's change to revision rev: one with
+// no EventID is named <agent>:<rev>:<kind>; another agent's is skipped when
+// that agent is deleted.
+func commitEvents(ctx context.Context, tx *sql.Tx, agentID string, rev int64, events []Event) (saved []Event, err error) {
+	for _, e := range events {
+		if e.EventID == "" {
+			e.EventID = fmt.Sprintf("%s:%d:%s", agentID, rev, e.Kind)
+		}
+		live := true
+		if e.AgentID != agentID {
+			err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE agent_id = ? AND deleted_at IS NULL`,
+				e.AgentID).Scan(&live)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !live {
+			continue
+		}
+		got, err := appendEvent(ctx, tx, e)
+		if err != nil {
+			return nil, err
+		}
+		saved = append(saved, got)
+	}
+	return saved, nil
 }
 
 // AgentFilter selects agents for ListAgents. Empty fields match anything.

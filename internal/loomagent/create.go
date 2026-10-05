@@ -310,24 +310,43 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 		a.HarnessSessionID, a.HarnessSessionRoot, a.CreateStep = &ref.NativeID, &ref.Root, stepSession
 	}
 	createCrash("created")
+	if a, err = s.commitCreated(ctx, a); err != nil {
+		return a, err
+	}
+	createCrash("done")
+	return s.wake(ctx, a) // hand over the first message
+}
+
+// commitCreated is Create's last step, one transaction under the event lane
+// (Store.CommitCreate): a creating row moves to idle, clearing
+// create_incomplete; create_step becomes done; and the created events are
+// saved, the parent's child.created only while the parent is not deleted.
+// It takes no parent lock. On any error nothing is saved or published.
+func (s *Service) commitCreated(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
+	before, to := a, a.StateOf()
 	if a.State == StateCreating {
-		to := a.StateOf()
 		to.State = StateIdle
 		if deref(to.AttentionReason) == AttentionCreateIncomplete {
 			to.AttentionReason = nil
 		}
-		if a, err = s.setState(ctx, a, to); err != nil {
-			return a, err
-		}
 	}
-	if err := s.created(ctx, a); err != nil {
-		return a, err
+	a.State, a.AttentionReason, a.CreateStep = to.State, to.AttentionReason, stepDone
+	a.Revision++
+	out := changeEvents(before, a)
+	rows, err := eventRows(out)
+	if err != nil {
+		return before, err
 	}
-	a.CreateStep = stepDone
-	if err := s.store.SetCreateStep(ctx, a.AgentID, stepDone, nil, nil, nil); err != nil {
-		return a, err
+	more, err := created(a)
+	if err != nil {
+		return before, err
 	}
-	return s.wake(ctx, a) // hand over the first message
+	if _, err := s.events.commit(func() ([]loomstore.Event, error) {
+		return s.store.CommitCreate(ctx, a.AgentID, before.StateOf(), to, before.Revision, stepDone, append(rows, more...))
+	}, s.busPublish(out)); err != nil {
+		return before, err
+	}
+	return a, nil
 }
 
 // ensureWorktree ensures a's owned working copy through the Workspace port

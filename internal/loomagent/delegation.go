@@ -271,18 +271,26 @@ func parseCompletionKey(key string) (Completion, bool) {
 	return Completion{Child: rest[:i], Attempt: attempt}, true
 }
 
-// created saves agent.created once, when Create finishes, and child.created
-// on a's parent.
-func (s *Service) created(ctx context.Context, a loomstore.Agent) error {
-	if err := s.appendEvent(ctx, a.AgentID, KindAgentCreated, KindAgentCreated,
-		map[string]any{"name": a.Name, "preset": a.Preset, "harness": a.Harness}); err != nil {
-		return err
+// created are the events Create's last step saves: agent.created, a's
+// model.unverified if any, and child.created on a's parent.
+func created(a loomstore.Agent) ([]loomstore.Event, error) {
+	e, err := eventRow(a.AgentID, KindAgentCreated, KindAgentCreated,
+		map[string]any{"name": a.Name, "preset": a.Preset, "harness": a.Harness})
+	if err != nil {
+		return nil, err
 	}
-	if err := s.warnUnverified(ctx, a); err != nil || a.ParentAgentID == nil {
-		return err
+	out := []loomstore.Event{e}
+	if e, ok, err := unverified(a); err != nil {
+		return nil, err
+	} else if ok {
+		out = append(out, e)
 	}
-	return s.appendEvent(ctx, *a.ParentAgentID, KindChildCreated, KindChildCreated+":"+a.AgentID,
+	if a.ParentAgentID == nil {
+		return out, nil
+	}
+	e, err = eventRow(*a.ParentAgentID, KindChildCreated, KindChildCreated+":"+a.AgentID,
 		map[string]any{"child": a.AgentID, "name": a.Name, "preset": a.Preset})
+	return append(out, e), err
 }
 
 // completed reports whether a is a child single task whose current attempt

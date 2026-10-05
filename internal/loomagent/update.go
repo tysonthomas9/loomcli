@@ -106,18 +106,24 @@ func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstor
 	if from == a.Harness && fromModel == deref(a.Model) {
 		return a, nil
 	}
-	return a, s.warnUnverified(ctx, a)
+	e, ok, err := unverified(a)
+	if err != nil || !ok {
+		return a, err
+	}
+	_, err = s.events.Append(ctx, e)
+	return a, err
 }
 
-// warnUnverified saves model.unverified when a's model was not in its
-// harness's catalog when chosen (MCS1).
-func (s *Service) warnUnverified(ctx context.Context, a loomstore.Agent) error {
+// unverified is a's model.unverified event, ok when a's model was not in
+// its harness's catalog when chosen (MCS1).
+func unverified(a loomstore.Agent) (e loomstore.Event, ok bool, err error) {
 	if cfg, err := loadConfig(a); err != nil || !cfg.ModelUnverified {
-		return err
+		return e, false, err
 	}
-	return s.appendEvent(ctx, a.AgentID, KindModelUnverified, KindModelUnverified+":v"+strconv.FormatInt(a.SpecVersion, 10),
+	e, err = eventRow(a.AgentID, KindModelUnverified, KindModelUnverified+":v"+strconv.FormatInt(a.SpecVersion, 10),
 		map[string]any{"model": deref(a.Model), "harness": a.Harness,
 			"message": fmt.Sprintf("model %q is not in %s's model list; the harness decides whether it runs", deref(a.Model), a.Harness)})
+	return e, err == nil, err
 }
 
 // checkUpdate refuses a change of anything but the name of an unfinished
@@ -231,12 +237,18 @@ func (s *Service) current(ctx context.Context, a loomstore.Agent) (loomharness.S
 
 // appendEvent saves one agent-level event; a repeated eventID is a no-op.
 func (s *Service) appendEvent(ctx context.Context, agentID, kind, eventID string, payload any) error {
-	b, err := json.Marshal(payload)
+	e, err := eventRow(agentID, kind, eventID, payload)
 	if err != nil {
 		return err
 	}
-	_, err = s.events.Append(ctx, loomstore.Event{AgentID: agentID, EventID: eventID, Kind: kind, Payload: b})
+	_, err = s.events.Append(ctx, e)
 	return err
+}
+
+// eventRow is the event row of payload, to save.
+func eventRow(agentID, kind, eventID string, payload any) (loomstore.Event, error) {
+	b, err := json.Marshal(payload)
+	return loomstore.Event{AgentID: agentID, EventID: eventID, Kind: kind, Payload: b}, err
 }
 
 // harnessErr maps a harness failure to harness_unavailable or harness_error.
