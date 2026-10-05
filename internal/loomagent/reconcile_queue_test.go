@@ -821,3 +821,65 @@ func TestBadRequestLeftoverUnrecordedRetried(t *testing.T) {
 		t.Fatalf("owned = %v; want the leftover recorded", owned)
 	}
 }
+
+// TestRefusedDeleteReplacesCreateAttention: a partly created agent shows
+// create_retrying when a Delete the user confirmed over unsaved work is
+// marked. The reconcile retry, refused for lack of the fingerprint, shows
+// delete_incomplete in its place and stops; the resync clock does not
+// retry it.
+func TestRefusedDeleteReplacesCreateAttention(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	if !crashAt(t, "open")(func() { _, _ = e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) }) {
+		t.Fatal("did not crash")
+	}
+	id := onlyRow(t, e).AgentID
+	execSQL(t, e, `UPDATE agents SET attention_reason = 'create_retrying', delete_requested = 1 WHERE agent_id = ?`, id)
+	dws := &countStatus{deleteWorkspace: &deleteWorkspace{Workspace: e.ws,
+		status: WorkspaceStatus{Uncommitted: []string{"a.go"}, Fingerprint: "f1"}}}
+	s := e.service(ServiceConfig{})
+	s.workspace = dws
+	c := useTestClock(s)
+	runDispatcher(t, s)
+	settled(t, s)
+	for range 3 {
+		c.tick(t)
+		settled(t, s)
+	}
+	if a := onlyRow(t, e); deref(a.AttentionReason) != AttentionDeleteIncomplete || dws.n.Load() != 1 {
+		t.Fatalf("Attention %q, unsaved-work checks %d; want delete_incomplete after one refused retry",
+			deref(a.AttentionReason), dws.n.Load())
+	}
+}
+
+// TestCascadeChildFailureQueued: a cascading Delete whose child fails after
+// its mark queues the child for its retry, which deletes it.
+func TestCascadeChildFailureQueued(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	var fails atomic.Int32
+	fails.Store(1)
+	s := e.service(ServiceConfig{Purge: func(_ context.Context, a loomstore.Agent, _ []loomstore.NativeSession) error {
+		if a.ParentAgentID != nil && fails.Add(-1) >= 0 {
+			return errors.New("purge down")
+		}
+		return nil
+	}})
+	c := useTestClock(s)
+	lead, _ := newLead(t, e, s, "lead")
+	child, err := s.Create(ctx, childReq(lead.AgentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(ctx, DeleteRequest{AgentID: lead.AgentID, Cascade: true}); err == nil {
+		t.Fatal("cascade Delete succeeded although the child's purge failed")
+	}
+	runDispatcher(t, s)
+	if c.fire() == 0 {
+		t.Fatal("the child that failed after its mark was not queued")
+	}
+	settled(t, s)
+	if row, _ := e.st.GetAgent(ctx, child.AgentID); row.DeletedAt == nil {
+		t.Fatal("the child's retry did not delete it")
+	}
+}

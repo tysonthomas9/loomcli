@@ -215,11 +215,12 @@ func (s *Service) backfill(ctx context.Context, harness string) (failed map[stri
 
 var errHistoryTooLarge = errors.New("loomagent: the native history is over the replay cap")
 
-// flag shows Attention reason on agentID unless it already shows one.
+// flag shows Attention reason on agentID unless it already shows one; a
+// Delete's replaces a Create's, as the Delete replaced the Create.
 func (s *Service) flag(ctx context.Context, agentID, reason string) error {
 	defer s.lock(agentID)()
 	a, err := s.live(ctx, agentID)
-	if err != nil || a.AttentionReason != nil {
+	if err != nil || (a.AttentionReason != nil && !(reason == AttentionDeleteIncomplete && createReason(*a.AttentionReason))) {
 		return err
 	}
 	if reason == AttentionCreateIncomplete && a.State != StateCreating {

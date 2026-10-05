@@ -139,10 +139,18 @@ func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
 		return err
 	}
 	err := s.delete(ctx, req)
-	if a, gerr := s.store.GetAgent(context.WithoutCancel(ctx), req.AgentID); err != nil && gerr == nil && owes(a, false) {
-		s.retryLater(req.AgentID)
+	if err != nil {
+		s.retryIfOwed(ctx, req.AgentID)
 	}
 	return err
+}
+
+// retryIfOwed queues agentID for its retry when a failed Delete left it
+// with a marker; it reads the row without ctx's cancel.
+func (s *Service) retryIfOwed(ctx context.Context, agentID string) {
+	if a, err := s.store.GetAgent(context.WithoutCancel(ctx), agentID); err == nil && owes(a, false) {
+		s.retryLater(agentID)
+	}
 }
 
 // delete is Delete without the start-up gate; Reconcile finishes a Delete with it.
@@ -234,6 +242,7 @@ func (s *Service) deleteChildren(ctx context.Context, agentID string, cascade bo
 	for _, c := range children {
 		if cascade {
 			if err := s.delete(ctx, DeleteRequest{AgentID: c.AgentID, Cascade: true}); err != nil {
+				s.retryIfOwed(ctx, c.AgentID)
 				return err
 			}
 		}
