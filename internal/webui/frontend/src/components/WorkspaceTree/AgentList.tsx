@@ -12,30 +12,22 @@ import {
   agentColor,
   agentColorIndex,
   agentInitials,
-  childrenByParent,
   useAgentRoster,
   useArchiveAgent,
   useDeleteAgent,
   type DeleteRefusal,
 } from "@/hooks";
 import {
+  SK_AGENT_API_ORDER,
   agentDot,
   agentRoleLabel,
-  childVisible,
+  sidebarRows,
+  storedAgentApiOrder as storedOrder,
+  visibleChildren,
 } from "@/hooks/agents/agentSidebar";
 import { useToast } from "@/hooks/ui";
-import {
-  mergeAgentSectionOrder,
-  parseStoredAgentSectionOrder,
-} from "@/utils/agentSectionOrder";
-import { wsGet, wsSet } from "@/utils/scopedStorage";
+import { wsSet } from "@/utils/scopedStorage";
 import styles from "./AgentList.module.css";
-
-/** The top-level rows' order by agent id, saved as the fleet rows' is. */
-const SK_AGENT_API_ORDER = "agent-api-order";
-
-const storedOrder = (workspaceId: string): string[] =>
-  parseStoredAgentSectionOrder(wsGet(workspaceId, SK_AGENT_API_ORDER)) ?? [];
 
 export interface AgentListProps {
   workspaceId: string;
@@ -97,36 +89,10 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   );
 
   // Children of a hidden (archived) parent rise to the top while at work.
-  const kids = useMemo(
-    () =>
-      childrenByParent(
-        new Map(
-          [...roster].filter(
-            ([id, a]) => a.state !== "archived" && !gone.has(id),
-          ),
-        ),
-      ),
-    [roster, gone],
+  const { kids, fullOrder, main, background } = useMemo(
+    () => sidebarRows(roster, activeId, order, gone),
+    [roster, activeId, order, gone],
   );
-  const top = (kids.get("") ?? []).filter(
-    (a) =>
-      !a.parent_agent_id ||
-      !roster.has(a.parent_agent_id) ||
-      childVisible(a, kids, activeId),
-  );
-  const isWorker = (a: Agent) => a.role_kind === "worker";
-  const isLead = (a: Agent) => a.preset === "lead";
-  const fullOrder = mergeAgentSectionOrder(
-    [
-      ...top.filter(isLead),
-      ...top.filter((a) => !isLead(a) && !isWorker(a)),
-      ...top.filter(isWorker),
-    ].map((a) => a.agent_id),
-    order,
-  );
-  const ordered = fullOrder.map((id) => roster.get(id)!);
-  const main = ordered.filter((a) => !isWorker(a));
-  const background = ordered.filter(isWorker);
 
   const reorder = useCallback(
     (next: string[]) => {
@@ -222,10 +188,8 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
 
   // A row's children, pinned under it: they archive but do not drag.
   const children = (a: Agent): JSX.Element | null => {
-    const list = kids
-      .get(a.agent_id)
-      ?.filter((k) => childVisible(k, kids, activeId));
-    if (!list?.length) return null;
+    const list = visibleChildren(a, kids, activeId);
+    if (!list.length) return null;
     return (
       <div
         role="group"

@@ -2,6 +2,13 @@
 // and the second line and status dot each row shows.
 
 import type { Agent } from "@/api/agentsv1";
+import {
+  mergeAgentSectionOrder,
+  parseStoredAgentSectionOrder,
+} from "@/utils/agentSectionOrder";
+import { wsGet } from "@/utils/scopedStorage";
+import { childrenByParent } from "./agentRoster";
+import type { Roster } from "./agentRoster";
 
 /** A child at work, as the Lead chat's tray counts it (DF1). */
 const WORKING = new Set(["creating", "active", "waiting", "stopping"]);
@@ -22,6 +29,94 @@ export function childVisible(
   return (kids.get(a.agent_id) ?? []).some((k) =>
     childVisible(k, kids, openId),
   );
+}
+
+/** Whether the agent is at work, as the Lead chat's tray counts it (DF1). */
+export const agentAtWork = (a: Agent): boolean => WORKING.has(a.state);
+
+/** The top-level rows' order by agent id, saved as the fleet rows' is. */
+export const SK_AGENT_API_ORDER = "agent-api-order";
+
+/** The workspace's saved top-level row order (SB4). */
+export const storedAgentApiOrder = (workspaceId: string): string[] =>
+  parseStoredAgentSectionOrder(wsGet(workspaceId, SK_AGENT_API_ORDER)) ?? [];
+
+export interface SidebarRows {
+  /** Each shown parent's children, archived and gone ones left out. */
+  kids: ReadonlyMap<string, readonly Agent[]>;
+  /** Every top-level row's id, in the saved order. */
+  fullOrder: string[];
+  /** Top-level rows: Leads and other agents, then Background workers. */
+  main: Agent[];
+  background: Agent[];
+}
+
+/**
+ * The sidebar's top-level Agent API rows (SB2/SB4): Leads first, then other
+ * agents, then workers, in the saved order; archived and gone agents leave.
+ * A child whose parent is hidden (archived) rises to the top while it shows.
+ */
+export function sidebarRows(
+  roster: Roster,
+  openId: string | undefined,
+  order: readonly string[],
+  gone: ReadonlySet<string> = new Set(),
+): SidebarRows {
+  const kids = childrenByParent(
+    new Map(
+      [...roster].filter(([id, a]) => a.state !== "archived" && !gone.has(id)),
+    ),
+  );
+  const top = (kids.get("") ?? []).filter(
+    (a) =>
+      !a.parent_agent_id ||
+      !roster.has(a.parent_agent_id) ||
+      childVisible(a, kids, openId),
+  );
+  const isWorker = (a: Agent) => a.role_kind === "worker";
+  const isLead = (a: Agent) => a.preset === "lead";
+  const fullOrder = mergeAgentSectionOrder(
+    [
+      ...top.filter(isLead),
+      ...top.filter((a) => !isLead(a) && !isWorker(a)),
+      ...top.filter(isWorker),
+    ].map((a) => a.agent_id),
+    order,
+  );
+  const ordered = fullOrder.map((id) => roster.get(id)!);
+  return {
+    kids,
+    fullOrder,
+    main: ordered.filter((a) => !isWorker(a)),
+    background: ordered.filter(isWorker),
+  };
+}
+
+/** A row's children that show under it (SB2), oldest first. */
+export const visibleChildren = (
+  a: Agent,
+  kids: ReadonlyMap<string, readonly Agent[]>,
+  openId: string | undefined,
+): Agent[] =>
+  (kids.get(a.agent_id) ?? []).filter((k) => childVisible(k, kids, openId));
+
+/**
+ * Every Agent API row the sidebar shows, flattened in its order: each
+ * top-level row followed by its shown children, then the Background rows.
+ */
+export function sidebarAgents(
+  roster: Roster,
+  openId: string | undefined,
+  order: readonly string[],
+): Agent[] {
+  const { kids, main, background } = sidebarRows(roster, openId, order);
+  const out: Agent[] = [];
+  const walk = (a: Agent) => {
+    out.push(a);
+    visibleChildren(a, kids, openId).forEach(walk);
+  };
+  [...main, ...background].forEach(walk);
+  return out;
 }
 
 /** The row's second line: what kind of agent it is. */

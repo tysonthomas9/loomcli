@@ -1,6 +1,8 @@
 /**
  * CollapsedAgentRail — vertical agent avatar pills when WorkspaceTree is
  * collapsed (Aether wireframe pin 24: sidebar shrinks to agent switcher).
+ * It lists the fleet agents, then the Agent API agents the expanded tree's
+ * AgentList shows, by the same rules (RAIL1, SB2/SB4).
  */
 
 import { useMemo } from "react";
@@ -16,6 +18,7 @@ import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
 import type { LoomAgentStatus } from "@/types";
 import { isPRReviewerAgent } from "@/utils/agentDisplay";
 
+import { ApiAgentRailItems } from "./ApiAgentRailItems";
 import styles from "./CollapsedAgentRail.module.css";
 
 export interface CollapsedAgentRailProps {
@@ -34,9 +37,15 @@ export function CollapsedAgentRail({
 }: CollapsedAgentRailProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const fleetAgents = useStore(agentStore, (s) => s.agents);
-  const { agents: workspaceConfigAgents, workspace } = useWorkspaceContext();
+  const {
+    agents: workspaceConfigAgents,
+    workspace,
+    workspaceId,
+  } = useWorkspaceContext();
   const prsView = activeView === "prs";
   const addClick = prsView ? undefined : onAddClick;
+  // The expanded tree shows the Agent API rows outside the PRs view.
+  const showApi = !prsView && !!workspaceId;
 
   const agents = useMemo<LoomAgentStatus[]>(() => {
     const merged: LoomAgentStatus[] = [...fleetAgents];
@@ -71,7 +80,7 @@ export function CollapsedAgentRail({
       aria-label="Agents"
       data-testid="collapsed-agent-rail"
     >
-      {agents.length === 0 ? (
+      {agents.length === 0 && !showApi ? (
         <CompactRailHost label="No agents" className={styles.emptyHint}>
           —
         </CompactRailHost>
@@ -89,6 +98,7 @@ export function CollapsedAgentRail({
           />
         ))
       )}
+      {showApi ? <ApiAgentRailItems workspaceId={workspaceId} /> : null}
       {addClick ? (
         <CompactRailHost
           as="button"

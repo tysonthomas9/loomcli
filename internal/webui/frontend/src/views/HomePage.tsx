@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { updateIssue } from "@/api";
 import {
@@ -13,6 +13,8 @@ import {
   useWorkspaceViewActions,
   useWorkspaceViewData,
 } from "@/contexts/WorkspaceViewContext";
+import { agentAtWork, sidebarAgents } from "@/hooks/agents/agentSidebar";
+import { useRoster } from "@/hooks/agents/useAgentRoster";
 import { useOperatorQueue } from "@/hooks/issues";
 import { useRecentActivity } from "@/hooks/workspace";
 import { isAgentActive } from "@/types";
@@ -45,7 +47,15 @@ export function HomePage(): JSX.Element {
   );
   const activity = useRecentActivity(workspaceId, issues, agents);
   const workspaceCounts = deriveThisWorkspaceCounts(issues);
-  const idleAgents = agents.filter((agent) => !isAgentActive(agent)).length;
+  // The sidebar's Agent API rows count with the fleet's (RAIL1): the shared
+  // roster the sidebar keeps live, by the sidebar's own rules.
+  const roster = useRoster();
+  const idleApiAgents = useMemo(
+    () => sidebarAgents(roster, undefined, []).filter((a) => !agentAtWork(a)),
+    [roster],
+  ).length;
+  const idleAgents =
+    agents.filter((agent) => !isAgentActive(agent)).length + idleApiAgents;
   const mountedRef = useRef(true);
 
   useEffect(() => {
