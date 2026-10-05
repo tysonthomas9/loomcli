@@ -24,8 +24,11 @@
   transition: background-color 0.15s ease;
 }
 
+/* base.css a:hover outranks .row, so hover resets its underline and colour. */
 .row:hover {
   background: var(--color-bg-hover);
+  color: inherit;
+  text-decoration: none;
 }
 
 .row:focus-visible {

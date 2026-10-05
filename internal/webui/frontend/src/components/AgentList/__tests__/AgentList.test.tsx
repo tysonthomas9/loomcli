@@ -431,4 +431,14 @@ describe("AgentList", () => {
     expect(rule).toMatch(/overflow-wrap: anywhere/);
     expect(rule).not.toMatch(/ellipsis|nowrap|overflow: hidden/);
   });
+
+  it("does not underline a row on hover, over the global a:hover rule", () => {
+    // base.css a:hover (0,1,1) beats .row (0,1,0), so .row:hover must reset it.
+    const css = readFileSync(
+      resolve(__dirname, "../AgentList.module.css"),
+      "utf8",
+    );
+    const rule = /\.row:hover \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/text-decoration: none/);
+  });
 });
