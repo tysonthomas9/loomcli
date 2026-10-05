@@ -644,4 +644,65 @@ test.describe("in a locale with a long time format", () => {
         animations: "disabled",
       });
   });
+
+  test("in a very narrow split pane the user's pill still fits its row (UI7b)", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Date.prototype.toLocaleTimeString = () => "অপৰাহ্ন ১২.৫৯";
+    });
+    await open(
+      page,
+      mock({
+        events: [
+          {
+            ...ev("message.delivered", {
+              sender: "user:local",
+              text: "Please run the API reviewer on the branch.",
+            }),
+            created_at: "2026-10-04T12:59:00Z",
+          },
+        ],
+      }),
+    );
+    const row = transcript(page)
+      .locator("li")
+      .filter({ hasText: "Please run" });
+    // A narrow split pane gives its rows this width; the column cap sets it here.
+    for (const width of [130, 105, 80]) {
+      await transcript(page).evaluate((el, w) => {
+        el.style.setProperty("--chat-column", `${w}px`);
+      }, width);
+      await page.mouse.move(0, 0);
+      await row.hover();
+      const pill = row.getByTestId("message-actions");
+      const copy = pill.getByRole("button", { name: "Copy your message" });
+      await expect(copy).toBeVisible();
+      const r = (await row.boundingBox())!;
+      expect(Math.round(r.width), `${width}px: row width`).toBe(width);
+      const p = (await pill.boundingBox())!;
+      const b = (await row.locator("[class*=userBubble]").boundingBox())!;
+      const c = (await copy.boundingBox())!;
+      expect(p.x, `${width}px: not clipped by its row`).toBeGreaterThanOrEqual(
+        r.x,
+      );
+      expect(
+        p.x + p.width,
+        `${width}px: left of the bubble`,
+      ).toBeLessThanOrEqual(b.x);
+      expect(c.width, `${width}px: copy whole`).toBeGreaterThanOrEqual(14);
+      expect(c.x, `${width}px: copy inside the pill`).toBeGreaterThanOrEqual(
+        p.x,
+      );
+      expect(
+        c.x + c.width,
+        `${width}px: copy inside the pill`,
+      ).toBeLessThanOrEqual(p.x + p.width);
+      if (SHOTS)
+        await page.screenshot({
+          path: `${SHOTS}/ui7b-${width}px.png`,
+          animations: "disabled",
+        });
+    }
+  });
 });

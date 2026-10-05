@@ -234,6 +234,8 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+  /* The user pill sizes itself against the row's width (UI7b). */
+  container-type: inline-size;
 }
 
 .userBubble {
@@ -328,6 +330,11 @@
   width: max-content;
   /* Never wider than the room the bubble leaves, so the row never clips it. */
   max-width: calc(6.5rem - 4px);
+  /*
+   * In a very narrow pane the bubble keeps its 24px of padding and leaves less
+   * than 6.5rem, so the room is the row's width less that padding (UI7b).
+   */
+  max-width: calc(min(6.5rem, 100cqi - 24px) - 4px);
 }
 
 /* Actions keep their size; only the time gives way, cut short with "…". */
