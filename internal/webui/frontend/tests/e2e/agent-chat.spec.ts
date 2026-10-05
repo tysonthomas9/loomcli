@@ -556,7 +556,9 @@ test("a user's hover pill sits left of the bubble, over none of it (UI7)", async
     // Left of the bubble and top-aligned with it, so the boxes never meet.
     expect(p.x + p.width, `${name}: pill right edge`).toBeLessThanOrEqual(b.x);
     expect(Math.abs(p.y - b.y), `${name}: top-aligned`).toBeLessThanOrEqual(1);
-    expect(p.x, `${name}: inside the transcript`).toBeGreaterThanOrEqual(0);
+    // Whole inside its row, which clips anything past its edge.
+    const r = (await row.boundingBox())!;
+    expect(p.x, `${name}: not clipped by its row`).toBeGreaterThanOrEqual(r.x);
     for (const theme of ["light", "dark"]) {
       await page.evaluate((t) => {
         document.documentElement.dataset.theme = t;

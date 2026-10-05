@@ -219,6 +219,9 @@ describe("AgentChat timeline (UI3)", () => {
       css.match(/\.userBubble > \.messageActions \{[^}]*\}/)?.[0] ?? "";
     expect(rule).toMatch(/right: calc\(100% \+ \d+px\);/);
     expect(rule).not.toMatch(/bottom:/);
+    // The bubble always leaves the pill room, even on a narrow chat column.
+    const bubble = css.match(/\n\.userBubble \{[^}]*\}/)?.[0] ?? "";
+    expect(bubble).toMatch(/max-width: min\(80%, calc\(100% - \d+px\)\);/);
   });
 
   it("groups tool calls under a summary that expands to each call's input and output", async () => {
