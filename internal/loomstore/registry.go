@@ -348,7 +348,7 @@ func (a Agent) StateOf() AgentState {
 var ErrStateChanged = errors.New("loomstore: agent state changed")
 
 // commitStateCrash runs inside the transactions of CommitState (and its
-// CommitCreate and CommitArchive), SendEvents and TombstoneEvents,
+// CommitCreate and CommitArchive), CommitSpec, SendEvents and TombstoneEvents,
 // after their writes and before their COMMIT; tests crash there.
 var commitStateCrash = func() {}
 
@@ -608,6 +608,37 @@ func (s *Store) CompareAndSetSpec(ctx context.Context, agentID string, fromVersi
 		return ErrSpecChanged
 	}
 	return nil
+}
+
+// CommitSpec is the one write of an Update's or harness switch's spec
+// change. In one transaction it sets agentID's spec columns to `to` and
+// bumps its revision by one, only if its spec_version still equals
+// fromVersion, its revision still equals rev and it is not deleted
+// (otherwise ErrSpecChanged), and saves events as CommitState does. Both are
+// saved or neither. It returns the saved events.
+func (s *Store) CommitSpec(ctx context.Context, agentID string, fromVersion, rev int64, to AgentSpec, events []Event) (saved []Event, err error) {
+	err = s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE agents SET name = ?, spec_json = ?, harness = ?, model = ?,
+		harness_session_id = ?, harness_session_root = ?, last_request_id = ?, spec_version = ?, updated_at = ?,
+		revision = revision + 1 WHERE agent_id = ? AND deleted_at IS NULL AND spec_version = ? AND revision = ?`,
+			to.Name, to.SpecJSON, to.Harness, to.Model, to.HarnessSessionID, to.HarnessSessionRoot, to.LastRequestID,
+			to.SpecVersion, Stamp(time.Now()), agentID, fromVersion, rev)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrSpecChanged
+		}
+		if saved, err = commitEvents(ctx, tx, agentID, rev+1, events); err != nil {
+			return err
+		}
+		commitStateCrash()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return saved, nil
 }
 
 // FindCreated returns the agent a Create made in workspaceID: the live agent

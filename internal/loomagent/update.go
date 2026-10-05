@@ -78,40 +78,58 @@ func (s *Service) Update(ctx context.Context, req UpdateRequest) (AgentInfo, err
 	return info(a), nil
 }
 
-// commitSpec bumps a's spec version, records requestID and, after the
-// commit, saves the change as a `kind` event (agent.updated or harness.changed).
+// commitSpec bumps a's spec version and revision, records requestID and
+// saves the change's `kind` event (agent.updated or harness.changed), with
+// model.unverified when the model or harness changed to an unverified
+// model, in one transaction under the event lane (Store.CommitSpec). On any
+// error nothing is saved or published.
 func (s *Service) commitSpec(ctx context.Context, a loomstore.Agent, to loomstore.AgentSpec, requestID, kind string) (loomstore.Agent, error) {
 	to.SpecVersion = a.SpecVersion + 1
 	if requestID != "" {
 		to.LastRequestID = &requestID
 	}
-	err := s.store.CompareAndSetSpec(ctx, a.AgentID, a.SpecVersion, to)
-	switch {
-	case errors.Is(err, loomstore.ErrSpecChanged):
-		return a, &Error{Code: CodeSpecVersionMismatch, Message: "the agent changed meanwhile"}
-	case err != nil && strings.Contains(err.Error(), "agents.name"):
-		return a, nameTaken(to.Name)
-	case err != nil:
-		return a, err
-	}
-	from, fromModel := a.Harness, deref(a.Model)
+	before := a
 	a.Name, a.SpecJSON, a.Harness, a.Model = to.Name, to.SpecJSON, to.Harness, to.Model
 	a.HarnessSessionID, a.HarnessSessionRoot = to.HarnessSessionID, to.HarnessSessionRoot
 	a.LastRequestID, a.SpecVersion = to.LastRequestID, to.SpecVersion
-	if err := s.appendEvent(ctx, a.AgentID, kind, kind+":v"+strconv.FormatInt(a.SpecVersion, 10),
-		map[string]any{"name": a.Name, "model": deref(a.Model), "from_harness": from, "harness": a.Harness,
-			"spec_version": a.SpecVersion}); err != nil {
-		return a, err
+	a.Revision++
+	rows, err := specEvents(before, a, kind)
+	if err != nil {
+		return before, err
 	}
-	if from == a.Harness && fromModel == deref(a.Model) {
-		return a, nil
+	_, err = s.events.commit(func() ([]loomstore.Event, error) {
+		return s.store.CommitSpec(ctx, a.AgentID, before.SpecVersion, before.Revision, to, rows)
+	}, func([]loomstore.Event) {})
+	switch {
+	case errors.Is(err, loomstore.ErrSpecChanged):
+		return before, &Error{Code: CodeSpecVersionMismatch, Message: "the agent changed meanwhile"}
+	case err != nil && strings.Contains(err.Error(), "agents.name"):
+		return before, nameTaken(to.Name)
+	case err != nil:
+		return before, err
 	}
-	e, ok, err := unverified(a)
-	if err != nil || !ok {
-		return a, err
+	return a, nil
+}
+
+// specEvents are the events of a's spec change from before: the `kind`
+// event, then model.unverified when the model or harness changed to an
+// unverified model. Each is named by the change's revision.
+func specEvents(before, a loomstore.Agent, kind string) ([]loomstore.Event, error) {
+	e, err := eventRow(a.AgentID, kind, "", map[string]any{"name": a.Name, "model": deref(a.Model),
+		"from_harness": before.Harness, "harness": a.Harness, "spec_version": a.SpecVersion})
+	if err != nil {
+		return nil, err
 	}
-	_, err = s.events.Append(ctx, e)
-	return a, err
+	rows := []loomstore.Event{e}
+	if before.Harness == a.Harness && deref(before.Model) == deref(a.Model) {
+		return rows, nil
+	}
+	u, ok, err := unverified(a)
+	if ok {
+		u.EventID = ""
+		rows = append(rows, u)
+	}
+	return rows, err
 }
 
 // unverified is a's model.unverified event, ok when a's model was not in
