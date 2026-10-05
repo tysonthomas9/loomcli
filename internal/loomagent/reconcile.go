@@ -108,21 +108,23 @@ func owes(a loomstore.Agent, live bool) bool {
 // means retry; a permanent Create failure shows create_incomplete and
 // returns nil, as no retry can fix it. It takes each agent lock itself and
 // holds none across another's.
-func (s *Service) reconcileAgent(ctx context.Context, agentID string) error {
-	err := s.recordMarkers(ctx, agentID) // owed to its parent even once it is gone
-	a, gerr := s.store.GetAgent(ctx, agentID)
-	if errors.Is(gerr, loomstore.ErrNotFound) || (gerr == nil && a.WorkspaceID != s.workspaceID) {
+func (s *Service) reconcileAgent(ctx context.Context, agentID string) (err error) {
+	a, err := s.store.GetAgent(ctx, agentID)
+	if errors.Is(err, loomstore.ErrNotFound) || (err == nil && a.WorkspaceID != s.workspaceID) {
+		return s.recordMarkers(ctx, agentID) // owed to its parent even once it is gone
+	} else if err != nil {
 		return err
-	} else if gerr != nil {
-		return errors.Join(err, gerr)
 	}
-	err = errors.Join(err, s.purgePending(ctx, agentID))
+	defer func() { err = errors.Join(err, s.recordMarkers(ctx, agentID)) }() // after a Delete, which the record names
+	err = s.purgePending(ctx, agentID)
 	switch {
 	case a.DeletedAt != nil:
 	case !owes(a, false):
 		serr := s.settle(ctx, agentID)
 		s.failed(ctx, agentID, AttentionHarnessUnavailable, serr)
-		err = errors.Join(err, serr)
+		if !isPermanent(serr) {
+			err = errors.Join(err, serr)
+		}
 	case a.DeleteRequested:
 		derr := s.delete(ctx, DeleteRequest{AgentID: agentID})
 		s.failed(ctx, agentID, AttentionDeleteIncomplete, derr)
@@ -349,12 +351,14 @@ func (s *Service) resumeOnce(ctx context.Context, a loomstore.Agent) (loomstore.
 }
 
 // settle runs after the backfill: it ends agentID's running turn if the
-// harness no longer runs it, else dispatches, which first settles a
-// message left handed.
+// harness no longer runs it, else dispatches, which first puts saved
+// task_completed records in its slots and settles a message left handed.
+// An error no retry can clear (an unwired harness, an unrecorded session,
+// a bad request) is permanent.
 func (s *Service) settle(ctx context.Context, agentID string) error {
 	defer s.lock(agentID)()
 	a, err := s.live(ctx, agentID)
-	if err != nil || a.State == StateCreating || a.HarnessSessionID == nil {
+	if err != nil || a.State == StateCreating {
 		return err
 	}
 	if a.RunningTurnID == nil {
@@ -362,20 +366,20 @@ func (s *Service) settle(ctx context.Context, agentID string) error {
 		return err
 	}
 	sess, _, err := s.current(ctx, a)
-	if err != nil || sess == nil {
-		return errors.Join(err, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"})
+	if err != nil || sess == nil { // no retry wires the harness or records the session
+		return permanent{errors.Join(err, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"})}
 	}
 	st, err := sess.Status(ctx)
 	if errors.Is(err, loomharness.ErrSessionNotFound) {
 		return nil // the backfill showed session_missing
 	} else if err != nil {
-		return harnessErr(err)
+		return openErr(err)
 	}
 	if st.Running {
 		return nil
 	}
 	if ended, err := endedNatively(ctx, sess, *a.RunningTurnID); err != nil || ended {
-		return harnessErr(err) // it ended after the backfill read: the feed or the next backfill applies its end
+		return openErr(err) // it ended after the backfill read: the feed or the next backfill applies its end
 	}
 	return s.endLostTurn(ctx, a, sess)
 }

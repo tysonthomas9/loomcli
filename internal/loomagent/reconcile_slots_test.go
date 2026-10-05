@@ -271,3 +271,69 @@ func TestRecoveryClockCallSites(t *testing.T) {
 		t.Fatalf("clocks asked for = %v; want only the resync interval %v", asked, resyncInterval)
 	}
 }
+
+// TestReconcileDeleteBeforeMarker: a finished child's record is owed and
+// its Delete was requested before a crash. Reconcile finishes the Delete
+// first, so the parent's record says the child is deleted and has no head.
+func TestReconcileDeleteBeforeMarker(t *testing.T) {
+	ctx := context.Background()
+	ws := &gatedStatus{headWorkspace: headWorkspace{branch: "loom/agent/c1", head: "abc"}}
+	s, path := markerKid(t, ws)
+	lift := failRecords(t, path)
+	finishTurn(t, s, "c1", "completed")
+	lift()
+	if err := s.store.MarkDeleteRequested(ctx, "c1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.reconcileAgent(ctx, "c1"); err != nil {
+		t.Fatal(err)
+	}
+	got := completions(t, s, "L")
+	if len(got) != 1 || !got[0].ChildDeleted || got[0].Head != "" {
+		t.Fatalf("records = %+v; want one, child deleted and no head", got)
+	}
+}
+
+// TestReconcileRestartDeliversSavedRecord: a child's record was saved but
+// Loom crashed before the idle parent, which has no harness session, took
+// it. After the restart the dispatcher's start puts it in the parent's slot.
+func TestReconcileRestartDeliversSavedRecord(t *testing.T) {
+	ws := &gatedStatus{headWorkspace: headWorkspace{branch: "loom/agent/c1", head: "abc"}}
+	s1, path := markerKid(t, ws)
+	l := s1.get(t, "L")
+	to := l.StateOf()
+	to.RunningTurn, to.State = nil, StateIdle
+	if _, err := s1.setState(context.Background(), l, to); err != nil {
+		t.Fatal(err)
+	}
+	endAttempt(t, s1, "c1", "completed")
+	if got := completions(t, s1, "L"); len(got) != 1 || len(waiting(t, s1, "L")) != 0 {
+		t.Fatalf("setup: records %d slots %q", len(got), waiting(t, s1, "L"))
+	}
+	s := markerService(t, ServiceConfig{Workspace: ws}, path) // the restart
+	runDispatcher(t, s)
+	settled(t, s)
+	if got := waiting(t, s, "L"); len(got) != 1 {
+		t.Fatalf("lead slots = %q; want c1's notice", got)
+	}
+}
+
+// TestReconcileUnwiredHarnessNotRetried: a lead's message waits behind a
+// running turn on a harness this Loom has not wired. Settling it shows
+// harness_unavailable once and queues no retry: none can wire it.
+func TestReconcileUnwiredHarnessNotRetried(t *testing.T) {
+	ctx := context.Background()
+	l := busy("L", "persistent", StateActive)
+	l.Harness, l.HarnessSessionID = "codex", sp("ses_1")
+	s := markerService(t, ServiceConfig{}, dbPath(t), l)
+	clk := useTestClock(s)
+	if _, _, err := s.store.Send(ctx, loomstore.SlotSend{AgentID: "L", Sender: "user:u", RequestID: "u1", Body: "go",
+		Source: "user_chat", Result: func(bool) (string, error) { return "{}", nil }}); err != nil {
+		t.Fatal(err)
+	}
+	runDispatcher(t, s)
+	settled(t, s)
+	if r := deref(s.get(t, "L").AttentionReason); r != AttentionHarnessUnavailable || len(clk.backoffs()) != 0 {
+		t.Fatalf("Attention %q backoffs %v; want harness_unavailable and no retry", r, clk.backoffs())
+	}
+}
