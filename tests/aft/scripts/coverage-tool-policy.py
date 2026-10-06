@@ -318,33 +318,44 @@ def tray_capture_script(child_id):
     return script
 
 
+def save_child_failure(child, rows, reason, expected_turn=None):
+    safe_outcomes = {"completed", "failed", "cancelled", "declined", "end_turn", "error"}
+    turn_ends = [e for e in rows if e["kind"] == "agent.turn_completed"]
+    stop_reasons = [(e["payload"].get("stopReason") if
+                     e["payload"].get("stopReason") in safe_outcomes else None) for e in turn_ends]
+    save("tray-failure.json", {"child_agent_id": child["agent_id"],
+         "expected_turn_id": expected_turn, "current_state": child["state"],
+         "current_turn_id": child.get("running_turn_id"),
+         "outcome": child.get("outcome") if child.get("outcome") in safe_outcomes else None,
+         "event_count": len(rows), "event_kinds": [e["kind"] for e in rows],
+         "saved_tool_count": sum(e["kind"] == "item.completed" and
+             e["payload"].get("itemKind") == "tool" for e in rows),
+         "native_stop_reasons": stop_reasons,
+         "native_error_present": any(bool(e["payload"].get("error")) for e in turn_ends),
+         "reason": reason})
+
+
 def tray_capture():
     child = agent("child")
     child_id = child["agent_id"]
     turn_id = child.get("running_turn_id")
     if child["state"] != "active" or not turn_id:
-        rows = events("child")
-        save("tray-failure.json", {"child_agent_id": child_id,
-             "current_state": child["state"], "current_turn_id": turn_id,
-             "event_count": len(rows), "last_event_kind": rows[-1]["kind"] if rows else None,
-             "reason": "exact child has no active turn before tray observation"})
+        save_child_failure(child, events("child"),
+                           "exact child has no active turn before tray observation", turn_id)
         raise AssertionError("exact child has no active turn before tray observation")
     script = tray_capture_script(child_id)
     wait = subprocess.run(["agent-browser", "--session", env("AFT_SESSION"), "wait", "--fn", script],
                           text=True, capture_output=True, check=False)
     if wait.returncode:
         latest = agent("child")
-        rows = events("child")
-        save("tray-failure.json", {"child_agent_id": child_id, "expected_turn_id": turn_id,
-             "current_state": latest["state"], "current_turn_id": latest.get("running_turn_id"),
-             "event_count": len(rows), "last_event_kind": rows[-1]["kind"] if rows else None,
-             "reason": "exact running redacted command preview not observed"})
+        save_child_failure(latest, events("child"),
+                           "exact running redacted command preview not observed", turn_id)
         raise AssertionError("exact running child redacted command preview not observed")
     capture = browser("window.__aftPolicyTrayCapture || null")
     if not isinstance(capture, dict) or capture.get("agentId") != child_id or \
             capture.get("status") != "running":
-        save("tray-failure.json", {"child_agent_id": child_id, "expected_turn_id": turn_id,
-             "reason": "exact child running tray capture unavailable"})
+        save_child_failure(agent("child"), events("child"),
+                           "exact child running tray capture unavailable", turn_id)
         raise AssertionError("exact child running tray capture unavailable")
     assert capture["href"].endswith("/" + child_id), "tray capture links to a foreign child"
     assert "Ran command" in capture["text"] and "printf" in capture["text"] and \
@@ -359,10 +370,8 @@ def tray_capture():
             "running child tray command did not bind to its one native saved tool step"
     except Exception:
         latest = agent("child")
-        save("tray-failure.json", {"child_agent_id": child_id, "expected_turn_id": turn_id,
-             "current_state": latest["state"], "current_turn_id": latest.get("running_turn_id"),
-             "event_count": len(rows), "last_event_kind": rows[-1]["kind"] if rows else None,
-             "reason": "captured running row lacks one matching saved native tool step"})
+        save_child_failure(latest, rows,
+                           "captured running row lacks one matching saved native tool step", turn_id)
         raise AssertionError("captured running row lacks one matching saved native tool step") from None
     save("tray-capture.json", {"child_agent_id": child_id,
          "parent_agent_id": child["parent_agent_id"], "running_turn_id": turn_id,
