@@ -77,16 +77,7 @@ tests:
         intent: "Select the required connected provider model through the runner's owned real-model UI contract"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker target'
         intent: "Read back the model selected through that same UI actor"
-      - click: { selector: "[data-chat-provider-model-picker]" }
-        intent: "Open the picker after two real model selections"
-      - click: { selector: '[data-model-picker-provider="recent"]' }
-        intent: "Open the Recent section"
-      - wait:
-          fn: "!!document.querySelector('li[role=option][title=\"${AFT_REAL_MODEL}\"]')"
-        intent: "Show the current model in the picker's actual Recent section"
-      - press: Escape
-        intent: "Return to the composer"
-      - fill: { label: Message, value: "PRIOR_${RUN_ID}: use a tool to read README.md and cite its test command." }
+      - fill: { label: Message, value: "PRIOR_${RUN_ID}: use a tool to read README.md. In your final answer, include the literal filename README.md and its test command." }
         intent: "Ask a first real repository question before changing effort"
       - press: Enter
         intent: "Send the prior turn"
@@ -121,7 +112,7 @@ tests:
         intent: "High remains visible after reload"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker target effort'
         intent: "Recheck the model and effort from the saved agent"
-      - fill: { label: Message, value: "PICKER_${RUN_ID}: read README.md with a tool and tell me its test command, citing the file." }
+      - fill: { label: Message, value: "PICKER_${RUN_ID}: read README.md with a tool. In your final answer, include the literal filename README.md and its test command." }
         intent: "Ask a real repository question on the selected model"
       - press: Enter
         intent: "Send from Chat"
@@ -139,6 +130,15 @@ tests:
         intent: "Require the earlier real turn's saved event IDs and order to remain unchanged"
       - run: 'bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-native.sh" picker'
         intent: "Check the completed assistant message in the owned native OpenCode session used the UI-selected model"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Open the picker after two saved selections and completed real turns"
+      - click: { selector: '[data-model-picker-provider="recent"]' }
+        intent: "Open the Recent section"
+      - wait:
+          fn: "!!document.querySelector('li[role=option][title=\"${AFT_REAL_MODEL}\"]')"
+        intent: "Require the selected and used model in the picker's actual Recent section"
+      - press: Escape
+        intent: "Return to the composer"
       - run: 'agent-browser --session "$AFT_SESSION" set viewport 540 900'
         intent: "Resize only this test browser to the supported narrow-composer layout"
       - wait:
@@ -270,7 +270,7 @@ tests:
         intent: "Recover the same agent with a listed model through the UI picker"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" recover unknown'
         intent: "Read back valid Config.Model and retain the saved prior failure and warning"
-      - fill: { label: Message, value: "RECOVER_${RUN_ID}: use a tool to read README.md and cite its test command." }
+      - fill: { label: Message, value: "RECOVER_${RUN_ID}: use a tool to read README.md. In your final answer, include the literal filename README.md and its test command." }
         intent: "Ask a fresh real turn after recovery"
       - press: Enter
       - wait:
