@@ -106,6 +106,40 @@ class QueueOracleTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             queue.assert_shot_route("/ws/LOCALMODE/chat/agt_foreign", "agt_child", "LOCALMODE")
 
+    def test_u3_exact_request_replay_rejects_new_event_or_changed_receipt(self):
+        receipt = {"request_id": "request-u3", "body": {"text": queue.TEXT["u3"], "delivery": "interrupt"},
+                   "result": {"message_id": "m3", "state": "waiting", "replaced": False, "interrupted": True}}
+        proof = {"delivered": [{"input_key": "msg_" + "a" * 26}, {"input_key": "msg_" + "b" * 26}]}
+        saved = {"receipt-u3": receipt, "first-delivery": proof}
+        row = {"state": "finished", "attempt": 1, "waiting_messages": []}
+        event = {"seq": 10, "event_id": "one"}
+        with patch.object(queue, "load", side_effect=saved.__getitem__), patch.object(queue, "identity", return_value="agt_child"), \
+             patch.object(queue, "agent", return_value=row), patch.object(queue, "events", side_effect=[[event], [event]]), \
+             patch.object(queue, "http", return_value=receipt["result"]) as post, patch.object(queue, "save"):
+            queue.replay_u3()
+            self.assertEqual(post.call_args.args[2], receipt["request_id"])
+        for replay, after in (({**receipt["result"], "replaced": True}, [event]),
+                              (receipt["result"], [event, {"seq": 11, "event_id": "extra"}])):
+            with patch.object(queue, "load", side_effect=saved.__getitem__), patch.object(queue, "identity", return_value="agt_child"), \
+                 patch.object(queue, "agent", return_value=row), patch.object(queue, "events", side_effect=[[event], after]), \
+                 patch.object(queue, "http", return_value=replay), patch.object(queue, "save"):
+                with self.assertRaises(AssertionError):
+                    queue.replay_u3()
+
+    def test_native_input_probe_rejects_missing_or_duplicate_count(self):
+        keys = ["msg_" + "a" * 26, "msg_" + "b" * 26]
+        proof = {"delivered": [{"input_key": key} for key in keys]}
+        def reply(args, text):
+            key = args[-1]
+            return json.dumps({"agent_id": "agt_child", "harness": "opencode", "input_key": key,
+                               "native_id": "ses_child", "native_root": "/owned",
+                               "native_user_message_count": 2 if key == keys[1] else 1})
+        with patch.dict(os.environ, {"AFT_TESTS_DIR": "/tmp"}), patch.object(queue, "load", return_value=proof), \
+             patch.object(queue, "identity", return_value="agt_child"), \
+             patch.object(queue.subprocess, "check_output", side_effect=reply), patch.object(queue, "save"):
+            with self.assertRaisesRegex(AssertionError, "exact input once"):
+                queue.native_inputs()
+
     def test_event_pager_rejects_foreign_child_and_duplicate_event(self):
         expected = {"agent_id": "agt_child", "seq": 1, "event_id": "one", "kind": "message.waiting", "payload": {}}
         with patch.object(queue, "identity", return_value="agt_child"), patch.object(queue, "http", return_value={

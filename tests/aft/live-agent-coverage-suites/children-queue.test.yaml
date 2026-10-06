@@ -255,6 +255,8 @@ tests:
         intent: Await natural First handover then the older parent slot
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" first-done && python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot first-delivered QUEUE-U3-${RUN_ID} QUEUE-P3B-${RUN_ID}'
         intent: Require exact saved later-user-before-older-parent delivery with distinct native input keys
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" replay-u3 && python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" native-inputs'
+        intent: Replay exact U3 RequestID after delivery without new events, then count each U3 and P3B input once in the owned OpenCode child session
       - run: '"$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-queue/child.id")"'
         intent: Save requested, native session, and completed answer model proof separately for the actual child
       - run: '"$AFT_NATIVE_SESSION_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-queue/lead.id")"'

@@ -559,6 +559,48 @@ def first_done():
     capture("first-done")
 
 
+def replay_u3():
+    receipt = load("receipt-u3")
+    demand(receipt["body"] == {"text": TEXT["u3"], "delivery": "interrupt"} and
+           receipt["result"].get("interrupted") is True, "original U3 interrupt receipt invalid")
+    before_events = events("child")
+    before_agent = agent("child")
+    demand(before_agent["state"] == "finished" and not before_agent["waiting_messages"],
+           "U3 replay must happen after natural delivery")
+    replayed = http(f"{ROOT}/{quote(identity('child'))}/messages", receipt["body"], receipt["request_id"])
+    after_events = events("child")
+    after_agent = agent("child")
+    demand(replayed == receipt["result"], "same U3 RequestID did not replay its exact receipt")
+    demand([(e["seq"], e["event_id"]) for e in after_events] ==
+           [(e["seq"], e["event_id"]) for e in before_events], "U3 replay added a saved event")
+    demand(after_agent["state"] == before_agent["state"] and
+           after_agent["attempt"] == before_agent["attempt"] and
+           after_agent["waiting_messages"] == before_agent["waiting_messages"],
+           "U3 replay mutated the finished child")
+    pair = load("first-delivery")["delivered"]
+    demand(len(pair) == 2 and all(x["input_key"] for x in pair), "First delivery input keys missing")
+    save("u3-replay", {"request_id": receipt["request_id"], "result": replayed,
+                       "event_ids_before_after": [e["event_id"] for e in after_events],
+                       "input_keys": [x["input_key"] for x in pair]})
+
+
+def native_inputs():
+    pair = load("first-delivery")["delivered"]
+    demand(len(pair) == 2 and pair[0]["input_key"] != pair[1]["input_key"], "First input keys not distinct")
+    helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-children-queue-native.sh"
+    proofs = []
+    for entry in pair:
+        raw = subprocess.check_output(["bash", str(helper), identity("child"), entry["input_key"]], text=True)
+        value = json.loads(raw.strip().splitlines()[-1])
+        demand(value["agent_id"] == identity("child") and value["input_key"] == entry["input_key"] and
+               value["native_user_message_count"] == 1 and value["harness"] == "opencode",
+               "owned native history does not contain exact input once")
+        proofs.append(value)
+    demand(proofs[0]["native_id"] == proofs[1]["native_id"] and
+           proofs[0]["native_root"] == proofs[1]["native_root"], "First inputs resolved to different child NativeRefs")
+    save("first-native-inputs", proofs)
+
+
 SHOT_KEYS = {
     "fifo-user-waiting": ("u1",),
     "fifo-two-senders": ("u1", "p1"),
@@ -674,6 +716,8 @@ def main():
     elif cmd == "first-parent-queued": first_parent_queued()
     elif cmd == "first-parent": first_parent()
     elif cmd == "first-done": first_done()
+    elif cmd == "replay-u3": replay_u3()
+    elif cmd == "native-inputs": native_inputs()
     elif cmd == "lead-ui": lead_ui(sys.argv[2])
     elif cmd == "sidebar": sidebar(sys.argv[2])
     elif cmd == "child-selected": child_selected()
