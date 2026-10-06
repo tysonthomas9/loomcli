@@ -58,7 +58,7 @@ tests:
         budget: 180000
         intent: "Show replacement once, old text absent, a real answer, and a finished turn"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" interrupt-after'
-        intent: "Require exact cancelled turn, ordered first delivery, one native InputKey, and immutable retry receipts/events"
+        intent: "Require exact cancelled turn, ordered replacement delivery, one native InputKey, and immutable retry receipts/events"
       - reload: true
       - wait:
           fn: >-

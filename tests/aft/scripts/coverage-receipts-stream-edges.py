@@ -224,7 +224,7 @@ def interrupt_after():
                  e["payload"].get("stopReason") == "cancelled"]
     assert len(cancelled) == 1, "native interrupted turn did not save one cancelled completion"
     cancel = cancelled[0]
-    assert cancel["seq"] < row["seq"], "interrupt did not order cancellation before First delivery"
+    assert cancel["seq"] < row["seq"], "interrupt did not order cancellation before replacement delivery"
     assert not agent("interrupt")["waiting_messages"]
     before = event_ids("interrupt")
     for entry in (old, new):
