@@ -43,7 +43,7 @@ agent_flows_check_manifest() {
 }
 
 agent_flows_podman() {
-  local error_file status reason
+  local error_file status reason diagnostic
   error_file="$(mktemp "$AFT_WORK_DIR/.podman-helper.XXXXXXXX")" || return 2
   status=0
   HOME="$AFT_PODMAN_HOME" CONTAINER_CONNECTION="$AFT_PODMAN_CONNECTION" \
@@ -54,8 +54,10 @@ agent_flows_podman() {
     if rg -qi 'cannot connect to podman|unable to connect|connection refused|no such connection' "$error_file"; then
       reason=connection-unavailable
     fi
+    diagnostic="$(rg -o -m1 'native probe: (agent-row-missing|agent-name-not-run-owned|harness-mismatch|native-id-missing|native-root-missing|native-owner-mismatch|storage-unavailable)' "$error_file" || true)"
     printf 'owned Podman %s failed on pinned connection %s (exit %d, %s)\n' \
       "${1:-command}" "$AFT_PODMAN_CONNECTION" "$status" "$reason" >&2
+    [[ -z "$diagnostic" ]] || printf '%s\n' "$diagnostic" >&2
   fi
   rm -f "$error_file"
   return "$status"
