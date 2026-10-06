@@ -168,12 +168,16 @@ def editor_bytes_match(actual, expected):
     assert actual == expected, f"CodeMirror buffer differs from intended bytes ({len(actual)} vs {len(expected)})"
 
 
+def select_all_key(platform):
+    return "Meta+a" if platform == "darwin" else "Control+a"
+
+
 def type_editor(stage):
     assert stage in ("one", "two")
     selector = "[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]"
     session = os.environ["AFT_SESSION"]
     expected = (OUT / f"readme-{stage}.txt").read_text()
-    for args in (("focus", selector), ("press", "Meta+a"), ("press", "Backspace"),
+    for args in (("focus", selector), ("press", select_all_key(sys.platform)), ("press", "Backspace"),
                  ("keyboard", "type", expected)):
         subprocess.run(["agent-browser", "--session", session, *args], check=True,
                        stdout=subprocess.DEVNULL)
@@ -318,6 +322,7 @@ def self_test():
                           "ui_url": ui_url, "api_url": api_url, "ports": [8281, 8282, 8283]}}
     assert checked_file_origin(manifest, ui_url, api_url, head) == ui_url
     editor_bytes_match("original\nmarker\n", "original\nmarker\n")
+    assert select_all_key("darwin") == "Meta+a" and select_all_key("linux") == "Control+a"
     for action in (
         lambda: check_unsaved(204, body, "/owned", f1),
         lambda: check_unsaved(409, {**body, "fingerprint": f1}, "/owned", f1),
