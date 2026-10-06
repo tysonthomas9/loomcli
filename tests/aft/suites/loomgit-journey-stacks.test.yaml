@@ -1,0 +1,1448 @@
+# B-219b-01/02/05; C.P3.3, C.P3.5, C.P3.7, C.P3.9e, C.P2.19c; D29(7/8).
+# Runtime evidence is UNRUN. --screenshots captures each named checkpoint.
+# Requires the reviewed journey-common helper and per-repository forge launcher.
+# Sequential approved-predecessor setup does not settle the run-ahead policy.
+suite: loomgit-journey-stacks
+classification:
+  area: git
+  feature: stack-and-signed-feedback
+  surface: mixed
+  purpose: journey
+baseUrl: ${AFT_BASE_URL:-http://127.0.0.1:3100}
+teardown: >-
+  cleanup_failed=0;
+  for c in loom-stack loom-lower native-stack native-lower loom-feedback native-feedback trunk-feedback; do
+  bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" teardown "$c" || cleanup_failed=1; done;
+  exit "$cleanup_failed"
+tests:
+  - name: Loom stack prefix continuation and mode switch
+    intent: A human builds approved dependent PRs, merges the prefix through layer 2 and then continues through layer 3, observes layer 4 converge, and switches future tasks to trunk without changing existing PRs
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" setup loom-stack
+        intent: Fixture provisioning creates an isolated local Git repository, public workspace and lead, and registers only its own simulated provider repository
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-stack 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-stack 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-1.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-1: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-stack 1
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-1: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-stack 2 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-stack 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-2.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-2: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-stack 2
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-2: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-stack 3 2
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-stack 3
+        intent: Human observer opens task 3 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-3.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-3: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-stack 3
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-3: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-stack 4 3
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-stack 4
+        intent: Human observer opens task 4 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-4.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-4: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-stack 4
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-4: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain loom-stack 4
+        intent: Readback asserts task-only PR diffs, ordered bases, exact task bytes, native membership when selected, provider create count, and working-area leaf equality
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields loom-stack 2
+        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
+      - click:
+          role: button
+          name: Show merge state
+          exact: true
+        intent: Human previews the actual ordered stack heads before merging
+      - wait:
+          text: awaiting confirmation
+        intent: The merge preview is ready for human confirmation
+      - expect:
+          text: awaiting confirmation
+        intent: "Checkpoint STACK-ORDER-2: the merge preview lists the stack order and exact heads"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge loom-stack
+        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done loom-stack 2
+        intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
+      - wait:
+          text: "loom merge: done"
+        intent: The product merge panel agrees with provider and Git readbacks
+      - expect:
+          text: "loom merge: done"
+        intent: "Checkpoint PREFIX-2-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-stack 3
+        intent: Human observer opens task 3 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-3.txt
+        intent: The remaining PR task retains its own patch
+      - wait:
+          text: against trunk
+        intent: The first remaining task now compares its patch against trunk
+      - expect:
+          visible:
+            testid: revision-pr
+          text: against trunk
+        intent: "Checkpoint FOLLOW-UP-3: the remaining open PR has a trunk-based task diff after lower landing"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields loom-stack 3
+        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
+      - click:
+          role: button
+          name: Show merge state
+          exact: true
+        intent: Human previews the actual ordered stack heads before merging
+      - wait:
+          text: awaiting confirmation
+        intent: The merge preview is ready for human confirmation
+      - expect:
+          text: awaiting confirmation
+        intent: "Checkpoint STACK-ORDER-3: the merge preview lists the stack order and exact heads"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge loom-stack
+        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done loom-stack 3
+        intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
+      - wait:
+          text: "loom merge: done"
+        intent: The product merge panel agrees with provider and Git readbacks
+      - expect:
+          text: "loom merge: done"
+        intent: "Checkpoint PREFIX-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-stack 4
+        intent: Human observer opens task 4 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-4.txt
+        intent: The remaining PR task retains its own patch
+      - wait:
+          text: against trunk
+        intent: The first remaining task now compares its patch against trunk
+      - expect:
+          visible:
+            testid: revision-pr
+          text: against trunk
+        intent: "Checkpoint FOLLOW-UP-4: the remaining open PR has a trunk-based task diff after lower landing"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" mode-before loom-stack
+        intent: Readback snapshots every existing PR head, base, state and number before the workspace delivery-mode switch
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-settings loom-stack
+        intent: Human observer opens workspace settings
+      - click:
+          role: button
+          name: Git
+          exact: true
+        intent: Human opens the mounted Git settings category
+      - wait:
+          fn: "!!document.querySelector('[data-testid=git-delivery-mode]:not([disabled])')"
+        intent: Git settings are loaded
+      - select:
+          testid: git-delivery-mode
+          value: trunk
+        intent: Human switches future deliveries to PR per task using the mounted workspace control
+      - wait:
+          fn: document.querySelector('[data-testid=git-delivery-mode]')?.value === 'trunk' && !document.querySelector('[data-testid=git-delivery-mode]').disabled
+        intent: The delivery-mode save has settled
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" mode-after loom-stack
+        intent: Readback requires trunk mode and unchanged existing PR identities, heads, bases and merged states
+      - expect:
+          value:
+            testid: git-delivery-mode
+            equals: trunk
+        intent: "Checkpoint MODE-SAVED: workspace setting is PR per task and existing PR arrangement is preserved"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-stack future
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-stack future
+        intent: Human observer opens task future through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-future.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-future: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-stack future
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-future: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" future-pr loom-stack
+        intent: Readback requires exactly one new trunk PR containing only the future task patch and no changes to previous PRs
+      - expect:
+          visible:
+            testid: revision-pr
+          text: journey-future.txt
+        intent: "Checkpoint FUTURE-PR: future task has its own patch and trunk PR while the earlier remaining stack PR stays open"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" teardown loom-stack
+        intent: Fixture cleanup requests only this workspace’s guarded product deletion and retains Git/provider evidence
+  - name: Loom stack lower landing and mode switch
+    intent: A human merges only the lower PR, observes remaining Loom PRs converge on trunk, and switches future tasks to trunk without changing the open stack
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" setup loom-lower
+        intent: Fixture provisioning creates an isolated local Git repository, public workspace and lead, and registers only its own simulated provider repository
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-lower 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-lower 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-1.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-1: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-lower 1
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-1: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-lower 2 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-lower 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-2.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-2: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-lower 2
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-2: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-lower 3 2
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-lower 3
+        intent: Human observer opens task 3 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-3.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-3: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-lower 3
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-3: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-lower 4 3
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-lower 4
+        intent: Human observer opens task 4 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-4.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-4: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-lower 4
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-4: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain loom-lower 4
+        intent: Readback asserts task-only PR diffs, ordered bases, exact task bytes, native membership when selected, provider create count, and working-area leaf equality
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields loom-lower 1
+        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
+      - click:
+          role: button
+          name: Show merge state
+          exact: true
+        intent: Human previews the actual ordered stack heads before merging
+      - wait:
+          text: awaiting confirmation
+        intent: The merge preview is ready for human confirmation
+      - expect:
+          text: awaiting confirmation
+        intent: "Checkpoint STACK-ORDER-1: the merge preview lists the stack order and exact heads"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge loom-lower
+        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done loom-lower 1
+        intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
+      - wait:
+          text: "loom merge: done"
+        intent: The product merge panel agrees with provider and Git readbacks
+      - expect:
+          text: "loom merge: done"
+        intent: "Checkpoint LOWER-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-lower 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-2.txt
+        intent: The remaining PR task retains its own patch
+      - wait:
+          text: against trunk
+        intent: The first remaining task now compares its patch against trunk
+      - expect:
+          visible:
+            testid: revision-pr
+          text: against trunk
+        intent: "Checkpoint FOLLOW-UP-2: the remaining open PR has a trunk-based task diff after lower landing"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" mode-before loom-lower
+        intent: Readback snapshots every existing PR head, base, state and number before the workspace delivery-mode switch
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-settings loom-lower
+        intent: Human observer opens workspace settings
+      - click:
+          role: button
+          name: Git
+          exact: true
+        intent: Human opens the mounted Git settings category
+      - wait:
+          fn: "!!document.querySelector('[data-testid=git-delivery-mode]:not([disabled])')"
+        intent: Git settings are loaded
+      - select:
+          testid: git-delivery-mode
+          value: trunk
+        intent: Human switches future deliveries to PR per task using the mounted workspace control
+      - wait:
+          fn: document.querySelector('[data-testid=git-delivery-mode]')?.value === 'trunk' && !document.querySelector('[data-testid=git-delivery-mode]').disabled
+        intent: The delivery-mode save has settled
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" mode-after loom-lower
+        intent: Readback requires trunk mode and unchanged existing PR identities, heads, bases and merged states
+      - expect:
+          value:
+            testid: git-delivery-mode
+            equals: trunk
+        intent: "Checkpoint MODE-SAVED: workspace setting is PR per task and existing PR arrangement is preserved"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-lower future
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-lower future
+        intent: Human observer opens task future through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-future.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-future: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-lower future
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-future: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" future-pr loom-lower
+        intent: Readback requires exactly one new trunk PR containing only the future task patch and no changes to previous PRs
+      - expect:
+          visible:
+            testid: revision-pr
+          text: journey-future.txt
+        intent: "Checkpoint FUTURE-PR: future task has its own patch and trunk PR while the earlier remaining stack PR stays open"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" teardown loom-lower
+        intent: Fixture cleanup requests only this workspace’s guarded product deletion and retains Git/provider evidence
+  - name: Native stack prefix landing and mode switch
+    intent: A human builds approved dependent PRs, merges the prefix through layer 3 in one native request, observes layer 4 converge, and switches future tasks to trunk without changing existing PRs
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" setup native-stack
+        intent: Fixture provisioning creates an isolated local Git repository, public workspace and lead, and registers only its own simulated provider repository
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-stack 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-stack 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-1.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-1: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-stack 1
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-1: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-stack 2 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-stack 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-2.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-2: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-stack 2
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-2: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-stack 3 2
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-stack 3
+        intent: Human observer opens task 3 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-3.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-3: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-stack 3
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-3: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-stack 4 3
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-stack 4
+        intent: Human observer opens task 4 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-4.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-4: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-stack 4
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-4: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain native-stack 4
+        intent: Readback asserts task-only PR diffs, ordered bases, exact task bytes, native membership when selected, provider create count, and working-area leaf equality
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields native-stack 3
+        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
+      - click:
+          role: button
+          name: Show merge state
+          exact: true
+        intent: Human previews the actual ordered stack heads before merging
+      - wait:
+          text: awaiting confirmation
+        intent: The merge preview is ready for human confirmation
+      - expect:
+          text: awaiting confirmation
+        intent: "Checkpoint STACK-ORDER-3: the merge preview lists the stack order and exact heads"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge native-stack
+        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done native-stack 3
+        intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
+      - wait:
+          text: "native merge: done"
+        intent: The product merge panel agrees with provider and Git readbacks
+      - expect:
+          text: "native merge: done"
+        intent: "Checkpoint PREFIX-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-stack 4
+        intent: Human observer opens task 4 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-4.txt
+        intent: The remaining PR task retains its own patch
+      - wait:
+          text: against trunk
+        intent: The first remaining task now compares its patch against trunk
+      - expect:
+          visible:
+            testid: revision-pr
+          text: against trunk
+        intent: "Checkpoint FOLLOW-UP-4: the remaining open PR has a trunk-based task diff after lower landing"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" mode-before native-stack
+        intent: Readback snapshots every existing PR head, base, state and number before the workspace delivery-mode switch
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-settings native-stack
+        intent: Human observer opens workspace settings
+      - click:
+          role: button
+          name: Git
+          exact: true
+        intent: Human opens the mounted Git settings category
+      - wait:
+          fn: "!!document.querySelector('[data-testid=git-delivery-mode]:not([disabled])')"
+        intent: Git settings are loaded
+      - select:
+          testid: git-delivery-mode
+          value: trunk
+        intent: Human switches future deliveries to PR per task using the mounted workspace control
+      - wait:
+          fn: document.querySelector('[data-testid=git-delivery-mode]')?.value === 'trunk' && !document.querySelector('[data-testid=git-delivery-mode]').disabled
+        intent: The delivery-mode save has settled
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" mode-after native-stack
+        intent: Readback requires trunk mode and unchanged existing PR identities, heads, bases and merged states
+      - expect:
+          value:
+            testid: git-delivery-mode
+            equals: trunk
+        intent: "Checkpoint MODE-SAVED: workspace setting is PR per task and existing PR arrangement is preserved"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-stack future
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-stack future
+        intent: Human observer opens task future through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-future.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-future: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-stack future
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-future: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" future-pr native-stack
+        intent: Readback requires exactly one new trunk PR containing only the future task patch and no changes to previous PRs
+      - expect:
+          visible:
+            testid: revision-pr
+          text: journey-future.txt
+        intent: "Checkpoint FUTURE-PR: future task has its own patch and trunk PR while the earlier remaining stack PR stays open"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" teardown native-stack
+        intent: Fixture cleanup requests only this workspace’s guarded product deletion and retains Git/provider evidence
+  - name: Native stack lower landing and mode switch
+    intent: A human merges only the lower PR, observes remaining native PRs converge on trunk, and switches future tasks to trunk without changing the open stack
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" setup native-lower
+        intent: Fixture provisioning creates an isolated local Git repository, public workspace and lead, and registers only its own simulated provider repository
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-lower 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-lower 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-1.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-1: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-lower 1
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-1: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-lower 2 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-lower 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-2.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-2: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-lower 2
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-2: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-lower 3 2
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-lower 3
+        intent: Human observer opens task 3 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-3.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-3: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-lower 3
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-3: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-lower 4 3
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-lower 4
+        intent: Human observer opens task 4 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-4.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-4: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-lower 4
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-4: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain native-lower 4
+        intent: Readback asserts task-only PR diffs, ordered bases, exact task bytes, native membership when selected, provider create count, and working-area leaf equality
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields native-lower 1
+        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
+      - click:
+          role: button
+          name: Show merge state
+          exact: true
+        intent: Human previews the actual ordered stack heads before merging
+      - wait:
+          text: awaiting confirmation
+        intent: The merge preview is ready for human confirmation
+      - expect:
+          text: awaiting confirmation
+        intent: "Checkpoint STACK-ORDER-1: the merge preview lists the stack order and exact heads"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge native-lower
+        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done native-lower 1
+        intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
+      - wait:
+          text: "native merge: done"
+        intent: The product merge panel agrees with provider and Git readbacks
+      - expect:
+          text: "native merge: done"
+        intent: "Checkpoint LOWER-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-lower 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-2.txt
+        intent: The remaining PR task retains its own patch
+      - wait:
+          text: against trunk
+        intent: The first remaining task now compares its patch against trunk
+      - expect:
+          visible:
+            testid: revision-pr
+          text: against trunk
+        intent: "Checkpoint FOLLOW-UP-2: the remaining open PR has a trunk-based task diff after lower landing"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" mode-before native-lower
+        intent: Readback snapshots every existing PR head, base, state and number before the workspace delivery-mode switch
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-settings native-lower
+        intent: Human observer opens workspace settings
+      - click:
+          role: button
+          name: Git
+          exact: true
+        intent: Human opens the mounted Git settings category
+      - wait:
+          fn: "!!document.querySelector('[data-testid=git-delivery-mode]:not([disabled])')"
+        intent: Git settings are loaded
+      - select:
+          testid: git-delivery-mode
+          value: trunk
+        intent: Human switches future deliveries to PR per task using the mounted workspace control
+      - wait:
+          fn: document.querySelector('[data-testid=git-delivery-mode]')?.value === 'trunk' && !document.querySelector('[data-testid=git-delivery-mode]').disabled
+        intent: The delivery-mode save has settled
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" mode-after native-lower
+        intent: Readback requires trunk mode and unchanged existing PR identities, heads, bases and merged states
+      - expect:
+          value:
+            testid: git-delivery-mode
+            equals: trunk
+        intent: "Checkpoint MODE-SAVED: workspace setting is PR per task and existing PR arrangement is preserved"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-lower future
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-lower future
+        intent: Human observer opens task future through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-future.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-future: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-lower future
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-future: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" future-pr native-lower
+        intent: Readback requires exactly one new trunk PR containing only the future task patch and no changes to previous PRs
+      - expect:
+          visible:
+            testid: revision-pr
+          text: journey-future.txt
+        intent: "Checkpoint FUTURE-PR: future task has its own patch and trunk PR while the earlier remaining stack PR stays open"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" teardown native-lower
+        intent: Fixture cleanup requests only this workspace’s guarded product deletion and retains Git/provider evidence
+  - name: Loom signed feedback updates the stack and cancels merge-after
+    intent: A signed provider reviewer requests changes; a named deterministic stub-agent addresses them through product feedback address/complete, updates the same PR without another approval, preserves the dependent patch and cancels its stale merge-after approval
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" setup loom-feedback
+        intent: Fixture provisioning creates owned local Git and provider resources and a supported signing binding; no feedback, verdict or revision records are seeded
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-feedback 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-feedback 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-1.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-1: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-feedback 1
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-1: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt loom-feedback 2 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-feedback 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-2.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-2: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published loom-feedback 2
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-2: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain loom-feedback 2
+        intent: Readback asserts the two approved dependent PRs have correct bases, task patches and selected backend membership
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-send loom-feedback 1
+        intent: Signed provider reviewer actor submits a changes-requested webhook through the supported GitHub route; readback requires verified pending feedback
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-agent loom-feedback 1
+        intent: Deterministic stub-agent actor uses the product-created feedback copy and prompt, commits its patch, and calls product feedback complete to freeze and import the revision; runner-exit capture remains a documented gap
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-pushed loom-feedback 1
+        intent: Readback requires the same PR numbers, updated head, preserved task bytes and replayed dependent patch, and no merge request
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-feedback 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: review-1.txt
+        intent: Changes shows the fix-up patch produced by the named stub agent
+      - wait:
+          fn: document.querySelector('[data-testid=feedback-status]')?.textContent.includes('automatically')
+        intent: The product reports the feedback revision was pushed automatically
+      - expect:
+          visible:
+            testid: feedback-status
+          text: review-1.txt
+        intent: "Checkpoint FEEDBACK-PUSHED: same PR shows the fix-up and automatic push, with no second human approval"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-feedback 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - expect:
+          text: journey-2.txt
+          enabled:
+            testid: approve-merge
+        intent: "Checkpoint DEPENDENT-PRESERVED: the upper task still shows its own patch after the lower feedback update"
+      - click:
+          testid: approve-merge
+        intent: Human approves the mounted upper PR to merge after its predecessor
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-waiting loom-feedback 2
+        intent: Readback requires the actual pinned upper merge approval is waiting while the lower PR remains open
+      - expect:
+          visible:
+            testid: merge-status
+          text: merges after
+        intent: "Checkpoint MERGE-AFTER-WAITING: upper PR is approved to merge only after the lower PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-send loom-feedback 2
+        intent: Signed provider reviewer actor submits a second independently signed review on the upper PR through the supported route
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-agent loom-feedback 2
+        intent: Deterministic stub-agent actor addresses the upper review through product address/complete; no direct storage writes or synthetic review intake
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-pushed loom-feedback 2
+        intent: Readback requires the upper fix-up reached the same open PR and no changed code was merged
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-cancelled loom-feedback 2
+        intent: Readback requires stale merge-after approval cancelled with the review-fix-up reason and revision cancellation flag
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-feedback 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          fn: "!!document.querySelector('[data-testid=feedback-merge-cancelled]')"
+        intent: The product explains why the previous merge approval was cancelled
+      - wait:
+          text: review-2.txt
+        intent: Changes shows the upper fix-up contents
+      - expect:
+          visible:
+            testid: feedback-merge-cancelled
+          enabled:
+            testid: approve-merge
+          text: Approve again to merge
+        intent: "Checkpoint FEEDBACK-CANCELLED: fix-up is pushed to the existing PR and fresh human merge approval is required"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" teardown loom-feedback
+        intent: Fixture cleanup requests guarded deletion of this workspace only, retaining product denial and evidence if cleanup is refused
+  - name: Native signed feedback updates the stack and cancels merge-after
+    intent: A signed provider reviewer requests changes; a named deterministic stub-agent addresses them through product feedback address/complete, updates the same PR without another approval, preserves the dependent patch and cancels its stale merge-after approval
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" setup native-feedback
+        intent: Fixture provisioning creates owned local Git and provider resources and a supported signing binding; no feedback, verdict or revision records are seeded
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-feedback 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-feedback 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-1.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-1: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-feedback 1
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-1: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt native-feedback 2 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-feedback 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-2.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-2: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published native-feedback 2
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-2: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain native-feedback 2
+        intent: Readback asserts the two approved dependent PRs have correct bases, task patches and selected backend membership
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-send native-feedback 1
+        intent: Signed provider reviewer actor submits a changes-requested webhook through the supported GitHub route; readback requires verified pending feedback
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-agent native-feedback 1
+        intent: Deterministic stub-agent actor uses the product-created feedback copy and prompt, commits its patch, and calls product feedback complete to freeze and import the revision; runner-exit capture remains a documented gap
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-pushed native-feedback 1
+        intent: Readback requires the same PR numbers, updated head, preserved task bytes and replayed dependent patch, and no merge request
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-feedback 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: review-1.txt
+        intent: Changes shows the fix-up patch produced by the named stub agent
+      - wait:
+          fn: document.querySelector('[data-testid=feedback-status]')?.textContent.includes('automatically')
+        intent: The product reports the feedback revision was pushed automatically
+      - expect:
+          visible:
+            testid: feedback-status
+          text: review-1.txt
+        intent: "Checkpoint FEEDBACK-PUSHED: same PR shows the fix-up and automatic push, with no second human approval"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-feedback 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - expect:
+          text: journey-2.txt
+          enabled:
+            testid: approve-merge
+        intent: "Checkpoint DEPENDENT-PRESERVED: the upper task still shows its own patch after the lower feedback update"
+      - click:
+          testid: approve-merge
+        intent: Human approves the mounted upper PR to merge after its predecessor
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-waiting native-feedback 2
+        intent: Readback requires the actual pinned upper merge approval is waiting while the lower PR remains open
+      - expect:
+          visible:
+            testid: merge-status
+          text: merges after
+        intent: "Checkpoint MERGE-AFTER-WAITING: upper PR is approved to merge only after the lower PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-send native-feedback 2
+        intent: Signed provider reviewer actor submits a second independently signed review on the upper PR through the supported route
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-agent native-feedback 2
+        intent: Deterministic stub-agent actor addresses the upper review through product address/complete; no direct storage writes or synthetic review intake
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-pushed native-feedback 2
+        intent: Readback requires the upper fix-up reached the same open PR and no changed code was merged
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-cancelled native-feedback 2
+        intent: Readback requires stale merge-after approval cancelled with the review-fix-up reason and revision cancellation flag
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-feedback 2
+        intent: Human observer opens task 2 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          fn: "!!document.querySelector('[data-testid=feedback-merge-cancelled]')"
+        intent: The product explains why the previous merge approval was cancelled
+      - wait:
+          text: review-2.txt
+        intent: Changes shows the upper fix-up contents
+      - expect:
+          visible:
+            testid: feedback-merge-cancelled
+          enabled:
+            testid: approve-merge
+          text: Approve again to merge
+        intent: "Checkpoint FEEDBACK-CANCELLED: fix-up is pushed to the existing PR and fresh human merge approval is required"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" teardown native-feedback
+        intent: Fixture cleanup requests guarded deletion of this workspace only, retaining product denial and evidence if cleanup is refused
+  - name: Trunk signed feedback updates its existing PR
+    intent: A signed provider reviewer requests changes; a named deterministic stub-agent addresses them through product feedback address/complete, updates the same PR without another approval
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" setup trunk-feedback
+        intent: Fixture provisioning creates owned local Git and provider resources and a supported signing binding; no feedback, verdict or revision records are seeded
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" attempt trunk-feedback 1
+        intent: API-client actor provisions and starts one stub-AI TaskRun; its approved predecessor dependency is retained
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task trunk-feedback 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: journey-1.txt
+        intent: The captured task file is shown in Changes
+      - wait:
+          text: task=
+        intent: The diff shows the actual stub TaskRun marker contents
+      - expect:
+          enabled:
+            testid: approve-create-pr
+          visible:
+            testid: task-diff-label
+        intent: "Checkpoint REVIEW-1: the human sees this task patch before approving it"
+      - click:
+          testid: approve-create-pr
+        intent: Human approves the mounted task diff and creates its PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" published trunk-feedback 1
+        intent: Readback requires approved task closure, an applied revision, exactly one owned PR, and byte-exact task contents in its remote branch
+      - expect:
+          visible:
+            testid: revision-pr
+        intent: "Checkpoint PR-1: the approved task shows its existing PR"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-send trunk-feedback 1
+        intent: Signed provider reviewer actor submits a changes-requested webhook through the supported GitHub route; readback requires verified pending feedback
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-agent trunk-feedback 1
+        intent: Deterministic stub-agent actor uses the product-created feedback copy and prompt, commits its patch, and calls product feedback complete to freeze and import the revision; runner-exit capture remains a documented gap
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" feedback-pushed trunk-feedback 1
+        intent: Readback requires the same PR numbers, updated head, preserved task bytes, and no merge request
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task trunk-feedback 1
+        intent: Human observer opens task 1 through its product deep link
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: Human observer opens the mounted Changes tab
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task Changes panel is mounted
+      - wait:
+          text: review-1.txt
+        intent: Changes shows the fix-up patch produced by the named stub agent
+      - wait:
+          fn: document.querySelector('[data-testid=feedback-status]')?.textContent.includes('automatically')
+        intent: The product reports the feedback revision was pushed automatically
+      - expect:
+          visible:
+            testid: feedback-status
+          text: review-1.txt
+        intent: "Checkpoint FEEDBACK-PUSHED: same PR shows the fix-up and automatic push, with no second human approval"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" teardown trunk-feedback
+        intent: Fixture cleanup requests guarded deletion of this workspace only, retaining product denial and evidence if cleanup is refused
