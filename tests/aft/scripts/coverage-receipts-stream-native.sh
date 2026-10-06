@@ -49,7 +49,7 @@ const fail=(code)=>{process.stderr.write("native restart: "+code+"\n");process.e
     let cursor="",count=0;
     for (let page=0;page<100;page++) {
       const url=new URL("/api/session/"+encodeURIComponent(row.native_id)+"/message",base);
-      url.search=new URLSearchParams({order:"asc",limit:"200",...(cursor?{cursor}:{})}).toString();
+      url.search=new URLSearchParams({limit:"200",...(cursor?{cursor}:{order:"asc"})}).toString();
       const response=await fetch(url,{headers:{Authorization:auth},signal:AbortSignal.timeout(15000)});
       if (!response.ok) fail("native-history-unavailable");
       const body=await response.json();
@@ -59,6 +59,7 @@ const fail=(code)=>{process.stderr.write("native restart: "+code+"\n");process.e
       cursor=body.cursor.next;
       if (page===99) fail("native-history-page-limit");
     }
+    if (count!==1) fail("native-input-count-mismatch");
     value.input_key=key;
     value.native_user_message_count=count;
   }

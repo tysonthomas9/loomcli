@@ -26,6 +26,18 @@ def http(path, method="GET", body=None, key=None):
     if key:
         headers["Idempotency-Key"] = key
     with urllib.request.urlopen(urllib.request.Request(BASE + path, data=data, headers=headers, method=method), timeout=20) as r:
+        expected = None
+        if method == "POST" and re.search(r"/agents/[^/]+/messages$", path):
+            expected = 202
+        elif method == "DELETE" and re.search(r"/agents/[^/]+/messages/waiting$", path):
+            expected = 200
+        elif method == "POST" and re.search(r"/agents/[^/]+/archive$", path):
+            expected = 204
+        if expected is not None:
+            assert r.status == expected, f"unexpected {method} response status {r.status}"
+        if r.status == 204:
+            assert expected == 204 and r.read() == b"", "unexpected nonempty or unrecognized 204 response"
+            return None
         return json.load(r)
 
 
@@ -213,11 +225,23 @@ def observe():
     assert browser(OBSERVER) == "installed", "browser request observer was not installed"
 
 
+def valid_ui_receipt(call, label):
+    if not call.get("key") or not isinstance(call.get("result"), dict):
+        return False
+    if call.get("method") == "POST" and call.get("path") == path(label) + "/messages":
+        result = call["result"]
+        return call.get("status") == 202 and bool(result.get("message_id")) and isinstance(result.get("state"), str)
+    if call.get("method") == "DELETE" and call.get("path") == path(label) + "/messages/waiting":
+        return call.get("status") == 200 and call["result"].get("result") in (
+            "withdrawn", "nothing_waiting", "already_handed")
+    return False
+
+
 def capture(label, stage):
     a, evs = agent(label), pages(label)
     calls = browser("window.__coverageRsCalls || []")
     assert isinstance(calls, list)
-    assert all(c.get("key") and c.get("status") in (200, 201) for c in calls), "missing successful UI receipt"
+    assert all(valid_ui_receipt(c, label) for c in calls), "missing exact successful UI receipt"
     # Persist only the public fields needed for the oracle. Tool inputs and
     # outputs can contain private data and have no role in these assertions.
     safe_events = [{"agent_id": e["agent_id"], "seq": e["seq"], "event_id": e["event_id"],
