@@ -50,7 +50,7 @@ tests:
         intent: "Show the new Lead's real harness in Chat"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" claim chat'
         intent: "Record the actual Chat agent ID and verify its saved repo, owner, preset and harness"
-      - run: '"$AFT_SELECT_AGENT_MODEL"'
+      - run: '"$AFT_SELECT_AGENT_MODEL" "aft-lead-${RUN_ID}-chat"'
         intent: "Show the explicitly selected real model before sending"
       - fill: { label: Message, value: "Use a tool to read README.md in this repository. What command does it document for running tests? Cite the file and quote the supporting line." }
         intent: "Ask an open repository question that requires reading the owned README"
@@ -142,7 +142,7 @@ tests:
         intent: "Wait for its Chat route"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" claim persona'
         intent: "Record the actual custom Lead ID and verify its saved identity"
-      - run: '"$AFT_SELECT_AGENT_MODEL"'
+      - run: '"$AFT_SELECT_AGENT_MODEL" "aft-lead-${RUN_ID}-persona"'
         intent: "Show the explicitly selected real model before sending"
       - fill: { label: Message, value: "Use a tool to read README.md and tell me which command it documents for running tests. Cite the supporting line. Follow your persona prefix, and include the exact literal placeholder string your persona names." }
         intent: "Ask a repository question that also exercises the custom persona"
@@ -201,7 +201,7 @@ tests:
         intent: "Wait for Chat"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" claim busy'
         intent: "Record the real Lead ID for event checks and safe cleanup"
-      - run: '"$AFT_SELECT_AGENT_MODEL"'
+      - run: '"$AFT_SELECT_AGENT_MODEL" "aft-lead-${RUN_ID}-busy"'
         intent: "Show the explicitly selected real model before sending"
       - fill: { label: Message, value: "Inspect README.md, BACKLOG.md, package.json, server.js and the source and test files. Run npm test, then explain how a message moves through this Slack clone. Use your tools and cite files; do not change anything." }
         intent: "Give the real Lead bounded repository work with multiple tool steps"
