@@ -138,37 +138,60 @@ class ChildProofPredicates(unittest.TestCase):
 
     def test_started_rejects_wrong_child_name_count_or_raw_input(self):
         good = {"markerCount": 1, "ids": [self.a, self.b], "names": ["pair-a", "pair-b"],
-                "toolCount": 2, "colors": ["1", "2"], "rawCode": False}
-        module.assert_started_snapshot(good, [self.a, self.b], ["pair-a", "pair-b"], 2)
+                "toolCount": 1, "colors": ["1", "2"], "rawCode": False}
+        module.assert_started_snapshot(good, [self.a, self.b], ["pair-a", "pair-b"], 1)
+        module.assert_started_snapshot({**good, "toolCount": 2}, [self.a, self.b], ["pair-a", "pair-b"], 2)
         for change in ({"ids": [self.a, self.a]}, {"names": ["pair-a", "wrong"]},
-                       {"toolCount": 1}, {"rawCode": True}):
+                       {"toolCount": 3}, {"rawCode": True}):
             with self.subTest(change=change), self.assertRaises(AssertionError):
-                module.assert_started_snapshot({**good, **change}, [self.a, self.b], ["pair-a", "pair-b"], 2)
+                module.assert_started_snapshot({**good, **change}, [self.a, self.b], ["pair-a", "pair-b"], 1)
+
+    def test_one_native_tool_entry_can_create_two_distinct_children(self):
+        both = event("item.completed", 1, "both", {"itemKind": "tool", "tool": {
+            "name": "execute", "input": json.dumps({"code":
+                "await tools.loom.agent_create({name:'pair-a'}); await tools.loom.agent_create({name:'pair-b'})"})}})
+        self.assertEqual(module.native_create_tool_count([both]), 1)
+        self.assertEqual(module.native_create_tool_count([both, both]), 2)
+        searched = event("item.completed", 2, "search", {"itemKind": "tool", "tool": {
+            "name": "execute", "input": json.dumps({"code":
+                "const t=search({namespace:'loom',query:'agent_create'}); await t[0].call({name:'pair-a'})"})}})
+        self.assertEqual(module.native_create_tool_count([searched]), 1)
+        both["payload"]["tool"]["failed"] = True
+        self.assertEqual(module.native_create_tool_count([both]), 0)
 
     def test_card_rejects_duplicate_wrong_color_and_raw_completion_bubble(self):
         kid = {"agent_id": self.a, "name": "pair-a"}
-        good = {"cards": [{"name": "pair-a", "attempt": "0", "color": "3",
+        good = {"cards": [{"id": self.a, "name": "pair-a", "attempt": "0", "color": "3",
                             "outcome": "completed", "delivery": "delivered"}], "rawBubble": False}
         with patch.object(module, "load", return_value={"value": "3"}):
             module.card_snapshot_ok(good, [(kid, 0)])
             for bad in ({"cards": good["cards"] * 2},
                         {"cards": [{**good["cards"][0], "color": "4"}]},
+                        {"cards": [{**good["cards"][0], "id": self.b}]},
+                        {"cards": [{**good["cards"][0], "name": "pair-b"}]},
                         {"rawBubble": True}):
                 with self.subTest(bad=bad), self.assertRaises(AssertionError):
                     module.card_snapshot_ok({**good, **bad}, [(kid, 0)])
 
     def test_child_ancestry_rejects_wrong_actual_branch_or_merge_base(self):
-        prior = {"branch": "parent", "head": "a" * 40}
-        parent = {"branch": "parent"}
+        prior = {"branch": "parent", "head": "a" * 40, "worktree": "/tmp/parent"}
+        parent = {"branch": "parent", "worktree_path": "/tmp/parent"}
         child = {"branch": "child", "worktree_path": "/tmp/child"}
-        with patch.object(module.subprocess, "run") as run, patch.object(module, "git_ref", return_value=prior["head"]):
-            module.assert_child_ancestry(prior, parent, child, "child", "b" * 40)
-            run.assert_called_once()
+        good = {"branch": "child", "head": "b" * 40, "merge_base": prior["head"]}
+        module.assert_child_ancestry(prior, parent, child, good)
         with self.assertRaisesRegex(AssertionError, "branch mismatch"):
-            module.assert_child_ancestry(prior, parent, child, "wrong", "b" * 40)
-        with patch.object(module.subprocess, "run"), patch.object(module, "git_ref", return_value="c" * 40):
-            with self.assertRaisesRegex(AssertionError, "does not descend"):
-                module.assert_child_ancestry(prior, parent, child, "child", "b" * 40)
+            module.assert_child_ancestry(prior, parent, child, {**good, "branch": "wrong"})
+        with self.assertRaisesRegex(AssertionError, "does not descend"):
+            module.assert_child_ancestry(prior, parent, child, {**good, "merge_base": "c" * 40})
+        with self.assertRaises(AssertionError):
+            module.assert_child_ancestry(prior, {**parent, "worktree_path": "/tmp/other"}, child, good)
+
+    def test_sidebar_rejects_duplicate_or_wrong_child_link(self):
+        good = {"parentGroup": True, "exactIdCount": 1, "id": self.a}
+        module.assert_sidebar_exact_link(good, self.a)
+        for bad in ({"exactIdCount": 2}, {"id": self.b}, {"parentGroup": False}):
+            with self.subTest(bad=bad), self.assertRaisesRegex(AssertionError, "missing or duplicated"):
+                module.assert_sidebar_exact_link({**good, **bad}, self.a)
 
     def test_archive_state_requires_exact_saved_api_state(self):
         with patch.object(module, "load", return_value={"agent_id": self.a}), \
