@@ -880,7 +880,7 @@ if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
     export AGENT_BROWSER_ARGS="--disable-features=BackForwardCache"
     export AGENT_BROWSER_CONFIG="$AFT_WORK_DIR/agent-browser.json"
     export AGENT_BROWSER_PROFILE="$AFT_WORK_DIR/browser-profile"
-    export AGENT_BROWSER_NAMESPACE="aft-loomgit-$(date +%s)-$$"
+    export AGENT_BROWSER_NAMESPACE="lg-$(date +%s)-$$"
     export AGENT_BROWSER_RESTORE_SAVE=never
     printf '{}\n' > "$AGENT_BROWSER_CONFIG"
     mkdir "$AGENT_BROWSER_PROFILE" # Refuse profile reuse, including interrupted runs.
