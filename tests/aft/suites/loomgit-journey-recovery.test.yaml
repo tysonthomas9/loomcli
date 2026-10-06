@@ -112,7 +112,7 @@ tests:
       - expect: { text: server.pem, visible: { testid: confirm-dialog-overlay } }
         intent: "R3.before checkpoint — the human sees the current preview name the dirty secret-pattern file before confirming removal"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" delete-stale delete
-        intent: The local editor agent changes the dirty sentinel after the mounted preview opens, invalidating that fingerprint without altering runtime records
+        intent: The local editor agent changes the dirty sentinel and adds an owned untracked file after the mounted preview opens; public readback requires its work-list fingerprint to change without altering runtime records
       - click: { testid: confirm-dialog-confirm }
       - wait: { text: unsaved_work }
       - expect: { text: unsaved_work }

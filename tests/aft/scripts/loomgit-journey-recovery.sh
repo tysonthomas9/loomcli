@@ -328,6 +328,12 @@ elif phase == 'delete-stale':
     # Local editor agent writes AFTER the human has opened the real preview.
     path = lead()
     (path / 'user-kept.txt').write_text('dirty deletion sentinel changed after preview\n')
+    # The contract fingerprints the current work list, not existing file bytes.
+    # Add a real untracked file so the human's displayed list is actually stale.
+    (path / 'sentinel.txt').write_text('new untracked work added after preview\n')
+    current = request(api + '/delete/preview')
+    assert current['fingerprint'] != read('delete-preview.json')['fingerprint'], current
+    save('delete-preview-after-editor.json', current)
     snapshot('delete-stale-before')
 
 elif phase == 'delete-stale-readback':
