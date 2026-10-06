@@ -10,7 +10,7 @@ agent_flows_check_manifest
 : "${AFT_REAL_MODEL:?runner-validated real model required}"
 : "${AFT_SESSION:?AFT named browser session required}"
 : "${AFT_BROWSER_PROFILES:?runner-owned browser profiles required}"
-[[ $# -eq 1 && "$1" =~ ^aft-[a-z0-9-]+$ && "$1" == *"$RUN_ID"* ]] || { echo 'expected one exact run-owned Lead name' >&2; exit 2; }
+[[ $# -le 1 ]] || { echo 'expected the current Chat route and at most one matching Lead name' >&2; exit 2; }
 [[ "$AFT_SESSION" =~ ^aft-live-(agent-children|lead-chat|recovery-lifecycle)-[0-9]+$ ]] || { echo 'foreign AFT browser session' >&2; exit 2; }
 [[ "$AFT_BROWSER_PROFILES" == "${AFT_WORK_DIR%/evidence}/profiles" ]] || { echo 'browser profile ownership mismatch' >&2; exit 2; }
 [[ "$AFT_REAL_MODEL" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$AFT_REAL_MODEL" != aft/* ]] || exit 2
@@ -23,27 +23,29 @@ jq -e --arg target "$AFT_REAL_MODEL" \
   '.harness == "opencode" and .target == $target and (.displayed_default | type == "string") and (.alternate | type == "string")' \
   "$AFT_WORK_DIR/model-selection.json" >/dev/null || { echo 'model catalog selection mismatch' >&2; exit 2; }
 
-agent_name="$1"
-agent_page="$(curl -fsS --max-time 15 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents?name=$agent_name&include_archived=true&limit=500")" \
-  || { echo 'run-owned Lead identity unavailable' >&2; exit 1; }
-jq -e --arg name "$agent_name" --arg repo "$AFT_AGENT_FLOW_REPO" '
-  .next == "" and ([.agents[] | select(.name == $name)] | length) == 1 and
-  (.agents[] | select(.name == $name) |
-    .harness == "opencode" and .repo == $repo and .preset == "lead" and
-    .created_by_kind == "user" and .parent_agent_id == null)' \
-  <<< "$agent_page" >/dev/null || { echo 'Lead is not the owned UI-created OpenCode agent' >&2; exit 1; }
-agent_id="$(jq -r --arg name "$agent_name" '.agents[] | select(.name == $name) | .agent_id' <<< "$agent_page" | tr -d '\r')"
-[[ "$agent_id" =~ ^agt_[a-zA-Z0-9]+$ ]] || { echo 'invalid saved Lead ID' >&2; exit 1; }
-initial="$(jq -r --arg name "$agent_name" '.agents[] | select(.name == $name) | .model // empty' <<< "$agent_page" | tr -d '\r')"
 displayed="$(jq -r '.displayed_default' "$AFT_WORK_DIR/model-selection.json" | tr -d '\r')"
 alternate="$(jq -r '.alternate' "$AFT_WORK_DIR/model-selection.json" | tr -d '\r')"
 [[ -z "$alternate" || "$alternate" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || exit 2
 
 browser() { agent-browser --session "$AFT_SESSION" "$@"; }
 url="$(browser get url | tr -d '\r')"
-expected_url="$AFT_BASE_URL/ws/LOCALMODE/chat/$agent_id"
-[[ "$url" == "$expected_url" || "$url" == "$expected_url"\?* || "$url" == "$expected_url"\#* ]] \
-  || { echo 'browser is not on the owned Lead Chat page' >&2; exit 1; }
+chat_url="${url%%[?#]*}"
+chat_prefix="$AFT_BASE_URL/ws/LOCALMODE/chat/"
+[[ "$chat_url" == "$chat_prefix"* ]] || { echo 'browser is not on the owned Lead Chat page' >&2; exit 1; }
+agent_id="${chat_url#"$chat_prefix"}"
+[[ "$agent_id" =~ ^agt_[a-zA-Z0-9]+$ ]] || { echo 'invalid Chat route Agent ID' >&2; exit 1; }
+agent_page="$(curl -fsS --max-time 15 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents/$agent_id")" \
+  || { echo 'run-owned Lead identity unavailable' >&2; exit 1; }
+agent_name="$(jq -r '.name // empty' <<< "$agent_page" | tr -d '\r')"
+owned_name="^(aft-child-lead-${RUN_ID}|aft-cancel-lead-${RUN_ID}|aft-isolation-[ab]-${RUN_ID}|aft-lead-${RUN_ID}-(chat|persona|busy)|live-recovery-(restart|archive|sibling|dirty)-${RUN_ID})$"
+[[ "$agent_name" =~ $owned_name && ( $# -eq 0 || "$1" == "$agent_name" ) ]] \
+  || { echo 'Chat route Lead name is not from this run and suite' >&2; exit 1; }
+jq -e --arg id "$agent_id" --arg name "$agent_name" --arg repo "$AFT_AGENT_FLOW_REPO" '
+  .agent_id == $id and .name == $name and .harness == "opencode" and
+  .repo == $repo and .preset == "lead" and .created_by_kind == "user" and
+  .parent_agent_id == null' \
+  <<< "$agent_page" >/dev/null || { echo 'Lead is not the owned UI-created OpenCode agent' >&2; exit 1; }
+initial="$(jq -r '.model // empty' <<< "$agent_page" | tr -d '\r')"
 
 choose() {
   local id="$1" option
