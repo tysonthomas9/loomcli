@@ -210,8 +210,8 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=working-row]') &&
-            !!document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=completed], [data-testid=tool-group]') &&
-            Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+            !!document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running], [data-testid=tool-call][data-status=completed], [data-testid=tool-group]') &&
+            !!document.querySelector('form button[title="Stop the running turn"]')
         budget: 120000
         intent: "Observe real tool activity while the turn is still running before queuing a follow-up"
       - fill: { label: Message, value: "BUSY_A: first waiting note" }
@@ -274,14 +274,14 @@ tests:
           fn: >-
             (() => { const u = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]'));
               return u.filter((r) => r.textContent.includes('BUSY_D')).length === 1 &&
-                Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+                !!document.querySelector('form button[title="Stop the running turn"]'); })()
         budget: 180000
         intent: "Show the final follow-up delivered once and its real turn running"
       - click: { role: button, name: Stop, exact: true }
         intent: "Interrupt only the current Chat turn"
       - wait:
           fn: >-
-            !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+            !document.querySelector('form button[title="Stop the running turn"]')
         budget: 60000
         intent: "Show the interrupted turn has stopped"
       - fill: { label: Message, value: "BUSY_NEXT: use a tool to read README.md and tell me which command it documents for running tests. Cite the supporting line." }
