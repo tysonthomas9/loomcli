@@ -289,11 +289,18 @@ def native_create_tool_count(history):
         if event["kind"] != "item.completed" or event["payload"].get("itemKind") != "tool":
             continue
         tool = event["payload"].get("tool") or {}
-        code = tool_code(tool)
-        is_execute = tool.get("name", "").split("/")[-1] == "execute"
+        raw = tool.get("input")
+        input_text = raw if isinstance(raw, str) else json.dumps(raw or {})
+        try:
+            json_object = isinstance(json.loads(input_text), dict)
+        except json.JSONDecodeError:
+            json_object = False
+        is_execute = bool(re.search(r"(?:^|[^a-z])execute$", tool.get("name", "").strip(), re.I))
+        loom_marker = bool(re.search(r"['\"`]loom\b|\bloom\.", input_text))
+        named_create = bool(re.search(r"\bagent_create\b", input_text))
+        truncated_fallback = not json_object and not re.search(r"tools\.loom\.\w+\s*\(", input_text)
         is_create = calls_operation(event, "agent_create") or (
-            is_execute and bool(re.search(r"['\"`]loom\b|\bloom\.", code)) and
-            bool(re.search(r"\bagent_create\b", code)))
+            is_execute and loom_marker and (named_create or truncated_fallback))
         if is_create and not tool.get("failed"):
             count += 1
     return count
