@@ -22,6 +22,7 @@ done
 [[ "$cap" =~ ^[1-9][0-9]*$ ]] || usage
 ((cap <= 10)) || die '--max-real-cases exceeds the absolute ceiling of 10'
 [[ -z "${AFT_BASE_URL:-}${AFT_API_URL:-}${AFT_SUITES:-}" ]] || die 'ambient AFT URL or suite override is refused; this runner owns its stack and corpus'
+[[ -z "${AFT_AGENT_FLOW_REPO:-}" ]] || die 'ambient Agent flow repository override is refused'
 [[ -z "${AFT_REAL_BACKEND:-}" || "$AFT_REAL_BACKEND" == opencode ]] || die 'conflicting ambient real backend'
 [[ -z "${AFT_REAL_CODEX:-}" ]] || die 'AFT_REAL_CODEX conflicts with the OpenCode tier'
 [[ -d "$SUITE_DIR" ]] || die "missing suite directory: $SUITE_DIR"
@@ -38,7 +39,8 @@ AFT_DIR="${AFT_DIR:-/Users/tyson/codebase/code-agents/testing-app}"
 [[ -f "$AFT_DIR/dist/cli.js" && -f "$AFT_DIR/dist/runner.js" && -d "$AFT_DIR/node_modules" ]] || die "AFT checkout is not built: $AFT_DIR"
 command -v node >/dev/null || die 'node is required'
 export AFT_BASE_URL=http://127.0.0.1:1 AFT_API_URL=http://127.0.0.1:1 AFT_WS=LOCALMODE
-export AFT_AGENT_FLOW_REPO=/workspace/source-repo AFT_REAL_BACKEND=opencode
+seed_repo=/workspace/source-repo
+export AFT_REAL_BACKEND=opencode
 export AFT_TESTS_DIR="$TESTS_DIR" AFT_WORK_DIR=/private/tmp/aft-agent-flows-validation RUN_ID=validation
 export AFT_RESTART_SERVE="$TESTS_DIR/scripts/agent-flows-restart-serve.sh"
 export AFT_NATIVE_SESSION_PROBE="$TESTS_DIR/scripts/agent-flows-native-session.sh"
@@ -206,6 +208,20 @@ build_lock_owned=0
 
 curl -fsS --max-time 10 "$AFT_API_URL/api/config" > /dev/null || die 'owned API is not ready'
 curl -fsS --max-time 10 "$AFT_BASE_URL/" > /dev/null || die 'owned UI is not ready'
+workspace_json="$(curl -fsS --max-time 30 "$AFT_API_URL/api/workspaces/LOCALMODE")" \
+  || die 'owned LOCALMODE workspace registry unavailable'
+jq '{workspace_id:.data.id,workspace_path:.data.path,repos:[.data.repos[]? | {name,path}]}' \
+  <<< "$workspace_json" > "$run_root/evidence/workspace-repo.json" || die 'workspace registry metadata is invalid'
+jq -e '.workspace_id == "LOCALMODE" and .workspace_path == "/root/.loom/workspaces/LOCALMODE" and
+  (.repos | length) == 1 and .repos[0].name == "source-repo" and
+  .repos[0].path == (.workspace_path + "/source-repo")' \
+  "$run_root/evidence/workspace-repo.json" >/dev/null || die 'owned LOCALMODE source-repo import is not registered at its managed path'
+export AFT_AGENT_FLOW_REPO
+AFT_AGENT_FLOW_REPO="$(jq -r '.repos[0].path' "$run_root/evidence/workspace-repo.json" | tr -d '\r')"
+jq --arg seed "$seed_repo" --arg managed "$AFT_AGENT_FLOW_REPO" \
+  '.fixture_repo={seed_path:$seed,managed_path:$managed}' \
+  "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
+mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"
 catalog="$(curl -fsS --max-time 30 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/harnesses/opencode/models")" || die 'OpenCode model catalog unavailable'
 model="${LOCAL_MODE_AGENTS_MODEL:-$(jq -r '[.providers[].models[] | select(.is_default) | .id][0] // empty' <<< "$catalog")}"
 model="${model//$'\r'/}"
@@ -227,10 +243,10 @@ HOME="$run_root/aft-home" node "$AFT_DIR/dist/cli.js" run "${suites[@]}" --no-ag
 # selection above is only a preflight candidate and may differ from UI defaults.
 agents_json="$(curl -fsS --max-time 30 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents?include_archived=true&limit=500")" \
   || die 'AFT finished but actual Agent API model readback failed'
-jq -e '.next == null' <<< "$agents_json" >/dev/null || die 'Agent API model readback was truncated'
 jq --arg run "$run_id" '[.agents[] | select(.name | contains($run)) |
   {agent_id,name,harness,model,model_unverified,state}]' <<< "$agents_json" \
-  > "$run_root/evidence/actual-agent-models.json"
+  > "$run_root/evidence/actual-agent-models.json" || die 'actual Agent API model snapshot could not be saved'
+jq -e '.next == ""' <<< "$agents_json" >/dev/null || die 'Agent API model readback was truncated'
 jq -e 'length > 0 and all(.[]; .harness == "opencode" and (.model | type == "string" and length > 0 and (startswith("aft/") | not)))' \
   "$run_root/evidence/actual-agent-models.json" >/dev/null || die 'actual Agent API model identities are missing or not real OpenCode'
 jq -e --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
