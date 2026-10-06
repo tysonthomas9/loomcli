@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -94,6 +95,17 @@ class EdgeOracles(unittest.TestCase):
         with mock.patch.object(edge, "agent_id", return_value="agt_owned"):
             expected = "msg_" + hashlib.sha256(b"agt_owned\x00request-1").hexdigest()[:26]
             self.assertEqual(edge.native_key("large", "request-1"), expected)
+
+    def test_owned_native_helper_uses_direct_podman_exec_without_compose_flag(self):
+        shell = SCRIPT.with_name("coverage-receipts-stream-edges-native.sh").read_text()
+
+        def supported(source):
+            found = re.search(r'^result="\$\(agent_flows_podman (exec[^\n]*?) node -e ', source, re.M)
+            return found is not None and found[1] == 'exec "$container"'
+
+        self.assertTrue(supported(shell))
+        self.assertFalse(supported(shell.replace('exec "$container"', 'exec -T "$container"')))
+        self.assertRegex(shell, r'agent_flows_check_manifest[\s\S]*agent_flows_check_container "\$container"[\s\S]*agent_flows_podman exec "\$container" node -e')
 
     def test_repo_rejections_use_owned_read_only_fixtures_and_leave_inventory(self):
         edge = module()

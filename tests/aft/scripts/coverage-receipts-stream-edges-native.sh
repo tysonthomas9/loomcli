@@ -16,7 +16,7 @@ compose=(agent_flows_podman compose -p "$AFT_OWNED_PROJECT" -f test/local-mode/d
 container="$("${compose[@]}" ps -q loom-local | tr -d '\r')"
 agent_flows_check_container "$container"
 # shellcheck disable=SC2016 # The single-quoted program runs in the owned container.
-result="$(agent_flows_podman exec -T "$container" node -e '
+result="$(agent_flows_podman exec "$container" node -e '
 const fs=require("node:fs");
 const path=require("node:path");
 const {DatabaseSync}=require("node:sqlite");
