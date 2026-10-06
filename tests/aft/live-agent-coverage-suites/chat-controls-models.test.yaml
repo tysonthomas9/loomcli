@@ -130,6 +130,21 @@ tests:
         intent: "Require the earlier real turn's saved event IDs and order to remain unchanged"
       - run: 'bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-native.sh" picker'
         intent: "Check the completed assistant message in the owned native OpenCode session used the UI-selected model"
+      - run: 'agent-browser --session "$AFT_SESSION" set viewport 540 900'
+        intent: "Resize only this test browser to the supported narrow-composer layout"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-chat-provider-model-picker]') &&
+            !!document.querySelector('button[aria-label="More composer controls"]') &&
+            !document.querySelector('[data-chat-traits-picker]')
+        intent: "Show the compact model trigger and More composer controls instead of the wide effort trigger"
+      - click: { role: button, name: More composer controls }
+        intent: "Open the narrow composer's declared effort choices"
+      - wait:
+          fn: "[...document.querySelectorAll('[role=menu] [role=menuitemradio]')].some(e => e.textContent.trim() === 'High' && e.getAttribute('aria-checked') === 'true')"
+        intent: "Show the saved High effort selected in the compact menu"
+      - run: 'agent-browser --session "$AFT_SESSION" set viewport 1920 1080'
+        intent: "Restore this test session's normal browser viewport"
 
   - name: MCS3 custom model added in picker is listed without warning and removed after a readable OpenCode refusal
     intent: A person adds and removes a custom id in the real picker; the API actor creates with it without a model warning, while OpenCode's accepted custom turn limitation remains a readable failure.
