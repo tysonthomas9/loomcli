@@ -11,7 +11,7 @@ assert.ok(match, 'embedded native probe is present');
 const probe = match[1];
 const inputKey = `msg_${'a'.repeat(26)}`;
 
-async function run(registration) {
+async function run(registration, messagePages = [[{type: 'user', id: inputKey}]]) {
   let stdout = '';
   let stderr = '';
   let fetches = 0;
@@ -48,10 +48,20 @@ async function run(registration) {
     name === 'node:sqlite' ? {DatabaseSync} : assert.fail(`unexpected module ${name}`),
     process: fakeProcess, Buffer, URL, URLSearchParams, AbortSignal,
     fetch: async url => {
-      fetches++;
       assert.equal(url.hostname, '127.0.0.1');
       assert.equal(url.pathname, '/api/session/ses_1/message');
-      return {ok: true, json: async () => ({data: [{type: 'user', id: inputKey}]})};
+      assert.equal(url.searchParams.get('limit'), '200');
+      if (fetches === 0) {
+        assert.equal(url.searchParams.get('order'), 'asc');
+        assert.equal(url.searchParams.has('cursor'), false);
+      } else {
+        assert.equal(url.searchParams.get('cursor'), 'next-page');
+        assert.equal(url.searchParams.has('order'), false);
+      }
+      const index = fetches++;
+      assert.ok(index < messagePages.length, 'unexpected extra native page');
+      return {ok: true, json: async () => ({data: messagePages[index],
+        cursor: index + 1 < messagePages.length ? {next: 'next-page'} : {}})};
     }};
   let failure;
   try {
@@ -82,4 +92,20 @@ test('native count rejects a foreign service PID before fetching history', async
   const result = await run({pid: 999, url: 'http://127.0.0.1:49999/', password: 'offline-secret'});
   assert.match(result.stderr, /service-registration-mismatch/);
   assert.equal(result.fetches, 0);
+});
+
+test('native count follows cursor without order and finds input on page two', async () => {
+  const first = Array.from({length: 200}, (_, index) => ({type: 'assistant', id: `other_${index}`}));
+  const result = await run({pid: 321, url: 'http://127.0.0.1:49999/', password: 'offline-secret'},
+    [first, [{type: 'user', id: inputKey}]]);
+  assert.equal(result.failure, undefined);
+  assert.equal(result.fetches, 2);
+  assert.equal(JSON.parse(result.stdout).native_user_message_count, 1);
+});
+
+test('native count rejects a missing user input', async () => {
+  const result = await run({pid: 321, url: 'http://127.0.0.1:49999/', password: 'offline-secret'},
+    [[{type: 'assistant', id: 'other'}]]);
+  assert.match(result.stderr, /native-input-count-mismatch/);
+  assert.equal(result.fetches, 1);
 });
