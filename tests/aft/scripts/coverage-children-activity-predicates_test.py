@@ -159,6 +159,23 @@ class ChildProofPredicates(unittest.TestCase):
         both["payload"]["tool"]["failed"] = True
         self.assertEqual(module.native_create_tool_count([both]), 0)
 
+    def test_truncated_loom_execute_matches_started_fallback_only(self):
+        prefix = '{"code":"const namespace=\'loom\';'
+        truncated = prefix + "x" * (16 * 1024 - len(prefix))
+        self.assertEqual(len(truncated), 16 * 1024)
+        item = event("item.completed", 1, "truncated", {"itemKind": "tool", "tool": {
+            "name": "execute", "input": truncated}})
+        self.assertEqual(module.native_create_tool_count([item]), 1)
+        non_loom = {**item, "payload": {"itemKind": "tool", "tool": {
+            "name": "execute", "input": truncated.replace("'loom'", "'other'")}}}
+        visible_other_call = {**item, "payload": {"itemKind": "tool", "tool": {
+            "name": "execute", "input": prefix + "tools.loom.agent_get("}}}
+        valid_json_without_create = {**item, "payload": {"itemKind": "tool", "tool": {
+            "name": "execute", "input": json.dumps({"code": "const namespace='loom';"})}}}
+        for bad in (non_loom, visible_other_call, valid_json_without_create):
+            with self.subTest(input=bad["payload"]["tool"]["input"][:60]):
+                self.assertEqual(module.native_create_tool_count([bad]), 0)
+
     def test_card_rejects_duplicate_wrong_color_and_raw_completion_bubble(self):
         kid = {"agent_id": self.a, "name": "pair-a"}
         good = {"cards": [{"id": self.a, "name": "pair-a", "attempt": "0", "color": "3",
