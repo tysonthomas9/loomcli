@@ -56,6 +56,24 @@ class OracleTests(unittest.TestCase):
                     evidence.replay("waiting", "cleared", "cleared", "1")
                 request.assert_called_once()
 
+    def test_create_replay_rejects_new_saved_event_after_restart(self):
+        agent = {"agent_id": "agt_1", "name": "coverage-rs-create-validation", "preset": "lead",
+                 "repo": "/repo", "base_ref": "main", "external_key": "coverage-rs-create-validation",
+                 "created_by_kind": "user", "parent_agent_id": None, "harness": "opencode",
+                 "model": "openai/real", "worktree_path": "/owned/tree", "state": "idle"}
+        request = {"body": {"name": agent["name"], "repo": agent["repo"], "base_ref": "main",
+                            "external_key": agent["external_key"], "overrides": {"model": agent["model"]}},
+                   "request_id": "create-one", "worktree_path": agent["worktree_path"]}
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(evidence, "OUT", Path(directory)), patch.object(evidence, "agent_id", return_value="agt_1"), \
+                 patch.object(evidence, "agent", return_value=agent), \
+                 patch.object(evidence, "pages", side_effect=[[row(1, "agent.created")],
+                                                             [row(1, "agent.created"), row(2, "agent.created")]]), \
+                 patch.object(evidence, "http", return_value=agent):
+                evidence.save("create", "request", request)
+                with self.assertRaisesRegex(AssertionError, "appended an event"):
+                    evidence.create_replay("after-restart")
+
 
 if __name__ == "__main__":
     unittest.main()

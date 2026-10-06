@@ -25,8 +25,8 @@ const [id,run,action,key]=process.argv.slice(1);
 const fail=(code)=>{process.stderr.write("native restart: "+code+"\n");process.exit(3)};
 (async()=>{
   const db=new DatabaseSync("/root/.loom/agents.db",{readOnly:true});
-  const row=db.prepare("SELECT agent_id,name,harness,harness_session_id AS native_id,harness_session_root AS native_root FROM agents WHERE agent_id=? AND workspace_id=?").get(id,"LOCALMODE");
-  if (!row || ![`coverage-rs-native-${run}`,`coverage-rs-waiting-${run}`].includes(row.name) || row.harness!=="opencode" || !row.native_id || typeof row.native_root!=="string") fail("unowned-agent");
+  const row=db.prepare("SELECT agent_id,name,harness,worktree_path,harness_session_id AS native_id,harness_session_root AS native_root FROM agents WHERE agent_id=? AND workspace_id=?").get(id,"LOCALMODE");
+  if (!row || ![`coverage-rs-native-${run}`,`coverage-rs-waiting-${run}`,`coverage-rs-create-${run}`].includes(row.name) || row.harness!=="opencode" || !row.native_id || typeof row.native_root!=="string" || !row.worktree_path) fail("unowned-agent");
   if (action==="restart" && row.name!==`coverage-rs-native-${run}`) fail("restart-scope");
   const owned=db.prepare("SELECT 1 FROM agent_native_sessions WHERE agent_id=? AND harness=? AND native_root=? AND native_id=?").get(id,row.harness,row.native_root,row.native_id);
   if (!owned) fail("native-ref-unregistered");
@@ -38,7 +38,7 @@ const fail=(code)=>{process.stderr.write("native restart: "+code+"\n");process.e
     } catch {return null}
   }).filter(x=>x!==null);
   if (pids.length!==1 || pids[0]<=1) fail("ambiguous-service-pid");
-  const value={agent_id:id,harness:row.harness,native_id:row.native_id,native_root:row.native_root,service_pid:pids[0],scope:"owned OpenCode service only"};
+  const value={agent_id:id,harness:row.harness,worktree_path:row.worktree_path,native_id:row.native_id,native_root:row.native_root,service_pid:pids[0],scope:"owned OpenCode service only"};
   if (action==="count") {
     if (process.env.LOOM_CONFIG_DIR!=="/root/.loom") fail("service-root-mismatch");
     const filename=path.join(process.env.LOOM_CONFIG_DIR,"agents-opencode","state","opencode","service.json");
