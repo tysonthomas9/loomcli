@@ -224,6 +224,37 @@ def select_files_lens(label):
     subprocess.check_call(["agent-browser", "--session", env("AFT_SESSION"), "click", FILES_LENS_SELECTOR])
 
 
+def folder_expand_decision(state, folder):
+    assert state["panels"] == 1 and state["rows"] == 1, f"ambiguous Agent Files folder: {state}"
+    assert state["role"] == "treeitem" and state["path"] == folder, f"wrong folder path: {state}"
+    assert state["directory"] == "true" and state["label"] == folder, f"not the owned folder: {state}"
+    assert state["expanded"] in ("true", "false"), f"invalid folder expansion state: {state}"
+    return state["expanded"] == "false"
+
+
+def ensure_folder_expanded(label, folder):
+    """Open the exact Agent Files folder only when its real tree row is collapsed."""
+    assert label == "actions" and folder == f"cov-files-{RUN}-folder", "foreign Files folder"
+    route(label, "files")
+    selector = (
+        '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) '
+        '[role=tree][aria-label="File tree"] [role=treeitem][aria-label=' + json.dumps(folder) + ']'
+    )
+    script = """(() => { const panels = document.querySelectorAll('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+      const rows = document.querySelectorAll(%s); const row = rows[0];
+      return JSON.stringify({panels:panels.length,rows:rows.length,role:row?.getAttribute('role'),
+        path:row?.getAttribute('data-path'),directory:row?.getAttribute('data-dir'),
+        label:row?.getAttribute('aria-label'),expanded:row?.getAttribute('aria-expanded')}); })()""" % json.dumps(selector)
+    raw = subprocess.check_output(
+        ["agent-browser", "--session", env("AFT_SESSION"), "eval", script], text=True
+    ).strip()
+    state = json.loads(raw)
+    if isinstance(state, str):
+        state = json.loads(state)
+    if folder_expand_decision(state, folder):
+        subprocess.check_call(["agent-browser", "--session", env("AFT_SESSION"), "click", selector])
+
+
 def exact_file_content(data, path, expected):
     assert data["path"] == path, data
     if expected == "":
@@ -579,6 +610,11 @@ def selftest():
     tab_clicks = re.findall(r'- click: \{ selector: "([^"]*agent-editor-groups[^"]*)" \}', suite)
     assert len(tab_clicks) == 7 and all('[data-testid=agent-api-page] ' in selector for selector in tab_clicks)
     assert [int(re.search(r'nth-of-type\((\d+)\)', selector)[1]) for selector in tab_clicks] == [5, 3, 2, 1, 4, 5, 4]
+    assert suite.count("ensure_folder_expanded actions") == 1
+    assert "folder?.getAttribute('aria-expanded')==='true'" in suite
+    file_tree = (source_root / "internal/webui/frontend/src/components/FileExplorer/FileTree.tsx").read_text()
+    assert 'aria-expanded={node.isDir ? node.isExpanded : undefined}' in file_tree
+    assert 'data-path={node.path}' in file_tree and 'data-dir={node.isDir || undefined}' in file_tree
 
     original_route, original_check_output, original_check_call = (
         globals()["route"], subprocess.check_output, subprocess.check_call
@@ -606,6 +642,58 @@ def selftest():
                 assert not accepted and len(clicks) == before_clicks, state
             else:
                 assert accepted and clicks[-1][-2:] == ["click", FILES_LENS_SELECTOR], state
+    finally:
+        globals()["route"], subprocess.check_output, subprocess.check_call = (
+            original_route, original_check_output, original_check_call
+        )
+        if original_session is None:
+            os.environ.pop("AFT_SESSION", None)
+        else:
+            os.environ["AFT_SESSION"] = original_session
+
+    folder = f"cov-files-{RUN}-folder"
+    expanded = {"panels": 1, "rows": 1, "role": "treeitem", "path": folder,
+                "directory": "true", "label": folder, "expanded": "true"}
+    assert folder_expand_decision(expanded, folder) is False
+    assert folder_expand_decision({**expanded, "expanded": "false"}, folder) is True
+    for mutation in ({"panels": 0}, {"rows": 2}, {"role": "button"},
+                     {"path": "foreign-folder"}, {"directory": None},
+                     {"label": "foreign-folder"}, {"expanded": None}):
+        try:
+            folder_expand_decision({**expanded, **mutation}, folder)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"folder decision accepted {mutation}")
+    original_route, original_check_output, original_check_call = (
+        globals()["route"], subprocess.check_output, subprocess.check_call
+    )
+    original_session = os.environ.get("AFT_SESSION")
+    os.environ["AFT_SESSION"] = "aft-selftest"
+    globals()["route"] = lambda label, tab: (label == "actions" and tab == "files") or (_ for _ in ()).throw(AssertionError("wrong route"))
+    clicks = []
+    subprocess.check_call = lambda args: clicks.append(args)
+    try:
+        subprocess.check_output = lambda *_args, **_kwargs: json.dumps(json.dumps(expanded))
+        ensure_folder_expanded("actions", folder)
+        assert clicks == [], "already-expanded folder was collapsed"
+        subprocess.check_output = lambda *_args, **_kwargs: json.dumps(json.dumps({**expanded, "expanded": "false"}))
+        ensure_folder_expanded("actions", folder)
+        assert len(clicks) == 1 and clicks[0][-2] == "click" and folder in clicks[0][-1]
+        for bad in ("foreign-folder", f"cov-files-{RUN}-renamed.txt"):
+            try:
+                ensure_folder_expanded("actions", bad)
+            except AssertionError:
+                assert len(clicks) == 1
+            else:
+                raise AssertionError("foreign folder was accepted")
+        subprocess.check_output = lambda *_args, **_kwargs: json.dumps(json.dumps({**expanded, "rows": 2}))
+        try:
+            ensure_folder_expanded("actions", folder)
+        except AssertionError:
+            assert len(clicks) == 1
+        else:
+            raise AssertionError("duplicate folder rows were accepted")
     finally:
         globals()["route"], subprocess.check_output, subprocess.check_call = (
             original_route, original_check_output, original_check_call
