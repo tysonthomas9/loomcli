@@ -57,13 +57,19 @@ tests:
         intent: "Send the request through Chat"
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=working-row]') &&
-            !!document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running]') &&
-            !!document.querySelector('form button[title="Stop the running turn"]')
+            (() => { const tool=document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running]');
+              const working=document.querySelector('[data-testid=working-row]');
+              const stop=document.querySelector('form button[title="Stop the running turn"]');
+              const label=tool?.textContent?.trim()||'';
+              if (!tool || !working || !stop || !label) return false;
+              window.__aftChatVisualLive ||= {path:location.pathname, at:new Date().toISOString(),
+                source:tool.dataset.testid, label, live:!!tool, working:!!working, running:!!stop,
+                workingText:working.textContent, stopTitle:stop.title};
+              return true; })()
         budget: 120000
-        intent: "Observe an actual running tool row before it completes"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" live-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render tool-live'
-        intent: "Record the live tool and working row; the later saved completion is compared by time and file"
+        intent: "Capture the first actual running tool, working row and Stop control in the same DOM read before the tool completes"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" live-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render tool-transition'
+        intent: "Read back the observed live state and capture its possibly completed transition; compare the later saved tool by time and file"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=chat-transcript] li[data-kind=agent] [data-streaming-caret]') &&
@@ -87,6 +93,8 @@ tests:
             !!document.querySelector('[data-testid=chat-transcript] [data-testid=chat-codeblock][data-language=json] code span')
         budget: 30000
         intent: "Wait for completed JSON code highlighting before reading its token spans"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-check before-reload'
+        intent: "Match each genuine saved reasoning EventID and first-line Thinking preview to its expanded full body before reload; record BLOCKED if none exists"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" render-check'
         intent: "Expand through UI clicks and compare table, highlighted code and all tool bodies with actual saved events"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render expanded'
@@ -115,6 +123,8 @@ tests:
               return c?.textContent.includes('VISUAL_END_${RUN_ID}') && !!c.querySelector('table') &&
                 !!c.querySelector('[data-testid=chat-codeblock]'); })()
         intent: "Wait for persisted table, code and final answer"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-check reloaded'
+        intent: "Match the same saved reasoning EventIDs, text, short Thinking previews and expanded full bodies after reload"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" render-reload-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render reloaded'
         intent: "Compare exact saved event IDs and rendered tool/table/code after reload"
       - run: 'agent-browser --session "$AFT_SESSION" set media light reduced-motion'
@@ -149,9 +159,6 @@ tests:
         intent: "Wait for the actual reduced-motion reply to complete"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reduced-saved-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render reduced-end'
         intent: "Compare the second real reply to its saved turn and capture the final reduced-motion frame"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-check'
-        intent: "Require expanded Thinking text when the first real turn saved reasoning; otherwise record the exact provider capability blocker"
-
   # UI0 empty/focus/keyboard/autogrow/header; 1.8a/1.8c literal text;
   # UI6/7/7b hover and narrow geometry; SK1 and MB1/MB1b actual viewport.
   # The source is a genuine user send;
