@@ -82,6 +82,7 @@ if [[ "$phase" == setup ]]; then
     fi
     git -C "$JOURNEY_REMOTE" for-each-ref --format='%(refname) %(objectname)' refs/heads > "$JOURNEY_STATE/remote-before.txt"
     git -C "$JOURNEY_REPO" rev-parse "refs/heads/loom/ws/$JOURNEY_WS/interactive/lead" > "$JOURNEY_STATE/lead-before.sha"
+    touch "$JOURNEY_STATE/setup.complete"
     exit 0
 fi
 
@@ -89,13 +90,27 @@ if [[ "$phase" == teardown ]]; then
     # Retain unresolved code review, refs and provider outcomes for inspection.
     # The outer harness owns server/process teardown. Never force-close a task
     # or bypass guarded workspace deletion just to make suite cleanup green.
+    cleanup_failed=0
     for mode in stack trunk; do
         for flow in explicit automatic reject-retry empty held; do
-            journey_load "review-$mode-$flow"
-            printf 'Fixture retained for review; outer harness owns process cleanup.\n' > "$JOURNEY_STATE/cleanup.txt"
+            state="${AFT_WORK_DIR:?}/journey-review-$mode-$flow"
+            # --filter may provision only one case. Absent fixture directories
+            # are not failures; created but incomplete fixtures remain failures.
+            [[ -d "$state" ]] || continue
+            printf 'Fixture retained for review; outer harness owns process cleanup.\n' > "$state/cleanup.txt"
+            incomplete=false
+            [[ -f "$state/setup.complete" ]] || incomplete=true
+            for receipt in workspace.id forge-repo task-task.id file-task lead.path lead-before.sha remote-before.txt; do
+                [[ -s "$state/$receipt" ]] || incomplete=true
+            done
+            if "$incomplete"; then
+                printf 'Fixture setup incomplete; all existing evidence retained.\n' > "$state/cleanup.failed"
+                echo "Incomplete review fixture retained: $state" >&2
+                cleanup_failed=1
+            fi
         done
     done
-    exit 0
+    exit "$cleanup_failed"
 fi
 
 key="${2:?fixture key required}"
