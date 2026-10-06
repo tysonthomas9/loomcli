@@ -227,10 +227,12 @@ def assert_busy():
 
 def preflight():
     assert required("AFT_REAL_BACKEND") == "opencode", "first live tier requires the available OpenCode harness"
-    assert required("AFT_AGENT_FLOW_REPO") == "/workspace/source-repo"
+    repo_path = required("AFT_AGENT_FLOW_REPO")
+    assert Path(repo_path).is_absolute() and Path(repo_path).name == "source-repo", repo_path
     workspace = request(f"/api/workspaces/{urllib.parse.quote(WS, safe='')}")
     repos = (workspace.get("data") or workspace)["repos"]
-    assert any(r["path"] == required("AFT_AGENT_FLOW_REPO") for r in repos), repos
+    source = [r for r in repos if r.get("name") == "source-repo"]
+    assert len(source) == 1 and source[0]["path"] == repo_path, (repo_path, source)
     request(f"/api/workspaces/{urllib.parse.quote(WS, safe='')}/v1/harnesses/opencode")
 
 
