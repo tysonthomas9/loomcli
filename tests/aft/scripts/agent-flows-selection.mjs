@@ -41,7 +41,15 @@ if (batchName === 'default') {
   agents = null;
 } else {
   const batch = catalog.batches[batchName];
-  if (!exactKeys(batch, ['files', 'agents']) || !Array.isArray(batch.files) ||
+  if (!(exactKeys(batch, ['files', 'agents']) || exactKeys(batch, ['files', 'agents', 'expected_cases'])) ||
+      !Array.isArray(batch.files) ||
+      (batchName === 'tool-policy' && (!Array.isArray(batch.expected_cases) ||
+        batch.expected_cases.length !== 3 || batch.files.join(',') !== 'tool-policy.test.yaml')) ||
+      (batch.expected_cases !== undefined && (!Array.isArray(batch.expected_cases) || !batch.expected_cases.length ||
+        !batch.expected_cases.every(test => exactKeys(test, ['suite', 'name']) &&
+          typeof test.suite === 'string' && namePattern.test(test.suite) &&
+          typeof test.name === 'string' && test.name.length > 0) ||
+        !unique(batch.expected_cases.map(test => `${test.suite}\0${test.name}`)))) ||
       batch.files.length < 1 || !unique(batch.files) ||
       !(exactKeys(batch.agents, ['leads', 'children']) || exactKeys(batch.agents, ['leads', 'children', 'reviewers'])) ||
       !Array.isArray(batch.agents.leads) || !Array.isArray(batch.agents.children) ||
@@ -98,6 +106,11 @@ for (const file of files) {
   for (const name of names) cases.push({ suite: parsed.suite, name });
 }
 if (!unique(cases.map(test => `${test.suite}\0${test.name}`))) fail('duplicate selected cases');
+if (batchName !== 'default' && catalog.batches[batchName].expected_cases &&
+    (cases.length !== catalog.batches[batchName].expected_cases.length ||
+      cases.some((test, i) => test.suite !== catalog.batches[batchName].expected_cases[i].suite ||
+        test.name !== catalog.batches[batchName].expected_cases[i].name)))
+  fail('selected cases differ from the reviewed batch');
 if (batchName === 'default' && cases.length !== 9) fail('default selection must contain exactly nine cases');
 if (cases.length > 10) fail('selected cases exceed absolute ceiling of 10');
 if (agents && [...agents.leads, ...agents.children, ...(agents.reviewers ?? [])].some(agent => !suites.some(suite => suite.name === agent.suite)))
