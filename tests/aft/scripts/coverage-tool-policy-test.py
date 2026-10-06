@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import runpy
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +21,7 @@ assert_native_steps = policy["assert_native_steps"]
 event_item_id = policy["event_item_id"]
 assert_reviewer_binding = policy["assert_reviewer_binding"]
 current_child_tool_events = policy["current_child_tool_events"]
+tray_snapshot = policy["tray_snapshot"]
 tray_capture_script = policy["tray_capture_script"]
 tool_events = policy["tool_events"]
 scoped_dom = policy["SCOPED_DOM"]
@@ -160,6 +162,40 @@ class NativeUsageOracle(unittest.TestCase):
 
 
 class OwnedEvidenceOracle(unittest.TestCase):
+    def test_completed_child_readback_keeps_captured_row_and_step_identity(self):
+        event_id = "item.completed:root:native:msg_1/tool/call_1"
+        tool = {"agent_id": "agt_child", "turn_id": "turn_now", "seq": 2,
+                "event_id": event_id, "kind": "item.completed",
+                "payload": {"itemKind": "tool", "tool": {
+                    "input": "printf SAFE # TOKEN=REDACTED"}}}
+        child = {"agent_id": "agt_child", "parent_agent_id": "agt_parent",
+                 "state": "finished", "running_turn_id": None}
+        capture = {"child_agent_id": "agt_child", "parent_agent_id": "agt_parent",
+                   "running_turn_id": "turn_now", "tool_event_id": event_id,
+                   "native_item_id": "msg_1/tool/call_1", "tray_row_sha256": "safe-hash",
+                   "redacted_command_visible": True}
+        globals_ = tray_snapshot.__globals__
+        original = {k: globals_[k] for k in ("WORK", "agent", "events", "native_tool_ids")}
+        with tempfile.TemporaryDirectory() as directory:
+            globals_["WORK"] = Path(directory)
+            globals_["agent"] = lambda kind: child
+            globals_["events"] = lambda kind: [tool]
+            globals_["native_tool_ids"] = lambda kind: ["msg_1/tool/call_1"]
+            try:
+                def check(value):
+                    (Path(directory) / "tray-capture.json").write_text(json.dumps(value))
+                    tray_snapshot()
+
+                check(capture)
+                self.assertEqual(json.loads((Path(directory) / "tray-privacy.json").read_text())
+                                 ["tool_event_ids"], [event_id])
+                with self.assertRaisesRegex(AssertionError, "captured saved redacted step"):
+                    check({**capture, "tool_event_id": "item.completed:root:native:foreign"})
+                with self.assertRaisesRegex(AssertionError, "exactly one same-turn"):
+                    check({**capture, "running_turn_id": "turn_old"})
+            finally:
+                globals_.update(original)
+
     def test_running_tray_capture_requires_exact_child_and_redacted_command(self):
         expression = tray_capture_script("agt_owned")
         harness = """
@@ -205,17 +241,19 @@ class OwnedEvidenceOracle(unittest.TestCase):
                 "payload": {"itemKind": "tool", "tool": {"input": "printf SAFE # TOKEN=REDACTED"}}}
         self.assertEqual(current_child_tool_events([tool], "agt_child", "turn_now", sentinel), [tool])
         for stale in ({**tool, "turn_id": "turn_old"}, {**tool, "agent_id": "agt_foreign"}):
-            with self.assertRaisesRegex(AssertionError, "no saved native child tool call"):
+            with self.assertRaisesRegex(AssertionError, "exactly one same-turn"):
                 current_child_tool_events([stale], "agt_child", "turn_now", sentinel)
         reasoning = {"agent_id": "agt_child", "turn_id": "turn_now", "seq": 3,
                      "event_id": "reason:3", "kind": "item.completed",
                      "payload": {"itemKind": "reasoning"}}
-        with self.assertRaisesRegex(AssertionError, "not the child's latest saved step"):
-            current_child_tool_events([tool, reasoning], "agt_child", "turn_now", sentinel)
+        self.assertEqual(current_child_tool_events([tool, reasoning], "agt_child", "turn_now", sentinel),
+                         [tool])  # completion may append reasoning after the captured preview
         other = {**tool, "seq": 3, "event_id": "tool:3",
                  "payload": {"itemKind": "tool", "tool": {"input": "printf SAFE # TOKEN=" + sentinel}}}
-        with self.assertRaisesRegex(AssertionError, "did not redact"):
+        with self.assertRaisesRegex(AssertionError, "exactly one same-turn"):
             current_child_tool_events([tool, other], "agt_child", "turn_now", sentinel)
+        with self.assertRaisesRegex(AssertionError, "did not redact"):
+            current_child_tool_events([other], "agt_child", "turn_now", sentinel)
 
 
 if __name__ == "__main__":
