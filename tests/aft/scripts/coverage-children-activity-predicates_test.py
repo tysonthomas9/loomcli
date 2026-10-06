@@ -118,6 +118,9 @@ class ChildProofPredicates(unittest.TestCase):
         good = {"width": 390, "height": 844, "theme": "dark", "navPosition": "fixed",
                 "trayOpen": True, "childId": self.a, "headerExpanded": True,
                 "rowIds": [self.a], "rowCount": 1, "visibleRowCount": 1,
+                "childWhole": True,
+                "headerHit": {"x": 180, "y": 480, "hit": True, "target": "SPAN"},
+                "childLinkHit": {"x": 310, "y": 540, "hit": True, "target": "A"},
                 "partialRows": 0, "hiddenRows": 0, "moreCount": 0,
                 "horizontalOverflow": 0, "maxControlBottom": 600,
                 "composerTop": 610, "composerBottom": 770, "navTop": 780}
@@ -126,7 +129,10 @@ class ChildProofPredicates(unittest.TestCase):
                                 ({"horizontalOverflow": 3}, "overflows"),
                                 ({"maxControlBottom": 620}, "usable composer"),
                                 ({"composerBottom": 790}, "mobile navigation"),
-                                ({"hiddenRows": 1}, "More count")]:
+                                ({"hiddenRows": 1}, "More count"),
+                                ({"childWhole": False}, "exact saved child row"),
+                                ({"headerHit": {"x": 180, "y": 480, "hit": False, "target": "DIV"}}, "tray header"),
+                                ({"childLinkHit": {"x": 310, "y": 540, "hit": False, "target": "DIV"}}, "child Open link")]:
             with self.subTest(change=change), self.assertRaisesRegex(AssertionError, message):
                 module.mobile_geometry_ok({**good, **change}, self.a, 390, "dark")
 
