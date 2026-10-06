@@ -3,6 +3,7 @@
 
 import importlib.util
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,6 +60,29 @@ class OracleTest(unittest.TestCase):
         with patch.object(module, "events", return_value=[{"kind": "ask.opened", "event_id": "e1", "payload": {}}]):
             with self.assertRaisesRegex(AssertionError, "executed commands"):
                 module.approval_effect("approval", "MARKER", "1", "1")
+
+    def test_resolved_ask_still_running_is_not_terminal(self):
+        module.save("denial-declined-ask.json", {"ask_id": "per_1", "turn_id": "turn_1"})
+        rows = [{"kind": "ask.resolved", "seq": 3, "turn_id": "turn_1", "event_id": "e3",
+                 "payload": {"askId": "per_1"}},
+                {"kind": "agent.turn_completed", "seq": 4, "turn_id": "turn_1", "event_id": "e4",
+                 "payload": {"stopReason": "declined"}}]
+        with patch.object(module, "agent", return_value={"running_turn_id": "turn_1", "open_asks": []}), \
+             patch.object(module, "events", return_value=rows):
+            with self.assertRaisesRegex(AssertionError, "active turn"):
+                module.ask_terminal("denial", "declined", "declined")
+
+    def test_active_icon_stop_makes_completion_wait_false(self):
+        suites = Path(__file__).parents[1] / "live-agent-coverage-suites"
+        source = "\n".join((suites / name).read_text() for name in
+                           ("chat-controls-asks.test.yaml", "chat-controls-models.test.yaml"))
+        old = "b.textContent === 'Stop'"
+        guard = '!document.querySelector(\'form button[title="Stop the running turn"]\')'
+        self.assertNotIn(old, source)
+        self.assertGreaterEqual(source.count(guard), 9)
+        script = "const document={querySelector:()=>({title:'Stop the running turn'})};" + \
+                 f"if ({guard}) process.exit(1);"
+        subprocess.run(["node", "-e", script], check=True)
 
 
 if __name__ == "__main__":

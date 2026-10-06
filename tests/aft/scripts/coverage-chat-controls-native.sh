@@ -28,14 +28,29 @@ const fail = reason => { process.stdout.write(JSON.stringify({status:"unavailabl
     return fail("owned-agent-or-native-ref-mismatch");
   if (!db.prepare("SELECT 1 FROM agent_native_sessions WHERE agent_id=? AND harness=? AND native_root=? AND native_id=?").get(id,"opencode",row.native_root,row.native_id))
     return fail("native-ref-not-owned");
-  const file = path.join(process.env.LOOM_CONFIG_DIR || "", "agents-opencode/state/opencode/service.json");
+  if (process.env.LOOM_CONFIG_DIR !== "/root/.loom" ||
+      process.env.LOOM_OPENCODE_BIN !== "/usr/local/bin/opencode")
+    return fail("owned-service-root-or-binary-mismatch");
+  const file = path.join(process.env.LOOM_CONFIG_DIR, "agents-opencode/state/opencode/service.json");
   let reg;
   try { reg = JSON.parse(fs.readFileSync(file,"utf8")); } catch { return fail("service-registration-unavailable"); }
   let base;
   try { base = new URL(reg.url); } catch { return fail("service-url-invalid"); }
+  const port = Number(base.port);
   if (base.protocol !== "http:" || !["127.0.0.1","localhost"].includes(base.hostname) ||
-      base.username || base.password || base.pathname !== "/" || !Number.isInteger(reg.pid) ||
+      !/^[1-9][0-9]{0,4}$/.test(base.port) || port > 65535 ||
+      base.username || base.password || base.pathname !== "/" || base.search || base.hash ||
+      !Number.isInteger(reg.pid) || reg.pid < 1 ||
       typeof reg.password !== "string" || !reg.password) return fail("service-identity-invalid");
+  let command, executable, pinned;
+  try {
+    command = fs.readFileSync(`/proc/${reg.pid}/cmdline`,"utf8").split("\0").filter(Boolean);
+    executable = fs.realpathSync(`/proc/${reg.pid}/exe`);
+    pinned = fs.realpathSync(process.env.LOOM_OPENCODE_BIN);
+  } catch { return fail("service-process-unavailable"); }
+  if (command[0] !== process.env.LOOM_OPENCODE_BIN || command[1] !== "serve" ||
+      !command.includes("--service") || executable !== pinned)
+    return fail("service-process-not-pinned-opencode");
   const auth = "Basic " + Buffer.from("opencode:" + reg.password).toString("base64");
   const get = async pathname => {
     const response = await fetch(new URL(pathname, base), {headers:{Authorization:auth},signal:AbortSignal.timeout(15000)});

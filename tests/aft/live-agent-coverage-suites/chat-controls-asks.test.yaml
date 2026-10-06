@@ -34,10 +34,10 @@ tests:
             (() => { const c = document.querySelector('[data-testid=chat-transcript]');
               return !document.querySelector('[data-testid=ask-card]') &&
                 [...c.querySelectorAll('li[data-kind=agent]')].some(r => r.textContent.includes('APPROVAL_EFFECT_${RUN_ID}')) &&
-                ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop'); })()
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
         budget: 180000
         intent: "Show the command effect and the completed first turn"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt approval once && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved approval once allow_once && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect approval APPROVAL_EFFECT_${RUN_ID} 1 1'
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt approval once && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved approval once allow_once && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal approval once completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect approval APPROVAL_EFFECT_${RUN_ID} 1 1'
         intent: "Check one saved resolution and one successful native tool effect"
       - fill: { label: Message, value: "APPROVAL_TWO_${RUN_ID}: run exactly the same shell command printf 'APPROVAL_EFFECT_${RUN_ID}\\n' again and report its output." }
         intent: "Ask again to prove Allow once did not grant later turns"
@@ -55,10 +55,10 @@ tests:
             (() => { const c = document.querySelector('[data-testid=chat-transcript]');
               return !document.querySelector('[data-testid=ask-card]') &&
                 (c?.querySelectorAll('li[data-kind=agent]').length || 0) >= 2 &&
-                ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop'); })()
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
         budget: 180000
         intent: "Show the second turn finished"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt approval always && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved approval always allow_always && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect approval APPROVAL_EFFECT_${RUN_ID} 2 2'
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt approval always && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved approval always allow_always && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal approval always completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect approval APPROVAL_EFFECT_${RUN_ID} 2 2'
         intent: "Check the Always Respond resolution and second command effect"
       - fill: { label: Message, value: "APPROVAL_THREE_${RUN_ID}: run exactly printf 'APPROVAL_EFFECT_${RUN_ID}\\n' again with your shell tool, then report the output." }
         intent: "Use the same command in the same native session on a new turn"
@@ -68,10 +68,10 @@ tests:
             (() => { const c = document.querySelector('[data-testid=chat-transcript]');
               return !document.querySelector('[data-testid=ask-card]') &&
                 (c?.querySelectorAll('li[data-kind=agent]').length || 0) >= 3 &&
-                ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop'); })()
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
         budget: 180000
         intent: "Show the granted command's third turn completed without another approval card"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect approval APPROVAL_EFFECT_${RUN_ID} 3 2'
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect approval APPROVAL_EFFECT_${RUN_ID} 3 2 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn approval APPROVAL_THREE_${RUN_ID} completed'
         intent: "Require three real command effects but only two native ask.opened events"
 
   - name: UI4 OC1 real Decline and Cancel end their turns without the denied command running
@@ -98,10 +98,10 @@ tests:
           fn: >-
             !document.querySelector('[data-testid=ask-card]') &&
             (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('Turn declined') &&
-            ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop')
+            !document.querySelector('form button[title="Stop the running turn"]')
         budget: 180000
         intent: "Show the real OpenCode decline ends the turn and Chat is reusable"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt denial declined && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved denial declined deny && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect denial DENIED_EFFECT_${RUN_ID} 0 1'
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt denial declined && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved denial declined deny && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal denial declined declined && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect denial DENIED_EFFECT_${RUN_ID} 0 1'
         intent: "Check the saved resolution and absence of command output"
       - fill: { label: Message, value: "CANCEL_${RUN_ID}: use shell to run exactly printf 'CANCELLED_EFFECT_${RUN_ID}\\n'." }
         intent: "Trigger a new approval on the same usable agent"
@@ -117,10 +117,12 @@ tests:
       - wait:
           fn: >-
             !document.querySelector('[data-testid=ask-card]') &&
-            ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop')
+            !document.querySelector('form button[title="Stop the running turn"]')
         budget: 180000
         intent: "Show Cancel finished instead of leaving the agent active"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt denial cancelled && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved denial cancelled deny && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect denial CANCELLED_EFFECT_${RUN_ID} 0 2'
+      # AskCard Cancel sends deny, then Stop. OpenCode can record the decline
+      # before the interrupt, or the interrupt can win; either must end this turn.
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt denial cancelled && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved denial cancelled deny && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal denial cancelled declined,cancelled && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect denial CANCELLED_EFFECT_${RUN_ID} 0 2'
         intent: "Check Cancel resolved exactly once and never executed its command"
 
   - name: UI4 real native two-question form accepts an option and a custom answer
@@ -163,10 +165,10 @@ tests:
               return !document.querySelector('[data-testid=ask-card]') &&
                 (c?.textContent || '').includes('Blue') &&
                 (c?.textContent || '').includes('Medium, please') &&
-                ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop'); })()
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
         budget: 180000
         intent: "Show the real agent continue after receiving both answers"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt questions questions && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved questions questions answered && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" question-answers questions'
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt questions questions && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved questions questions answered && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal questions questions completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" question-answers questions'
         intent: "Require one saved resolution and native question-tool output containing both UI answers"
 
   - name: UI4 lost native ask after owned restart refuses stale Respond and shows one fresh reask
@@ -204,8 +206,8 @@ tests:
       - wait:
           fn: >-
             !document.querySelector('[data-testid=ask-card]') &&
-            ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop')
+            !document.querySelector('form button[title="Stop the running turn"]')
         budget: 180000
         intent: "Show the recovered turn finishes"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt restart fresh && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved restart fresh allow_once && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect restart REASK_EFFECT_${RUN_ID} 1 2'
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt restart fresh && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved restart fresh allow_once && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal restart fresh completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect restart REASK_EFFECT_${RUN_ID} 1 2'
         intent: "Check the fresh ask resolves and the command runs once despite two asks"
