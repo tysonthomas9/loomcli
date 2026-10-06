@@ -32,7 +32,7 @@ tests:
       - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
-      - run: '"$AFT_SELECT_AGENT_MODEL" "aft-child-lead-${RUN_ID}"'
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
         intent: "Show the explicitly selected real model in the Lead's Chat before sending"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead pair-lead "aft-child-lead-${RUN_ID}"
@@ -129,7 +129,7 @@ tests:
       - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
-      - run: '"$AFT_SELECT_AGENT_MODEL" "aft-cancel-lead-${RUN_ID}"'
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
         intent: "Show the explicitly selected real model in the cancellation Lead's Chat before sending"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead cancel-lead "aft-cancel-lead-${RUN_ID}"
@@ -189,7 +189,7 @@ tests:
       - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
-      - run: '"$AFT_SELECT_AGENT_MODEL" "aft-isolation-a-${RUN_ID}"'
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
         intent: "Show the explicitly selected real model in Lead A's Chat before sending"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead iso-a "aft-isolation-a-${RUN_ID}"
@@ -219,7 +219,7 @@ tests:
       - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
-      - run: '"$AFT_SELECT_AGENT_MODEL" "aft-isolation-b-${RUN_ID}"'
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
         intent: "Show the explicitly selected real model in Lead B's Chat before sending"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead iso-b "aft-isolation-b-${RUN_ID}"
