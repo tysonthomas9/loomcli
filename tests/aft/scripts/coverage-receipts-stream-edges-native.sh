@@ -18,17 +18,23 @@ agent_flows_check_container "$container"
 # shellcheck disable=SC2016 # The single-quoted program runs in the owned container.
 result="$(agent_flows_podman exec -T "$container" node -e '
 const fs=require("node:fs");
+const path=require("node:path");
 const {DatabaseSync}=require("node:sqlite");
 const [action,id,key,run,repo,model]=process.argv.slice(1);
 const fail=reason=>{process.stderr.write("edges native: "+reason+"\n");process.exit(3)};
 (async()=>{
   if(action==="inventory") {
     const root="/root/.loom/worktrees/source-repo";
+    const nonGit=path.dirname(repo);
+    if(repo!=="/root/.loom/workspaces/LOCALMODE/source-repo" ||
+       !fs.statSync(nonGit).isDirectory() || fs.existsSync(path.join(nonGit,".git")) ||
+       !fs.statSync(repo).isDirectory() || !fs.existsSync(path.join(repo,".git")) ||
+       fs.existsSync(path.join(nonGit,`no-such-repo-${run}`))) fail("repo-fixture-mismatch");
     const names=fs.existsSync(root)?fs.readdirSync(root).sort():[];
     const db=new DatabaseSync("/root/.loom/agents.db",{readOnly:true});
     const agents=db.prepare("SELECT count(*) AS n FROM agents WHERE workspace_id=?").get("LOCALMODE").n;
     const sessions=db.prepare("SELECT count(*) AS n FROM agent_native_sessions").get().n;
-    process.stdout.write(JSON.stringify({worktrees:names,agents,sessions})+"\n");
+    process.stdout.write(JSON.stringify({worktrees:names,agents,sessions,non_git_dir:nonGit,unknown_repo:path.join(nonGit,`no-such-repo-${run}`)})+"\n");
     return;
   }
   const db=new DatabaseSync("/root/.loom/agents.db",{readOnly:true});

@@ -123,11 +123,13 @@ tests:
           fn: "document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]').length===0"
         intent: "Show the empty waiting slot after persisted-history reload"
 
-  - name: LIVE CR1 2.0n rejected Create base ref leaves no Agent or worktree then same-name retry succeeds
-    intent: The public Create actor receives typed errors for missing and unknown base_ref with no row or worktree; the same name then creates one owned OpenCode Lead, appears in Chat, and completes a real reply. Harness unavailability is recorded only when the public preset advertises a candidate.
+  - name: LIVE CR1 2.0n rejected Create inputs leave no Agent or worktree then same-name retry succeeds
+    intent: The public Create actor receives typed errors for missing and unknown base_ref, unknown repo, and an owned non-Git directory with no row, worktree or native registration; the same name then creates one owned OpenCode Lead, appears in Chat, and completes a real reply. Harness unavailability is recorded only when the public preset advertises a candidate.
     steps:
       - run: 'test -x "$AFT_SELECT_AGENT_MODEL" && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-baseline && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-refuse missing && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-refuse unknown && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-harness-capability'
         intent: "Pin owned worktrees, prove both typed rejection paths leave no Agent, and record the advertised harness capability"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-refuse repo-missing && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-refuse repo-nongit'
+        intent: "Use the public API to reject one absent owned-workspace repo path and the existing owned non-Git workspace directory without an Agent, worktree or native side effect"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-success && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" open-chat create'
         intent: "Retry the same name on supported OpenCode and require one Agent, worktree and registered native session"
       - wait: { url: "/ws/${AFT_WS}/chat/agt_" }

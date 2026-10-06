@@ -364,18 +364,27 @@ def listed_create():
 
 
 def create_refuse(stage):
-    assert stage in ("missing", "unknown")
+    assert stage in ("missing", "unknown", "repo-missing", "repo-nongit")
     body = {"preset": "lead", "name": name("create"), "repo": REPO,
             "overrides": {"harness": "opencode", "model": MODEL}}
     if stage == "unknown":
         body["base_ref"] = f"no-such-ref-{RUN}"
+    if stage in ("repo-missing", "repo-nongit"):
+        inventory = load("create", "baseline")["inventory"]
+        body["repo"] = inventory["unknown_repo" if stage == "repo-missing" else "non_git_dir"]
+        body["base_ref"] = "main"
     error = call(ROOT + "/agents", "POST", body, f"rs-edges-{RUN}-create-{stage}", 400)
-    assert error["code"] == "preset_invalid" and "base_ref" in error["error"]
+    assert error["code"] == "preset_invalid"
     if stage == "unknown":
-        assert body["base_ref"] in error["error"] and REPO in error["error"]
+        assert "base_ref" in error["error"] and body["base_ref"] in error["error"] and REPO in error["error"]
+    elif stage == "missing":
+        assert "base_ref" in error["error"]
+    else:
+        assert body["repo"] in error["error"] and "repo clone" in error["error"]
     assert not listed_create(), "refused Create left an Agent row"
     assert native("inventory") == load("create", "baseline")["inventory"], "refused Create left an Agent, worktree or native registration"
     save("create", stage, {"status": 400, "code": error["code"], "request_id": f"rs-edges-{RUN}-create-{stage}",
+                           "repo": body["repo"],
                            "agent_rows": 0, "inventory_unchanged": True})
 
 

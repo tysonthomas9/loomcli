@@ -95,6 +95,30 @@ class EdgeOracles(unittest.TestCase):
             expected = "msg_" + hashlib.sha256(b"agt_owned\x00request-1").hexdigest()[:26]
             self.assertEqual(edge.native_key("large", "request-1"), expected)
 
+    def test_repo_rejections_use_owned_read_only_fixtures_and_leave_inventory(self):
+        edge = module()
+        inventory = {"worktrees": ["agt_other"], "agents": 1, "sessions": 1,
+                     "non_git_dir": "/root/.loom/workspaces/LOCALMODE",
+                     "unknown_repo": "/root/.loom/workspaces/LOCALMODE/no-such-repo-offline"}
+        bodies = []
+
+        def refuse(_path, method="GET", body=None, key=None, expected=200):
+            self.assertEqual((method, expected), ("POST", 400))
+            bodies.append(body)
+            return {"code": "preset_invalid", "error": f'repo "{body["repo"]}" is not the absolute path of a repo clone'}
+
+        with tempfile.TemporaryDirectory() as temporary:
+            edge.OUT = Path(temporary)
+            edge.save("create", "baseline", {"inventory": inventory})
+            with mock.patch.object(edge, "call", side_effect=refuse), \
+                 mock.patch.object(edge, "listed_create", return_value=[]), \
+                 mock.patch.object(edge, "native", return_value=inventory):
+                edge.create_refuse("repo-missing")
+                edge.create_refuse("repo-nongit")
+        self.assertEqual([body["repo"] for body in bodies],
+                         [inventory["unknown_repo"], inventory["non_git_dir"]])
+        self.assertTrue(all(body["name"] == edge.name("create") and body["base_ref"] == "main" for body in bodies))
+
 
 if __name__ == "__main__":
     unittest.main()
