@@ -56,7 +56,7 @@ tests:
       - run: |
           python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" capture restart first native
         intent: "Save the stable Agent ID, native session ID/root and numbered event IDs after the first answer"
-      - fill: { label: Message, value: "Use tools to inspect README.md and package.json in this repository, then explain the app entry point and one test command. Keep all files unchanged." }
+      - fill: { label: Message, value: "In your own worktree, use tools to inspect README.md, package.json, server.js and app.test.js, then run the package.json test command once. Explain the app entry point and the test result. Keep all files unchanged." }
       - press: Enter
       - wait:
           fn: >-
