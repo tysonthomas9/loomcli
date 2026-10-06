@@ -278,6 +278,16 @@ jq --arg run "$run_id" '[.agents[] | select(.name | contains($run)) |
   {agent_id,name,preset,created_by_kind,parent_agent_id,root_agent_id,repo,harness,model,model_unverified,state}]' <<< "$agents_json" \
   > "$run_root/evidence/actual-agent-models.json" || die 'actual Agent API model snapshot could not be saved'
 jq -e '.next == ""' <<< "$agents_json" >/dev/null || die 'Agent API model readback was truncated'
+if [[ "$coverage_batch" == lifecycle-delete ]]; then
+  declared="$(agent_flows_declared_agents)" || die 'could not expand Delete declarations'
+  node "$TESTS_DIR/scripts/agent-flows-deleted-proof.mjs" \
+    "$run_root/evidence" "$declared" "$run_id" "$AFT_API_URL" "$AFT_AGENT_FLOW_REPO" "$real_model" \
+    > "$run_root/evidence/deleted-agent-models.json" || die 'exact-ID deleted Agent proof failed'
+  jq -s '.[0] + .[1]' "$run_root/evidence/actual-agent-models.json" \
+    "$run_root/evidence/deleted-agent-models.json" > "$run_root/evidence/actual-agent-models.tmp" \
+    || die 'could not combine surviving and tombstoned Agent identities'
+  mv "$run_root/evidence/actual-agent-models.tmp" "$run_root/evidence/actual-agent-models.json"
+fi
 if [[ "$coverage_batch" == default ]]; then
   jq -e --arg repo "$AFT_AGENT_FLOW_REPO" --arg target "$real_model" '
     length > 0 and all(.[]; .harness == "opencode" and .repo == $repo and

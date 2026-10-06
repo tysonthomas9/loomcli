@@ -38,6 +38,20 @@ try {
   assert.equal(selected.count, 3);
   assert.deepEqual(selected.cases.map(test => test.suite), Array(3).fill('coverage-one'));
   assert.match(selected.suites[0].sha256, /^[a-f0-9]{64}$/);
+  agents.leads[0].end_state = 'deleted';
+  write(['one.test.yaml']);
+  refuse('smoke'); // A generic batch cannot relax its surviving-Agent proof.
+  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'lifecycle-delete': { files: ['one.test.yaml'], agents } } }));
+  assert.equal(JSON.parse(run('lifecycle-delete')).agents.leads[0].end_state, 'deleted');
+  agents.leads[0].model_required = false;
+  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'lifecycle-delete': { files: ['one.test.yaml'], agents } } }));
+  refuse('lifecycle-delete');
+  agents.leads[0].model_required = true;
+  agents.leads[0].end_state = 'missing';
+  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'lifecycle-delete': { files: ['one.test.yaml'], agents } } }));
+  refuse('lifecycle-delete');
+  delete agents.leads[0].end_state;
+  write(['one.test.yaml']);
   assert.equal(JSON.parse(run('default')).count, 9);
   writeFileSync(join(original, 'lead-chat.test.yaml'), originalSource.replace('tests:\n',
     'tests:\n  - name: unexpected tenth default case\n    steps:\n      - open: /ws/${AFT_WS}/agents\n'));
@@ -62,9 +76,9 @@ try {
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ selection: { batch: 'smoke', agents } }));
   const expanded = JSON.parse(execFileSync('bash', ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],
     { env: { ...env, AFT_WORK_DIR: root, RUN_ID: 'af12345678' }, encoding: 'utf8' }));
-  assert.deepEqual(expanded, { leads: [{ name: 'aft-coverage-af12345678', suite: 'coverage-one', model_required: true, model_exception: false, model_proof: 'ui_selection' }],
+  assert.deepEqual(expanded, { leads: [{ name: 'aft-coverage-af12345678', suite: 'coverage-one', model_required: true, model_exception: false, model_proof: 'ui_selection', end_state: 'present' }],
     reviewers: [],
-    children: [{ name: 'aft-child-af12345678', parent: 'aft-coverage-af12345678', suite: 'coverage-one' }] });
+    children: [{ name: 'aft-child-af12345678', parent: 'aft-coverage-af12345678', suite: 'coverage-one', end_state: 'present' }] });
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ selection: { batch: 'default', agents: null } }));
   assert.equal(execFileSync('bash', ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],
     { env: { ...env, AFT_WORK_DIR: root, RUN_ID: 'af12345678' }, encoding: 'utf8' }).trim(), 'null');

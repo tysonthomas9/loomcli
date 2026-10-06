@@ -50,9 +50,11 @@ if (batchName === 'default') {
   if (!(batch.agents.leads.length || batch.agents.reviewers?.length) ||
       !batch.agents.leads.every(lead => (exactKeys(lead, ['name', 'suite', 'model_required']) ||
         exactKeys(lead, ['name', 'suite', 'model_required', 'model_exception']) ||
-        exactKeys(lead, ['name', 'suite', 'model_required', 'model_proof'])) &&
+        exactKeys(lead, ['name', 'suite', 'model_required', 'model_proof']) ||
+        (batchName === 'lifecycle-delete' && exactKeys(lead, ['name', 'suite', 'model_required', 'end_state']))) &&
         typeof lead.name === 'string' && agentPattern.test(lead.name) && typeof lead.suite === 'string' &&
         typeof lead.model_required === 'boolean' &&
+        (lead.end_state === undefined || (lead.end_state === 'deleted' && lead.model_required)) &&
         (lead.model_exception === undefined || typeof lead.model_exception === 'boolean') &&
         (lead.model_proof === undefined || (lead.model_required && lead.model_proof === 'api_post_create')) &&
         !(lead.model_required && lead.model_exception)))
@@ -67,7 +69,9 @@ if (batchName === 'default') {
   if (!unique(reviewerNames) || reviewerNames.some(name => leadNames.includes(name))) fail('duplicate declared root agent');
   const childNames = [];
   for (const child of batch.agents.children) {
-    if (!exactKeys(child, ['name', 'parent', 'suite']) || typeof child.name !== 'string' ||
+    if (!(exactKeys(child, ['name', 'parent', 'suite']) ||
+        (batchName === 'lifecycle-delete' && exactKeys(child, ['name', 'parent', 'suite', 'end_state']) && child.end_state === 'deleted')) ||
+        typeof child.name !== 'string' ||
         !agentPattern.test(child.name) || typeof child.suite !== 'string' ||
         !batch.agents.leads.some(lead => lead.name === child.parent && lead.suite === child.suite))
       fail('invalid declared child or parent');
