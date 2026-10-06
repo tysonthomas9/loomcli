@@ -1,0 +1,154 @@
+# LIVE paid OpenCode; public API actions use the authenticated user actor.
+# The three cases keep separate owned Agents and require saved IDs plus UI proof.
+suite: live-receipts-stream-edges
+classification: { area: agents, feature: real-receipt-boundaries, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" preflight
+teardown: |
+  set -eu
+  python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" cleanup
+tests:
+  - name: LIVE 1.5d interrupt with message cancels running turn and delivers replacement once
+    intent: A UI-created Lead has a real running OpenCode tool turn; the authenticated public user replaces its one waiting slot with a message-bearing interrupt, then sees one delivered replacement and a usable next turn.
+    steps:
+      - run: 'test -x "$AFT_SELECT_AGENT_MODEL"'
+        intent: "Require the runner's real-model UI selector before paid work"
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "coverage-rs-edges-interrupt-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - wait:
+          fn: >-
+            (() => { const r=Array.from(document.querySelectorAll('[data-testid=create-agent-repo-chips] button'));
+              return r.length===1 && r[0].textContent.includes('source-repo') && r[0].getAttribute('aria-pressed')==='true'; })()
+        intent: "Show the canonical owned source repository selected"
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" claim-interrupt && "$AFT_SELECT_AGENT_MODEL"'
+        intent: "Bind this exact UI Lead and visibly select the real model"
+      - fill: { label: Message, value: "Read README.md, BACKLOG.md, package.json, server.js, app.js and app.test.js with tools. Trace the message handling path with file citations. Keep files unchanged and do not run package scripts." }
+        intent: "Start a finite real repository inspection"
+      - press: Enter
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=working-row]') &&
+            !!document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running], [data-testid=tool-call][data-status=completed], [data-testid=tool-group]') &&
+            !!document.querySelector('form button[title="Stop the running turn"]')
+        budget: 120000
+        intent: "Show genuine OpenCode tool activity and an active turn"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" running && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" queue-interrupt'
+        intent: "Save exact running turn and public first waiting receipt"
+      - wait:
+          fn: >-
+            (() => { const w=document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
+              return w.length===1 && w[0].textContent.includes('INTERRUPT_OLD-${RUN_ID}'); })()
+        intent: "Show the original user waiting bubble"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" replace-interrupt'
+        intent: "Send delivery=interrupt with real text, require Interrupted and replacement receipts, and replay both exact RequestIDs"
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!t && [...t.querySelectorAll('li[data-kind=user]')].filter(x=>x.textContent.includes('INTERRUPT_NEW-${RUN_ID}')).length===1 &&
+                !t.textContent.includes('INTERRUPT_OLD-${RUN_ID}') &&
+                [...t.querySelectorAll('li[data-kind=agent]')].length>=1 &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show replacement once, old text absent, a real answer, and a finished turn"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" interrupt-after'
+        intent: "Require exact cancelled turn, ordered first delivery, one native InputKey, and immutable retry receipts/events"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!t && [...t.querySelectorAll('li[data-kind=user]')].filter(x=>x.textContent.includes('INTERRUPT_NEW-${RUN_ID}')).length===1 &&
+                !t.textContent.includes('INTERRUPT_OLD-${RUN_ID}'); })()
+        intent: "Show the exact persisted replacement after reload"
+      - fill: { label: Message, value: "INTERRUPT_NEXT-${RUN_ID}: read README.md again and name one documented command with a file citation." }
+        intent: "Exercise a separate real follow-up turn"
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!t && [...t.querySelectorAll('li[data-kind=user]')].filter(x=>x.textContent.includes('INTERRUPT_NEXT-${RUN_ID}')).length===1 &&
+                [...t.querySelectorAll('li[data-kind=agent]')].length>=2 &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show the Lead accepts a new input and answers it"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" interrupt-next'
+        intent: "Check saved follow-up EventID, exact text and one native input"
+
+  - name: LIVE 1.6c 1.7b queued UTF-8 body limit and rejected over-cap receipt
+    intent: A genuine native ask holds the turn while two large public user messages replace one waiting slot byte-for-byte; an over-cap body returns 413 without a receipt, and the user withdraws before declining the ask so large text never reaches the paid model.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-api large pr-review-interactive && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" open-chat large'
+        intent: "Create the owned ask-policy actor with runner-validated real-model override and open its Chat"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+      - fill: { label: Message, value: "LARGE_HOLD_${RUN_ID}: use your shell tool to run exactly printf 'LARGE_EFFECT_${RUN_ID}\n'. Report its output." }
+        intent: "Trigger a real native bash approval to hold the turn"
+      - press: Enter
+      - wait:
+          fn: "(document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('LARGE_EFFECT_${RUN_ID}')"
+        budget: 180000
+        intent: "Show the actual pending OpenCode ask before queuing large text"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" ask-baseline && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" large-send hundred-k'
+        intent: "Read the exact ask/turn and round-trip a >100KB Unicode/JSON-escaped waiting body"
+      - wait:
+          fn: "document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]').length===1"
+        intent: "Show one visible pending message while the native ask stays open"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" large-send near-cap'
+        intent: "Replace with a byte-exact 1MiB-minus-one JSON body and saved receipt"
+      - wait:
+          fn: "document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]').length===1 && !!document.querySelector('[data-testid=ask-card]')"
+        intent: "Show the sole waiting slot and still-pending real ask"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" large-over && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" withdraw-large && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" retry-over-key'
+        intent: "Prove 413 has no slot/EventID/receipt, then withdraw and reuse the rejected RequestID for a valid queued body"
+      - wait:
+          fn: "document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]').length===0 && !!document.querySelector('[data-testid=ask-card]')"
+        intent: "Show all queued text withdrawn before releasing the native ask"
+      - click: { role: button, name: Decline, exact: true }
+        intent: "Decline the real command through Chat without sending large text to the model"
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=ask-card]') &&
+            !document.querySelector('form button[title="Stop the running turn"]')
+        budget: 180000
+        intent: "Show the held turn ends with no pending user text"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" large-after'
+        intent: "Require original delivery only, two saved withdrawals, resolved ask, and idle agent"
+      - reload: true
+      - wait:
+          fn: "document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]').length===0"
+        intent: "Show the empty waiting slot after persisted-history reload"
+
+  - name: LIVE CR1 2.0n rejected Create base ref leaves no Agent or worktree then same-name retry succeeds
+    intent: The public Create actor receives typed errors for missing and unknown base_ref with no row or worktree; the same name then creates one owned OpenCode Lead, appears in Chat, and completes a real reply. Harness unavailability is recorded only when the public preset advertises a candidate.
+    steps:
+      - run: 'test -x "$AFT_SELECT_AGENT_MODEL" && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-baseline && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-refuse missing && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-refuse unknown && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-harness-capability'
+        intent: "Pin owned worktrees, prove both typed rejection paths leave no Agent, and record the advertised harness capability"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-success && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" open-chat create'
+        intent: "Retry the same name on supported OpenCode and require one Agent, worktree and registered native session"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+      - run: '"$AFT_SELECT_AGENT_MODEL" "coverage-rs-edges-create-${RUN_ID}"'
+        intent: "Record the route-bound model selection proof after the explicit API Create override"
+      - fill: { label: Message, value: "CREATE_RETRY-${RUN_ID}: read README.md with a tool and name its documented test command with a file citation." }
+        intent: "Send the first real Chat input to the same-name successful Lead"
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!t && [...t.querySelectorAll('li[data-kind=user]')].filter(x=>x.textContent.includes('CREATE_RETRY-${RUN_ID}')).length===1 &&
+                [...t.querySelectorAll('li[data-kind=agent]')].length>=1 &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show the real answer and completed Lead turn"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-answer'
+        intent: "Read exact saved delivered EventID/InputKey and one native user message"
+      - reload: true
+      - wait:
+          fn: "(document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('CREATE_RETRY-${RUN_ID}')"
+        intent: "Show persisted same-name Agent Chat history after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" create-reload'
+        intent: "Require unchanged EventIDs and exactly one Agent row"
