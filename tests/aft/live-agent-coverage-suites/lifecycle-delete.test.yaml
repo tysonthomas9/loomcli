@@ -67,10 +67,15 @@ tests:
           fn: >-
             (() => { const p=document.querySelector('[role=tabpanel]:not([data-hidden])');
               const id=location.pathname.split('/').pop();
-              const root=p?.querySelector('[data-root-key^="agent:' + id + ':"]');
-              if(root?.getAttribute('aria-expanded')==='false') root.click();
-              return !!p?.querySelector('[aria-label="README.md"]'); })()
-        intent: Show the target's Files tree and tracked README
+              return !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
+        intent: Show the target's Files root
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const p=document.querySelector("[role=tabpanel]:not([data-hidden])"); const id=location.pathname.split("/").pop(); const root=p?.querySelector("[data-root-key^=\"agent:" + id + ":\"]"); if(!root) throw Error("owned Files root missing"); if(root.getAttribute("aria-expanded")==="false") root.click(); return true; })()' >/dev/null
+        intent: Expand only this target's owned Files root when collapsed
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="README.md"]')
+        intent: Show tracked README in the expanded owned Files tree
       - click: { selector: "[role=tabpanel]:not([data-hidden]) [aria-label='README.md']" }
       - wait: { fn: "!!document.querySelector('[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]')" }
         intent: Show the real Files editor
@@ -172,9 +177,9 @@ tests:
           label: Message
           value: >-
             Use Loom agent_create to make one task child named cov-delete-child-${RUN_ID}.
-            Ask it to inspect README.md, docs/loom-glossary.md, internal/loomagent/lifecycle.go,
-            internal/loomagent/cleanup.go, and tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml
-            without editing any file; then run the repository's fast test command and report the results.
+            Ask it to inspect README.md, package.json, app.js, server.js, app.test.js,
+            public/index.html, and BACKLOG.md without editing any file; then run
+            node --test app.test.js once and report the results.
             Do not archive the child. Reply as soon as it has started.
       - press: Enter
       - wait:

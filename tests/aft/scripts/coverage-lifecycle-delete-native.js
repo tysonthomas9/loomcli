@@ -6,7 +6,12 @@ const {DatabaseSync} = require('node:sqlite');
 const fail = () => { throw Error('owned native lifecycle probe failed'); };
 function checkSession(result, mode, ref, id, worktree) {
   if (mode === 'deleted') {
-    if (result.status !== 404 || result.body?.data?.id === ref.native_id) fail();
+    // Pinned OpenCode b30c4d0: protocol/errors.ts and server/handlers/session-error.ts.
+    // A route/auth 404 is not proof of native purge.
+    if (result.status !== 404 || result.body?._tag !== 'SessionNotFoundError' ||
+        result.body.sessionID !== ref.native_id ||
+        result.body.message !== `Session not found: ${ref.native_id}` ||
+        result.body.data !== undefined) fail();
   } else if (result.status !== 200 || result.body?.data?.id !== ref.native_id ||
              result.body.data.metadata?.agent_id !== id ||
              result.body.data.location?.directory !== worktree) fail();
@@ -15,10 +20,16 @@ function selfTest() {
   const ref = {harness:'opencode',native_root:'',native_id:'ses_owned'};
   const good = {status:200,body:{data:{id:'ses_owned',metadata:{agent_id:'agt_owned'},location:{directory:'/owned'}}}};
   checkSession(good,'present',ref,'agt_owned','/owned');
-  checkSession({status:404,body:{}},'deleted',ref,'agt_owned','/owned');
+  const missing = {status:404,body:{_tag:'SessionNotFoundError',sessionID:'ses_owned',message:'Session not found: ses_owned'}};
+  checkSession(missing,'deleted',ref,'agt_owned','/owned');
   for (const [result,mode] of [
     [{status:401,body:{}},'deleted'],
     [{status:403,body:{}},'deleted'],
+    [{status:404,body:{}},'deleted'],
+    [{status:404,body:{...missing.body,_tag:'NotFoundError'}},'deleted'],
+    [{status:404,body:{...missing.body,sessionID:'ses_foreign'}},'deleted'],
+    [{status:404,body:{...missing.body,message:'wrong session'}},'deleted'],
+    [{status:404,body:{...missing.body,data:{id:'ses_owned'}}},'deleted'],
     [good,'deleted'],
     [{status:200,body:{data:{...good.body.data,id:'ses_foreign'}}},'present'],
     [{status:200,body:{data:{...good.body.data,metadata:{agent_id:'agt_foreign'}}}},'present'],
