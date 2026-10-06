@@ -596,16 +596,118 @@ def render_check():
     write("render-oracle.json", {"delivered": delivered, "turn_completed": end, "saved_answer": answer, "saved_tools": tools, "dom": dom})
 
 
-def reasoning_check():
+def reasoning_receipts(between):
+    saved = [{"event_id": e["event_id"], "text": e["payload"].get("text", "")}
+             for e in between if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning"]
+    assert saved and all(item["event_id"] and item["text"].strip() for item in saved), "missing saved reasoning item/content"
+    assert len({item["event_id"] for item in saved}) == len(saved), "duplicate reasoning EventID"
+    return saved
+
+
+def reasoning_preview(text):
+    # WorkRows uses timelineRows.firstLine: strip, first line, plain-text marks, 120-character cap.
+    line = re.sub(r"^#{1,6}\s+", "", text.strip().split("\n")[0])
+    while True:
+        plain = re.sub(r"(\*\*|__|\*|_|`)(.+?)\1", r"\2", line)
+        if plain == line:
+            break
+        line = plain
+    line = line.strip()
+    return line if len(line) <= 120 else line[:119] + "…"
+
+
+REASONING_DOM = r"""(() => [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]
+  .map(x => { const toggle=x.querySelector('[role=button]');
+    return {heading:x.querySelector('[class*=heading]')?.textContent||'',
+      preview:x.querySelector('[class*=preview]')?.textContent||'',
+      expanded:toggle?.getAttribute('aria-expanded')??null,
+      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null}; }))()"""
+
+
+def assert_reasoning_rows(saved, rows, expanded):
+    assert len(rows) == len(saved), "Thinking row count differs from saved reasoning items"
+    for item, row in zip(saved, rows):
+        assert row["heading"] == "Thinking" and row["status"] == "completed", row
+        assert row["preview"] == reasoning_preview(item["text"]) and len(row["preview"]) <= 120, \
+            f"Thinking preview differs from saved first line: {item['event_id']}"
+        assert row["expanded"] == ("true" if expanded else "false"), row
+        assert row["body"] == (item["text"] if expanded else None), \
+            f"Thinking full text differs from saved item: {item['event_id']}"
+
+
+def assert_reasoning_saved_after_reload(before, after):
+    assert after == before, "reload changed reasoning EventID, order, or saved content"
+
+
+def reasoning_check(stage):
+    assert stage in ("before-reload", "reloaded"), stage
+    current("render")
     _, _, between = turn_events("render", "VISUAL_RENDER")
-    saved = [e["payload"].get("text", "") for e in between if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning"]
-    if not saved:
+    if not any(e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning" for e in between):
         write("reasoning-blocked.json", {"status": "blocked", "prerequisite": "actual selected provider must emit saved item.completed reasoning text"})
         raise AssertionError("BLOCKED: selected real provider emitted no saved reasoning item; Thinking UI cannot be claimed")
+    saved = reasoning_receipts(between)
+    if stage == "reloaded":
+        before = json.loads((WORK / "render-reasoning-before-reload.json").read_text())
+        assert_reasoning_saved_after_reload(before["saved"], saved)
+    # Reveal grouped rows without opening the Thinking bodies yet.
+    for _ in range(20):
+        if not evaluate("document.querySelectorAll('[data-testid=tool-group][aria-expanded=false], [data-testid=work-toggle][aria-expanded=false]').length"):
+            break
+        browser("click", "[data-testid=tool-group][aria-expanded=false], [data-testid=work-toggle][aria-expanded=false]")
+    else:
+        raise AssertionError("too many collapsed work groups")
+    collapsed = evaluate(REASONING_DOM)
+    assert_reasoning_rows(saved, collapsed, False)
+    shot("render", f"thinking-{stage}-preview")
     expand_work()
-    dom = evaluate(RENDER_DOM)
-    assert dom["reasoning"] and all(any(text in shown for shown in dom["reasoning"]) for text in saved if text.strip()), "saved reasoning is absent from expanded Thinking UI"
-    write("render-reasoning.json", {"saved": saved, "dom": dom["reasoning"]})
+    expanded = evaluate(REASONING_DOM)
+    assert_reasoning_rows(saved, expanded, True)
+    shot("render", f"thinking-{stage}-expanded")
+    write(f"render-reasoning-{stage}.json", {"saved": saved, "collapsed": collapsed, "expanded": expanded})
+
+
+def self_test_reasoning():
+    item = {"event_id": "reasoning-1", "text": "## **First** line\nFull second line"}
+    event = {"event_id": item["event_id"], "kind": "item.completed",
+             "payload": {"itemKind": "reasoning", "text": item["text"]}}
+    assert reasoning_receipts([event]) == [item]
+    assert reasoning_preview(item["text"]) == "First line"
+    assert reasoning_preview("x" * 121) == "x" * 119 + "…"
+    assert_reasoning_rows([item], [{"heading": "Thinking", "preview": "First line",
+                                    "expanded": "false", "status": "completed", "body": None}], False)
+    assert_reasoning_rows([item], [{"heading": "Thinking", "preview": "First line",
+                                    "expanded": "true", "status": "completed", "body": item["text"]}], True)
+    for bad in ([], [{**event, "payload": {**event["payload"], "text": ""}}],
+                [{**event, "payload": {**event["payload"], "itemKind": "message"}}]):
+        try:
+            reasoning_receipts(bad)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("missing reasoning item/content passed")
+    for wrong in ({"preview": "Wrong"}, {"body": "Wrong"}):
+        row = {"heading": "Thinking", "preview": "First line", "expanded": "true",
+               "status": "completed", "body": item["text"]} | wrong
+        try:
+            assert_reasoning_rows([item], [row], True)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("wrong Thinking preview/content passed")
+    try:
+        assert_reasoning_rows([item], [], True)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("missing Thinking row passed")
+    for changed in ({**item, "event_id": "reasoning-2"}, {**item, "text": "Changed"}):
+        try:
+            assert_reasoning_saved_after_reload([item], [changed])
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("wrong reload receipt passed")
 
 
 def clipboard_check(kind):
