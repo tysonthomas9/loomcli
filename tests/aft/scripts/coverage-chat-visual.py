@@ -419,8 +419,9 @@ MOTION_JS = r"""(() => {
   const frame=() => { if(p.stopped)return; const s=state();
     if(s.text!==p.lastText) {const before=p.lastText.trim().split(/\s+/).filter(Boolean).length;
       const after=s.text.trim().split(/\s+/).filter(Boolean).length;
+      const marker=s.text.includes(p.marker);
       p.frames.push({at:s.at,chars:s.text.length,words:after,addedWords:Math.max(0,after-before),
-        marker:s.text.includes(p.marker)}); p.lastText=s.text;}
+        marker,...(marker?{text:s.text}:{})}); p.lastText=s.text;}
     p.sawCaret ||= s.caret; p.sawWorking ||= s.working;
     if(Date.now()-p.start>p.maxMs) {p.stopped=true;return;} requestAnimationFrame(frame); };
   p.timer=setInterval(()=>{ if(p.stopped){clearInterval(p.timer);return;}
@@ -438,11 +439,44 @@ def motion_start():
     assert evaluate(MOTION_JS.replace("__MARKER__", json.dumps(f"VISUAL_END_{RUN}"))) == "armed"
 
 
+def final_text_frame(answer, frames, final_text, marker):
+    assert answer.endswith(marker), "saved answer did not end exactly with the requested marker"
+    assert frames and frames[-1].get("text") == final_text and final_text.endswith(marker), "last measured frame is not the final rendered DOM text"
+    first_marker = next((index for index, frame in enumerate(frames) if frame["marker"]), None)
+    assert first_marker is not None, "completed answer marker was never visible in a rendered frame"
+    assert first_marker == len(frames) - 1, "marker appeared before later rendered text growth or change"
+    return frames[first_marker]
+
+
+def final_text_lag(frame, turn_ms):
+    lag = frame["at"] - turn_ms
+    assert lag <= 300, f"final text lagged saved turn completion by {lag:.0f}ms"
+    return lag
+
+
+def self_test_final_text():
+    marker = "VISUAL_END_TEST"
+    answer = "early " + marker + " late words " + marker
+    early = {"at": 10, "text": "early " + marker, "marker": True}
+    late = {"at": 800, "text": answer, "marker": True}
+    try:
+        final_text_frame(answer, [early, late], answer, marker)
+    except AssertionError as exc:
+        assert "before later rendered text" in str(exc), exc
+    else:
+        raise AssertionError("early marker with delayed growth was incorrectly accepted")
+    assert final_text_frame(answer, [{"at": 800, "text": answer, "marker": True}], answer, marker) == late
+    assert final_text_lag({"at": 700}, 800) == -100, "valid pre-completion final render was rejected"
+
+
 def motion_finish(case):
     current(case)
     probe = evaluate("""(() => { const p=window.__aftChatVisual; if(!p)throw Error('motion probe missing');
       p.stopped=true; clearInterval(p.timer); p.observer?.disconnect();
-      return {start:p.start,frames:p.frames,samples:p.samples,shifts:p.shifts,
+      const c=document.querySelector('[data-testid=chat-transcript]');
+      const a=[...(c?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);
+      const finalText=a?.querySelector('[data-testid=chat-markdown]')?.textContent||'';
+      return {start:p.start,frames:p.frames,finalText,samples:p.samples,shifts:p.shifts,
         sawCaret:p.sawCaret,sawWorking:p.sawWorking,observerError:p.observerError||null}; })()""")
     evs = events(case)
     delivered = [e for e in evs if e["kind"] == "message.delivered" and "VISUAL_RENDER" in e["payload"].get("text", "")]
@@ -453,7 +487,7 @@ def motion_finish(case):
     assert replies, "real turn saved no assistant message"
     answer = "\n".join(e["payload"].get("text", "") for e in replies)
     assert len(answer.split()) >= 300, f"model supplied only {len(answer.split())} words; 300-word motion criterion unverified"
-    assert f"VISUAL_END_{RUN}" in answer, "model omitted requested end marker; final-byte timing unverified"
+    marker = f"VISUAL_END_{RUN}"
     assert probe["observerError"] is None, probe["observerError"]
     assert probe["sawCaret"] and probe["sawWorking"], "streaming caret/working row were not observed"
     frames = probe["frames"]
@@ -461,17 +495,16 @@ def motion_finish(case):
     assert max(f["addedWords"] for f in frames) <= 2, "visible block exceeded two words in a rendered frame"
     assert sum(s["value"] for s in probe["shifts"]) == 0, "non-input layout shift during streaming"
     assert probe["samples"] and all(s["gap"] == 0 for s in probe["samples"] if s["stop"]), "live follow lost the bottom"
-    marker_frame = next((f for f in frames if f["marker"]), None)
-    assert marker_frame, "completed answer marker was never visible in a rendered frame"
+    marker_frame = final_text_frame(answer, frames, probe["finalText"], marker)
     # The completed event timestamp is saved by the product. Browser Date.now
-    # and serve share this host clock; the marker's first DOM frame is the bound.
+    # and serve share this host clock; this proven-final DOM frame is the bound.
     end_at = end[0].get("created_at")
     assert end_at, "turn completion lacks a saved timestamp"
     from datetime import datetime
     turn_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000
-    assert marker_frame["at"] - turn_ms <= 300, f"final text lagged saved turn completion by {marker_frame['at'] - turn_ms:.0f}ms"
+    lag_ms = final_text_lag(marker_frame, turn_ms)
     assert evaluate("!document.querySelector('[data-streaming-caret], [data-testid=working-row]')"), "caret or working row remained after turn"
-    write("render-motion.json", {"probe": probe, "turn_completed": end[0], "answer": answer, "marker_frame": marker_frame, "turn_ms": turn_ms})
+    write("render-motion.json", {"probe": probe, "turn_completed": end[0], "answer": answer, "final_frame": marker_frame, "turn_ms": turn_ms, "lag_ms": lag_ms})
 
 
 def turn_events(case, marker):
