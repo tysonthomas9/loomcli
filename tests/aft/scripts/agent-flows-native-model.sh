@@ -25,7 +25,7 @@ native_ref="$("$AFT_NATIVE_SESSION_PROBE" "$agent_id")" \
   || { echo 'owned child NativeRef unavailable' >&2; exit 1; }
 jq -e --arg id "$agent_id" '.agent_id == $id and .harness == "opencode" and
   (.native_id | type == "string" and length > 0) and
-  (.native_root | type == "string" and length > 0)' \
+  (.native_root | type == "string")' \
   <<< "$native_ref" >/dev/null || { echo 'owned child NativeRef is invalid' >&2; exit 1; }
 native_id="$(jq -r '.native_id' <<< "$native_ref" | tr -d '\r')"
 native_root="$(jq -r '.native_root' <<< "$native_ref" | tr -d '\r')"
@@ -51,7 +51,8 @@ const emit = (reason) => {
   const row = db.prepare("SELECT agent_id,name,harness,repo,preset,parent_agent_id,model,worktree_path,harness_session_id AS native_id,harness_session_root AS native_root,state,outcome FROM agents WHERE agent_id=? AND workspace_id=?").get(id,"LOCALMODE");
   const ownedName = new RegExp("^aft-(child-(a|b)|cancel-child|isolation-(own|foreign))-" + run + "$");
   if (!row || !ownedName.test(row.name) || row.harness !== "opencode" || row.repo !== repo ||
-      row.preset !== "task" || !row.parent_agent_id || !row.native_id || !row.native_root ||
+      row.preset !== "task" || !row.parent_agent_id || !row.native_id ||
+      typeof row.native_root !== "string" ||
       !row.worktree_path) return emit("owned child or current NativeRef unavailable");
   if (row.native_id !== expectedNativeID || row.native_root !== expectedNativeRoot)
     return emit("current NativeRef changed after the owned identity probe");

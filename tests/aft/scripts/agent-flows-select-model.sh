@@ -56,8 +56,24 @@ choose() {
   browser fill '[role=dialog] [role=combobox][aria-label="Search models"]' "$id" >/dev/null
   browser wait "$option" >/dev/null
   browser click "$option" >/dev/null
-  # Wait for the UI's PATCH to persist; this read-only wait is the oracle.
-  browser wait --fn "fetch('/api/workspaces/LOCALMODE/v1/agents/$agent_id', {cache:'no-store'}).then(r => r.ok ? r.json() : null).then(a => a?.model === '$id')" >/dev/null
+  # wait --fn needs a synchronous boolean. An unresolved fetch Promise can be
+  # truthy before the UI's PATCH is saved, so keep the read-only result on page.
+  browser wait --fn "(() => {
+    const key = '__aftSavedModel_${agent_id//[^a-zA-Z0-9_]/_}';
+    const state = window[key] ||= {model: '$id', ready: false, pending: false};
+    if (state.model !== '$id') { state.model = '$id'; state.ready = false; }
+    if (!state.ready && !state.pending) {
+      state.pending = true;
+      fetch('/api/workspaces/LOCALMODE/v1/agents/$agent_id', {cache:'no-store'})
+        .then(r => r.ok ? r.json() : null)
+        .then(a => { state.ready = a?.agent_id === '$agent_id' &&
+          a?.name === '$agent_name' && a?.model === '$id' &&
+          a?.model_unverified === false; })
+        .catch(() => { state.ready = false; })
+        .finally(() => { state.pending = false; });
+    }
+    return state.ready === true;
+  })()" >/dev/null
   local saved
   saved="$(curl -fsS --max-time 15 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents/$agent_id")" || return 1
   jq -e --arg id "$agent_id" --arg name "$agent_name" --arg repo "$AFT_AGENT_FLOW_REPO" --arg model "$id" '
