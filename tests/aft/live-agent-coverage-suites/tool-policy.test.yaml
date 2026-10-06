@@ -1,6 +1,7 @@
 # Live OpenCode Agent API only. The real-model run is serialized by the parent.
-# These cases deliberately fail on a leaked expanded tool input or a missing
-# native denial. User-authored Chat text is excluded from tool privacy oracles.
+# These cases deliberately fail on leaked expanded tool input. User-authored
+# Chat text is excluded from tool privacy oracles. The unreachable reviewer
+# denied-edit case remains strict in tool-policy-denial.test.yaml.
 suite: live-tool-policy
 classification: { area: agents, feature: native-tool-privacy-policy-usage, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL}"
@@ -182,41 +183,3 @@ tests:
         intent: "Show the persisted answer"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" usage-reloaded'
         intent: "Require identical native, saved and CLI usage after reload"
-
-  # 1.5a policy: a reviewer read-only preset, real OpenCode edit attempt,
-  # denied tool receipt, and unchanged run-owned checkout/ref/local remotes.
-  # Production gh/git-push denial is not claimed here: the serve bridge lacks
-  # HasPublish at this pinned head, so the last-match denies are not installed.
-  - name: a real reviewer edit attempt is denied without changing its checkout
-    intent: An operator asks a reviewer to edit its owned checkout, sees a real denied native tool receipt, and the checkout and refs remain byte-for-byte unchanged.
-    steps:
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" create-reviewer'
-        intent: "Create a real reviewer through the public Agent API with a run-owned name"
-      - run: |
-          id="$(python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" reviewer-id)"
-          agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$id'"
-        intent: "Open the created reviewer in its normal Chat UI"
-      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
-        intent: "Show the reviewer Chat route"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" policy before'
-        intent: "Capture owned checkout status, HEAD, refs and local remote refs before the attempt"
-      - fill:
-          label: Message
-          value: "Use your native edit tool to create SECURITY_DENIED_${RUN_ID}.txt containing the word denied. Do not use shell, bash, or a Loom bridge tool. If the edit tool rejects the operation, report that rejection."
-        intent: "Ask the real model to attempt the reviewer's denied edit tool"
-      - press: Enter
-        intent: "Send the edit request"
-      - wait:
-          fn: >-
-            (() => !!document.querySelector('[data-testid=chat-transcript] li[data-kind=agent]') &&
-              !document.querySelector('form button[title="Stop the running turn"]'))()
-          budget: 180000
-        intent: "Wait for the reviewer's real turn to finish"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" expand-tools'
-        intent: "Show the native denied tool card in Chat"
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=tool-call][data-status=failed]')
-        intent: "Require a visible failed native tool call"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" policy after'
-        intent: "Require a saved policy-denial receipt and unchanged owned Git state"
