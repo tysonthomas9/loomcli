@@ -115,31 +115,97 @@ def text_events(rows, kind, item_kind=None):
     ]
 
 
+def readme_contract():
+    fixture = Path(required("AFT_TESTS_DIR")).parent / "fixtures/slack-clone/README.md"
+    source = fixture.read_text()
+    lines = re.findall(r"^- `([^`]+)` runs the tests\.$", source, re.MULTILINE)
+    assert len(lines) == 1, f"expected one test command in {fixture}"
+    command = lines[0]
+    return command, f"- `{command}` runs the tests."
+
+
+def delivered_event(evs, marker):
+    found = [e for e in evs if e["kind"] == "message.delivered" and marker in e["payload"].get("text", "")]
+    assert len(found) == 1, f"expected one delivered request containing {marker!r}: {found}"
+    return found[0]
+
+
+def verify_readme_turn(evs, delivered, before_seq=None):
+    command, source_line = readme_contract()
+    prompt = delivered["payload"].get("text", "")
+    assert command not in prompt, f"the expected command was supplied by the user: {prompt}"
+    end = before_seq if before_seq is not None else float("inf")
+    assert delivered["seq"] < end
+    reads = [e for e in evs
+             if delivered["seq"] < e["seq"] < end and e["kind"] == "item.completed"
+             and e["payload"].get("itemKind") == "tool"
+             and "README.md" in (e["payload"].get("tool") or {}).get("input", "")
+             and not (e["payload"].get("tool") or {}).get("failed")
+             and source_line in (e["payload"].get("tool") or {}).get("output", "")]
+    assert reads, f"no successful README tool output contained the checked-in source line: {source_line}"
+    answer = "\n".join(e["payload"].get("text", "") for e in evs
+                       if reads[0]["seq"] < e["seq"] < end and e["kind"] == "item.completed"
+                       and e["payload"].get("itemKind") == "message")
+    assert command in answer and "README.md" in answer, f"answer after README read missed its documented command/file: {answer}"
+    return answer
+
+
+def agent_list_payloads(raw):
+    decoder = json.JSONDecoder()
+    found = []
+
+    def visit(value):
+        if isinstance(value, dict):
+            if isinstance(value.get("agents"), list):
+                found.append(value["agents"])
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+        elif isinstance(value, str):
+            for index, char in enumerate(value):
+                if char not in "{[":
+                    continue
+                try:
+                    parsed, _ = decoder.raw_decode(value[index:])
+                except json.JSONDecodeError:
+                    continue
+                visit(parsed)
+
+    visit(raw)
+    assert found, f"agent_list tool output had no parseable agents array: {raw}"
+    return found
+
+
 def assert_chat():
     before, after = rows("chat", "before-reopen"), rows("chat", "after-reopen")
     assert [e["event_id"] for e in before] == [e["event_id"] for e in after[: len(before)]], "reload changed saved history"
-    delivered = text_events(after, "message.delivered")
-    assert len([t for t in delivered if "README.md" in t and "npm test" in t]) == 1, delivered
-    assert len([t for t in delivered if "agent_list" in t]) == 1, delivered
-    answers = text_events(after, "item.completed", "message")
-    assert any("npm test" in t for t in answers), answers
-    calls = [e for e in after if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "tool"
+    read_request = delivered_event(after, "README.md")
+    list_request = delivered_event(after, "agent_list")
+    verify_readme_turn(after, read_request, list_request["seq"])
+    calls = [e for e in after if e["seq"] > list_request["seq"] and e["kind"] == "item.completed"
+             and e["payload"].get("itemKind") == "tool"
              and "agent_list" in (e["payload"].get("tool") or {}).get("input", "")]
     assert len(calls) == 1, f"expected one real Loom agent_list call, got {calls}"
     tool = calls[0]["payload"]["tool"]
     assert not tool.get("failed"), tool
-    assert '"agents":[]' in "".join(tool.get("output", "").split()), tool
     children = request(f"{PREFIX}?parent={urllib.parse.quote(agent_id('chat'))}&limit=500")["agents"]
-    assert children == [], f"agent_list output disagrees with this Lead's child roster: {children}"
+    expected_ids = sorted(a["agent_id"] for a in children)
+    for roster in agent_list_payloads(tool.get("output", "")):
+        actual_ids = sorted(a["agent_id"] for a in roster)
+        assert actual_ids == expected_ids, f"agent_list output disagrees with this Lead's child roster: {actual_ids} != {expected_ids}"
+    assert any(e["seq"] > calls[0]["seq"] and e["kind"] == "item.completed"
+               and e["payload"].get("itemKind") == "message" for e in after), "no reply after agent_list"
 
 
 def assert_persona():
     before, after = rows("persona", "answer"), rows("persona", "reloaded")
     assert [e["event_id"] for e in before] == [e["event_id"] for e in after], "persona history changed on reload"
-    answer = "\n".join(text_events(after, "item.completed", "message"))
-    assert f"PERSONA_{RUN}" in answer and "{{.AgentName}}" in answer and "npm test" in answer, answer
-    delivered = text_events(after, "message.delivered")
-    assert len(delivered) == 1 and "README.md" in delivered[0], delivered
+    delivered = delivered_event(after, "README.md")
+    assert len([e for e in after if e["kind"] == "message.delivered"]) == 1
+    answer = verify_readme_turn(after, delivered)
+    assert f"PERSONA_{RUN}" in answer and "{{.AgentName}}" in answer, answer
 
 
 def assert_busy():
@@ -155,11 +221,8 @@ def assert_busy():
     assert sum("BUSY_NEXT" in t for t in delivered) == 1, delivered
     stopped = [e for e in evs if e["kind"] == "agent.turn_completed" and e["payload"].get("stopReason") == "cancelled"]
     assert stopped, "Stop did not save a cancelled turn"
-    next_seq = next(e["seq"] for e in evs if e["kind"] == "message.delivered" and "BUSY_NEXT" in e["payload"].get("text", ""))
-    answer = "\n".join(e["payload"].get("text", "") for e in evs
-                       if e["seq"] > next_seq and e["kind"] == "item.completed"
-                       and e["payload"].get("itemKind") == "message")
-    assert "npm test" in answer, "the post-Stop turn did not answer the repo question"
+    next_request = delivered_event(evs, "BUSY_NEXT")
+    verify_readme_turn(evs, next_request)
 
 
 def preflight():
