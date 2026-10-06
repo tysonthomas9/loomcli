@@ -40,12 +40,12 @@ const port = server.address().port;
 const write = (name, rows) => writeFileSync(join(root, name),
   name === 'actual-agent-models.json' ? JSON.stringify(rows) : rows.map(row => JSON.stringify(row)).join('\n') + '\n');
 const check = async (nextReceipts = receipts, nextNatives = natives, nextSelections = selections,
-  nextSurvivors = []) => {
+  nextSurvivors = [], nextDeclared = declared) => {
   write('lifecycle-delete-preflight.jsonl', nextReceipts);
   write('native-sessions.jsonl', nextNatives);
   write('model-selections.jsonl', nextSelections);
   write('actual-agent-models.json', nextSurvivors);
-  return promisify(execFile)(process.execPath, [script, root, JSON.stringify(declared), run,
+  return promisify(execFile)(process.execPath, [script, root, JSON.stringify(nextDeclared), run,
     `http://127.0.0.1:${port}`, repo, target]);
 };
 const refuse = async (...args) => assert.rejects(check(...args));
@@ -54,6 +54,10 @@ try {
   assert.deepEqual(good.map(row => row.agent_id), [lead.agent_id, child.agent_id]);
   await refuse(receipts.map((row, i) => i ? row : { ...row, run_id: 'foreign' }));
   await refuse(receipts.map((row, i) => i ? row : { ...row, session: 'aft-foreign-0' }));
+  await refuse(receipts.map((row, i) => i ? row : { ...row, suite: 'live-lifecycle-delete' }));
+  await refuse(receipts, natives, selections, [], {
+    ...declared, leads: declared.leads.map(row => ({ ...row, suite: 'live-lifecycle-delete' }))
+  });
   await refuse(receipts.map((row, i) => i ? row : { ...row, api: { ...row.api, model: 'openai/foreign' } }));
   await refuse(receipts.map((row, i) => i ? row : { ...row, api: { ...row.api, agent_id: 'agt_foreign' } }));
   await refuse(receipts.map((row, i) => i ? row : { ...row, native: { ...row.native, native_id: 'ses_foreign' } }));
