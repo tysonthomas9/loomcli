@@ -3,6 +3,42 @@
 # Human mutations are YAML UI steps; helper mutations identify an API or local
 # editor/provider actor. Each helper phase is one action or one readback.
 set -euo pipefail
+
+# AFT caps every run step/hook at 120 seconds. Keep the entire process tree
+# below that cap, including helper Git/CLI calls, and emit local diagnostics.
+if [[ "${1:-}" != __guarded ]]; then
+    exec python3 - "$0" "$@" <<'PY'
+import os,pathlib,signal,subprocess,sys
+script,*args=sys.argv[1:]
+child=subprocess.Popen(['bash',script,'__guarded',*args],start_new_session=True)
+try:
+    code=child.wait(timeout=105)
+except subprocess.TimeoutExpired:
+    print('Recovery phase exceeded 105 seconds: '+repr(args),file=sys.stderr)
+    try: os.killpg(child.pid,signal.SIGTERM)
+    except ProcessLookupError: pass
+    try: child.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try: os.killpg(child.pid,signal.SIGKILL)
+        except ProcessLookupError: pass
+        try: child.wait(timeout=2)
+        except subprocess.TimeoutExpired: pass
+    code=124
+if code:
+    key=args[1] if len(args)>1 else ''
+    state=pathlib.Path(os.environ.get('AFT_WORK_DIR','.'),'journey-'+key)
+    print(f'Recovery phase failed ({code}): {args}; retain {state} and server logs',file=sys.stderr)
+    for name in ('workspace.json','issue.json','revisions.json','workflow-readback.json'):
+        path=state/name
+        if path.is_file():
+            with path.open(errors='replace') as stream:
+                print(name+': '+stream.read(2048),file=sys.stderr)
+    if state.is_dir(): (state/'phase-failure.txt').write_text(f'{args}: exit {code}\n')
+sys.exit(code if code>=0 else 1)
+PY
+fi
+shift
+
 python3 - "$@" <<'PY'
 import hashlib
 import json
@@ -45,7 +81,7 @@ def request(url, method='GET', body=None, expected=200, receipt=None):
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method=method, headers={'Content-Type': 'application/json'})
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=5) as response:
             status, raw = response.status, response.read()
     except urllib.error.HTTPError as error:
         status, raw = error.code, error.read()
@@ -75,7 +111,10 @@ def newest():
 
 
 def wait_for(fn, description, attempts=90):
+    deadline = time.monotonic() + 70
     for _ in range(attempts):
+        if time.monotonic() >= deadline:
+            break
         value = fn()
         if value:
             return value
@@ -155,7 +194,7 @@ if phase == 'setup':
         workspace = created['data']['id']
         assert workspace, created
         api = base + '/api/workspaces/' + workspace
-        request(forge + '/__register', 'POST', {'repo': 'owner/recovery-' + name, 'remote': str(remote), 'native_stacks': False})
+        request(forge + '/__register', 'POST', {'repo': 'owner/recovery-' + name, 'remote': str(remote), 'native_stacks': False}, expected=201)
         request(api + '/agents', 'POST', {'name': 'lead', 'role_name': 'lead', 'auto': False, 'cross_repo': True, 'repos': [], 'backend': 'codex'}, expected=(200, 201))
         if name == 'foreign':
             subprocess.run([os.environ['AFT_LOOM_BIN'], 'delivery-mode', 'trunk', '--workspace', workspace], env={**os.environ, 'LOOM_CONFIG_DIR': os.environ['AFT_LOOM_CONFIG_DIR'], 'LOOM_WORKSPACE': workspace}, check=True)

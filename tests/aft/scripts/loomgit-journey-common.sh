@@ -16,8 +16,10 @@ journey_load() {
     journey_key "$1"
     export JOURNEY_STATE="${AFT_WORK_DIR:?}/journey-$1"
     export JOURNEY_REPO="$JOURNEY_STATE/repo" JOURNEY_REMOTE="$JOURNEY_STATE/origin.git"
-    export JOURNEY_WS="$(cat "$JOURNEY_STATE/workspace.id")"
-    export JOURNEY_FORGE_REPO="$(cat "$JOURNEY_STATE/forge-repo")"
+    JOURNEY_WS="$(cat "$JOURNEY_STATE/workspace.id")"
+    export JOURNEY_WS
+    JOURNEY_FORGE_REPO="$(cat "$JOURNEY_STATE/forge-repo")"
+    export JOURNEY_FORGE_REPO
     export JOURNEY_API="${AFT_BASE_URL:?}/api/workspaces/$JOURNEY_WS"
 }
 
@@ -193,7 +195,7 @@ with tarfile.open(out,'w') as archive:
         if os.path.lexists(path): archive.add(path,arcname=name,recursive=False)
 PY
     done < "$JOURNEY_STATE/worktrees-before-cleanup.txt"
-    curl -fsS --max-time 10 -X DELETE "$JOURNEY_API" > "$JOURNEY_STATE/delete-workspace.json" || {
+    curl --fail-with-body -sS --max-time 10 -X DELETE "$JOURNEY_API" > "$JOURNEY_STATE/delete-workspace.json" || {
         printf 'guarded workspace deletion refused; evidence retained\n' > "$JOURNEY_STATE/cleanup.failed"
         return 1
     }

@@ -1788,34 +1788,40 @@
       "suite": "loomgit-journey-review",
       "file": "tests/aft/suites/loomgit-journey-review.test.yaml",
       "source_path": "tests/aft/suites/loomgit-journey-review.test.yaml",
-      "source_file_sha256": "096611ae0d4f3be96d68ad7027e62bb9e7ff38cd40a1ec2c84cb15af87f668e7",
-      "source_status": "integrated_test_only",
+      "source_file_sha256": "d1ecd1214a77f59ff4c6745d3a5c3376fae54e2a8bbebd4f85c4e00aeab1906b",
+      "source_status": "integrated_with_documented_test_only_corrections",
       "source_sha": "536dbdede590cc5f6c9116174b6993d255d01da4",
       "author_task": "df232431-41a7-4a71-9bc5-88f3b2c46772",
       "script_file": "tests/aft/scripts/loomgit-journey-review.sh",
-      "script_sha256": "7fac424533d4814d65159e65159973dc6f5268c6add39c33c9242af4131da0d8"
+      "script_sha256": "25eca7674f250238041a51bb2bec38aff66e49ca85078caf91a91ef583a09c47",
+      "author_file_sha256": "096611ae0d4f3be96d68ad7027e62bb9e7ff38cd40a1ec2c84cb15af87f668e7",
+      "author_script_sha256": "7fac424533d4814d65159e65159973dc6f5268c6add39c33c9242af4131da0d8"
     },
     {
       "suite": "loomgit-journey-recovery",
       "file": "tests/aft/suites/loomgit-journey-recovery.test.yaml",
       "source_path": "tests/aft/suites/loomgit-journey-recovery.test.yaml",
       "source_file_sha256": "dce8a6349aaa0e917e27adaf4fb4484cda4c56f19cbb3fcb13717e23472bf653",
-      "source_status": "integrated_test_only",
+      "source_status": "integrated_with_documented_test_only_corrections",
       "source_sha": "6e297317b96481bc61cad307fd5f2f4f2771c0be",
       "author_task": "1c76497f-a584-4f92-bad9-ac4e326f04e6",
       "script_file": "tests/aft/scripts/loomgit-journey-recovery.sh",
-      "script_sha256": "fceaf109ca23e9e2935a3eb5cb4f934199b4bda23f3cf94be05aa6360982aee7"
+      "script_sha256": "2c7ac443ecd93ebbbbc0fcf47a2ce3c37acdc360a980bed3a2c4348ca83e8e5a",
+      "author_file_sha256": "dce8a6349aaa0e917e27adaf4fb4484cda4c56f19cbb3fcb13717e23472bf653",
+      "author_script_sha256": "fceaf109ca23e9e2935a3eb5cb4f934199b4bda23f3cf94be05aa6360982aee7"
     },
     {
       "suite": "loomgit-journey-stacks",
       "file": "tests/aft/suites/loomgit-journey-stacks.test.yaml",
       "source_path": "tests/aft/suites/loomgit-journey-stacks.test.yaml",
       "source_file_sha256": "9df8ed1f740b66ff1c67f6ab9e5787cf75982d38c1e2d4b56887a83bcb2347f5",
-      "source_status": "integrated_test_only",
+      "source_status": "integrated_with_documented_test_only_corrections",
       "source_sha": "55a57c449ee0b648397f6d0640144987c6670c8f",
       "author_task": "3e4266bd-98b2-4a91-af83-c6ab00e25a79",
       "script_file": "tests/aft/scripts/loomgit-journey-stacks.sh",
-      "script_sha256": "f985740f7c6c53938f6e086e2047fd355c249c55584c9229726b14ca1750cd2d"
+      "script_sha256": "477e291d0073fbcaba202d3014502d3614f254067b20ce5aaf74f8843351e823",
+      "author_file_sha256": "9df8ed1f740b66ff1c67f6ab9e5787cf75982d38c1e2d4b56887a83bcb2347f5",
+      "author_script_sha256": "f985740f7c6c53938f6e086e2047fd355c249c55584c9229726b14ca1750cd2d"
     }
   ],
   "authored_cases": [
@@ -4236,6 +4242,14 @@
       "fleetdb": "40e8431ddd369cdd125d91cbb7096ec7326b12c1",
       "flue": "492bf47b9f3d6c379d00471523987b8fe9511f7d"
     },
-    "results": []
+    "results": [],
+    "test_only_corrections": [
+      "Shortened macOS browser namespace",
+      "Explicit Bash3.2 failure exits for stack polling and hook assertions",
+      "Forge __register201 fixture expectation",
+      "Empty revision preserves accepted existing worker closure reason",
+      "Bounded recovery phase/process and HTTP/poll deadlines",
+      "Preserve guarded DELETE409 response bodies; warning-level shell lint fixes"
+    ]
   }
 }

@@ -65,6 +65,8 @@ if [[ -n "$AFT_SUITE_GLOB" ]]; then
         exit 1
     fi
     shopt -s nullglob
+    # Intentional glob expansion; the validated pattern cannot contain spaces.
+    # shellcheck disable=SC2206
     AFT_SUITE_CANDIDATES=("$SCRIPT_DIR"/suites/${AFT_SUITE_GLOB}.test.yaml "$SCRIPT_DIR"/forge-suites/${AFT_SUITE_GLOB}.test.yaml)
     shopt -u nullglob
     AFT_SUITE_PATHS=()
@@ -880,7 +882,8 @@ if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
     export AGENT_BROWSER_ARGS="--disable-features=BackForwardCache"
     export AGENT_BROWSER_CONFIG="$AFT_WORK_DIR/agent-browser.json"
     export AGENT_BROWSER_PROFILE="$AFT_WORK_DIR/browser-profile"
-    export AGENT_BROWSER_NAMESPACE="lg-$(date +%s)-$$"
+    AGENT_BROWSER_NAMESPACE="lg-$(date +%s)-$$"
+    export AGENT_BROWSER_NAMESPACE
     export AGENT_BROWSER_RESTORE_SAVE=never
     printf '{}\n' > "$AGENT_BROWSER_CONFIG"
     mkdir "$AGENT_BROWSER_PROFILE" # Refuse profile reuse, including interrupted runs.

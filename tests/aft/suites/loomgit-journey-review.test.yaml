@@ -354,7 +354,7 @@ tests:
       fn: '!document.querySelector(''[data-testid=task-changes-tab] button'')'
     intent: 'R-stack-empty-no-actions: empty code offers no verdict, Apply or PR controls'
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-empty empty
-    intent: The observer checks identical Git trees, empty API diff, No changes closure and unchanged remote
+    intent: The observer checks identical Git trees, empty API diff, No changes revision, existing worker closure and unchanged remote
   - reload: true
     intent: The human reloads the empty task
   - wait:
@@ -766,7 +766,7 @@ tests:
       fn: '!document.querySelector(''[data-testid=task-changes-tab] button'')'
     intent: 'R-trunk-empty-no-actions: empty code offers no verdict, Apply or PR controls'
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-empty empty
-    intent: The observer checks identical Git trees, empty API diff, No changes closure and unchanged remote
+    intent: The observer checks identical Git trees, empty API diff, No changes revision, existing worker closure and unchanged remote
   - reload: true
     intent: The human reloads the empty task
   - wait:

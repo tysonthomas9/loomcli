@@ -104,7 +104,7 @@ published)
     if json "$work/revisions-$slot.json" 'r=max(v["data"],key=lambda r:r["number"]); assert r.get("pr_head") and r.get("applied"),r' 2>/dev/null; then settled=true; break; fi
     sleep 2
   done
-  [[ "$settled" == true ]]
+  [[ "$settled" == true ]] || { echo "Stack journey phase assertion failed: $phase $slot" >&2; exit 1; }
   get "issues/$(task_id "$slot")" "$work/approved-$slot.json"
   json "$work/approved-$slot.json" 'assert v["data"]["status"]=="closed" and "code-review" not in (v["data"].get("labels") or []),v'
   pull "$slot"
@@ -188,7 +188,7 @@ merge-done)
     if json "$work/merge-$slot.json" 'assert v["phase"]=="done",v' 2>/dev/null; then done_merge=true; break; fi
     sleep 2
   done
-  [[ "$done_merge" == true ]]
+  [[ "$done_merge" == true ]] || { echo "Stack journey phase assertion failed: $phase $slot" >&2; exit 1; }
   receipt "merge-$slot"
   python3 - "$work" "$remote" "$slot" "$case_name" <<'PY'
 import json, pathlib, subprocess, sys
@@ -265,7 +265,7 @@ print(json.dumps({'action':'submitted','repository':{'full_name':sys.argv[1]},'s
 PY
   signature="$(openssl dgst -sha256 -hmac aft-journey-signing-secret -r < "$work/webhook-$slot.json" | cut -d' ' -f1)"
   code="$(curl -sS -o "$work/webhook-response-$slot.json" -w '%{http_code}' -X POST "$api/webhooks/github" -H 'Content-Type: application/json' -H 'X-GitHub-Event: pull_request_review' -H "X-GitHub-Delivery: $delivery" -H "X-Hub-Signature-256: sha256=$signature" --data-binary @"$work/webhook-$slot.json")"
-  [[ "$code" == 202 ]]
+  [[ "$code" == 202 ]] || { echo "Stack journey phase assertion failed: $phase $slot" >&2; exit 1; }
   get "changes/$(cat "$work/change-$slot.id")/feedback" "$work/feedback-intake-$slot.json"
   json "$work/feedback-intake-$slot.json" 'f=[f for f in v["feedback"] if f["delivery_id"]==sys.argv[2]]; assert len(f)==1 and f[0]["status"]=="pending",v' "$delivery"
   ;;
@@ -280,7 +280,7 @@ feedback-agent)
   test "$(json "$work/address-$slot.json" 'print(v["base_sha"])')" = "$(json "$work/pull-$slot.json" 'print(v["head"]["sha"])')"
   json "$work/address-$slot.json" 'print(v["prompt"])' > "$work/feedback-prompt-$slot.txt"
   stub="$AFT_TESTS_DIR/../../e2e/stubs/codex"
-  [[ -f "$stub" ]]
+  [[ -f "$stub" ]] || { echo "Stack journey phase assertion failed: $phase $slot" >&2; exit 1; }
   (cd "$target"; STUB_CODEX_EPIC_RUNNER=0 LOOM_TASK_ID="$(task_id "$slot")" LOOM_TASK_RUN_ID="$delivery" bash "$stub" exec --json - < "$work/feedback-prompt-$slot.txt" > "$work/stub-feedback-$slot.json")
   grep -qF "task=$(task_id "$slot") run=$delivery" "$target/review-$slot.txt"
   git -C "$target" add -- "review-$slot.txt"
@@ -296,7 +296,7 @@ feedback-pushed)
     if json "$work/revisions-$slot.json" 'r=max(v["data"],key=lambda r:r["number"]); f=[i for i in v["data"] if i["number"]==int(sys.argv[2])]; assert r.get("feedback_status")=="pushed" and len(f)==1 and f[0].get("verdict")=="feedback" and not f[0]["incomplete"],v' "$(cat "$work/feedback-number-$slot")" 2>/dev/null; then ready=true; break; fi
     sleep 2
   done
-  [[ "$ready" == true ]]
+  [[ "$ready" == true ]] || { echo "Stack journey phase assertion failed: $phase $slot" >&2; exit 1; }
   receipt "feedback-$slot"
   python3 - "$work" "$remote" "$slot" <<'PY'
 import json, pathlib, subprocess, sys
@@ -333,7 +333,7 @@ merge-waiting|merge-cancelled)
     if json "$work/approval-$slot.json" 'd=v.get("data",v); assert d["status"]==sys.argv[2],d' "$want" 2>/dev/null; then ready=true; break; fi
     sleep 2
   done
-  [[ "$ready" == true ]]
+  [[ "$ready" == true ]] || { echo "Stack journey phase assertion failed: $phase $slot" >&2; exit 1; }
   if [[ "$phase" == merge-cancelled ]]; then
     json "$work/approval-$slot.json" 'd=v.get("data",v); assert "review fix-ups" in d["reason"],d'
     json "$work/revisions-$slot.json" 'r=max(v["data"],key=lambda r:r["number"]); assert r["feedback_merge_cancelled"] is True,r'

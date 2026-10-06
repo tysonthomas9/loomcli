@@ -41,6 +41,7 @@ shift
 
 # Bound requests made here AND by sourced fixture helpers. Last options win.
 curl() { command curl "$@" --connect-timeout 2 --max-time 5; }
+# shellcheck disable=SC1091
 source "${AFT_TESTS_DIR:?}/scripts/loomgit-journey-common.sh"
 
 phase="${1:?phase required}"
@@ -65,7 +66,7 @@ fi
 if [[ "$phase" == setup ]]; then
     key="${2:?fixture key required}"
     case "$key" in review-stack-*) mode=stack ;; review-trunk-*) mode=trunk ;; *) exit 2 ;; esac
-    flow="${key#review-$mode-}"
+    flow="${key#review-"$mode"-}"
     case "$flow" in explicit|automatic|reject-retry|empty|held) ;; *) exit 2 ;; esac
     journey_setup "$key" "$mode" loom
     file="$key.txt"
@@ -117,7 +118,6 @@ key="${2:?fixture key required}"
 journey_load "$key"
 task="$(cat "$JOURNEY_STATE/task-task.id")"
 file="$(cat "$JOURNEY_STATE/file-task")"
-lead_ref="refs/heads/loom/ws/$JOURNEY_WS/interactive/lead"
 # All successive waits share one wall-clock budget, rather than accumulating
 # three independent 90/180-second polls. Reserve time for the five readbacks.
 poll_deadline=$((SECONDS + 70))
@@ -313,7 +313,9 @@ elif check=='rejected':
     assert git('rev-parse',lead)==(state/'lead-before.sha').read_text().strip()
 elif check=='empty':
     assert len(revisions)==1 and r['no_changes'] and not r['incomplete'] and not r.get('verdict') and not r['applied'], r
-    assert issue['status']=='closed' and issue['close_reason']=='No changes', issue
+    # The accepted P1.25 refinement preserves the worker's existing close reason.
+    # No changes describes the captured revision, not a new lifecycle policy.
+    assert issue['status']=='closed', issue
     assert not paths and git('rev-parse',source['head_sha']+'^{tree}')==git('rev-parse',base+'^{tree}')
     unpublished(); assert git('rev-parse',lead)==(state/'lead-before.sha').read_text().strip()
 elif check=='held':
