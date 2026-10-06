@@ -228,6 +228,8 @@ tests:
             (() => { const w = document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
               return w.length === 1 && w[0].textContent.includes('BUSY_B') && !w[0].textContent.includes('BUSY_A'); })()
         intent: "Show one waiting bubble with the replacement text"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot busy replaced-waiting'
+        intent: "Save the replacement waiting event and slot state"
       - click: { role: button, name: Edit, exact: true }
         intent: "Edit the waiting message in the composer"
       - expect: { value: { selector: "textarea[aria-label=Message]", equals: "BUSY_B: replacement note" } }
@@ -241,12 +243,16 @@ tests:
             (() => { const w = document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
               return w.length === 1 && w[0].textContent.includes('BUSY_C') && !w[0].textContent.includes('BUSY_B'); })()
         intent: "Show the edited waiting bubble"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot busy edited-waiting'
+        intent: "Save the edited waiting event and slot state"
       - click: { role: button, name: Clear, exact: true }
         intent: "Clear the waiting message"
       - wait:
           fn: >-
             document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]').length === 0
         intent: "Show the waiting bubble gone"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot busy cleared-waiting'
+        intent: "Save the withdrawal event after Clear"
       - fill: { label: Message, value: "BUSY_D: after your current analysis, run npm test once more and report whether it passed." }
         intent: "Compose the only follow-up that should reach the model"
       - press: Enter
