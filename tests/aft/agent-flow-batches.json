@@ -70,6 +70,17 @@
         ]
       }
     },
+    "children-queue": {
+      "files": ["children-queue.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "cov-child-queue-lead-${RUN_ID}", "suite": "coverage-children-queue", "model_required": true }
+        ],
+        "children": [
+          { "name": "cov-child-queue-task-${RUN_ID}", "parent": "cov-child-queue-lead-${RUN_ID}", "suite": "coverage-children-queue" }
+        ]
+      }
+    },
     "lifecycle-delete": {
       "files": ["lifecycle-delete.test.yaml"],
       "agents": {
