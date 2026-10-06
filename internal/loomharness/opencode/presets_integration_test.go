@@ -81,6 +81,39 @@ func TestContractPresets(t *testing.T) {
 		persona(t, testerRef, "preset-tester", tester.Persona)
 	})
 
+	t.Run("SessionPersonaIsolation", func(t *testing.T) {
+		cases := []struct {
+			key     string
+			persona string
+		}{
+			{"persona-a", "PERSONA_A literal {{.AgentName}}"},
+			{"persona-b", "PERSONA_B"},
+			{"persona-default", tester.Persona},
+		}
+		for _, tc := range cases {
+			ref, err := open(tc.key, loomharness.PresetConfig{Name: tester.Name, Persona: tc.persona}, repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := "persona isolation " + tc.key
+			if err := a.Session(ref).Prompt(ctx, loomharness.Input{Key: PromptID(tc.key, "r1"), Text: text}); err != nil {
+				t.Fatal(err)
+			}
+			if err := model.awaitRequest(ctx, text); err != nil {
+				t.Fatal(err)
+			}
+			system := model.systemFor(text)
+			if !strings.Contains(system, tc.persona) {
+				t.Fatalf("%s system omitted its persona: %q", tc.key, system)
+			}
+			for _, other := range cases {
+				if other.key != tc.key && other.persona != tester.Persona && strings.Contains(system, other.persona) {
+					t.Fatalf("%s system contained %s persona: %q", tc.key, other.key, system)
+				}
+			}
+		}
+	})
+
 	t.Run("HotAdd", func(t *testing.T) {
 		if err := a.SetPresets([]loomharness.PresetConfig{tester, added}); err != nil {
 			t.Fatal(err)
