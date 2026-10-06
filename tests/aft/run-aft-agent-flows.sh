@@ -52,7 +52,7 @@ for (const file of files) {
   if (suite.tests.length < 1 || suite.tests.length > 3) throw new Error(`${file}: expected 1-3 cases`);
   count += suite.tests.length;
 }
-console.log(count);
+process.stdout.write(String(count) + '\n');
 NODE
 )" || die 'suite schema validation failed'
 [[ "$case_count" =~ ^[1-9][0-9]*$ ]] || die 'could not count parsed AFT cases'
