@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read-only, exact-agent receipts for the paid Files and Git journeys."""
 
+import io
 import json
 import os
 import re
@@ -263,7 +264,7 @@ def capture_context_state(label, stage, path):
         try:
             return {"status": 200, "body": get(url)}
         except urllib.error.HTTPError as error:
-            return {"status": error.code}
+            return context_error(error)
 
     all_checkouts = observed(f"{ROOT}/files/checkouts")
     if all_checkouts["status"] == 200:
@@ -278,6 +279,25 @@ def capture_context_state(label, stage, path):
         "file": observed(f"{ROOT}/files?{query}"),
         "git_status": observed(f"{ROOT}/files/git-status?{checkout_query}"),
     })
+
+
+def context_error(error):
+    """Retain the server's bounded error signal without calling a 404 a missing checkout."""
+    try:
+        payload = json.loads(error.read(4096))
+    except (AttributeError, OSError, ValueError, TypeError):
+        payload = {}
+    message = payload.get("error", "") if isinstance(payload, dict) else ""
+    kind = payload.get("kind", "") if isinstance(payload, dict) else ""
+    message = message[:500] if isinstance(message, str) else ""
+    kind = kind[:80] if isinstance(kind, str) else ""
+    if error.code == 429 or "rate limit exceeded" in message.lower() or "http 429" in message.lower():
+        classification = "upstream-rate-limited"
+    elif error.code == 404 and "not checked out" in message.lower():
+        classification = "reported-not-checked-out"
+    else:
+        classification = "unclassified-error"
+    return {"status": error.code, "kind": kind, "error": message, "classification": classification}
 
 
 def unchanged(label, path, before_stage):
@@ -483,6 +503,11 @@ def selftest():
     tabs = re.search(r"export const AGENT_API_TABS[^=]*=\s*\[([^]]+)\]", page)
     assert tabs and re.findall(r'"([a-z]+)"', tabs[1]) == ["chat", "info", "git", "diff", "files"]
     suite = (source_root / "tests/aft/live-agent-coverage-suites/git-files.test.yaml").read_text()
+    assert suite.count('keyboard inserttext "$(cat "$AFT_WORK_DIR/coverage-git-files/editor-expected.txt")"') == 1
+    assert 'agent-browser --session "$AFT_SESSION" type "$editor"' not in suite
+    assert suite.index("editor_visible editor") < suite.index('textContent.trim()==='), (
+        "exact visible bytes must precede Save"
+    )
     assert not re.search(r"click: \{ role: button, name: (?:Chat|Info|Git|Diff|Files)\b", suite), "global nav label can steal an Agent tab click"
     tab_clicks = re.findall(r'- click: \{ selector: "([^"]*agent-editor-groups[^"]*)" \}', suite)
     assert len(tab_clicks) == 7 and all('[data-testid=agent-api-page] ' in selector for selector in tab_clicks)
@@ -548,9 +573,21 @@ def selftest():
         capture_context_state("actions", "selftest-missing", "a.txt")
         captured = json.loads((WORK / "actions-selftest-missing-context.json").read_text())
         assert captured["tree"]["status"] == 404 and captured["file"]["status"] == 200
+        assert captured["tree"]["classification"] == "unclassified-error"
         assert captured["checkouts"]["body"]["checkouts"] == []
     finally:
         globals()["get"], globals()["identity"] = original_get, original_identity
+
+    def receipt(status, body):
+        return context_error(urllib.error.HTTPError(
+            "http://owned-ui/api/workspaces/LOCALMODE/files/tree", status,
+            "error", {}, io.BytesIO(json.dumps(body).encode())))
+
+    upstream = "FleetDB GET /api/v1/LOCALMODE/repos: HTTP 429 rate limit exceeded: domain: conflict"
+    assert receipt(404, {"error": upstream})["classification"] == "upstream-rate-limited"
+    assert receipt(429, {"error": "rate limit exceeded"})["classification"] == "upstream-rate-limited"
+    assert receipt(404, {"error": "This checkout is not checked out"})["classification"] == "reported-not-checked-out"
+    assert receipt(404, {"error": "repo not found"})["classification"] == "unclassified-error"
 
 
 if __name__ == "__main__":
