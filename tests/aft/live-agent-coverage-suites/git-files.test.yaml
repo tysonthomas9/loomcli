@@ -76,8 +76,8 @@ tests:
           case "$platform" in *Mac*) select_all=Meta+a ;; *) select_all=Control+a ;; esac
           agent-browser --session "$AFT_SESSION" press "$select_all"
           agent-browser --session "$AFT_SESSION" press Backspace
-          agent-browser --session "$AFT_SESSION" type "$editor" "$(cat "$AFT_WORK_DIR/coverage-git-files/editor-expected.txt")"
-        intent: "Replace the actual CodeMirror document using focus, select all, delete and typing"
+          agent-browser --session "$AFT_SESSION" keyboard inserttext "$(cat "$AFT_WORK_DIR/coverage-git-files/editor-expected.txt")"
+        intent: "Insert the exact multiline text through the focused CodeMirror editor without Markdown Enter shortcuts"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
           editor_visible editor "@$AFT_WORK_DIR/coverage-git-files/editor-expected.txt"
