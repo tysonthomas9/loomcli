@@ -115,14 +115,6 @@ tests:
         intent: "Prove each real child turn, its own commit and diff, one keyed completion, one delivered notice, and the Lead's later combined reply"
       - run: |
           set -eu
-          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-a-${RUN_ID}.id")"
-        intent: "Compare child A's completed native OpenCode session model with its saved Agent API model"
-      - run: |
-          set -eu
-          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-b-${RUN_ID}.id")"
-        intent: "Compare child B's completed native OpenCode session model with its saved Agent API model"
-      - run: |
-          set -eu
           child_id="$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-a-${RUN_ID}.id")"
           agent-browser --session "$AFT_SESSION" click "[data-testid=started-marker] a[href$='/$child_id']"
         intent: "Reopen the completed child A from its exact-ID Started marker"
@@ -156,6 +148,14 @@ tests:
               return r.length === 2 && r.every((e) => e.dataset.delivery === 'delivered') &&
                 !document.body.textContent.includes('task_completed:'); })()
         intent: "Confirm the two completion cards survive a reload without duplication"
+      - run: |
+          set -eu
+          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-a-${RUN_ID}.id")"
+        intent: "Compare child A's completed native OpenCode session model with its saved Agent API model"
+      - run: |
+          set -eu
+          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-b-${RUN_ID}.id")"
+        intent: "Compare child B's completed native OpenCode session model with its saved Agent API model"
 
   # Source MATRIX:T3; RELEASE:R9. Stop in the composer is turn interrupt,
   # whereas this case requires the Lead's agent_archive(cancel:true) tool.
