@@ -281,7 +281,39 @@ def ask(case, stage="first"):
     assert len(a["open_asks"]) == 1, "expected one real native pending ask"
     pending = a["open_asks"][0]
     opened = [e for e in rows if e["kind"] == "ask.opened" and e["payload"].get("askId") == pending["id"]]
-    assert len(opened) == 1, "native ask is not saved exactly once"
+    save(f"{case}-{stage}-pending.json", {"ask_id": pending["id"], "turn_id": a["running_turn_id"],
+                                          "type": pending["type"],
+                                          "initial_opened_event_ids": [e["event_id"] for e in opened]})
+    if not opened:
+        path = f"{PREFIX}/agents/{aid(case)}/events"
+        js = """(() => {
+          const key = '__coverageSavedAsk_' + ASK;
+          const state = window[key] ||= {ready: false, pending: false};
+          if (!state.ready && !state.pending) {
+            state.pending = true;
+            (async () => {
+              let after = 0;
+              for (let i = 0; i < 20; i++) {
+                const response = await fetch(PATH + '?after=' + after + '&limit=500', {cache: 'no-store'});
+                if (!response.ok) return;
+                const page = await response.json();
+                if (page.events.some(e => e.kind === 'ask.opened' && e.payload?.askId === ASK)) {
+                  state.ready = true;
+                  return;
+                }
+                if (!page.more || !(page.next > after)) return;
+                after = page.next;
+              }
+            })().catch(() => {}).finally(() => {state.pending = false;});
+          }
+          return state.ready;
+        })()""".replace("ASK", json.dumps(pending["id"])).replace("PATH", json.dumps(path))
+        browser("wait", "--fn", js)
+        a, rows = agent(case), events(case)
+        assert len(a["open_asks"]) == 1 and a["open_asks"][0]["id"] == pending["id"], \
+            "pending native ask changed while its saved event was awaited"
+        opened = [e for e in rows if e["kind"] == "ask.opened" and e["payload"].get("askId") == pending["id"]]
+    assert len(opened) == 1, f"native ask is not saved exactly once: {len(opened)} matching events"
     assert opened[0]["turn_id"] == a["running_turn_id"], "ask is bound to another turn"
     if stage == "questions":
         qs = pending.get("questions") or []

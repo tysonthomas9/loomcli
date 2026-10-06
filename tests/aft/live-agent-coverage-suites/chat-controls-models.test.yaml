@@ -48,8 +48,15 @@ tests:
         intent: "Show a matching real catalog model row"
       - click: { role: button, name: Add to favorites }
         intent: "Favorite the found model using the picker UI"
-      - fill: { label: Search models, value: "" }
-        intent: "Clear search to reveal the provider rail"
+      - press: Escape
+        intent: "Close the search through the picker's actual Escape control"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Reopen the picker with its saved favorite and a fresh empty search"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-model-picker-sidebar] [data-model-picker-provider="favorites"]') &&
+            document.querySelector('[aria-label="Search models"]')?.value === ''
+        intent: "Show the real Favorites rail after the picker resets its search"
       - click: { selector: '[data-model-picker-provider="favorites"]' }
         intent: "Open the Favorites section"
       - wait:

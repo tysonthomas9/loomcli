@@ -56,6 +56,27 @@ class OracleTest(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "another turn"):
                 module.ask("approval")
 
+    def test_ask_awaits_the_exact_saved_event_after_pending_snapshot(self):
+        a = {"open_asks": [{"id": "per_1", "type": "approval"}], "running_turn_id": "turn_1"}
+        row = {"kind": "ask.opened", "turn_id": "turn_1", "event_id": "e1", "payload": {"askId": "per_1"}}
+        (module.ROOT / "denial.id").write_text("agt_abc\n")
+        with patch.object(module, "agent", return_value=a), \
+             patch.object(module, "events", side_effect=[[], [row]]), \
+             patch.object(module, "browser") as browser:
+            module.ask("denial", "declined")
+        self.assertEqual(browser.call_args.args[:2], ("wait", "--fn"))
+        self.assertIn('"per_1"', browser.call_args.args[2])
+        self.assertEqual(module.saved("denial-declined-ask.json")["opened_event_id"], "e1")
+        self.assertEqual(module.saved("denial-declined-pending.json")["initial_opened_event_ids"], [])
+
+    def test_ask_refuses_two_saved_events_for_one_pending_id(self):
+        a = {"open_asks": [{"id": "per_1", "type": "approval"}], "running_turn_id": "turn_1"}
+        rows = [{"kind": "ask.opened", "turn_id": "turn_1", "event_id": eid,
+                 "payload": {"askId": "per_1"}} for eid in ("e1", "e2")]
+        with patch.object(module, "agent", return_value=a), patch.object(module, "events", return_value=rows):
+            with self.assertRaisesRegex(AssertionError, "2 matching events"):
+                module.ask("denial", "declined")
+
     def test_allow_requires_native_command_effect(self):
         with patch.object(module, "events", return_value=[{"kind": "ask.opened", "event_id": "e1", "payload": {}}]):
             with self.assertRaisesRegex(AssertionError, "executed commands"):
