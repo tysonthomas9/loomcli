@@ -4,6 +4,11 @@
 set -euo pipefail
 : "${AFT_BROWSER_BIN:?runner must provide the real agent-browser path}"
 : "${AFT_BROWSER_PROFILES:?runner must provide its private profile directory}"
+: "${AFT_BROWSER_SOCKET_RECEIPT:?runner must provide its socket ownership receipt}"
+: "${AGENT_BROWSER_SOCKET_DIR:?runner must provide its private socket directory}"
+: "${AFT_TESTS_DIR:?runner must provide its AFT tests directory}"
+node "$AFT_TESTS_DIR/scripts/agent-flows-browser-socket.mjs" verify \
+  "$AFT_BROWSER_SOCKET_RECEIPT" "$AGENT_BROWSER_SOCKET_DIR" >/dev/null
 session=""
 args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do

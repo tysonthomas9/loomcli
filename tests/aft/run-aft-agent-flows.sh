@@ -22,6 +22,7 @@ done
 [[ "$cap" =~ ^([1-9]|10)$ ]] || die '--max-real-cases must be an integer from 1 to 10'
 [[ -z "${AFT_BASE_URL:-}${AFT_API_URL:-}${AFT_SUITES:-}" ]] || die 'ambient AFT URL or suite override is refused; this runner owns its stack and corpus'
 [[ -z "${AFT_AGENT_FLOW_REPO:-}" ]] || die 'ambient Agent flow repository override is refused'
+[[ -z "${AGENT_BROWSER_SOCKET_DIR:-}" ]] || die 'ambient agent-browser socket directory is refused; this runner owns it'
 [[ -z "${AFT_REAL_BACKEND:-}" || "$AFT_REAL_BACKEND" == opencode ]] || die 'conflicting ambient real backend'
 [[ -z "${AFT_REAL_CODEX:-}" ]] || die 'AFT_REAL_CODEX conflicts with the OpenCode tier'
 real_model="${AFT_REAL_MODEL:-openai/gpt-5.5}"
@@ -96,6 +97,7 @@ run_id="af$(printf '%s' "${run_root##*.}" | tr '[:upper:]' '[:lower:]')"
 project="loom-aft-agents-$run_id"
 account_lock="$primary_root/tmp/aft-live.opencode.lock"
 mkdir -p "$primary_root/tmp" "$run_root/evidence" "$run_root/bin" "$run_root/profiles" "$run_root/aft-home"
+browser_socket_receipt="$run_root/evidence/browser-socket.json"
 lock_owned=0 stack_attempted=0 build_lock_owned=0
 # shellcheck source=tests/aft/scripts/agent-flows-ownership.sh
 source "$TESTS_DIR/scripts/agent-flows-ownership.sh"
@@ -137,15 +139,24 @@ cleanup() {
     [[ -f "$registry" ]] || continue
     session="$(basename "$registry" .json | tr -d '\r')"
     [[ "$session" =~ ^aft-[A-Za-z0-9-]+$ ]] || continue
-    "$browser_bin" --profile "$run_root/profiles/$session" --session "$session" close >/dev/null 2>&1 || status=1
+    HOME="$run_root/aft-home" "$browser_bin" --profile "$run_root/profiles/$session" --session "$session" close >/dev/null 2>&1 || status=1
   done
   if [[ -d "$run_root/profiles" ]]; then rm -rf "$run_root/profiles"; fi
   if [[ -d "$run_root/aft-home" ]]; then rm -rf "$run_root/aft-home"; fi
+  if [[ -f "$browser_socket_receipt" ]]; then
+    node "$TESTS_DIR/scripts/agent-flows-browser-socket.mjs" cleanup "$browser_socket_receipt" || status=1
+  fi
   if ((lock_owned)) && [[ "$(cat "$account_lock" 2>/dev/null | tr -d '\r' || true)" == "$$" ]]; then rm -f "$account_lock"; fi
   echo "[aft-agent-flows] evidence: $run_root/evidence (exit $status)" >&2
   exit "$status"
 }
 trap cleanup EXIT INT TERM
+browser_socket_json="$(node "$TESTS_DIR/scripts/agent-flows-browser-socket.mjs" create "$browser_socket_receipt" "$selection")" \
+  || die 'could not allocate a private, short agent-browser socket directory'
+export AGENT_BROWSER_SOCKET_DIR
+AGENT_BROWSER_SOCKET_DIR="$(jq -r '.path' <<< "$browser_socket_json")"
+node "$TESTS_DIR/scripts/agent-flows-browser-socket.mjs" verify "$browser_socket_receipt" "$AGENT_BROWSER_SOCKET_DIR" >/dev/null \
+  || die 'private agent-browser socket ownership check failed'
 if ! (set -o noclobber; printf '%s\n' "$$" > "$account_lock") 2>/dev/null; then
   die "OpenCode account lock exists at $account_lock; do not start a second paid run"
 fi
@@ -182,6 +193,7 @@ export AFT_OWNED_PROJECT="$project" AFT_SOURCE_ROOT="$SOURCE_ROOT"
 export AFT_BASE_URL="http://127.0.0.1:$ui_port" AFT_API_URL="http://127.0.0.1:$api_port"
 export AFT_WORK_DIR="$run_root/evidence" RUN_ID="$run_id"
 export AFT_BROWSER_BIN="$browser_bin" AFT_BROWSER_PROFILES="$run_root/profiles"
+export AFT_BROWSER_SOCKET_RECEIPT="$browser_socket_receipt"
 ln -s "$TESTS_DIR/scripts/agent-flows-browser" "$run_root/bin/agent-browser"
 export PATH="$run_root/bin:$PATH"
 if ! existing_containers="$(cd "$SOURCE_ROOT" && podman compose -p "$project" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f "$LOCAL_MODE_COMPOSE_FILES" ps -a -q | tr -d '\r')"; then
@@ -193,6 +205,7 @@ fi
 
 jq -n --arg head "$head_sha" --arg source "$SOURCE_ROOT" --arg fleet "$fleet_repo" --arg fleetSha "$fleet_sha" \
   --arg aft "$AFT_DIR" --arg browser "$browser_bin" --arg project "$project" \
+  --arg browserSocket "$AGENT_BROWSER_SOCKET_DIR" --argjson browserSocketBytes "$(jq -r '.max_socket_bytes' <<< "$browser_socket_json")" \
   --arg apiUrl "$AFT_API_URL" --arg uiUrl "$AFT_BASE_URL" --arg evidence "$AFT_WORK_DIR" \
   --arg podmanHome "$AFT_PODMAN_HOME" --arg podmanConnection "$AFT_PODMAN_CONNECTION" \
   --arg podmanFingerprint "$connection_fingerprint" \
@@ -200,7 +213,7 @@ jq -n --arg head "$head_sha" --arg source "$SOURCE_ROOT" --arg fleet "$fleet_rep
   --argjson fleetPort "$fleet_port" --argjson apiPort "$api_port" --argjson uiPort "$ui_port" \
   --arg aftCliSha "$(shasum -a 256 "$AFT_DIR/dist/cli.js" | awk '{print $1}')" \
   --arg aftLoaderSha "$(shasum -a 256 "$AFT_DIR/dist/runner.js" | awk '{print $1}')" \
-  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:(if $selection.batch == "default" then "real OpenCode external model" else "real OpenCode stack; paid model evidence is per selected suite" end),backend:"opencode",cases:$cases,cap:$cap,selection:$selection,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
+  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:(if $selection.batch == "default" then "real OpenCode external model" else "real OpenCode stack; paid model evidence is per selected suite" end),backend:"opencode",cases:$cases,cap:$cap,selection:$selection,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,browser_socket_dir:$browserSocket,browser_socket_max_bytes:$browserSocketBytes,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
   > "$run_root/evidence/manifest.json"
 
 if ! mkdir /private/tmp/dryhawk-stack-build.lock 2>/dev/null; then
