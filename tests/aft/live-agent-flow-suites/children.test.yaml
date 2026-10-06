@@ -99,10 +99,16 @@ tests:
         intent: "Wait for exactly one delivered completion card for each real child attempt"
       - wait:
           fn: >-
-            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
-              return t.includes('aft-child-a-${RUN_ID}') && t.includes('aft-child-b-${RUN_ID}') &&
-                !t.includes('task_completed:'); })()
-        intent: "Show the Lead's combined account beside the two child result cards, without raw protocol text"
+            (() => { const rows = Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li'));
+              const cards = rows.filter((row) => row.querySelector('[data-testid=completion-record]'));
+              if (cards.length !== 2) return false;
+              const last = rows.indexOf(cards[cards.length - 1]);
+              return rows.slice(last + 1).some((row) => row.dataset.kind === 'agent' &&
+                !!row.querySelector('[data-testid=message-actions]') &&
+                (row.textContent || '').includes('aft-child-a-${RUN_ID}') &&
+                (row.textContent || '').includes('aft-child-b-${RUN_ID}') &&
+                !(row.textContent || '').includes('task_completed:')); })()
+        intent: "Show a completed Lead summary after the final child result card, naming both children"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" completed pair pair-lead
           "aft-child-a-${RUN_ID}" "aft-child-b-${RUN_ID}"
