@@ -56,14 +56,16 @@
     },
     "tool-policy": {
       "files": ["tool-policy.test.yaml"],
+      "expected_cases": [
+        { "suite": "live-tool-policy", "name": "a real tool call masks a harmless credential-shaped input after expansion and reload" },
+        { "suite": "live-tool-policy", "name": "a working child tray masks its real native command argument" },
+        { "suite": "live-tool-policy", "name": "one real Agent API turn yields exact native step and CLI usage while a fresh session is zero" }
+      ],
       "agents": {
         "leads": [
           { "name": "aft-lead-${RUN_ID}-cov-policy", "suite": "live-tool-policy", "model_required": true },
           { "name": "aft-lead-${RUN_ID}-cov-policy-tray", "suite": "live-tool-policy", "model_required": true },
           { "name": "aft-lead-${RUN_ID}-cov-policy-usage", "suite": "live-tool-policy", "model_required": true }
-        ],
-        "reviewers": [
-          { "name": "aft-review-${RUN_ID}-cov-policy", "suite": "live-tool-policy" }
         ],
         "children": [
           { "name": "aft-child-${RUN_ID}-cov-policy-tray", "parent": "aft-lead-${RUN_ID}-cov-policy-tray", "suite": "live-tool-policy" }

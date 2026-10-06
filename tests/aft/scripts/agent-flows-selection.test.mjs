@@ -38,6 +38,25 @@ try {
   assert.equal(selected.count, 3);
   assert.deepEqual(selected.cases.map(test => test.suite), Array(3).fill('coverage-one'));
   assert.match(selected.suites[0].sha256, /^[a-f0-9]{64}$/);
+  const writeExpected = expected_cases => writeFileSync(catalog, JSON.stringify({ version: 1,
+    batches: { smoke: { files: ['one.test.yaml'], agents, expected_cases } } }));
+  writeExpected(selected.cases);
+  assert.equal(JSON.parse(run('smoke')).count, 3);
+  writeExpected(selected.cases.slice(0, 2));
+  refuse('smoke'); // Extra selected case cannot enter an exact reviewed batch.
+  writeExpected([selected.cases[1], selected.cases[0], selected.cases[2]]);
+  refuse('smoke');
+  writeExpected([selected.cases[0], selected.cases[0]]);
+  refuse('smoke');
+  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'tool-policy':
+    { files: ['one.test.yaml'], agents } } }));
+  refuse('tool-policy'); // This batch must always pin its three reachable cases.
+  cpSync(join(coverage, 'one.test.yaml'), join(coverage, 'tool-policy.test.yaml'));
+  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'tool-policy':
+    { files: ['tool-policy.test.yaml'], agents, expected_cases: [...selected.cases,
+      { suite: 'coverage-one', name: 'unexpected fourth case' }] } } }));
+  refuse('tool-policy');
+  write(['one.test.yaml']);
   agents.leads[0].end_state = 'deleted';
   write(['one.test.yaml']);
   refuse('smoke'); // A generic batch cannot relax its surviving-Agent proof.
