@@ -74,6 +74,67 @@ tests:
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" privacy reloaded'
         intent: "Require the same saved EventIDs and safe scoped UI after reload"
 
+  # DF2 child tray: a real Lead creates a real task child, whose native
+  # command includes harmless credential-shaped test data. Observe the exact
+  # running child row while the saved tool event is current.
+  - name: a working child tray masks its real native command argument
+    intent: A Lead delegates to a child; the child's live tray row shows the native command without disclosing a harmless token-shaped argument.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open Agents to create an isolated tray Lead"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open New Agent"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the Lead template"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose a Lead"
+      - fill: { testid: create-agent-name, value: "aft-lead-${RUN_ID}-cov-policy-tray" }
+        intent: "Name the run-owned tray Lead"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Choose OpenCode"
+      - click: { testid: create-agent-submit }
+        intent: "Create through the operator form"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show the Lead's Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" claim-tray'
+        intent: "Claim the exact saved Lead identity"
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Select the real catalog model in Chat"
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create to make exactly one task child named
+            aft-child-${RUN_ID}-cov-policy-tray. Brief the child to use its native
+            shell tool in its own checkout for the exact harmless command
+            printf 'SAFE\\n' # TOKEN=ghp_AFTONLY${RUN_ID}ZZZZZZZZZZZZZZZZ
+            and to report only SAFE. The token-shaped comment is test data;
+            neither of you should quote it in a reply. Do not edit files,
+            push, or open a PR. Wait for the child's real result, then summarize it.
+        intent: "Delegate a real native tool call with harmless credential-shaped input"
+      - press: Enter
+        intent: "Start the external-model delegation"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=started-marker] a[href*="/chat/agt_"]')
+          budget: 180000
+        intent: "Wait for the saved child creation marker"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" claim-child'
+        intent: "Bind the run-owned task child to its real parent and worker preset"
+      - click: { selector: "[data-testid=agent-tray] button[aria-expanded=false]" }
+        intent: "Expand the actual Lead child tray"
+      - wait:
+          fn: >-
+            (() => { const tray=document.querySelector('[data-testid=agent-tray]');
+              const row=[...(tray?.querySelectorAll('li[data-tray-row]')||[])]
+                .find(e=>e.textContent.includes('aft-child-${RUN_ID}-cov-policy-tray'));
+              const t=row?.textContent||'';
+              return row?.querySelector('[data-status=running]') &&
+                t.includes('Ran command') && t.includes('printf') && t.includes('•••'); })()
+          budget: 180000
+        intent: "Show the current native command as a masked preview in the running child row"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" tray'
+        intent: "Require the exact child row, saved native tool input and masked current preview"
+
   # 2.8/2.8b: independent paid turn, saved native per-step amounts, real CLI
   # readback and fresh zero session. The legacy v5 producer join is a focused
   # nonbrowser contract; this fresh Agent API stack has no prior v5 session.

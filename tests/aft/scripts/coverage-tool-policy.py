@@ -32,6 +32,8 @@ API = f"/api/workspaces/{urllib.parse.quote(WS, safe='')}/v1/agents"
 SENTINEL = f"ghp_AFTONLY{RUN}ZZZZZZZZZZZZZZZZ"
 LEAD = f"aft-lead-{RUN}-cov-policy"
 USAGE_LEAD = f"aft-lead-{RUN}-cov-policy-usage"
+TRAY_LEAD = f"aft-lead-{RUN}-cov-policy-tray"
+TRAY_CHILD = f"aft-child-{RUN}-cov-policy-tray"
 REVIEWER = f"aft-review-{RUN}-cov-policy"
 
 
@@ -62,10 +64,14 @@ def owned_id(kind):
 
 def agent(kind):
     row = api(f"{API}/{owned_id(kind)}")
-    expected = {"lead": LEAD, "usage": USAGE_LEAD, "reviewer": REVIEWER}[kind]
+    expected = {"lead": LEAD, "usage": USAGE_LEAD, "tray": TRAY_LEAD,
+                "child": TRAY_CHILD, "reviewer": REVIEWER}[kind]
     assert row["agent_id"] == owned_id(kind) and row["name"] == expected
     assert row["repo"] == env("AFT_AGENT_FLOW_REPO") and row["harness"] == "opencode"
-    assert row["parent_agent_id"] is None and row["created_by_kind"] == "user"
+    if kind == "child":
+        assert row["parent_agent_id"] == owned_id("tray") and row["created_by_kind"] == "agent"
+    else:
+        assert row["parent_agent_id"] is None and row["created_by_kind"] == "user"
     return row
 
 
@@ -101,6 +107,19 @@ def claim_lead(kind):
     assert row["preset"] == "lead"
     save(f"{kind}-identity.json", {"agent_id": row["agent_id"], "name": row["name"],
                                     "preset": row["preset"], "model": row["model"]})
+
+
+def claim_child():
+    children = api(f"{API}?parent={urllib.parse.quote(owned_id('tray'))}&limit=500")["agents"]
+    matches = [row for row in children if row["name"] == TRAY_CHILD]
+    assert len(matches) == 1, "one exact run-owned child was not created through Loom"
+    WORK.mkdir(parents=True, exist_ok=True)
+    (WORK / "child.id").write_text(matches[0]["agent_id"] + "\n")
+    row = agent("child")
+    assert row["preset"] == "task" and row["role_kind"] == "worker"
+    save("child-identity.json", {"agent_id": row["agent_id"],
+                                  "parent_agent_id": row["parent_agent_id"],
+                                  "name": row["name"], "preset": row["preset"]})
 
 
 def create_reviewer():
@@ -201,7 +220,9 @@ SCOPED_DOM = """(() => {
   const selectors = '[data-testid=tool-call],[data-testid=tool-live],[data-testid=tool-group],[data-testid=work-toggle],[data-testid=bridge-call],[data-testid=agent-tray]';
   const nodes = [...document.querySelectorAll(selectors)];
   return nodes.map(n => ({kind:n.getAttribute('data-testid'), text:n.textContent||'',
-    aria:n.getAttribute('aria-label')||'', expanded:n.getAttribute('aria-expanded')}));
+    aria:[n,...n.querySelectorAll('[aria-label],[title]')]
+      .map(e=>(e.getAttribute('aria-label')||'')+' '+(e.getAttribute('title')||'')).join(' '),
+    expanded:n.getAttribute('aria-expanded')}));
 })()"""
 
 
@@ -227,6 +248,39 @@ def privacy_snapshot(stage):
     if stage == "reloaded":
         before = json.loads((WORK / "privacy-expanded.json").read_text())
         assert before["event_ids"] == [e["event_id"] for e in rows], "reload changed saved history"
+
+
+def tray_snapshot():
+    child = agent("child")
+    assert child["state"] == "active" and child.get("running_turn_id"), \
+        "child is no longer running during tray privacy observation"
+    events_now = events("child")
+    matching = [e for e in events_now if e["kind"] == "item.completed"
+                and e["payload"].get("itemKind") == "tool"
+                and SENTINEL in (e["payload"].get("tool") or {}).get("input", "")]
+    assert matching, "no saved native child tool call contained the harmless sentinel"
+    assert any("printf" in (e["payload"].get("tool") or {}).get("input", "") for e in matching), \
+        "child's saved tool call was not the requested safe command"
+    child_id = json.dumps(child["agent_id"])
+    row = browser("""(() => {
+      const id = CHILD_ID;
+      const tray = document.querySelector('[data-testid=agent-tray]');
+      const li = [...(tray?.querySelectorAll('li[data-tray-row]')||[])].find(e=>e.getAttribute('data-tray-row')===id);
+      const link = li?.querySelector('a[href]');
+      const row = li?.querySelector('[data-status]');
+      return row && link ? {status:row.getAttribute('data-status'),text:row.textContent||'',
+        childHref:link.getAttribute('href')} : null;
+    })()""".replace("CHILD_ID", child_id))
+    assert row and row["status"] == "running", "exact child tray row was not running"
+    assert "Ran command" in row["text"] and "printf" in row["text"], \
+        "exact child tray row did not show the real safe command step"
+    assert_private_nodes([{"kind": "agent-tray", "text": row["text"], "aria": ""}], SENTINEL)
+    assert "•••" in row["text"], "credential-shaped tool argument was not masked in the tray"
+    save("tray-privacy.json", {"child_agent_id": child["agent_id"],
+         "parent_agent_id": child["parent_agent_id"],
+         "tool_event_ids": [e["event_id"] for e in matching],
+         "running_turn_id": child["running_turn_id"],
+         "tray_row_sha256": hashlib.sha256(row["text"].encode()).hexdigest()})
 
 
 def expand_tools():
@@ -270,12 +324,14 @@ def policy_snapshot(stage):
 
 
 def cleanup():
-    for name, preset in ((LEAD, "lead"), (USAGE_LEAD, "lead"),
+    for name, preset in ((TRAY_CHILD, "task"), (LEAD, "lead"),
+                         (USAGE_LEAD, "lead"), (TRAY_LEAD, "lead"),
                          (REVIEWER, "pr-review-interactive")):
         listing = api(f"{API}?name={urllib.parse.quote(name)}&include_archived=true&limit=500")
         for row in listing["agents"]:
+            expected_creator = "agent" if name == TRAY_CHILD else "user"
             if row["name"] != name or row["repo"] != env("AFT_AGENT_FLOW_REPO") \
-                    or row["preset"] != preset or row["created_by_kind"] != "user":
+                    or row["preset"] != preset or row["created_by_kind"] != expected_creator:
                 continue
             if not row.get("archived_at"):
                 api(f"{API}/{row['agent_id']}/archive", "POST", {"reason": "cancelled"},
@@ -288,6 +344,10 @@ def main():
         claim_lead("lead")
     elif op == "claim-usage":
         claim_lead("usage")
+    elif op == "claim-tray":
+        claim_lead("tray")
+    elif op == "claim-child":
+        claim_child()
     elif op == "create-reviewer":
         create_reviewer()
     elif op == "reviewer-id":
@@ -304,6 +364,8 @@ def main():
         save("usage-reloaded.json", after)
     elif op == "privacy":
         privacy_snapshot(sys.argv[2])
+    elif op == "tray":
+        tray_snapshot()
     elif op == "expand-tools":
         expand_tools()
     elif op == "policy":
