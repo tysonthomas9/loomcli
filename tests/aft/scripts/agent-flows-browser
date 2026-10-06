@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# AFT calls agent-browser without a profile. Bind each named AFT session to a
+# private profile while preserving every argument (including lifecycle close).
+set -euo pipefail
+: "${AFT_BROWSER_BIN:?runner must provide the real agent-browser path}"
+: "${AFT_BROWSER_PROFILES:?runner must provide its private profile directory}"
+session=""
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  if [[ "${args[$i]}" == --session && $((i+1)) -lt ${#args[@]} ]]; then
+    session="${args[$((i+1))]}"
+    break
+  fi
+done
+[[ "$session" =~ ^aft-[A-Za-z0-9-]+$ ]] || { echo 'agent-flows-browser: refusing an unnamed or foreign session' >&2; exit 2; }
+profile="$AFT_BROWSER_PROFILES/$session"
+mkdir -p "$profile"
+exec "$AFT_BROWSER_BIN" --profile "$profile" "$@"
