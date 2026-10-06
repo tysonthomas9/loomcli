@@ -59,6 +59,23 @@ class QueueOracleTests(unittest.TestCase):
             self.assertFalse(queue.actual_call(bad, "agent_send", "agt_child", "QUEUE-P1"))
         self.assertFalse(queue.actual_call(event, "agent_send", "agt_foreign", "QUEUE-P1"))
 
+    def test_native_parent_replacement_receipt_must_be_true(self):
+        first = {"event_id": "one", "payload": {"tool": {"output": '{"replaced": false}'}}}
+        second = {"event_id": "two", "payload": {"tool": {"output": '{"replaced": true}'}}}
+        queue.replacement_result(first, second)
+        queue.replacement_result({"event_id": "combined", "payload": {"tool": {
+            "output": '{"first":{"replaced":false},"second":{"replaced":true}}'}}},
+            {"event_id": "combined", "payload": {"tool": {
+            "output": '{"first":{"replaced":false},"second":{"replaced":true}}'}}})
+        for bad in ({**second, "payload": {"tool": {"output": '{"replaced": false}'}}},
+                    {**second, "payload": {"tool": {"output": '{}'}}}):
+            with self.assertRaises(AssertionError):
+                queue.replacement_result(first, bad)
+        combined_bad = {"event_id": "combined", "payload": {"tool": {
+            "output": '{"first":{"replaced":true},"second":{"replaced":false}}'}}}
+        with self.assertRaises(AssertionError):
+            queue.replacement_result(combined_bad, combined_bad)
+
     def test_event_pager_rejects_foreign_child_and_duplicate_event(self):
         expected = {"agent_id": "agt_child", "seq": 1, "event_id": "one", "kind": "message.waiting", "payload": {}}
         with patch.object(queue, "identity", return_value="agt_child"), patch.object(queue, "http", return_value={
