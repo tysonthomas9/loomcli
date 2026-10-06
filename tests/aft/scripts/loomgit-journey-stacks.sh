@@ -116,6 +116,14 @@ published)
   branch="$(json "$work/pull-$slot.json" 'print(v["head"]["ref"])')"
   git --git-dir="$remote" show "refs/heads/$branch:journey-$slot.txt" > "$work/published-$slot.txt"
   cmp "$work/source-$slot.txt" "$work/published-$slot.txt"
+  provider_head="$(git --git-dir="$remote" rev-parse "refs/heads/$branch")"
+  python3 - "$work" "$slot" "$provider_head" <<'PYREMOTE'
+import json,pathlib,sys
+w,slot,actual=pathlib.Path(sys.argv[1]),sys.argv[2],sys.argv[3]
+pull=json.load(open(w/f'pull-{slot}.json'));pub=max(json.load(open(w/f'revisions-{slot}.json'))['data'],key=lambda r:r['number'])
+assert actual==pull['head']['sha']==pub['pr_head']==pub['head_sha'],(actual,pull,pub)
+(w/f'provider-head-{slot}.json').write_text(json.dumps(dict(actual_bare_sha=actual,provider_api_sha=pull['head']['sha'],publication_api_sha=pub['head_sha']))+'\n')
+PYREMOTE
   get "issues/$(task_id "$slot")/diff?lead=lead" "$work/diff-$slot.json"
   python3 - "$work" "$repo" "$slot" <<'PY'
 import json,pathlib,subprocess,sys

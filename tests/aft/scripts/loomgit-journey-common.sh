@@ -211,25 +211,31 @@ for item in preview['items']:
     path=pathlib.Path(item['path']).resolve()
     assert any(path.is_relative_to(root) for root in allowed),(path,allowed)
 manifest={'workspace':ws['id'],'product_root':str(product),'preview':preview,'trees':[],'files':[]}
-for root in [product,state/'repo']:
-    assert root.is_dir(),root
-    for path in sorted(root.rglob('*')):
-        if path.is_symlink():
-            manifest['files'].append({'path':str(path),'symlink':os.readlink(path)})
-        elif path.is_file():
-            h=hashlib.sha256()
-            with path.open('rb') as f:
-                while data:=f.read(1024*1024):h.update(data)
-            manifest['files'].append({'path':str(path),'sha256':h.hexdigest(),'size':path.stat().st_size})
-    gitroots=[root]+[p.parent for p in root.rglob('.git')]
-    for tree in sorted(set(gitroots)):
-        probe=subprocess.run(['git','-C',str(tree),'rev-parse','HEAD'],capture_output=True,text=True)
-        if probe.returncode:continue
-        read=lambda *args:subprocess.check_output(['git','-C',str(tree),*args],text=True)
-        manifest['trees'].append({'path':str(tree),'head':probe.stdout.strip(),'refs':read('for-each-ref','--format=%(refname) %(objectname)'),'index':read('ls-files','--stage'),'status':read('status','--porcelain=v1','--untracked-files=all'),'dirty_patch':read('diff','--binary','HEAD')})
+roots=[(product,'product-workspace'),(state/'repo','source-fixture')]
+# Archive raw index/stat and all bytes before diagnostic Git status can refresh it.
 with tarfile.open(state/'product-before-delete.tar.gz','w:gz') as archive:
-    archive.add(product,arcname='product-workspace')
-    archive.add(state/'repo',arcname='source-fixture')
+    for root,prefix in roots:
+        assert root.is_dir(),root
+        archive.add(root,arcname=prefix)
+with tarfile.open(state/'product-before-delete.tar.gz','r:gz') as archive:
+    for member in archive:
+        parts=pathlib.PurePosixPath(member.name).parts
+        root=next(root for root,prefix in roots if prefix==parts[0])
+        entry={'path':str(root.joinpath(*parts[1:])),'archive_member':member.name,'size':member.size,'mtime':member.mtime,'mode':member.mode}
+        if member.isfile():
+            h=hashlib.sha256();stream=archive.extractfile(member)
+            while data:=stream.read(1024*1024):h.update(data)
+            entry['sha256']=h.hexdigest()
+        elif member.issym():entry['symlink']=member.linkname
+        else:continue
+        manifest['files'].append(entry)
+for root,_ in roots:
+    # Do not mistake an enclosing fixture repository for a managed working copy.
+    gitroots=[p.parent for p in root.rglob('.git')]
+    for tree in sorted(set(gitroots)):
+        read=lambda *args:subprocess.check_output(['git','--no-optional-locks','-C',str(tree),*args],text=True)
+        manifest['trees'].append({'path':str(tree),'managed':tree.is_relative_to(product),'head':read('rev-parse','HEAD').strip(),'refs':read('for-each-ref','--format=%(refname) %(objectname)'),'index':read('ls-files','--stage'),'status':read('status','--porcelain=v1','--untracked-files=all'),'dirty_patch':read('diff','--binary','HEAD')})
+assert any(tree['managed'] for tree in manifest['trees']),manifest['trees']
 (state/'product-before-delete-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 (state/'product-root-before-delete.txt').write_text(str(product)+'\n')
 PY
@@ -256,8 +262,27 @@ if isinstance(rows,dict):rows=rows.get('data',rows.get('workspaces',[]))
 assert isinstance(rows,list),rows
 assert not any(row.get('id')==ws for row in rows),(ws,rows)
 product=pathlib.Path((state/'product-root-before-delete.txt').read_text().strip())
-assert not product.exists(),product
-(state/'cleanup-post-state.json').write_text(json.dumps(dict(workspace=ws,registered=False,product_root_removed=True))+'\n')
+manifest=json.load(open(state/'product-before-delete-manifest.json'))
+managed=[pathlib.Path(t['path']) for t in manifest['trees'] if t['managed']]
+assert all(not path.exists() for path in managed),managed
+assert all(not pathlib.Path(item['path']).exists() for item in manifest['preview']['items']),manifest['preview']
+# Registrations in every retained source Git repository must omit removed copies.
+import subprocess
+registrations={}
+for tree in manifest['trees']:
+    if tree['managed']:continue
+    path=pathlib.Path(tree['path'])
+    listing=subprocess.check_output(['git','--no-optional-locks','-C',str(path),'worktree','list','--porcelain'],text=True)
+    assert all('worktree '+str(p)+'\n' not in listing for p in managed),listing
+    registrations[str(path)]=listing
+# Only proven empty owned parent directories may be removed. Retain metadata.
+if product.exists():
+    for path in sorted((p for p in product.rglob('*') if p.is_dir() and not p.is_symlink()),key=lambda p:len(p.parts),reverse=True):
+        if not any(path.iterdir()):path.rmdir()
+    if not any(product.iterdir()):product.rmdir()
+retained=[str(p) for p in product.rglob('*')] if product.exists() else []
+assert not any(p.name=='.git' for p in product.rglob('*')) if product.exists() else True
+(state/'cleanup-post-state.json').write_text(json.dumps(dict(workspace=ws,registered=False,managed_paths_removed=[str(p) for p in managed],registrations=registrations,product_root_removed=not product.exists(),retained_metadata=retained))+'\n')
 PY
     printf 'workspace API deletion and removal readbacks succeeded; local archives/provider evidence retained\n' > "$JOURNEY_STATE/cleanup.txt"
     rm "$JOURNEY_STATE/cleanup.failed"

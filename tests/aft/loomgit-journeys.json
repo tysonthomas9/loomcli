@@ -1092,7 +1092,7 @@
           "scenario_id": "C.P3.9.01",
           "owner": "P3.9",
           "criterion": "AC1",
-          "expected": "Green four-layer prefix merge lands layers 1–3, layer 4 is based on trunk, and Loom marks 1–3 landed",
+          "expected": "Green four-layer prefix merge lands layers 1\u20133, layer 4 is based on trunk, and Loom marks 1\u20133 landed",
           "mapping_note": "7dc7c0bd-e025-448d-b47f-601629c04d70"
         },
         {
@@ -1819,7 +1819,7 @@
       "source_sha": "55a57c449ee0b648397f6d0640144987c6670c8f",
       "author_task": "3e4266bd-98b2-4a91-af83-c6ab00e25a79",
       "script_file": "tests/aft/scripts/loomgit-journey-stacks.sh",
-      "script_sha256": "92b0c9ec55a692cdd6a0fe8b92882a6afd4c1a441925abf9d3c84bfc1c33fef6",
+      "script_sha256": "ab260398671055c79c737fe8ef5ab54727e439b90bb1ea7f91296a6086e352ba",
       "author_file_sha256": "9df8ed1f740b66ff1c67f6ab9e5787cf75982d38c1e2d4b56887a83bcb2347f5",
       "author_script_sha256": "f985740f7c6c53938f6e086e2047fd355c249c55584c9229726b14ca1750cd2d"
     }
@@ -2485,14 +2485,14 @@
         {
           "id": "R1.before",
           "step": 8,
-          "intent": "R1.before checkpoint — human sees the task awaiting review; hold-before.json records dirty bytes, staged entries, task/revision IDs and local/provider refs",
+          "intent": "R1.before checkpoint \u2014 human sees the task awaiting review; hold-before.json records dirty bytes, staged entries, task/revision IDs and local/provider refs",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
           "id": "R1.held",
           "step": 11,
-          "intent": "R1.held checkpoint — the mounted approval action reports apply_pending for overlapping unsaved work",
+          "intent": "R1.held checkpoint \u2014 the mounted approval action reports apply_pending for overlapping unsaved work",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
@@ -2506,7 +2506,7 @@
         {
           "id": "R1.recovered",
           "step": 19,
-          "intent": "R1.recovered checkpoint — Changes reports Applied; hold-recovered.json and saved-unsaved-edit.txt prove identity, exactly one result, and preserved dirty work",
+          "intent": "R1.recovered checkpoint \u2014 Changes reports Applied; hold-recovered.json and saved-unsaved-edit.txt prove identity, exactly one result, and preserved dirty work",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         }
@@ -2529,7 +2529,7 @@
         {
           "id": "R2.before",
           "step": 4,
-          "intent": "R2.before checkpoint — the task has no revision before the product TaskRun starts",
+          "intent": "R2.before checkpoint \u2014 the task has no revision before the product TaskRun starts",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
@@ -2543,7 +2543,7 @@
         {
           "id": "R2.disabled",
           "step": 10,
-          "intent": "R2.disabled checkpoint — Incomplete capture is visible and Approve and create PR is disabled",
+          "intent": "R2.disabled checkpoint \u2014 Incomplete capture is visible and Approve and create PR is disabled",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
@@ -2557,7 +2557,7 @@
         {
           "id": "R2.denied",
           "step": 14,
-          "intent": "R2.denied checkpoint — the human still sees the incomplete revision, never No changes; incomplete-denied.json and retained-copy.json prove preserved dirty work",
+          "intent": "R2.denied checkpoint \u2014 the human still sees the incomplete revision, never No changes; incomplete-denied.json and retained-copy.json prove preserved dirty work",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         }
@@ -2580,7 +2580,7 @@
         {
           "id": "R3.before",
           "step": 9,
-          "intent": "R3.before checkpoint — the human sees the current preview name the dirty secret-pattern file before confirming removal",
+          "intent": "R3.before checkpoint \u2014 the human sees the current preview name the dirty secret-pattern file before confirming removal",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
@@ -2594,7 +2594,7 @@
         {
           "id": "R3.stale-denied",
           "step": 13,
-          "intent": "R3.stale-denied checkpoint — the mounted removal action shows the stale work confirmation refusal",
+          "intent": "R3.stale-denied checkpoint \u2014 the mounted removal action shows the stale work confirmation refusal",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
@@ -2615,7 +2615,7 @@
         {
           "id": "R3.incomplete-denied",
           "step": 21,
-          "intent": "R3.incomplete-denied checkpoint — even fresh confirmation cannot remove the folder whose actual product capture is incomplete",
+          "intent": "R3.incomplete-denied checkpoint \u2014 even fresh confirmation cannot remove the folder whose actual product capture is incomplete",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
@@ -2629,7 +2629,7 @@
         {
           "id": "R3.retained",
           "step": 26,
-          "intent": "R3.retained checkpoint — the original task remains reviewable after both refused deletions; delete-incomplete-denied.json pairs this UI with retained folder/identity readback",
+          "intent": "R3.retained checkpoint \u2014 the original task remains reviewable after both refused deletions; delete-incomplete-denied.json pairs this UI with retained folder/identity readback",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         }
@@ -2652,14 +2652,14 @@
         {
           "id": "R4.before",
           "step": 6,
-          "intent": "R4.before checkpoint — the current task diff awaits review; captured.json records its exact revision SHA and untouched provider refs",
+          "intent": "R4.before checkpoint \u2014 the current task diff awaits review; captured.json records its exact revision SHA and untouched provider refs",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
           "id": "R4.stale-denied",
           "step": 8,
-          "intent": "R4.stale-denied checkpoint — Changes still awaits review after the rejected stale request; stale-verdict-denied.json proves denial and unchanged identities",
+          "intent": "R4.stale-denied checkpoint \u2014 Changes still awaits review after the rejected stale request; stale-verdict-denied.json proves denial and unchanged identities",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
@@ -2673,14 +2673,14 @@
         {
           "id": "R4.published",
           "step": 14,
-          "intent": "R4.published checkpoint — the human sees the task's single open PR; foreign-published.json pairs its number/base/head with real Git",
+          "intent": "R4.published checkpoint \u2014 the human sees the task's single open PR; foreign-published.json pairs its number/base/head with real Git",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
           "id": "R4.foreign-denied",
           "step": 17,
-          "intent": "R4.foreign-denied checkpoint — the original PR remains visible; foreign-denied.json and foreign-publish-denied.json prove refusal and the unchanged foreign provider tip, not a real GitHub or stale-fence claim",
+          "intent": "R4.foreign-denied checkpoint \u2014 the original PR remains visible; foreign-denied.json and foreign-publish-denied.json prove refusal and the unchanged foreign provider tip, not a real GitHub or stale-fence claim",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         }
@@ -4237,7 +4237,10 @@
       "Register feedback intake binding after normal TaskRun ensures epic-runner exists",
       "Use mounted WorkspaceSwitcher deletion controls",
       "R2 read-only revision snapshot precedes unchanged strict incomplete UI assertion",
-      "Guarded cleanup archives actual copies and Git/file manifests, confirms fresh fingerprint and verifies removal"
+      "Guarded cleanup archives actual copies and Git/file manifests, confirms fresh fingerprint and verifies removal",
+      "Require actual bare provider ref SHA equals provider API and publication API heads",
+      "Archive index/stat before diagnostic status; hash actual tar bytes, constrain managed copies to .git markers",
+      "Cleanup verifies every managed path/preview path and Git registration absent, permits retained metadata and removes only empty owned parents"
     ]
   }
 }
