@@ -15,9 +15,10 @@
       }
     },
     "receipts-stream": {
-      "files": ["receipts-stream-native.test.yaml", "receipts-stream-sse.test.yaml", "receipts-stream-waiting.test.yaml"],
+      "files": ["receipts-stream-create.test.yaml", "receipts-stream-native.test.yaml", "receipts-stream-sse.test.yaml", "receipts-stream-waiting.test.yaml"],
       "agents": {
         "leads": [
+          { "name": "coverage-rs-create-${RUN_ID}", "suite": "live-receipts-stream-create", "model_required": true, "model_proof": "api_post_create" },
           { "name": "coverage-rs-native-${RUN_ID}", "suite": "live-receipts-stream-native", "model_required": true },
           { "name": "coverage-rs-stream-${RUN_ID}", "suite": "live-receipts-stream-sse", "model_required": true },
           { "name": "coverage-rs-other-${RUN_ID}", "suite": "live-receipts-stream-sse", "model_required": true },
@@ -32,7 +33,7 @@
         "leads": [
           { "name": "cov-child-repeat-lead-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true },
           { "name": "cov-child-pair-lead-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true },
-          { "name": "cov-child-sidebar-a-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true },
+          { "name": "cov-child-sidebar-a-${RUN_ID}", "suite": "coverage-children-activity", "model_required": false },
           { "name": "cov-child-sidebar-b-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true }
         ],
         "children": [
@@ -75,7 +76,8 @@
         "leads": [
           { "name": "cov-controls-questions-${RUN_ID}", "suite": "live-chat-controls-asks", "model_required": false },
           { "name": "cov-controls-refusal-${RUN_ID}", "suite": "live-chat-controls-create", "model_required": false },
-          { "name": "cov-controls-picker-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false },
+          { "name": "cov-controls-picker-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": true },
+          { "name": "cov-controls-cold-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false },
           { "name": "cov-controls-custom-ui-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false },
           { "name": "cov-controls-custom-api-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false, "model_exception": true },
           { "name": "cov-controls-unknown-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false, "model_exception": true }

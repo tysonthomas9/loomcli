@@ -289,7 +289,9 @@ else
   declared="$(agent_flows_declared_agents)" || die 'could not expand declared agent ownership'
   jq -e --arg repo "$AFT_AGENT_FLOW_REPO" --arg target "$real_model" --argjson declared "$declared" '
     . as $observed |
-    length > 0 and all(.[]; .harness == "opencode" and .repo == $repo and
+    length > 0 and (map(.name) | unique | length) == length and
+    (map(.agent_id) | unique | length) == length and
+    all(.[]; .harness == "opencode" and .repo == $repo and
       (.model == null or (.model | type == "string" and length > 0 and (startswith("aft/") | not))) and
       (if .preset == "lead" then
          .created_by_kind == "user" and .parent_agent_id == null and .root_agent_id == null and
@@ -305,6 +307,9 @@ else
        else false end)) and
     all($declared.leads[] | select(.model_required); . as $lead |
       any($observed[]; .name == $lead.name and .preset == "lead" and
+        .model == $target and .model_unverified == false)) and
+    all($declared.reviewers[]; . as $reviewer |
+      any($observed[]; .name == $reviewer.name and .preset == "pr-review-interactive" and
         .model == $target and .model_unverified == false))' \
     "$run_root/evidence/actual-agent-models.json" >/dev/null || die 'declared agent ownership or required UI model is missing'
 fi
@@ -326,9 +331,20 @@ else
     <<< "$catalog" >/dev/null || die 'an actual Agent API model is absent from the real OpenCode catalog'
   if jq -e 'any(.leads[]; .model_required)' <<< "$declared" >/dev/null; then
     [[ -f "$run_root/evidence/model-selections.jsonl" ]] || die 'required UI model selection evidence is missing'
-    jq -se --argjson declared "$declared" --arg target "$real_model" '
-      . as $selections | all($declared.leads[] | select(.model_required); . as $lead |
-        any($selections[]; .name == $lead.name and .ui_selected_model == $target and .observed_saved_model == $target))' \
+    jq -se --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
+      --argjson declared "$declared" --arg target "$real_model" --arg run "$run_id" '
+      . as $selections |
+      ($selections | map(.agent_id) | length) == ($selections | map(.agent_id) | unique | length) and
+      all($declared.leads[] | select(.model_required); . as $lead |
+        [$observed[0][] | select(.name == $lead.name and .preset == "lead")] as $agents |
+        ($agents | length) == 1 and
+        ([$selections[] | select(
+          .name == $lead.name and .agent_id == $agents[0].agent_id and .run_id == $run and
+          (.session | startswith("aft-" + $lead.suite + "-")) and
+          (.session | ltrimstr("aft-" + $lead.suite + "-") | test("^[0-9]+$")) and
+          .observed_saved_model == $target and
+          (if $lead.model_proof == "api_post_create" then .initial_saved_model == $target
+           else .ui_selected_model == $target end))] | length) == 1)' \
       "$run_root/evidence/model-selections.jsonl" >/dev/null || die 'a paid Lead lacks an explicit saved-model selection receipt'
   fi
 fi
@@ -339,7 +355,7 @@ jq --slurpfile observed "$run_root/evidence/actual-agent-models.json" --arg batc
    .model_proof_scope=(if $batch == "default" then
      "UI-saved model on surviving Leads; null child defaults need separate turn-level proof"
      elif any($declared.leads[]; .model_required) then
-       "UI-saved model on declared runner-required Leads; other model behavior requires suite and native proof"
+       "Exact-ID saved-model receipts on declared runner-required Leads; API Create first-message and native answer proof remain suite-owned"
      else "No runner-level model receipt in this batch; suite assertions and independent live review required" end)' \
   "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
 mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"

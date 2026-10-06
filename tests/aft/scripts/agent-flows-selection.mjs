@@ -49,10 +49,12 @@ if (batchName === 'default') {
   directory(coverageDir);
   if (!(batch.agents.leads.length || batch.agents.reviewers?.length) ||
       !batch.agents.leads.every(lead => (exactKeys(lead, ['name', 'suite', 'model_required']) ||
-        exactKeys(lead, ['name', 'suite', 'model_required', 'model_exception'])) &&
+        exactKeys(lead, ['name', 'suite', 'model_required', 'model_exception']) ||
+        exactKeys(lead, ['name', 'suite', 'model_required', 'model_proof'])) &&
         typeof lead.name === 'string' && agentPattern.test(lead.name) && typeof lead.suite === 'string' &&
         typeof lead.model_required === 'boolean' &&
         (lead.model_exception === undefined || typeof lead.model_exception === 'boolean') &&
+        (lead.model_proof === undefined || (lead.model_required && lead.model_proof === 'api_post_create')) &&
         !(lead.model_required && lead.model_exception)))
     fail('invalid declared Lead names');
   const leadNames = batch.agents.leads.map(lead => lead.name);
@@ -86,6 +88,7 @@ for (const file of files) {
   regular(file);
   const parsed = loadSuite(file);
   if (!Array.isArray(parsed.tests) || !parsed.tests.length) fail(`empty parsed suite: ${file}`);
+  if (batchName === 'default' && parsed.tests.length !== 3) fail(`default suite must contain exactly three cases: ${file}`);
   if (typeof parsed.suite !== 'string' || !namePattern.test(parsed.suite) || suites.some(suite => suite.name === parsed.suite))
     fail(`duplicate or unsafe suite name: ${file}`);
   const names = parsed.tests.map(test => test.name);
@@ -95,6 +98,7 @@ for (const file of files) {
   for (const name of names) cases.push({ suite: parsed.suite, name });
 }
 if (!unique(cases.map(test => `${test.suite}\0${test.name}`))) fail('duplicate selected cases');
+if (batchName === 'default' && cases.length !== 9) fail('default selection must contain exactly nine cases');
 if (cases.length > 10) fail('selected cases exceed absolute ceiling of 10');
 if (agents && [...agents.leads, ...agents.children, ...(agents.reviewers ?? [])].some(agent => !suites.some(suite => suite.name === agent.suite)))
   fail('declared agent is not bound to a selected suite');
