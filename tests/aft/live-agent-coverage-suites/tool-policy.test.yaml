@@ -122,16 +122,8 @@ tests:
         intent: "Bind the run-owned task child to its real parent and worker preset"
       - click: { selector: "[data-testid=agent-tray] button[aria-expanded=false]" }
         intent: "Expand the actual Lead child tray"
-      - wait:
-          fn: >-
-            (() => { const tray=document.querySelector('[data-testid=agent-tray]');
-              const row=[...(tray?.querySelectorAll('li[data-tray-row]')||[])]
-                .find(e=>e.textContent.includes('aft-child-${RUN_ID}-cov-policy-tray'));
-              const t=row?.textContent||'';
-              return row?.querySelector('[data-status=running]') &&
-                t.includes('Ran command') && t.includes('printf') && t.includes('•••'); })()
-          budget: 180000
-        intent: "Show the current native command as a masked preview in the running child row"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" tray-capture'
+        intent: "Capture the exact running child row when its real command shows a redacted argument"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" tray'
         intent: "Require the exact child row, saved native tool input and masked current preview"
 
