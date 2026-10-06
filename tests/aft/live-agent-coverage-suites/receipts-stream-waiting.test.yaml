@@ -40,7 +40,7 @@ tests:
         intent: "Bind the exact UI-created Agent ID and visibly select the real model"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" observe'
         intent: "Record the UI's actual successful Send RequestIDs without changing request or response bodies"
-      - fill: { label: Message, value: "Inspect README.md, BACKLOG.md, package.json, server.js and app.test.js with tools. Run npm test and explain the message path with file citations. Keep files unchanged." }
+      - fill: { label: Message, value: "Read README.md, BACKLOG.md, package.json, server.js, app.js and app.test.js with tools. Trace how a posted message reaches stored history, naming the relevant handlers and tests with file citations. Keep files unchanged and do not run package scripts." }
         intent: "Start a bounded real tool turn"
       - press: Enter
         intent: "Send from the production Chat user"
