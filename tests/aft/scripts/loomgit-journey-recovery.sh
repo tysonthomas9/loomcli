@@ -26,7 +26,7 @@ except subprocess.TimeoutExpired:
     code=124
 if code:
     key=args[1] if len(args)>1 else ''
-    state=pathlib.Path(os.environ.get('AFT_WORK_DIR','.'),'journey-'+key)
+    state=pathlib.Path(os.environ.get('AFT_WORK_DIR','.'),'journey-recovery',key)
     print(f'Recovery phase failed ({code}): {args}; retain {state} and server logs',file=sys.stderr)
     for name in ('workspace.json','issue.json','revisions.json','workflow-readback.json'):
         path=state/name
@@ -205,6 +205,13 @@ if phase == 'setup':
 
 elif phase == 'start':
     request(api + '/workflows/epic-runner', 'POST', {'epicId': read('epic.json')['data']['id'], 'runner': 'local-task-runner'}, expected=(200, 201, 202), receipt='start.json')
+
+elif phase == 'wait-revision':
+    # Observer readiness/readback only: strict incomplete capture assertions
+    # remain in captured, after the mounted UI checkpoint so failures are visible.
+    wait_for(revisions, 'TaskRun did not freeze a revision')
+    save('observed-revisions.json', revisions())
+    snapshot('observed-capture')
 
 elif phase == 'captured':
     wait_for(revisions, 'TaskRun did not freeze a revision')

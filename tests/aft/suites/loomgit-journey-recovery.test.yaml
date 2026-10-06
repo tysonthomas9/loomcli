@@ -72,8 +72,8 @@ tests:
         intent: "R2.before checkpoint — the task has no revision before the product TaskRun starts"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" start incomplete
         intent: The orchestration API client starts the actual TaskRun; stub AI writes server.pem as a non-secret test marker, not fabricated capture state
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" captured incomplete
-        intent: Require a product-created incomplete revision, no_changes false, secret path absent from its Git tree and the exact dirty task copy still present
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" wait-revision incomplete
+        intent: The API observer waits for the actual frozen revision and saves its current fields and Git/provider refs before the mounted UI assertion
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-task incomplete
         intent: The human opens the same task after its incomplete attempt has frozen
       - click: { role: tab, name: Changes, exact: true }
@@ -82,6 +82,8 @@ tests:
         intent: "R2.disabled checkpoint — Incomplete capture is visible and Approve and create PR is disabled"
       - expect: { enabled: { testid: approve-menu-toggle, equals: false } }
         intent: The incomplete revision also disables Approve only rather than allowing a menu bypass
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" captured incomplete
+        intent: Require a product-created incomplete revision, no_changes false, secret path absent from its Git tree and the exact dirty task copy still present
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" incomplete-denied incomplete
         intent: An API-client actor tries approval and Apply and must receive capture_incomplete; verify retained copy bytes, index and HEAD plus unchanged revision, lead/trunk/provider refs and no PR
       - expect: { text: Incomplete capture, notText: No changes }
@@ -99,12 +101,13 @@ tests:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" delete-dirty delete
         intent: The local editor agent writes a dirty sentinel and non-secret server.pem test marker in the owned working area; preview is a public API readback
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-board hold
-        intent: Navigate the human to another owned workspace so the deletion target appears in the mounted Other Workspaces list
-      - wait:
-          fn: "!!document.querySelector('[data-testid=workspace-overflow-e2e-ws-recovery-delete]')"
-        intent: The mounted workspace list contains the exact owned deletion fixture
-      - click: { testid: workspace-overflow-e2e-ws-recovery-delete }
-      - click: { testid: workspace-context-menu-remove }
+        intent: Navigate the human to another owned workspace before removing the target through the mounted workspace switcher
+      - click: { selector: "button[aria-label^='Active workspace:']" }
+        intent: The human opens the mounted workspace switcher
+      - fill: { label: "Search workspaces", value: "e2e-ws-recovery-delete" }
+        intent: The human finds the exact owned deletion fixture
+      - click: { role: button, name: "Remove e2e-ws-recovery-delete", exact: true }
+        intent: The human requests its real deletion preview through the mounted switcher
       - wait: { text: Remove workspace }
       - expect: { text: server.pem, visible: { testid: confirm-dialog-overlay } }
         intent: "R3.before checkpoint — the human sees the current preview name the dirty secret-pattern file before confirming removal"
@@ -116,8 +119,11 @@ tests:
         intent: "R3.stale-denied checkpoint — the mounted removal action shows the stale work confirmation refusal"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" delete-stale-readback delete
         intent: Verify the preview fingerprint changed and the workspace, task, file hashes, full staged index and local/provider refs are preserved
-      - click: { testid: workspace-overflow-e2e-ws-recovery-delete }
-      - click: { testid: workspace-context-menu-remove }
+      - click: { selector: "button[aria-label^='Active workspace:']" }
+        intent: The human reopens the mounted workspace switcher after the refusal
+      - fill: { label: "Search workspaces", value: "e2e-ws-recovery-delete" }
+      - click: { role: button, name: "Remove e2e-ws-recovery-delete", exact: true }
+        intent: The human requests a fresh preview for the same owned workspace
       - wait: { text: Remove workspace }
       - click: { testid: confirm-dialog-confirm }
       - wait: { text: incomplete capture }

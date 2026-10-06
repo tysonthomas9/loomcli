@@ -1801,12 +1801,12 @@
       "suite": "loomgit-journey-recovery",
       "file": "tests/aft/suites/loomgit-journey-recovery.test.yaml",
       "source_path": "tests/aft/suites/loomgit-journey-recovery.test.yaml",
-      "source_file_sha256": "dce8a6349aaa0e917e27adaf4fb4484cda4c56f19cbb3fcb13717e23472bf653",
+      "source_file_sha256": "8e343c901aee88430dc0bee140d916d72a1271200f6a90d2bb193528d14e1f25",
       "source_status": "integrated_with_documented_test_only_corrections",
       "source_sha": "6e297317b96481bc61cad307fd5f2f4f2771c0be",
       "author_task": "1c76497f-a584-4f92-bad9-ac4e326f04e6",
       "script_file": "tests/aft/scripts/loomgit-journey-recovery.sh",
-      "script_sha256": "2c7ac443ecd93ebbbbc0fcf47a2ce3c37acdc360a980bed3a2c4348ca83e8e5a",
+      "script_sha256": "dd31a1a7c2b6808bd563314d2332b9bb814e50c627d830e7075871367fd2c78d",
       "author_file_sha256": "dce8a6349aaa0e917e27adaf4fb4484cda4c56f19cbb3fcb13717e23472bf653",
       "author_script_sha256": "fceaf109ca23e9e2935a3eb5cb4f934199b4bda23f3cf94be05aa6360982aee7"
     },
@@ -1819,7 +1819,7 @@
       "source_sha": "55a57c449ee0b648397f6d0640144987c6670c8f",
       "author_task": "3e4266bd-98b2-4a91-af83-c6ab00e25a79",
       "script_file": "tests/aft/scripts/loomgit-journey-stacks.sh",
-      "script_sha256": "477e291d0073fbcaba202d3014502d3614f254067b20ce5aaf74f8843351e823",
+      "script_sha256": "92b0c9ec55a692cdd6a0fe8b92882a6afd4c1a441925abf9d3c84bfc1c33fef6",
       "author_file_sha256": "9df8ed1f740b66ff1c67f6ab9e5787cf75982d38c1e2d4b56887a83bcb2347f5",
       "author_script_sha256": "f985740f7c6c53938f6e086e2047fd355c249c55584c9229726b14ca1750cd2d"
     }
@@ -2473,8 +2473,7 @@
           "step": 5,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
           "id": "R1 unsaved edits hold approval and an API client retries without losing dirty work::ui-step-6",
@@ -2502,8 +2501,7 @@
           "step": 18,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
           "id": "R1.recovered",
@@ -2526,8 +2524,7 @@
           "step": 3,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
           "id": "R2.before",
@@ -2541,8 +2538,7 @@
           "step": 9,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
           "id": "R2.disabled",
@@ -2560,7 +2556,7 @@
         },
         {
           "id": "R2.denied",
-          "step": 13,
+          "step": 14,
           "intent": "R2.denied checkpoint — the human still sees the incomplete revision, never No changes; incomplete-denied.json and retained-copy.json prove preserved dirty work",
           "binding_status": "integrated_exact_step",
           "screenshot": null
@@ -2575,19 +2571,11 @@
       "runtime_status": "not_run",
       "checkpoints": [
         {
-          "id": "R3 a stale deletion preview and incomplete capture refuse unsafe removal::ui-step-5",
-          "step": 5,
-          "intent": "The mounted workspace list contains the exact owned deletion fixture",
-          "binding_status": "integrated_exact_step",
-          "screenshot": null
-        },
-        {
           "id": "R3 a stale deletion preview and incomplete capture refuse unsafe removal::ui-step-8",
           "step": 8,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
           "id": "R3.before",
@@ -2601,8 +2589,7 @@
           "step": 12,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
           "id": "R3.stale-denied",
@@ -2612,39 +2599,36 @@
           "screenshot": null
         },
         {
-          "id": "R3 a stale deletion preview and incomplete capture refuse unsafe removal::ui-step-17",
-          "step": 17,
+          "id": "R3 a stale deletion preview and incomplete capture refuse unsafe removal::ui-step-18",
+          "step": 18,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
-          "id": "R3 a stale deletion preview and incomplete capture refuse unsafe removal::ui-step-19",
-          "step": 19,
+          "id": "R3 a stale deletion preview and incomplete capture refuse unsafe removal::ui-step-20",
+          "step": 20,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
           "id": "R3.incomplete-denied",
-          "step": 20,
+          "step": 21,
           "intent": "R3.incomplete-denied checkpoint — even fresh confirmation cannot remove the folder whose actual product capture is incomplete",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "R3 a stale deletion preview and incomplete capture refuse unsafe removal::ui-step-24",
-          "step": 24,
+          "id": "R3 a stale deletion preview and incomplete capture refuse unsafe removal::ui-step-25",
+          "step": 25,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
           "id": "R3.retained",
-          "step": 25,
+          "step": 26,
           "intent": "R3.retained checkpoint — the original task remains reviewable after both refused deletions; delete-incomplete-denied.json pairs this UI with retained folder/identity readback",
           "binding_status": "integrated_exact_step",
           "screenshot": null
@@ -2663,8 +2647,7 @@
           "step": 5,
           "intent": null,
           "binding_status": "integrated_exact_step",
-          "screenshot": null,
-          "label_status": "unnamed_source_assertion; step number anchors screenshot"
+          "screenshot": null
         },
         {
           "id": "R4.before",
@@ -2746,21 +2729,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-15",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-5",
           "step": 15,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-16",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-6",
           "step": 16,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-17",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-7",
           "step": 17,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -2781,21 +2764,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-25",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-5",
           "step": 25,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-26",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-6",
           "step": 26,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-27",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-7",
           "step": 27,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -2816,21 +2799,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-35",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-5",
           "step": 35,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-36",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-6",
           "step": 36,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-37",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-7",
           "step": 37,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -2879,7 +2862,7 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-53",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-5",
           "step": 53,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -2907,7 +2890,7 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-59",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-45",
           "step": 59,
           "intent": "The merge preview is ready for human confirmation",
           "binding_status": "integrated_exact_step",
@@ -2921,7 +2904,7 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-63",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-49",
           "step": 63,
           "intent": "The product merge panel agrees with provider and Git readbacks",
           "binding_status": "integrated_exact_step",
@@ -2935,21 +2918,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-67",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-5",
           "step": 67,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-68",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-54",
           "step": 68,
           "intent": "The remaining PR task retains its own patch",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-69",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-55",
           "step": 69,
           "intent": "The first remaining task now compares its patch against trunk",
           "binding_status": "integrated_exact_step",
@@ -2984,21 +2967,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-82",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-5",
           "step": 82,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-83",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-6",
           "step": 83,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack prefix continuation and mode switch::ui-step-84",
+          "id": "Loom stack prefix continuation and mode switch::ui-step-7",
           "step": 84,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3070,21 +3053,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-15",
+          "id": "Loom stack lower landing and mode switch::ui-step-5",
           "step": 15,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-16",
+          "id": "Loom stack lower landing and mode switch::ui-step-6",
           "step": 16,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-17",
+          "id": "Loom stack lower landing and mode switch::ui-step-7",
           "step": 17,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3105,21 +3088,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-25",
+          "id": "Loom stack lower landing and mode switch::ui-step-5",
           "step": 25,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-26",
+          "id": "Loom stack lower landing and mode switch::ui-step-6",
           "step": 26,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-27",
+          "id": "Loom stack lower landing and mode switch::ui-step-7",
           "step": 27,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3140,21 +3123,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-35",
+          "id": "Loom stack lower landing and mode switch::ui-step-5",
           "step": 35,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-36",
+          "id": "Loom stack lower landing and mode switch::ui-step-6",
           "step": 36,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-37",
+          "id": "Loom stack lower landing and mode switch::ui-step-7",
           "step": 37,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3203,7 +3186,7 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-53",
+          "id": "Loom stack lower landing and mode switch::ui-step-5",
           "step": 53,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -3252,21 +3235,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-68",
+          "id": "Loom stack lower landing and mode switch::ui-step-5",
           "step": 68,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-69",
+          "id": "Loom stack lower landing and mode switch::ui-step-6",
           "step": 69,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom stack lower landing and mode switch::ui-step-70",
+          "id": "Loom stack lower landing and mode switch::ui-step-7",
           "step": 70,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3338,21 +3321,21 @@
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-15",
+          "id": "Native stack prefix landing and mode switch::ui-step-5",
           "step": 15,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-16",
+          "id": "Native stack prefix landing and mode switch::ui-step-6",
           "step": 16,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-17",
+          "id": "Native stack prefix landing and mode switch::ui-step-7",
           "step": 17,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3373,21 +3356,21 @@
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-25",
+          "id": "Native stack prefix landing and mode switch::ui-step-5",
           "step": 25,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-26",
+          "id": "Native stack prefix landing and mode switch::ui-step-6",
           "step": 26,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-27",
+          "id": "Native stack prefix landing and mode switch::ui-step-7",
           "step": 27,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3408,21 +3391,21 @@
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-35",
+          "id": "Native stack prefix landing and mode switch::ui-step-5",
           "step": 35,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-36",
+          "id": "Native stack prefix landing and mode switch::ui-step-6",
           "step": 36,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-37",
+          "id": "Native stack prefix landing and mode switch::ui-step-7",
           "step": 37,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3471,7 +3454,7 @@
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-53",
+          "id": "Native stack prefix landing and mode switch::ui-step-5",
           "step": 53,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -3520,21 +3503,21 @@
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-68",
+          "id": "Native stack prefix landing and mode switch::ui-step-5",
           "step": 68,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-69",
+          "id": "Native stack prefix landing and mode switch::ui-step-6",
           "step": 69,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack prefix landing and mode switch::ui-step-70",
+          "id": "Native stack prefix landing and mode switch::ui-step-7",
           "step": 70,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3606,21 +3589,21 @@
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-15",
+          "id": "Native stack lower landing and mode switch::ui-step-5",
           "step": 15,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-16",
+          "id": "Native stack lower landing and mode switch::ui-step-6",
           "step": 16,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-17",
+          "id": "Native stack lower landing and mode switch::ui-step-7",
           "step": 17,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3641,21 +3624,21 @@
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-25",
+          "id": "Native stack lower landing and mode switch::ui-step-5",
           "step": 25,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-26",
+          "id": "Native stack lower landing and mode switch::ui-step-6",
           "step": 26,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-27",
+          "id": "Native stack lower landing and mode switch::ui-step-7",
           "step": 27,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3676,21 +3659,21 @@
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-35",
+          "id": "Native stack lower landing and mode switch::ui-step-5",
           "step": 35,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-36",
+          "id": "Native stack lower landing and mode switch::ui-step-6",
           "step": 36,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-37",
+          "id": "Native stack lower landing and mode switch::ui-step-7",
           "step": 37,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3739,7 +3722,7 @@
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-53",
+          "id": "Native stack lower landing and mode switch::ui-step-5",
           "step": 53,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -3788,21 +3771,21 @@
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-68",
+          "id": "Native stack lower landing and mode switch::ui-step-5",
           "step": 68,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-69",
+          "id": "Native stack lower landing and mode switch::ui-step-6",
           "step": 69,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native stack lower landing and mode switch::ui-step-70",
+          "id": "Native stack lower landing and mode switch::ui-step-7",
           "step": 70,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3874,21 +3857,21 @@
           "screenshot": null
         },
         {
-          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-15",
+          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-5",
           "step": 15,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-16",
+          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-6",
           "step": 16,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-17",
+          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-7",
           "step": 17,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -3909,7 +3892,7 @@
           "screenshot": null
         },
         {
-          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-28",
+          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-5",
           "step": 28,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -3937,7 +3920,7 @@
           "screenshot": null
         },
         {
-          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-34",
+          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-5",
           "step": 34,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -3958,7 +3941,7 @@
           "screenshot": null
         },
         {
-          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-45",
+          "id": "Loom signed feedback updates the stack and cancels merge-after::ui-step-5",
           "step": 45,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -4030,21 +4013,21 @@
           "screenshot": null
         },
         {
-          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-15",
+          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-5",
           "step": 15,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-16",
+          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-6",
           "step": 16,
           "intent": "The captured task file is shown in Changes",
           "binding_status": "integrated_exact_step",
           "screenshot": null
         },
         {
-          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-17",
+          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-7",
           "step": 17,
           "intent": "The diff shows the actual stub TaskRun marker contents",
           "binding_status": "integrated_exact_step",
@@ -4065,7 +4048,7 @@
           "screenshot": null
         },
         {
-          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-28",
+          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-5",
           "step": 28,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -4093,7 +4076,7 @@
           "screenshot": null
         },
         {
-          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-34",
+          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-5",
           "step": 34,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -4114,7 +4097,7 @@
           "screenshot": null
         },
         {
-          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-45",
+          "id": "Native signed feedback updates the stack and cancels merge-after::ui-step-5",
           "step": 45,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -4186,7 +4169,7 @@
           "screenshot": null
         },
         {
-          "id": "Trunk signed feedback updates its existing PR::ui-step-17",
+          "id": "Trunk signed feedback updates its existing PR::ui-step-5",
           "step": 17,
           "intent": "The task Changes panel is mounted",
           "binding_status": "integrated_exact_step",
@@ -4249,7 +4232,12 @@
       "Forge __register201 fixture expectation",
       "Empty revision preserves accepted existing worker closure reason",
       "Bounded recovery phase/process and HTTP/poll deadlines",
-      "Preserve guarded DELETE409 response bodies; warning-level shell lint fixes"
+      "Preserve guarded DELETE409 response bodies; warning-level shell lint fixes",
+      "Separate trunk publication revision from applied lead layer per P3.10/P3.10c; preserve prior PRs and lead patches",
+      "Register feedback intake binding after normal TaskRun ensures epic-runner exists",
+      "Use mounted WorkspaceSwitcher deletion controls",
+      "R2 read-only revision snapshot precedes unchanged strict incomplete UI assertion",
+      "Guarded cleanup archives actual copies and Git/file manifests, confirms fresh fingerprint and verifies removal"
     ]
   }
 }

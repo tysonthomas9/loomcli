@@ -195,12 +195,71 @@ with tarfile.open(out,'w') as archive:
         if os.path.lexists(path): archive.add(path,arcname=name,recursive=False)
 PY
     done < "$JOURNEY_STATE/worktrees-before-cleanup.txt"
-    curl --fail-with-body -sS --max-time 10 -X DELETE "$JOURNEY_API" > "$JOURNEY_STATE/delete-workspace.json" || {
+    # Fixture API-client cleanup uses the product's exact-list confirmation.
+    # Archive actual product working areas/copies, not just the source fixture.
+    curl -fsS --max-time 10 "$JOURNEY_API/delete/preview" > "$JOURNEY_STATE/delete-preview-before.json" || return 1
+    python3 - "$JOURNEY_STATE" "$AFT_WORK_DIR" "$AFT_LOOM_CONFIG_DIR" <<'PY' || return 1
+import hashlib,json,os,pathlib,subprocess,sys,tarfile
+state,run,config=map(pathlib.Path,sys.argv[1:])
+ws=json.load(open(state/'workspace.json'))['data']
+product=pathlib.Path(ws['path']).resolve()
+allowed=[state.resolve(),(config/'workspaces'/ws['name']).resolve()]
+assert product.is_relative_to(allowed[0]) or product==allowed[1],(product,allowed)
+assert state.resolve().is_relative_to(run.resolve()),state
+preview=json.load(open(state/'delete-preview-before.json'))
+for item in preview['items']:
+    path=pathlib.Path(item['path']).resolve()
+    assert any(path.is_relative_to(root) for root in allowed),(path,allowed)
+manifest={'workspace':ws['id'],'product_root':str(product),'preview':preview,'trees':[],'files':[]}
+for root in [product,state/'repo']:
+    assert root.is_dir(),root
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink():
+            manifest['files'].append({'path':str(path),'symlink':os.readlink(path)})
+        elif path.is_file():
+            h=hashlib.sha256()
+            with path.open('rb') as f:
+                while data:=f.read(1024*1024):h.update(data)
+            manifest['files'].append({'path':str(path),'sha256':h.hexdigest(),'size':path.stat().st_size})
+    gitroots=[root]+[p.parent for p in root.rglob('.git')]
+    for tree in sorted(set(gitroots)):
+        probe=subprocess.run(['git','-C',str(tree),'rev-parse','HEAD'],capture_output=True,text=True)
+        if probe.returncode:continue
+        read=lambda *args:subprocess.check_output(['git','-C',str(tree),*args],text=True)
+        manifest['trees'].append({'path':str(tree),'head':probe.stdout.strip(),'refs':read('for-each-ref','--format=%(refname) %(objectname)'),'index':read('ls-files','--stage'),'status':read('status','--porcelain=v1','--untracked-files=all'),'dirty_patch':read('diff','--binary','HEAD')})
+with tarfile.open(state/'product-before-delete.tar.gz','w:gz') as archive:
+    archive.add(product,arcname='product-workspace')
+    archive.add(state/'repo',arcname='source-fixture')
+(state/'product-before-delete-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+(state/'product-root-before-delete.txt').write_text(str(product)+'\n')
+PY
+    curl -fsS --max-time 10 "$JOURNEY_API/delete/preview" > "$JOURNEY_STATE/delete-preview-confirmed.json" || return 1
+    local fingerprint
+    fingerprint="$(python3 - "$JOURNEY_STATE" <<'PY'
+import json,pathlib,sys
+state=pathlib.Path(sys.argv[1]);before=json.load(open(state/'delete-preview-before.json'));after=json.load(open(state/'delete-preview-confirmed.json'))
+assert before['fingerprint']==after['fingerprint'] and before['items']==after['items'],'Deletion preview changed during archive; retain all evidence'
+assert len(after['fingerprint'])==64,after
+print(after['fingerprint'])
+PY
+)" || return 1
+    curl --fail-with-body -sS --max-time 30 -X DELETE "$JOURNEY_API" \
+        -H "X-Loom-Delete-Fingerprint: $fingerprint" > "$JOURNEY_STATE/delete-workspace.json" || {
         printf 'guarded workspace deletion refused; evidence retained\n' > "$JOURNEY_STATE/cleanup.failed"
         return 1
     }
-    # Retain provider records and bare refs for the executor's post-run inspection.
-    printf 'workspace API deletion succeeded; local Git/provider evidence retained\n' > "$JOURNEY_STATE/cleanup.txt"
+    curl -fsS --max-time 10 "$AFT_BASE_URL/api/workspaces" > "$JOURNEY_STATE/workspaces-after-delete.json" || return 1
+    python3 - "$JOURNEY_STATE" <<'PY' || return 1
+import json,pathlib,sys
+state=pathlib.Path(sys.argv[1]);ws=json.load(open(state/'workspace.json'))['data']['id'];rows=json.load(open(state/'workspaces-after-delete.json'))
+if isinstance(rows,dict):rows=rows.get('data',rows.get('workspaces',[]))
+assert isinstance(rows,list),rows
+assert not any(row.get('id')==ws for row in rows),(ws,rows)
+product=pathlib.Path((state/'product-root-before-delete.txt').read_text().strip())
+assert not product.exists(),product
+(state/'cleanup-post-state.json').write_text(json.dumps(dict(workspace=ws,registered=False,product_root_removed=True))+'\n')
+PY
+    printf 'workspace API deletion and removal readbacks succeeded; local archives/provider evidence retained\n' > "$JOURNEY_STATE/cleanup.txt"
     rm "$JOURNEY_STATE/cleanup.failed"
 }
 

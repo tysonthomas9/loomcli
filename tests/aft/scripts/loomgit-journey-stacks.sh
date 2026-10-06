@@ -65,9 +65,7 @@ trap diagnose ERR
 
 case "$phase" in
 setup)
-  if [[ "$case_name" == *feedback ]]; then
-    loom trigger bindings create --route-key github.pull_request_review.submitted --workflow epic-runner --secret aft-journey-signing-secret > "$work/binding.txt"
-  fi
+  # The first normal TaskRun registers the builtin workflow before feedback intake.
   ;;
 teardown)
   [[ ! -f "$work/cleanup.txt" ]] || exit 0
@@ -101,7 +99,14 @@ published)
   settled=false
   for _ in $(seq 1 45); do
     newest "$slot" > "$work/newest-$slot.txt"
-    if json "$work/revisions-$slot.json" 'r=max(v["data"],key=lambda r:r["number"]); assert r.get("pr_head") and r.get("applied"),r' 2>/dev/null; then settled=true; break; fi
+    if [[ "$(cat "$work/delivery-mode")" == trunk || "$slot" == future ]]; then
+      # P3.10/P3.10c: trunk publication can derive a separate revision while
+      # the applied working-area layer retains the other unlanded patches.
+      predicate='r=max(v["data"],key=lambda r:r["number"]); assert r.get("pr_head") and r["head_sha"]==r["pr_head"] and r.get("verdict") in ("approve","carried","feedback") and any(x.get("applied") and x.get("verdict") in ("approve","carried","feedback") for x in v["data"]),v'
+    else
+      predicate='r=max(v["data"],key=lambda r:r["number"]); assert r.get("pr_head") and r.get("applied"),r'
+    fi
+    if json "$work/revisions-$slot.json" "$predicate" 2>/dev/null; then settled=true; break; fi
     sleep 2
   done
   [[ "$settled" == true ]] || { echo "Stack journey phase assertion failed: $phase $slot" >&2; exit 1; }
@@ -112,6 +117,22 @@ published)
   git --git-dir="$remote" show "refs/heads/$branch:journey-$slot.txt" > "$work/published-$slot.txt"
   cmp "$work/source-$slot.txt" "$work/published-$slot.txt"
   get "issues/$(task_id "$slot")/diff?lead=lead" "$work/diff-$slot.json"
+  python3 - "$work" "$repo" "$slot" <<'PY'
+import json,pathlib,subprocess,sys
+w,repo,slot=pathlib.Path(sys.argv[1]),sys.argv[2],sys.argv[3]
+rows=json.load(open(w/f'revisions-{slot}.json'))['data']
+pub=max(rows,key=lambda r:r['number']); applied=[r for r in rows if r.get('applied')]
+assert applied,rows
+lead=subprocess.check_output(['git','-C',repo,'rev-parse','refs/heads/loom/ws/'+(w/'workspace.id').read_text().strip()+'/interactive/lead'],text=True).strip()
+assert any(r['head_sha']==lead for r in applied),(lead,rows)
+original=(w/f'source-{slot}.txt').read_bytes()
+assert subprocess.check_output(['git','-C',repo,'show',lead+f':journey-{slot}.txt'])==original
+assert subprocess.check_output(['git','-C',repo,'show',pub['head_sha']+f':journey-{slot}.txt'])==original
+if slot=='future':
+    for i in range(1,5):
+        assert subprocess.check_output(['git','-C',repo,'show',lead+f':journey-{i}.txt'])==(w/f'source-{i}.txt').read_bytes(),i
+(w/f'publication-lineage-{slot}.json').write_text(json.dumps(dict(lead_head=lead,applied_revisions=applied,publication_revision=pub),indent=2)+'\n')
+PY
   ;;
 chain)
   # Assert order, bases, isolated PR patches, bytes and native membership.
@@ -254,6 +275,9 @@ assert subprocess.check_output(['git','--git-dir='+sys.argv[2],'diff','--name-on
 PY
   ;;
 feedback-send)
+  if [[ ! -f "$work/binding.txt" ]]; then
+    loom trigger bindings create --route-key github.pull_request_review.submitted --workflow epic-runner --secret aft-journey-signing-secret > "$work/binding.txt"
+  fi
   pull "$slot"
   delivery="journey-$case_name-$slot-$RUN_ID"
   printf '%s\n' "$delivery" > "$work/delivery-$slot.id"
