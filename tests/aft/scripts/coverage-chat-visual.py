@@ -25,9 +25,10 @@ RUN = required("RUN_ID")
 API = required("AFT_API_URL").rstrip("/")
 PREFIX = f"/api/workspaces/{urllib.parse.quote(WS, safe='')}/v1/agents"
 NAMES = {case: f"aft-{RUN}-cov-visual-{case}" for case in ("render", "input")}
+MOBILE_WS_NAMES = [f"aft-{RUN}-visual-ws-{index}" for index in range(1, 4)]
 
 
-def request(path, method="GET", body=None, key=None):
+def request(path, method="GET", body=None, key=None, expected_status=None):
     headers = {"Accept": "application/json"}
     data = None
     if body is not None:
@@ -38,6 +39,8 @@ def request(path, method="GET", body=None, key=None):
     with urllib.request.urlopen(
         urllib.request.Request(API + path, data=data, headers=headers, method=method), timeout=15
     ) as response:
+        if expected_status is not None:
+            assert response.status == expected_status, (method, path, response.status)
         raw = response.read()
         if response.status == 204:
             assert not raw, "204 response unexpectedly carried a body"
@@ -225,6 +228,61 @@ def mouse_focus_skip_link():
     browser("click", "main#main-content")
     assert evaluate("(() => { const a=document.querySelector('a[href=\"#main-content\"]'); a.focus(); return document.activeElement===a; })()")
     skip_link("mouse_focus")
+
+
+def workspace_data(path):
+    response = request(path)
+    assert response["success"] and isinstance(response["data"], dict), response
+    return response["data"]
+
+
+def create_mobile_roster():
+    current("input")
+    active_path = f"/api/workspaces/{urllib.parse.quote(WS, safe='')}"
+    before = workspace_data(active_path)
+    baseline = before["workspaces"]
+    assert any(w["id"] == WS for w in baseline), "current real workspace absent from roster"
+    needed = max(0, 4 - len(baseline))
+    names = MOBILE_WS_NAMES[:needed]
+    assert all(re.fullmatch(r"[A-Za-z0-9_-]{1,32}", name) for name in names), names
+    assert not any(w["name"] in names for w in baseline), "run-owned workspace name already exists"
+    plan = {"baseline": [{"id": w["id"], "name": w["name"]} for w in baseline], "planned_names": names}
+    write("mobile-workspace-plan.json", plan)
+    created = []
+    for name in names:
+        try:
+            response = request("/api/workspaces", "POST", {"name": name, "type": "empty"}, expected_status=201)
+        except Exception as exc:
+            write("mobile-workspace-blocked.json", {"status": "blocked", "prerequisite":
+                  "this isolated serve must enable POST /api/workspaces type=empty", "name": name, "error": str(exc)})
+            raise AssertionError("BLOCKED: product workspace-create API did not provision an empty roster workspace") from exc
+        assert response["success"] and isinstance(response["data"], dict), response
+        row = next((w for w in response["data"]["workspaces"] if w["name"] == name), None)
+        assert row and row["id"] and row["id"] != WS, response
+        actual = workspace_data(f"/api/workspaces/{urllib.parse.quote(row['id'], safe='')}")
+        assert actual["id"] == row["id"] and actual["name"] == name and actual["repos"] == [], actual
+        active = workspace_data(active_path)
+        assert any(w["id"] == row["id"] and w["name"] == name for w in active["workspaces"]), active
+        created.append({"id": row["id"], "name": name, "repos": actual["repos"]})
+        write("mobile-workspace-created.json", created)
+    write("mobile-workspace-roster.json", {"baseline": plan["baseline"], "created": created})
+
+
+def mobile_roster_check():
+    current("input")
+    plan = json.loads((WORK / "mobile-workspace-plan.json").read_text())
+    live = workspace_data(f"/api/workspaces/{urllib.parse.quote(WS, safe='')}")
+    expected = {w["name"] for w in plan["baseline"]} | set(plan["planned_names"])
+    actual = {w["name"] for w in live["workspaces"]}
+    created_path = WORK / "mobile-workspace-created.json"
+    created = json.loads(created_path.read_text()) if created_path.exists() else []
+    assert {w["name"] for w in created} == set(plan["planned_names"]), (created, plan)
+    assert all(any(w["id"] == item["id"] and w["name"] == item["name"] for w in live["workspaces"])
+               for item in created), (created, live["workspaces"])
+    shown = evaluate("""[...document.querySelectorAll('nav[aria-label="Primary"] [aria-label="Workspace selector"] button')]
+      .map(b=>b.getAttribute('aria-label')).filter(x=>x?.startsWith('Switch to ')).map(x=>x.slice(10))""")
+    assert expected == actual == set(shown) and len(shown) == len(set(shown)) >= 4, (expected, actual, shown)
+    write("mobile-workspace-dom.json", {"api": live["workspaces"], "nav_names": shown})
 
 
 MOBILE_LAYOUT_JS = r"""(() => {
@@ -753,7 +811,7 @@ def reduced_saved_check():
     write("render-reduced-end.json", {"delivered": delivered, "turn_completed": end, "answer": answer, "dom": shown})
 
 
-def cleanup():
+def cleanup_agents():
     for case, expected in NAMES.items():
         if not (WORK / f"{case}.id").exists():
             continue
@@ -764,6 +822,42 @@ def cleanup():
         assert a["preset"] == "lead" and a["created_by_kind"] == "user" and a["parent_agent_id"] is None, a
         if not a.get("archived_at"):
             request(f"{PREFIX}/{a['agent_id']}/archive", "POST", {"reason": "cancelled"}, f"cov-visual-{RUN}-{case}-archive")
+
+
+def cleanup_mobile_workspaces():
+    plan_path = WORK / "mobile-workspace-plan.json"
+    if not plan_path.exists():
+        return
+    plan = json.loads(plan_path.read_text())
+    assert all(name in MOBILE_WS_NAMES for name in plan["planned_names"]), plan
+    baseline = {row["id"] for row in plan["baseline"]}
+    active_path = f"/api/workspaces/{urllib.parse.quote(WS, safe='')}"
+    roster = workspace_data(active_path)["workspaces"]
+    removed = []
+    for name in plan["planned_names"]:
+        matches = [row for row in roster if row["name"] == name]
+        assert len(matches) <= 1, matches
+        if not matches:
+            continue
+        row = matches[0]
+        assert row["id"] not in baseline and row["id"] != WS, row
+        actual = workspace_data(f"/api/workspaces/{urllib.parse.quote(row['id'], safe='')}")
+        assert actual["id"] == row["id"] and actual["name"] == name and actual["repos"] == [], actual
+        response = request(f"/api/workspaces/{urllib.parse.quote(row['id'], safe='')}", "DELETE", expected_status=200)
+        assert response["success"], response
+        remaining = workspace_data(active_path)["workspaces"]
+        assert not any(w["id"] == row["id"] for w in remaining), remaining
+        removed.append({"id": row["id"], "name": name})
+        write("mobile-workspace-cleanup.json", removed)
+    assert all(any(row["id"] == original["id"] and row["name"] == original["name"] for row in workspace_data(active_path)["workspaces"])
+               for original in plan["baseline"]), "baseline workspace roster changed during owned cleanup"
+
+
+def cleanup():
+    try:
+        cleanup_agents()
+    finally:
+        cleanup_mobile_workspaces()
 
 
 def main():

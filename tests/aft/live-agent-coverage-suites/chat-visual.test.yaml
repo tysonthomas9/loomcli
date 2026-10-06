@@ -263,13 +263,17 @@ tests:
         intent: "Wait for the original name in the Chat header"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-restored input'
         intent: "Read back the exact restored name from the saved Agent row and visible header"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" create-mobile-roster'
+        intent: "Create only the needed real empty workspaces through the isolated serve API, saving exact IDs for teardown"
       - reload: true
         intent: "Open a fresh Chat document for the first-Tab skip-link journey"
       - wait:
           fn: >-
             document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input' &&
-            !!document.querySelector('nav[aria-label="Primary"] [aria-label="Workspace selector"]')
-        intent: "Wait for the authentic workspace rail and original Lead title"
+            document.querySelectorAll('nav[aria-label="Primary"] [aria-label="Workspace selector"] button[aria-label^="Switch to "]').length >= 4
+        intent: "Wait for the four authentic workspace avatars and original Lead title"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-roster-check'
+        intent: "Compare exact roster names and IDs from product API with visible switcher avatars before layout checks"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" skip-link hidden'
         intent: "Measure the real skip link hidden before keyboard use"
       - press: Tab
