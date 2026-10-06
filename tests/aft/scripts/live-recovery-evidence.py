@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Noncredential Agent API evidence for the paid recovery/lifecycle AFT suite.
 
-The optional native probe is an executable owned by the stack runner. It must
-query inside that run's container and print only native_id and session_root.
+The native probe is an executable owned by the stack runner. It queries inside
+that run's container and prints only agent_id, harness, native_id and native_root.
 """
 
 import json
@@ -27,6 +27,23 @@ def get(path):
 
 def agent_path(agent_id):
     return f"/api/workspaces/{urllib.parse.quote(WS)}/v1/agents/{urllib.parse.quote(agent_id)}"
+
+
+def verify_repo():
+    registry = get(f"/api/workspaces/{urllib.parse.quote(WS)}")
+    assert registry.get("success") is True, "workspace registry read failed"
+    data = registry["data"]
+    assert data["id"] == WS, "workspace registry identity changed"
+    repos = data["repos"]
+    assert len(repos) == 1 and repos[0]["name"] == "source-repo", "unexpected workspace repos"
+    canonical = data["path"].rstrip("/") + "/source-repo"
+    assert repos[0]["path"] == canonical, "source repo is not the managed workspace import"
+    assert os.environ["AFT_AGENT_FLOW_REPO"] == canonical, "runner repo differs from registry"
+    (OUT / "live-recovery-repo.json").write_text(json.dumps({
+        "workspace_id": WS, "workspace_path": data["path"],
+        "repo_name": repos[0]["name"], "repo_path": canonical,
+        "source": "GET /api/workspaces/{ws}",
+    }, indent=2) + "\n")
 
 
 def owned_id(label):
@@ -134,5 +151,5 @@ def gone(label):
 
 if __name__ == "__main__":
     command, *args = sys.argv[1:]
-    {"id": owned_id, "capture": capture, "compare": compare,
+    {"repo": verify_repo, "id": owned_id, "capture": capture, "compare": compare,
      "delivery": delivery, "gone": gone}[command](*args)
