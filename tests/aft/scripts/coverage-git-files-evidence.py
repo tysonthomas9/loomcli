@@ -173,6 +173,25 @@ def committed(label, path, marker):
                                  "completion": {"event_id": completed[0]["event_id"], "payload": completed[0]["payload"]}})
 
 
+def git_visible(label):
+    saved = json.loads((WORK / f"{label}-committed.json").read_text())
+    git = saved["git"]
+    script = """(() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+      return JSON.stringify({ text: p?.textContent || '',
+        ahead: p?.querySelector('[data-type=ahead]')?.textContent || '',
+        behind: p?.querySelector('[data-type=behind]')?.textContent || '' }); })()"""
+    raw = subprocess.check_output(
+        ["agent-browser", "--session", env("AFT_SESSION"), "eval", script], text=True
+    ).strip()
+    visible = json.loads(raw)
+    if isinstance(visible, str):
+        visible = json.loads(visible)
+    assert git["branch"] in visible["text"] and git["target_branch"] in visible["text"], visible
+    assert f"cov-files-{RUN}-commit" in visible["text"], visible
+    assert visible["ahead"].strip() == (f"+{git['ahead']} ahead" if git["ahead"] else ""), visible
+    assert visible["behind"].strip() == (f"-{git['behind']} behind" if git["behind"] else ""), visible
+
+
 def cleanup():
     if not WORK.exists():
         return

@@ -348,6 +348,8 @@ tests:
                 t.includes('loom/agent/' + location.pathname.split('/').pop()) &&
                 Array.from(p.querySelectorAll('button')).some(b=>b.textContent.includes('Create PR') && !b.disabled); })()
         intent: "Show the child's own branch, committed history and visible Create PR control"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" git_visible git'
+        intent: "Match the visible branch, target, ahead and behind badges to this child's saved Git status"
       - click: { role: button, name: Create PR, exact: true }
         intent: "Open the enabled Create PR form without submitting it"
       - wait:
@@ -371,6 +373,8 @@ tests:
           fn: >-
             location.search==='?tab=git' && document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent.includes('cov-files-${RUN_ID}-commit')
         intent: "Show the same child commit after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" git_visible git'
+        intent: "Recheck the child's displayed branch, target and ahead/behind counts after reload"
       - click: { role: button, name: Diff, exact: true }
         intent: "Open the same child's Diff tab"
       - wait:
