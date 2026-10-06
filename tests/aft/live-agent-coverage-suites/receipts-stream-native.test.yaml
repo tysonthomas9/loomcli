@@ -70,8 +70,8 @@ tests:
                 document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle'); })()
         budget: 180000
         intent: "Show the queued message delivered once and answered after native restart"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture native resumed && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" prefix native first resumed && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" delivered native resumed "NATIVE_WAIT-${RUN_ID}: after the inspection, name the repository entry point exactly once." && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" native native after && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" native-compare native before after'
-        intent: "Verify stable AgentID/NativeRef, changed native PID, exact history and one delivered input key"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture native resumed && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" prefix native first resumed && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" delivered native resumed "NATIVE_WAIT-${RUN_ID}: after the inspection, name the repository entry point exactly once." && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" native native after && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" native-compare native before after && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" native-count native resumed'
+        intent: "Verify stable AgentID/NativeRef, changed native PID, exact history and one actual native user message"
       - reload: true
         intent: "Reload Chat after native recovery"
       - wait:
@@ -90,5 +90,5 @@ tests:
                 document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle'); })()
         budget: 180000
         intent: "Show the recovered OpenCode session answer a new real turn"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture native final && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" prefix native resumed final && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" delivered native final "NATIVE_NEXT-${RUN_ID}: use a tool to read README.md again and name the file exactly."'
-        intent: "Verify restored saved history, unique native input keys and exact next delivered text"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture native final && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" prefix native resumed final && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" delivered native final "NATIVE_NEXT-${RUN_ID}: use a tool to read README.md again and name the file exactly." && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" native-count native final'
+        intent: "Verify restored saved history, one native input for the next turn and exact delivered text"
