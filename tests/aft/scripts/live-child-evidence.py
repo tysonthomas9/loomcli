@@ -186,6 +186,27 @@ def completed(label, lead_label, *names):
                       f"completed post-delivery messages: {len(replies)}")
 
 
+def cancellation_ready(lead, child, lead_id, child_id, child_name):
+    return (lead.get("agent_id") == lead_id and lead.get("preset") == "lead" and
+            lead.get("state") == "idle" and not lead.get("running_turn_id") and
+            child.get("agent_id") == child_id and child.get("name") == child_name and
+            child.get("preset") == "task" and child.get("parent_agent_id") == lead_id and
+            child.get("root_agent_id") == lead_id and child.get("state") == "active" and
+            bool(child.get("running_turn_id")) and child.get("outcome") is None and
+            child.get("finished_at") is None)
+
+
+def cancel_ready(lead_label, child_name):
+    lead_id = (WORK / lead_label).read_text().strip()
+    child_id = (WORK / f"cancel-{child_name}.id").read_text().strip()
+    lead, child = agent(lead_id), agent(child_id)
+    assert cancellation_ready(lead, child, lead_id, child_id, child_name), (
+        "cancel Send requires the saved idle Lead and its saved active child turn")
+    save("cancel-ready", {"lead_id": lead_id, "lead_state": lead["state"],
+                          "child_id": child_id, "child_state": child["state"],
+                          "child_running_turn_id": child["running_turn_id"]})
+
+
 def cancelled(label, lead_label, name):
     parent = load(lead_label)
     child_id = (WORK / f"{label}-{name}.id").read_text().strip()
