@@ -47,6 +47,7 @@ export AFT_REAL_BACKEND=opencode
 export AFT_TESTS_DIR="$TESTS_DIR" AFT_WORK_DIR=/private/tmp/aft-agent-flows-validation RUN_ID=validation
 export AFT_RESTART_SERVE="$TESTS_DIR/scripts/agent-flows-restart-serve.sh"
 export AFT_NATIVE_SESSION_PROBE="$TESTS_DIR/scripts/agent-flows-native-session.sh"
+export AFT_NATIVE_MODEL_PROBE="$TESTS_DIR/scripts/agent-flows-native-model.sh"
 export AFT_SELECT_AGENT_MODEL="$TESTS_DIR/scripts/agent-flows-select-model.sh"
 case_count="$(node --input-type=module - "$AFT_DIR/dist/runner.js" "${suites[@]}" <<'NODE' | tr -d '\r'
 import {pathToFileURL} from 'node:url';

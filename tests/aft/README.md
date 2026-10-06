@@ -39,9 +39,13 @@ printed `/private/tmp/aft-agent-flows.*/evidence` path; it removes only its own
 stack, auth seed, and browser profiles. AFT's recovery agent is disabled while
 the real model may incur provider cost. To validate the combined suite schema
 and case count without starting a stack, add `AFT_ARGS=--validate-only`.
-Before Send, each live suite calls `$AFT_SELECT_AGENT_MODEL` with its owned Lead
-name; the runner validates `AFT_REAL_MODEL` (default `openai/gpt-5.5`) against
-the owned OpenCode catalog and records the UI-saved model readback.
+Before Send, each live suite calls `$AFT_SELECT_AGENT_MODEL` on its owned Lead
+Chat route; the optional Lead name must match that route. The runner validates
+`AFT_REAL_MODEL` (default `openai/gpt-5.5`) against the owned OpenCode catalog
+and records the UI-saved model readback. `$AFT_NATIVE_MODEL_PROBE <child-agent-id>`
+reads a run-owned child's current OpenCode session model inside the owned
+container. Its receipt distinguishes the registry request, native model, and
+the separate suite evidence needed to prove a completed answer.
 
 Extra aft flags go through `AFT_ARGS`, e.g.
 `make test-aft AFT_ARGS="--screenshots --record-all"`.
