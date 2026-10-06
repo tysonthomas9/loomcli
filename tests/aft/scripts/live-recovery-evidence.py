@@ -87,7 +87,17 @@ def native(agent_id):
             ("owned manifest mismatch", "owned manifest mismatch"),
             ("runner project mismatch", "runner project mismatch"),
         )
-        diagnostic = next((safe for phrase, safe in known if phrase in stderr), "unrecognized stderr suppressed")
+        native_categories = {
+            f"native probe: {reason}" for reason in (
+                "agent-row-missing", "agent-name-not-run-owned", "harness-mismatch",
+                "native-id-missing", "native-root-missing", "native-owner-mismatch",
+            )
+        }
+        diagnostic = next((line.strip() for line in stderr.splitlines()
+                           if line.strip() in native_categories), None)
+        if diagnostic is None:
+            diagnostic = next((safe for phrase, safe in known if phrase in stderr),
+                              "unrecognized stderr suppressed")
         raise AssertionError(
             f"owned native-session probe exited {error.returncode}; sanitized stderr: {diagnostic}"
         ) from None
