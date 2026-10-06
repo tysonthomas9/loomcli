@@ -153,7 +153,8 @@ tests:
         intent: "Require expanded Thinking text when the first real turn saved reasoning; otherwise record the exact provider capability blocker"
 
   # UI0 empty/focus/keyboard/autogrow/header; 1.8a/1.8c literal text;
-  # UI6/7/7b hover and narrow geometry. The source is a genuine user send;
+  # UI6/7/7b hover and narrow geometry; SK1 and MB1/MB1b actual viewport.
+  # The source is a genuine user send;
   # this case does not claim a successful model reply.
   - name: chat composer and long literal user text stay usable at narrow widths
     intent: A new real Lead's Chat keeps keyboard and rename behavior, saves an unsafe-shaped long user message literally, and fits its hover pill at documented narrow widths.
@@ -248,3 +249,42 @@ tests:
         intent: "Reveal all saved characters after reload"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" input-reload-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot input reloaded'
         intent: "Compare the exact saved user event and full safe rendered text after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-reloaded input'
+        intent: "Prove the changed header name survived reload in the exact saved Agent row"
+      - click: { role: button, name: "Rename agent", exact: true }
+        intent: "Open inline rename again to restore the runner-declared Lead identity"
+      - fill: { label: "Agent name", value: "aft-${RUN_ID}-cov-visual-input" }
+        intent: "Restore the exact cataloged Lead name through real Chat UI"
+      - press: Enter
+        intent: "Save the restored Lead name"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input'
+        intent: "Wait for the original name in the Chat header"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-restored input'
+        intent: "Read back the exact restored name from the saved Agent row and visible header"
+      - reload: true
+        intent: "Open a fresh Chat document for the first-Tab skip-link journey"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input' &&
+            !!document.querySelector('nav[aria-label="Primary"] [aria-label="Workspace selector"]')
+        intent: "Wait for the authentic workspace rail and original Lead title"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" skip-link hidden'
+        intent: "Measure the real skip link hidden before keyboard use"
+      - press: Tab
+        intent: "Use the first keyboard Tab on the freshly loaded Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" skip-link tab'
+        intent: "Read focused and visible skip-link state and capture its keyboard screenshot"
+      - press: Enter
+        intent: "Activate Skip to main content"
+      - press: Tab
+        intent: "Move to the first control within main"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" skip-link entered'
+        intent: "Verify main-content hash and keyboard focus inside main"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mouse-focus-skip-link'
+        intent: "After a real main-area mouse click, focus the link and verify it stays visually hidden"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-layout 360 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-layout 390 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-layout 470 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-layout 557'
+        intent: "Set actual phone/tablet viewports, measure overflow, single rail, active workspace, name, uncovered composer and header, and capture both themes"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-switcher 360 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-switcher 390 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-switcher 470 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-switcher 557'
+        intent: "Check authentic workspace avatars/Add at scroll start, odd offset and end, with whole-item and more-hint readback; fail explicitly if the real roster cannot exercise overflow"
