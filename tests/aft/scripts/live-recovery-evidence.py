@@ -93,7 +93,8 @@ def native(agent_id):
         ) from None
     value = json.loads(result.stdout)
     assert value.get("agent_id") == agent_id and value.get("harness") == os.environ["AFT_REAL_BACKEND"]
-    assert value.get("native_id") and value.get("native_root"), "native probe returned no qualified ID/root"
+    assert isinstance(value.get("native_id"), str) and value["native_id"], "native probe returned no qualified ID"
+    assert isinstance(value.get("native_root"), str), "native probe returned no qualified root"
     return {"native_id": value["native_id"], "native_root": value["native_root"]}
 
 
