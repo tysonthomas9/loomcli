@@ -1,0 +1,394 @@
+# Paid real-OpenCode coverage. Run only on the runner-owned LOCALMODE stack.
+# Every named AFT step is a screenshot checkpoint. No test-body API writes.
+suite: coverage-agent-git-files
+classification: { area: agents, feature: real-agent-api-git-files, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_SELECT_AGENT_MODEL:?}" "${RUN_ID:?}"
+  test "$AFT_WS" = LOCALMODE
+  test "$AFT_REAL_BACKEND" = opencode
+  mkdir -p "$AFT_WORK_DIR/coverage-git-files"
+teardown: |
+  python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" cleanup
+
+tests:
+  # Files editor Save, immediate GT1 Changes refresh, exact server version and tabs.
+  - name: GF1 UI editor Save updates this Agent API checkout and survives every tab reload
+    intent: A person edits the checked-in README in this Lead's real Files editor, clicks Save, sees Changes and the added patch immediately, and reopens Chat, Info, Git, Diff and Files on the same saved agent ID.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open Agents in the owned fixture"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open New Agent"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the Lead template"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose Lead"
+      - fill: { testid: create-agent-name, value: "cov-files-${RUN_ID}-editor" }
+        intent: "Name the owned editor Lead"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Choose real OpenCode"
+      - click: { testid: create-agent-submit }
+        intent: "Create the Lead in the UI"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show the actual Agent API Chat route"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" claim editor'
+        intent: "Bind the route to the saved Lead ID and canonical repo"
+      - click: { role: button, name: Files, exact: true }
+        intent: "Open this Lead's Files tab"
+      - wait:
+          fn: >-
+            (() => { const id = location.pathname.split('/').pop();
+              const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              const root = p?.querySelector('[data-root-key^="agent:' + id + ':"]');
+              if (root?.getAttribute('aria-expanded') === 'false') root.click();
+              return location.search === '?tab=files' && !!p?.querySelector('[aria-label="README.md"]'); })()
+        intent: "Show the owned agent checkout and README before editing"
+      - click: { role: tab, name: "Changes 0" }
+        intent: "Open Changes before the edit"
+      - click: { role: tab, name: "Working tree · 0" }
+        intent: "Select uncommitted changes for the exact checkout"
+      - click: { role: tab, name: Files, exact: true }
+        intent: "Return to Files while the Working tree lens remains selected"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          prepare_editor editor README.md
+        intent: "Record the original README version and prepare an exact expected edit from its read-only content"
+      - click: { selector: "[role=tabpanel]:not([data-hidden]) [aria-label='README.md']" }
+        intent: "Open the checked-in README in the real editor"
+      - wait:
+          fn: >-
+            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              return p?.querySelector('.cm-content[contenteditable=true]') &&
+                Array.from(p.querySelectorAll('button')).some(b => b.textContent.trim() === 'Save'); })()
+        intent: "Show editable CodeMirror and Save before typing"
+      - run: |
+          agent-browser --session "$AFT_SESSION" fill '[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]' "$(cat "$AFT_WORK_DIR/coverage-git-files/editor-expected.txt")"
+        intent: "Type the README plus its run marker in the actual CodeMirror editor"
+      - wait:
+          fn: >-
+            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              return p?.querySelector('.cm-content')?.textContent?.includes('COV_FILES_${RUN_ID}_EDITOR') &&
+                Array.from(p.querySelectorAll('button')).some(b => b.textContent.trim() === 'Save' && !b.disabled); })()
+        intent: "Show the unsaved text and enabled Save control"
+      - click: { role: button, name: Save, exact: true }
+        intent: "Save using Files, not an API or shell write"
+      - wait:
+          fn: >-
+            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              return Array.from(p?.querySelectorAll('button[role=tab]') || []).some(b => b.getAttribute('aria-label') === 'Changes 1'); })()
+        intent: "Show Changes 1 without a page reload after Save"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          file_state editor saved README.md "@$AFT_WORK_DIR/coverage-git-files/editor-expected.txt"
+        intent: "Verify exact saved content, changed strong version and one scoped checkout change"
+      - click: { role: tab, name: "Changes 1" }
+        intent: "Open the live Changes lens"
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="Open diff for README.md (Modified)"]')
+        intent: "Show the exact README in this agent's Working tree"
+      - click: { role: button, name: "Open diff for README.md (Modified)" }
+        intent: "Open the changed file's patch"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[role=tabpanel]:not([data-hidden]) [data-type=add]')).some(e => e.textContent.includes('COV_FILES_${RUN_ID}_EDITOR'))
+        intent: "Show the added marker line in the visible Files diff"
+      - reload: true
+        intent: "Reload the Files route"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route editor files'
+        intent: "Confirm reloaded Files still addresses the saved Lead ID"
+      - wait:
+          fn: >-
+            location.search === '?tab=files' && !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="README.md"]')
+        intent: "Show the same README persisted after reload"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          file_state editor reloaded README.md "@$AFT_WORK_DIR/coverage-git-files/editor-expected.txt"
+        intent: "Read the same saved content and strong version after reload"
+      - click: { role: button, name: Git, exact: true }
+        intent: "Open this Lead's Git tab"
+      - wait:
+          fn: >-
+            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              return p?.textContent.includes('Git history') &&
+                p.textContent.includes('loom/agent/' + location.pathname.split('/').pop()) &&
+                Array.from(p.querySelectorAll('button')).some(b => b.textContent.includes('Create PR')); })()
+        intent: "Show the correct branch and visible Create PR control without publishing"
+      - reload: true
+        intent: "Reload Git on the same Agent API URL"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route editor git'
+        intent: "Confirm reloaded Git still addresses the saved Lead ID"
+      - wait:
+          fn: >-
+            location.search === '?tab=git' && document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent.includes('Git history')
+        intent: "Show Git persisted across reload"
+      - click: { role: button, name: Info, exact: true }
+        intent: "Open this Lead's Info"
+      - wait:
+          fn: >-
+            location.search === '?tab=info' && document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent.includes('cov-files-${RUN_ID}-editor')
+        intent: "Show Info bound to the same Lead"
+      - reload: true
+        intent: "Reload Info"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route editor info'
+        intent: "Confirm reloaded Info still addresses the saved Lead ID"
+      - click: { role: button, name: Chat, exact: true }
+        intent: "Return to the same Lead's Chat"
+      - wait:
+          fn: >-
+            location.search === '' && !!document.querySelector('[role=tabpanel]:not([data-hidden]) [data-testid=chat-transcript]')
+        intent: "Show Chat on the same Agent ID"
+      - reload: true
+        intent: "Reload Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route editor chat'
+        intent: "Confirm reloaded Chat still addresses the saved Lead ID"
+      - click: { role: button, name: Diff, exact: true }
+        intent: "Open this Lead's Diff"
+      - wait:
+          fn: >-
+            location.search === '?tab=diff' && !!document.querySelector('[role=tabpanel]:not([data-hidden])')
+        intent: "Show Diff bound to the same Agent ID"
+      - reload: true
+        intent: "Reload Diff"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route editor diff'
+        intent: "Confirm reloaded Diff still addresses the saved Lead ID"
+
+  # Context actions are performed only on files/folders created in this owned checkout.
+  - name: GF2 Files context actions create rename move and delete scoped paths
+    intent: A person uses every offered context action on disposable paths in one UI-created Lead, while an unrelated README stays byte-for-byte unchanged.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the Lead creation dialog for the context-action journey"
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-files-${RUN_ID}-actions" }
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" claim actions'
+        intent: "Bind every context write to the UI-created Lead and canonical repo"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" baseline actions sibling README.md'
+        intent: "Save the unaffected sibling's exact bytes and strong version"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" baseline editor other-checkout README.md'
+        intent: "Save the separate editor Lead checkout before context actions"
+      - click: { role: button, name: Files, exact: true }
+      - wait:
+          fn: >-
+            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])'); const id=location.pathname.split('/').pop();
+              const root=p?.querySelector('[data-root-key^="agent:' + id + ':"]'); if(root?.getAttribute('aria-expanded')==='false') root.click();
+              return !!p?.querySelector('[aria-label="README.md"]'); })()
+        intent: "Show the owned Files tree before context actions"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"README.md\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+        intent: "Open the README context menu to create a sibling folder"
+      - wait:
+          fn: >-
+            ['New File','New Folder','Rename','Move to...','Delete','Copy Path'].every(n => Array.from(document.querySelectorAll('[role=menuitem]')).some(e => e.textContent.trim()===n))
+        intent: "Show all six offered context actions before touching private paths"
+      - click: { role: menuitem, name: New Folder, exact: true }
+        intent: "Choose New Folder"
+      - fill: { label: File name, value: "cov-files-${RUN_ID}-folder" }
+        intent: "Name the private folder"
+      - press: Enter
+        intent: "Create the folder through Files"
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-folder"]')
+        intent: "Show the new folder in the owned tree"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"README.md\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+        intent: "Open the same menu for New File"
+      - click: { role: menuitem, name: New File, exact: true }
+        intent: "Choose New File"
+      - fill: { label: File name, value: "cov-files-${RUN_ID}-temporary.txt" }
+        intent: "Name the disposable file"
+      - press: Enter
+        intent: "Create the file through Files"
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-temporary.txt"]')
+        intent: "Show the new file before renaming"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          file_state actions created "cov-files-${RUN_ID}-temporary.txt" ""
+        intent: "Check that the new file belongs to this agent checkout"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-temporary.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+        intent: "Open the disposable file's context menu"
+      - click: { role: menuitem, name: Rename, exact: true }
+        intent: "Choose Rename"
+      - fill: { label: File name, value: "cov-files-${RUN_ID}-renamed.txt" }
+        intent: "Set the new private basename"
+      - press: Enter
+        intent: "Rename the file through Files"
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
+        intent: "Show the renamed file"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          absent actions "cov-files-${RUN_ID}-temporary.txt"
+        intent: "Verify the old path is absent"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-renamed.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+        intent: "Open the renamed file's menu for Move"
+      - click: { role: menuitem, name: "Move to...", exact: true }
+        intent: "Choose Move to"
+      - wait: { fn: "!!document.querySelector('[role=dialog][aria-label=\"Move to\"]')" }
+        intent: "Show the folder picker"
+      - click: { role: button, name: "cov-files-${RUN_ID}-folder", exact: true }
+        intent: "Select only the private folder"
+      - click: { role: button, name: Move, exact: true }
+        intent: "Move the disposable file through Files"
+      - wait:
+          fn: >-
+            !document.querySelector('[role=dialog][aria-label="Move to"]')
+        intent: "Show Move completed"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          file_state actions moved "cov-files-${RUN_ID}-folder/cov-files-${RUN_ID}-renamed.txt" ""
+        intent: "Verify the exact destination exists in this agent checkout"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          absent actions "cov-files-${RUN_ID}-renamed.txt"
+        intent: "Verify the old top-level name is gone"
+      - click: { selector: "[role=tabpanel]:not([data-hidden]) [aria-label='cov-files-${RUN_ID}-folder']" }
+        intent: "Expand the private destination folder"
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
+        intent: "Show the moved file inside the folder"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-renamed.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+        intent: "Open Delete on the moved file"
+      - click: { role: menuitem, name: Delete, exact: true }
+        intent: "Choose Delete"
+      - wait: { fn: "!!document.querySelector('[role=dialog]')" }
+        intent: "Show confirmation for the exact moved path"
+      - click: { role: button, name: Delete, exact: true }
+        intent: "Confirm Delete in Files"
+      - wait:
+          fn: >-
+            !document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
+        intent: "Show the moved file removed"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          absent actions "cov-files-${RUN_ID}-folder/cov-files-${RUN_ID}-renamed.txt"
+        intent: "Verify exact scoped deletion"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          unchanged actions README.md sibling
+        intent: "Verify the unrelated sibling bytes and version never changed"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          unchanged editor README.md other-checkout
+        intent: "Verify the other Agent API checkout stayed byte-for-byte unchanged"
+
+  # The child and its commit are produced by the real Loom Agent API turn.
+  - name: GF3 real child commit appears in its own Git history and Diff
+    intent: A UI-created real Lead delegates one private file commit to its own real child; a person opens that exact child's Git and Diff and sees the persisted branch, commit and patch with Create PR present.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the Lead creation dialog for the Git journey"
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-files-${RUN_ID}-git" }
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" claim git'
+        intent: "Bind the real UI-created Lead to its saved Agent API ID"
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Select and read back the route-bound real model before the turn"
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create to start exactly one task child named cov-files-child-${RUN_ID}.
+            Give it this brief: in your own worktree and branch, create only
+            cov-files-git-${RUN_ID}.txt with the exact text COV_FILES_${RUN_ID}_CHILD,
+            git add and commit only that file with subject cov-files-${RUN_ID}-commit.
+            Report the actual commit and file. Do not push or open a PR.
+            Wait for the child result, then report the real outcome.
+      - press: Enter
+        intent: "Send a real child delegation through Lead Chat"
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('cov-files-child-${RUN_ID}')
+        budget: 180000
+        intent: "Show the real child's Started marker"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          child git "cov-files-child-${RUN_ID}"
+        intent: "Bind the child to its saved parent ID, source repo, own worktree and branch"
+      - wait:
+          fn: >-
+            (() => { const c=document.querySelector('[data-testid=completion-record]');
+              return c?.dataset.outcome==='completed' && c.dataset.delivery==='delivered' &&
+                c.textContent.includes('cov-files-child-${RUN_ID}'); })()
+        budget: 240000
+        intent: "Show the child's actual completed result in Lead Chat"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          committed git "cov-files-git-${RUN_ID}.txt" "COV_FILES_${RUN_ID}_CHILD"
+        intent: "Read the exact child's persisted file, version and added patch"
+      - run: |
+          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-git-files/git-child.id")"
+        intent: "Verify the completed child used the selected native OpenCode model"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/coverage-git-files/git-child.id")?tab=git'"
+        intent: "Open the saved child's own Git route"
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[role=tabpanel]:not([data-hidden])'); const t=p?.textContent||'';
+              return t.includes('Git history') && t.includes('cov-files-${RUN_ID}-commit') &&
+                t.includes('loom/agent/' + location.pathname.split('/').pop()) &&
+                Array.from(p.querySelectorAll('button')).some(b=>b.textContent.includes('Create PR') && !b.disabled); })()
+        intent: "Show the child's own branch, committed history and visible Create PR control"
+      - click: { role: button, name: Create PR, exact: true }
+        intent: "Open the enabled Create PR form without submitting it"
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=tabpanel]:not([data-hidden]) input[placeholder=main]')
+        intent: "Show the PR-specific target field; this is separate from the hidden Git target selector"
+      - fill: { label: Target branch, value: "cov-files-preview-${RUN_ID}" }
+        intent: "Show that the per-PR target can be edited locally"
+      - click: { role: button, name: Cancel, exact: true }
+        intent: "Cancel the PR form without publishing or changing the Git target"
+      - wait:
+          fn: >-
+            !document.querySelector('[role=tabpanel]:not([data-hidden]) input[placeholder=main]')
+        intent: "Show the PR form closed with no external mutation"
+      - reload: true
+        intent: "Reload the exact child's Git route"
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route git git "$(cat "$AFT_WORK_DIR/coverage-git-files/git-child.id")"
+        intent: "Confirm Git still addresses the saved child ID"
+      - wait:
+          fn: >-
+            location.search==='?tab=git' && document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent.includes('cov-files-${RUN_ID}-commit')
+        intent: "Show the same child commit after reload"
+      - click: { role: button, name: Diff, exact: true }
+        intent: "Open the same child's Diff tab"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[role=tabpanel]:not([data-hidden]) [class*="filePath"]')).some(e=>e.textContent.trim()==='cov-files-git-${RUN_ID}.txt')
+        intent: "Show this child's exact committed file in Diff"
+      - click: { selector: "[role=tabpanel]:not([data-hidden]) [class*='fileRow'][role=button]" }
+        intent: "Expand the committed patch"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[role=tabpanel]:not([data-hidden]) [data-type=add]')).some(e=>e.textContent.includes('COV_FILES_${RUN_ID}_CHILD'))
+        intent: "Show the real child-created added line in Diff"
+      - reload: true
+        intent: "Reload the same child's Diff"
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route git diff "$(cat "$AFT_WORK_DIR/coverage-git-files/git-child.id")"
+        intent: "Confirm Diff still addresses the saved child ID"
+      - wait:
+          fn: >-
+            location.search==='?tab=diff' && Array.from(document.querySelectorAll('[role=tabpanel]:not([data-hidden]) [class*="filePath"]')).some(e=>e.textContent.trim()==='cov-files-git-${RUN_ID}.txt')
+        intent: "Show the committed file persisted in this child's Diff after reload"
