@@ -6,10 +6,11 @@ classification: { area: agents, feature: agent-api-children, surface: mixed, pur
 baseUrl: "${AFT_BASE_URL}"
 setup: |
   set -eu
-  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_REAL_BACKEND:?}" "${AFT_REAL_MODEL:?}" "${AFT_SELECT_AGENT_MODEL:?}" "${RUN_ID:?}"
+  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_REAL_BACKEND:?}" "${AFT_REAL_MODEL:?}" "${AFT_SELECT_AGENT_MODEL:?}" "${AFT_NATIVE_MODEL_PROBE:?}" "${RUN_ID:?}"
   test "$AFT_WS" = LOCALMODE
   case "$AFT_REAL_BACKEND" in opencode|codex) ;; *) exit 2 ;; esac
   test -x "$AFT_SELECT_AGENT_MODEL"
+  test -x "$AFT_NATIVE_MODEL_PROBE"
   mkdir -p "$AFT_WORK_DIR/live-children"
   python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" repo
 teardown: |
@@ -106,6 +107,14 @@ tests:
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" completed pair pair-lead
           "aft-child-a-${RUN_ID}" "aft-child-b-${RUN_ID}"
         intent: "Prove each real child turn, its own commit and diff, one keyed completion, one delivered notice, and the Lead's later combined reply"
+      - run: |
+          set -eu
+          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-a-${RUN_ID}.id")"
+        intent: "Compare child A's completed native OpenCode session model with its saved Agent API model"
+      - run: |
+          set -eu
+          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-b-${RUN_ID}.id")"
+        intent: "Compare child B's completed native OpenCode session model with its saved Agent API model"
       - reload: true
       - wait:
           fn: >-
