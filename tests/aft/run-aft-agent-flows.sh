@@ -3,24 +3,23 @@
 set -Eeuo pipefail
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_ROOT="$(cd "$TESTS_DIR/../.." && pwd)"
-SUITE_DIR="$TESTS_DIR/live-agent-flow-suites"
 die() { echo "[aft-agent-flows] $*" >&2; exit 2; }
-usage() { die 'usage: run-aft-agent-flows.sh --live --no-agent --real-backend opencode --max-real-cases N [--validate-only]'; }
+usage() { die 'usage: run-aft-agent-flows.sh --live --no-agent --real-backend opencode --max-real-cases N [--coverage-batch NAME] [--validate-only]'; }
 
-live=0 no_agent=0 backend='' cap='' validate_only=0
+live=0 no_agent=0 backend='' cap='' validate_only=0 coverage_batch=default batch_flags=0
 while (($#)); do
   case "$1" in
     --live) ((live+=1)); shift ;;
     --no-agent) ((no_agent+=1)); shift ;;
     --real-backend) (($#>=2)) || usage; backend="$2"; shift 2 ;;
     --max-real-cases) (($#>=2)) || usage; cap="$2"; shift 2 ;;
+    --coverage-batch) (($#>=2)) || usage; coverage_batch="$2"; ((batch_flags+=1)); shift 2 ;;
     --validate-only) ((validate_only+=1)); shift ;;
     *) usage ;;
   esac
 done
-[[ "$live" == 1 && "$no_agent" == 1 && "$backend" == opencode && "$validate_only" -le 1 ]] || usage
-[[ "$cap" =~ ^[1-9][0-9]*$ ]] || usage
-((cap <= 10)) || die '--max-real-cases exceeds the absolute ceiling of 10'
+[[ "$live" == 1 && "$no_agent" == 1 && "$backend" == opencode && "$validate_only" -le 1 && "$batch_flags" -le 1 ]] || usage
+[[ "$cap" =~ ^([1-9]|10)$ ]] || die '--max-real-cases must be an integer from 1 to 10'
 [[ -z "${AFT_BASE_URL:-}${AFT_API_URL:-}${AFT_SUITES:-}" ]] || die 'ambient AFT URL or suite override is refused; this runner owns its stack and corpus'
 [[ -z "${AFT_AGENT_FLOW_REPO:-}" ]] || die 'ambient Agent flow repository override is refused'
 [[ -z "${AFT_REAL_BACKEND:-}" || "$AFT_REAL_BACKEND" == opencode ]] || die 'conflicting ambient real backend'
@@ -28,19 +27,10 @@ done
 real_model="${AFT_REAL_MODEL:-openai/gpt-5.5}"
 [[ "$real_model" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$real_model" != aft/* ]] || die 'invalid real model ID'
 export AFT_REAL_MODEL="$real_model"
-[[ -d "$SUITE_DIR" ]] || die "missing suite directory: $SUITE_DIR"
-shopt -s nullglob
-suites=("$SUITE_DIR"/*.test.yaml)
-shopt -u nullglob
-((${#suites[@]} == 3)) || die "expected exactly three live Agent API suite files; found ${#suites[@]}"
-[[ -d "$SUITE_DIR" && ! -L "$SUITE_DIR" ]] || die 'suite directory must not be a symlink'
-for suite in "${suites[@]}"; do [[ -f "$suite" && ! -L "$suite" ]] || die "unsafe suite path: $suite"; done
-
-primary_root="$(git -C "$SOURCE_ROOT" worktree list --porcelain | sed -n '1s/^worktree //p' | tr -d '\r')"
-[[ -n "$primary_root" ]] || die 'could not locate the shared account lock root'
 AFT_DIR="${AFT_DIR:-/Users/tyson/codebase/code-agents/testing-app}"
 [[ -f "$AFT_DIR/dist/cli.js" && -f "$AFT_DIR/dist/runner.js" && -d "$AFT_DIR/node_modules" ]] || die "AFT checkout is not built: $AFT_DIR"
 command -v node >/dev/null || die 'node is required'
+command -v jq >/dev/null || die 'jq is required'
 export AFT_BASE_URL=http://127.0.0.1:1 AFT_API_URL=http://127.0.0.1:1 AFT_WS=LOCALMODE
 seed_repo=/workspace/source-repo
 export AFT_REAL_BACKEND=opencode
@@ -49,23 +39,22 @@ export AFT_RESTART_SERVE="$TESTS_DIR/scripts/agent-flows-restart-serve.sh"
 export AFT_NATIVE_SESSION_PROBE="$TESTS_DIR/scripts/agent-flows-native-session.sh"
 export AFT_NATIVE_MODEL_PROBE="$TESTS_DIR/scripts/agent-flows-native-model.sh"
 export AFT_SELECT_AGENT_MODEL="$TESTS_DIR/scripts/agent-flows-select-model.sh"
-case_count="$(node --input-type=module - "$AFT_DIR/dist/runner.js" "${suites[@]}" <<'NODE' | tr -d '\r'
-import {pathToFileURL} from 'node:url';
-const [loader, ...files] = process.argv.slice(2);
-const {loadSuite} = await import(pathToFileURL(loader).href);
-let count = 0;
-for (const file of files) {
-  const suite = loadSuite(file);
-  if (suite.tests.length < 1 || suite.tests.length > 3) throw new Error(`${file}: expected 1-3 cases`);
-  count += suite.tests.length;
-}
-process.stdout.write(String(count) + '\n');
-NODE
-)" || die 'suite schema validation failed'
+selection="$(node "$TESTS_DIR/scripts/agent-flows-selection.mjs" "$TESTS_DIR" "$AFT_DIR/dist/runner.js" "$coverage_batch")" \
+  || die 'suite selection or schema validation failed'
+case_count="$(jq -r '.count' <<< "$selection")" || die 'could not read selected case count'
 [[ "$case_count" =~ ^[1-9][0-9]*$ ]] || die 'could not count parsed AFT cases'
-((case_count <= cap && case_count <= 9)) || die "$case_count selected paid cases exceed cap $cap or the nine-case suite ceiling"
-echo "[aft-agent-flows] validated ${#suites[@]} suites and $case_count cases (cap $cap); real OpenCode will consume provider account usage"
-((validate_only == 0)) || exit 0
+((case_count <= cap && case_count <= 10)) || die "$case_count selected paid cases exceed cap $cap or the absolute ten-case ceiling"
+suites=()
+while IFS= read -r suite; do suites+=("$suite"); done < <(jq -r '.suites[].path' <<< "$selection")
+if ((validate_only)); then
+  echo "[aft-agent-flows] offline loader validation: batch $coverage_batch, ${#suites[@]} suites, $case_count cases (cap $cap); no stack or provider actions"
+  jq -c --arg source "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" '. + {source_head:$source}' <<< "$selection"
+  exit 0
+fi
+echo "[aft-agent-flows] validated batch $coverage_batch: ${#suites[@]} suites, $case_count cases (cap $cap); real OpenCode will consume provider account usage"
+
+primary_root="$(git -C "$SOURCE_ROOT" worktree list --porcelain | sed -n '1s/^worktree //p' | tr -d '\r')"
+[[ -n "$primary_root" ]] || die 'could not locate the shared account lock root'
 
 [[ "$SOURCE_ROOT" == /private/tmp/* ]] || die 'run from a separate /private/tmp source worktree'
 [[ -z "$(git -C "$SOURCE_ROOT" status --porcelain)" ]] || die 'source worktree must be clean and committed before a live run'
@@ -207,11 +196,11 @@ jq -n --arg head "$head_sha" --arg source "$SOURCE_ROOT" --arg fleet "$fleet_rep
   --arg apiUrl "$AFT_API_URL" --arg uiUrl "$AFT_BASE_URL" --arg evidence "$AFT_WORK_DIR" \
   --arg podmanHome "$AFT_PODMAN_HOME" --arg podmanConnection "$AFT_PODMAN_CONNECTION" \
   --arg podmanFingerprint "$connection_fingerprint" \
-  --arg run "$run_id" --argjson cases "$case_count" --argjson cap "$cap" \
+  --arg run "$run_id" --argjson cases "$case_count" --argjson cap "$cap" --argjson selection "$selection" \
   --argjson fleetPort "$fleet_port" --argjson apiPort "$api_port" --argjson uiPort "$ui_port" \
   --arg aftCliSha "$(shasum -a 256 "$AFT_DIR/dist/cli.js" | awk '{print $1}')" \
   --arg aftLoaderSha "$(shasum -a 256 "$AFT_DIR/dist/runner.js" | awk '{print $1}')" \
-  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:"real OpenCode external model",backend:"opencode",cases:$cases,cap:$cap,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
+  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:"real OpenCode external model",backend:"opencode",cases:$cases,cap:$cap,selection:$selection,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
   > "$run_root/evidence/manifest.json"
 
 if ! mkdir /private/tmp/dryhawk-stack-build.lock 2>/dev/null; then
@@ -269,9 +258,17 @@ for image in "$LOCAL_MODE_LOOM_AGENTS_IMAGE" "$LOCAL_MODE_FLEETDB_IMAGE"; do
 done
 
 echo "[aft-agent-flows] running $case_count paid cases on owned $project; required UI model $real_model; catalog candidate $model; screenshots and videos in $run_root/evidence"
+[[ "$(node "$TESTS_DIR/scripts/agent-flows-selection.mjs" "$TESTS_DIR" "$AFT_DIR/dist/runner.js" "$coverage_batch")" == "$selection" ]] \
+  || die 'selected suite contents changed after preflight'
 aft_status=0
 HOME="$run_root/aft-home" node "$AFT_DIR/dist/cli.js" run "${suites[@]}" --no-agent --screenshots --record-all \
   --report-dir "$run_root/evidence" --viewport 1920x1080 --timeout 30000 || aft_status=$?
+[[ -f "$run_root/evidence/last-run.json" ]] || die 'AFT produced no original run report'
+jq -e --argjson selected "$selection" '
+  [.tests[] | {suite,name}] as $actual |
+  ($actual | length) == $selected.count and
+  ($actual | sort_by(.suite,.name)) == ($selected.cases | sort_by(.suite,.name))' \
+  "$run_root/evidence/last-run.json" >/dev/null || die 'AFT report cases differ from the selected batch'
 
 # AgentInfo.model is the model saved on each actual Agent API row. The catalog
 # selection above is only a preflight candidate and may differ from UI defaults.
