@@ -60,15 +60,19 @@ tests:
         intent: Screenshot the expanded delegation details (CL4)
       - click: { selector: "[data-testid=agent-tray] button[aria-expanded]" }
         intent: Expand the live task child tray
-      - run: >-
-          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" activity repeat
-        intent: Bind the visible live preview to the same child's saved tool or reasoning event ID
       - wait:
           fn: >-
             (() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));
               return row?.getAttribute('data-tray-row') && row.textContent?.includes(' · ') &&
                 row.textContent?.match(/(▸|💭)/); })()
         intent: Screenshot the running child's current harmless tool or reasoning step and elapsed time (DF2)
+      - run: |
+          set -eu
+          id="$(cat "$AFT_WORK_DIR/coverage-children-activity/repeat.id")"
+          agent-browser --session "$AFT_SESSION" wait --fn "(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\"$id\"]'); const result=row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(▸|💭)/.test(result) && / · [0-9]+:[0-9][0-9]$/.test(result); })()"
+          agent-browser --session "$AFT_SESSION" screenshot "$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png"
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" activity repeat
+        intent: Match the exact visible child row and its current step to a saved event in that same running turn
       - wait:
           fn: >-
             (() => { const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]'));

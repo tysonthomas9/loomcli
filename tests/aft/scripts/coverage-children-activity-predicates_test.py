@@ -77,6 +77,43 @@ class ChildProofPredicates(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.run_pair()
 
+    def test_preview_rejects_prior_turn(self):
+        prior = event("item.completed", 1, "prior", {"itemKind": "tool", "tool": {"name": "bash"}}, "turn-old")
+        prior["agent_id"] = self.a
+        with self.assertRaisesRegex(AssertionError, "current-turn step"):
+            module.current_preview_event([prior], self.a, "turn-current", lambda prefix: prefix == "▸ Ran command")
+
+    def test_preview_rejects_wrong_child_even_with_matching_label(self):
+        wrong = event("item.completed", 1, "wrong", {"itemKind": "tool", "tool": {"name": "bash"}}, "turn-current")
+        wrong["agent_id"] = self.b
+        with self.assertRaisesRegex(AssertionError, "current-turn step"):
+            module.current_preview_event([wrong], self.a, "turn-current", lambda prefix: prefix == "▸ Ran command")
+
+    def test_preview_requires_visible_product_step(self):
+        right = event("item.completed", 1, "right", {"itemKind": "tool", "tool": {"name": "execute"}}, "turn-current")
+        right["agent_id"] = self.a
+        with self.assertRaisesRegex(AssertionError, "current-turn step"):
+            module.current_preview_event([right], self.a, "turn-current", lambda prefix: prefix == "▸ Ran command")
+        self.assertEqual(module.current_preview_event([right], self.a, "turn-current",
+                                                      lambda prefix: prefix == "▸ Ran code")["event_id"], "right")
+
+    def test_preview_rejects_older_step_in_same_turn(self):
+        old = event("item.completed", 1, "old", {"itemKind": "tool", "tool": {"name": "bash"}}, "turn-current")
+        latest = event("item.completed", 2, "latest", {"itemKind": "tool", "tool": {"name": "read"}}, "turn-current")
+        old["agent_id"] = latest["agent_id"] = self.a
+        with self.assertRaisesRegex(AssertionError, "latest saved current-turn step"):
+            module.current_preview_event([old, latest], self.a, "turn-current", lambda prefix: prefix == "▸ Ran command")
+
+    def test_switched_ref_rejects_wrong_saved_original_branch(self):
+        original = "assigned-child-branch"
+        actual = {"branch": f"cov-child-switched-{module.RUN}", "head": "a" * 40,
+                  "changed": [f"aft-child-fixtures/{module.RUN}/second.txt"]}
+        module.switched_ref({"branch": original}, {"branch": original, "head": None}, original, actual)
+        with self.assertRaisesRegex(AssertionError, "original branch"):
+            module.switched_ref({"branch": original}, {"branch": "other", "head": None}, original, actual)
+        with self.assertRaisesRegex(AssertionError, "original branch"):
+            module.switched_ref({"branch": "other"}, {"branch": original, "head": None}, original, actual)
+
 
 if __name__ == "__main__":
     unittest.main()
