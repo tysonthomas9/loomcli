@@ -170,17 +170,82 @@ def repeat_ready(lead_label, child_label):
     assert load("first")["child"] == child["agent_id"]
 
 
+def step_prefix(event):
+    payload = event["payload"]
+    if event["kind"] != "item.completed":
+        return None
+    if payload.get("itemKind") == "reasoning":
+        line = (payload.get("text") or "").strip().split("\n")[0].strip()
+        # The product strips Markdown here. Only compare the plain first-line
+        # subset, so an unsupported rendering cannot claim a match.
+        if not line or re.search(r"[`*_#]", line):
+            return None
+        label = f"💭 Thinking · {line}"
+        return f"{label[:59]}…" if len(label) > 60 else label
+    if payload.get("itemKind") != "tool":
+        return None
+    name = (payload.get("tool") or {}).get("name", "").strip()
+    short = name.split("/")[-1]
+    if re.search(r"(?:^|[^a-z])execute$", name, re.I):
+        action = "Ran code"
+    elif re.fullmatch(r"read|view|cat|read_?file|notebook_?read|image_?view", short, re.I):
+        action = "Read file"
+    elif re.fullmatch(r"edit|write|multi_?edit|patch|apply_?patch|str_?replace\w*|notebook_?edit|create_?file", short, re.I):
+        action = "Changed file"
+    elif re.fullmatch(r"bash|shell|command|exec(_?command)?|terminal|run\w*", short, re.I):
+        action = "Ran command"
+    elif re.fullmatch(r"grep|glob|find|ls|list|codesearch|search_?code|rg", short, re.I):
+        action = "Searched code"
+    elif re.fullmatch(r"web_?search|web_?fetch|fetch|browse", short, re.I):
+        action = "Searched the web"
+    else:
+        action = name[:1].upper() + name[1:] if name else "Tool call"
+    label = f"▸ {action}"
+    return f"{label[:59]}…" if len(label) > 60 else label
+
+
+def current_preview_event(history, child_id, turn_id, visible):
+    assert child_id and turn_id
+    steps = [event for event in history if event.get("agent_id") == child_id and
+             event.get("turn_id") == turn_id and step_prefix(event)]
+    assert steps, "no saved current-turn step matches the exact visible child preview"
+    latest = max(steps, key=lambda event: event["seq"])
+    assert visible(step_prefix(latest)), "latest saved current-turn step does not match the exact visible child preview"
+    return latest
+
+
+def visible_step(child_id, prefix):
+    script = """(() => {
+      const id = %s, prefix = %s;
+      const row = Array.from(document.querySelectorAll('[data-testid=agent-tray] [data-tray-row]'))
+        .find(x => x.dataset.trayRow === id);
+      const line = row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim() || '';
+      return !!row?.getClientRects().length && line.startsWith(prefix) &&
+        (line.length === prefix.length || line.slice(prefix.length).startsWith(' · '));
+    })()""" % (json.dumps(child_id), json.dumps(prefix))
+    output = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"], "eval", script], text=True)
+    return bool(re.search(r"\btrue\s*$", output))
+
+
 def activity(child_label):
     child = load(child_label)
     current = agent(child["agent_id"])
     assert current["state"] in ("active", "waiting") and current["running_turn_id"]
-    steps = [e for e in events(child["agent_id"]) if
-             e["kind"] == "item.completed" and e["payload"].get("itemKind") in ("tool", "reasoning")]
-    assert steps, "no saved real tool or reasoning step for the live tray preview"
-    last = steps[-1]
+    last = current_preview_event(events(child["agent_id"]), child["agent_id"], current["running_turn_id"],
+                                 lambda prefix: visible_step(child["agent_id"], prefix))
     save("activity", {"child": child["agent_id"], "event_id": last["event_id"],
-                      "turn_id": last.get("turn_id"), "item_kind": last["payload"]["itemKind"],
-                      "tool_name": last["payload"].get("tool", {}).get("name")})
+                      "turn_id": last["turn_id"], "item_kind": last["payload"]["itemKind"],
+                      "tool_name": last["payload"].get("tool", {}).get("name"),
+                      "visible_prefix": step_prefix(last)})
+
+
+def switched_ref(prior, second, original, actual):
+    branch, head, changed = actual["branch"], actual["head"], actual["changed"]
+    assert branch == f"cov-child-switched-{RUN}" and re.fullmatch(r"[0-9a-f]{40}", head)
+    assert changed == [f"aft-child-fixtures/{RUN}/second.txt"], changed
+    assert original and prior["branch"] == original, "first completion must report the assigned original branch"
+    assert second["branch"] == original and branch != original, "CL3 must report the original branch and an actual distinct switched ref"
+    assert not second["head"], "CL3 must not report an unowned head"
 
 
 def repeated(lead_label, child_label):
@@ -201,13 +266,11 @@ def repeated(lead_label, child_label):
     assert len(after) == 1 and all(x in reply_text(after[0]) for x in ("first", "second")), "expected one final combined summary"
     ref_helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-children-activity-ref.sh"
     actual = json.loads(subprocess.check_output(["bash", str(ref_helper), second["child"]], text=True))
-    branch, head, changed = actual["branch"], actual["head"], actual["changed"]
-    assert branch == f"cov-child-switched-{RUN}" and re.fullmatch(r"[0-9a-f]{40}", head)
-    assert changed == [f"aft-child-fixtures/{RUN}/second.txt"], changed
-    assert second["branch"] and not second["head"], "CL3 must report saved branch without an unowned head"
+    original = load(child_label)["branch"]
+    switched_ref(prior, second, original, actual)
     save("repeat-proof", {"keys": [prior["record_id"], second["record_id"]],
                           "first_reply": load("first-reply"), "final_reply": after[0]["event_id"],
-                          "actual_branch": branch, "actual_head": head, "second_record": second})
+                          "actual_branch": actual["branch"], "actual_head": actual["head"], "second_record": second})
 
 
 def busy(lead_label, first_label, second_label):
