@@ -9,8 +9,8 @@ setup: |
   : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_REAL_BACKEND:?}" "${RUN_ID:?}"
   test "$AFT_WS" = LOCALMODE
   case "$AFT_REAL_BACKEND" in opencode|codex) ;; *) exit 2 ;; esac
-  test "$AFT_AGENT_FLOW_REPO" = /workspace/source-repo
   mkdir -p "$AFT_WORK_DIR/live-children"
+  python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" repo
 teardown: |
   python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" cleanup
 
