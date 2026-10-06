@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const testsDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -148,4 +148,30 @@ try {
   console.log('agent-flow selection: default, named batch, and unsafe selections passed');
 } finally {
   rmSync(root, { recursive: true, force: true });
+}
+
+const policyCandidate = process.argv[3];
+if (policyCandidate) {
+  const policyRoot = mkdtempSync('/private/tmp/aft-policy-candidate-');
+  try {
+    const suites = join(policyRoot, 'live-agent-coverage-suites');
+    mkdirSync(suites);
+    cpSync(join(testsDir, 'agent-flow-batches.json'), join(policyRoot, 'agent-flow-batches.json'));
+    for (const file of ['tool-policy.test.yaml', 'tool-policy-denial.test.yaml'])
+      cpSync(join(policyCandidate, file), join(suites, file));
+    const candidateRun = () => execFileSync(process.execPath, [selector, policyRoot, loader, 'tool-policy'],
+      { env: { ...env, AFT_TESTS_DIR: policyRoot, AFT_WORK_DIR: policyRoot }, encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'] });
+    const selected = JSON.parse(candidateRun());
+    const reviewed = JSON.parse(readFileSync(join(testsDir, 'agent-flow-batches.json'), 'utf8')).batches['tool-policy'];
+    assert.equal(selected.count, 3);
+    assert.deepEqual(selected.cases, reviewed.expected_cases);
+    assert.deepEqual(selected.suites.map(suite => basename(suite.path)), ['tool-policy.test.yaml']);
+    assert.equal(selected.agents.reviewers, undefined);
+    cpSync(join(suites, 'tool-policy-denial.test.yaml'), join(suites, 'tool-policy.test.yaml'));
+    assert.throws(candidateRun, 'the denied reviewer suite cannot replace paid policy selection');
+    console.log('agent-flow policy: exact authored three cases selected; reviewer denial refused');
+  } finally {
+    rmSync(policyRoot, { recursive: true, force: true });
+  }
 }
