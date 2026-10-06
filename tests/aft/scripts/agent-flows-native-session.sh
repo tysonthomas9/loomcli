@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 # Read a noncredential native identity from this run's container only.
 set -euo pipefail
-: "${AFT_OWNED_PROJECT:?runner-owned project required}"
-: "${AFT_SOURCE_ROOT:?runner-owned source required}"
-: "${AFT_WORK_DIR:?runner-owned evidence directory required}"
-: "${RUN_ID:?runner-owned run id required}"
-[[ "$AFT_OWNED_PROJECT" == loom-aft-agents-* && $# -eq 1 && "$1" =~ ^[A-Za-z0-9_-]+$ ]] || exit 2
+# shellcheck source=tests/aft/scripts/agent-flows-ownership.sh
+source "$(dirname "${BASH_SOURCE[0]}")/agent-flows-ownership.sh"
+agent_flows_check_manifest
+[[ $# -eq 1 && "$1" =~ ^[A-Za-z0-9_-]+$ ]] || exit 2
 agent_id="$1"
 cd "$AFT_SOURCE_ROOT"
 compose=(podman compose -p "$AFT_OWNED_PROJECT" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml")
 container="$("${compose[@]}" ps -q loom-local)"
-[[ -n "$container" ]] || exit 1
-project="$(podman inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$container")"
-[[ "$project" == "$AFT_OWNED_PROJECT" ]] || exit 1
+agent_flows_check_container "$container"
 result="$("${compose[@]}" exec -T loom-local node -e '
 const {DatabaseSync}=require("node:sqlite");
 const db=new DatabaseSync("/root/.loom/agents.db",{readOnly:true});
