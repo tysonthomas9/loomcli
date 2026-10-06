@@ -73,6 +73,15 @@ tests:
           agent-browser --session "$AFT_SESSION" screenshot "$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png"
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" activity repeat
         intent: Match the exact visible child row and its current step to a saved event in that same running turn
+      - run: |
+          set -eu
+          for theme in dark light; do
+            for width in 390 557; do
+              python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" mobile repeat repeat-lead "$width" "$theme"
+            done
+          done
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" mobile_restore
+        intent: Capture numeric bounds and named screenshots of the authentic child tray at both mobile widths and themes
       - wait:
           fn: >-
             (() => { const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]'));

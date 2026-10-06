@@ -114,6 +114,22 @@ class ChildProofPredicates(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "original branch"):
             module.switched_ref({"branch": "other"}, {"branch": original, "head": None}, original, actual)
 
+    def test_mobile_tray_geometry_rejects_clipping_and_overlap(self):
+        good = {"width": 390, "height": 844, "theme": "dark", "navPosition": "fixed",
+                "trayOpen": True, "childId": self.a, "headerExpanded": True,
+                "rowIds": [self.a], "rowCount": 1, "visibleRowCount": 1,
+                "partialRows": 0, "hiddenRows": 0, "moreCount": 0,
+                "horizontalOverflow": 0, "maxControlBottom": 600,
+                "composerTop": 610, "composerBottom": 770, "navTop": 780}
+        module.mobile_geometry_ok(good, self.a, 390, "dark")
+        for change, message in [({"partialRows": 1}, "clipped"),
+                                ({"horizontalOverflow": 3}, "overflows"),
+                                ({"maxControlBottom": 620}, "usable composer"),
+                                ({"composerBottom": 790}, "mobile navigation"),
+                                ({"hiddenRows": 1}, "More count")]:
+            with self.subTest(change=change), self.assertRaisesRegex(AssertionError, message):
+                module.mobile_geometry_ok({**good, **change}, self.a, 390, "dark")
+
 
 if __name__ == "__main__":
     unittest.main()
