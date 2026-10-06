@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read-only oracles for run-owned real child activity journeys."""
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -237,6 +238,111 @@ def activity(child_label):
                       "turn_id": last["turn_id"], "item_kind": last["payload"]["itemKind"],
                       "tool_name": last["payload"].get("tool", {}).get("name"),
                       "visible_prefix": step_prefix(last)})
+
+
+def browser(*args):
+    return subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"], *args], text=True)
+
+
+def browser_json(script):
+    raw = browser("eval", "-b", base64.b64encode(script.encode()).decode()).strip()
+    for _ in range(2):
+        value = json.loads(raw)
+        if not isinstance(value, str) or not value.startswith(("{", "[", '"')):
+            return value
+        raw = value
+    raise AssertionError("browser did not return JSON geometry")
+
+
+def mobile_geometry_ok(geometry, child_id, width, theme):
+    assert geometry["width"] == width and geometry["height"] == 844
+    assert geometry["theme"] == theme and geometry["navPosition"] == "fixed"
+    assert geometry["trayOpen"] and geometry["childId"] == child_id
+    assert geometry["headerExpanded"] and geometry["rowIds"].count(child_id) == 1
+    assert geometry["rowCount"] > 0 and geometry["visibleRowCount"] > 0
+    assert geometry["partialRows"] == 0, "a visible child row is clipped"
+    assert geometry["hiddenRows"] == 0 or geometry["moreCount"] >= geometry["hiddenRows"], "hidden rows lack the More count"
+    assert geometry["horizontalOverflow"] <= 1, "mobile tray or document overflows horizontally"
+    assert geometry["maxControlBottom"] <= geometry["composerTop"] + 1, "tray control overlaps usable composer"
+    assert geometry["composerBottom"] <= geometry["navTop"] + 1, "composer overlaps fixed mobile navigation"
+
+
+def mobile(child_label, lead_label, width, theme):
+    width = int(width)
+    assert width in (390, 557) and theme in ("dark", "light")
+    if width == 390 and theme == "dark":
+        save("mobile-original", browser_json("JSON.stringify({width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme})"))
+    child, lead = load(child_label), load(lead_label)
+    child_id = child["agent_id"]
+    live = agent(child_id)
+    assert live["name"] == child["name"] and live["parent_agent_id"] == lead["agent_id"]
+    assert live["worktree_path"] == child["worktree_path"]
+    lead_events = events(lead["agent_id"])
+    created = [e for e in lead_events if e["kind"] == "child.created" and e["payload"].get("child") == child_id]
+    assert len(created) == 1, "mobile row has no real Lead-created child receipt"
+    activity_proof = load("activity")
+    assert activity_proof["child"] == child_id
+    receipts = [e for e in events(child_id) if e["event_id"] == activity_proof["event_id"] and
+                e["turn_id"] == activity_proof["turn_id"]]
+    assert len(receipts) == 1, "mobile row has no saved current-turn activity receipt"
+    assert live["running_turn_id"] or live["state"] == "finished"
+    browser("set", "viewport", str(width), "844")
+    current_theme = browser_json("JSON.stringify({value:document.documentElement.dataset.theme})")["value"]
+    if current_theme != theme:
+        browser("click", f'button[aria-label="Switch to {theme} mode"]')
+    browser("wait", "--fn", f'document.documentElement.dataset.theme === {json.dumps(theme)}')
+    open_state = browser_json("JSON.stringify({value:document.querySelector('[data-testid=agent-tray]')?.dataset.open || ''})")["value"]
+    if open_state != "true":
+        browser("click", "[data-testid=agent-tray] button[aria-expanded=false]")
+    browser("wait", "--fn", "(() => { const id=" + json.dumps(child_id) + "; return !!document.querySelector('[data-testid=agent-tray][data-open=true] [data-tray-row=\"' + id + '\"]'); })()")
+    geometry = browser_json("""JSON.stringify((() => {
+      const id = %s;
+      const tray = document.querySelector('[data-testid=agent-tray]');
+      const header = tray?.querySelector('button[aria-expanded]');
+      const list = tray?.querySelector('ul');
+      const rows = Array.from(list?.querySelectorAll('li[data-tray-row]') || []);
+      const composer = document.querySelector('section[aria-label="Agent chat"] form[data-chat-composer-form]');
+      const nav = document.querySelector('nav[aria-label="Primary"]');
+      if (!tray || !header || !list || !composer || !nav) return {missing:true};
+      const box = el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };
+      const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);
+      const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));
+      const visible = rowBoxes.filter(row => row.bottom > clip.top && row.top < clip.bottom);
+      const partial = visible.filter(row => row.top < clip.top-1 || row.bottom > clip.bottom+1);
+      const hidden = rowBoxes.filter(row => row.bottom <= clip.top || row.top >= clip.bottom);
+      const moreText = Array.from(tray.querySelectorAll('div[aria-hidden=true]'))
+        .find(x => /↓ [0-9]+ more/.test(x.textContent || ''))?.textContent || '';
+      const moreCount = Number(/([0-9]+) more/.exec(moreText)?.[1] || 0);
+      return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,
+        navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',
+        childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',
+        rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,
+        partialRows:partial.length,hiddenRows:hidden.length,moreCount,
+        horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,
+          tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,
+          ...rowBoxes.map(row=>Math.max(clip.left-row.left,row.right-clip.right))),
+        maxControlBottom:Math.max(header.getBoundingClientRect().bottom,...visible.map(row=>row.bottom)),
+        composerTop:composerBox.top,composerBottom:composerBox.bottom,navTop:navBox.top,
+        tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};
+    })())""" % json.dumps(child_id))
+    mobile_geometry_ok(geometry, child_id, width, theme)
+    shot = OUT / f"mobile-tray-{width}-{theme}.png"
+    browser("screenshot", str(shot))
+    save(f"mobile-tray-{width}-{theme}", {"child": child_id, "parent": lead["agent_id"],
+                                         "child_state": live["state"], "running_turn_id": live["running_turn_id"],
+                                         "created_event_id": created[0]["event_id"],
+                                         "child_receipt_ids": [e["event_id"] for e in receipts],
+                                         "screenshot": str(shot), "geometry": geometry})
+
+
+def mobile_restore():
+    original = load("mobile-original")
+    assert original["width"] > 0 and original["height"] > 0 and original["theme"] in ("dark", "light")
+    browser("set", "viewport", str(original["width"]), str(original["height"]))
+    current = browser_json("JSON.stringify({value:document.documentElement.dataset.theme})")["value"]
+    if current != original["theme"]:
+        browser("click", f'button[aria-label="Switch to {original["theme"]} mode"]')
+    browser("wait", "--fn", f'document.documentElement.dataset.theme === {json.dumps(original["theme"])}')
 
 
 def switched_ref(prior, second, original, actual):
