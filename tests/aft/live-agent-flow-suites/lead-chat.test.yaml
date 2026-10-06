@@ -209,10 +209,11 @@ tests:
         intent: "Start the real repository inspection"
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=tool-live]') &&
+            !!document.querySelector('[data-testid=working-row]') &&
+            !!document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=completed], [data-testid=tool-group]') &&
             Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
         budget: 120000
-        intent: "Observe a genuine active tool turn before queuing a follow-up"
+        intent: "Observe real tool activity while the turn is still running before queuing a follow-up"
       - fill: { label: Message, value: "BUSY_A: first waiting note" }
         intent: "Compose the first waiting follow-up"
       - press: Enter
