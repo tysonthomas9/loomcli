@@ -53,6 +53,9 @@ def api(path, method="GET", body=None, key=None):
     with urllib.request.urlopen(
         urllib.request.Request(BASE + path, data=data, headers=headers, method=method), timeout=20
     ) as response:
+        if response.status == 204:
+            assert response.read() == b"", "204 response unexpectedly had a body"
+            return None
         return json.load(response)
 
 
