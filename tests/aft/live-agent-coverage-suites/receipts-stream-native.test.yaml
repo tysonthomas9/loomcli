@@ -42,7 +42,7 @@ tests:
         intent: "Show the first real answer in saved Chat history"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture native first && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" native native before'
         intent: "Save AgentID, registered NativeRef, exact native service PID and EventIDs before interruption"
-      - fill: { label: Message, value: "Inspect README.md, BACKLOG.md, package.json, server.js and app.test.js with tools, then run npm test. Explain the message path with file citations. Keep files unchanged." }
+      - fill: { label: Message, value: "Read README.md, BACKLOG.md, package.json, server.js, app.js and app.test.js with tools. Trace how a posted message reaches stored history, naming the relevant handlers and tests with file citations. Keep files unchanged and do not run package scripts." }
         intent: "Start a naturally active real tool turn"
       - press: Enter
       - wait:

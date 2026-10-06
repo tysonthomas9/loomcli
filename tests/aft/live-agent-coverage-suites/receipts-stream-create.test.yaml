@@ -14,7 +14,7 @@ tests:
   - name: LIVE public user Create RequestID and ExternalKey replay preserves one Agent and first delivery
     intent: The production user Create API makes one real OpenCode Lead and first message; same RequestID and ExternalKey replays before and after an owned serve restart keep its AgentID, worktree, NativeRef and delivered input unique.
     steps:
-      - run: 'test -x "$AFT_RESTART_SERVE" && test -x "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-native.sh" && test -n "$AFT_REAL_MODEL"'
+      - run: 'test -x "$AFT_RESTART_SERVE" && test -x "$AFT_SELECT_AGENT_MODEL" && test -x "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-native.sh" && test -n "$AFT_REAL_MODEL"'
         intent: "Confirm this run owns its whole-service restart and the real model and native probe are available"
       - open: /ws/${AFT_WS}/agents
         intent: "Show the production Agents UI before public Create"
@@ -22,6 +22,8 @@ tests:
         intent: "Create through the public user API, replay exact RequestID and ExternalKey once, prove registered native ownership, and open its real Chat"
       - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
         intent: "Show the API-created Lead in the production Chat UI"
+      - run: '"$AFT_SELECT_AGENT_MODEL" "coverage-rs-create-${RUN_ID}"'
+        intent: "Bind this Chat route to the saved real model; Create's first message already used its public API model override, so this is a readback receipt rather than a prior UI choice"
       - wait:
           fn: >-
             (() => { const t=document.querySelector('[data-testid=chat-transcript]');
