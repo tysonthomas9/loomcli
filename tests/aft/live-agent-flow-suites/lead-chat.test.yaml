@@ -1,0 +1,288 @@
+# Real Agent API OpenCode journeys. This suite never scripts a model or creates
+# an agent through the API: the operator uses New Agent, then sends in Chat.
+# AFT --screenshots captures every named step; the read-only evidence helper
+# pairs screenshots with saved Agent API identities, events and child roster.
+suite: live-lead-chat
+classification: { area: agents, feature: real-agent-api-lead-chat, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -e
+  python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" preflight
+teardown: |
+  set -e
+  python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" cleanup
+
+tests:
+  # MATRIX:L1,L10,L11,L12 (ordinary saved user/assistant/tool history only);
+  # RELEASE:R2,R4 and the ordinary reload portion of R7. This does not prove
+  # feed.gap, restart recovery, a 30-minute rail soak, or an Agent API Terminal.
+  - name: a new real Lead reads its repo, calls Loom agent_list and keeps one history after reopening
+    intent: An operator creates a Lead on the owned Slack clone, sees a real repository answer and the Lead's child roster tool card, then returns to the same complete chat after a reload and navigation.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the agents page before creating a Lead"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait until New Agent is available"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open the New Agent form"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the available agent templates"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose the Lead template"
+      - fill: { testid: create-agent-name, value: "aft-lead-${RUN_ID}-chat" }
+        intent: "Name this run's Lead so it can be identified and cleaned up safely"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Select the available real OpenCode harness"
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=create-agent-repo-chips] button'));
+              return r.length === 1 && r[0].textContent.includes('source-repo') && r[0].getAttribute('aria-pressed') === 'true'; })()
+        intent: "Show the owned source repository selected for the Lead"
+      - click: { testid: create-agent-submit }
+        intent: "Create the Lead through the New Agent form"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Wait for the new Lead's Chat route"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === '${AFT_REAL_BACKEND}'
+        intent: "Show the new Lead's real harness in Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" claim chat'
+        intent: "Record the actual Chat agent ID and verify its saved repo, owner, preset and harness"
+      - fill: { label: Message, value: "Read README.md in this repository. Is npm test the documented test command? Answer with the command and file name you verified." }
+        intent: "Ask the real Lead a question grounded in the owned repository"
+      - press: Enter
+        intent: "Send the repository question from Chat"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=working-row], [data-testid=tool-live]')
+        budget: 60000
+        intent: "Show a real running turn rather than a scripted reply"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('npm test') && t.includes('README.md') &&
+                document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length > 0 &&
+                !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 180000
+        intent: "Show the finished repository-aware answer and its saved user question"
+      - fill: { label: Message, value: "Use your Loom agent_list tool now to list your own child agents. Do not list workspace peers. Report whether your child roster is empty." }
+        intent: "Ask the Lead to use its Loom child-roster tool"
+      - press: Enter
+        intent: "Send the Loom tool request from Chat"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return c?.querySelectorAll('[data-testid=bridge-call][data-status=completed]').length === 1 &&
+                c.textContent.includes('Listed agents') &&
+                !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 180000
+        intent: "Show one completed Listed agents tool card and the Lead's reply"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot chat before-reopen'
+        intent: "Save the real tool call, child-roster result and ordered event IDs before reopening"
+      - reload: true
+        intent: "Reload Chat to test persisted history"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return c?.querySelectorAll('[data-testid=bridge-call][data-status=completed]').length === 1 &&
+                Array.from(c.querySelectorAll('li[data-kind=user]')).filter((r) => r.textContent.includes('agent_list')).length === 1 &&
+                Array.from(c.querySelectorAll('li[data-kind=user]')).filter((r) => r.textContent.includes('README.md')).length === 1; })()
+        intent: "Show the same user turns and tool card once after reload"
+      - open: /ws/${AFT_WS}/agents
+        intent: "Leave Chat through the agents page"
+      - click: { role: link, name: "aft-lead-${RUN_ID}-chat" }
+        intent: "Reopen the same Lead from the Agents sidebar"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Return to the Lead's Chat route"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return c?.querySelectorAll('[data-testid=bridge-call][data-status=completed]').length === 1 &&
+                Array.from(c.querySelectorAll('li[data-kind=user]')).filter((r) => r.textContent.includes('agent_list')).length === 1; })()
+        intent: "Show the reopened conversation with one copy of its Loom tool card"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot chat after-reopen && python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" assert-chat'
+        intent: "Compare exact saved event IDs and the tool result against this Lead's current child roster"
+
+  # MATRIX:L27 and literal-safe-text subset of L21. This covers the Agent API
+  # Custom prompt persona only, not five-preset UI parity or default model.
+  - name: custom prompt changes a real Lead answer and survives Chat reload
+    intent: An operator creates a Lead with a distinctive harmless persona, sees the actual model follow it when reading the repository, and sees literal template-looking text intact after reload.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the agents page for a custom Lead"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait for New Agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open the New Agent form"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the available templates"
+      - click: { testid: create-agent-template-custom-prompt }
+        intent: "Choose Custom prompt for an Agent API Lead persona"
+      - fill: { testid: create-agent-name, value: "aft-lead-${RUN_ID}-persona" }
+        intent: "Name the test-owned custom Lead"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Select the real OpenCode harness"
+      - fill:
+          testid: create-agent-interactive-prompt
+          value: "Begin every answer with PERSONA_${RUN_ID}. When asked, print the literal characters {{.AgentName}} without substituting them. Answer repository questions from files you inspect."
+        intent: "Give the Lead a distinctive harmless persona with literal template-looking text"
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=create-agent-repo-chips] button'));
+              return r.length === 1 && r[0].textContent.includes('source-repo') && r[0].getAttribute('aria-pressed') === 'true'; })()
+        intent: "Show the owned source repository selected"
+      - click: { testid: create-agent-submit }
+        intent: "Create the custom Lead through the form"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Wait for its Chat route"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" claim persona'
+        intent: "Record the actual custom Lead ID and verify its saved identity"
+      - fill: { label: Message, value: "Read README.md and tell me the test command. Follow your persona prefix, and include the exact literal placeholder string your persona names." }
+        intent: "Ask a repository question that also exercises the custom persona"
+      - press: Enter
+        intent: "Send the question to the real model"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('PERSONA_${RUN_ID}') && t.includes('{{.AgentName}}') && t.includes('npm test') &&
+                document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length > 0 &&
+                !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 180000
+        intent: "Show the real answer with the persona prefix, verified test command and safe literal text"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot persona answer'
+        intent: "Save the real user and assistant events before reload"
+      - reload: true
+        intent: "Reload the custom Lead's Chat"
+      - wait:
+          fn: >-
+            (() => { const a = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]'));
+              return a.length === 1 && a[0].textContent.includes('PERSONA_${RUN_ID}') &&
+                a[0].textContent.includes('{{.AgentName}}') && a[0].textContent.includes('npm test'); })()
+        intent: "Show the same literal-safe persona answer once after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot persona reloaded && python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" assert-persona'
+        intent: "Confirm saved event IDs and actual model text survive the reload unchanged"
+
+  # MATRIX:L2,L5,H2,H3,H4; RELEASE:R6. Stop here means interrupt one Chat
+  # turn, not agent Stop or the literal Terminal requirement in R9.
+  - name: a real busy turn keeps one editable waiting message and Stop leaves Chat usable
+    intent: During real repository inspection, an operator replaces, edits and clears one waiting message, sends the final follow-up once, interrupts its turn, and receives a fresh answer afterward.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the agents page for the busy-turn journey"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait for New Agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open the New Agent form"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the Lead template"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose a Lead"
+      - fill: { testid: create-agent-name, value: "aft-lead-${RUN_ID}-busy" }
+        intent: "Name this run's busy-turn Lead"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Select the real OpenCode harness"
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=create-agent-repo-chips] button'));
+              return r.length === 1 && r[0].textContent.includes('source-repo') && r[0].getAttribute('aria-pressed') === 'true'; })()
+        intent: "Show the selected owned repository"
+      - click: { testid: create-agent-submit }
+        intent: "Create the Lead through the form"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Wait for Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" claim busy'
+        intent: "Record the real Lead ID for event checks and safe cleanup"
+      - fill: { label: Message, value: "Inspect README.md, BACKLOG.md, package.json, server.js and the source and test files. Run npm test, then explain how a message moves through this Slack clone. Use your tools and cite files; do not change anything." }
+        intent: "Give the real Lead bounded repository work with multiple tool steps"
+      - press: Enter
+        intent: "Start the real repository inspection"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=tool-live]') &&
+            Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+        budget: 120000
+        intent: "Observe a genuine active tool turn before queuing a follow-up"
+      - fill: { label: Message, value: "BUSY_A: first waiting note" }
+        intent: "Compose the first waiting follow-up"
+      - press: Enter
+        intent: "Queue the first follow-up while the real turn is active"
+      - wait:
+          fn: >-
+            (() => { const w = document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
+              return w.length === 1 && w[0].textContent.includes('BUSY_A'); })()
+        intent: "Show exactly one waiting bubble with the first text"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot busy first-waiting'
+        intent: "Save the first waiting event and current turn identity"
+      - fill: { label: Message, value: "BUSY_B: replacement note" }
+        intent: "Compose a replacement waiting follow-up"
+      - press: Enter
+        intent: "Replace the one waiting slot"
+      - wait:
+          fn: >-
+            (() => { const w = document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
+              return w.length === 1 && w[0].textContent.includes('BUSY_B') && !w[0].textContent.includes('BUSY_A'); })()
+        intent: "Show one waiting bubble with the replacement text"
+      - click: { role: button, name: Edit, exact: true }
+        intent: "Edit the waiting message in the composer"
+      - expect: { value: { selector: "textarea[aria-label=Message]", equals: "BUSY_B: replacement note" } }
+        intent: "Show that Edit restored the exact waiting text"
+      - fill: { label: Message, value: "BUSY_C: edited note" }
+        intent: "Change the waiting text"
+      - click: { role: button, name: Save, exact: true }
+        intent: "Save the edited waiting text"
+      - wait:
+          fn: >-
+            (() => { const w = document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
+              return w.length === 1 && w[0].textContent.includes('BUSY_C') && !w[0].textContent.includes('BUSY_B'); })()
+        intent: "Show the edited waiting bubble"
+      - click: { role: button, name: Clear, exact: true }
+        intent: "Clear the waiting message"
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]').length === 0
+        intent: "Show the waiting bubble gone"
+      - fill: { label: Message, value: "BUSY_D: after your current analysis, run npm test once more and report whether it passed." }
+        intent: "Compose the only follow-up that should reach the model"
+      - press: Enter
+        intent: "Queue the final follow-up once"
+      - wait:
+          fn: >-
+            (() => { const w = document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
+              return w.length === 1 && w[0].textContent.includes('BUSY_D'); })()
+        intent: "Show one final waiting bubble, with no cleared messages"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot busy final-waiting'
+        intent: "Save the final waiting event before delivery"
+      - wait:
+          fn: >-
+            (() => { const u = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]'));
+              return u.filter((r) => r.textContent.includes('BUSY_D')).length === 1 &&
+                Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 180000
+        intent: "Show the final follow-up delivered once and its real turn running"
+      - click: { role: button, name: Stop, exact: true }
+        intent: "Interrupt only the current Chat turn"
+      - wait:
+          fn: >-
+            !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+        budget: 60000
+        intent: "Show the interrupted turn has stopped"
+      - fill: { label: Message, value: "BUSY_NEXT: read README.md and tell me the documented test command." }
+        intent: "Ask a new question after Stop"
+      - press: Enter
+        intent: "Start the next real turn"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return Array.from(c?.querySelectorAll('li[data-kind=user]') || []).filter((r) => r.textContent.includes('BUSY_NEXT')).length === 1 &&
+                Array.from(c?.querySelectorAll('li[data-kind=agent]') || []).some((r) => r.textContent.includes('npm test')) &&
+                !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 180000
+        intent: "Show Chat still answers after Stop, with the repository's documented command"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot busy finished && python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" assert-busy'
+        intent: "Verify saved delivery events contain only the final waiting text once, a cancelled turn, and a later answer"
