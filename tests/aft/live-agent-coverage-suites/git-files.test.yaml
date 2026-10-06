@@ -338,6 +338,26 @@ tests:
         intent: "Bind the real UI-created Lead to its saved Agent API ID"
       - run: '"$AFT_SELECT_AGENT_MODEL"'
         intent: "Select and read back the route-bound real model before the turn"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          origin_observation git before
+        intent: "Attest the saved Lead branch, clean worktree and unpublished ref against the owned local bare origin"
+      - run: |
+          prompt="$(python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" origin_prompt git)"
+          agent-browser --session "$AFT_SESSION" fill 'textarea[aria-label=Message]' "$prompt"
+        intent: "Prepare the guarded local-only push instruction in this Lead's real Chat composer"
+      - press: Enter
+        intent: "Ask the real Lead to push only its own branch to the owned bare local origin"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=agent-api-page] [data-testid=chat-transcript] li[data-kind=agent]'))
+              .some(row => row.textContent.includes('COV_FILES_LOCAL_PUSH_${RUN_ID}_DONE'))
+        budget: 180000
+        intent: "Show the Lead's completed local-push answer in its own Chat"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          origin_observation git after
+        intent: "Read back the exact parent ref and tracking ref at the pre-push head from the owned container"
       - fill:
           label: Message
           value: >-
