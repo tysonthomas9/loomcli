@@ -12,7 +12,7 @@ const readLines = name => {
 };
 const declared = JSON.parse(declaredText);
 const deleted = [...declared.leads, ...declared.children].filter(agent => agent.end_state === 'deleted');
-if (!deleted.length || deleted.some(agent => agent.suite !== 'live-lifecycle-delete')) fail('unexpected deleted declaration');
+if (!deleted.length || deleted.some(agent => agent.suite !== 'coverage-lifecycle-delete')) fail('unexpected deleted declaration');
 const receipts = readLines('lifecycle-delete-preflight.jsonl');
 const nativeRows = readLines('native-sessions.jsonl');
 const models = readLines('model-selections.jsonl');

@@ -51,7 +51,8 @@ if (batchName === 'default') {
       !batch.agents.leads.every(lead => (exactKeys(lead, ['name', 'suite', 'model_required']) ||
         exactKeys(lead, ['name', 'suite', 'model_required', 'model_exception']) ||
         exactKeys(lead, ['name', 'suite', 'model_required', 'model_proof']) ||
-        (batchName === 'lifecycle-delete' && exactKeys(lead, ['name', 'suite', 'model_required', 'end_state']))) &&
+        (batchName === 'lifecycle-delete' && batch.files.join(',') === 'lifecycle-delete.test.yaml' &&
+          lead.suite === 'coverage-lifecycle-delete' && exactKeys(lead, ['name', 'suite', 'model_required', 'end_state']))) &&
         typeof lead.name === 'string' && agentPattern.test(lead.name) && typeof lead.suite === 'string' &&
         typeof lead.model_required === 'boolean' &&
         (lead.end_state === undefined || (lead.end_state === 'deleted' && lead.model_required)) &&
@@ -70,7 +71,9 @@ if (batchName === 'default') {
   const childNames = [];
   for (const child of batch.agents.children) {
     if (!(exactKeys(child, ['name', 'parent', 'suite']) ||
-        (batchName === 'lifecycle-delete' && exactKeys(child, ['name', 'parent', 'suite', 'end_state']) && child.end_state === 'deleted')) ||
+        (batchName === 'lifecycle-delete' && batch.files.join(',') === 'lifecycle-delete.test.yaml' &&
+          child.suite === 'coverage-lifecycle-delete' && exactKeys(child, ['name', 'parent', 'suite', 'end_state']) &&
+          child.end_state === 'deleted')) ||
         typeof child.name !== 'string' ||
         !agentPattern.test(child.name) || typeof child.suite !== 'string' ||
         !batch.agents.leads.some(lead => lead.name === child.parent && lead.suite === child.suite))

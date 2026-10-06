@@ -41,16 +41,26 @@ try {
   agents.leads[0].end_state = 'deleted';
   write(['one.test.yaml']);
   refuse('smoke'); // A generic batch cannot relax its surviving-Agent proof.
-  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'lifecycle-delete': { files: ['one.test.yaml'], agents } } }));
+  const lifecycleFile = 'lifecycle-delete.test.yaml';
+  writeFileSync(join(coverage, lifecycleFile), originalSource.replace('suite: live-lead-chat', 'suite: coverage-lifecycle-delete'));
+  agents.leads[0].suite = 'coverage-lifecycle-delete';
+  agents.children[0].suite = 'coverage-lifecycle-delete';
+  const writeLifecycle = files => writeFileSync(catalog,
+    JSON.stringify({ version: 1, batches: { 'lifecycle-delete': { files, agents } } }));
+  writeLifecycle([lifecycleFile]);
   assert.equal(JSON.parse(run('lifecycle-delete')).agents.leads[0].end_state, 'deleted');
+  writeLifecycle(['one.test.yaml']);
+  refuse('lifecycle-delete');
   agents.leads[0].model_required = false;
-  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'lifecycle-delete': { files: ['one.test.yaml'], agents } } }));
+  writeLifecycle([lifecycleFile]);
   refuse('lifecycle-delete');
   agents.leads[0].model_required = true;
   agents.leads[0].end_state = 'missing';
-  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'lifecycle-delete': { files: ['one.test.yaml'], agents } } }));
+  writeLifecycle([lifecycleFile]);
   refuse('lifecycle-delete');
   delete agents.leads[0].end_state;
+  agents.leads[0].suite = 'coverage-one';
+  agents.children[0].suite = 'coverage-one';
   write(['one.test.yaml']);
   assert.equal(JSON.parse(run('default')).count, 9);
   writeFileSync(join(original, 'lead-chat.test.yaml'), originalSource.replace('tests:\n',

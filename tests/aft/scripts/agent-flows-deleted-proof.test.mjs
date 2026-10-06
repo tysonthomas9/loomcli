@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const script = join(dirname(fileURLToPath(import.meta.url)), 'agent-flows-deleted-proof.mjs');
 const root = mkdtempSync('/private/tmp/aft-deleted-proof-');
 const run = 'af12345678';
-const suite = 'live-lifecycle-delete';
+const suite = 'coverage-lifecycle-delete';
 const session = `aft-${suite}-0`;
 const target = 'openai/gpt-5.5';
 const repo = '/workspace/source-repo';
