@@ -9,8 +9,10 @@ baseUrl: "${AFT_BASE_URL}"
 setup: |
   set -eu
   : "${AFT_BASE_URL:?}" "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}"
-  : "${AFT_REAL_BACKEND:?}" "${AFT_WORK_DIR:?}" "${AFT_TESTS_DIR:?}" "${RUN_ID:?}"
+  : "${AFT_REAL_BACKEND:?}" "${AFT_REAL_MODEL:?}" "${AFT_SELECT_AGENT_MODEL:?}"
+  : "${AFT_WORK_DIR:?}" "${AFT_TESTS_DIR:?}" "${RUN_ID:?}"
   [ "$AFT_WS" = LOCALMODE ] && [ "$AFT_REAL_BACKEND" = opencode ]
+  [ -x "$AFT_SELECT_AGENT_MODEL" ]
   python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" repo
 
 tests:
@@ -36,6 +38,9 @@ tests:
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
         intent: "Show the new real OpenCode Lead in its Chat, created through the UI"
+      - run: |
+          "$AFT_SELECT_AGENT_MODEL"
+        intent: "Show the explicitly selected real model before sending"
       - run: |
           python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id restart
         intent: "Save the run-owned Lead ID from the public Agent API"
@@ -123,6 +128,9 @@ tests:
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
       - run: |
+          "$AFT_SELECT_AGENT_MODEL"
+        intent: "Show the explicitly selected real model before sending"
+      - run: |
           python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id archive
         intent: "Save the archive journey's run-owned Lead ID"
       - fill: { label: Message, value: "Before archive, answer with marker archive-first-${RUN_ID}." }
@@ -204,6 +212,9 @@ tests:
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
       - run: |
+          "$AFT_SELECT_AGENT_MODEL"
+        intent: "Show the explicitly selected real model before sending"
+      - run: |
           python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id sibling
         intent: "Save the independent sibling's run-owned Agent ID"
       - fill: { label: Message, value: "Reply briefly with sibling-${RUN_ID}." }
@@ -227,6 +238,9 @@ tests:
         intent: "Confirm the dirty target will use the owned source repository"
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: |
+          "$AFT_SELECT_AGENT_MODEL"
+        intent: "Show the explicitly selected real model before sending"
       - run: |
           python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id dirty
         intent: "Save the dirty target's run-owned Agent ID"
