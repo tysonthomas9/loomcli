@@ -187,6 +187,8 @@ services:
   fleet-db:
     build:
       context: $fleet_repo
+    environment:
+      FLEET_RATE_LIMIT_ENABLED: "false"
 YAML
 export LOCAL_MODE_COMPOSE_FILES="$run_root/evidence/fleet-override.yml"
 export AFT_OWNED_PROJECT="$project" AFT_SOURCE_ROOT="$SOURCE_ROOT"
@@ -205,6 +207,7 @@ fi
 
 jq -n --arg head "$head_sha" --arg source "$SOURCE_ROOT" --arg fleet "$fleet_repo" --arg fleetSha "$fleet_sha" \
   --arg aft "$AFT_DIR" --arg browser "$browser_bin" --arg project "$project" \
+  --arg fleetOverrideSha "$(shasum -a 256 "$run_root/evidence/fleet-override.yml" | awk '{print $1}')" \
   --arg browserSocket "$AGENT_BROWSER_SOCKET_DIR" --argjson browserSocketBytes "$(jq -r '.max_socket_bytes' <<< "$browser_socket_json")" \
   --arg apiUrl "$AFT_API_URL" --arg uiUrl "$AFT_BASE_URL" --arg evidence "$AFT_WORK_DIR" \
   --arg podmanHome "$AFT_PODMAN_HOME" --arg podmanConnection "$AFT_PODMAN_CONNECTION" \
@@ -213,7 +216,7 @@ jq -n --arg head "$head_sha" --arg source "$SOURCE_ROOT" --arg fleet "$fleet_rep
   --argjson fleetPort "$fleet_port" --argjson apiPort "$api_port" --argjson uiPort "$ui_port" \
   --arg aftCliSha "$(shasum -a 256 "$AFT_DIR/dist/cli.js" | awk '{print $1}')" \
   --arg aftLoaderSha "$(shasum -a 256 "$AFT_DIR/dist/runner.js" | awk '{print $1}')" \
-  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:(if $selection.batch == "default" then "real OpenCode external model" else "real OpenCode stack; paid model evidence is per selected suite" end),backend:"opencode",cases:$cases,cap:$cap,selection:$selection,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,browser_socket_dir:$browserSocket,browser_socket_max_bytes:$browserSocketBytes,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
+  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:(if $selection.batch == "default" then "real OpenCode external model" else "real OpenCode stack; paid model evidence is per selected suite" end),backend:"opencode",cases:$cases,cap:$cap,selection:$selection,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,fleetdb_rate_limit_enabled:false,fleetdb_compose_override_sha256:$fleetOverrideSha,browser_socket_dir:$browserSocket,browser_socket_max_bytes:$browserSocketBytes,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
   > "$run_root/evidence/manifest.json"
 
 if ! mkdir /private/tmp/dryhawk-stack-build.lock 2>/dev/null; then
