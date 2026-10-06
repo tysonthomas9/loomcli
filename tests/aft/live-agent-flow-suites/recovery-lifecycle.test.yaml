@@ -1,0 +1,298 @@
+# Paid real OpenCode Agent API journeys. Run only through the owned agent-flow
+# runner with --no-agent --screenshots --record-all. A screenshot is taken after
+# every step; the intent below names the state each checkpoint must show.
+# Subset only: MATRIX:S5/H6, L15/N7 immediate leg, L16 basic UI; RELEASE:R7.
+# No S1 startup-time, N7 30-day, H10 native-purge, or cross-harness claim.
+suite: live-recovery-lifecycle
+classification: { area: agents, feature: agent-api-recovery-lifecycle, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  : "${AFT_BASE_URL:?}" "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}"
+  : "${AFT_REAL_BACKEND:?}" "${AFT_WORK_DIR:?}" "${AFT_TESTS_DIR:?}" "${RUN_ID:?}"
+  [ "$AFT_WS" = LOCALMODE ] && [ "$AFT_REAL_BACKEND" = opencode ]
+  [ "$AFT_AGENT_FLOW_REPO" = /workspace/source-repo ]
+
+tests:
+  # MATRIX:S5/H6; RELEASE:R7 subset: owned serve restart during a real turn.
+  - name: S5 H6 a running Lead and its waiting message survive an owned serve restart
+    intent: A real Lead keeps its identity and saved history across a serve restart, answers one waiting message once, and accepts a new message
+    steps:
+      - run: |
+          set -eu
+          : "${AFT_RESTART_SERVE:?owned serve restart helper required}"
+          : "${AFT_NATIVE_SESSION_PROBE:?owned in-container native ID probe required}"
+          [ -x "$AFT_RESTART_SERVE" ] && [ -x "$AFT_NATIVE_SESSION_PROBE" ]
+        intent: "Confirm this run owns the serve restart and has a read-only native-session probe before paid work"
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "live-recovery-restart-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-repo-chips] button[data-active]')?.textContent || '').includes('source-repo')
+        intent: "Confirm the modal selected the owned Slack-clone source repository"
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+        intent: "Show the new real OpenCode Lead in its Chat, created through the UI"
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id restart
+        intent: "Save the run-owned Lead ID from the public Agent API"
+      - fill: { label: Message, value: "Reply with the exact marker first-${RUN_ID} in one short sentence." }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('first-${RUN_ID}') &&
+                document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle') &&
+                document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length > 0; })()
+        intent: "Show the first real model answer and the Lead back at idle"
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" capture restart first native
+        intent: "Save the stable Agent ID, native session ID/root and numbered event IDs after the first answer"
+      - fill: { label: Message, value: "Use tools to inspect README.md and package.json in this repository, then explain the app entry point and one test command. Keep all files unchanged." }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              return !!t?.querySelector('li[data-kind=work]') &&
+                Array.from(document.querySelectorAll('form button')).some(b => b.textContent?.trim() === 'Stop'); })()
+        intent: "Show a naturally active real tool turn before queueing another message"
+      - fill: { label: Message, value: "waiting-${RUN_ID}: after the inspection, name the repository entry point once." }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('Waiting') && t.includes('waiting-${RUN_ID}'); })()
+        intent: "Show exactly one waiting message while the real turn is active"
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" capture restart waiting native
+          "$AFT_RESTART_SERVE"
+        intent: "Save the waiting receipt and restart only this run's owned serve service"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('first-${RUN_ID}') && t.includes('waiting-${RUN_ID}') &&
+                !!document.querySelector('[data-testid=harness-label]'); })()
+        intent: "Show the same Chat and its earlier answer after serve reconnects"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return !t.includes('Waiting') && t.includes('waiting-${RUN_ID}') &&
+                document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle') &&
+                document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length >= 3; })()
+        intent: "Show the resumed answer followed by one answer to the waiting message"
+      - run: |
+          set -eu
+          h="$AFT_TESTS_DIR/scripts/live-recovery-evidence.py"
+          python3 "$h" capture restart settled native
+          python3 "$h" compare restart waiting settled native
+          python3 "$h" delivery restart "waiting-${RUN_ID}"
+        intent: "Prove the native ID/root, ordered event history and one waiting-message delivery survived"
+      - fill: { label: Message, value: "final-${RUN_ID}: answer with one sentence about the same repository." }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('final-${RUN_ID}') &&
+                document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle') &&
+                document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length >= 4; })()
+        intent: "Show the Lead answer a new real turn in the restored conversation"
+      - run: |
+          set -eu
+          h="$AFT_TESTS_DIR/scripts/live-recovery-evidence.py"
+          python3 "$h" capture restart final native
+          python3 "$h" compare restart first final native
+        intent: "Prove one Agent ID and native session with complete saved history through the next reply"
+
+  # MATRIX:L15/N7 immediate leg. No passage-of-30-days claim.
+  - name: L15 N7 an idle Lead archives read-only and unarchives with its history
+    intent: A real Lead's Chat stays readable after UI Archive, refuses a send, and continues with the same history after UI Unarchive
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "live-recovery-archive-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-repo-chips] button[data-active]')?.textContent || '').includes('source-repo')
+        intent: "Confirm this Lead will use the owned source repository"
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id archive
+        intent: "Save the archive journey's run-owned Lead ID"
+      - fill: { label: Message, value: "Before archive, answer with marker archive-first-${RUN_ID}." }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('archive-first-${RUN_ID}') &&
+                document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length > 0 &&
+                document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle'); })()
+        intent: "Show the complete first real exchange before archiving"
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" capture archive before native
+        intent: "Save the Lead's Agent ID and ordered event IDs before Archive"
+      - api:
+          method: GET
+          path: "/api/workspaces/${AFT_WS}/v1/agents?name=live-recovery-archive-${RUN_ID}&include_archived=true"
+          assert: [{ path: agents.0.name, equals: "live-recovery-archive-${RUN_ID}" }]
+          save: [{ from: agents.0.agent_id, as: archiveId }]
+        intent: "Bind subsequent read-only API checks to the exact UI-created Lead"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const n = document.querySelector("nav[aria-label=Agents] a[aria-current=page]"); if (!n) throw Error("active agent row missing"); const r=n.getBoundingClientRect(); n.dispatchEvent(new MouseEvent("contextmenu", {bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()' >/dev/null
+        intent: "Open the current Lead's sidebar context menu"
+      - click: { testid: agent-context-menu-archive }
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/live-recovery-archive.id")"
+        intent: "Reopen the archived Lead's direct Chat route"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('archive-first-${RUN_ID}') &&
+                !!document.querySelector('[data-testid=agent-archived-notice]') &&
+                !document.querySelector('textarea[aria-label=Message]'); })()
+        intent: "Show retained conversation with the archived read-only notice and no composer"
+      - api:
+          method: POST
+          path: "/api/workspaces/${AFT_WS}/v1/agents/${var:archiveId}/messages"
+          headers: { Idempotency-Key: "live-recovery-archived-refusal-${RUN_ID}" }
+          body: { text: "must not reach model", delivery: queue }
+          status: 409
+          assert: [{ path: code, equals: agent_archived }]
+        intent: "Verify the archived Lead rejects a Send without making a model turn"
+      - click: { testid: agent-unarchive }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=agent-archived-notice]') &&
+            !!document.querySelector('textarea[aria-label=Message]') &&
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('archive-first-${RUN_ID}')
+        intent: "Show the same saved history and a writable composer after Unarchive"
+      - fill: { label: Message, value: "After unarchive, answer with marker archive-next-${RUN_ID}." }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('archive-first-${RUN_ID}') && t.includes('archive-next-${RUN_ID}') &&
+                document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length >= 2 &&
+                document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle'); })()
+        intent: "Show a new real answer after Unarchive beside the retained old exchange"
+      - run: |
+          set -eu
+          h="$AFT_TESTS_DIR/scripts/live-recovery-evidence.py"
+          python3 "$h" capture archive after native
+          python3 "$h" compare archive before after native
+        intent: "Prove one Agent ID and one ordered saved event history before and after Archive"
+
+  # MATRIX:L16 basic UI only. H10/N15 native purge remains a separate gate.
+  - name: L16 dirty Delete warns, Keep agent preserves it, Delete anyway removes only target
+    intent: A real Lead changes its own tracked fixture, the UI warns before deletion, and an independent Lead remains after target deletion
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "live-recovery-sibling-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-repo-chips] button[data-active]')?.textContent || '').includes('source-repo')
+        intent: "Confirm the independent sibling will use the owned source repository"
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id sibling
+        intent: "Save the independent sibling's run-owned Agent ID"
+      - fill: { label: Message, value: "Reply briefly with sibling-${RUN_ID}." }
+      - press: Enter
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle') &&
+            document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length > 0
+        intent: "Show the independent sibling's real conversation before target deletion"
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" capture sibling before native
+        intent: "Save the sibling's identity and event history before deleting the target"
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "live-recovery-dirty-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-repo-chips] button[data-active]')?.textContent || '').includes('source-repo')
+        intent: "Confirm the dirty target will use the owned source repository"
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id dirty
+        intent: "Save the dirty target's run-owned Agent ID"
+      - api:
+          method: GET
+          path: "/api/workspaces/${AFT_WS}/v1/agents?name=live-recovery-dirty-${RUN_ID}&include_archived=true"
+          assert: [{ path: agents.0.name, equals: "live-recovery-dirty-${RUN_ID}" }]
+          save: [{ from: agents.0.agent_id, as: dirtyId }]
+        intent: "Bind the delete checks to the exact UI-created dirty target"
+      - fill: { label: Message, value: "In your own worktree only, append the line 'live-recovery-dirty-${RUN_ID}' to the tracked README.md. Do not commit or touch any other file. Then tell me when done." }
+      - press: Enter
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle') &&
+            document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length > 0
+        intent: "Show the real Lead finish its own harmless tracked README change"
+      - click: { selector: "[data-testid=agent-editor-groups] button[draggable]:nth-of-type(5)" }
+      - click: { role: tab, name: "Changes", exact: false }
+      - click: { role: tab, name: "Working tree", exact: false }
+      - wait:
+          fn: >-
+            location.search === '?tab=files' &&
+            !!document.querySelector('[aria-label="Open diff for README.md (Modified)"]')
+        intent: "Show tracked README.md as Modified in the target Lead's Working tree view"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const n = document.querySelector("nav[aria-label=Agents] a[aria-current=page]"); if (!n) throw Error("active agent row missing"); const r=n.getBoundingClientRect(); n.dispatchEvent(new MouseEvent("contextmenu", {bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()' >/dev/null
+        intent: "Open the dirty target's sidebar menu to request deletion"
+      - click: { testid: agent-context-menu-delete }
+      - click: { role: button, name: "Delete agent", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agent-delete-anyway]') &&
+            (document.querySelector('[role=alertdialog]')?.textContent || '').toLowerCase().includes('unsaved')
+        intent: "Show the named unsaved-work refusal and explicit Delete anyway decision"
+      - click: { role: button, name: "Keep agent", exact: true }
+      - api:
+          method: GET
+          path: "/api/workspaces/${AFT_WS}/v1/agents/${var:dirtyId}"
+          assert: [{ path: agent_id, equals: "${var:dirtyId}" }]
+        intent: "Prove dismissing the warning preserved the target Lead"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const n = document.querySelector("nav[aria-label=Agents] a[aria-current=page]"); if (!n) throw Error("active agent row missing"); const r=n.getBoundingClientRect(); n.dispatchEvent(new MouseEvent("contextmenu", {bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()' >/dev/null
+        intent: "Reopen the target's sidebar menu after dismissing the warning"
+      - click: { testid: agent-context-menu-delete }
+      - click: { role: button, name: "Delete agent", exact: true }
+      - wait: { fn: "!!document.querySelector('[data-testid=agent-delete-anyway]')" }
+        intent: "Show a fresh warning tied to the current dirty-worktree fingerprint"
+      - click: { testid: agent-delete-anyway }
+      - wait:
+          fn: >-
+            location.pathname.endsWith('/home') && !document.querySelector('[data-testid=agent-delete-anyway]')
+        intent: "Show the target removed after the explicit current-fingerprint decision"
+      - run: |
+          python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" gone dirty
+        intent: "Verify the deleted target no longer resolves through the public Agent API"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/live-recovery-sibling.id")"
+        intent: "Reopen the independent sibling's direct Chat route"
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('sibling-${RUN_ID}') &&
+            !document.querySelector('[role=alert]')
+        intent: "Show the independent sibling's retained Chat after the target is gone"
+      - run: |
+          set -eu
+          h="$AFT_TESTS_DIR/scripts/live-recovery-evidence.py"
+          python3 "$h" capture sibling after native
+          python3 "$h" compare sibling before after native
+        intent: "Prove the sibling Agent ID and saved event history were preserved"
