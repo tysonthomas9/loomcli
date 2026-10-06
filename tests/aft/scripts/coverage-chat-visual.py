@@ -38,7 +38,22 @@ def request(path, method="GET", body=None, key=None):
     with urllib.request.urlopen(
         urllib.request.Request(API + path, data=data, headers=headers, method=method), timeout=15
     ) as response:
-        return json.load(response)
+        raw = response.read()
+        if response.status == 204:
+            assert not raw, "204 response unexpectedly carried a body"
+            return None
+        return json.loads(raw)
+
+
+def self_test_request_204():
+    from io import BytesIO
+    from unittest.mock import patch
+
+    class Empty204(BytesIO):
+        status = 204
+
+    with patch("urllib.request.urlopen", return_value=Empty204(b"")):
+        assert request(f"{PREFIX}/agt_self_test/archive", "POST", {"reason": "cancelled"}) is None
 
 
 def browser(*args):
@@ -165,6 +180,168 @@ def rename(case):
     shown = evaluate("document.querySelector('section[aria-label=" + json.dumps("Agent chat") + "] header h2')?.textContent")
     assert shown == expected, (shown, expected)
     write(f"{case}-renamed.json", a)
+
+
+def rename_reloaded(case):
+    current(case)
+    original = json.loads((WORK / f"{case}-renamed.json").read_text())
+    saved = request(f"{PREFIX}/{agent_id(case)}")
+    shown = evaluate("document.querySelector('section[aria-label=\"Agent chat\"] header h2')?.textContent")
+    assert saved["name"] == original["name"] == shown == NAMES[case] + "-renamed", (saved, shown)
+    write(f"{case}-rename-reloaded.json", {"agent": saved, "header": shown})
+
+
+def rename_restored(case):
+    current(case)
+    saved = request(f"{PREFIX}/{agent_id(case)}")
+    shown = evaluate("document.querySelector('section[aria-label=\"Agent chat\"] header h2')?.textContent")
+    assert saved["name"] == shown == NAMES[case], (saved, shown)
+    write(f"{case}-rename-restored.json", {"agent": saved, "header": shown})
+
+
+def skip_link(stage):
+    current("input")
+    result = evaluate("""(() => {const a=document.querySelector('a[href="#main-content"]');
+      const m=document.querySelector('main#main-content'), r=a?.getBoundingClientRect();
+      return {text:a?.textContent?.trim(), focused:document.activeElement===a,
+        inViewport:!!r&&r.bottom>0&&r.top<innerHeight, hash:location.hash,
+        focusInMain:!!m&&m.contains(document.activeElement)&&m!==document.activeElement};})()""")
+    assert result["text"] == "Skip to main content", result
+    if stage == "hidden":
+        assert not result["inViewport"] and not result["focused"], result
+    elif stage == "tab":
+        assert result["focused"] and result["inViewport"], result
+    elif stage == "entered":
+        assert result["hash"] == "#main-content" and result["focusInMain"], result
+    elif stage == "mouse_focus":
+        assert result["focused"] and not result["inViewport"], result
+    else:
+        raise ValueError(stage)
+    write(f"input-skip-link-{stage}.json", result)
+    shot("input", f"skip-link-{stage}")
+
+
+def mouse_focus_skip_link():
+    browser("click", "main#main-content")
+    assert evaluate("(() => { const a=document.querySelector('a[href=\"#main-content\"]'); a.focus(); return document.activeElement===a; })()")
+    skip_link("mouse_focus")
+
+
+MOBILE_LAYOUT_JS = r"""(() => {
+  const vw=innerWidth, vh=innerHeight, nav=document.querySelector('nav[aria-label="Primary"]');
+  const s=nav?.querySelector('[aria-label="Workspace selector"]');
+  const title=document.querySelector('section[aria-label="Agent chat"] header h2');
+  const field=document.querySelector('textarea[aria-label="Message"]');
+  const form=field?.closest('form');
+  const box=e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};
+  const n=nav&&box(nav), c=form&&box(form), sw=s&&box(s);
+  const overflow=[];
+  for(const e of document.body.querySelectorAll('*')){
+    const r=e.getBoundingClientRect(); if(!r.width||!r.height||getComputedStyle(e).visibility==='hidden')continue;
+    let right=r.right;
+    for(let p=e.parentElement;p;p=p.parentElement){const pr=p.getBoundingClientRect().right;
+      if(getComputedStyle(p).overflowX!=='visible'&&pr<vw-.5)right=Math.min(right,pr);}
+    if(right>vw+.5&&r.left<right)overflow.push(e.tagName.toLowerCase()+'.'+String(e.className));
+  }
+  const centers=[...(nav?.querySelectorAll('button')||[])].map(e=>({name:e.getAttribute('aria-label'),y:(box(e).top+box(e).bottom)/2}));
+  const active=s?.querySelector('button[data-active]'); const a=active&&box(active);
+  const covered=[...(form?.querySelectorAll('button')||[])].filter(b=>{const r=box(b);
+    const top=document.elementFromPoint((r.left+r.right)/2,(r.top+r.bottom)/2);
+    return !top||!b.contains(top);}).map(b=>b.getAttribute('aria-label'));
+  const header=document.querySelector('section[aria-label="Agent chat"] header');
+  return {vw,vh,scrollWidth:document.documentElement.scrollWidth,overflow,nav:n,form:c,switcher:sw,
+    centers,active:a,activeName:active?.getAttribute('aria-label'),title:title?.textContent,
+    titleClipped:!!title&&title.scrollWidth>title.clientWidth,covered,
+    header:header&&box(header),field:field&&box(field),theme:document.documentElement.dataset.theme};
+})()"""
+
+
+def mobile_layout(width):
+    current("input")
+    width = int(width)
+    assert width in (360, 390, 470, 557)
+    height = 800 if width == 360 else 844
+    browser("set", "viewport", str(width), str(height))
+    results = []
+    for theme in ("light", "dark"):
+        if evaluate("document.documentElement.dataset.theme") != theme:
+            browser("click", 'button[aria-label="Switch to ' + theme + ' mode"]')
+        state = evaluate(MOBILE_LAYOUT_JS)
+        assert state["vw"] == width and state["vh"] == height and state["theme"] == theme, state
+        assert not state["overflow"] and state["scrollWidth"] <= width, state
+        nav, form = state["nav"], state["form"]
+        assert nav and form and nav["height"] <= 64 and abs(nav["bottom"] - height) <= 1, state
+        assert all(abs(c["y"] - (nav["top"] + nav["bottom"]) / 2) < 4 for c in state["centers"]), state
+        assert state["switcher"] and state["active"] and state["activeName"], state
+        assert state["active"]["left"] >= state["switcher"]["left"] - 4, state
+        assert state["active"]["right"] <= state["switcher"]["right"] + 4, state
+        assert state["title"] == NAMES["input"] and not state["titleClipped"], state
+        assert form["bottom"] <= nav["top"] and not state["covered"], state
+        assert state["header"] and state["header"]["bottom"] <= state["field"]["top"], state
+        results.append(state)
+        shot("input", f"mobile-{width}-{theme}")
+    write(f"input-mobile-{width}.json", results)
+
+
+SWITCHER_JS = r"""(() => {
+  const nav=document.querySelector('nav[aria-label="Primary"]');
+  const s=nav?.querySelector('[aria-label="Workspace selector"]');
+  if(!nav||!s)throw Error('real workspace switcher absent');
+  const w=s.getBoundingClientRect(), items=[...s.querySelectorAll('button')];
+  const cut=[],hidden=[];
+  for(const b of items){const r=b.getBoundingClientRect();
+    const shown=Math.min(r.right,w.right)-Math.max(r.left,w.left);
+    if(shown<=.5)hidden.push(r.right<=w.left+.5?'left':'right');
+    else if(shown<r.width-.5)cut.push({name:b.getAttribute('aria-label'),shown,width:r.width});}
+  const hints=[...nav.querySelectorAll('[data-more-hint]')].filter(h=>{const r=h.getBoundingClientRect(),c=getComputedStyle(h);
+    return c.visibility!=='hidden'&&Number(c.opacity)>.5&&r.width>0&&r.height>0;});
+  const marks=[...items.map(b=>{const r=b.getBoundingClientRect();return {name:b.getAttribute('aria-label'),
+    left:Math.max(r.left,w.left),right:Math.min(r.right,w.right),top:r.top,bottom:r.bottom};}),
+    ...[...nav.querySelectorAll('button svg')].filter(i=>!s.contains(i)).map(i=>{const r=i.getBoundingClientRect();
+      return {name:i.closest('button')?.getAttribute('aria-label')+' icon',left:r.left,right:r.right,top:r.top,bottom:r.bottom};})];
+  const covered=hints.flatMap(h=>{const r=h.getBoundingClientRect();return marks.filter(m=>m.right-m.left>.5&&
+    r.left<m.right-.5&&r.right>m.left+.5&&r.top<m.bottom&&r.bottom>m.top).map(m=>h.dataset.moreHint+' over '+m.name);});
+  const overlap=[...nav.querySelectorAll('button')].filter(b=>!s.contains(b)).filter(b=>{
+    const r=b.getBoundingClientRect();return r.right>w.left+.5&&r.left<w.right-.5;}).map(b=>b.getAttribute('aria-label'));
+  const hitBlocked=items.filter(b=>{const r=b.getBoundingClientRect();
+    if(r.left<w.left-.5||r.right>w.right+.5)return false;
+    const top=document.elementFromPoint((r.left+r.right)/2,(r.top+r.bottom)/2);
+    return !top||!b.contains(top);}).map(b=>b.getAttribute('aria-label'));
+  return {scrollLeft:s.scrollLeft,max:s.scrollWidth-s.clientWidth,items:items.map(b=>b.getAttribute('aria-label')),
+    cut,hidden,hints:hints.map(h=>h.dataset.moreHint).sort(),covered,overlap,hitBlocked};
+})()"""
+
+
+def mobile_switcher(width):
+    current("input")
+    width = int(width)
+    assert width in (360, 390, 470, 557)
+    height = 800 if width == 360 else 844
+    browser("set", "viewport", str(width), str(height))
+    first = evaluate(SWITCHER_JS)
+    workspace_buttons = [name for name in first["items"] if name and name.startswith("Switch to ")]
+    if width < 557 and (len(workspace_buttons) < 4 or first["max"] <= 4):
+        write(f"input-switcher-{width}-blocked.json", {"status": "blocked", "prerequisite":
+              "at least four authentic workspace avatars must overflow the real switcher at this viewport", "observed": first})
+        raise AssertionError(f"BLOCKED: real workspace roster does not exercise MB1b multi-item overflow at {width}px")
+    rows = []
+    for target in sorted(set((0, min(13, first["max"]), first["max"] // 2, first["max"]))):
+        evaluate("(() => {window.__aftVisualScroll=NaN;document.querySelector('nav[aria-label=\"Primary\"] [aria-label=\"Workspace selector\"]').scrollTo({left:" + str(target) + ",behavior:'instant'});return true;})()")
+        browser("wait", "--fn", "(() => {const s=document.querySelector('nav[aria-label=\"Primary\"] [aria-label=\"Workspace selector\"]');const v=s.scrollLeft;const p=window.__aftVisualScroll;window.__aftVisualScroll=v;return p===v;})()")
+        row = evaluate(SWITCHER_JS)
+        want = sorted(set(row["hidden"]))
+        assert not row["cut"] and row["hints"] == want and not row["covered"] and not row["overlap"] and not row["hitBlocked"], row
+        rows.append({"requested": target, **row})
+        shot("input", f"switcher-{width}-{target}")
+    for name in first["items"]:
+        assert name, "workspace switcher item lacks an accessible name"
+        script = "(() => {const s=document.querySelector('nav[aria-label=\"Primary\"] [aria-label=\"Workspace selector\"]');const b=[...s.querySelectorAll('button')].find(x=>x.getAttribute('aria-label')===" + json.dumps(name) + ");if(!b)return false;window.__aftVisualScroll=NaN;b.scrollIntoView({block:'nearest',inline:'nearest'});return true;})()"
+        assert evaluate(script), name
+        browser("wait", "--fn", "(() => {const s=document.querySelector('nav[aria-label=\"Primary\"] [aria-label=\"Workspace selector\"]');const v=s.scrollLeft;const p=window.__aftVisualScroll;window.__aftVisualScroll=v;return p===v;})()")
+        visible = evaluate("(() => {const s=document.querySelector('nav[aria-label=\"Primary\"] [aria-label=\"Workspace selector\"]');const b=[...s.querySelectorAll('button')].find(x=>x.getAttribute('aria-label')===" + json.dumps(name) + ");const r=b.getBoundingClientRect(),w=s.getBoundingClientRect(),top=document.elementFromPoint((r.left+r.right)/2,(r.top+r.bottom)/2);return {left:r.left,right:r.right,windowLeft:w.left,windowRight:w.right,hittable:!!top&&b.contains(top)};})()")
+        assert visible["left"] >= visible["windowLeft"] - .5 and visible["right"] <= visible["windowRight"] + .5 and visible["hittable"], (name, visible)
+        rows.append({"reachable": name, **visible})
+    write(f"input-switcher-{width}.json", rows)
 
 
 MOTION_JS = r"""(() => {
@@ -576,15 +753,15 @@ def reduced_saved_check():
 
 def cleanup():
     for case, expected in NAMES.items():
-        for a in request(f"{PREFIX}?include_archived=true&limit=500")["agents"]:
-            if a["name"] not in (expected, expected + "-renamed"):
-                continue
-            if a["repo"] != required("AFT_AGENT_FLOW_REPO") or a["preset"] != "lead":
-                continue
-            if a["created_by_kind"] != "user" or a["parent_agent_id"] is not None:
-                continue
-            if not a.get("archived_at"):
-                request(f"{PREFIX}/{a['agent_id']}/archive", "POST", {"reason": "cancelled"}, f"cov-visual-{RUN}-{case}-archive")
+        if not (WORK / f"{case}.id").exists():
+            continue
+        owned = json.loads((WORK / f"{case}-identity.json").read_text())
+        a = request(f"{PREFIX}/{agent_id(case)}")
+        assert a["agent_id"] == owned["agent_id"] and a["name"] in (expected, expected + "-renamed"), a
+        assert a["repo"] == owned["repo"] == required("AFT_AGENT_FLOW_REPO"), a
+        assert a["preset"] == "lead" and a["created_by_kind"] == "user" and a["parent_agent_id"] is None, a
+        if not a.get("archived_at"):
+            request(f"{PREFIX}/{a['agent_id']}/archive", "POST", {"reason": "cancelled"}, f"cov-visual-{RUN}-{case}-archive")
 
 
 def main():
