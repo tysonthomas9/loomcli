@@ -87,11 +87,18 @@ tests:
             (() => { const h = document.querySelector('[aria-label="Agent chat"] header')?.textContent || '';
               return location.pathname.startsWith('/ws/${AFT_WS}/chat/') && h.includes('aft-child-a-${RUN_ID}'); })()
         intent: "Show the real child's Chat and its identity in the header"
+      - wait:
+          fn: >-
+            (() => { const h = document.querySelector('[aria-label="Agent chat"] header')?.textContent || '';
+              return h.includes('aft-child-a-${RUN_ID}') && h.includes('finished'); })()
+        intent: "Wait for child A's own finished state before reviewing its committed Diff"
       - click: { role: button, name: Diff, exact: true }
         intent: "Open the child's Diff tab to review its own committed result"
       - wait:
           fn: >-
-            (document.body.textContent || '').includes('aft-child-fixtures/${RUN_ID}/aft-child-a-${RUN_ID}.txt')
+            Array.from(document.querySelectorAll('[class*="fileList"] [class*="filePath"]')).some(
+              e => e.getClientRects().length > 0 &&
+                e.textContent?.trim() === 'aft-child-fixtures/${RUN_ID}/aft-child-a-${RUN_ID}.txt')
         intent: "Wait for the child's private fixture file to appear in its Diff"
       - run: |
           agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/live-children/pair-lead")'"
@@ -161,8 +168,16 @@ tests:
       - wait:
           fn: >-
             (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('aft-cancel-child-${RUN_ID}') &&
+            !!Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find(
+              e => (e.textContent || '').startsWith('aft-cancel-child-${RUN_ID}')) &&
+            (document.querySelector('[data-testid=agent-tray]')?.textContent || '').includes('1 running')
+        intent: "Observe the Started child, sidebar worker, and running count before cancellation"
+      - click: { selector: "[data-testid=agent-tray] button[aria-expanded]" }
+        intent: "Expand the running child tray to show its name in the screenshot"
+      - wait:
+          fn: >-
             (document.querySelector('[data-testid=agent-tray]')?.textContent || '').includes('aft-cancel-child-${RUN_ID}')
-        intent: "Observe the created child still working before asking the Lead to cancel it"
+        intent: "Show the exact running child in the expanded tray"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" children cancel cancel-lead
           "aft-cancel-child-${RUN_ID}"
