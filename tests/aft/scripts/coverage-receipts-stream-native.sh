@@ -19,7 +19,6 @@ agent_flows_check_container "$container"
 # shellcheck disable=SC2016 # JavaScript template literals are passed verbatim to node.
 result="$(agent_flows_podman exec -T "$container" node -e '
 const fs=require("node:fs");
-const path=require("node:path");
 const {DatabaseSync}=require("node:sqlite");
 const [id,run,action,key]=process.argv.slice(1);
 const fail=(code)=>{process.stderr.write("native restart: "+code+"\n");process.exit(3)};
@@ -40,12 +39,12 @@ const fail=(code)=>{process.stderr.write("native restart: "+code+"\n");process.e
   if (pids.length!==1 || pids[0]<=1) fail("ambiguous-service-pid");
   const value={agent_id:id,harness:row.harness,worktree_path:row.worktree_path,native_id:row.native_id,native_root:row.native_root,service_pid:pids[0],scope:"owned OpenCode service only"};
   if (action==="count") {
-    if (process.env.LOOM_CONFIG_DIR!=="/root/.loom") fail("service-root-mismatch");
-    const filename=path.join(process.env.LOOM_CONFIG_DIR,"agents-opencode","state","opencode","service.json");
+    const filename="/root/.loom/agents-opencode/state/opencode/service.json";
     const reg=JSON.parse(fs.readFileSync(filename,"utf8"));
     const base=new URL(reg.url);
     if (reg.pid!==pids[0] || base.protocol!=="http:" || !["127.0.0.1","localhost"].includes(base.hostname) ||
-        base.pathname!=="/" || base.username || base.password || typeof reg.password!=="string" || !reg.password) fail("service-registration-mismatch");
+        !base.port || base.pathname!=="/" || base.search || base.hash || base.username || base.password ||
+        typeof reg.password!=="string" || !reg.password) fail("service-registration-mismatch");
     const auth="Basic "+Buffer.from("opencode:"+reg.password).toString("base64");
     let cursor="",count=0;
     for (let page=0;page<100;page++) {
