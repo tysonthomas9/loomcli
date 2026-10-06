@@ -1,0 +1,406 @@
+# Paid provider journey. Each person action uses the mounted UI; Lead mutations
+# use its real Loom tool. Read-only helpers only inspect saved state and refs.
+suite: coverage-children-activity
+classification: { area: agents, feature: child-activity, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_REAL_MODEL:?}" "${AFT_NATIVE_MODEL_PROBE:?}" "${AFT_SELECT_AGENT_MODEL:?}" "${RUN_ID:?}"
+  test "$AFT_WS" = LOCALMODE
+  test "$AFT_REAL_BACKEND" = opencode
+  test -x "$AFT_NATIVE_MODEL_PROBE"
+  test -x "$AFT_SELECT_AGENT_MODEL"
+teardown: |
+  python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" cleanup
+tests:
+  # CL2/CL3/OR3c and duplicate-narration 2.3d. The second task attempt
+  # begins only when the real Lead sends to the same finished child ID.
+  - name: repeated child attempts keep two keyed results and one final Lead summary
+    intent: A person asks a real Lead to create one task child, then the Lead reopens that same child with Loom agent_send; the child switches branch and commits during its second attempt
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: Wait for the actual Lead creation form
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-child-repeat-lead-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: Show the selected real model before the first user Send
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind repeat-lead "cov-child-repeat-lead-${RUN_ID}"
+        intent: Bind the UI Lead to an exact saved Agent API ID
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create to delegate one task child named cov-child-repeat-${RUN_ID}.
+            Brief it to inspect README.md and docs/loom-glossary.md, create only
+            aft-child-fixtures/${RUN_ID}/first.txt with the words first complete,
+            git add and commit that file on its assigned branch, and report its
+            result. Do not push. When its task_completed notice reaches you,
+            give only one brief acknowledgement naming first; do not use agent_get.
+            I will ask you to reopen the same child after that acknowledgement.
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const m=document.querySelector('[data-testid=started-marker]');
+              return m?.textContent?.includes('cov-child-repeat-${RUN_ID}') &&
+                !/\{\s*"(name|brief|agent_id)"/.test(m.textContent || ''); })()
+        intent: Screenshot the real Started header without raw bridge JSON (CL4)
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind repeat repeat-lead "cov-child-repeat-${RUN_ID}"
+        intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - click: { selector: "[data-testid=started-marker] button[aria-expanded]" }
+        intent: Expand the real bridge call while preserving the short Started header
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=started-marker] button[aria-expanded=true]')
+        intent: Screenshot the expanded delegation details (CL4)
+      - click: { selector: "[data-testid=agent-tray] button[aria-expanded]" }
+        intent: Expand the live task child tray
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" activity repeat
+        intent: Bind the visible live preview to the same child's saved tool or reasoning event ID
+      - wait:
+          fn: >-
+            (() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));
+              return row?.getAttribute('data-tray-row') && row.textContent?.includes(' · ') &&
+                row.textContent?.match(/(▸|💭)/); })()
+        intent: Screenshot the running child's current harmless tool or reasoning step and elapsed time (DF2)
+      - wait:
+          fn: >-
+            (() => { const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              return cards.length===1 && cards[0].dataset.outcome==='completed' && cards[0].dataset.delivery==='delivered' &&
+                cards[0].textContent?.includes('cov-child-repeat-${RUN_ID}'); })()
+        intent: Screenshot the first delivered completion card
+      - wait:
+          fn: >-
+            (() => { const rows=Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li'));
+              const card=rows.findIndex(r=>r.querySelector('[data-testid=completion-record]'));
+              return card>=0 && rows.slice(card+1).filter(r=>r.dataset.kind==='agent' && r.textContent?.includes('first')).length===1; })()
+        intent: Screenshot exactly one brief Lead acknowledgement after attempt zero
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" first repeat-lead repeat
+        intent: Save attempt-zero completion and delivered event IDs, one acknowledgement, and zero saved agent_get calls
+      - reload: true
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=completion-record]').length===1
+        intent: Screenshot one first-attempt card after reload
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" repeat_ready repeat-lead repeat
+        intent: Confirm the exact same child is finished before the Lead reopens it
+      - run: |
+          set -eu
+          id="$(cat "$AFT_WORK_DIR/coverage-children-activity/repeat.id")"
+          agent-browser --session "$AFT_SESSION" fill "textarea[aria-label=Message]" "Use Loom agent_send once to your existing finished child $id. Ask it to git switch -c cov-child-switched-${RUN_ID} in its own worktree, create only aft-child-fixtures/${RUN_ID}/second.txt with the words second complete, git add and commit it on that switched branch, and report the outcome. Do not create another child. After the new task_completed notice, give one final summary with the words first and second, without agent_get."
+        intent: Put the exact saved child ID into the person's Lead Chat request
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              return cards.length===2 && cards.every(c=>c.dataset.outcome==='completed' && c.dataset.delivery==='delivered'); })()
+        intent: Screenshot two delivered completion cards for the same child ID and two attempts
+      - wait:
+          fn: >-
+            (() => { const rows=Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li'));
+              const last=rows.findLastIndex(r=>r.querySelector('[data-testid=completion-record]'));
+              return last>=0 && rows.slice(last+1).filter(r=>r.dataset.kind==='agent' && r.textContent?.includes('first') && r.textContent?.includes('second')).length===1; })()
+        intent: Screenshot one final combined Lead narration after attempt one
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" repeated repeat-lead repeat
+        intent: Match two exact keyed completions and deliveries to one child, real switched worktree ref and commit, and zero saved agent_get calls
+      - run: |
+          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-activity/repeat.id")"
+        intent: Save separate requested, native session, and completed-answer model evidence for the task child
+      - reload: true
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=completion-record]').length===2
+        intent: Screenshot both attempt cards still present once after reload
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" repeated repeat-lead repeat
+        intent: Recheck exact completion and delivery keys after reload
+
+  # OR4c visible handover. Internal crash/transaction races remain Go gates.
+  - name: two task children finish while the Lead works and both facts reach one handover
+    intent: Two actual task children finish while their real Lead has an active turn; the saved completion keys share one later handover and one combined Lead reply
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-child-pair-lead-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: Select the real model for the pair Lead before its first Send
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind pair-lead "cov-child-pair-lead-${RUN_ID}"
+        intent: Save the UI-created pair Lead's exact Agent API ID
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create twice, creating task children cov-child-pair-a-${RUN_ID}
+            and cov-child-pair-b-${RUN_ID}. Each must independently inspect README.md,
+            docs/loom-glossary.md, internal/loomagent/delegation.go, and
+            internal/loomagent/send.go, then create and commit only its own file
+            aft-child-fixtures/${RUN_ID}/pair-a.txt or pair-b.txt respectively.
+            The file must include its own name and complete. Do not push or open
+            a PR. Reply briefly as soon as both have started; I will give you
+            more work while they finish. On completion, summarize their actual results once.
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('cov-child-pair-a-${RUN_ID}') && t.includes('cov-child-pair-b-${RUN_ID}') &&
+                document.querySelectorAll('[data-testid=started-marker]').length>=1; })()
+        intent: Screenshot both actual Started child names
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind pair-a pair-lead "cov-child-pair-a-${RUN_ID}"
+        intent: Prove pair child A was made by the Lead's native Loom tool
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind pair-b pair-lead "cov-child-pair-b-${RUN_ID}"
+        intent: Prove pair child B was made by the Lead's native Loom tool
+      - click: { role: button, name: "Collapse workspace tree" }
+        intent: Collapse the rail while both real task children are active
+      - run: |
+          set -eu
+          a="$(cat "$AFT_WORK_DIR/coverage-children-activity/pair-a.id")"
+          b="$(cat "$AFT_WORK_DIR/coverage-children-activity/pair-b.id")"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const ids=Array.from(document.querySelectorAll('[data-testid=collapsed-agent-rail] [data-agent-id]')).map(x=>x.dataset.agentId); return ids.filter(x=>x==='$a').length===1 && ids.filter(x=>x==='$b').length===1; })()" | rg -q true
+        intent: Match both visible collapsed-rail child pills to their exact saved Agent API IDs (RAIL1)
+      - click: { role: button, name: "Expand workspace tree" }
+        intent: Restore the expanded sidebar before the Lead's busy turn
+      - wait:
+          fn: >-
+            (() => { const h=document.querySelector('section[aria-label="Agent chat"] header');
+              return h?.textContent?.includes('idle') &&
+                (document.querySelector('[data-testid=agent-tray]')?.textContent || '').includes('2 running'); })()
+        intent: Screenshot two live children while the Lead becomes available
+      - fill:
+          label: Message
+          value: >-
+            While your children work, inspect docs/loom-glossary.md,
+            internal/loomagent/delegation.go, internal/loomagent/send.go,
+            internal/loomagent/reconcile.go, and internal/loomagent/events.go.
+            Explain the relation between completion records and saved deliveries.
+            Keep the analysis factual. After their notices arrive, give exactly
+            one combined summary of both child files and outcomes.
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const h=document.querySelector('section[aria-label="Agent chat"] header');
+              return h?.textContent?.includes('active') &&
+                (document.querySelector('[data-testid=agent-tray]')?.textContent || '').includes('2 running'); })()
+        intent: Screenshot the Lead busy with two live children
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" busy pair-lead pair-a pair-b
+        intent: Save exact active Lead turn and two active child turns before either completion
+      - wait:
+          fn: >-
+            (() => { const r=Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              return r.length===2 && r.every(c=>c.dataset.outcome==='completed' && c.dataset.delivery==='delivered'); })()
+        intent: Screenshot two real completion cards after the busy Lead handover
+      - wait:
+          fn: >-
+            (() => { const rows=Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li'));
+              const last=rows.findLastIndex(r=>r.querySelector('[data-testid=completion-record]'));
+              return last>=0 && rows.slice(last+1).some(r=>r.dataset.kind==='agent' &&
+                r.textContent?.includes('cov-child-pair-a-${RUN_ID}') && r.textContent?.includes('cov-child-pair-b-${RUN_ID}')); })()
+        intent: Screenshot the final combined Lead result
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" pair pair-lead pair-a pair-b
+        intent: Require one saved delivery containing both completion keys, one final reply, and no agent_get
+      - run: |
+          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-activity/pair-a.id")"
+          "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-activity/pair-b.id")"
+        intent: Require both completed task children to have native completed-answer model evidence
+      - click: { role: button, name: "Collapse workspace tree" }
+        intent: Check the collapsed rail after both task children finished
+      - run: |
+          set -eu
+          a="$(cat "$AFT_WORK_DIR/coverage-children-activity/pair-a.id")"
+          b="$(cat "$AFT_WORK_DIR/coverage-children-activity/pair-b.id")"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const ids=Array.from(document.querySelectorAll('[data-testid=collapsed-agent-rail] [data-agent-id]')).map(x=>x.dataset.agentId); return !ids.includes('$a') && !ids.includes('$b'); })()" | rg -q true
+        intent: Match finished-child removal from the collapsed rail to both exact Agent API IDs
+      - click: { role: button, name: "Expand workspace tree" }
+        intent: Restore the Lead's expanded sidebar for reload history proof
+      - reload: true
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=completion-record]').length===2
+        intent: Screenshot no duplicate child narration or cards after reload
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" pair pair-lead pair-a pair-b
+        intent: Recheck exact saved keys and grouped delivery after reload
+
+  # SB2/SB4/SB5/RAIL1. Independent Agent API daemon workers have no UI
+  # creation path at this pinned source; the mixed Background proof is pending.
+  - name: finished child sidebar exception, UI reorder, archive return and collapsed rail
+    intent: A person creates two real Leads and a task child, checks the sidebar against saved IDs, reorders Leads, archives and unarchives one from Chat, and sees matching collapsed rail entries
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-child-sidebar-a-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: Select the real model for sidebar Lead A
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind sidebar-a "cov-child-sidebar-a-${RUN_ID}"
+        intent: Save sidebar Lead A's exact UI-created identity
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-child-sidebar-b-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: Select the real model for sidebar Lead B
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind sidebar-b "cov-child-sidebar-b-${RUN_ID}"
+        intent: Save sidebar Lead B's exact UI-created identity
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create once for task child cov-child-sidebar-task-${RUN_ID}.
+            Have it inspect README.md and report its exact filename in one sentence.
+            Do not make a repository change. On its completion, summarize it once.
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('cov-child-sidebar-task-${RUN_ID}')
+        intent: Screenshot the nested working task child
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind sidebar-task sidebar-b "cov-child-sidebar-task-${RUN_ID}"
+        intent: Bind the sidebar task child to its real Lead and saved Agent API ID
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" roster sidebar-a sidebar-b sidebar-task
+        intent: Bind visible sidebar names to exact API roster IDs
+      - wait:
+          fn: >-
+            (() => { const r=Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              return r.length===1 && r[0].dataset.outcome==='completed' && r[0].dataset.delivery==='delivered'; })()
+        intent: Screenshot the child completion in its Lead Chat
+      - wait:
+          fn: >-
+            !Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some(a=>a.textContent?.includes('cov-child-sidebar-task-${RUN_ID}'))
+        intent: Screenshot finished child absent from the ordinary expanded sidebar (SB2)
+      - click: { selector: "[data-testid=completion-record]" }
+        intent: Open the exact finished child from its completion card
+      - wait:
+          fn: >-
+            (() => { const a=Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find(a=>a.textContent?.includes('cov-child-sidebar-task-${RUN_ID}'));
+              return a?.getAttribute('aria-current')==='page' && a?.dataset.state==='finished'; })()
+        intent: Screenshot only the open finished child restored beneath its Lead
+      - click: { role: button, name: Git, exact: true }
+        intent: Open the finished child's Git tab through the UI
+      - wait: { fn: "location.search.includes('tab=git')" }
+        intent: Screenshot the selected Git tab and retained child identity
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-activity/sidebar-b.id")"
+          agent-browser --session "$AFT_SESSION" click "nav[aria-label=Agents] a[href$='/$id']"
+        intent: Return from the child's Git tab to its Lead through the sidebar
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return location.search==='' && t.includes('cov-child-sidebar-task-${RUN_ID}') &&
+                !!document.querySelector('[data-testid=completion-record]'); })()
+        intent: Screenshot the Lead Chat history and completion card after sidebar navigation
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-activity/sidebar-task.id")"
+          agent-browser --session "$AFT_SESSION" click "[data-testid=completion-record]"
+        intent: Reopen the same finished child before checking the collapsed rail
+      - click: { role: button, name: "Collapse workspace tree" }
+      - wait:
+          fn: >-
+            (() => { const rail=document.querySelector('[data-testid=collapsed-agent-rail]');
+              return rail && Array.from(rail.querySelectorAll('[data-agent-id]')).filter(a=>a.getAttribute('aria-current')==='page').length===1 &&
+                Array.from(rail.querySelectorAll('[data-agent-id]')).some(a=>a.getAttribute('title')?.includes('cov-child-sidebar-task-${RUN_ID}') || a.getAttribute('aria-label')?.includes('cov-child-sidebar-task-${RUN_ID}')); })()
+        intent: Screenshot the selected child and two Leads in the collapsed rail
+      - run: |
+          set -eu
+          a="$(cat "$AFT_WORK_DIR/coverage-children-activity/sidebar-a.id")"
+          b="$(cat "$AFT_WORK_DIR/coverage-children-activity/sidebar-b.id")"
+          child="$(cat "$AFT_WORK_DIR/coverage-children-activity/sidebar-task.id")"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const rows=Array.from(document.querySelectorAll('[data-testid=collapsed-agent-rail] [data-agent-id]')); const ids=rows.map(x=>x.dataset.agentId); return ['$a','$b','$child'].every(id=>ids.filter(x=>x===id).length===1) && rows.find(x=>x.dataset.agentId==='$child')?.getAttribute('aria-current')==='page'; })()" | rg -q true
+        intent: Require exactly one collapsed pill for each saved Lead and the selected finished child ID
+      - reload: true
+      - wait: { fn: "!!document.querySelector('[data-testid=collapsed-agent-rail] [data-agent-id][aria-current=page]')" }
+        intent: Screenshot collapsed selection surviving reload
+      - click: { role: button, name: "Expand workspace tree" }
+      - open: /ws/${AFT_WS}/home
+      - wait: { fn: "!!document.querySelector('[data-stat=idle]')" }
+        intent: Screenshot the Home idle agent count with the saved roster available for comparison
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" roster sidebar-a sidebar-b sidebar-task
+        intent: Save exact API roster states at the Home count checkpoint
+      - run: |
+          set -eu
+          expected="$(python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" home_expected)"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const s=document.querySelector('[data-stat=idle] strong'); return s && Number.parseInt(s.textContent,10)===$expected; })()" | rg -q true
+        intent: Compare the visible Home idle count to exact saved Agent API and quiescent legacy roster counts
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-activity/sidebar-b.id")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$id"
+        intent: Return to the sidebar Lead using its saved exact ID
+      - wait:
+          fn: >-
+            (() => { const nav=document.querySelector('nav[aria-label=Agents]');
+              const names=Array.from(nav?.querySelectorAll(':scope > div [data-testid=sortable-agent-row] > a') || []).map(a=>a.textContent || '');
+              return names.some(n=>n.includes('cov-child-sidebar-a-${RUN_ID}')) && names.some(n=>n.includes('cov-child-sidebar-b-${RUN_ID}')); })()
+        intent: Screenshot the two independent Lead rows before reorder
+      - run: |
+          agent-browser --session "$AFT_SESSION" click '[aria-label="Drag to reorder cov-child-sidebar-b-${RUN_ID}"]'
+          agent-browser --session "$AFT_SESSION" press Space
+          agent-browser --session "$AFT_SESSION" press ArrowUp
+          agent-browser --session "$AFT_SESSION" press Space
+        intent: Reorder Lead B above Lead A through the sidebar keyboard drag handle
+      - wait:
+          fn: >-
+            (() => { const nav=document.querySelector('nav[aria-label=Agents]');
+              const names=Array.from(nav?.querySelectorAll('a') || []).map(a=>a.textContent || '');
+              return names.findIndex(n=>n.includes('cov-child-sidebar-b-${RUN_ID}')) < names.findIndex(n=>n.includes('cov-child-sidebar-a-${RUN_ID}')); })()
+        intent: Screenshot the visibly changed Lead order (SB4)
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const names=Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).map(a=>a.textContent || '');
+              const a=names.findIndex(n=>n.includes('cov-child-sidebar-a-${RUN_ID}'));
+              const b=names.findIndex(n=>n.includes('cov-child-sidebar-b-${RUN_ID}'));
+              return a>=0 && b>=0 && b<a; })()
+        intent: Screenshot persisted sidebar order after reload
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const a=document.querySelector("nav[aria-label=Agents] a[aria-current=page]"); if(!a) throw Error("active sidebar row missing"); const r=a.getBoundingClientRect(); a.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()' >/dev/null
+        intent: Open the current Lead's sidebar context menu with a person-visible action
+      - click: { testid: agent-context-menu-archive }
+      - wait:
+          fn: >-
+            !Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some(a=>a.textContent?.includes('cov-child-sidebar-b-${RUN_ID}'))
+        intent: Screenshot the archived Lead removed from the expanded sidebar
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-activity/sidebar-b.id")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$id"
+        intent: Open the archived Lead's retained Chat by its exact saved ID
+      - wait: { fn: "!!document.querySelector('[data-testid=agent-archived-notice]')" }
+        intent: Screenshot the retained read-only Chat before Unarchive
+      - click: { testid: agent-unarchive }
+      - wait:
+          fn: >-
+            (() => { const a=Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find(a=>a.textContent?.includes('cov-child-sidebar-b-${RUN_ID}'));
+              return a?.getAttribute('aria-current')==='page' && !document.querySelector('[data-testid=agent-archived-notice]'); })()
+        intent: Screenshot the same Lead restored to the sidebar from Chat (SB5)
+      - reload: true
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some(a=>a.textContent?.includes('cov-child-sidebar-b-${RUN_ID}') && a.getAttribute('aria-current')==='page')
+        intent: Screenshot the restored Lead row after reload
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" roster sidebar-a sidebar-b sidebar-task
+        intent: Match the final visible roster to the same saved Lead and child IDs
