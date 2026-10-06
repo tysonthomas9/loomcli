@@ -17,7 +17,7 @@ compose=(agent_flows_podman compose -p "$AFT_OWNED_PROJECT" -f test/local-mode/d
 container="$("${compose[@]}" ps -q loom-local | tr -d '\r')"
 agent_flows_check_container "$container"
 # shellcheck disable=SC2016 # JavaScript template literals are passed verbatim to node.
-result="$(agent_flows_podman exec -T "$container" node -e '
+result="$(agent_flows_podman exec "$container" node -e '
 const fs=require("node:fs");
 const {DatabaseSync}=require("node:sqlite");
 const [id,run,action,key]=process.argv.slice(1);
@@ -46,6 +46,16 @@ const fail=(code)=>{process.stderr.write("native restart: "+code+"\n");process.e
         !base.port || base.pathname!=="/" || base.search || base.hash || base.username || base.password ||
         typeof reg.password!=="string" || !reg.password) fail("service-registration-mismatch");
     const auth="Basic "+Buffer.from("opencode:"+reg.password).toString("base64");
+    const read=async path=>{
+      const response=await fetch(new URL(path,base),{headers:{Authorization:auth},signal:AbortSignal.timeout(15000)});
+      if (!response.ok) fail("native-identity-unavailable");
+      return response.json();
+    };
+    const info=await read("/api/info");
+    const session=await read("/api/session/"+encodeURIComponent(row.native_id));
+    if (info?.pid!==reg.pid || session?.data?.id!==row.native_id ||
+        session.data.metadata?.agent_id!==id || session.data.location?.directory!==row.worktree_path)
+      fail("native-session-mismatch");
     let cursor="",count=0;
     for (let page=0;page<100;page++) {
       const url=new URL("/api/session/"+encodeURIComponent(row.native_id)+"/message",base);
