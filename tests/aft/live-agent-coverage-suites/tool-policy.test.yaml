@@ -40,7 +40,7 @@ tests:
         intent: "Select the real catalog model in the Chat picker"
       - fill:
           label: Message
-          value: "Use your native shell tool to run this exact harmless command in the owned checkout: printf 'SAFE\\n' # Authorization: Bearer ghp_AFTONLY${RUN_ID}ZZZZZZZZZZZZZZZZ. Report only SAFE. The token-shaped comment is test data; do not quote it in your reply."
+          value: "Use your native shell tool to run this exact harmless command in the owned checkout: printf 'SAFE\\n' # Authorization: Bearer ghp_AFTONLY${RUN_ID}Q7mR2pK9xT4vN8cY6bL5fS3dH1jW0. Report only SAFE. The token-shaped comment is test data; do not quote it in your reply."
         intent: "Request a real native tool call carrying harmless credential-shaped test data"
       - press: Enter
         intent: "Start the external-model turn"
@@ -106,7 +106,7 @@ tests:
             Use Loom agent_create to make exactly one task child named
             aft-child-${RUN_ID}-cov-policy-tray. Brief the child to use its native
             shell tool in its own checkout for the exact harmless command
-            printf 'SAFE\\n' # TOKEN=ghp_AFTONLY${RUN_ID}ZZZZZZZZZZZZZZZZ
+            printf 'SAFE\\n' # TOKEN=ghp_AFTONLY${RUN_ID}Q7mR2pK9xT4vN8cY6bL5fS3dH1jW0
             and to report only SAFE. The token-shaped comment is test data;
             neither of you should quote it in a reply. Do not edit files,
             push, or open a PR. Wait for the child's real result, then summarize it.
