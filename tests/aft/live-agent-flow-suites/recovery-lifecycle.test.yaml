@@ -272,9 +272,20 @@ tests:
       - click: { role: button, name: "Delete agent", exact: true }
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=agent-delete-anyway]') &&
-            (document.querySelector('[role=alertdialog]')?.textContent || '').toLowerCase().includes('unsaved')
-        intent: "Show the named unsaved-work refusal and explicit Delete anyway decision"
+            (() => { const dialog = document.querySelector('[role=alertdialog]');
+              const text = dialog?.textContent || '';
+              return !!dialog?.querySelector('[data-testid=agent-delete-anyway]') &&
+                text.includes('Not deleted') &&
+                text.includes('Uncommitted changes in /root/.loom/worktrees/source-repo/') &&
+                text.includes('README.md. Delete anyway loses these changes.') &&
+                Array.from(dialog.querySelectorAll('button')).some(b => b.textContent?.trim() === 'Keep agent'); })()
+        intent: "Show the uncommitted README refusal and both Keep agent and Delete anyway decisions"
+      - run: |
+          set -euo pipefail
+          target="$(cat "$AFT_WORK_DIR/live-recovery-dirty.id")"
+          [[ "$target" =~ ^agt_[A-Za-z0-9]+$ ]]
+          agent-browser --session "$AFT_SESSION" eval "(() => { const text = document.querySelector('[role=alertdialog]')?.textContent || ''; if (!text.includes('Uncommitted changes in /root/.loom/worktrees/source-repo/$target: README.md. Delete anyway loses these changes.')) throw Error('wrong dirty target warning'); return true; })()" >/dev/null
+        intent: "Bind the uncommitted README warning to this exact UI-created target Agent ID"
       - click: { role: button, name: "Keep agent", exact: true }
       - api:
           method: GET
@@ -288,6 +299,12 @@ tests:
       - click: { role: button, name: "Delete agent", exact: true }
       - wait: { fn: "!!document.querySelector('[data-testid=agent-delete-anyway]')" }
         intent: "Show a fresh warning tied to the current dirty-worktree fingerprint"
+      - run: |
+          set -euo pipefail
+          target="$(cat "$AFT_WORK_DIR/live-recovery-dirty.id")"
+          [[ "$target" =~ ^agt_[A-Za-z0-9]+$ ]]
+          agent-browser --session "$AFT_SESSION" eval "(() => { const text = document.querySelector('[role=alertdialog]')?.textContent || ''; if (!text.includes('Uncommitted changes in /root/.loom/worktrees/source-repo/$target: README.md. Delete anyway loses these changes.')) throw Error('wrong dirty target warning'); return true; })()" >/dev/null
+        intent: "Show the fresh uncommitted README warning still names this exact target before Delete anyway"
       - click: { testid: agent-delete-anyway }
       - wait:
           fn: >-
