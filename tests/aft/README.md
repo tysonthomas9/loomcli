@@ -34,9 +34,11 @@ Extra aft flags go through `AFT_ARGS`, e.g.
 
 `loomgit-journeys.json` maps the ten readable journeys in the workspace verification
 plan to original criterion IDs, exact suite/case bindings and screenshot checkpoints.
-It is an authoring inventory, **not a runtime result**. The integration task must
-reconcile pending bindings with all authors' final suites before reporting coverage.
-A journey may cover only part of its original criteria; gaps stay explicit.
+It records author provenance, final source hashes, exact checkpoint indices and
+actual deterministic run receipts. Each receipt names its executed source version;
+filtered/skipped or unreached checks are not passes. Latest selected cases total
+15 passed and 6 failed across the recorded runs, not one all-green run. Original
+criterion gaps remain explicit, and the full module is still acceptance-gated.
 
 This runner overlays reviewed test-only changes from harness
 `ea006c5b758b5bbb25617411954bef8b4448a99a` onto product #943
@@ -96,7 +98,9 @@ result:
   make test-aft AFT_ARGS="--suite loomgit-task-review --screenshots --record-all --max-browsers 1"
 ```
 
-Run that preserved baseline suite first. Then select each integrated journey by its
+The screenshot integration ran review-stack-explicit first, then the authored
+journeys. The preserved baseline suite remains unrun in these receipts. For
+additional regression work, run it separately; select integrated journeys by their
 exact suite name in `loomgit-journeys.json`; use `--suite 'loomgit-*'` only after
 reviewing the selected corpus and the legacy suites' actor/setup limitations. Keep
 forge-resetting legacy scenarios serialized. Existing stack scripts that run all

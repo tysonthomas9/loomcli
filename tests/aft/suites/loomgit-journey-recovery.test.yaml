@@ -109,8 +109,6 @@ tests:
       - click: { role: button, name: "Remove e2e-ws-recovery-delete", exact: true }
         intent: The human requests its real deletion preview through the mounted switcher
       - wait: { text: Remove workspace }
-      - run: agent-browser --session "$AFT_SESSION" scrollintoview "text=server.pem"
-        intent: The human observer scrolls the mounted deletion work list to its protected-file entry so the screenshot shows the named work
       - expect: { text: server.pem, visible: { testid: confirm-dialog-overlay } }
         intent: "R3.before checkpoint — the human sees the current preview name the dirty secret-pattern file before confirming removal"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" delete-stale delete
