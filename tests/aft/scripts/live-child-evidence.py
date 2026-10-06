@@ -5,6 +5,7 @@ import json
 import hashlib
 import os
 import pathlib
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -107,6 +108,27 @@ def called(calls, name, target=None, error=None):
     return matched
 
 
+def owned_git(worktree, *args):
+    """Read the checked child worktree; Agent API has no diff/commit route."""
+    script = r'''
+set -euo pipefail
+source "$AFT_TESTS_DIR/scripts/agent-flows-ownership.sh"
+agent_flows_check_manifest
+cd "$AFT_SOURCE_ROOT"
+compose=(agent_flows_podman compose -p "$AFT_OWNED_PROJECT"
+  -f test/local-mode/docker-compose.yml
+  -f test/local-mode/docker-compose.agents.yml
+  -f test/local-mode/docker-compose.agents-real.yml
+  -f "$AFT_WORK_DIR/fleet-override.yml")
+container="$("${compose[@]}" ps -q loom-local | tr -d '\r')"
+agent_flows_check_container "$container"
+"${compose[@]}" exec -T loom-local git -C "$1" "${@:2}"
+'''
+    result = subprocess.run(["bash", "-c", script, "owned-git", worktree, *args],
+                            capture_output=True, text=True, check=True, timeout=60)
+    return result.stdout.strip()
+
+
 def lead(label, name):
     page = get(f"{ROOT}?include_archived=true&limit=500")
     assert not page.get("next"), "agent list truncated"
@@ -134,6 +156,8 @@ def children(label, lead_label, *names):
         assert a["repo"] == parent["repo"] and a["base_ref"] == parent["branch"]
         assert a["worktree_path"] and a["worktree_path"] != parent["worktree_path"]
         assert a["branch"] and a["branch"] != parent["branch"]
+        if label == "cancel":
+            assert a["state"] == "active" and a["running_turn_id"], "cancellation child is not running"
         (WORK / f"{label}-{a['name']}.id").write_text(a["agent_id"] + "\n")
     _, ev = evidence(lead_label, parent["agent_id"])
     for child in found:
@@ -154,15 +178,17 @@ def completed(label, lead_label, *names):
                e["event_id"] == f"task_completed:{child_id}:0"]
         assert len(rec) == 1 and rec[0]["payload"]["outcome"] == "completed", rec
         assert rec[0]["payload"].get("head") and rec[0]["payload"].get("summary")
-        diff_root = f"{BASE}/api/workspaces/{urllib.parse.quote(WS)}/agents/{urllib.parse.quote(name)}/diff"
-        query = urllib.parse.urlencode({"from": parent["branch"]})
-        commits = get(f"{diff_root}/commits?{query}")["data"]["commits"]
-        files = get(f"{diff_root}/files?{query}&to=HEAD")["data"]["files"]
+        assert pathlib.PurePosixPath(a["worktree_path"]).name == child_id
+        head = owned_git(a["worktree_path"], "rev-parse", "HEAD")
+        commits = owned_git(a["worktree_path"], "log", "--format=%H",
+                            f"{a['base_ref']}..HEAD").splitlines()
+        files = owned_git(a["worktree_path"], "diff", "--name-only",
+                          f"{a['base_ref']}..HEAD").splitlines()
         expected_path = f"aft-child-fixtures/{os.environ['RUN_ID']}/{name}.txt"
-        assert any(c["hash"] == rec[0]["payload"]["head"] for c in commits), commits
-        assert any(f["path"] == expected_path for f in files), files
-        save(f"{label}-{name}-commits", commits)
-        save(f"{label}-{name}-files", files)
+        assert head == rec[0]["payload"]["head"] and head in commits, (head, commits)
+        assert files == [expected_path], files
+        save(f"{label}-{name}-commits", {"head": head, "commits": commits})
+        save(f"{label}-{name}-files", {"base_ref": a["base_ref"], "paths": files})
         delivery = [e for e in ev if e["kind"] == "message.delivered" and
                     {"child": child_id, "attempt": 0} in e["payload"].get("completions", [])]
         assert len(delivery) == 1, delivery
