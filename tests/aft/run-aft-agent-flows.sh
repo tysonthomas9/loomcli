@@ -82,7 +82,7 @@ export LOCAL_MODE_OPENCODE_DATA="${LOCAL_MODE_OPENCODE_DATA:-$HOME/.local/share/
 
 umask 077
 run_root="$(mktemp -d /private/tmp/aft-agent-flows.XXXXXXXX | tr -d '\r')"
-run_id="af${run_root##*.}"
+run_id="af$(printf '%s' "${run_root##*.}" | tr '[:upper:]' '[:lower:]')"
 project="loom-aft-agents-$run_id"
 account_lock="$primary_root/tmp/aft-live.opencode.lock"
 mkdir -p "$primary_root/tmp" "$run_root/evidence" "$run_root/bin" "$run_root/profiles" "$run_root/aft-home"
@@ -92,11 +92,11 @@ source "$TESTS_DIR/scripts/agent-flows-ownership.sh"
 # shellcheck disable=SC2329 # Invoked by the EXIT/INT/TERM cleanup trap.
 cleanup_owns_stack() {
   agent_flows_check_manifest || return 1
-  local containers container
-  containers="$(cd "$SOURCE_ROOT" && podman compose -p "$AFT_OWNED_PROJECT" \
+  local container
+  owned_containers="$(cd "$SOURCE_ROOT" && podman compose -p "$AFT_OWNED_PROJECT" \
     -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml \
     -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml" ps -a -q | tr -d '\r')" || return 1
-  for container in $containers; do
+  for container in $owned_containers; do
     podman inspect "$container" | jq -e --arg project "$AFT_OWNED_PROJECT" '
       .[0].Config.Labels as $labels |
       $labels["com.docker.compose.project"] == $project and
@@ -111,7 +111,13 @@ cleanup() {
   if ((build_lock_owned)); then rm -f /private/tmp/dryhawk-stack-build.lock/owner; rmdir /private/tmp/dryhawk-stack-build.lock || true; fi
   if ((stack_attempted)); then
     if cleanup_owns_stack; then
-      (cd "$SOURCE_ROOT" && make local-mode-agents-down) >> "$run_root/evidence/teardown.log" 2>&1 || status=1
+      if ! (cd "$SOURCE_ROOT" && make local-mode-agents-down) >> "$run_root/evidence/teardown.log" 2>&1; then
+        status=1
+        if [[ -z "$owned_containers" && "$LOCAL_MODE_OPENCODE_COPY" == "$run_root/state/$project/opencode.db" ]]; then
+          (cd "$SOURCE_ROOT" && test/local-mode/real-opencode-copy.sh remove "$LOCAL_MODE_OPENCODE_COPY") \
+            >> "$run_root/evidence/teardown.log" 2>&1 || status=1
+        fi
+      fi
     else
       echo 'owned stack check failed; teardown skipped' >> "$run_root/evidence/teardown.log"
       status=1
@@ -168,18 +174,21 @@ export AFT_WORK_DIR="$run_root/evidence" RUN_ID="$run_id"
 export AFT_BROWSER_BIN="$browser_bin" AFT_BROWSER_PROFILES="$run_root/profiles"
 ln -s "$TESTS_DIR/scripts/agent-flows-browser" "$run_root/bin/agent-browser"
 export PATH="$run_root/bin:$PATH"
-if [[ -n "$(cd "$SOURCE_ROOT" && podman compose -p "$project" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f "$LOCAL_MODE_COMPOSE_FILES" ps -a -q)" ]]; then
+if ! existing_containers="$(cd "$SOURCE_ROOT" && podman compose -p "$project" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f "$LOCAL_MODE_COMPOSE_FILES" ps -a -q | tr -d '\r')"; then
+  die "compose preflight failed for $project before auth setup"
+fi
+if [[ -n "$existing_containers" ]]; then
   die "generated project $project already has containers; refusing to attach"
 fi
 
 jq -n --arg head "$head_sha" --arg source "$SOURCE_ROOT" --arg fleet "$fleet_repo" --arg fleetSha "$fleet_sha" \
   --arg aft "$AFT_DIR" --arg browser "$browser_bin" --arg project "$project" \
-  --arg apiUrl "$AFT_API_URL" --arg uiUrl "$AFT_BASE_URL" \
+  --arg apiUrl "$AFT_API_URL" --arg uiUrl "$AFT_BASE_URL" --arg evidence "$AFT_WORK_DIR" \
   --arg run "$run_id" --argjson cases "$case_count" --argjson cap "$cap" \
   --argjson fleetPort "$fleet_port" --argjson apiPort "$api_port" --argjson uiPort "$ui_port" \
   --arg aftCliSha "$(shasum -a 256 "$AFT_DIR/dist/cli.js" | awk '{print $1}')" \
   --arg aftLoaderSha "$(shasum -a 256 "$AFT_DIR/dist/runner.js" | awk '{print $1}')" \
-  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:"real OpenCode external model",backend:"opencode",cases:$cases,cap:$cap,owned:{compose_project:$project,api_url:$apiUrl,ui_url:$uiUrl,ports:[$fleetPort,$apiPort,$uiPort]},evidence:"AFT screenshots every step and all videos"}' \
+  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:"real OpenCode external model",backend:"opencode",cases:$cases,cap:$cap,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,ports:[$fleetPort,$apiPort,$uiPort]},evidence:"AFT screenshots every step and all videos"}' \
   > "$run_root/evidence/manifest.json"
 
 if ! mkdir /private/tmp/dryhawk-stack-build.lock 2>/dev/null; then
