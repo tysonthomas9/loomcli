@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
@@ -170,6 +171,41 @@ def native(label, stage):
     save(f"native-{label}-{stage}", receipt)
 
 
+def preflight(*labels):
+    assert labels in (("target",), ("parent", "child"))
+    session = os.environ["AFT_SESSION"]
+    assert re.fullmatch(r"aft-coverage-lifecycle-delete-[0-9]+", session)
+    probe = os.environ["AFT_NATIVE_SESSION_PROBE"]
+    assert Path(probe).is_file()
+    pending = []
+    journal = Path(os.environ["AFT_WORK_DIR"]) / "lifecycle-delete-preflight.jsonl"
+    seen = {json.loads(line)["api"]["agent_id"] for line in journal.read_text().splitlines()} if journal.exists() else set()
+    for label in labels:
+        row = live(label)
+        agent_id = row["agent_id"]
+        assert agent_id not in seen
+        captured = load(f"native-{label}-capture")
+        result = subprocess.run([probe, agent_id], capture_output=True, text=True)
+        assert result.returncode == 0, "runner-owned native identity probe failed"
+        actual = json.loads(result.stdout)
+        check_preflight(label, row, actual, captured)
+        pending.append({"run_id": RUN, "session": session, "suite": "coverage-lifecycle-delete",
+                        "captured_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "api": row, "native": actual})
+    with journal.open("a") as output:
+        for receipt in pending:
+            output.write(json.dumps(receipt, separators=(",", ":")) + "\n")
+
+
+def check_preflight(label, row, actual, captured):
+    assert actual["agent_id"] == row["agent_id"] and actual["harness"] == "opencode"
+    assert actual["native_id"] in {ref["native_id"] for ref in captured["refs"]}
+    assert actual["native_root"] == ""
+    assert row["deleted_at"] is None and row["model_unverified"] is False
+    if label != "child":
+        assert row["model"] == os.environ["AFT_REAL_MODEL"]
+
+
 def child_refusal():
     parent, kid = live("parent"), live("child")
     assert kid["parent_agent_id"] == parent["agent_id"]
@@ -215,6 +251,12 @@ def self_test():
     child_row = {"preset": "task", "created_by_kind": "agent", "parent_agent_id": "agt_parent",
                  "root_agent_id": "agt_parent", "created_by_id": "agt_parent", "repo": REPO}
     check_child_ownership(child_row, parent)
+    model = "openai/example"
+    os.environ["AFT_REAL_MODEL"] = model
+    row = {"agent_id": "agt_owned", "deleted_at": None, "model_unverified": False, "model": model}
+    native_row = {"agent_id": "agt_owned", "harness": "opencode", "native_id": "ses_owned", "native_root": ""}
+    captured = {"refs": [{"native_id": "ses_owned"}]}
+    check_preflight("target", row, native_row, captured)
     for action in (
         lambda: check_unsaved(204, body, "/owned", f1),
         lambda: check_unsaved(409, {**body, "fingerprint": f1}, "/owned", f1),
@@ -222,6 +264,11 @@ def self_test():
         lambda: check_unsaved(409, body, "/foreign", f1),
         lambda: check_child_ownership({**child_row, "parent_agent_id": "agt_foreign"}, parent),
         lambda: check_child_ownership({**child_row, "repo": "/foreign"}, parent),
+        lambda: check_preflight("target", {**row, "model": "other"}, native_row, captured),
+        lambda: check_preflight("target", {**row, "deleted_at": "past"}, native_row, captured),
+        lambda: check_preflight("target", row, {**native_row, "agent_id": "agt_foreign"}, captured),
+        lambda: check_preflight("target", row, {**native_row, "native_id": "ses_foreign"}, captured),
+        lambda: check_preflight("target", row, {**native_row, "native_root": "/foreign"}, captured),
     ):
         try:
             action()

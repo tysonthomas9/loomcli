@@ -136,6 +136,8 @@ tests:
                 d.textContent.includes('README.md') &&
                 d.textContent.includes(location.pathname.split('/').pop()); })()
         intent: Show a fresh UI Delete warning after the second Save
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" preflight target'
+        intent: Save exact public Agent and runner-owned native identity receipts before UI Delete
       - click: { testid: agent-delete-anyway }
         intent: Confirm through the UI with its current fingerprint
       - wait: { fn: "location.pathname.endsWith('/home')" }
@@ -192,6 +194,8 @@ tests:
         intent: Verify refusal kept the parent native session and worktree
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native child present'
         intent: Verify refusal kept the child native session and worktree
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" preflight parent child'
+        intent: Save both exact public Agent rows and runner-owned native identities before cascade
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" cascade'
         intent: User public cascade=true Delete, the supported production path
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" deleted child'
