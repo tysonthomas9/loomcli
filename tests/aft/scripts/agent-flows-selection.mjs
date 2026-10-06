@@ -46,8 +46,9 @@ if (batchName === 'default') {
       !Array.isArray(batch.agents.leads) || !Array.isArray(batch.agents.children)) fail('unknown or invalid coverage batch');
   directory(coverageDir);
   if (!batch.agents.leads.length ||
-      !batch.agents.leads.every(lead => exactKeys(lead, ['name', 'suite']) &&
-        typeof lead.name === 'string' && agentPattern.test(lead.name) && typeof lead.suite === 'string'))
+      !batch.agents.leads.every(lead => exactKeys(lead, ['name', 'suite', 'model_required']) &&
+        typeof lead.name === 'string' && agentPattern.test(lead.name) && typeof lead.suite === 'string' &&
+        typeof lead.model_required === 'boolean') || !batch.agents.leads.some(lead => lead.model_required))
     fail('invalid declared Lead names');
   const leadNames = batch.agents.leads.map(lead => lead.name);
   if (!unique(leadNames)) fail('duplicate declared Lead');

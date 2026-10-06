@@ -1,4 +1,18 @@
 {
   "version": 1,
-  "batches": {}
+  "batches": {
+    "git-files": {
+      "files": ["git-files.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "cov-files-${RUN_ID}-editor", "suite": "coverage-agent-git-files", "model_required": false },
+          { "name": "cov-files-${RUN_ID}-actions", "suite": "coverage-agent-git-files", "model_required": false },
+          { "name": "cov-files-${RUN_ID}-git", "suite": "coverage-agent-git-files", "model_required": true }
+        ],
+        "children": [
+          { "name": "cov-files-child-${RUN_ID}", "parent": "cov-files-${RUN_ID}-git", "suite": "coverage-agent-git-files" }
+        ]
+      }
+    }
+  }
 }

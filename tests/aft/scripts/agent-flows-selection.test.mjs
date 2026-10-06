@@ -17,7 +17,7 @@ mkdirSync(coverage);
 for (const file of ['children', 'lead-chat', 'recovery-lifecycle'])
   cpSync(join(testsDir, 'live-agent-flow-suites', `${file}.test.yaml`), join(original, `${file}.test.yaml`));
 const catalog = join(root, 'agent-flow-batches.json');
-const agents = { leads: [{ name: 'aft-coverage-${RUN_ID}', suite: 'coverage-one' }],
+const agents = { leads: [{ name: 'aft-coverage-${RUN_ID}', suite: 'coverage-one', model_required: true }],
   children: [{ name: 'aft-child-${RUN_ID}', parent: 'aft-coverage-${RUN_ID}', suite: 'coverage-one' }] };
 const write = files => writeFileSync(catalog, JSON.stringify({ version: 1, batches: { smoke: { files, agents } } }));
 const env = { ...process.env, AFT_BASE_URL: 'http://127.0.0.1:1', AFT_API_URL: 'http://127.0.0.1:1',
@@ -39,10 +39,14 @@ try {
   assert.deepEqual(selected.cases.map(test => test.suite), Array(3).fill('coverage-one'));
   assert.match(selected.suites[0].sha256, /^[a-f0-9]{64}$/);
   assert.equal(JSON.parse(run('default')).count, 9);
+  agents.leads[0].model_required = false;
+  write(['one.test.yaml']);
+  refuse('smoke');
+  agents.leads[0].model_required = true;
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ selection: { batch: 'smoke', agents } }));
   const expanded = JSON.parse(execFileSync('bash', ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],
     { env: { ...env, AFT_WORK_DIR: root, RUN_ID: 'af12345678' }, encoding: 'utf8' }));
-  assert.deepEqual(expanded, { leads: [{ name: 'aft-coverage-af12345678', suite: 'coverage-one' }],
+  assert.deepEqual(expanded, { leads: [{ name: 'aft-coverage-af12345678', suite: 'coverage-one', model_required: true }],
     children: [{ name: 'aft-child-af12345678', parent: 'aft-coverage-af12345678', suite: 'coverage-one' }] });
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ selection: { batch: 'default', agents: null } }));
   assert.equal(execFileSync('bash', ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],

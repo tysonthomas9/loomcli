@@ -275,29 +275,59 @@ jq -e --argjson selected "$selection" '
 agents_json="$(curl -fsS --max-time 30 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents?include_archived=true&limit=500")" \
   || die 'AFT finished but actual Agent API model readback failed'
 jq --arg run "$run_id" '[.agents[] | select(.name | contains($run)) |
-  {agent_id,name,preset,created_by_kind,parent_agent_id,repo,harness,model,model_unverified,state}]' <<< "$agents_json" \
+  {agent_id,name,preset,created_by_kind,parent_agent_id,root_agent_id,repo,harness,model,model_unverified,state}]' <<< "$agents_json" \
   > "$run_root/evidence/actual-agent-models.json" || die 'actual Agent API model snapshot could not be saved'
 jq -e '.next == ""' <<< "$agents_json" >/dev/null || die 'Agent API model readback was truncated'
-jq -e --arg repo "$AFT_AGENT_FLOW_REPO" --arg target "$real_model" '
-  length > 0 and all(.[]; .harness == "opencode" and .repo == $repo and
-    (.model == null or (.model | type == "string" and length > 0 and (startswith("aft/") | not)))) and
-  any(.[]; .preset == "lead" and .created_by_kind == "user" and .model == $target) and
-  all(.[]; if .preset == "lead" and .created_by_kind == "user" then .model == $target and .model_unverified == false else true end)' \
-  "$run_root/evidence/actual-agent-models.json" >/dev/null || die 'saved UI Lead model or owned OpenCode identity is missing'
+if [[ "$coverage_batch" == default ]]; then
+  jq -e --arg repo "$AFT_AGENT_FLOW_REPO" --arg target "$real_model" '
+    length > 0 and all(.[]; .harness == "opencode" and .repo == $repo and
+      (.model == null or (.model | type == "string" and length > 0 and (startswith("aft/") | not)))) and
+    any(.[]; .preset == "lead" and .created_by_kind == "user" and .model == $target) and
+    all(.[]; if .preset == "lead" and .created_by_kind == "user" then .model == $target and .model_unverified == false else true end)' \
+    "$run_root/evidence/actual-agent-models.json" >/dev/null || die 'saved UI Lead model or owned OpenCode identity is missing'
+else
+  declared="$(agent_flows_declared_agents)" || die 'could not expand declared agent ownership'
+  jq -e --arg repo "$AFT_AGENT_FLOW_REPO" --arg target "$real_model" --argjson declared "$declared" '
+    . as $observed |
+    length > 0 and all(.[]; .harness == "opencode" and .repo == $repo and
+      (.model == null or (.model | type == "string" and length > 0 and (startswith("aft/") | not))) and
+      (if .preset == "lead" then
+         .created_by_kind == "user" and .parent_agent_id == null and .root_agent_id == null and
+         (.name as $name | any($declared.leads[]; .name == $name))
+       elif .preset == "task" then
+         .created_by_kind == "agent" and .parent_agent_id == .root_agent_id and
+         (. as $child | any($declared.children[]; .name == $child.name and
+           (.parent as $parentName |
+             any($observed[]; .agent_id == $child.parent_agent_id and .name == $parentName))))
+       else false end)) and
+    all($declared.leads[] | select(.model_required); . as $lead |
+      any($observed[]; .name == $lead.name and .preset == "lead" and
+        .model == $target and .model_unverified == false))' \
+    "$run_root/evidence/actual-agent-models.json" >/dev/null || die 'declared agent ownership or required UI model is missing'
+fi
 jq -e --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
   '. as $catalog | all($observed[0][] | select(.model != null); .model as $m | any($catalog.providers[].models[]; .id == $m))' \
   <<< "$catalog" >/dev/null || die 'an actual Agent API model is absent from the real OpenCode catalog'
 [[ -f "$run_root/evidence/model-selections.jsonl" ]] || die 'no UI model selection evidence was recorded'
-jq -se --slurpfile observed "$run_root/evidence/actual-agent-models.json" --arg target "$real_model" '
-  . as $selections | [$observed[0][] | select(.preset == "lead" and .created_by_kind == "user")] as $leads |
-  ($leads | length) > 0 and all($leads[]; . as $lead |
-    any($selections[]; .agent_id == $lead.agent_id and .ui_selected_model == $target and .observed_saved_model == $target))' \
-  "$run_root/evidence/model-selections.jsonl" >/dev/null || die 'a UI-created Lead lacks an explicit saved-model selection receipt'
-jq --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
+if [[ "$coverage_batch" == default ]]; then
+  jq -se --slurpfile observed "$run_root/evidence/actual-agent-models.json" --arg target "$real_model" '
+    . as $selections | [$observed[0][] | select(.preset == "lead" and .created_by_kind == "user")] as $leads |
+    ($leads | length) > 0 and all($leads[]; . as $lead |
+      any($selections[]; .agent_id == $lead.agent_id and .ui_selected_model == $target and .observed_saved_model == $target))' \
+    "$run_root/evidence/model-selections.jsonl" >/dev/null || die 'a UI-created Lead lacks an explicit saved-model selection receipt'
+else
+  jq -se --argjson declared "$declared" --arg target "$real_model" '
+    . as $selections | all($declared.leads[] | select(.model_required); . as $lead |
+      any($selections[]; .name == $lead.name and .ui_selected_model == $target and .observed_saved_model == $target))' \
+    "$run_root/evidence/model-selections.jsonl" >/dev/null || die 'a paid Lead lacks an explicit saved-model selection receipt'
+fi
+jq --slurpfile observed "$run_root/evidence/actual-agent-models.json" --arg batch "$coverage_batch" \
   '.observed_agents=$observed[0] |
    .observed_models=($observed[0] | map(.model) | map(select(. != null)) | unique) |
    .agents_without_saved_model=($observed[0] | map(select(.model == null) | {agent_id,name,preset})) |
-   .model_proof_scope="UI-saved model on surviving Leads; null child defaults need separate turn-level proof"' \
+   .model_proof_scope=(if $batch == "default" then
+     "UI-saved model on surviving Leads; null child defaults need separate turn-level proof"
+     else "UI-saved model on declared paid Leads; UI-only Leads may have no saved model; child answers need separate native proof" end)' \
   "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
 mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"
 exit "$aft_status"
