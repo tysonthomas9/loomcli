@@ -2,6 +2,7 @@
 """Offline negative checks for the live suite's evidence oracles."""
 
 import importlib.util
+import json
 import os
 import subprocess
 import tempfile
@@ -84,6 +85,24 @@ class OracleTest(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "another Chat route or Agent ID"):
                 module.picker_receipt("recent")
         browser.assert_called_once_with("get", "url")
+
+    def test_recent_receipt_records_then_refuses_wrong_section_or_query(self):
+        (module.ROOT / "picker.id").write_text("agt_abc\n")
+        module.save("catalog.json", {"target": module.MODEL, "alternate": "openai/other"})
+        base = {"route": f"/ws/{module.WS}/chat/agt_abc", "dialogOpen": True,
+                "prefs": {"status": "parsed", "favorites": {"keys": [], "count": 0},
+                          "recent": {"keys": [], "count": 0}},
+                "optionIds": [module.MODEL], "optionCount": 1}
+        agent = {"model": module.MODEL, "model_unverified": False}
+        for section, query in (("favorites", ""), ("recent", "openai")):
+            receipt = {**base, "selectedSection": section, "query": query, "queryLength": len(query)}
+            with self.subTest(section=section, query=query), \
+                 patch.object(module, "agent", return_value=agent), \
+                 patch.object(module, "browser", side_effect=[
+                     f"{os.environ['AFT_BASE_URL']}/ws/{module.WS}/chat/agt_abc", json.dumps(receipt)]):
+                with self.assertRaisesRegex(AssertionError, "Recent picker section or empty search"):
+                    module.picker_receipt("recent")
+                self.assertEqual(module.saved("picker-recent-ui-prefs.json")["selectedSection"], section)
 
     def test_allow_requires_native_command_effect(self):
         with patch.object(module, "events", return_value=[{"kind": "ask.opened", "event_id": "e1", "payload": {}}]):
