@@ -14,6 +14,7 @@ for key, value in {
     "RUN_ID": "oracle",
     "AFT_WS": "LOCALMODE",
     "AFT_API_URL": "http://127.0.0.1:1",
+    "AFT_BASE_URL": "http://127.0.0.1:1",
     "AFT_REAL_MODEL": "openai/gpt-5.5",
 }.items():
     os.environ.setdefault(key, value)
@@ -76,6 +77,13 @@ class OracleTest(unittest.TestCase):
         with patch.object(module, "agent", return_value=a), patch.object(module, "events", return_value=rows):
             with self.assertRaisesRegex(AssertionError, "2 matching events"):
                 module.ask("denial", "declined")
+
+    def test_picker_receipt_refuses_foreign_chat_route_before_reading_prefs(self):
+        (module.ROOT / "picker.id").write_text("agt_abc\n")
+        with patch.object(module, "browser", return_value="http://127.0.0.1:1/ws/LOCALMODE/chat/agt_foreign") as browser:
+            with self.assertRaisesRegex(AssertionError, "another Chat route or Agent ID"):
+                module.picker_receipt("recent")
+        browser.assert_called_once_with("get", "url")
 
     def test_allow_requires_native_command_effect(self):
         with patch.object(module, "events", return_value=[{"kind": "ask.opened", "event_id": "e1", "payload": {}}]):

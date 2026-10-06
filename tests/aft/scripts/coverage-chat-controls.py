@@ -259,6 +259,49 @@ def check_model(case, which, effort=False):
     print(f"saved picker choice {wanted}; effort={effort}")
 
 
+def picker_receipt(stage):
+    assert stage in ("after-alternate", "after-target", "recent"), "unknown picker receipt stage"
+    agent_id = aid("picker")
+    url = browser("get", "url")
+    expected = f"{env('AFT_BASE_URL')}/ws/{WS}/chat/{agent_id}"
+    assert url.split("?", 1)[0].split("#", 1)[0] == expected, \
+        "picker receipt is on another Chat route or Agent ID"
+    a = agent("picker")
+    catalog = saved("catalog.json")
+    wanted = catalog["alternate" if stage == "after-alternate" else "target"]
+    assert a["model"] == wanted and a["model_unverified"] is False, "picker receipt model changed"
+    script = """(() => {
+      const safeKey = s => typeof s === 'string' && /^opencode:[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$/.test(s);
+      const project = value => ({keys: Array.isArray(value) ? value.filter(safeKey).slice(0, 20) : [],
+                                count: Array.isArray(value) ? value.length : null});
+      let prefs = {status: 'missing', favorites: project([]), recent: project([])};
+      try {
+        const raw = localStorage.getItem('loom.agentChat.modelPicker');
+        if (raw !== null) {
+          const parsed = JSON.parse(raw);
+          prefs = {status: 'parsed', favorites: project(parsed?.favorites), recent: project(parsed?.recent)};
+        }
+      } catch { prefs.status = 'unreadable'; }
+      const dialog = document.querySelector('[role=dialog][aria-label="Choose a model"]');
+      const input = dialog?.querySelector('[aria-label="Search models"]');
+      const query = input?.value ?? null;
+      const options = [...(dialog?.querySelectorAll('li[role=option][title]') ?? [])];
+      return {route: location.pathname, dialogOpen: !!dialog,
+        prefs, selectedSection: dialog?.querySelector('[data-model-picker-provider][data-selected="true"]')
+          ?.getAttribute('data-model-picker-provider') ?? null,
+        query: typeof query === 'string' && /^[A-Za-z0-9._/-]{0,160}$/.test(query) ? query : null,
+        queryLength: query?.length ?? null,
+        optionIds: options.map(o => o.getAttribute('title')).filter(s =>
+          typeof s === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$/.test(s)).slice(0, 50),
+        optionCount: options.length};
+    })()"""
+    receipt = json.loads(browser("eval", script))
+    assert receipt["route"] == f"/ws/{WS}/chat/{agent_id}" and receipt["dialogOpen"], \
+        "picker receipt did not observe the owned open picker"
+    save(f"picker-{stage}-ui-prefs.json", {"agent_id": agent_id, "saved_model": wanted, **receipt})
+    print(f"saved read-only picker receipt {stage} for {agent_id}")
+
+
 def turn(case, marker, stop="completed"):
     a, rows = agent(case), events(case)
     delivered = [e for e in rows if e["kind"] == "message.delivered" and marker in e["payload"].get("text", "")]
@@ -484,6 +527,7 @@ def recover(case):
 def main():
     command, *args = sys.argv[1:]
     actions = {"claim": claim, "create": create, "cold-create": cold_create, "catalog": catalog, "pick": pick,
+               "picker-receipt": picker_receipt,
                "check-model": check_model, "turn": turn, "ask": ask,
                "resolved": resolved, "ask-terminal": ask_terminal, "malformed": malformed, "custom": custom,
                "unknown": unknown, "recover": recover, "approval-effect": approval_effect,
