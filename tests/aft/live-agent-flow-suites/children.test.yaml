@@ -42,10 +42,13 @@ tests:
           label: Message
           value: >-
             Use Loom agent_create twice now, with distinct task child names aft-child-a-${RUN_ID}
-            and aft-child-b-${RUN_ID}. Give each this exact private task: in your own agent
-            worktree, create aft-child-fixtures/${RUN_ID}/<your-agent-name>.txt containing
-            your name and the word complete; git add and commit that file on your own branch;
-            report the file path and commit. The two children must each do their own work.
+            and aft-child-b-${RUN_ID}. Give child A the exact file path
+            aft-child-fixtures/${RUN_ID}/aft-child-a-${RUN_ID}.txt and child B the exact
+            file path aft-child-fixtures/${RUN_ID}/aft-child-b-${RUN_ID}.txt in their
+            respective briefs. Each child must create only its assigned file in its own
+            worktree, put its name and the word complete in it, then git add and commit
+            that file on its own branch; report the exact file path and commit.
+            The two children must each do their own work.
             Keep all changes inside this private fixture path. Do not push or open a PR.
             After both results arrive, give me one concise combined summary naming both
             children, their files, and their actual outcomes. Do not ask for a fake result.
@@ -74,8 +77,11 @@ tests:
                 kids.some((a) => (a.textContent || '').startsWith('aft-child-b-${RUN_ID}')) &&
                 tray.includes('aft-child-a-${RUN_ID}') && tray.includes('aft-child-b-${RUN_ID}'); })()
         intent: "Show both working children nested in the sidebar and together in the Lead's tray"
-      - click: { selector: "[data-testid=started-marker] a", first: true }
-        intent: "Open the first child from the Lead's Started marker"
+      - run: |
+          set -eu
+          child_id="$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-a-${RUN_ID}.id")"
+          agent-browser --session "$AFT_SESSION" click "[data-testid=started-marker] a[href$='/$child_id']"
+        intent: "Open child A's exact saved Agent API identity from the Lead's Started marker"
       - wait:
           fn: >-
             (() => { const h = document.querySelector('[aria-label="Agent chat"] header')?.textContent || '';
@@ -146,10 +152,11 @@ tests:
       - fill:
           label: Message
           value: >-
-            Call Loom agent_create for task child aft-cancel-child-${RUN_ID}. Its private
-            cancellation fixture is to run tail -f /dev/null in its own worktree and wait;
-            this consumes no CPU and makes its turn visibly active until I cancel it.
-            No file or external changes are needed. Tell me when you started the child.
+            Call Loom agent_create for task child aft-cancel-child-${RUN_ID}. Give it
+            this exact brief: "In your own worktree, run tail -f /etc/hosts as a
+            read-only watch of a regular file. Keep that command attached and the
+            task running until I cancel you. Make no file or external changes."
+            Tell me when you started the child.
       - press: Enter
       - wait:
           fn: >-
@@ -267,21 +274,31 @@ tests:
           agent-browser --session "$AFT_SESSION" fill '[aria-label="Agent chat"] textarea' "Call Loom agent_get for child $foreign, which belongs to another Lead. Show the exact error code. Use your Loom tool, not an HTTP or shell API client."
           agent-browser --session "$AFT_SESSION" press Enter
         intent: "Ask Lead A to get Lead B's child using Lead A's real bridge identity"
-      - wait:
-          fn: >-
-            Array.from(document.querySelectorAll('[data-testid=bridge-call]')).some((e) =>
-              e.textContent.includes('Checked') && e.textContent.includes('failed'))
-        intent: "Show the foreign-child get is refused in Lead A's Chat"
+      - run: |
+          set -eu
+          foreign="$(cat "$AFT_WORK_DIR/live-children/iso-aft-isolation-foreign-${RUN_ID}.id")"
+          agent-browser --session "$AFT_SESSION" wait --fn "(() => {
+            const calls = Array.from(document.querySelectorAll('[data-testid=bridge-call]'));
+            const text = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+            return calls.some(e => e.dataset.status === 'completed' && e.textContent.includes('Checked $foreign')) &&
+              text.includes('agent_not_found'); })()"
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" rejected iso iso-a "aft-isolation-foreign-${RUN_ID}" agent_get
+        intent: "Show agent_not_found for the exact foreign child in Chat and its saved Loom get receipt"
       - run: |
           foreign="$(cat "$AFT_WORK_DIR/live-children/iso-aft-isolation-foreign-${RUN_ID}.id")"
           agent-browser --session "$AFT_SESSION" fill '[aria-label="Agent chat"] textarea' "Call Loom agent_send for foreign child $foreign with text foreign-probe-${RUN_ID}. Show the exact error code. Use your Loom tool, not an HTTP or shell API client."
           agent-browser --session "$AFT_SESSION" press Enter
         intent: "Ask Lead A to send to Lead B's child using Lead A's real bridge identity"
-      - wait:
-          fn: >-
-            Array.from(document.querySelectorAll('[data-testid=bridge-call]')).some((e) =>
-              e.textContent.includes('Messaged') && e.textContent.includes('failed'))
-        intent: "Show the foreign-child send is refused in Lead A's Chat"
+      - run: |
+          set -eu
+          foreign="$(cat "$AFT_WORK_DIR/live-children/iso-aft-isolation-foreign-${RUN_ID}.id")"
+          agent-browser --session "$AFT_SESSION" wait --fn "(() => {
+            const calls = Array.from(document.querySelectorAll('[data-testid=bridge-call]'));
+            const text = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+            return calls.some(e => e.dataset.status === 'completed' && e.textContent.includes('Messaged $foreign')) &&
+              text.includes('agent_not_found'); })()"
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" rejected iso iso-a "aft-isolation-foreign-${RUN_ID}" agent_send
+        intent: "Show agent_not_found for the exact foreign child in Chat and its saved Loom send receipt"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" isolation iso iso-a
           "aft-isolation-own-${RUN_ID}" iso-b "aft-isolation-foreign-${RUN_ID}"
