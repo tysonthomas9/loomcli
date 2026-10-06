@@ -82,6 +82,12 @@ try {
   agents.reviewers = [{ name: 'aft-review-${RUN_ID}', suite: 'coverage-one' }];
   write(['one.test.yaml']);
   assert.equal(JSON.parse(run('smoke')).agents.reviewers.length, 1);
+  const savedLead = agents.leads.splice(0);
+  const savedChild = agents.children.splice(0);
+  write(['one.test.yaml']);
+  assert.equal(JSON.parse(run('smoke')).agents.reviewers.length, 1, 'reviewer-only batch stays selectable');
+  agents.leads.push(...savedLead);
+  agents.children.push(...savedChild);
   delete agents.reviewers;
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ selection: { batch: 'smoke', agents } }));
   const expanded = JSON.parse(execFileSync('bash', ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],
