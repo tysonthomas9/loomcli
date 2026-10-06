@@ -32,7 +32,7 @@ shopt -u nullglob
 [[ -d "$SUITE_DIR" && ! -L "$SUITE_DIR" ]] || die 'suite directory must not be a symlink'
 for suite in "${suites[@]}"; do [[ -f "$suite" && ! -L "$suite" ]] || die "unsafe suite path: $suite"; done
 
-primary_root="$(git -C "$SOURCE_ROOT" worktree list --porcelain | sed -n '1s/^worktree //p')"
+primary_root="$(git -C "$SOURCE_ROOT" worktree list --porcelain | sed -n '1s/^worktree //p' | tr -d '\r')"
 [[ -n "$primary_root" ]] || die 'could not locate the shared account lock root'
 AFT_DIR="${AFT_DIR:-/Users/tyson/codebase/code-agents/testing-app}"
 [[ -f "$AFT_DIR/dist/cli.js" && -f "$AFT_DIR/dist/runner.js" && -d "$AFT_DIR/node_modules" ]] || die "AFT checkout is not built: $AFT_DIR"
@@ -42,7 +42,7 @@ export AFT_AGENT_FLOW_REPO=/workspace/source-repo AFT_REAL_BACKEND=opencode
 export AFT_TESTS_DIR="$TESTS_DIR" AFT_WORK_DIR=/private/tmp/aft-agent-flows-validation RUN_ID=validation
 export AFT_RESTART_SERVE="$TESTS_DIR/scripts/agent-flows-restart-serve.sh"
 export AFT_NATIVE_SESSION_PROBE="$TESTS_DIR/scripts/agent-flows-native-session.sh"
-case_count="$(node --input-type=module - "$AFT_DIR/dist/runner.js" "${suites[@]}" <<'NODE'
+case_count="$(node --input-type=module - "$AFT_DIR/dist/runner.js" "${suites[@]}" <<'NODE' | tr -d '\r'
 import {pathToFileURL} from 'node:url';
 const [loader, ...files] = process.argv.slice(2);
 const {loadSuite} = await import(pathToFileURL(loader).href);
@@ -62,25 +62,26 @@ echo "[aft-agent-flows] validated ${#suites[@]} suites and $case_count cases (ca
 
 [[ "$SOURCE_ROOT" == /private/tmp/* ]] || die 'run from a separate /private/tmp source worktree'
 [[ -z "$(git -C "$SOURCE_ROOT" status --porcelain)" ]] || die 'source worktree must be clean and committed before a live run'
-head_sha="$(git -C "$SOURCE_ROOT" rev-parse HEAD)"
+head_sha="$(git -C "$SOURCE_ROOT" rev-parse HEAD | tr -d '\r')"
 for cmd in podman python3 curl jq df shasum; do command -v "$cmd" >/dev/null || die "missing $cmd"; done
 podman compose version >/dev/null 2>&1 || die 'podman compose is unavailable'
 podman info >/dev/null 2>&1 || die 'podman is unavailable'
-available_kib="$(df -Pk /private/tmp | awk 'NR==2 {print $4}')"
+available_kib="$(df -Pk /private/tmp | awk 'NR==2 {print $4}' | tr -d '\r')"
 if [[ ! "$available_kib" =~ ^[0-9]+$ ]] || ((available_kib < 9*1024*1024)); then
   die 'less than 9 GiB free under /private/tmp'
 fi
 browser_bin="$(command -v agent-browser)" || die 'agent-browser is required'
+browser_bin="${browser_bin//$'\r'/}"
 fleet_repo="${FLEET_DB_REPO:-/private/tmp/fdb1-fleet}"
 [[ -f "$fleet_repo/deploy/docker/Dockerfile" ]] || die "compatible FleetDB checkout missing: $fleet_repo"
-[[ "$(git -C "$fleet_repo" rev-parse --is-bare-repository)" == false ]] || die 'FleetDB source must be a worktree; set FLEET_DB_REPO'
+[[ "$(git -C "$fleet_repo" rev-parse --is-bare-repository | tr -d '\r')" == false ]] || die 'FleetDB source must be a worktree; set FLEET_DB_REPO'
 [[ -z "$(git -C "$fleet_repo" status --porcelain)" ]] || die 'FleetDB build source must be clean'
-fleet_sha="$(git -C "$fleet_repo" rev-parse HEAD)"
+fleet_sha="$(git -C "$fleet_repo" rev-parse HEAD | tr -d '\r')"
 export LOCAL_MODE_OPENCODE_DATA="${LOCAL_MODE_OPENCODE_DATA:-$HOME/.local/share/opencode}"
 [[ -f "$LOCAL_MODE_OPENCODE_DATA/opencode.db" ]] || die 'host OpenCode login database is missing'
 
 umask 077
-run_root="$(mktemp -d /private/tmp/aft-agent-flows.XXXXXXXX)"
+run_root="$(mktemp -d /private/tmp/aft-agent-flows.XXXXXXXX | tr -d '\r')"
 run_id="af${run_root##*.}"
 project="loom-aft-agents-$run_id"
 account_lock="$primary_root/tmp/aft-live.opencode.lock"
@@ -94,7 +95,7 @@ cleanup_owns_stack() {
   local containers container
   containers="$(cd "$SOURCE_ROOT" && podman compose -p "$AFT_OWNED_PROJECT" \
     -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml \
-    -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml" ps -a -q)" || return 1
+    -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml" ps -a -q | tr -d '\r')" || return 1
   for container in $containers; do
     podman inspect "$container" | jq -e --arg project "$AFT_OWNED_PROJECT" '
       .[0].Config.Labels as $labels |
@@ -118,13 +119,13 @@ cleanup() {
   fi
   for registry in "$run_root"/aft-home/.aft/sessions/aft-*.json; do
     [[ -f "$registry" ]] || continue
-    session="$(basename "$registry" .json)"
+    session="$(basename "$registry" .json | tr -d '\r')"
     [[ "$session" =~ ^aft-[A-Za-z0-9-]+$ ]] || continue
     "$browser_bin" --profile "$run_root/profiles/$session" --session "$session" close >/dev/null 2>&1 || status=1
   done
   if [[ -d "$run_root/profiles" ]]; then rm -rf "$run_root/profiles"; fi
   if [[ -d "$run_root/aft-home" ]]; then rm -rf "$run_root/aft-home"; fi
-  if ((lock_owned)) && [[ "$(cat "$account_lock" 2>/dev/null || true)" == "$$" ]]; then rm -f "$account_lock"; fi
+  if ((lock_owned)) && [[ "$(cat "$account_lock" 2>/dev/null | tr -d '\r' || true)" == "$$" ]]; then rm -f "$account_lock"; fi
   echo "[aft-agent-flows] evidence: $run_root/evidence (exit $status)" >&2
   exit "$status"
 }
@@ -134,7 +135,7 @@ if ! (set -o noclobber; printf '%s\n' "$$" > "$account_lock") 2>/dev/null; then
 fi
 lock_owned=1
 
-ports="$(python3 - <<'PY'
+ports="$(python3 - <<'PY' | tr -d '\r'
 import socket
 sockets=[]
 for _ in range(3):
@@ -143,6 +144,7 @@ print(' '.join(str(s.getsockname()[1]) for s in sockets))
 for s in sockets: s.close()
 PY
 )"
+[[ "$ports" =~ ^[0-9]+\ [0-9]+\ [0-9]+$ ]] || die 'could not parse owned port allocation'
 read -r fleet_port api_port ui_port <<< "$ports"
 export LOCAL_MODE_COMPOSE_PROJECT="$project" LOCAL_MODE_FLEETDB_PORT="$fleet_port"
 export LOCAL_MODE_API_PORT="$api_port" LOCAL_MODE_UI_PORT="$ui_port"
@@ -190,13 +192,14 @@ stack_attempted=1
 rm -f /private/tmp/dryhawk-stack-build.lock/owner
 rmdir /private/tmp/dryhawk-stack-build.lock
 build_lock_owned=0
-[[ "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" == "$head_sha" && "$(git -C "$fleet_repo" rev-parse HEAD)" == "$fleet_sha" ]] \
+[[ "$(git -C "$SOURCE_ROOT" rev-parse HEAD | tr -d '\r')" == "$head_sha" && "$(git -C "$fleet_repo" rev-parse HEAD | tr -d '\r')" == "$fleet_sha" ]] \
   || die 'build source head changed during stack creation; provenance is invalid'
 
 curl -fsS --max-time 10 "$AFT_API_URL/api/config" > /dev/null || die 'owned API is not ready'
 curl -fsS --max-time 10 "$AFT_BASE_URL/" > /dev/null || die 'owned UI is not ready'
 catalog="$(curl -fsS --max-time 30 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/harnesses/opencode/models")" || die 'OpenCode model catalog unavailable'
 model="${LOCAL_MODE_AGENTS_MODEL:-$(jq -r '[.providers[].models[] | select(.is_default) | .id][0] // empty' <<< "$catalog")}"
+model="${model//$'\r'/}"
 [[ -n "$model" && "$model" != aft/* ]] || die 'OpenCode has no selected real model; refusing paid cases'
 jq -e --arg model "$model" 'any(.providers[].models[]; .id == $model)' <<< "$catalog" >/dev/null || die "selected OpenCode model $model is unavailable"
 jq --arg model "$model" '.selected_catalog_model=$model' "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
