@@ -37,19 +37,21 @@ else
      .parent_agent_id == null and .repo == $repo and .harness == "opencode"' <<< "$parent" >/dev/null
 fi
 worktree="$(jq -r '.worktree_path' <<< "$row")"
+expected_branch="$(jq -r '.branch' <<< "$row")"
+[[ -n "$expected_branch" && "$expected_branch" != null ]] || exit 2
 cd "$AFT_SOURCE_ROOT"
 compose=(agent_flows_podman compose -p "$AFT_OWNED_PROJECT" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml")
 container="$("${compose[@]}" ps -q loom-local | tr -d '\r')"
 agent_flows_check_container "$container"
 "${compose[@]}" exec -T loom-local node -e '
 const {spawnSync}=require("node:child_process");
-const [path,id,kind,parentHead]=process.argv.slice(1);
+const [path,id,kind,parentHead,expectedBranch]=process.argv.slice(1);
 const git=(...args)=>{const r=spawnSync("git",["-C",path,...args],{encoding:"utf8",timeout:15000});
   if(r.status!==0) process.exit(3); return r.stdout.trim();};
 const branch=git("symbolic-ref","--short","HEAD");
 const head=git("rev-parse","HEAD");
-if(!/^[a-f0-9]{40}$/.test(head) || !branch) process.exit(3);
+if(!/^[a-f0-9]{40}$/.test(head) || branch!==expectedBranch) process.exit(3);
 const mergeBase=kind==="child"?git("merge-base",parentHead,head):null;
 if(kind==="child" && mergeBase!==parentHead) process.exit(3);
 process.stdout.write(JSON.stringify({agent_id:id,kind,branch,head,merge_base:mergeBase})+"\n");
-' "$worktree" "$agent_id" "$kind" "${3:-}"
+' "$worktree" "$agent_id" "$kind" "${3:-}" "$expected_branch"

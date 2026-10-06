@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Saved-receipt oracles for one real two-sender child queue journey."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -181,6 +182,19 @@ def replacement_result(first, second):
     replacement = native_send_result(second, True)
     demand(initial["message_id"] != replacement["message_id"], "native replacement reused its message ID")
     return initial, replacement
+
+
+def native_wait_request(wait, child_id, sender, result):
+    demand(wait["kind"] == "message.waiting" and wait["agent_id"] == child_id and
+           wait["payload"].get("reason") == sender, "native waiting event has wrong child or sender")
+    prefix, suffix = f"{child_id}:send:", ":message.waiting"
+    event_id = wait["event_id"]
+    demand(event_id.startswith(prefix) and event_id.endswith(suffix), "native waiting event ID has wrong production form")
+    request_id = event_id[len(prefix):-len(suffix)]
+    demand(bool(re.fullmatch(r"agent_tool-[A-Z2-7]{26,}", request_id)), "native waiting event has invalid tool RequestID")
+    expected = "msg_" + hashlib.sha256(f"{child_id}\0{sender}\0{request_id}".encode()).digest()[:13].hex()
+    demand(result.get("message_id") == expected, "native send message ID differs from exact saved RequestID")
+    return request_id
 
 
 def bind_child():
@@ -509,8 +523,10 @@ def first_parent_queued():
              e["payload"].get("reason") == f"agent:{identity('lead')}")]
     demand(len(waits) == 1 and not [e for e in ev if e["kind"] == "message.delivered" and
                                     e["payload"].get("text") == TEXT["p3"]], "first parent slot was already delivered")
+    request_id = native_wait_request(waits[0], row["agent_id"], slot[0]["sender"], initial)
     save("first-parent-initial", {"tool_event_id": first["event_id"], "tool_turn_id": first["turn_id"],
                                   "native_result": initial, "waiting_event_id": waits[0]["event_id"],
+                                  "request_id": request_id,
                                   "waiting_seq": waits[0]["seq"], "slot": slot[0], "turn": row["running_turn_id"]})
     capture("first-parent-initial")
 
@@ -536,10 +552,15 @@ def first_parent():
     demand(len(waits) == 2 and waits[0]["event_id"] == prior["waiting_event_id"] and
            waits[0]["seq"] < waits[1]["seq"] and waits[0]["event_id"] != waits[1]["event_id"],
            "parent replacement lacks two saved sends")
+    first_request = native_wait_request(waits[0], row["agent_id"], slot[0]["sender"], initial)
+    replacement_request = native_wait_request(waits[1], row["agent_id"], slot[0]["sender"], replacement)
+    demand(first_request == prior["request_id"] and first_request != replacement_request,
+           "native replacement did not use two exact RequestIDs")
     demand(not [e for e in ev if e["kind"] == "message.delivered" and e["payload"].get("text") == TEXT["p3"]],
            "superseded native parent text was delivered")
     save("first-parent-proof", {"event_ids": [e["event_id"] for e in waits], "seq": waits[1]["seq"],
                                 "turn": row["running_turn_id"], "native_result": replacement,
+                                "request_ids": [first_request, replacement_request],
                                 "initial_message_id": initial["message_id"],
                                 "sender": slot[0]["sender"], "since": slot[0]["since"]})
     capture("first-parent")

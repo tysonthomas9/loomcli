@@ -2,11 +2,13 @@
 """Offline negative fixtures for the live child-queue evidence predicates."""
 
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -78,6 +80,26 @@ class QueueOracleTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             queue.replacement_result(first, {**second, "turn_id": "turn-one"})
 
+    def test_native_send_ids_bind_exact_saved_waiting_request(self):
+        child, sender = "agt_child", "agent:agt_lead"
+        request = "agent_tool-" + "A" * 26
+        message_id = "msg_" + hashlib.sha256(f"{child}\0{sender}\0{request}".encode()).digest()[:13].hex()
+        wait = {"kind": "message.waiting", "agent_id": child,
+                "event_id": f"{child}:send:{request}:message.waiting", "payload": {"reason": sender}}
+        self.assertEqual(queue.native_wait_request(wait, child, sender, {"message_id": message_id}), request)
+        for bad_wait, bad_result in (
+            ({**wait, "event_id": wait["event_id"] + ":extra"}, {"message_id": message_id}),
+            ({**wait, "event_id": f"agt_foreign:send:{request}:message.waiting"}, {"message_id": message_id}),
+            ({**wait, "event_id": f"{child}:send:bad-request:message.waiting"}, {"message_id": message_id}),
+            ({**wait, "agent_id": "agt_foreign"}, {"message_id": message_id}),
+            ({**wait, "payload": {"reason": "user:local"}}, {"message_id": message_id}),
+            (wait, {"message_id": "msg_" + "0" * 26}),
+            (wait, {"message_id": ""}),
+            (wait, {}),
+        ):
+            with self.subTest(bad_wait=bad_wait, bad_result=bad_result), self.assertRaises(AssertionError):
+                queue.native_wait_request(bad_wait, child, sender, bad_result)
+
     def test_shot_rows_require_exact_waiting_count_order_and_first(self):
         u2, p1 = queue.TEXT["u2"], queue.TEXT["p1"]
         ui = {"waiting": ["Waiting " + u2, "Waiting from Lead " + p1], "history": [], "user": []}
@@ -102,6 +124,76 @@ class QueueOracleTests(unittest.TestCase):
             "agent_id": "agt_foreign", "kind": "child", "branch": "child", "head": "a" * 40})):
             with self.assertRaises(AssertionError):
                 queue.native_ref("child", "agt_child", "b" * 40)
+
+    def test_ref_shell_rejects_wrong_head_branch_and_container(self):
+        with tempfile.TemporaryDirectory(prefix="queue-ref-oracle-") as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            def git(*args):
+                return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+            subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+            git("-c", "user.name=AFT", "-c", "user.email=aft@example.test", "commit", "-q", "--allow-empty", "-m", "base")
+            base = git("rev-parse", "HEAD")
+            git("switch", "-q", "-c", "child")
+            git("-c", "user.name=AFT", "-c", "user.email=aft@example.test", "commit", "-q", "--allow-empty", "-m", "child")
+            child_row = {"agent_id": "agt_child", "name": "cov-child-queue-task-af12345678", "preset": "task",
+                         "created_by_kind": "agent", "created_by_id": "agt_lead", "parent_agent_id": "agt_lead",
+                         "root_agent_id": "agt_lead", "repo": "source-repo", "harness": "opencode",
+                         "worktree_path": str(repo), "branch": "child"}
+            lead_row = {"agent_id": "agt_lead", "name": "cov-child-queue-lead-af12345678", "preset": "lead",
+                        "parent_agent_id": None, "repo": "source-repo", "harness": "opencode"}
+            child_file, lead_file = root / "child.json", root / "lead.json"
+            def write_child():
+                child_file.write_text(json.dumps(child_row))
+            write_child()
+            lead_file.write_text(json.dumps(lead_row))
+            helper = root / "coverage-children-queue-ref.sh"
+            helper.write_text(Path(__file__).with_name("coverage-children-queue-ref.sh").read_text())
+            (root / "agent-flows-ownership.sh").write_text('''
+agent_flows_check_manifest() { :; }
+agent_flows_check_container() { [[ "$1" == owned-container ]]; }
+curl() {
+  local url="${@: -1}"
+  case "$url" in */agt_child) cat "$CHILD_ROW";; */agt_lead) cat "$LEAD_ROW";; *) return 9;; esac
+}
+agent_flows_podman() {
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == ps ]]; then printf '%s\\n' "${STUB_CONTAINER:-owned-container}"; return; fi
+  done
+  while (($#)); do
+    if [[ "$1" == exec ]]; then
+      shift
+      [[ "$1" == -T && "$2" == loom-local ]] || return 9
+      shift 2
+      "$@"
+      return
+    fi
+    shift
+  done
+  return 9
+}
+''')
+            env = {**os.environ, "RUN_ID": "af12345678", "AFT_API_URL": "http://127.0.0.1:1",
+                   "AFT_AGENT_FLOW_REPO": "source-repo", "AFT_SOURCE_ROOT": str(root),
+                   "AFT_OWNED_PROJECT": "owned-project", "AFT_WORK_DIR": str(root),
+                   "CHILD_ROW": str(child_file), "LEAD_ROW": str(lead_file)}
+            def probe(overrides=None):
+                return subprocess.run(["bash", str(helper), "child", "agt_child", base],
+                                      env={**env, **(overrides or {})}, capture_output=True, text=True)
+            good = probe()
+            self.assertEqual(good.returncode, 0, good.stderr)
+            self.assertEqual(json.loads(good.stdout)["merge_base"], base)
+            self.assertNotEqual(probe({"STUB_CONTAINER": "foreign-container"}).returncode, 0)
+            child_row["branch"] = "wrong-branch"
+            write_child()
+            self.assertNotEqual(probe().returncode, 0)
+            git("switch", "-q", "--orphan", "foreign")
+            git("-c", "user.name=AFT", "-c", "user.email=aft@example.test", "commit", "-q", "--allow-empty", "-m", "unrelated")
+            child_row["branch"] = "foreign"
+            write_child()
+            self.assertNotEqual(probe().returncode, 0)
 
     def test_screenshot_route_rejects_foreign_child(self):
         queue.assert_shot_route("/ws/LOCALMODE/chat/agt_child", "agt_child", "LOCALMODE")
