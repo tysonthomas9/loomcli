@@ -88,7 +88,7 @@ tests:
             (() => { const c = document.querySelector('[data-testid=chat-transcript]');
               return (c?.querySelectorAll('li[data-kind=agent]').length || 0) > 0 &&
                 [...c.querySelectorAll('li[data-kind=agent]')].some(r => r.textContent.includes('README.md')) &&
-                ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop'); })()
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
         budget: 180000
         intent: "Show the first real answer completed"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn picker PRIOR_${RUN_ID} completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" history picker prior'
@@ -123,7 +123,7 @@ tests:
             (() => { const c = document.querySelector('[data-testid=chat-transcript]');
               return (c?.querySelectorAll('li[data-kind=agent]').length || 0) >= 2 &&
                 [...c.querySelectorAll('li[data-kind=agent]')].some(r => r.textContent.includes('README.md')) &&
-                ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop'); })()
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
         budget: 180000
         intent: "Show a completed real answer that cites the owned repository"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn picker PICKER_${RUN_ID} completed'
@@ -270,7 +270,7 @@ tests:
           fn: >-
             (() => { const c = document.querySelector('[data-testid=chat-transcript]');
               return [...c.querySelectorAll('li[data-kind=agent]')].some(r => r.textContent.includes('README.md')) &&
-                ![...document.querySelectorAll('form button')].some(b => b.textContent === 'Stop'); })()
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
         budget: 180000
         intent: "Show the recovered agent answered with its valid model"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn unknown RECOVER_${RUN_ID} completed'
