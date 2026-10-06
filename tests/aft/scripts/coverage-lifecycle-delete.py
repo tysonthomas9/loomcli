@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Public API and sanitized read-only receipts for two owned Delete journeys."""
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
+
+RUN = os.environ["RUN_ID"]
+WS = os.environ["AFT_WS"]
+BASE = os.environ["AFT_API_URL"].rstrip("/")
+REPO = os.environ["AFT_AGENT_FLOW_REPO"]
+ROOT = f"{BASE}/api/workspaces/{quote(WS)}/v1/agents"
+OUT = Path(os.environ["AFT_WORK_DIR"]) / "coverage-lifecycle-delete"
+NATIVE = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-lifecycle-delete-native.sh"
+NAMES = {label: f"cov-delete-{label}-{RUN}" for label in ("target", "control", "parent", "child")}
+
+
+def api(path, method="GET"):
+    request = Request(path, method=method)
+    try:
+        with urlopen(request, timeout=20) as response:
+            return response.status, json.load(response) if response.status != 204 else None
+    except HTTPError as error:
+        return error.code, json.load(error)
+
+
+def save(name, data):
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / f"{name}.json").write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def load(name):
+    return json.loads((OUT / f"{name}.json").read_text())
+
+
+def url(label):
+    return ROOT + "/" + quote(load(label)["agent_id"])
+
+
+def live(label):
+    status, row = api(url(label))
+    assert status == 200 and row["agent_id"] == load(label)["agent_id"], (label, status)
+    assert row["name"] == NAMES[label] and row["workspace_id"] == WS and row["repo"] == REPO
+    assert row["harness"] == "opencode" and row["state"] != "deleted"
+    assert row["worktree_path"] == load(label)["worktree"]
+    return row
+
+
+def route_id():
+    raw = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"],
+                                   "eval", "location.pathname"], text=True).strip()
+    pathname = json.loads(raw) if raw.startswith('"') else raw
+    match = re.fullmatch(rf"/ws/{re.escape(WS)}/chat/(agt_[A-Za-z0-9_-]+)", pathname)
+    assert match, "expected the UI-created Agent Chat route"
+    return match[1]
+
+
+def bind(label):
+    assert label in ("target", "control", "parent")
+    agent_id = route_id()
+    status, row = api(ROOT + "/" + quote(agent_id))
+    assert status == 200 and row["name"] == NAMES[label] and row["repo"] == REPO
+    assert row["harness"] == "opencode" and row["preset"] == "lead"
+    assert row["created_by_kind"] == "user" and not row.get("parent_agent_id")
+    assert row["worktree_path"] == f"/root/.loom/worktrees/source-repo/{agent_id}"
+    save(label, {"label": label, "run": RUN, "agent_id": agent_id, "name": row["name"],
+                 "repo": REPO, "worktree": row["worktree_path"], "branch": row["branch"],
+                 "parent_agent_id": None})
+
+
+def events(label):
+    status, page = api(url(label) + "/events?limit=500")
+    assert status == 200 and not page.get("more"), "event history unavailable or truncated"
+    return page["events"]
+
+
+def child():
+    parent = live("parent")
+    status, page = api(ROOT + "?" + urlencode({"name": NAMES["child"], "parent": parent["agent_id"],
+                                               "include_archived": "true", "limit": 500}))
+    assert status == 200 and not page.get("next")
+    matches = [r for r in page["agents"] if r["name"] == NAMES["child"]]
+    assert len(matches) == 1, "expected exactly one real task child"
+    row = matches[0]
+    check_child_ownership(row, parent)
+    assert row["harness"] == "opencode" and row["worktree_path"] == f"/root/.loom/worktrees/source-repo/{row['agent_id']}"
+    parent_events = events("parent")
+    created = [e for e in parent_events if e["kind"] == "child.created" and
+               e["payload"].get("child") == row["agent_id"]]
+    tools = [e for e in parent_events if e["kind"] == "item.completed" and
+             e["payload"].get("itemKind") == "tool" and
+             "agent_create" in str(e["payload"].get("tool", {}))]
+    assert len(created) == 1 and len(tools) >= 1 and any(NAMES["child"] in str(t) for t in tools)
+    save("child", {"label": "child", "run": RUN, "agent_id": row["agent_id"],
+                   "name": row["name"], "repo": REPO, "worktree": row["worktree_path"],
+                   "branch": row["branch"], "parent_agent_id": parent["agent_id"],
+                   "created_event_id": created[0]["event_id"],
+                   "tool_event_ids": [t["event_id"] for t in tools if NAMES["child"] in str(t)]})
+
+
+def check_child_ownership(row, parent):
+    assert row["preset"] == "task" and row["created_by_kind"] == "agent"
+    assert row["parent_agent_id"] == row["root_agent_id"] == parent["agent_id"]
+    assert row["created_by_id"] == parent["agent_id"] and row["repo"] == REPO
+
+
+def file_path(label):
+    return f"{BASE}/api/workspaces/{quote(WS)}/files?" + urlencode({
+        "scope": "agent", "target": load(label)["agent_id"], "repo": Path(REPO).name, "path": "README.md"})
+
+
+def prepare():
+    live("target")
+    status, file = api(file_path("target"))
+    assert status == 200 and file["path"] == "README.md" and not file["binary"]
+    assert file["content"].endswith("\n") and file["version"]
+    save("file-original", {"version": file["version"]})
+    for stage in ("one", "two"):
+        marker = f"COV_DELETE_{RUN}_{stage.upper()}"
+        (OUT / f"readme-{stage}.txt").write_text(file["content"] + marker + "\n")
+
+
+def file_saved(stage):
+    assert stage in ("one", "two")
+    row = live("target")
+    status, file = api(file_path("target"))
+    expected = (OUT / f"readme-{stage}.txt").read_text()
+    assert status == 200 and file["content"] == expected and file["version"]
+    before = load("file-original") if stage == "one" else load("file-one")
+    assert file["version"] != before["version"], "Files Save did not change strong version"
+    status, git = api(f"{BASE}/api/workspaces/{quote(WS)}/files/git-status?" + urlencode({
+        "scope": "agent", "target": row["agent_id"], "repo": Path(REPO).name, "path": ""}))
+    assert status == 200 and set(git["status"]) == {"README.md"}
+    save(f"file-{stage}", {"version": file["version"]})
+
+
+def fingerprint(stage):
+    assert stage in ("one", "stale")
+    row = live("target")
+    query = "" if stage == "one" else "?" + urlencode({"fingerprint": load("fingerprint-one")["fingerprint"]})
+    status, body = api(url("target") + query, "DELETE")
+    old = load("fingerprint-one")["fingerprint"] if stage == "stale" else None
+    token = check_unsaved(status, body, row["worktree_path"], old)
+    save(f"fingerprint-{stage}", {"fingerprint": token, "paths": body["paths"]})
+    live("target")
+
+
+def check_unsaved(status, body, worktree, old=None):
+    assert status == 409 and body["code"] == "unsaved_work"
+    assert body["paths"] == ["README.md"] and re.fullmatch(r"[a-fA-F0-9]{64}", body["fingerprint"])
+    assert worktree in body["error"]
+    if old is not None:
+        assert body["fingerprint"] != old, "stale token was accepted"
+    return body["fingerprint"]
+
+
+def native(label, stage):
+    assert label in NAMES and stage in ("capture", "present", "deleted")
+    prior = OUT / f"{label}.json" if stage == "capture" else OUT / f"native-{label}-capture.json"
+    result = subprocess.run([str(NATIVE), stage, load(label)["agent_id"], str(prior)],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, "owned native probe failed"
+    receipt = json.loads(result.stdout)
+    assert receipt["agent_id"] == load(label)["agent_id"] and receipt["stage"] == stage
+    save(f"native-{label}-{stage}", receipt)
+
+
+def child_refusal():
+    parent, kid = live("parent"), live("child")
+    assert kid["parent_agent_id"] == parent["agent_id"]
+    assert kid["state"] not in ("finished", "archived", "deleted"), "child settled before refusal"
+    status, body = api(url("parent"), "DELETE")
+    assert status == 409 and body["code"] == "children_live"
+    assert kid["agent_id"] in body["error"]
+    live("parent")
+    live("child")
+    save("child-refusal", {"parent": parent["agent_id"], "child": kid["agent_id"],
+                           "child_state": kid["state"], "code": body["code"]})
+
+
+def cascade():
+    parent, kid = live("parent"), live("child")
+    assert kid["parent_agent_id"] == parent["agent_id"]
+    status, body = api(url("parent") + "?cascade=true", "DELETE")
+    assert status == 204 and body is None, "public cascade Delete failed"
+
+
+def deleted(label):
+    status, row = api(url(label))
+    assert status == 200 and row["agent_id"] == load(label)["agent_id"]
+    assert row["state"] == "deleted" and row["deleted_at"] and row["history_purged_at"]
+    status, body = api(url(label) + "/events?limit=10")
+    assert status == 410 and body["code"] == "history_expired"
+    native(label, "deleted")
+
+
+def control():
+    row = live("control")
+    assert row["state"] in ("idle", "waiting"), row["state"]
+    native("control", "present")
+    assert events("control"), "control history vanished"
+
+
+def self_test():
+    f1, f2 = "a" * 64, "b" * 64
+    body = {"code": "unsaved_work", "paths": ["README.md"],
+            "fingerprint": f2, "error": "uncommitted changes in /owned"}
+    assert check_unsaved(409, body, "/owned", f1) == f2
+    parent = {"agent_id": "agt_parent"}
+    child_row = {"preset": "task", "created_by_kind": "agent", "parent_agent_id": "agt_parent",
+                 "root_agent_id": "agt_parent", "created_by_id": "agt_parent", "repo": REPO}
+    check_child_ownership(child_row, parent)
+    for action in (
+        lambda: check_unsaved(204, body, "/owned", f1),
+        lambda: check_unsaved(409, {**body, "fingerprint": f1}, "/owned", f1),
+        lambda: check_unsaved(409, {**body, "code": "conflict"}, "/owned", f1),
+        lambda: check_unsaved(409, body, "/foreign", f1),
+        lambda: check_child_ownership({**child_row, "parent_agent_id": "agt_foreign"}, parent),
+        lambda: check_child_ownership({**child_row, "repo": "/foreign"}, parent),
+    ):
+        try:
+            action()
+        except AssertionError:
+            continue
+        raise AssertionError("lifecycle oracle accepted a negative case")
+    print("lifecycle stale and ownership negative checks passed")
+
+
+if __name__ == "__main__":
+    globals()[sys.argv[1]](*sys.argv[2:])
