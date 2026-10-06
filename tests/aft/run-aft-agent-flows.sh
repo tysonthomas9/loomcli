@@ -248,7 +248,10 @@ jq --arg seed "$seed_repo" --arg managed "$AFT_AGENT_FLOW_REPO" \
   '.fixture_repo={seed_path:$seed,managed_path:$managed}' \
   "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
 mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"
-catalog="$(curl -fsS --max-time 30 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/harnesses/opencode/models")" || die 'OpenCode model catalog unavailable'
+catalog="$(python3 "$TESTS_DIR/scripts/agent-flows-catalog-readiness.py" \
+  "$AFT_API_URL/api/workspaces/LOCALMODE/v1/harnesses/opencode/models" \
+  "$run_root/evidence/model-catalog-readiness.json")" \
+  || die "OpenCode model catalog unavailable; see $run_root/evidence/model-catalog-readiness.json"
 model="${LOCAL_MODE_AGENTS_MODEL:-$(jq -r '[.providers[].models[] | select(.is_default) | .id][0] // empty' <<< "$catalog")}"
 model="${model//$'\r'/}"
 [[ -n "$model" && "$model" != aft/* ]] || die 'OpenCode has no selected real model; refusing paid cases'
