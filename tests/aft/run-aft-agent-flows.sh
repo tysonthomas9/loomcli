@@ -47,7 +47,7 @@ case_count="$(jq -r '.count' <<< "$selection")" || die 'could not read selected 
 suites=()
 while IFS= read -r suite; do suites+=("$suite"); done < <(jq -r '.suites[].path' <<< "$selection")
 if ((validate_only)); then
-  echo "[aft-agent-flows] offline loader validation: batch $coverage_batch, ${#suites[@]} suites, $case_count cases (cap $cap); no stack or provider actions"
+  echo "[aft-agent-flows] offline loader validation: batch $coverage_batch, ${#suites[@]} suites, $case_count cases (cap $cap); no stack or provider actions" >&2
   jq -c --arg source "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" '. + {source_head:$source}' <<< "$selection"
   exit 0
 fi
