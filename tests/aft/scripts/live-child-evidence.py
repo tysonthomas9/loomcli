@@ -178,7 +178,12 @@ def completed(label, lead_label, *names):
                          e["payload"].get("completions"))
     replies = [e["payload"].get("text", "") for e in ev if e["kind"] == "item.completed" and
                e["seq"] > final_delivery and e["payload"].get("itemKind") == "message"]
-    assert any(all(name in reply for name in names) for reply in replies), replies
+    combined = any(all(name in reply for name in names) for reply in replies)
+    save(f"{label}-summary-proof", {"final_delivery_seq": final_delivery,
+                                    "post_delivery_message_count": len(replies),
+                                    "combined_summary_present": combined})
+    assert combined, (f"missing combined Lead reply after delivery seq {final_delivery}; "
+                      f"completed post-delivery messages: {len(replies)}")
 
 
 def cancelled(label, lead_label, name):
