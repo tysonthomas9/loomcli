@@ -99,6 +99,30 @@ def claim(case):
 
 def snapshot(case, stage):
     a, rows = agent(case), events(case)
+    if case == "busy" and stage in {
+        "first-waiting", "replaced-waiting", "edited-waiting", "cleared-waiting", "final-waiting"
+    }:
+        expected = {
+            "first-waiting": "BUSY_A: first waiting note",
+            "replaced-waiting": "BUSY_B: replacement note",
+            "edited-waiting": "BUSY_C: edited note",
+            "cleared-waiting": None,
+            "final-waiting": "BUSY_D: after your current analysis, run npm test once more and report whether it passed.",
+        }[stage]
+        waiting = a.get("waiting_messages") or []
+        receipt_count = {
+            "first-waiting": 2, "replaced-waiting": 3, "edited-waiting": 4,
+            "cleared-waiting": 4, "final-waiting": 5,
+        }[stage]
+        receipts = [e for e in rows if e["kind"] == "message.waiting"]
+        assert a["running_turn_id"], f"{stage}: no real running turn"
+        assert [w["text"] for w in waiting] == ([] if expected is None else [expected]), (stage, waiting)
+        assert len(receipts) == receipt_count, f"{stage}: expected {receipt_count} Send receipts, got {receipts}"
+        if stage == "first-waiting":
+            tools = [e for e in rows if e["seq"] < receipts[-1]["seq"]
+                     and e["kind"] in ("item.started", "item.completed")
+                     and e["payload"].get("itemKind") == "tool"]
+            assert tools, "no real tool activity before the first waiting follow-up"
     write(f"{case}-{stage}.json", {"agent": a, "events": rows})
 
 
@@ -178,6 +202,16 @@ def agent_list_payloads(raw):
     return found
 
 
+def invokes_agent_list(tool):
+    if tool.get("name") != "execute":
+        return False
+    try:
+        code = json.loads(tool.get("input", ""))["code"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return False
+    return bool(re.search(r"\btools\.loom\.agent_list\s*\(", code))
+
+
 def assert_chat():
     before, after = rows("chat", "before-reopen"), rows("chat", "after-reopen")
     assert [e["event_id"] for e in before] == [e["event_id"] for e in after[: len(before)]], "reload changed saved history"
@@ -186,7 +220,7 @@ def assert_chat():
     verify_readme_turn(after, read_request, list_request["seq"])
     calls = [e for e in after if e["seq"] > list_request["seq"] and e["kind"] == "item.completed"
              and e["payload"].get("itemKind") == "tool"
-             and "agent_list" in (e["payload"].get("tool") or {}).get("input", "")]
+             and invokes_agent_list(e["payload"].get("tool") or {})]
     assert len(calls) == 1, f"expected one real Loom agent_list call, got {calls}"
     tool = calls[0]["payload"]["tool"]
     assert not tool.get("failed"), tool
