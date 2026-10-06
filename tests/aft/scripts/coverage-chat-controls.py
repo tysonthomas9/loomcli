@@ -307,6 +307,26 @@ def resolved(case, stage, decision):
                                       "decision": decision, "resolved_event_id": resolved_rows[0]["event_id"]})
 
 
+def ask_terminal(case, stage, reasons):
+    identity = saved(f"{case}-{stage}-ask.json")
+    a, rows = agent(case), events(case)
+    assert a["running_turn_id"] is None and not a["open_asks"], "resolved ask left an active turn or open ask"
+    resolved_rows = [e for e in rows if e["kind"] == "ask.resolved" and
+                     e["payload"].get("askId") == identity["ask_id"] and
+                     e["turn_id"] == identity["turn_id"]]
+    assert len(resolved_rows) == 1, "exact ask resolution missing"
+    ends = [e for e in rows if e["kind"] == "agent.turn_completed" and
+            e["turn_id"] == identity["turn_id"] and e["seq"] > resolved_rows[0]["seq"]]
+    expected = reasons.split(",")
+    assert len(ends) == 1 and ends[0]["payload"].get("stopReason") in expected, \
+        f"ask turn did not end once with production stop reason {expected}"
+    save(f"{case}-{stage}-terminal.json", {"ask_id": identity["ask_id"],
+                                           "turn_id": identity["turn_id"],
+                                           "completion_event_id": ends[0]["event_id"],
+                                           "stop_reason": ends[0]["payload"]["stopReason"],
+                                           "idle": True})
+
+
 def respond_receipt(case, stage):
     identity = saved(f"{case}-{stage}-ask.json")
     suffix = f"/v1/agents/{aid(case)}/asks/{identity['ask_id']}"
@@ -433,7 +453,7 @@ def main():
     command, *args = sys.argv[1:]
     actions = {"claim": claim, "create": create, "cold-create": cold_create, "catalog": catalog, "pick": pick,
                "check-model": check_model, "turn": turn, "ask": ask,
-               "resolved": resolved, "malformed": malformed, "custom": custom,
+               "resolved": resolved, "ask-terminal": ask_terminal, "malformed": malformed, "custom": custom,
                "unknown": unknown, "recover": recover, "approval-effect": approval_effect,
                "question-answers": question_answers, "lost": lost, "roster": roster,
                "history": history, "respond-receipt": respond_receipt}
