@@ -87,22 +87,9 @@ tests:
             (() => { const h = document.querySelector('[aria-label="Agent chat"] header')?.textContent || '';
               return location.pathname.startsWith('/ws/${AFT_WS}/chat/') && h.includes('aft-child-a-${RUN_ID}'); })()
         intent: "Show the real child's Chat and its identity in the header"
-      - wait:
-          fn: >-
-            (() => { const h = document.querySelector('[aria-label="Agent chat"] header')?.textContent || '';
-              return h.includes('aft-child-a-${RUN_ID}') && h.includes('finished'); })()
-        intent: "Wait for child A's own finished state before reviewing its committed Diff"
-      - click: { role: button, name: Diff, exact: true }
-        intent: "Open the child's Diff tab to review its own committed result"
-      - wait:
-          fn: >-
-            Array.from(document.querySelectorAll('[class*="fileList"] [class*="filePath"]')).some(
-              e => e.getClientRects().length > 0 &&
-                e.textContent?.trim() === 'aft-child-fixtures/${RUN_ID}/aft-child-a-${RUN_ID}.txt')
-        intent: "Wait for the child's private fixture file to appear in its Diff"
       - run: |
           agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/live-children/pair-lead")'"
-        intent: "Return to the same Lead Chat after reviewing the child"
+        intent: "Return to the Lead Chat after viewing child A's Chat"
       - wait:
           fn: >-
             (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
@@ -128,6 +115,34 @@ tests:
           set -eu
           "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-b-${RUN_ID}.id")"
         intent: "Compare child B's completed native OpenCode session model with its saved Agent API model"
+      - run: |
+          set -eu
+          child_id="$(cat "$AFT_WORK_DIR/live-children/pair-aft-child-a-${RUN_ID}.id")"
+          agent-browser --session "$AFT_SESSION" click "[data-testid=started-marker] a[href$='/$child_id']"
+        intent: "Reopen the completed child A from its exact-ID Started marker"
+      - wait:
+          fn: >-
+            (() => { const h = document.querySelector('[aria-label="Agent chat"] header')?.textContent || '';
+              return h.includes('aft-child-a-${RUN_ID}') && h.includes('finished'); })()
+        intent: "Show child A's persisted finished state before its Diff review"
+      - click: { role: button, name: Diff, exact: true }
+        intent: "Open the completed child's Diff tab so it reads the committed HEAD"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[class*="fileList"] [class*="filePath"]')).some(
+              e => e.getClientRects().length > 0 &&
+                e.textContent?.trim() === 'aft-child-fixtures/${RUN_ID}/aft-child-a-${RUN_ID}.txt')
+        intent: "Show child A's exact committed private file in the visible Diff list"
+      - click: { selector: "[class*='fileList'] [class*='fileRow'][role='button']" }
+        intent: "Expand child A's committed file patch in the Diff tab"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[class*="diffPre"] [data-type="add"]')).some(
+              e => e.getClientRects().length > 0 && (e.textContent || '').includes('complete'))
+        intent: "Show the added complete marker in child A's visible diff patch"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/live-children/pair-lead")'"
+        intent: "Return to the Lead's delivered child results after Diff review"
       - reload: true
       - wait:
           fn: >-
