@@ -144,7 +144,7 @@ tests:
         intent: "Record the actual custom Lead ID and verify its saved identity"
       - run: '"$AFT_SELECT_AGENT_MODEL"'
         intent: "Show the explicitly selected real model before sending"
-      - fill: { label: Message, value: "Use a tool to read README.md and tell me which command it documents for running tests. Cite the supporting line. Follow your persona prefix, and include the exact literal placeholder string your persona names." }
+      - fill: { label: Message, value: "Use a tool to read README.md and tell me which command it documents for running tests. In your answer, name the source file exactly README.md and cite the supporting line. Follow your persona prefix, and include the exact literal placeholder string your persona names." }
         intent: "Ask a repository question that also exercises the custom persona"
       - press: Enter
         intent: "Send the question to the real model"
