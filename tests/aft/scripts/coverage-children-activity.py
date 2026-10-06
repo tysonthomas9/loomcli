@@ -260,11 +260,14 @@ def mobile_geometry_ok(geometry, child_id, width, theme):
     assert geometry["trayOpen"] and geometry["childId"] == child_id
     assert geometry["headerExpanded"] and geometry["rowIds"].count(child_id) == 1
     assert geometry["rowCount"] > 0 and geometry["visibleRowCount"] > 0
+    assert geometry["childWhole"], "exact saved child row is not wholly visible"
     assert geometry["partialRows"] == 0, "a visible child row is clipped"
     assert geometry["hiddenRows"] == 0 or geometry["moreCount"] >= geometry["hiddenRows"], "hidden rows lack the More count"
     assert geometry["horizontalOverflow"] <= 1, "mobile tray or document overflows horizontally"
     assert geometry["maxControlBottom"] <= geometry["composerTop"] + 1, "tray control overlaps usable composer"
     assert geometry["composerBottom"] <= geometry["navTop"] + 1, "composer overlaps fixed mobile navigation"
+    assert geometry["headerHit"]["hit"], "tray header is hidden or occluded"
+    assert geometry["childLinkHit"]["hit"], "exact child Open link is hidden or occluded"
 
 
 def mobile(child_label, lead_label, width, theme):
@@ -307,6 +310,17 @@ def mobile(child_label, lead_label, width, theme):
       const box = el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };
       const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);
       const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));
+      const child = rows.find(row => row.dataset.trayRow === id);
+      const childBox = child && box(child);
+      const childWhole = !!childBox && childBox.left >= clip.left-1 && childBox.right <= clip.right+1 &&
+        childBox.top >= clip.top-1 && childBox.bottom <= clip.bottom+1;
+      const hit = el => {
+        if (!el) return {x:null,y:null,hit:false,target:null};
+        const r=el.getBoundingClientRect(), x=(r.left+r.right)/2, y=(r.top+r.bottom)/2;
+        const target=document.elementFromPoint(x,y);
+        return {x,y,hit:!!target && (target===el || el.contains(target)),target:target?.tagName || null};
+      };
+      const headerHit = hit(header), childLinkHit = hit(child?.querySelector('a[href]'));
       const visible = rowBoxes.filter(row => row.bottom > clip.top && row.top < clip.bottom);
       const partial = visible.filter(row => row.top < clip.top-1 || row.bottom > clip.bottom+1);
       const hidden = rowBoxes.filter(row => row.bottom <= clip.top || row.top >= clip.bottom);
@@ -317,6 +331,7 @@ def mobile(child_label, lead_label, width, theme):
         navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',
         childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',
         rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,
+        childWhole,headerHit,childLinkHit,
         partialRows:partial.length,hiddenRows:hidden.length,moreCount,
         horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,
           tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,
