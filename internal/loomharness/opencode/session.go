@@ -57,6 +57,12 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		// timeout, a 5xx after commit): remove it if it is there.
 		return c.discard(ref, err)
 	}
+	if err := s.persona(ctx, spec.Preset.Persona, existed); err != nil {
+		if existed {
+			return loomharness.NativeRef{}, err
+		}
+		return c.discard(ref, err)
+	}
 	// A repeat may find the session holding older rules, so always install.
 	c.dropGrants(ref.NativeID)
 	err = s.install(ctx, rules)
@@ -72,6 +78,27 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		return loomharness.NativeRef{}, err // not this Open's to remove
 	}
 	return c.discard(ref, err)
+}
+
+// persona installs the saved per-agent text as a durable native instruction
+// entry before a prompt can use the session. The preset agent remains selected
+// for its tools and baseline instructions; this entry belongs only to this
+// session. A repeated Open also clears an earlier persona if it is now empty.
+func (s *Session) persona(ctx context.Context, value string, existed bool) error {
+	if value == "" && !existed {
+		return nil
+	}
+	path := "/api/experimental/session/" + url.PathEscape(s.ref.NativeID) + "/instructions/entries/loom-persona"
+	if value == "" {
+		if err := s.c.call(ctx, "DELETE", path, nil, nil); err != nil {
+			return fmt.Errorf("opencode: remove session persona: %w", err)
+		}
+		return nil
+	}
+	if err := s.c.call(ctx, "PUT", path, map[string]string{"value": value}, nil); err != nil {
+		return fmt.Errorf("opencode: install session persona: %w", err)
+	}
+	return nil
 }
 
 // create POSTs the session unless it is there already. existed reports that
