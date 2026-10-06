@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import urllib.parse
@@ -87,6 +88,104 @@ def claim(label):
     assert agent["preset"] == "lead" and agent["created_by_kind"] == "user", agent
     assert not agent.get("parent_agent_id") and agent["worktree_path"], agent
     save(f"{label}-identity", agent)
+
+
+LOCAL_ORIGIN = "/workspace/source-repo-origin.git"
+GIT_SUITE = "coverage-agent-git-files"
+
+
+def approved_origin_manifest(manifest):
+    selected = manifest.get("selection", {})
+    owned = manifest.get("owned", {})
+    fixture = manifest.get("fixture_repo", {})
+    leads = selected.get("agents", {}).get("leads", [])
+    expected = {"name": "cov-files-${RUN_ID}-git", "suite": GIT_SUITE, "model_required": True}
+    assert manifest.get("run_id") == RUN and selected.get("batch") == "git-files", "foreign Git batch"
+    assert any(item.get("name") == GIT_SUITE for item in selected.get("suites", [])), "Git suite missing from owned selection"
+    assert expected in leads, "Git Lead is not declared for the selected suite"
+    assert fixture == {"seed_path": "/workspace/source-repo", "managed_path": REPO}, "foreign fixture repo"
+    assert owned.get("compose_project") == f"loom-aft-agents-{RUN}", "foreign Compose project"
+    assert owned.get("evidence_dir") == str(Path(env("AFT_WORK_DIR"))), "foreign evidence directory"
+    assert owned.get("api_url") == BASE and owned.get("ui_url") == FRONTEND, "foreign API or UI"
+
+
+def verify_origin_observation(agent, observed, stage, before=None):
+    agent_id = agent["agent_id"]
+    branch = f"loom/agent/{agent_id}"
+    worktree = f"/root/.loom/worktrees/source-repo/{agent_id}"
+    assert stage in ("before", "after")
+    assert re.fullmatch(r"agt_[A-Za-z0-9_-]+", agent_id), "invalid Lead ID"
+    assert agent["name"] == f"cov-files-{RUN}-git" and agent["repo"] == REPO, "foreign Lead"
+    assert agent["preset"] == "lead" and agent["created_by_kind"] == "user", "not a UI Lead"
+    assert not agent.get("parent_agent_id") and not agent.get("root_agent_id"), "Lead has a parent"
+    assert agent["branch"] == branch and agent["worktree_path"] == worktree, "foreign Lead branch or path"
+    assert observed["agent_id"] == agent_id and observed["name"] == agent["name"], "observed wrong Lead"
+    assert observed["repo"] == REPO and observed["branch"] == branch, "observed wrong repo or branch"
+    assert observed["worktree_path"] == worktree and observed["worktree_root"] == worktree, "wrong worktree"
+    assert observed["common"] == observed["managed_common"] and observed["common"], "foreign Git common directory"
+    assert observed["origin_realpath"] == LOCAL_ORIGIN and observed["origin_bare"] is True, "foreign origin"
+    assert observed["remotes"] == ["origin"], "unapproved Git remote"
+    assert observed["origin_fetch_urls"] == [LOCAL_ORIGIN], "foreign or changed fetch origin"
+    assert observed["origin_push_urls"] == [LOCAL_ORIGIN], "foreign, additional or changed push origin"
+    assert observed["origin_mirror"] in ("", "false") and observed["origin_push_refspecs"] == "", "unsafe push configuration"
+    assert observed["current_branch"] == branch and observed["porcelain"] == "", "branch changed or dirty"
+    assert re.fullmatch(r"[0-9a-f]{40}", observed["head"]), "invalid Lead head"
+    if stage == "before":
+        assert observed["origin_ref"] is None and observed["tracking_ref"] is None, "parent branch already published"
+    else:
+        assert before is not None, "missing before-push observation"
+        assert observed["head"] == before["head"], "Lead head changed during push"
+        assert observed["origin_ref"] == before["head"], "owned bare origin has wrong parent ref"
+        assert observed["tracking_ref"] == before["head"], "Lead has no matching origin tracking ref"
+
+
+def origin_observation(label, stage):
+    assert label == "git", "origin attestation is only for GF3"
+    route(label, "chat")
+    manifest = json.loads((Path(env("AFT_WORK_DIR")) / "manifest.json").read_text())
+    approved_origin_manifest(manifest)
+    agent = identity(label)
+    observer = Path(env("AFT_TESTS_DIR")) / "scripts/coverage-git-files-origin.sh"
+    observed = json.loads(subprocess.check_output(["bash", str(observer), agent["agent_id"]], text=True))
+    before = json.loads((WORK / "git-origin-before.json").read_text()) if stage == "after" else None
+    verify_origin_observation(agent, observed, stage, before)
+    save(f"{label}-origin-{stage}", observed)
+
+
+def origin_prompt(label):
+    assert label == "git", "origin prompt is only for GF3"
+    route(label, "chat")
+    agent = identity(label)
+    observed = json.loads((WORK / "git-origin-before.json").read_text())
+    verify_origin_observation(agent, observed, "before")
+    manifest = json.loads((Path(env("AFT_WORK_DIR")) / "manifest.json").read_text())
+    approved_origin_manifest(manifest)
+    observer = Path(env("AFT_TESTS_DIR")) / "scripts/coverage-git-files-origin.sh"
+    current = json.loads(subprocess.check_output(["bash", str(observer), agent["agent_id"]], text=True))
+    verify_origin_observation(agent, current, "before")
+    assert current == observed, "Lead Git origin, branch or head changed before Send"
+    save("git-origin-before-send", current)
+    path = shlex.quote(observed["worktree_path"])
+    branch = shlex.quote(observed["branch"])
+    head = shlex.quote(observed["head"])
+    origin = shlex.quote(LOCAL_ORIGIN)
+    ref = shlex.quote(f"refs/heads/{observed['branch']}")
+    print(
+        "Before any delegation, run this exact guarded shell command in your own worktree. "
+        "It publishes only your current branch to the task-owned local bare origin, never GitHub. "
+        "Stop on any failed guard; do not change remotes, refs, files, or any other branch. "
+        "Do not create a child yet.\n\n"
+        f"cd {path} && test \"$(git rev-parse --show-toplevel)\" = {path} "
+        f"&& test \"$(git branch --show-current)\" = {branch} "
+        f"&& test \"$(git rev-parse HEAD)\" = {head} "
+        f"&& test \"$(git remote get-url --all origin)\" = {origin} "
+        f"&& test \"$(git remote get-url --push --all origin)\" = {origin} "
+        f"&& test \"$(git config --bool --get remote.origin.mirror || true)\" != true "
+        f"&& test -z \"$(git config --get-all remote.origin.push || true)\" "
+        f"&& ! git --git-dir={origin} show-ref --verify --quiet {ref} "
+        f"&& git push -u origin HEAD:{ref}\n\n"
+        f"Only if that command succeeds, reply COV_FILES_LOCAL_PUSH_{RUN}_DONE."
+    )
 
 
 def route(label, tab, child_id=""):
@@ -198,6 +297,10 @@ def absent(label, path):
 
 def child(label, name):
     parent = identity(label)
+    if label == "git":
+        local_push = json.loads((WORK / "git-origin-after.json").read_text())
+        assert local_push["agent_id"] == parent["agent_id"] and local_push["branch"] == parent["branch"], local_push
+        assert local_push["origin_ref"] == local_push["head"], "parent branch was not published to the owned origin"
     page = get(f"{ROOT}/v1/agents?parent={urllib.parse.quote(parent['agent_id'])}&limit=500")
     matches = [a for a in page["agents"] if a["name"] == name]
     assert len(matches) == 1 and not page.get("next"), matches
@@ -290,6 +393,70 @@ def cleanup():
 
 def selftest():
     """Check the readback oracle rejects wrong bytes, versions and checkout IDs."""
+    owned_agent = {"agent_id": "agt_owned", "name": f"cov-files-{RUN}-git", "repo": REPO,
+                   "preset": "lead", "created_by_kind": "user", "parent_agent_id": None,
+                   "root_agent_id": None, "branch": "loom/agent/agt_owned",
+                   "worktree_path": "/root/.loom/worktrees/source-repo/agt_owned"}
+    owned_origin = {"agent_id": "agt_owned", "name": owned_agent["name"], "repo": REPO,
+                    "branch": owned_agent["branch"], "worktree_path": owned_agent["worktree_path"],
+                    "worktree_root": owned_agent["worktree_path"], "common": "/managed/.git",
+                    "managed_common": "/managed/.git", "origin_realpath": LOCAL_ORIGIN,
+                    "origin_bare": True, "remotes": ["origin"],
+                    "origin_fetch_urls": [LOCAL_ORIGIN], "origin_push_urls": [LOCAL_ORIGIN],
+                    "origin_mirror": "", "origin_push_refspecs": "", "head": "a" * 40,
+                    "current_branch": owned_agent["branch"], "porcelain": "",
+                    "origin_ref": None, "tracking_ref": None}
+    verify_origin_observation(owned_agent, owned_origin, "before")
+    after = {**owned_origin, "origin_ref": owned_origin["head"], "tracking_ref": owned_origin["head"]}
+    verify_origin_observation(owned_agent, after, "after", owned_origin)
+    for mutation in (
+        {"origin_push_urls": ["ssh://attacker.example/repo"]},
+        {"origin_push_urls": [LOCAL_ORIGIN, "https://attacker.example/repo"]},
+        {"origin_fetch_urls": ["https://attacker.example/repo"]},
+        {"origin_mirror": "true"},
+        {"origin_push_refspecs": "refs/heads/*:refs/heads/*"},
+        {"origin_realpath": "/tmp/foreign.git"},
+        {"branch": "loom/agent/agt_foreign"},
+        {"current_branch": "main"},
+        {"worktree_root": "/tmp/foreign"},
+        {"remotes": ["origin", "github"]},
+        {"common": "/foreign/.git"},
+        {"porcelain": " M README.md"},
+        {"origin_ref": "b" * 40},
+    ):
+        try:
+            verify_origin_observation(owned_agent, {**owned_origin, **mutation}, "before")
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"origin preflight accepted {mutation}")
+    for mutation in ({"origin_ref": None}, {"origin_ref": "b" * 40},
+                     {"tracking_ref": None}, {"head": "b" * 40},
+                     {"origin_push_urls": ["https://attacker.example/repo"]}):
+        try:
+            verify_origin_observation(owned_agent, {**after, **mutation}, "after", owned_origin)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"origin postflight accepted {mutation}")
+
+    owned_manifest = {"run_id": RUN, "selection": {"batch": "git-files",
+                      "suites": [{"name": GIT_SUITE}], "agents": {"leads": [
+                          {"name": "cov-files-${RUN_ID}-git", "suite": GIT_SUITE, "model_required": True}]}},
+                      "fixture_repo": {"seed_path": "/workspace/source-repo", "managed_path": REPO},
+                      "owned": {"compose_project": f"loom-aft-agents-{RUN}",
+                                "evidence_dir": env("AFT_WORK_DIR"), "api_url": BASE, "ui_url": FRONTEND}}
+    approved_origin_manifest(owned_manifest)
+    for mutation in ({"selection": {"batch": "default"}},
+                     {"fixture_repo": {"seed_path": "/workspace/source-repo", "managed_path": "/tmp/foreign"}},
+                     {"owned": {"compose_project": "foreign"}}):
+        try:
+            approved_origin_manifest({**owned_manifest, **mutation})
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"origin manifest accepted {mutation}")
+
     original_route, original_check_output = globals()["route"], subprocess.check_output
     original_session = os.environ.get("AFT_SESSION")
     os.environ["AFT_SESSION"] = "aft-selftest"
