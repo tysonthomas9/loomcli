@@ -91,6 +91,7 @@ def native(agent_id):
             f"native probe: {reason}" for reason in (
                 "agent-row-missing", "agent-name-not-run-owned", "harness-mismatch",
                 "native-id-missing", "native-root-missing", "native-owner-mismatch",
+                "storage-unavailable",
             )
         }
         diagnostic = next((line.strip() for line in stderr.splitlines()
