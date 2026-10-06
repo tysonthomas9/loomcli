@@ -15,7 +15,8 @@ agent_flows_check_manifest() {
   jq -e --arg run "$RUN_ID" --arg project "$AFT_OWNED_PROJECT" \
     --arg source "$AFT_SOURCE_ROOT" --arg head "$head" --arg api "$AFT_API_URL" \
     '.run_id == $run and .source_root == $source and .source_head == $head and
-     .backend == "opencode" and .owned.compose_project == $project and .owned.api_url == $api' \
+     .backend == "opencode" and .owned.compose_project == $project and
+     .owned.api_url == $api and .owned.api_url == ("http://127.0.0.1:" + (.owned.ports[1] | tostring))' \
     "$AFT_WORK_DIR/manifest.json" >/dev/null || { echo 'owned manifest mismatch' >&2; return 2; }
 }
 
