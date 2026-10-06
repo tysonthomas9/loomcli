@@ -2,6 +2,7 @@
 """Offline regressions for event-backed child completion predicates."""
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -55,9 +56,9 @@ class ChildProofPredicates(unittest.TestCase):
 
     def test_execute_body_detects_real_loom_call_without_matching_brief_text(self):
         call = event("item.completed", 1, "tool", {"itemKind": "tool", "tool": {
-            "name": "execute", "input": '{"code":"return await tools.loom.agent_get({id:\"agt_x\"})"}'}})
+            "name": "execute", "input": json.dumps({"code": 'return await tools.loom.agent_get({id:"agt_x"})'})}})
         brief = event("item.completed", 2, "brief", {"itemKind": "tool", "tool": {
-            "name": "execute", "input": '{"code":"return await tools.loom.agent_create({brief:\"no agent_get\"})"}'}})
+            "name": "execute", "input": json.dumps({"code": 'return await tools.loom.agent_create({brief:"no agent_get"})'})}})
         self.assertTrue(module.calls_operation(call, "agent_get"))
         self.assertFalse(module.calls_operation(brief, "agent_get"))
         self.assertTrue(module.calls_operation(brief, "agent_create"))

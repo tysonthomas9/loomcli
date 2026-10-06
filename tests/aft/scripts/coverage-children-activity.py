@@ -90,11 +90,21 @@ def tool_name(event):
         return None
     name = p.get("tool", {}).get("name", "")
     for tool in ("agent_create", "agent_send", "agent_get", "agent_archive"):
-        if name.endswith(tool):
-            return tool
-        if re.search(r"\btools\.loom\." + tool + r"\s*\(", str(p.get("tool", {}).get("input", ""))):
+        if calls_operation(event, tool):
             return tool
     return name
+
+
+def tool_code(tool):
+    raw = tool.get("input")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+    if isinstance(raw, dict) and isinstance(raw.get("code"), str):
+        return raw["code"]
+    return ""
 
 
 def calls_operation(event, operation):
@@ -102,7 +112,7 @@ def calls_operation(event, operation):
         return False
     tool = event["payload"].get("tool") or {}
     return tool.get("name", "").endswith(operation) or bool(re.search(
-        r"\btools\.loom\." + re.escape(operation) + r"\s*\(", str(tool.get("input", ""))))
+        r"\btools\.loom\." + re.escape(operation) + r"\s*\(", tool_code(tool)))
 
 
 def reply_text(event):
