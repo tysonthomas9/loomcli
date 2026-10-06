@@ -52,12 +52,32 @@ tests:
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind repeat repeat-lead "cov-child-repeat-${RUN_ID}"
         intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_ui repeat-lead repeat
+        intent: Compare the exact Started child link, name, color, native create count and collapsed input boundary
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" working_fallback repeat fresh
+        intent: Record a genuine fresh Working fallback only if this exact child has no saved current-turn step
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=started-marker] button[aria-expanded=false]')
+        intent: Restore the saved Started marker after a genuine Chat reconnect
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_ui repeat-lead repeat
+        intent: Recheck the same Started child ID and badge color after reconnect
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" working_fallback repeat reconnect
+        intent: Record a genuine reconnect Working fallback only if this exact child has no saved current-turn step
       - click: { selector: "[data-testid=started-marker] button[aria-expanded]" }
         intent: Expand the real bridge call while preserving the short Started header
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=started-marker] button[aria-expanded=true]')
         intent: Screenshot the expanded delegation details (CL4)
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" expanded_bridge repeat-lead
+        intent: Require the supported expanded Started bridge label while raw tool input stays hidden
       - click: { selector: "[data-testid=agent-tray] button[aria-expanded]" }
         intent: Expand the live task child tray
       - wait:
@@ -97,6 +117,9 @@ tests:
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" first repeat-lead repeat
         intent: Save attempt-zero completion and delivered event IDs, one acknowledgement, and zero saved agent_get calls
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" cards_ui repeat-lead repeat:0
+        intent: Match the first visible card and color to the saved completion and reject a raw task_completed user bubble
       - reload: true
       - wait:
           fn: >-
@@ -113,6 +136,15 @@ tests:
       - press: Enter
       - wait:
           fn: >-
+            (() => { const tray=document.querySelector('[data-testid=agent-tray]');
+              const row=Array.from(tray?.querySelectorAll('li[data-tray-row]')||[]).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));
+              return !!row?.querySelector('[data-status=running] [data-chip=attempt]') && row.textContent?.includes('attempt 2'); })()
+        intent: Await the real same-child attempt-two running tray row
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_child repeat-lead repeat reactivated
+        intent: Require the exact saved finished child ID to reappear active under its parent after native agent_send
+      - wait:
+          fn: >-
             (() => { const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]'));
               return cards.length===2 && cards.every(c=>c.dataset.outcome==='completed' && c.dataset.delivery==='delivered'); })()
         intent: Screenshot two delivered completion cards for the same child ID and two attempts
@@ -125,6 +157,9 @@ tests:
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" repeated repeat-lead repeat
         intent: Match two exact keyed completions and deliveries to one child, real switched worktree ref and commit, and zero saved agent_get calls
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" cards_ui repeat-lead repeat:0 repeat:1
+        intent: Require two keyed visible cards for the same saved child and no raw completion user bubble
       - run: |
           "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-activity/repeat.id")"
         intent: Save separate requested, native session, and completed-answer model evidence for the task child
@@ -177,6 +212,9 @@ tests:
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind pair-b pair-lead "cov-child-pair-b-${RUN_ID}"
         intent: Prove pair child B was made by the Lead's native Loom tool
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_ui pair-lead pair-a pair-b
+        intent: Compare both exact Started links, badges and tool count to two saved native creates
       - click: { role: button, name: "Collapse workspace tree" }
         intent: Collapse the rail while both real task children are active
       - run: |
@@ -227,6 +265,18 @@ tests:
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" pair pair-lead pair-a pair-b
         intent: Require one saved delivery containing both completion keys, one final reply, and no agent_get
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" cards_ui pair-lead pair-a:0 pair-b:0
+        intent: Match both visible cards to saved completion keys and reject raw task_completed user bubbles
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" theme_cards pair-lead pair-a pair-b
+        intent: Compare both exact child card colors in real dark and light UI screenshots
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" keyboard_card pair-lead pair-a Enter
+        intent: Open exact child A from its completed card using keyboard Enter, then return to Lead
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" keyboard_card pair-lead pair-b Space
+        intent: Open exact child B from its completed card using keyboard Space, then return to Lead
       - run: |
           "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-activity/pair-a.id")"
           "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-activity/pair-b.id")"
@@ -249,6 +299,12 @@ tests:
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" pair pair-lead pair-a pair-b
         intent: Recheck exact saved keys and grouped delivery after reload
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" cards_ui pair-lead pair-a:0 pair-b:0
+        intent: Recheck exact card IDs, colors and count after reload
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_ui pair-lead pair-a pair-b
+        intent: Recheck both Started child links and badges after reload
 
   # SB2/SB4/SB5/RAIL1. Independent Agent API daemon workers have no UI
   # creation path at this pinned source; the mixed Background proof is pending.
@@ -294,6 +350,12 @@ tests:
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind sidebar-task sidebar-b "cov-child-sidebar-task-${RUN_ID}"
         intent: Bind the sidebar task child to its real Lead and saved Agent API ID
       - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_ui sidebar-b sidebar-task
+        intent: Bind the visible Started child name, link, color and count to the saved native create
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_child sidebar-b sidebar-task working
+        intent: Check the actual nested child row, full name, harness logo and status dot against its API identity
+      - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" roster sidebar-a sidebar-b sidebar-task
         intent: Bind visible sidebar names to exact API roster IDs
       - wait:
@@ -312,6 +374,9 @@ tests:
             (() => { const a=Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find(a=>a.textContent?.includes('cov-child-sidebar-task-${RUN_ID}'));
               return a?.getAttribute('aria-current')==='page' && a?.dataset.state==='finished'; })()
         intent: Screenshot only the open finished child restored beneath its Lead
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_child sidebar-b sidebar-task finished-open
+        intent: Check the same finished child ID under its Lead with completed dot, full name and logo
       - click: { role: button, name: Git, exact: true }
         intent: Open the finished child's Git tab through the UI
       - wait: { fn: "location.search.includes('tab=git')" }
@@ -389,6 +454,9 @@ tests:
               const b=names.findIndex(n=>n.includes('cov-child-sidebar-b-${RUN_ID}'));
               return a>=0 && b>=0 && b<a; })()
         intent: Screenshot persisted sidebar order after reload
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" hover_archive sidebar-b
+        intent: Hover the exact Lead row and require no underline plus a visible Archive action
       - run: |
           agent-browser --session "$AFT_SESSION" eval '(() => { const a=document.querySelector("nav[aria-label=Agents] a[aria-current=page]"); if(!a) throw Error("active sidebar row missing"); const r=a.getBoundingClientRect(); a.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()' >/dev/null
         intent: Open the current Lead's sidebar context menu with a person-visible action
@@ -397,6 +465,9 @@ tests:
           fn: >-
             !Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some(a=>a.textContent?.includes('cov-child-sidebar-b-${RUN_ID}'))
         intent: Screenshot the archived Lead removed from the expanded sidebar
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" archive_state sidebar-b archived
+        intent: Confirm context Archive persisted the exact saved Lead ID as archived in the API
       - run: |
           id="$(cat "$AFT_WORK_DIR/coverage-children-activity/sidebar-b.id")"
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$id"
@@ -409,6 +480,9 @@ tests:
             (() => { const a=Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find(a=>a.textContent?.includes('cov-child-sidebar-b-${RUN_ID}'));
               return a?.getAttribute('aria-current')==='page' && !document.querySelector('[data-testid=agent-archived-notice]'); })()
         intent: Screenshot the same Lead restored to the sidebar from Chat (SB5)
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" archive_state sidebar-b active
+        intent: Confirm the same Lead ID is no longer archived after Chat Unarchive
       - reload: true
       - wait:
           fn: >-
