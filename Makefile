@@ -586,6 +586,11 @@ test-aft-live-workers:
 test-aft-podman:
 	@tests/aft/run-aft-podman.sh $(AFT_ARGS)
 
+.PHONY: test-aft-agent-flows
+# Explicit paid Agent API journey tier; no default AFT corpus or guard changes.
+test-aft-agent-flows:
+	@tests/aft/run-aft-agent-flows.sh --live --no-agent --real-backend opencode --max-real-cases 9 $(AFT_ARGS)
+
 # Run the isolated e2e stack (scripts/start-e2e-server.sh) against the
 # test-only OpenCode emulator instead of OpenCode (R29), with OpenCode's XDG
 # roots in an owned /tmp sandbox and the stub farm on PATH. With no
