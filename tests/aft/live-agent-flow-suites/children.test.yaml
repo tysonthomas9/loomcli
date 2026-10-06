@@ -6,9 +6,10 @@ classification: { area: agents, feature: agent-api-children, surface: mixed, pur
 baseUrl: "${AFT_BASE_URL}"
 setup: |
   set -eu
-  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_REAL_BACKEND:?}" "${RUN_ID:?}"
+  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_REAL_BACKEND:?}" "${AFT_REAL_MODEL:?}" "${AFT_SELECT_AGENT_MODEL:?}" "${RUN_ID:?}"
   test "$AFT_WS" = LOCALMODE
   case "$AFT_REAL_BACKEND" in opencode|codex) ;; *) exit 2 ;; esac
+  test -x "$AFT_SELECT_AGENT_MODEL"
   mkdir -p "$AFT_WORK_DIR/live-children"
   python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" repo
 teardown: |
@@ -31,6 +32,8 @@ tests:
       - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Show the explicitly selected real model in the Lead's Chat before sending"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead pair-lead "aft-child-lead-${RUN_ID}"
         intent: "Save the UI-created Lead's real Agent API identity and worktree binding"
@@ -126,6 +129,8 @@ tests:
       - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Show the explicitly selected real model in the cancellation Lead's Chat before sending"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead cancel-lead "aft-cancel-lead-${RUN_ID}"
         intent: "Save the UI-created cancellation Lead's identity"
@@ -184,6 +189,8 @@ tests:
       - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Show the explicitly selected real model in Lead A's Chat before sending"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead iso-a "aft-isolation-a-${RUN_ID}"
         intent: "Save Lead A's real identity"
@@ -212,6 +219,8 @@ tests:
       - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Show the explicitly selected real model in Lead B's Chat before sending"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead iso-b "aft-isolation-b-${RUN_ID}"
         intent: "Save Lead B's separate real identity"

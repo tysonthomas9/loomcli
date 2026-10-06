@@ -43,7 +43,7 @@ def events(agent_id):
 
 def evidence(label, agent_id):
     a, ev = agent(agent_id), events(agent_id)
-    fields = ("agent_id", "workspace_id", "name", "preset", "harness", "repo", "base_ref",
+    fields = ("agent_id", "workspace_id", "name", "preset", "harness", "model", "repo", "base_ref",
               "parent_agent_id", "root_agent_id", "created_by_kind", "created_by_id",
               "worktree_path", "branch", "state", "outcome", "archive_reason",
               "attempt", "finished_at", "history_purged_at")
@@ -108,6 +108,7 @@ def lead(label, name):
     assert len(matches) == 1, f"expected one UI-created lead {name}: {matches}"
     a, ev = evidence(label, matches[0]["agent_id"])
     assert a["preset"] == "lead" and a["harness"] == os.environ["AFT_REAL_BACKEND"]
+    assert a["model"] == os.environ["AFT_REAL_MODEL"], "Lead did not persist the explicit UI model choice"
     assert a["repo"] == os.environ["AFT_AGENT_FLOW_REPO"] and a["worktree_path"]
     (WORK / label).write_text(a["agent_id"] + "\n")
     print(a["agent_id"])
