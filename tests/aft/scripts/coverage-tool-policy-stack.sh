@@ -139,11 +139,15 @@ case "$1" in
       const {fileURLToPath}=require("node:url");
       const {DatabaseSync}=require("node:sqlite");
       const [id,run,sourcePath,seedPath]=process.argv.slice(1);
+      process.on("uncaughtException",()=>{
+        console.error("policy git-state: owned-read-error"); process.exitCode=1;
+      });
+      const fail=code=>{ console.error(`policy git-state: ${code}`); process.exit(1); };
       if (!/^[A-Za-z0-9_-]+$/.test(run)) throw Error("invalid run ID");
       const source=fs.realpathSync(sourcePath);
       const seed=fs.realpathSync(seedPath);
       if (source!==sourcePath || seed!==seedPath || source!=="/root/.loom/workspaces/LOCALMODE/source-repo" ||
-          seed!=="/workspace/source-repo") throw Error("foreign source repo");
+          seed!=="/workspace/source-repo") fail("foreign-source-repo");
       const db=new DatabaseSync("/root/.loom/agents.db",{readOnly:true});
       const row=db.prepare("SELECT agent_id,name,preset,repo,harness,created_by_kind,parent_agent_id,worktree_path,branch FROM agents WHERE workspace_id=? AND agent_id=?")
         .get("LOCALMODE",id);
@@ -151,29 +155,50 @@ case "$1" in
       if (!row || row.agent_id!==id || row.name!==`aft-review-${run}-cov-policy` ||
           row.preset!=="pr-review-interactive" || row.repo!==source || row.harness!=="opencode" ||
           row.created_by_kind!=="user" || row.parent_agent_id!==null || row.branch!==null ||
-          row.worktree_path!==expected) throw Error("foreign reviewer Agent binding");
+          row.worktree_path!==expected) fail("foreign-reviewer-agent");
       const root=fs.realpathSync(row.worktree_path);
-      if (root!==expected || root===source || root===seed) throw Error("foreign checkout");
+      if (root!==expected || root===source || root===seed) fail("foreign-checkout");
       const git=(...args)=>cp.execFileSync("git",["-C",root,...args],{encoding:"utf8"}).trim();
       const sourceGit=(...args)=>cp.execFileSync("git",["-C",source,...args],{encoding:"utf8"}).trim();
       if (git("rev-parse","--show-toplevel")!==root ||
           fs.realpathSync(git("rev-parse","--path-format=absolute","--git-common-dir"))!==
             fs.realpathSync(sourceGit("rev-parse","--path-format=absolute","--git-common-dir")))
-        throw Error("checkout is not a worktree of owned source");
+        fail("checkout-not-owned-worktree");
+      const originPath="/workspace/source-repo-origin.git";
+      if (fs.realpathSync(originPath)!==originPath ||
+          sourceGit("remote","get-url","origin")!==originPath ||
+          cp.execFileSync("git",["--git-dir",originPath,"rev-parse","--is-bare-repository"],
+            {encoding:"utf8"}).trim()!=="true") fail("origin-not-owned-bare-repo");
       const remotes=git("remote").split("\n").filter(Boolean).sort();
-      const remoteRefs={};
+      if (!remotes.includes("origin")) fail("owned-origin-remote-missing");
+      const remoteRefs={}, remoteURLs={};
       for (const remote of remotes) {
-        const url=git("remote","get-url",remote);
-        const remotePath=url.startsWith("file://") ? fileURLToPath(url) :
-          path.isAbsolute(url) ? url : path.resolve(root,url);
-        const resolved=fs.realpathSync(remotePath);
-        if (resolved!==source && resolved!==seed) throw Error("nonlocal or foreign git remote");
-        remoteRefs[remote]=git("ls-remote",remote);
+        const urls=[...git("remote","get-url","--all",remote).split("\n"),
+          ...git("remote","get-url","--push","--all",remote).split("\n")].filter(Boolean);
+        if (!urls.length) fail("git-remote-url-missing");
+        const resolvedPaths=urls.map(url=>{
+          if (!url.startsWith("file://") && !path.isAbsolute(url)) fail("git-remote-not-local");
+          let remotePath=url;
+          if (url.startsWith("file://")) {
+            const parsed=new URL(url);
+            if (parsed.username || parsed.password || parsed.search || parsed.hash ||
+                (parsed.hostname && parsed.hostname!=="localhost")) fail("git-remote-url-unsafe");
+            remotePath=fileURLToPath(parsed);
+          }
+          const resolved=fs.realpathSync(remotePath);
+          if (![source,seed,originPath].includes(resolved)) fail("git-remote-not-owned");
+          return resolved;
+        });
+        if (remote==="origin" && resolvedPaths.some(p=>p!==originPath))
+          fail("origin-remote-mismatch");
+        remoteURLs[remote]=urls;
+        remoteRefs[remote]=resolvedPaths.map(p=>cp.execFileSync("git",["ls-remote","--",p],
+          {encoding:"utf8"}).trim());
       }
       process.stdout.write(JSON.stringify({agent_id:id,checkout:root,repo:source,
         preset:row.preset,harness:row.harness,head:git("rev-parse","HEAD"),
         status:git("status","--porcelain","--untracked-files=all"),
-        refs:git("show-ref"),remoteRefs,
+        refs:git("show-ref"),remoteURLs,remoteRefs,
         deniedTargetExists:fs.existsSync(path.join(root,`SECURITY_DENIED_${run}.txt`))})+"\n");
     ' "$2" "$RUN_ID" "$AFT_AGENT_FLOW_REPO" /workspace/source-repo
     ;;

@@ -303,35 +303,84 @@ def current_child_tool_events(rows, agent_id, turn_id, sentinel):
     return [latest]
 
 
-def tray_snapshot():
+def tray_capture_script(child_id):
+    script = """(() => {
+      const id=CHILD_ID;
+      const li=[...(document.querySelector('[data-testid=agent-tray]')?.querySelectorAll('li[data-tray-row]')||[])]
+        .find(e=>e.getAttribute('data-tray-row')===id);
+      const row=li?.querySelector('[data-status=running]');
+      const href=li?.querySelector('a[href]')?.getAttribute('href')||'';
+      const text=row?.textContent||'';
+      if (!row || !href.endsWith('/'+id) || !text.includes('Ran command') ||
+          !text.includes('printf') || !text.includes('REDACTED') ||
+          text.includes(SENTINEL)) return false;
+      window.__aftPolicyTrayCapture={agentId:id,status:'running',href,text,
+        aria:[...(row.querySelectorAll('[aria-label]'))].map(e=>e.getAttribute('aria-label')||'').join(' '),
+        observedAt:Date.now()};
+      return true;
+    })()""".replace("CHILD_ID", json.dumps(child_id)).replace("SENTINEL", json.dumps(SENTINEL))
+    return script
+
+
+def tray_capture():
     child = agent("child")
-    assert child["state"] == "active" and child.get("running_turn_id"), \
-        "child is no longer running during tray privacy observation"
+    child_id = child["agent_id"]
+    turn_id = child.get("running_turn_id")
+    if child["state"] != "active" or not turn_id:
+        rows = events("child")
+        save("tray-failure.json", {"child_agent_id": child_id,
+             "current_state": child["state"], "current_turn_id": turn_id,
+             "event_count": len(rows), "last_event_kind": rows[-1]["kind"] if rows else None,
+             "reason": "exact child has no active turn before tray observation"})
+        raise AssertionError("exact child has no active turn before tray observation")
+    script = tray_capture_script(child_id)
+    wait = subprocess.run(["agent-browser", "--session", env("AFT_SESSION"), "wait", "--fn", script],
+                          text=True, capture_output=True, check=False)
+    if wait.returncode:
+        latest = agent("child")
+        rows = events("child")
+        save("tray-failure.json", {"child_agent_id": child_id, "expected_turn_id": turn_id,
+             "current_state": latest["state"], "current_turn_id": latest.get("running_turn_id"),
+             "event_count": len(rows), "last_event_kind": rows[-1]["kind"] if rows else None,
+             "reason": "exact running redacted command preview not observed"})
+        raise AssertionError("exact running child redacted command preview not observed")
+    capture = browser("window.__aftPolicyTrayCapture || null")
+    if not isinstance(capture, dict) or capture.get("agentId") != child_id or \
+            capture.get("status") != "running":
+        save("tray-failure.json", {"child_agent_id": child_id, "expected_turn_id": turn_id,
+             "reason": "exact child running tray capture unavailable"})
+        raise AssertionError("exact child running tray capture unavailable")
+    assert capture["href"].endswith("/" + child_id), "tray capture links to a foreign child"
+    assert "Ran command" in capture["text"] and "printf" in capture["text"] and \
+        "REDACTED" in capture["text"], "tray capture did not show the redacted native command"
+    assert_private_nodes([{"kind": "agent-tray", "text": capture["text"],
+                           "aria": capture["aria"]}], SENTINEL)
+    save("tray-capture.json", {"child_agent_id": child_id,
+         "parent_agent_id": child["parent_agent_id"], "running_turn_id": turn_id,
+         "observed_at": capture["observedAt"],
+         "tray_row_sha256": hashlib.sha256(capture["text"].encode()).hexdigest(),
+         "redacted_command_visible": True})
+
+
+def tray_snapshot():
+    capture = json.loads((WORK / "tray-capture.json").read_text())
+    child = agent("child")
+    assert capture["child_agent_id"] == child["agent_id"] and \
+        capture["parent_agent_id"] == child["parent_agent_id"], \
+        "saved running tray capture belongs to a foreign child"
+    assert not child.get("running_turn_id") or \
+        child["running_turn_id"] == capture["running_turn_id"], \
+        "child turn changed after running tray capture"
     matching = current_child_tool_events(events("child"), child["agent_id"],
-                                         child["running_turn_id"], SENTINEL)
+                                         capture["running_turn_id"], SENTINEL)
     assert native_tool_ids("child") == [event_item_id(matching[0])], \
         "native child sentinel tool did not match the current saved redacted event"
-    child_id = json.dumps(child["agent_id"])
-    row = browser("""(() => {
-      const id = CHILD_ID;
-      const tray = document.querySelector('[data-testid=agent-tray]');
-      const li = [...(tray?.querySelectorAll('li[data-tray-row]')||[])].find(e=>e.getAttribute('data-tray-row')===id);
-      const link = li?.querySelector('a[href]');
-      const row = li?.querySelector('[data-status]');
-      return row && link ? {status:row.getAttribute('data-status'),text:row.textContent||'',
-        childHref:link.getAttribute('href')} : null;
-    })()""".replace("CHILD_ID", child_id))
-    assert row and row["status"] == "running", "exact child tray row was not running"
-    assert row["childHref"].endswith("/" + child["agent_id"]), "tray link was not the current child"
-    assert "Ran command" in row["text"] and "printf" in row["text"], \
-        "exact child tray row did not show the real safe command step"
-    assert_private_nodes([{"kind": "agent-tray", "text": row["text"], "aria": ""}], SENTINEL)
-    assert "•••" in row["text"], "credential-shaped tool argument was not masked in the tray"
     save("tray-privacy.json", {"child_agent_id": child["agent_id"],
          "parent_agent_id": child["parent_agent_id"],
          "tool_event_ids": [e["event_id"] for e in matching],
-         "running_turn_id": child["running_turn_id"],
-         "tray_row_sha256": hashlib.sha256(row["text"].encode()).hexdigest()})
+         "running_turn_id": capture["running_turn_id"],
+         "tray_row_sha256": capture["tray_row_sha256"],
+         "redacted_command_visible": capture["redacted_command_visible"]})
 
 
 def expand_tools():
@@ -428,6 +477,8 @@ def main():
         privacy_snapshot(sys.argv[2])
     elif op == "tray":
         tray_snapshot()
+    elif op == "tray-capture":
+        tray_capture()
     elif op == "expand-tools":
         expand_tools()
     elif op == "policy":

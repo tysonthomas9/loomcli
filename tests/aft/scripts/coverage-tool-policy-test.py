@@ -20,6 +20,7 @@ assert_native_steps = policy["assert_native_steps"]
 event_item_id = policy["event_item_id"]
 assert_reviewer_binding = policy["assert_reviewer_binding"]
 current_child_tool_events = policy["current_child_tool_events"]
+tray_capture_script = policy["tray_capture_script"]
 tool_events = policy["tool_events"]
 scoped_dom = policy["SCOPED_DOM"]
 api = policy["api"]
@@ -159,6 +160,31 @@ class NativeUsageOracle(unittest.TestCase):
 
 
 class OwnedEvidenceOracle(unittest.TestCase):
+    def test_running_tray_capture_requires_exact_child_and_redacted_command(self):
+        expression = tray_capture_script("agt_owned")
+        harness = """
+          const [id,status,text]=process.argv.slice(1);
+          const row={textContent:text,querySelectorAll:()=>[],getAttribute:()=>status};
+          const li={getAttribute:k=>k==='data-tray-row'?id:null,
+            querySelector:s=>s==='[data-status=running]' && status==='running'?row:
+              s==='a[href]'?{getAttribute:()=>'/ws/LOCALMODE/chat/'+id}:null};
+          global.document={querySelector:()=>({querySelectorAll:()=>[li]})};
+          global.window={};
+          const result=eval(EXPRESSION);
+          process.stdout.write(JSON.stringify({result,capture:window.__aftPolicyTrayCapture||null}));
+        """.replace("EXPRESSION", json.dumps(expression))
+        for child_id, status, text, expected in (
+            ("agt_owned", "running", "Ran command · printf SAFE # TOKEN=REDACTED", True),
+            ("agt_foreign", "running", "Ran command · printf SAFE # TOKEN=REDACTED", False),
+            ("agt_owned", "done", "Ran command · printf SAFE # TOKEN=REDACTED", False),
+            ("agt_owned", "running", "Ran command · printf SAFE", False),
+            ("agt_owned", "running", "Ran command · printf TOKEN=REDACTED " + policy["SENTINEL"], False),
+        ):
+            actual = json.loads(subprocess.check_output(
+                ["node", "-e", harness, child_id, status, text], text=True))
+            self.assertEqual(actual["result"], expected)
+            self.assertEqual(actual["capture"] is not None, expected)
+
     def test_rejects_foreign_reviewer_id_or_checkout(self):
         repo = "/root/.loom/workspaces/LOCALMODE/source-repo"
         row = {"agent_id": "agt_owned", "worktree_path": "/root/.loom/worktrees/source-repo/agt_owned",
