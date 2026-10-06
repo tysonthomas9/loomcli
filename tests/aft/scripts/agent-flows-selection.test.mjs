@@ -41,12 +41,21 @@ try {
   assert.equal(JSON.parse(run('default')).count, 9);
   agents.leads[0].model_required = false;
   write(['one.test.yaml']);
-  refuse('smoke');
+  assert.equal(JSON.parse(run('smoke')).count, 3);
   agents.leads[0].model_required = true;
+  agents.leads[0].model_exception = true;
+  write(['one.test.yaml']);
+  refuse('smoke');
+  delete agents.leads[0].model_exception;
+  agents.reviewers = [{ name: 'aft-review-${RUN_ID}', suite: 'coverage-one' }];
+  write(['one.test.yaml']);
+  assert.equal(JSON.parse(run('smoke')).agents.reviewers.length, 1);
+  delete agents.reviewers;
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ selection: { batch: 'smoke', agents } }));
   const expanded = JSON.parse(execFileSync('bash', ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],
     { env: { ...env, AFT_WORK_DIR: root, RUN_ID: 'af12345678' }, encoding: 'utf8' }));
-  assert.deepEqual(expanded, { leads: [{ name: 'aft-coverage-af12345678', suite: 'coverage-one', model_required: true }],
+  assert.deepEqual(expanded, { leads: [{ name: 'aft-coverage-af12345678', suite: 'coverage-one', model_required: true, model_exception: false }],
+    reviewers: [],
     children: [{ name: 'aft-child-af12345678', parent: 'aft-coverage-af12345678', suite: 'coverage-one' }] });
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ selection: { batch: 'default', agents: null } }));
   assert.equal(execFileSync('bash', ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],

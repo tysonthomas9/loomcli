@@ -42,6 +42,35 @@
           { "name": "cov-child-sidebar-task-${RUN_ID}", "parent": "cov-child-sidebar-b-${RUN_ID}", "suite": "coverage-children-activity" }
         ]
       }
+    },
+    "chat-visual": {
+      "files": ["chat-visual.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "aft-${RUN_ID}-cov-visual-render", "suite": "live-chat-visual", "model_required": true },
+          { "name": "aft-${RUN_ID}-cov-visual-input", "suite": "live-chat-visual", "model_required": true }
+        ],
+        "children": []
+      }
+    },
+    "chat-controls": {
+      "files": ["chat-controls-asks.test.yaml", "chat-controls-create.test.yaml", "chat-controls-models.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "cov-controls-questions-${RUN_ID}", "suite": "live-chat-controls-asks", "model_required": false },
+          { "name": "cov-controls-refusal-${RUN_ID}", "suite": "live-chat-controls-create", "model_required": false },
+          { "name": "cov-controls-picker-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false },
+          { "name": "cov-controls-custom-ui-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false },
+          { "name": "cov-controls-custom-api-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false, "model_exception": true },
+          { "name": "cov-controls-unknown-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false, "model_exception": true }
+        ],
+        "reviewers": [
+          { "name": "cov-controls-approval-${RUN_ID}", "suite": "live-chat-controls-asks" },
+          { "name": "cov-controls-denial-${RUN_ID}", "suite": "live-chat-controls-asks" },
+          { "name": "cov-controls-restart-${RUN_ID}", "suite": "live-chat-controls-asks" }
+        ],
+        "children": []
+      }
     }
   }
 }

@@ -200,7 +200,7 @@ jq -n --arg head "$head_sha" --arg source "$SOURCE_ROOT" --arg fleet "$fleet_rep
   --argjson fleetPort "$fleet_port" --argjson apiPort "$api_port" --argjson uiPort "$ui_port" \
   --arg aftCliSha "$(shasum -a 256 "$AFT_DIR/dist/cli.js" | awk '{print $1}')" \
   --arg aftLoaderSha "$(shasum -a 256 "$AFT_DIR/dist/runner.js" | awk '{print $1}')" \
-  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:"real OpenCode external model",backend:"opencode",cases:$cases,cap:$cap,selection:$selection,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
+  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:(if $selection.batch == "default" then "real OpenCode external model" else "real OpenCode stack; paid model evidence is per selected suite" end),backend:"opencode",cases:$cases,cap:$cap,selection:$selection,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
   > "$run_root/evidence/manifest.json"
 
 if ! mkdir /private/tmp/dryhawk-stack-build.lock 2>/dev/null; then
@@ -257,7 +257,7 @@ for image in "$LOCAL_MODE_LOOM_AGENTS_IMAGE" "$LOCAL_MODE_FLEETDB_IMAGE"; do
     >> "$run_root/evidence/images.jsonl" || die "built image $image lacks owned project provenance"
 done
 
-echo "[aft-agent-flows] running $case_count paid cases on owned $project; required UI model $real_model; catalog candidate $model; screenshots and videos in $run_root/evidence"
+echo "[aft-agent-flows] running $case_count selected real-stack cases on owned $project; required UI model $real_model; catalog candidate $model; screenshots and videos in $run_root/evidence"
 [[ "$(node "$TESTS_DIR/scripts/agent-flows-selection.mjs" "$TESTS_DIR" "$AFT_DIR/dist/runner.js" "$coverage_batch")" == "$selection" ]] \
   || die 'selected suite contents changed after preflight'
 aft_status=0
@@ -299,35 +299,48 @@ else
          (. as $child | any($declared.children[]; .name == $child.name and
            (.parent as $parentName |
              any($observed[]; .agent_id == $child.parent_agent_id and .name == $parentName))))
+       elif .preset == "pr-review-interactive" then
+         .created_by_kind == "user" and .parent_agent_id == null and .root_agent_id == null and
+         (.name as $name | any($declared.reviewers[]; .name == $name))
        else false end)) and
     all($declared.leads[] | select(.model_required); . as $lead |
       any($observed[]; .name == $lead.name and .preset == "lead" and
         .model == $target and .model_unverified == false))' \
     "$run_root/evidence/actual-agent-models.json" >/dev/null || die 'declared agent ownership or required UI model is missing'
 fi
-jq -e --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
-  '. as $catalog | all($observed[0][] | select(.model != null); .model as $m | any($catalog.providers[].models[]; .id == $m))' \
-  <<< "$catalog" >/dev/null || die 'an actual Agent API model is absent from the real OpenCode catalog'
-[[ -f "$run_root/evidence/model-selections.jsonl" ]] || die 'no UI model selection evidence was recorded'
 if [[ "$coverage_batch" == default ]]; then
+  jq -e --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
+    '. as $catalog | all($observed[0][] | select(.model != null); .model as $m | any($catalog.providers[].models[]; .id == $m))' \
+    <<< "$catalog" >/dev/null || die 'an actual Agent API model is absent from the real OpenCode catalog'
+  [[ -f "$run_root/evidence/model-selections.jsonl" ]] || die 'no UI model selection evidence was recorded'
   jq -se --slurpfile observed "$run_root/evidence/actual-agent-models.json" --arg target "$real_model" '
     . as $selections | [$observed[0][] | select(.preset == "lead" and .created_by_kind == "user")] as $leads |
     ($leads | length) > 0 and all($leads[]; . as $lead |
       any($selections[]; .agent_id == $lead.agent_id and .ui_selected_model == $target and .observed_saved_model == $target))' \
     "$run_root/evidence/model-selections.jsonl" >/dev/null || die 'a UI-created Lead lacks an explicit saved-model selection receipt'
 else
-  jq -se --argjson declared "$declared" --arg target "$real_model" '
-    . as $selections | all($declared.leads[] | select(.model_required); . as $lead |
-      any($selections[]; .name == $lead.name and .ui_selected_model == $target and .observed_saved_model == $target))' \
-    "$run_root/evidence/model-selections.jsonl" >/dev/null || die 'a paid Lead lacks an explicit saved-model selection receipt'
+  jq -e --slurpfile observed "$run_root/evidence/actual-agent-models.json" --argjson declared "$declared" '
+    . as $catalog | all($observed[0][] | select(.model != null); . as $agent |
+      if any($declared.leads[]; .name == $agent.name and .model_exception) then true
+      else .model as $m | any($catalog.providers[].models[]; .id == $m) end)' \
+    <<< "$catalog" >/dev/null || die 'an actual Agent API model is absent from the real OpenCode catalog'
+  if jq -e 'any(.leads[]; .model_required)' <<< "$declared" >/dev/null; then
+    [[ -f "$run_root/evidence/model-selections.jsonl" ]] || die 'required UI model selection evidence is missing'
+    jq -se --argjson declared "$declared" --arg target "$real_model" '
+      . as $selections | all($declared.leads[] | select(.model_required); . as $lead |
+        any($selections[]; .name == $lead.name and .ui_selected_model == $target and .observed_saved_model == $target))' \
+      "$run_root/evidence/model-selections.jsonl" >/dev/null || die 'a paid Lead lacks an explicit saved-model selection receipt'
+  fi
 fi
-jq --slurpfile observed "$run_root/evidence/actual-agent-models.json" --arg batch "$coverage_batch" \
+jq --slurpfile observed "$run_root/evidence/actual-agent-models.json" --arg batch "$coverage_batch" --argjson declared "${declared:-null}" \
   '.observed_agents=$observed[0] |
    .observed_models=($observed[0] | map(.model) | map(select(. != null)) | unique) |
    .agents_without_saved_model=($observed[0] | map(select(.model == null) | {agent_id,name,preset})) |
    .model_proof_scope=(if $batch == "default" then
      "UI-saved model on surviving Leads; null child defaults need separate turn-level proof"
-     else "UI-saved model on declared paid Leads; UI-only Leads may have no saved model; child answers need separate native proof" end)' \
+     elif any($declared.leads[]; .model_required) then
+       "UI-saved model on declared runner-required Leads; other model behavior requires suite and native proof"
+     else "No runner-level model receipt in this batch; suite assertions and independent live review required" end)' \
   "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
 mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"
 exit "$aft_status"

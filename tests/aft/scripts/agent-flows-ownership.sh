@@ -46,7 +46,8 @@ agent_flows_declared_agents() {
   jq -c --arg run "$RUN_ID" '
     if .selection.batch == "default" then null else
       .selection.agents | {
-        leads: [.leads[] | {name: (.name | split("${RUN_ID}") | join($run)), suite, model_required}],
+        leads: [.leads[] | {name: (.name | split("${RUN_ID}") | join($run)), suite, model_required, model_exception: (.model_exception // false)}],
+        reviewers: [(.reviewers // [])[] | {name: (.name | split("${RUN_ID}") | join($run)), suite}],
         children: [.children[] | {
           name: (.name | split("${RUN_ID}") | join($run)),
           parent: (.parent | split("${RUN_ID}") | join($run)),
