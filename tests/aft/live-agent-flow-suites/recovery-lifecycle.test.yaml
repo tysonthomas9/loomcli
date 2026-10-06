@@ -11,7 +11,7 @@ setup: |
   : "${AFT_BASE_URL:?}" "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}"
   : "${AFT_REAL_BACKEND:?}" "${AFT_WORK_DIR:?}" "${AFT_TESTS_DIR:?}" "${RUN_ID:?}"
   [ "$AFT_WS" = LOCALMODE ] && [ "$AFT_REAL_BACKEND" = opencode ]
-  [ "$AFT_AGENT_FLOW_REPO" = /workspace/source-repo ]
+  python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" repo
 
 tests:
   # MATRIX:S5/H6; RELEASE:R7 subset: owned serve restart during a real turn.
