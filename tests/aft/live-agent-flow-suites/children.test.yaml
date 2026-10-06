@@ -1,0 +1,270 @@
+# Paid live-model tier only. The runner supplies an owned LOCALMODE stack,
+# isolated browser profile, --no-agent --screenshots --record-all, and one
+# AFT_WORK_DIR per run. Never point this at a user's or another agent's stack.
+suite: live-agent-children
+classification: { area: agents, feature: agent-api-children, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_REAL_BACKEND:?}" "${RUN_ID:?}"
+  test "$AFT_WS" = LOCALMODE
+  case "$AFT_REAL_BACKEND" in opencode|codex) ;; *) exit 2 ;; esac
+  test "$AFT_AGENT_FLOW_REPO" = /workspace/source-repo
+  mkdir -p "$AFT_WORK_DIR/live-children"
+teardown: |
+  python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" cleanup
+
+tests:
+  # Source MATRIX:T1,T2,T6; RELEASE:R4,R5. Local scripted T10 in
+  # agents-v1-children is NOT MATRIX:T10 (the epic case).
+  - name: live child delegation - two real task agents commit private results and the Lead summarizes both
+    intent: An operator creates a real OpenCode Lead, asks it to delegate twice with Loom tools, sees both children in the Lead's tray and sidebar, opens a child Chat and Diff, then sees one delivered result per child and a grounded combined Lead summary
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the Agents page on the owned stack"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-overlay]')"
+        intent: "Wait for the Lead creation dialog"
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "aft-child-lead-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead pair-lead "aft-child-lead-${RUN_ID}"
+        intent: "Save the UI-created Lead's real Agent API identity and worktree binding"
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create twice now, with distinct task child names aft-child-a-${RUN_ID}
+            and aft-child-b-${RUN_ID}. Give each this exact private task: in your own agent
+            worktree, create aft-child-fixtures/${RUN_ID}/<your-agent-name>.txt containing
+            your name and the word complete; git add and commit that file on your own branch;
+            report the file path and commit. The two children must each do their own work.
+            Keep all changes inside this private fixture path. Do not push or open a PR.
+            After both results arrive, give me one concise combined summary naming both
+            children, their files, and their actual outcomes. Do not ask for a fake result.
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('aft-child-a-${RUN_ID}') && t.includes('aft-child-b-${RUN_ID}') &&
+                !!document.querySelector('[data-testid=started-marker]'); })()
+        intent: "Wait for real child-created events rendered as Started markers"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" children pair pair-lead
+          "aft-child-a-${RUN_ID}" "aft-child-b-${RUN_ID}"
+        intent: "Match the Started markers to two persisted child IDs, parent and root IDs, branches, and separate worktrees"
+      - click: { selector: "[data-testid=agent-tray] button[aria-expanded]" }
+        intent: "Expand the Lead's child tray for the screenshot"
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const lead = Array.from(nav?.querySelectorAll('a') || []).find((a) =>
+                (a.textContent || '').startsWith('aft-child-lead-${RUN_ID}'));
+              const kids = Array.from(lead?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(
+                ':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
+              const tray = document.querySelector('[data-testid=agent-tray]')?.textContent || '';
+              return kids.some((a) => (a.textContent || '').startsWith('aft-child-a-${RUN_ID}')) &&
+                kids.some((a) => (a.textContent || '').startsWith('aft-child-b-${RUN_ID}')) &&
+                tray.includes('aft-child-a-${RUN_ID}') && tray.includes('aft-child-b-${RUN_ID}'); })()
+        intent: "Show both working children nested in the sidebar and together in the Lead's tray"
+      - click: { selector: "[data-testid=started-marker] a", first: true }
+        intent: "Open the first child from the Lead's Started marker"
+      - wait:
+          fn: >-
+            (() => { const h = document.querySelector('[aria-label="Agent chat"] header')?.textContent || '';
+              return location.pathname.startsWith('/ws/${AFT_WS}/chat/') && h.includes('aft-child-a-${RUN_ID}'); })()
+        intent: "Show the real child's Chat and its identity in the header"
+      - click: { role: button, name: Diff, exact: true }
+        intent: "Open the child's Diff tab to review its own committed result"
+      - wait:
+          fn: >-
+            (document.body.textContent || '').includes('aft-child-fixtures/${RUN_ID}/aft-child-a-${RUN_ID}.txt')
+        intent: "Wait for the child's private fixture file to appear in its Diff"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/live-children/pair-lead")'"
+        intent: "Return to the same Lead Chat after reviewing the child"
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              return r.length === 2 && r.every((e) => e.dataset.outcome === 'completed' && e.dataset.delivery === 'delivered') &&
+                r.some((e) => e.textContent.includes('aft-child-a-${RUN_ID}')) &&
+                r.some((e) => e.textContent.includes('aft-child-b-${RUN_ID}')); })()
+        intent: "Wait for exactly one delivered completion card for each real child attempt"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('aft-child-a-${RUN_ID}') && t.includes('aft-child-b-${RUN_ID}') &&
+                !t.includes('task_completed:'); })()
+        intent: "Show the Lead's combined account beside the two child result cards, without raw protocol text"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" completed pair pair-lead
+          "aft-child-a-${RUN_ID}" "aft-child-b-${RUN_ID}"
+        intent: "Prove each real child turn, its own commit and diff, one keyed completion, one delivered notice, and the Lead's later combined reply"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              return r.length === 2 && r.every((e) => e.dataset.delivery === 'delivered') &&
+                !document.body.textContent.includes('task_completed:'); })()
+        intent: "Confirm the two completion cards survive a reload without duplication"
+
+  # Source MATRIX:T3; RELEASE:R9. Stop in the composer is turn interrupt,
+  # whereas this case requires the Lead's agent_archive(cancel:true) tool.
+  - name: live child cancellation - Lead archives its running child as cancelled and preserves history
+    intent: A real Lead cancels its own working task child with the Loom archive tool; its parent gets one cancelled completion, and the child Chat remains available
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-overlay]')"
+        intent: "Wait for the Lead creation dialog"
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "aft-cancel-lead-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead cancel-lead "aft-cancel-lead-${RUN_ID}"
+        intent: "Save the UI-created cancellation Lead's identity"
+      - fill:
+          label: Message
+          value: >-
+            Call Loom agent_create for task child aft-cancel-child-${RUN_ID}. Its private
+            cancellation fixture is to run tail -f /dev/null in its own worktree and wait;
+            this consumes no CPU and makes its turn visibly active until I cancel it.
+            No file or external changes are needed. Tell me when you started the child.
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('aft-cancel-child-${RUN_ID}') &&
+            (document.querySelector('[data-testid=agent-tray]')?.textContent || '').includes('aft-cancel-child-${RUN_ID}')
+        intent: "Observe the created child still working before asking the Lead to cancel it"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" children cancel cancel-lead
+          "aft-cancel-child-${RUN_ID}"
+        intent: "Save the real child's parent identity and active worktree"
+      - fill:
+          label: Message
+          value: >-
+            Cancel your own child aft-cancel-child-${RUN_ID} now. Use Loom
+            agent_archive with cancel:true on its actual child agent ID. Do not
+            use the Chat Stop button or interrupt a turn as a substitute.
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const r = document.querySelector('[data-testid=completion-record]');
+              return r?.dataset.outcome === 'cancelled' && r.textContent.includes('aft-cancel-child-${RUN_ID}') &&
+                r.dataset.delivery === 'delivered'; })()
+        intent: "Show one cancelled child result delivered to the Lead"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" cancelled cancel cancel-lead
+          "aft-cancel-child-${RUN_ID}"
+        intent: "Prove the Lead's real cancel:true tool call, archived child, retained history, and one keyed cancelled notice"
+      - click: { selector: "[data-testid=completion-record]" }
+        intent: "Open the cancelled child's retained Chat from its result card"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=agent-archived-notice]')"
+        intent: "Show the cancelled agent's historical Chat and archived state"
+
+  # Source MATRIX:T8. The actor is the real Lead's Loom bridge token;
+  # human API writes cannot prove this authorization boundary.
+  - name: live child isolation - one Lead cannot get or message another Lead's child
+    intent: Two UI-created real Leads each own a task child; the first Lead's Loom get and send to the other's child return agent_not_found, while getting its own child succeeds
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-overlay]')"
+        intent: "Wait for Lead A's creation dialog"
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "aft-isolation-a-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead iso-a "aft-isolation-a-${RUN_ID}"
+        intent: "Save Lead A's real identity"
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create to make your task child aft-isolation-own-${RUN_ID}.
+            Have it read the repo README, report one sentence, and make no changes.
+            Tell me the child agent ID.
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('aft-isolation-own-${RUN_ID}')
+        intent: "Observe Lead A's Loom-created child"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" children iso iso-a
+          "aft-isolation-own-${RUN_ID}"
+        intent: "Save Lead A's child's persistent parent and root identity"
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: "!!document.querySelector('[data-testid=create-agent-overlay]')"
+        intent: "Wait for Lead B's creation dialog"
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "aft-isolation-b-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" lead iso-b "aft-isolation-b-${RUN_ID}"
+        intent: "Save Lead B's separate real identity"
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create to make your task child aft-isolation-foreign-${RUN_ID}.
+            Have it read the repo README, report one sentence, and make no changes.
+            Tell me the child agent ID.
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('aft-isolation-foreign-${RUN_ID}')
+        intent: "Observe Lead B's distinct Loom-created child"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" children iso iso-b
+          "aft-isolation-foreign-${RUN_ID}"
+        intent: "Save Lead B's child ID for the cross-Lead probe"
+      - run: |
+          set -eu
+          own="$(cat "$AFT_WORK_DIR/live-children/iso-aft-isolation-own-${RUN_ID}.id")"
+          agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/live-children/iso-a")'"
+          agent-browser --session "$AFT_SESSION" wait --fn "!!document.querySelector('[aria-label=\"Agent chat\"] textarea')"
+          agent-browser --session "$AFT_SESSION" fill '[aria-label="Agent chat"] textarea' "Call Loom agent_get for your own child $own and tell me its exact agent ID. Use your Loom tool, not an HTTP or shell API client."
+          agent-browser --session "$AFT_SESSION" press Enter
+        intent: "Ask Lead A through its Chat to prove its own-child Loom get succeeds"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=bridge-call]')).some((e) =>
+              e.textContent.includes('Checked') && e.textContent.includes('aft-isolation-own-${RUN_ID}') &&
+              e.dataset.status === 'completed')
+        intent: "Observe the real own-child get tool result before the foreign probe"
+      - run: |
+          foreign="$(cat "$AFT_WORK_DIR/live-children/iso-aft-isolation-foreign-${RUN_ID}.id")"
+          agent-browser --session "$AFT_SESSION" fill '[aria-label="Agent chat"] textarea' "Call Loom agent_get for child $foreign, which belongs to another Lead. Show the exact error code. Use your Loom tool, not an HTTP or shell API client."
+          agent-browser --session "$AFT_SESSION" press Enter
+        intent: "Ask Lead A to get Lead B's child using Lead A's real bridge identity"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=bridge-call]')).some((e) =>
+              e.textContent.includes('Checked') && e.textContent.includes('failed'))
+        intent: "Show the foreign-child get is refused in Lead A's Chat"
+      - run: |
+          foreign="$(cat "$AFT_WORK_DIR/live-children/iso-aft-isolation-foreign-${RUN_ID}.id")"
+          agent-browser --session "$AFT_SESSION" fill '[aria-label="Agent chat"] textarea' "Call Loom agent_send for foreign child $foreign with text foreign-probe-${RUN_ID}. Show the exact error code. Use your Loom tool, not an HTTP or shell API client."
+          agent-browser --session "$AFT_SESSION" press Enter
+        intent: "Ask Lead A to send to Lead B's child using Lead A's real bridge identity"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=bridge-call]')).some((e) =>
+              e.textContent.includes('Messaged') && e.textContent.includes('failed'))
+        intent: "Show the foreign-child send is refused in Lead A's Chat"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" isolation iso iso-a
+          "aft-isolation-own-${RUN_ID}" iso-b "aft-isolation-foreign-${RUN_ID}"
+        intent: "Prove real model tool calls returned agent_not_found for both foreign operations, an own-child get succeeded, and no foreign input was delivered"
