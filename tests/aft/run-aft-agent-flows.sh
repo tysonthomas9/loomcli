@@ -25,6 +25,9 @@ done
 [[ -z "${AFT_AGENT_FLOW_REPO:-}" ]] || die 'ambient Agent flow repository override is refused'
 [[ -z "${AFT_REAL_BACKEND:-}" || "$AFT_REAL_BACKEND" == opencode ]] || die 'conflicting ambient real backend'
 [[ -z "${AFT_REAL_CODEX:-}" ]] || die 'AFT_REAL_CODEX conflicts with the OpenCode tier'
+real_model="${AFT_REAL_MODEL:-openai/gpt-5.5}"
+[[ "$real_model" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$real_model" != aft/* ]] || die 'invalid real model ID'
+export AFT_REAL_MODEL="$real_model"
 [[ -d "$SUITE_DIR" ]] || die "missing suite directory: $SUITE_DIR"
 shopt -s nullglob
 suites=("$SUITE_DIR"/*.test.yaml)
@@ -44,6 +47,7 @@ export AFT_REAL_BACKEND=opencode
 export AFT_TESTS_DIR="$TESTS_DIR" AFT_WORK_DIR=/private/tmp/aft-agent-flows-validation RUN_ID=validation
 export AFT_RESTART_SERVE="$TESTS_DIR/scripts/agent-flows-restart-serve.sh"
 export AFT_NATIVE_SESSION_PROBE="$TESTS_DIR/scripts/agent-flows-native-session.sh"
+export AFT_SELECT_AGENT_MODEL="$TESTS_DIR/scripts/agent-flows-select-model.sh"
 case_count="$(node --input-type=module - "$AFT_DIR/dist/runner.js" "${suites[@]}" <<'NODE' | tr -d '\r'
 import {pathToFileURL} from 'node:url';
 const [loader, ...files] = process.argv.slice(2);
@@ -227,14 +231,27 @@ model="${LOCAL_MODE_AGENTS_MODEL:-$(jq -r '[.providers[].models[] | select(.is_d
 model="${model//$'\r'/}"
 [[ -n "$model" && "$model" != aft/* ]] || die 'OpenCode has no selected real model; refusing paid cases'
 jq -e --arg model "$model" 'any(.providers[].models[]; .id == $model)' <<< "$catalog" >/dev/null || die "selected OpenCode model $model is unavailable"
-jq --arg model "$model" '.selected_catalog_model=$model' "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
+jq -e --arg model "$real_model" 'any(.providers[].models[]; .id == $model)' <<< "$catalog" >/dev/null \
+  || die "required real UI model $real_model is absent from the owned OpenCode catalog"
+catalog_default="$(jq -r '[.providers[].models[] | select(.is_default) | .id][0] // empty' <<< "$catalog" | tr -d '\r')"
+alternate="$(jq -r --arg target "$real_model" --arg provider "${real_model%%/*}" \
+  '[.providers[].models[].id | select(. != $target and (startswith("aft/") | not))] as $others |
+   ([$others[] | select(startswith($provider + "/"))][0] // $others[0] // empty)' \
+  <<< "$catalog" | tr -d '\r')"
+[[ "$catalog_default" != "$real_model" || -n "$alternate" ]] || die 'default model cannot be saved through the picker without another catalog model'
+[[ -z "$alternate" || "$alternate" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die 'unsafe alternate model ID'
+jq -n --arg target "$real_model" --arg displayed "$catalog_default" --arg alternate "$alternate" \
+  '{target:$target,displayed_default:$displayed,alternate:$alternate,harness:"opencode"}' \
+  > "$run_root/evidence/model-selection.json"
+jq --arg model "$model" --arg required "$real_model" \
+  '.selected_catalog_model=$model | .required_ui_model=$required' "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
 mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"
 for image in "$LOCAL_MODE_LOOM_AGENTS_IMAGE" "$LOCAL_MODE_FLEETDB_IMAGE"; do
   podman image inspect "$image" | jq -e --arg project "$project" '.[0] | select(.Labels["io.loom.local-mode.project"] == $project) | {Id,RepoTags,Labels}' \
     >> "$run_root/evidence/images.jsonl" || die "built image $image lacks owned project provenance"
 done
 
-echo "[aft-agent-flows] running $case_count paid cases on owned $project; model $model; screenshots and videos in $run_root/evidence"
+echo "[aft-agent-flows] running $case_count paid cases on owned $project; required UI model $real_model; catalog candidate $model; screenshots and videos in $run_root/evidence"
 aft_status=0
 HOME="$run_root/aft-home" node "$AFT_DIR/dist/cli.js" run "${suites[@]}" --no-agent --screenshots --record-all \
   --report-dir "$run_root/evidence" --viewport 1920x1080 --timeout 30000 || aft_status=$?
@@ -244,16 +261,29 @@ HOME="$run_root/aft-home" node "$AFT_DIR/dist/cli.js" run "${suites[@]}" --no-ag
 agents_json="$(curl -fsS --max-time 30 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents?include_archived=true&limit=500")" \
   || die 'AFT finished but actual Agent API model readback failed'
 jq --arg run "$run_id" '[.agents[] | select(.name | contains($run)) |
-  {agent_id,name,harness,model,model_unverified,state}]' <<< "$agents_json" \
+  {agent_id,name,preset,created_by_kind,parent_agent_id,repo,harness,model,model_unverified,state}]' <<< "$agents_json" \
   > "$run_root/evidence/actual-agent-models.json" || die 'actual Agent API model snapshot could not be saved'
 jq -e '.next == ""' <<< "$agents_json" >/dev/null || die 'Agent API model readback was truncated'
-jq -e 'length > 0 and all(.[]; .harness == "opencode" and (.model | type == "string" and length > 0 and (startswith("aft/") | not)))' \
-  "$run_root/evidence/actual-agent-models.json" >/dev/null || die 'actual Agent API model identities are missing or not real OpenCode'
+jq -e --arg repo "$AFT_AGENT_FLOW_REPO" --arg target "$real_model" '
+  length > 0 and all(.[]; .harness == "opencode" and .repo == $repo and
+    (.model == null or (.model | type == "string" and length > 0 and (startswith("aft/") | not)))) and
+  any(.[]; .preset == "lead" and .created_by_kind == "user" and .model == $target) and
+  all(.[]; if .preset == "lead" and .created_by_kind == "user" then .model == $target and .model_unverified == false else true end)' \
+  "$run_root/evidence/actual-agent-models.json" >/dev/null || die 'saved UI Lead model or owned OpenCode identity is missing'
 jq -e --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
-  '. as $catalog | all($observed[0][]; .model as $m | any($catalog.providers[].models[]; .id == $m))' \
+  '. as $catalog | all($observed[0][] | select(.model != null); .model as $m | any($catalog.providers[].models[]; .id == $m))' \
   <<< "$catalog" >/dev/null || die 'an actual Agent API model is absent from the real OpenCode catalog'
+[[ -f "$run_root/evidence/model-selections.jsonl" ]] || die 'no UI model selection evidence was recorded'
+jq -se --slurpfile observed "$run_root/evidence/actual-agent-models.json" --arg target "$real_model" '
+  . as $selections | [$observed[0][] | select(.preset == "lead" and .created_by_kind == "user")] as $leads |
+  ($leads | length) > 0 and all($leads[]; . as $lead |
+    any($selections[]; .agent_id == $lead.agent_id and .ui_selected_model == $target and .observed_saved_model == $target))' \
+  "$run_root/evidence/model-selections.jsonl" >/dev/null || die 'a UI-created Lead lacks an explicit saved-model selection receipt'
 jq --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
-  '.observed_agents=$observed[0] | .observed_models=($observed[0] | map(.model) | unique)' \
+  '.observed_agents=$observed[0] |
+   .observed_models=($observed[0] | map(.model) | map(select(. != null)) | unique) |
+   .agents_without_saved_model=($observed[0] | map(select(.model == null) | {agent_id,name,preset})) |
+   .model_proof_scope="UI-saved model on surviving Leads; null child defaults need separate turn-level proof"' \
   "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
 mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"
 exit "$aft_status"
