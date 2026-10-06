@@ -17,6 +17,8 @@ tests:
         intent: "Show the form"
       - click: { testid: create-agent-template-lead }
         intent: "Select Agent API Lead"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" modal-backends'
+        intent: "Compare the real wired Lead harness list with every modal option and its selected default"
       - fill: { testid: create-agent-name, value: "cov-controls-refusal-${RUN_ID}" }
         intent: "Enter a valid unique name"
       - select: { testid: create-agent-backend, value: opencode }
@@ -41,13 +43,21 @@ tests:
         intent: "Enter an invalid persisted agent name"
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=create-agent-name-error]') &&
+            (document.querySelector('[data-testid=create-agent-name-error]')?.textContent || '') ===
+              'Use 1–100 lowercase letters, numbers, hyphens, dots, or underscores. Names cannot start or end with punctuation.' &&
+            document.querySelector('[data-testid=create-agent-name]')?.getAttribute('aria-invalid') === 'true' &&
             document.querySelector('[data-testid=create-agent-submit]')?.disabled === true
-        intent: "Show the typed name rule and disabled Create action"
+        intent: "Show the exact persisted-name rule, aria-invalid and disabled Create action"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" roster bad-name initial'
         intent: "Check invalid typed input did not alter the roster"
       - fill: { testid: create-agent-name, value: "cov-controls-refusal-${RUN_ID}" }
         intent: "Restore a valid name"
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-name-error]') &&
+            document.querySelector('[data-testid=create-agent-name]')?.getAttribute('aria-invalid') === 'false' &&
+            document.querySelector('[data-testid=create-agent-submit]')?.disabled === false
+        intent: "Show the exact invalid-name state cleared before the valid Create"
       - click: { testid: create-agent-submit }
         intent: "Create the single intended Lead"
       - wait: { url: "/ws/${AFT_WS}/chat/agt_" }

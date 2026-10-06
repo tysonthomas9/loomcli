@@ -84,6 +84,24 @@ class OracleTest(unittest.TestCase):
                  f"if ({guard}) process.exit(1);"
         subprocess.run(["node", "-e", script], check=True)
 
+    def test_reload_refuses_changed_saved_ask_content(self):
+        original = {"event_id": "ask.opened::ses:per_1", "seq": 1,
+                    "kind": "ask.opened", "turn_id": "turn_1",
+                    "payload": {"askId": "per_1", "text": "owned command"}}
+        with patch.object(module, "events", return_value=[original]), \
+             patch.object(module, "aid", return_value="agt_a"):
+            module.ask_history("approval", "once", "1,0,0")
+        changed = {**original, "payload": {"askId": "per_1", "text": "changed command"}}
+        with patch.object(module, "events", return_value=[changed]):
+            with self.assertRaisesRegex(AssertionError, "full saved ask"):
+                module.ask_history("approval", "once", "1,0,0", True)
+
+    def test_modal_refuses_default_outside_wired_harnesses(self):
+        with patch.object(module, "call", return_value={"harnesses": ["opencode"]}), \
+             patch.object(module, "browser", side_effect=["", '{"options":["opencode"],"selected":"codex"}']):
+            with self.assertRaisesRegex(AssertionError, "differ from wired"):
+                module.modal_backends()
+
 
 if __name__ == "__main__":
     unittest.main()

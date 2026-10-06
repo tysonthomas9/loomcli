@@ -327,6 +327,23 @@ def ask_terminal(case, stage, reasons):
                                            "idle": True})
 
 
+def ask_history(case, stage, counts, compare=False):
+    wanted = [int(n) for n in counts.split(",")]
+    assert len(wanted) == 3, "need opened,resolved,lost counts"
+    kinds = ("ask.opened", "ask.resolved", "ask.lost")
+    rows = [{k: e[k] for k in ("event_id", "seq", "kind", "turn_id", "payload")}
+            for e in events(case) if e["kind"] in kinds]
+    assert [sum(e["kind"] == kind for e in rows) for kind in kinds] == wanted, \
+        "saved ask history has the wrong opened/resolved/lost counts"
+    assert all(e["event_id"].startswith(e["kind"] + ":") and
+               e["payload"].get("askId") for e in rows), "saved ask event identity/content missing"
+    key = f"{case}-{stage}-ask-history.json"
+    if compare:
+        assert rows == saved(key)["events"], "reload changed full saved ask EventID/content history"
+    else:
+        save(key, {"agent_id": aid(case), "events": rows, "expected_counts": wanted})
+
+
 def respond_receipt(case, stage):
     identity = saved(f"{case}-{stage}-ask.json")
     suffix = f"/v1/agents/{aid(case)}/asks/{identity['ask_id']}"
@@ -395,6 +412,19 @@ def roster(stage, expected=None):
     save(f"roster-{stage}.json", {"agent_ids": ids})
 
 
+def modal_backends():
+    wired = call(f"{PREFIX}/presets/lead")["harnesses"]
+    assert wired and "opencode" in wired and len(wired) == len(set(wired)), "real Lead harness list unavailable"
+    selector = "[data-testid=create-agent-backend]"
+    browser("wait", "--fn", f"(() => {{ const s=document.querySelector({json.dumps(selector)}); "
+            f"return !!s && JSON.stringify([...s.options].map(o=>o.value)) === {json.dumps(json.dumps(wired))}; }})()")
+    result = json.loads(browser("eval", f"(() => {{ const s=document.querySelector({json.dumps(selector)}); "
+                                     "return {options:[...s.options].map(o=>o.value),selected:s.value}; })()"))
+    assert result["options"] == wired and result["selected"] in wired, \
+        "Create modal default or available backends differ from wired Lead preset"
+    save("modal-wired-backends.json", {"wired": wired, "selected_default": result["selected"]})
+
+
 def history(case, stage, compare=None):
     ids = [e["event_id"] for e in events(case)]
     if compare:
@@ -453,14 +483,18 @@ def main():
     command, *args = sys.argv[1:]
     actions = {"claim": claim, "create": create, "cold-create": cold_create, "catalog": catalog, "pick": pick,
                "check-model": check_model, "turn": turn, "ask": ask,
-               "resolved": resolved, "ask-terminal": ask_terminal, "malformed": malformed, "custom": custom,
+               "resolved": resolved, "ask-terminal": ask_terminal, "ask-history": ask_history,
+               "malformed": malformed, "custom": custom,
                "unknown": unknown, "recover": recover, "approval-effect": approval_effect,
                "question-answers": question_answers, "lost": lost, "roster": roster,
-               "history": history, "respond-receipt": respond_receipt}
+               "history": history, "respond-receipt": respond_receipt,
+               "modal-backends": modal_backends}
     if command == "check-model" and len(args) == 3:
         actions[command](args[0], args[1], args[2] == "effort")
     elif command == "custom":
         actions[command](args[0], args[1] == "present")
+    elif command == "ask-history":
+        actions[command](args[0], args[1], args[2], len(args) == 4 and args[3] == "compare")
     else:
         actions[command](*args)
 
