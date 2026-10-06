@@ -41,14 +41,14 @@ case "$1" in
         const get=async path=>{
           const res=await fetch(new URL(path,base),{headers:{Authorization:authorization},signal:AbortSignal.timeout(15000)});
           if (!res.ok) throw Error("native service read failed");
-          return (await res.json()).data;
+          return await res.json();
         };
         const info=await get("/api/info");
         if (info?.pid!==registration.pid) throw Error("native service identity changed");
-        const session=await get("/api/session/"+encodeURIComponent(row.native_id));
+        const session=(await get("/api/session/"+encodeURIComponent(row.native_id)))?.data;
         if (session?.id!==row.native_id || session.metadata?.agent_id!==id ||
             session.location?.directory!==row.worktree_path) throw Error("native session mismatch");
-        const messages=await get("/api/session/"+encodeURIComponent(row.native_id)+"/message?type=assistant&order=desc&limit=200");
+        const messages=(await get("/api/session/"+encodeURIComponent(row.native_id)+"/message?type=assistant&order=desc&limit=200"))?.data;
         if (!Array.isArray(messages)) throw Error("native usage messages unavailable");
         const steps=messages.filter(m=>m?.type==="assistant" && m.time?.completed!=null && m.tokens).map(m=>({
           itemID:m.id,inputTokens:m.tokens.input||0,
@@ -95,14 +95,14 @@ case "$1" in
         const get=async path=>{
           const res=await fetch(new URL(path,base),{headers:{Authorization:authorization},signal:AbortSignal.timeout(15000)});
           if (!res.ok) throw Error("native service read failed");
-          return (await res.json()).data;
+          return await res.json();
         };
         const info=await get("/api/info");
         if (info?.pid!==registration.pid) throw Error("native service identity changed");
-        const session=await get("/api/session/"+encodeURIComponent(row.native_id));
+        const session=(await get("/api/session/"+encodeURIComponent(row.native_id)))?.data;
         if (session?.id!==row.native_id || session.metadata?.agent_id!==id ||
             session.location?.directory!==row.worktree_path) throw Error("native session mismatch");
-        const messages=await get("/api/session/"+encodeURIComponent(row.native_id)+"/message?type=assistant&order=desc&limit=200");
+        const messages=(await get("/api/session/"+encodeURIComponent(row.native_id)+"/message?type=assistant&order=desc&limit=200"))?.data;
         if (!Array.isArray(messages)) throw Error("native tool messages unavailable");
         const sentinel=`ghp_AFTONLY${run}Q7mR2pK9xT4vN8cY6bL5fS3dH1jW0`;
         const calls=messages.flatMap(m=>m?.type==="assistant" && Array.isArray(m.content) ?

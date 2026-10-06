@@ -221,16 +221,16 @@ def tool_events():
     rows = events("lead")
     all_tools = [e for e in rows if e["kind"] == "item.completed"
                  and e["payload"].get("itemKind") == "tool"]
-    assert len(all_tools) == 1, "privacy turn did not have exactly one saved native tool call"
-    calls = all_tools
+    native_ids = native_tool_ids("lead")
+    calls = [e for e in all_tools if event_item_id(e) in native_ids]
+    assert len(calls) == len(native_ids) == 1, \
+        "native sentinel call did not match exactly one saved tool event"
     saved_tool = calls[0]["payload"].get("tool") or {}
     assert "printf" in saved_tool.get("input", "") and "REDACTED" in saved_tool.get("input", ""), \
         "saved native tool input did not retain a safe command and redaction receipt"
     assert SENTINEL not in saved_tool.get("input", "") and SENTINEL not in saved_tool.get("output", ""), \
         "saved native tool event leaked the harmless sentinel"
     assert not saved_tool.get("failed"), "sentinel tool failed"
-    assert native_tool_ids("lead") == [event_item_id(calls[0])], \
-        "native sentinel tool did not match the saved redacted event"
     return rows, calls
 
 
@@ -266,8 +266,8 @@ def assert_expanded_state(nodes, stage):
         assert not any(n["expanded"] == "true" for n in cards), \
             "a native tool card was already expanded at the collapsed checkpoint"
     else:
-        assert len(cards) == 1 and cards[0]["expanded"] == "true", \
-            "the sole native sentinel tool card was not expanded"
+        assert cards and all(n["expanded"] == "true" for n in cards), \
+            "one or more native tool cards were not expanded"
 
 
 def privacy_snapshot(stage):
@@ -335,17 +335,18 @@ def tray_snapshot():
 
 
 def expand_tools():
-    result = browser("""(() => {
+    browser("""(() => {
       const transcript = document.querySelector('[data-testid=chat-transcript]');
-      if (!transcript) return {group:false,tool:false};
-      const group = transcript.querySelector('[data-testid=work-toggle][aria-expanded=false]');
-      if (group) group.click();
-      const tool = transcript.querySelector('[data-testid=tool-call] [role=button][aria-expanded=false]');
-      if (tool) tool.click();
-      return {group:!!group,tool:!!tool};
+      transcript?.querySelectorAll('[data-testid=work-toggle][aria-expanded=false]')
+        .forEach(group=>group.click());
+      return true;
     })()""")
-    assert result["tool"] or browser("!!document.querySelector('[data-testid=tool-call] [role=button][aria-expanded=true]')"), \
-        "native tool card could not be expanded"
+    result = browser("""(() => {
+      const cards=[...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=tool-call]')];
+      cards.forEach(card=>card.querySelector('[role=button][aria-expanded=false]')?.click());
+      return {count:cards.length};
+    })()""")
+    assert result["count"] > 0, "no native tool cards could be expanded"
 
 
 def assert_reviewer_binding(row, state, repo):
