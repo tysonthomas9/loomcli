@@ -73,10 +73,22 @@ tests:
         intent: "Show the selected alternate model in the composer"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker alternate'
         intent: "Read back the UI selection from the Agent API"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Inspect the real picker after the alternate UI selection"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" picker-receipt after-alternate'
+        intent: "Save the owned route, parsed preferences, and actual picker section, query and option IDs without changing them"
+      - press: Escape
+        intent: "Close the picker before the required target selection"
       - run: '"$AFT_SELECT_AGENT_MODEL" "cov-controls-picker-${RUN_ID}"'
         intent: "Select the required connected provider model through the runner's owned real-model UI contract"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker target'
         intent: "Read back the model selected through that same UI actor"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Inspect the real picker after the target UI selection"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" picker-receipt after-target'
+        intent: "Save the owned route and parsed Recent preferences before any real turn"
+      - press: Escape
+        intent: "Return to the composer without changing the model"
       - fill: { label: Message, value: "PRIOR_${RUN_ID}: use a tool to read README.md. In your final answer, include the literal filename README.md and its test command." }
         intent: "Ask a first real repository question before changing effort"
       - press: Enter
@@ -134,6 +146,8 @@ tests:
         intent: "Open the picker after two saved selections and completed real turns"
       - click: { selector: '[data-model-picker-provider="recent"]' }
         intent: "Open the Recent section"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" picker-receipt recent'
+        intent: "Capture the exact route, parsed preferences, and visible Recent section before its required row assertion"
       - wait:
           fn: "!!document.querySelector('li[role=option][title=\"${AFT_REAL_MODEL}\"]')"
         intent: "Require the selected and used model in the picker's actual Recent section"
