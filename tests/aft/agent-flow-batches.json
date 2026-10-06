@@ -53,6 +53,22 @@
         "children": []
       }
     },
+    "tool-policy": {
+      "files": ["tool-policy.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "aft-lead-${RUN_ID}-cov-policy", "suite": "live-tool-policy", "model_required": true },
+          { "name": "aft-lead-${RUN_ID}-cov-policy-tray", "suite": "live-tool-policy", "model_required": true },
+          { "name": "aft-lead-${RUN_ID}-cov-policy-usage", "suite": "live-tool-policy", "model_required": true }
+        ],
+        "reviewers": [
+          { "name": "aft-review-${RUN_ID}-cov-policy", "suite": "live-tool-policy" }
+        ],
+        "children": [
+          { "name": "aft-child-${RUN_ID}-cov-policy-tray", "parent": "aft-lead-${RUN_ID}-cov-policy-tray", "suite": "live-tool-policy" }
+        ]
+      }
+    },
     "chat-controls": {
       "files": ["chat-controls-asks.test.yaml", "chat-controls-create.test.yaml", "chat-controls-models.test.yaml"],
       "agents": {
