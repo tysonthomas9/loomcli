@@ -20,6 +20,7 @@ assert_native_steps = policy["assert_native_steps"]
 event_item_id = policy["event_item_id"]
 assert_reviewer_binding = policy["assert_reviewer_binding"]
 current_child_tool_events = policy["current_child_tool_events"]
+tool_events = policy["tool_events"]
 scoped_dom = policy["SCOPED_DOM"]
 api = policy["api"]
 
@@ -60,6 +61,28 @@ class APIResponseOracle(unittest.TestCase):
 
 
 class ScopedPrivacyOracle(unittest.TestCase):
+    def test_saved_sentinel_receipt_allows_extra_benign_tool(self):
+        sentinel_id = "msg_1/tool/call_sensitive"
+        sensitive = {"kind": "item.completed", "event_id": "item.completed:root:native:" + sentinel_id,
+                     "payload": {"itemKind": "tool", "tool": {
+                         "input": "{\"command\":\"printf SAFE # TOKEN=REDACTED\"}",
+                         "output": "SAFE", "failed": False}}}
+        benign = {"kind": "item.completed", "event_id": "item.completed:root:native:msg_2/tool/call_read",
+                  "payload": {"itemKind": "tool", "tool": {"input": "{\"filePath\":\"README.md\"}"}}}
+        globals_ = tool_events.__globals__
+        original = globals_["events"], globals_["native_tool_ids"]
+        globals_["events"] = lambda kind: [benign, sensitive]
+        globals_["native_tool_ids"] = lambda kind: [sentinel_id]
+        try:
+            self.assertEqual(tool_events()[1], [sensitive])
+            raw = {**sensitive, "payload": {"itemKind": "tool", "tool": {
+                "input": "printf SAFE # TOKEN=" + policy["SENTINEL"], "output": "SAFE"}}}
+            globals_["events"] = lambda kind: [benign, raw]
+            with self.assertRaisesRegex(AssertionError, "redaction receipt"):
+                tool_events()
+        finally:
+            globals_["events"], globals_["native_tool_ids"] = original
+
     def test_dom_probe_reads_nested_tool_control(self):
         for value in ("false", "true"):
             script = """
@@ -82,10 +105,11 @@ class ScopedPrivacyOracle(unittest.TestCase):
         assert_expanded_state([closed], "collapsed")
         assert_expanded_state([opened], "expanded")
         assert_expanded_state([opened], "reloaded")
-        with self.assertRaisesRegex(AssertionError, "sole native sentinel tool card"):
+        with self.assertRaisesRegex(AssertionError, "one or more native tool cards"):
             assert_expanded_state([closed], "expanded")
-        with self.assertRaisesRegex(AssertionError, "sole native sentinel tool card"):
-            assert_expanded_state([opened, opened], "expanded")
+        assert_expanded_state([opened, opened], "expanded")  # an extra benign call is allowed
+        with self.assertRaisesRegex(AssertionError, "one or more native tool cards"):
+            assert_expanded_state([opened, closed], "expanded")  # wrong card opened
         with self.assertRaisesRegex(AssertionError, "already expanded"):
             assert_expanded_state([opened], "collapsed")
 
