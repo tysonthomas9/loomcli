@@ -62,5 +62,5 @@ tests:
                 !document.querySelector('form button[title="Stop the running turn"]'); })()
         budget: 180000
         intent: "Show a completed real answer while the composer is reusable"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop.py" reused && bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop-effect.sh"'
-        intent: "Check the new saved completed turn and unchanged lost-ask history without the stopped command effect"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop.py" reused && bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop-effect.sh" && bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop-native.sh"'
+        intent: "Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model"
