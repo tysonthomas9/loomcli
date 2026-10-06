@@ -265,6 +265,12 @@ def withdrawn(label, stage):
     assert sum(e["kind"] == "message.withdrawn" for e in value["events"]) == 1
 
 
+def public_send_receipt(result):
+    # SendResult fields from the public v1 route; never persist request bodies or headers.
+    return {key: result[key] for key in ("message_id", "state", "replaced", "turn_id", "interrupted")
+            if key in result}
+
+
 def replay(label, calls_stage, state_stage, count):
     """Replay exact UI RequestIDs through the public user route; no new mutation."""
     before = load(label, state_stage)
@@ -275,6 +281,9 @@ def replay(label, calls_stage, state_stage, count):
     for c in calls:
         assert c["path"] == path(label) + "/messages"
         result = http(c["path"], c["method"], json.loads(c["body"]) if c["body"] else None, c["key"])
+        if result != c["result"]:
+            save(label, state_stage + "-receipt-mismatch", {"request_id": c["key"],
+                  "original": public_send_receipt(c["result"]), "retry": public_send_receipt(result)})
         assert result == c["result"], "retry changed the saved public receipt"
     after = agent(label)
     assert after["waiting_messages"] == before["waiting"], "old RequestID changed waiting slots"
