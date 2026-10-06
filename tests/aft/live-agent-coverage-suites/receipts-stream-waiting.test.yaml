@@ -1,0 +1,121 @@
+# LIVE paid OpenCode, production UI user. MATRIX:L2-L4/L10/L12/R18.
+# This case uses the production Chat for every human mutation. Its read-only
+# observer records the UI's actual RequestIDs; public Send replays only those
+# saved IDs. Clear is never replayed because Withdraw has no retry receipt.
+suite: live-receipts-stream-waiting
+classification: { area: agents, feature: real-message-receipts, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" preflight
+teardown: |
+  set -eu
+  python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" cleanup
+tests:
+  - name: LIVE user waiting edit clear stale RequestID and delivery survive owned serve restart
+    intent: The UI user's real busy-turn messages keep one waiting slot, old Send RequestIDs replay without mutation, and the final full text delivers once after an owned serve and OpenCode restart.
+    steps:
+      - run: 'test -x "$AFT_RESTART_SERVE" && test -x "$AFT_SELECT_AGENT_MODEL"'
+        intent: "Check the runner's owned restart and real-model controls before paid work"
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the owned Agents page"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open New Agent"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose the Lead preset"
+      - fill: { testid: create-agent-name, value: "coverage-rs-waiting-${RUN_ID}" }
+        intent: "Name this run's Lead"
+      - select: { testid: create-agent-backend, value: opencode }
+        intent: "Choose the real OpenCode backend"
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=create-agent-repo-chips] button'));
+              return r.length === 1 && r[0].textContent.includes('source-repo') && r[0].getAttribute('aria-pressed') === 'true'; })()
+        intent: "Show the canonical owned source repository selected"
+      - click: { testid: create-agent-submit }
+        intent: "Create the Lead through the production UI"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show its Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" claim waiting && "$AFT_SELECT_AGENT_MODEL"'
+        intent: "Bind the exact UI-created Agent ID and visibly select the real model"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" observe'
+        intent: "Record the UI's actual successful Send RequestIDs without changing request or response bodies"
+      - fill: { label: Message, value: "Inspect README.md, BACKLOG.md, package.json, server.js and app.test.js with tools. Run npm test and explain the message path with file citations. Keep files unchanged." }
+        intent: "Start a bounded real tool turn"
+      - press: Enter
+        intent: "Send from the production Chat user"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=working-row]') &&
+            !!document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running], [data-testid=tool-call][data-status=completed], [data-testid=tool-group]') &&
+            !!document.querySelector('form button[title="Stop the running turn"]')
+        budget: 120000
+        intent: "Show real OpenCode tool activity and an active turn"
+      - fill: { label: Message, value: "RS_A-${RUN_ID}: first waiting text" }
+        intent: "Compose the first waiting message"
+      - press: Enter
+        intent: "Queue it through Chat"
+      - wait:
+          fn: >-
+            (() => { const w=document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
+              return w.length===1 && w[0].textContent.includes('RS_A-${RUN_ID}'); })()
+        intent: "Show one user-visible waiting bubble with A"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture waiting first && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" waiting waiting first "RS_A-${RUN_ID}: first waiting text"'
+        intent: "Read one exact public waiting slot and its saved event IDs"
+      - fill: { label: Message, value: "RS_B-${RUN_ID}: replacement text" }
+        intent: "Compose a replacement"
+      - press: Enter
+        intent: "Replace the same user's waiting slot"
+      - wait:
+          fn: >-
+            (() => { const w=document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
+              return w.length===1 && w[0].textContent.includes('RS_B-${RUN_ID}') && !w[0].textContent.includes('RS_A-${RUN_ID}'); })()
+        intent: "Show exactly one waiting bubble with B"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture waiting replaced && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" waiting waiting replaced "RS_B-${RUN_ID}: replacement text" && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" replay waiting replaced replaced 3'
+        intent: "Replay exact initial, stale A and current B RequestIDs; verify public receipts, slot and EventIDs do not change"
+      - click: { role: button, name: Edit, exact: true }
+        intent: "Use the waiting bubble's Edit control"
+      - expect: { value: { selector: "textarea[aria-label=Message]", equals: "RS_B-${RUN_ID}: replacement text" } }
+        intent: "Show B restored in the composer"
+      - fill: { label: Message, value: "RS_C-${RUN_ID}: edited text" }
+        intent: "Edit the same waiting slot"
+      - click: { role: button, name: Save, exact: true }
+        intent: "Save through Chat"
+      - wait:
+          fn: >-
+            (() => { const w=document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
+              return w.length===1 && w[0].textContent.includes('RS_C-${RUN_ID}') && !w[0].textContent.includes('RS_B-${RUN_ID}'); })()
+        intent: "Show C as the only waiting bubble"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture waiting edited && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" waiting waiting edited "RS_C-${RUN_ID}: edited text" && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" replay waiting edited edited 4'
+        intent: "Read the edited slot and replay every older Send RequestID without changing it"
+      - click: { role: button, name: Clear, exact: true }
+        intent: "Withdraw this user's waiting message through Chat"
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]').length===0
+        intent: "Show the waiting bubble removed"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture waiting cleared && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" withdrawn waiting cleared && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" replay waiting cleared cleared 4'
+        intent: "Read one withdrawn event and prove stale Send retries cannot restore C"
+      - fill: { label: Message, value: "RS_D-${RUN_ID}: after your current inspection, name the repository entry point exactly once." }
+        intent: "Compose the only follow-up intended for delivery"
+      - press: Enter
+        intent: "Queue D from Chat"
+      - wait:
+          fn: >-
+            (() => { const w=document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]');
+              return w.length===1 && w[0].textContent.includes('RS_D-${RUN_ID}'); })()
+        intent: "Show D as the sole waiting bubble before restart"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture waiting final-waiting && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" waiting waiting final-waiting "RS_D-${RUN_ID}: after your current inspection, name the repository entry point exactly once." && "$AFT_RESTART_SERVE"'
+        intent: "Save D's exact slot/EventIDs and restart only this owned loom-local service and its OpenCode process"
+      - reload: true
+        intent: "Reconnect Chat after the owned service returns"
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!t && Array.from(t.querySelectorAll('li[data-kind=user]')).filter(x=>x.textContent.includes('RS_D-${RUN_ID}')).length===1 &&
+                document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle') &&
+                Array.from(t.querySelectorAll('li[data-kind=agent]')).length>=2; })()
+        budget: 180000
+        intent: "Show D once in restored Chat history with a real reply and idle Lead"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture waiting settled && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" prefix waiting first settled && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" delivered waiting settled "RS_D-${RUN_ID}: after your current inspection, name the repository entry point exactly once." "RS_A-${RUN_ID}: first waiting text|RS_B-${RUN_ID}: replacement text|RS_C-${RUN_ID}: edited text" && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" replay waiting final-waiting settled 5 && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" sse waiting settled message.delivered'
+        intent: "Compare exact full delivered text, unique native input keys, stale receipts, saved EventIDs and filtered SSE replay"
