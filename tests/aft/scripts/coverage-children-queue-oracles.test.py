@@ -2,6 +2,8 @@
 """Offline negative fixtures for the live child-queue evidence predicates."""
 
 import importlib.util
+import json
+import os
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -60,21 +62,49 @@ class QueueOracleTests(unittest.TestCase):
         self.assertFalse(queue.actual_call(event, "agent_send", "agt_foreign", "QUEUE-P1"))
 
     def test_native_parent_replacement_receipt_must_be_true(self):
-        first = {"event_id": "one", "payload": {"tool": {"output": '{"replaced": false}'}}}
-        second = {"event_id": "two", "payload": {"tool": {"output": '{"replaced": true}'}}}
-        queue.replacement_result(first, second)
-        queue.replacement_result({"event_id": "combined", "payload": {"tool": {
-            "output": '{"first":{"replaced":false},"second":{"replaced":true}}'}}},
-            {"event_id": "combined", "payload": {"tool": {
-            "output": '{"first":{"replaced":false},"second":{"replaced":true}}'}}})
-        for bad in ({**second, "payload": {"tool": {"output": '{"replaced": false}'}}},
-                    {**second, "payload": {"tool": {"output": '{}'}}}):
+        first = {"event_id": "one", "turn_id": "turn-one", "kind": "item.completed", "payload": {
+            "itemKind": "tool", "tool": {"output": '{"replaced":false,"message_id":"m1","state":"waiting"}'}}}
+        second = {"event_id": "two", "turn_id": "turn-two", "kind": "item.completed", "payload": {
+            "itemKind": "tool", "tool": {"output": '{"replaced":true,"message_id":"m2","state":"waiting"}'}}}
+        self.assertEqual(queue.replacement_result(first, second)[1]["message_id"], "m2")
+        for bad in ({**second, "payload": {"itemKind": "tool", "tool": {"output": '{"replaced":false,"message_id":"m2","state":"waiting"}'}}},
+                    {**second, "payload": {"itemKind": "tool", "tool": {"output": '{}'}}},
+                    {**second, "payload": {"itemKind": "tool", "tool": {"output": 'replaced:true'}}},
+                    {**second, "payload": {"itemKind": "tool", "tool": {"output": '{"replaced":true,"message_id":"m1","state":"waiting"}'}}}):
             with self.assertRaises(AssertionError):
                 queue.replacement_result(first, bad)
-        combined_bad = {"event_id": "combined", "payload": {"tool": {
-            "output": '{"first":{"replaced":true},"second":{"replaced":false}}'}}}
         with self.assertRaises(AssertionError):
-            queue.replacement_result(combined_bad, combined_bad)
+            queue.replacement_result(first, {**second, "turn_id": "turn-one"})
+
+    def test_shot_rows_require_exact_waiting_count_order_and_first(self):
+        u2, p1 = queue.TEXT["u2"], queue.TEXT["p1"]
+        ui = {"waiting": ["Waiting " + u2, "Waiting from Lead " + p1], "history": [], "user": []}
+        api = [{"text": u2, "sender": "user:local"}, {"text": p1, "sender": "agent:agt_lead"}]
+        queue.assert_shot_rows("fifo-replaced", ui, api, "agt_lead")
+        for bad_ui, bad_api in (({**ui, "waiting": list(reversed(ui["waiting"]))}, api),
+                                (ui, list(reversed(api))),
+                                ({**ui, "waiting": ui["waiting"][:1]}, api),
+                                ({**ui, "history": [queue.TEXT["u1"]]}, api)):
+            with self.assertRaises(AssertionError):
+                queue.assert_shot_rows("fifo-replaced", bad_ui, bad_api, "agt_lead")
+        first_ui = {"waiting": ["Waiting " + queue.TEXT["p3b"]],
+                    "history": [queue.TEXT["u3"]], "user": [queue.TEXT["u3"]]}
+        queue.assert_shot_rows("first-user-interrupt", first_ui, [{"text": queue.TEXT["p3b"], "sender": "agent:agt_lead"}], "agt_lead")
+        with self.assertRaises(AssertionError):
+            queue.assert_shot_rows("first-user-interrupt", {**first_ui, "user": []}, [{"text": queue.TEXT["p3b"], "sender": "agent:agt_lead"}], "agt_lead")
+        queue.assert_shot_rows("first-parent-initial", {"waiting": [queue.TEXT["p3"]], "history": [], "user": []},
+                               [{"text": queue.TEXT["p3"], "sender": "agent:agt_lead"}], "agt_lead")
+
+    def test_owned_ref_probe_rejects_foreign_identity(self):
+        with patch.dict(os.environ, {"AFT_TESTS_DIR": "/tmp"}), patch.object(queue.subprocess, "check_output", return_value=json.dumps({
+            "agent_id": "agt_foreign", "kind": "child", "branch": "child", "head": "a" * 40})):
+            with self.assertRaises(AssertionError):
+                queue.native_ref("child", "agt_child", "b" * 40)
+
+    def test_screenshot_route_rejects_foreign_child(self):
+        queue.assert_shot_route("/ws/LOCALMODE/chat/agt_child", "agt_child", "LOCALMODE")
+        with self.assertRaises(AssertionError):
+            queue.assert_shot_route("/ws/LOCALMODE/chat/agt_foreign", "agt_child", "LOCALMODE")
 
     def test_event_pager_rejects_foreign_child_and_duplicate_event(self):
         expected = {"agent_id": "agt_child", "seq": 1, "event_id": "one", "kind": "message.waiting", "payload": {}}

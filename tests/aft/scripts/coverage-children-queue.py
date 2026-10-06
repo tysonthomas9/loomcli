@@ -106,13 +106,20 @@ def bind_lead():
     demand(row["repo"] == os.environ["AFT_AGENT_FLOW_REPO"] and row["harness"] == "opencode", "wrong Lead backend/repo")
     demand(row["model"] == os.environ["AFT_REAL_MODEL"], "Lead model selection not saved")
     save("lead", row)
-    save("lead-pre-create-ref", {"branch": git(row["worktree_path"], "rev-parse", "--abbrev-ref", "HEAD"),
-                                 "head": git(row["worktree_path"], "rev-parse", "HEAD"),
-                                 "repo": row["repo"], "worktree_path": row["worktree_path"]})
+    ref = native_ref("lead", row["agent_id"])
+    demand(ref["branch"] == row["branch"], "owned Lead branch differs from API")
+    save("lead-pre-create-ref", {**ref, "repo": row["repo"], "worktree_path": row["worktree_path"]})
 
 
-def git(path, *args):
-    return subprocess.check_output(["git", "-C", path, *args], text=True).strip()
+def native_ref(kind, agent_id, parent_head=None):
+    helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-children-queue-ref.sh"
+    args = ["bash", str(helper), kind, agent_id]
+    if parent_head:
+        args.append(parent_head)
+    ref = json.loads(subprocess.check_output(args, text=True))
+    demand(ref["agent_id"] == agent_id and ref["kind"] == kind and
+           re.fullmatch(r"[a-f0-9]{40}", ref["head"]), "owned native ref proof mismatch")
+    return ref
 
 
 def tool_code(tool):
@@ -147,17 +154,33 @@ def one_call(operation, marker):
     return rows[0]
 
 
+def native_send_result(event, expected_replaced):
+    demand(event["kind"] == "item.completed" and event["payload"].get("itemKind") == "tool", "native send is not a completed tool")
+    tool = event["payload"].get("tool") or {}
+    demand(not tool.get("failed"), "native send tool failed")
+    output = tool.get("output")
+    demand(isinstance(output, str) and output.strip(), "native send result missing")
+    try:
+        result = json.loads(output)
+        if isinstance(result, str):
+            result = json.loads(result)
+    except (ValueError, TypeError) as exc:
+        raise AssertionError("native send result is not JSON") from exc
+    demand(isinstance(result, dict) and result.get("replaced") is expected_replaced,
+           f"native send replaced result is not {expected_replaced}")
+    demand(isinstance(result.get("message_id"), str) and result["message_id"], "native send message_id missing")
+    demand(result.get("state") == "waiting", "native send did not preserve a waiting slot")
+    return result
+
+
 def replacement_result(first, second):
-    def values(event):
-        output = (event["payload"].get("tool") or {}).get("output") or ""
-        return re.findall(r"\breplaced[\"']?\s*[:=]\s*(true|false)\b", output, flags=re.I)
-    first_values, second_values = values(first), values(second)
-    if first["event_id"] == second["event_id"]:
-        demand(len(first_values) >= 2 and first_values[0].lower() == "false" and first_values[-1].lower() == "true",
-               "one native execution did not return first=false then replacement=true")
-    else:
-        demand(first_values and first_values[-1].lower() == "false" and second_values and second_values[-1].lower() == "true",
-               "distinct native agent_send executions did not report false then replaced=true")
+    demand(first["event_id"] != second["event_id"] and first.get("turn_id") and second.get("turn_id") and
+           first["turn_id"] != second["turn_id"],
+           "parent replacement must use two distinct native turns")
+    initial = native_send_result(first, False)
+    replacement = native_send_result(second, True)
+    demand(initial["message_id"] != replacement["message_id"], "native replacement reused its message ID")
+    return initial, replacement
 
 
 def bind_child():
@@ -176,17 +199,16 @@ def bind_child():
     demand(child["worktree_path"] and child["worktree_path"] != lead["worktree_path"], "child lacks distinct worktree")
     demand(child["base_ref"] == lead["branch"] and child["harness"] == "opencode", "child ref/backend mismatch")
     prior = load("lead-pre-create-ref")
-    child_head = git(child["worktree_path"], "rev-parse", "HEAD")
-    child_branch = git(child["worktree_path"], "rev-parse", "--abbrev-ref", "HEAD")
-    demand(prior["branch"] == lead["branch"] and child_branch == child["branch"], "actual worktree branch mismatch")
-    demand(child_head == prior["head"], "read-only child did not start at pre-create parent HEAD")
-    subprocess.run(["git", "-C", child["worktree_path"], "merge-base", "--is-ancestor", prior["head"], child_head], check=True)
+    child_ref = native_ref("child", child["agent_id"], prior["head"])
+    demand(prior["branch"] == lead["branch"] and child_ref["branch"] == child["branch"], "actual worktree branch mismatch")
+    demand(child_ref["merge_base"] == prior["head"], "owned child does not descend from exact pre-create parent HEAD")
     created = [e for e in events("lead") if e["kind"] == "child.created" and e["payload"].get("child") == child["agent_id"]]
     demand(len(created) == 1, "missing exact saved child.created")
     one_call("agent_create", CHILD_NAME)
     save("child", child)
     save("child-create-ref", {"parent_head_before": prior["head"], "parent_branch": prior["branch"],
-                              "child_head_after": child_head, "child_branch": child_branch,
+                              "child_head_after": child_ref["head"], "child_branch": child_ref["branch"],
+                              "merge_base": child_ref["merge_base"],
                               "child_base_ref": child["base_ref"], "parent_worktree": prior["worktree_path"],
                               "child_worktree": child["worktree_path"]})
 
@@ -206,7 +228,7 @@ def lead_ui(stage):
       const cards=[...document.querySelectorAll('[data-testid=completion-record]')];
       const card=cards.find(c=>c.dataset.attempt==='0');
       const raw=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].some(x=>x.textContent.includes('task_completed:'));
-      return {markerCount:own.length,links:links.map(a=>({href:a.getAttribute('href'),name:a.textContent.trim()})),
+      return {markerCount:own.length,links:links.map(a=>({href:a.getAttribute('href'),name:a.lastChild?.textContent?.trim()||''})),
         callText:button?.textContent.trim(),expanded:button?.getAttribute('aria-expanded'),
         bridge:[...document.querySelectorAll('[data-testid=bridge-call]')].map(x=>x.textContent.trim()),
         markerText:m?.textContent.trim(),color:badge?.getAttribute('data-agent-color'),
@@ -472,21 +494,54 @@ def parent_started():
     capture("parent-started")
 
 
-def first_parent():
+def first_parent_queued():
     first = one_call("agent_send", "QUEUE-P3-")
-    second = one_call("agent_send", "QUEUE-P3B-")
-    replacement_result(first, second)
+    initial = native_send_result(first, False)
     row = agent("child")
     active(row)
     demand(row["running_turn_id"] == load("parent-started")["turn"], "parent slot missed busy child turn")
-    demand(len(row["waiting_messages"]) == 1 and row["waiting_messages"][0]["sender"] == f"agent:{identity('lead')}" and row["waiting_messages"][0]["text"] == TEXT["p3b"], "replaced real parent slot missing")
+    slot = row["waiting_messages"]
+    demand(len(slot) == 1 and slot[0]["sender"] == f"agent:{identity('lead')}" and
+           slot[0]["text"] == TEXT["p3"] and slot[0]["since"], "first real parent waiting slot missing")
     ev = events("child")
     p2_delivery = delivered(ev, TEXT["p2"], f"agent:{identity('lead')}")
     waits = [e for e in ev if (e["kind"] == "message.waiting" and e["seq"] > p2_delivery["seq"] and
              e["payload"].get("reason") == f"agent:{identity('lead')}")]
-    demand(len(waits) == 2 and waits[0]["seq"] < waits[1]["seq"], "parent replacement lacks two saved sends")
+    demand(len(waits) == 1 and not [e for e in ev if e["kind"] == "message.delivered" and
+                                    e["payload"].get("text") == TEXT["p3"]], "first parent slot was already delivered")
+    save("first-parent-initial", {"tool_event_id": first["event_id"], "tool_turn_id": first["turn_id"],
+                                  "native_result": initial, "waiting_event_id": waits[0]["event_id"],
+                                  "waiting_seq": waits[0]["seq"], "slot": slot[0], "turn": row["running_turn_id"]})
+    capture("first-parent-initial")
+
+
+def first_parent():
+    first = one_call("agent_send", "QUEUE-P3-")
+    second = one_call("agent_send", "QUEUE-P3B-")
+    initial, replacement = replacement_result(first, second)
+    prior = load("first-parent-initial")
+    demand(prior["tool_event_id"] == first["event_id"] and prior["native_result"] == initial,
+           "initial native result changed before replacement")
+    row = agent("child")
+    active(row)
+    demand(row["running_turn_id"] == prior["turn"] == load("parent-started")["turn"], "parent slot moved to a different child turn")
+    slot = row["waiting_messages"]
+    demand(len(slot) == 1 and slot[0]["sender"] == prior["slot"]["sender"] == f"agent:{identity('lead')}" and
+           slot[0]["text"] == TEXT["p3b"] and slot[0]["since"] == prior["slot"]["since"],
+           "native replacement changed sender, FIFO timestamp or exact text")
+    ev = events("child")
+    p2_delivery = delivered(ev, TEXT["p2"], f"agent:{identity('lead')}")
+    waits = [e for e in ev if (e["kind"] == "message.waiting" and e["seq"] > p2_delivery["seq"] and
+             e["payload"].get("reason") == f"agent:{identity('lead')}")]
+    demand(len(waits) == 2 and waits[0]["event_id"] == prior["waiting_event_id"] and
+           waits[0]["seq"] < waits[1]["seq"] and waits[0]["event_id"] != waits[1]["event_id"],
+           "parent replacement lacks two saved sends")
+    demand(not [e for e in ev if e["kind"] == "message.delivered" and e["payload"].get("text") == TEXT["p3"]],
+           "superseded native parent text was delivered")
     save("first-parent-proof", {"event_ids": [e["event_id"] for e in waits], "seq": waits[1]["seq"],
-                                "turn": row["running_turn_id"], "replaced": True})
+                                "turn": row["running_turn_id"], "native_result": replacement,
+                                "initial_message_id": initial["message_id"],
+                                "sender": slot[0]["sender"], "since": slot[0]["since"]})
     capture("first-parent")
 
 
@@ -504,14 +559,101 @@ def first_done():
     capture("first-done")
 
 
+SHOT_KEYS = {
+    "fifo-user-waiting": ("u1",),
+    "fifo-two-senders": ("u1", "p1"),
+    "fifo-replaced": ("u2", "p1"),
+    "fifo-delivered": ("u2", "p1"),
+    "fifo-reloaded": ("u2", "p1"),
+    "first-parent-initial": ("p3",),
+    "first-parent-waiting": ("p3b",),
+    "first-user-interrupt": ("u3", "p3b"),
+    "first-delivered": ("u3", "p3b"),
+    "first-reloaded": ("u3", "p3b"),
+}
+
+
+def assert_shot_rows(name, ui, api_waiting, lead_id):
+    expected = SHOT_KEYS[name]
+    delivered_phase = name.endswith(("delivered", "reloaded"))
+    if delivered_phase:
+        demand(not ui["waiting"] and not api_waiting, "delivered screenshot still has a waiting row")
+        demand(all(any(TEXT[key] in text for text in ui["history"]) for key in expected),
+               "delivered screenshot lacks exact saved message text")
+    elif name == "first-user-interrupt":
+        keys = ("u3", "p3b") if len(api_waiting) == 2 else ("p3b",)
+        demand(keys in (("u3", "p3b"), ("p3b",)), "invalid First waiting shape")
+        demand(len(ui["waiting"]) == len(api_waiting) == len(keys), "First screenshot waiting count mismatch")
+        for index, key in enumerate(keys):
+            demand(api_waiting[index]["text"] == TEXT[key] and TEXT[key] in ui["waiting"][index],
+                   "First screenshot waiting order/text mismatch")
+            demand(api_waiting[index]["sender"].startswith("user:") if key == "u3" else
+                   api_waiting[index]["sender"] == f"agent:{lead_id}", "First screenshot sender mismatch")
+        if keys == ("p3b",):
+            demand(any(TEXT["u3"] in text for text in ui["user"]), "interrupt is not visible as the exact user message")
+    else:
+        demand(len(ui["waiting"]) == len(api_waiting) == len(expected), "waiting screenshot count mismatch")
+        for index, key in enumerate(expected):
+            demand(api_waiting[index]["text"] == TEXT[key] and TEXT[key] in ui["waiting"][index],
+                   "waiting screenshot sender order/text mismatch")
+            demand(api_waiting[index]["sender"].startswith("user:") if key.startswith("u") else
+                   api_waiting[index]["sender"] == f"agent:{lead_id}", "waiting screenshot sender mismatch")
+    absent = ("u1",) if name in ("fifo-replaced", "fifo-delivered", "fifo-reloaded") else \
+             ("p3",) if name.startswith("first-") and name != "first-parent-initial" else ()
+    demand(not any(TEXT[key] in text for key in absent for text in ui["waiting"] + ui["history"]),
+           "superseded text is still visible")
+
+
+def assert_shot_route(route, child_id, workspace):
+    demand(route == f"/ws/{workspace}/chat/{child_id}", "screenshot is not exact child Chat")
+
+
 def shot(name, required):
     demand(re.fullmatch(r"[a-z][a-z0-9-]+", name), "unsafe screenshot name")
+    demand(name in SHOT_KEYS and required == [f"QUEUE-{key.upper()}-{RUN}" for key in SHOT_KEYS[name]],
+           "screenshot requested arbitrary or wrong-stage markers")
     route = browser("location.pathname")
-    demand(route == f"/ws/{os.environ['AFT_WS']}/chat/{identity('child')}", "screenshot is not exact child Chat")
-    expr = "(() => { const t=document.querySelector('[data-testid=chat-transcript]'); return !!t && " + json.dumps(required) + ".every(x=>t.textContent.includes(x)); })()"
-    demand(browser(expr) is True, "child Chat does not visibly contain required message markers")
+    assert_shot_route(route, identity("child"), os.environ["AFT_WS"])
+    row = agent("child")
+    demand(row["agent_id"] == identity("child"), "screenshot API agent mismatch")
+    ui = browser("""(() => { const t=document.querySelector('[data-testid=chat-transcript]');
+      if(!t) return null;
+      const all=[...t.querySelectorAll(':scope > li')];
+      return {waiting:all.filter(x=>x.dataset.kind==='waiting').map(x=>x.textContent.trim()),
+        user:all.filter(x=>x.dataset.kind==='user').map(x=>x.textContent.trim()),
+        history:all.filter(x=>x.dataset.kind!=='waiting').map(x=>x.textContent.trim()),
+        running:!!document.querySelector('section[aria-label="Agent chat"] header [data-running=true]')};
+    })()""")
+    demand(isinstance(ui, dict), "exact child transcript absent")
+    assert_shot_rows(name, ui, row["waiting_messages"], identity("lead"))
+    if name.endswith(("delivered", "reloaded")):
+        demand(row["state"] == "finished" and not ui["running"], "delivered screenshot is not finished")
+        if name.startswith("fifo-"):
+            proof = load("fifo-proof")
+            delivery_pair(events("child"), TEXT["u2"], proof["sender_user"], TEXT["p1"], proof["sender_parent"], (TEXT["u1"],))
+        else:
+            proof = load("first-parent-proof")
+            delivery_pair(events("child"), TEXT["u3"], load("fifo-proof")["sender_user"], TEXT["p3b"], proof["sender"], (TEXT["p3"],))
+    else:
+        active(row)
+        demand(ui["running"], "waiting screenshot lacks the actual running child")
+        if name.startswith("fifo-"):
+            demand(row["running_turn_id"] == load("fifo-before")["turn"], "FIFO screenshot is from another child turn")
+        else:
+            if name == "first-parent-initial":
+                demand(row["running_turn_id"] == load("first-parent-initial")["turn"], "first parent screenshot is from another child turn")
+            elif name == "first-parent-waiting":
+                demand(row["running_turn_id"] == load("first-parent-proof")["turn"], "parent waiting screenshot is from another child turn")
+            else:
+                receipt = load("receipt-u3")["result"]
+                demand(receipt.get("interrupted") is True, "First screenshot lacks a real interrupt receipt")
+                u3 = waiting_event(events("child"), "u3", load("fifo-proof")["sender_user"])
+                demand(load("first-parent-proof")["seq"] < u3["seq"], "First screenshot lacks later user order")
     subprocess.run(["agent-browser", "--session", os.environ["AFT_SESSION"], "screenshot", str(OUT / f"{name}.png")], check=True)
-    save("shot-" + name, {"child": identity("child"), "route": route, "required": required, "file": name + ".png"})
+    save("shot-" + name, {"child": identity("child"), "route": route, "required": required,
+                           "api_state": row["state"], "waiting": row["waiting_messages"],
+                           "ui": ui, "first_receipt": load("receipt-u3")["result"] if name.startswith("first-user") else None,
+                           "file": name + ".png"})
 
 
 def cleanup():
@@ -529,6 +671,7 @@ def main():
     elif cmd == "fifo-replaced": fifo_replaced()
     elif cmd == "fifo-done": fifo_done()
     elif cmd == "parent-started": parent_started()
+    elif cmd == "first-parent-queued": first_parent_queued()
     elif cmd == "first-parent": first_parent()
     elif cmd == "first-done": first_done()
     elif cmd == "lead-ui": lead_ui(sys.argv[2])
