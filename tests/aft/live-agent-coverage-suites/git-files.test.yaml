@@ -116,10 +116,16 @@ tests:
         intent: "Reload the Files route"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route editor files'
         intent: "Confirm reloaded Files still addresses the saved Lead ID"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          file_state editor reloaded README.md "@$AFT_WORK_DIR/coverage-git-files/editor-expected.txt"
+        intent: "Read the same saved content and strong version immediately after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" select_files_lens editor'
+        intent: "Choose the unique Files lens inside this Lead's active Agent panel"
       - wait:
           fn: >-
-            (() => { const id=location.pathname.split('/').pop(); const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); return !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
-        intent: "Find the saved Lead's checkout after reload"
+            (() => { const id=location.pathname.split('/').pop(); const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); return p?.querySelector('[role=tablist][aria-label="File explorer lens"] [role=tab][aria-label="Files"]')?.getAttribute('aria-selected')==='true' && !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
+        intent: "Find the saved Lead's checkout in the selected Files lens after reload"
       - run: |
           agent-browser --session "$AFT_SESSION" eval "(() => { const id=location.pathname.split('/').pop(); const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const root=p?.querySelector('[data-root-key^=\"agent:' + id + ':\"]'); if (!root || location.search !== '?tab=files') throw Error('wrong reloaded Files root'); if (root.getAttribute('aria-expanded') === 'false') root.click(); return true; })()"
         intent: "Expand the same checkout after reload if needed"
@@ -127,10 +133,6 @@ tests:
           fn: >-
             location.search === '?tab=files' && !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="README.md"]')
         intent: "Show the same README persisted after reload"
-      - run: >-
-          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
-          file_state editor reloaded README.md "@$AFT_WORK_DIR/coverage-git-files/editor-expected.txt"
-        intent: "Read the same saved content and strong version after reload"
       - click: { selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(3)" }
         intent: "Open this Lead's Git tab"
       - wait:
@@ -201,9 +203,15 @@ tests:
       - click: { selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(5)" }
       - wait:
           fn: >-
+            location.search === '?tab=files' && !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tablist][aria-label="File explorer lens"]')
+        intent: "Show this Lead's Files route and its nested lens control before choosing a view"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" select_files_lens actions'
+        intent: "Choose the unique Files lens inside the context-action Lead's active Agent panel"
+      - wait:
+          fn: >-
             (() => { const p = document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const id=location.pathname.split('/').pop();
-              return location.search === '?tab=files' && !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
-        intent: "Find the context-action Lead's own checkout root"
+              return location.search === '?tab=files' && p?.querySelector('[role=tablist][aria-label="File explorer lens"] [role=tab][aria-label="Files"]')?.getAttribute('aria-selected')==='true' && !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
+        intent: "Find the context-action Lead's own checkout root in Files"
       - run: |
           agent-browser --session "$AFT_SESSION" eval "(() => { const id=location.pathname.split('/').pop(); const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const root=p?.querySelector('[data-root-key^=\"agent:' + id + ':\"]'); if (!root || location.search !== '?tab=files') throw Error('wrong Files root'); if (root.getAttribute('aria-expanded') === 'false') root.click(); return true; })()"
         intent: "Expand the context-action Lead's checkout root"
