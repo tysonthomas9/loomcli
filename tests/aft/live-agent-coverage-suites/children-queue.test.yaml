@@ -1,0 +1,206 @@
+# One live paid-model journey. The UI person creates and prompts the Lead;
+# public user Send supplies the second sender; the Lead's actual Loom tool
+# supplies the parent sender. No forged actor/source/header or test state.
+suite: coverage-children-queue
+classification: { area: agents, feature: two-sender-child-queue, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_REAL_MODEL:?}" "${AFT_NATIVE_MODEL_PROBE:?}" "${AFT_SELECT_AGENT_MODEL:?}" "${RUN_ID:?}"
+  test "$AFT_WS" = LOCALMODE
+  test "$AFT_REAL_BACKEND" = opencode
+  test -x "$AFT_NATIVE_MODEL_PROBE"
+  test -x "$AFT_SELECT_AGENT_MODEL"
+teardown: |
+  python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" cleanup
+tests:
+  - name: live task child keeps user and parent FIFO slots then hands a later user interrupt first
+    intent: An authentic task child receives competing user and parent messages while busy; saved receipts prove replacement keeps the user slot's FIFO place and a later interrupt with text gets First.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-child-queue-lead-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/" }
+      - run: '"$AFT_SELECT_AGENT_MODEL" && python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" bind-lead'
+        intent: Save the exact UI Lead ID, repo and chosen real model before paid Send
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create once to make your own task child named cov-child-queue-task-${RUN_ID}.
+            Brief it to inspect README.md, docs/loom-glossary.md, AGENTS.md,
+            internal/loomagent/send.go, dispatch.go, events.go, get.go,
+            internal/webui/handlers/agentsv1/agentsv1.go, and their nearby tests.
+            It should explain the real user Send, waiting-slot, and native
+            delivery paths with file citations. No edits or tests. Answer
+            when finished. After creating it, give a brief acknowledgement.
+            I will send separate follow-up instructions to this exact child.
+      - press: Enter
+        intent: Let the real Lead create and start a real task child
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!t && t.textContent.includes('cov-child-queue-task-${RUN_ID}') &&
+                !!document.querySelector('[data-testid=started-marker]'); })()
+        budget: 120000
+        intent: Show the actual Started marker for the named child
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" bind-child'
+        intent: Require exact Lead agent_create execution, child.created, parent ID, task preset and separate worktree/ref
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-queue/child.id")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$id"
+        intent: Open the genuine child Chat by its saved ID
+      - wait:
+          fn: >-
+            !!document.querySelector('section[aria-label="Agent chat"] header [data-running=true]') &&
+            !!document.querySelector('[data-testid=working-row]') &&
+            !!document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running], [data-testid=tool-call][data-status=completed], [data-testid=tool-group]')
+        budget: 120000
+        intent: Observe the exact child busy with real native tool activity before queuing
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" send u1'
+        intent: Public user Send with server-derived user actor queues U1 during the running child turn
+      - wait:
+          fn: >-
+            (() => { const w=Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]'));
+              return w.length===1 && w[0].textContent.includes('QUEUE-U1-${RUN_ID}'); })()
+        intent: Show the genuine user waiting bubble
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" fifo-before && python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot fifo-user-waiting QUEUE-U1-${RUN_ID}'
+        intent: Save exact busy turn, first sender slot, and child Chat screenshot
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-queue/lead.id")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$id"
+        intent: Return to the real Lead Chat to request its native agent_send
+      - wait:
+          fn: >-
+            !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]')
+        intent: Let the Lead's first turn finish before its next instruction
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-queue/child.id")"
+          agent-browser --session "$AFT_SESSION" fill 'textarea[aria-label=Message]' "Use Loom agent_send now to your own child $id with exactly this text: QUEUE-P1-${RUN_ID}: after the current task, name its test command. Do not interrupt. Send once, then briefly report the receipt without agent_get."
+        intent: Person asks the Lead to invoke agent_send against the exact saved child ID
+      - press: Enter
+      - wait:
+          fn: >-
+            !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
+            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')).some(x=>x.textContent.includes('QUEUE-P1-${RUN_ID}'))
+        budget: 120000
+        intent: Show the Lead's actual native-tool turn has settled
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" fifo-parent'
+        intent: Require completed native agent_send, the parent sender slot, and the same running child turn after U1
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-queue/child.id")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$id"
+        intent: Reopen exact child Chat with both real sender slots
+      - wait:
+          fn: >-
+            (() => { const w=Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]'));
+              return w.length===2 && w[0].textContent.includes('QUEUE-U1-${RUN_ID}') &&
+                w[1].textContent.includes('QUEUE-P1-${RUN_ID}'); })()
+        intent: Show two genuine waiting bubbles in FIFO order
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot fifo-two-senders QUEUE-U1-${RUN_ID} QUEUE-P1-${RUN_ID}'
+        intent: Screenshot the exact user and parent slots in the real child Chat
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" send u2'
+        intent: A new public user Send replaces U1 while the same child turn is still running
+      - wait:
+          fn: >-
+            (() => { const w=Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]'));
+              return w.length===2 && w[0].textContent.includes('QUEUE-U2-${RUN_ID}') &&
+                !w[0].textContent.includes('QUEUE-U1-${RUN_ID}') && w[1].textContent.includes('QUEUE-P1-${RUN_ID}'); })()
+        intent: Show replacement in place without moving behind the parent
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" fifo-replaced && python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot fifo-replaced QUEUE-U2-${RUN_ID} QUEUE-P1-${RUN_ID}'
+        intent: Save exact RequestIDs, two sender slots, unchanged queued timestamps and FIFO screenshot
+      - wait:
+          fn: >-
+            (() => { const h=document.querySelector('section[aria-label="Agent chat"] header [data-state=finished]');
+              const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!h && !!t && t.textContent.includes('QUEUE-U2-${RUN_ID}') &&
+                t.textContent.includes('QUEUE-P1-${RUN_ID}') &&
+                !t.querySelector('li[data-kind=waiting]'); })()
+        budget: 180000
+        intent: Await natural two-message handover and completed task child, with no synthetic time delay
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" fifo-done && python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot fifo-delivered QUEUE-U2-${RUN_ID} QUEUE-P1-${RUN_ID}'
+        intent: Compare saved native delivery sender, text, input keys and order; U1 must never deliver
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!t && t.textContent.includes('QUEUE-U2-${RUN_ID}') && t.textContent.includes('QUEUE-P1-${RUN_ID}'); })()
+        intent: Show the same genuine child history after reload
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" fifo-done && python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot fifo-reloaded QUEUE-U2-${RUN_ID} QUEUE-P1-${RUN_ID}'
+        intent: Recheck once-only native delivery and capture reloaded child Chat
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-queue/lead.id")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$id"
+        intent: Return to the real Lead for a second child attempt
+      - wait: { fn: "!!document.querySelector('section[aria-label=\"Agent chat\"] header [data-state=idle]')" }
+        intent: Await the Lead's completion notice and idle state before reopening the child
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-queue/child.id")"
+          agent-browser --session "$AFT_SESSION" fill 'textarea[aria-label=Message]' "Use Loom agent_send once to your existing finished child $id with exactly this text: QUEUE-P2-${RUN_ID}: inspect the request path in internal/loomagent/send.go, dispatch.go, events.go, get.go, and the Agent v1 handler; report file citations. Do not edit files or run tests. Do not create another child, interrupt, or call agent_get."
+        intent: Ask the Lead to reopen the same finished child through native agent_send
+      - press: Enter
+      - wait:
+          fn: >-
+            !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
+            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')).some(x=>x.textContent.includes('QUEUE-P2-${RUN_ID}'))
+        budget: 120000
+        intent: Show the Lead's second native-tool turn settled
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" parent-started'
+        intent: Require native P2 delivery and an actually running new attempt on the same child ID
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-queue/lead.id")"
+          agent-browser --session "$AFT_SESSION" fill 'textarea[aria-label=Message]' "Use Loom agent_send now to your same child $(cat "$AFT_WORK_DIR/coverage-children-queue/child.id") with exactly this text: QUEUE-P3-${RUN_ID}: after the current task, name the slot ordering rule. Do not interrupt or call agent_get; report the receipt briefly."
+        intent: Ask the real parent to queue P3 during its child's second running turn
+      - press: Enter
+      - wait:
+          fn: >-
+            !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
+            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')).some(x=>x.textContent.includes('QUEUE-P3-${RUN_ID}'))
+        budget: 120000
+        intent: Show the Lead's third native-tool turn settled
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" first-parent'
+        intent: Require the older genuine parent waiting slot on the exact current child turn
+      - run: |
+          id="$(cat "$AFT_WORK_DIR/coverage-children-queue/child.id")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$id"
+        intent: Open the busy child Chat with the older parent waiting slot
+      - wait:
+          fn: >-
+            !!document.querySelector('section[aria-label="Agent chat"] header [data-running=true]') &&
+            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=waiting]')).some(x=>x.textContent.includes('QUEUE-P3-${RUN_ID}'))
+        intent: Show the child is busy and its parent waits
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot first-parent-waiting QUEUE-P3-${RUN_ID}'
+        intent: Screenshot the authentic older parent slot before user interrupt
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" send u3'
+        intent: Public user API interrupts with text; response must say interrupted=true while busy
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!t && t.textContent.includes('QUEUE-U3-${RUN_ID}') && t.textContent.includes('QUEUE-P3-${RUN_ID}'); })()
+        intent: Show the interrupt and older parent message in the real child Chat
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot first-user-interrupt QUEUE-U3-${RUN_ID} QUEUE-P3-${RUN_ID}'
+        intent: Screenshot the interrupt text and older parent in the genuine child transcript
+      - wait:
+          fn: >-
+            (() => { const h=document.querySelector('section[aria-label="Agent chat"] header [data-state=finished]');
+              const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!h && !!t && t.textContent.includes('QUEUE-U3-${RUN_ID}') &&
+                t.textContent.includes('QUEUE-P3-${RUN_ID}') && !t.querySelector('li[data-kind=waiting]'); })()
+        budget: 180000
+        intent: Await natural First handover then the older parent slot
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" first-done && python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot first-delivered QUEUE-U3-${RUN_ID} QUEUE-P3-${RUN_ID}'
+        intent: Require exact saved later-user-before-older-parent delivery with distinct native input keys
+      - run: '"$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-queue/child.id")"'
+        intent: Save requested, native session, and completed answer model proof separately for the actual child
+      - run: '"$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-children-queue/lead.id")"'
+        intent: Save the Lead's separate requested, native session, and completed answer model proof
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return !!t && t.textContent.includes('QUEUE-U3-${RUN_ID}') && t.textContent.includes('QUEUE-P3-${RUN_ID}'); })()
+        intent: Show persisted First-phase transcript after reload
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" first-done && python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" shot first-reloaded QUEUE-U3-${RUN_ID} QUEUE-P3-${RUN_ID}'
+        intent: Recheck exact once-only First receipts and capture the reloaded child Chat
