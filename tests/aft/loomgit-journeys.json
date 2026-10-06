@@ -1,0 +1,2324 @@
+{
+  "schema_version": 1,
+  "purpose": "Provisional ten-journey authoring map; integrator completes exact new case/checkpoint bindings after all authors finish",
+  "product_sha": "8267795e0168cef8b1c259f27588ac8d4cfd529f",
+  "harness_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+  "harness_merge_base": "524f150f2bcdde0c45c30f62688180be120af032",
+  "plan_note": "dd5c9114-f14a-49af-bdd0-917a1e0bf8cb",
+  "runner_task": "e0d13dc3-2133-4947-ac96-4ae87697c4ea",
+  "integrator_task": "6149bbdc-1b26-49c8-b653-3152129df2b4",
+  "evidence_coordinates": {
+    "depth": "journey",
+    "realness": "deterministic orchestration only",
+    "provisioning": "isolated serve/FleetDB/Git/processes; stub AI; loopback fake forge",
+    "polarity": "positive and denial",
+    "target": "#943 Loom Git"
+  },
+  "screenshot_mechanism": {
+    "supported": "--screenshots captures every successful step; failures captured by AFT",
+    "checkpoint_anchor": "Named intent on visible expect/wait step",
+    "unsupported": "screenshot action key",
+    "actual_screenshot_receipts": []
+  },
+  "execution": {
+    "first": "make test-aft AFT_ARGS=\"--suite loomgit-task-review --screenshots --record-all --max-browsers 1\"",
+    "integrated_authored": "make test-aft AFT_ARGS=\"--suite 'loomgit-journey-*' --screenshots --record-all --max-browsers 1\"",
+    "full_corpus_after_review": "make test-aft AFT_ARGS=\"--suite 'loomgit-*' --screenshots --record-all --max-browsers 1\"",
+    "requires": [
+      "AFT_SUITES unset; no real backend flags",
+      "owned integration/dependency checkouts, exact dependency SHAs and build hashes",
+      "clean inherited Loom runtime environment",
+      "heavy-run wrapper and disk budget preflight",
+      "verified-free API/frontend ports; unique browser session/profile",
+      "product source equal baseline; preserve baseline task-review",
+      "review legacy actor/setup limitations; no manual revision/verdict/journal/session state"
+    ]
+  },
+  "journeys": [
+    {
+      "id": "J01",
+      "journey": "Finish a task",
+      "criteria": [
+        {
+          "scenario_id": "A-P1.13.01",
+          "owner": "P1.13",
+          "criterion": "AC1",
+          "expected": "Completed product TaskRun freezes the saved patch as a reviewable revision and preserves its task copy",
+          "mapping_note": "57838328-e41e-4746-bd21-9c271b9bbf04"
+        },
+        {
+          "scenario_id": "A-P1.25.01",
+          "owner": "P1.25",
+          "criterion": "AC1 with later planner ruling",
+          "expected": "Complete empty revision has No changes and no code verdict controls; do not invent planner closure policy",
+          "mapping_note": "57838328-e41e-4746-bd21-9c271b9bbf04"
+        },
+        {
+          "scenario_id": "A-P1.26.01",
+          "owner": "P1.26",
+          "criterion": "AC1",
+          "expected": "Nonempty successful attempt leaves task in review with code-review label",
+          "mapping_note": "57838328-e41e-4746-bd21-9c271b9bbf04"
+        }
+      ],
+      "bindings": [
+        {
+          "suite": "loomgit-task-review",
+          "file": "tests/aft/suites/loomgit-task-review.test.yaml",
+          "case": "stacked, a task with code waits in review until Approve closes it",
+          "source_sha": "8267795e0168cef8b1c259f27588ac8d4cfd529f",
+          "source_status": "present_on_product_baseline",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "finish-review-state",
+              "ui_assertion": "task status is review and code-review is locked",
+              "binding_status": "existing_step_anchor",
+              "screenshot": null,
+              "step": 7,
+              "intent": "Its status is a badge, not a dropdown, and the code-review label has no remove button",
+              "action": "wait"
+            },
+            {
+              "id": "finish-saved-diff",
+              "ui_assertion": "Changes contains trev-approve.txt and Awaiting review",
+              "binding_status": "existing_step_anchor",
+              "screenshot": null,
+              "step": 11,
+              "intent": null,
+              "action": "wait"
+            }
+          ]
+        },
+        {
+          "suite": "loomgit-task-review",
+          "file": "tests/aft/suites/loomgit-task-review.test.yaml",
+          "case": "stacked, an empty attempt still closes as No changes",
+          "source_sha": "8267795e0168cef8b1c259f27588ac8d4cfd529f",
+          "source_status": "present_on_product_baseline",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "finish-no-changes",
+              "ui_assertion": "closed task displays No changes",
+              "binding_status": "existing_step_anchor",
+              "screenshot": null,
+              "step": 7,
+              "intent": "Its revision reads No changes",
+              "action": "wait"
+            }
+          ]
+        }
+      ],
+      "pending_author_binding": {
+        "author_task": "df232431-41a7-4a71-9bc5-88f3b2c46772",
+        "suite": "loomgit-journey-review",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "finish-saved-diff",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "finish-no-changes",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "Baseline task-review mixes API verdicts without explicit API-client naming; preserve it as baseline regression and use authored UI journey for human evidence.",
+        "Failed/timeout/incomplete capture, committed plus uncommitted fidelity, driver/daemon/cloud variants and real backend proof remain separately required."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-review::review-stack-explicit",
+          "checkpoint_ids": [
+            "R-stack-explicit-task",
+            "R-stack-explicit-diff",
+            "R-stack-explicit-reloaded-task"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-stack-automatic",
+          "checkpoint_ids": [
+            "R-stack-automatic-task",
+            "R-stack-automatic-diff",
+            "R-stack-automatic-reloaded-task"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-stack-empty",
+          "checkpoint_ids": [
+            "R-stack-empty-task",
+            "R-stack-empty-no-changes",
+            "R-stack-empty-no-actions",
+            "R-stack-empty-reloaded-task"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-explicit",
+          "checkpoint_ids": [
+            "R-trunk-explicit-task",
+            "R-trunk-explicit-diff",
+            "R-trunk-explicit-reloaded-task"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-automatic",
+          "checkpoint_ids": [
+            "R-trunk-automatic-task",
+            "R-trunk-automatic-diff",
+            "R-trunk-automatic-reloaded-task"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-empty",
+          "checkpoint_ids": [
+            "R-trunk-empty-task",
+            "R-trunk-empty-no-changes",
+            "R-trunk-empty-no-actions",
+            "R-trunk-empty-reloaded-task"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-recovery::R2 incomplete TaskRun capture stays visible and cannot be approved or applied",
+          "checkpoint_ids": [
+            "R2.before",
+            "R2.disabled",
+            "R2.denied"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J02",
+      "journey": "Review the code",
+      "criteria": [
+        {
+          "scenario_id": "B-024-01",
+          "owner": "P2.4",
+          "criterion": "AC1",
+          "expected": "Approval binds exactly the recorded head SHA",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "A-P1.26.02",
+          "owner": "P1.26",
+          "criterion": "AC2",
+          "expected": "Approve advances/closes only after delivery; Reject reopens without bypassing review",
+          "mapping_note": "57838328-e41e-4746-bd21-9c271b9bbf04"
+        },
+        {
+          "scenario_id": "B-219-04",
+          "owner": "P2.19",
+          "criterion": "AC4",
+          "expected": "Held Apply opens no PR until application succeeds",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        }
+      ],
+      "bindings": [
+        {
+          "suite": "loomgit-review",
+          "file": "tests/aft/suites/loomgit-review.test.yaml",
+          "case": "operator approves a real task revision from the task detail panel",
+          "source_sha": "8267795e0168cef8b1c259f27588ac8d4cfd529f",
+          "source_status": "present_on_product_baseline",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "review-awaiting",
+              "ui_assertion": "Revisions section visible before approval",
+              "binding_status": "existing_step_anchor",
+              "screenshot": null,
+              "step": 9,
+              "intent": null,
+              "action": "expect"
+            },
+            {
+              "id": "review-recorded",
+              "ui_assertion": "API readback verifies verdict approve",
+              "binding_status": "existing_step_anchor",
+              "screenshot": null,
+              "step": 11,
+              "intent": "An operator confirms that the UI action persisted approval for the recorded revision",
+              "action": "api"
+            }
+          ]
+        },
+        {
+          "suite": "loomgit-task-review",
+          "file": "tests/aft/suites/loomgit-task-review.test.yaml",
+          "case": "stacked, Reject sends the task back to open",
+          "source_sha": "8267795e0168cef8b1c259f27588ac8d4cfd529f",
+          "source_status": "present_on_product_baseline",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "review-rejected-open",
+              "ui_assertion": "rejected task shows Open",
+              "binding_status": "existing_step_anchor",
+              "screenshot": null,
+              "step": 7,
+              "intent": "The rejected task shows Open",
+              "action": "wait"
+            }
+          ]
+        }
+      ],
+      "pending_author_binding": {
+        "author_task": "df232431-41a7-4a71-9bc5-88f3b2c46772",
+        "suite": "loomgit-journey-review",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "review-awaiting",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "review-approved",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "review-rejected",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "review-retry",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "Baseline loomgit-review uses an older Approve locator; executor must retain failures if current UI differs.",
+        "Exact stale/superseded/actor-policy denials and delivery failure retention need additional cases; authors must name every API mutation actor."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-review::review-stack-explicit",
+          "checkpoint_ids": [
+            "R-stack-explicit-diff",
+            "R-stack-explicit-verdict"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-stack-automatic",
+          "checkpoint_ids": [
+            "R-stack-automatic-diff",
+            "R-stack-automatic-verdict"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-stack-reject-retry",
+          "checkpoint_ids": [
+            "R-stack-reject-retry-diff",
+            "R-stack-reject-retry-rejected",
+            "R-stack-reject-retry-retry",
+            "R-stack-reject-retry-history",
+            "R-stack-reject-retry-verdict"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-stack-held",
+          "checkpoint_ids": [
+            "R-stack-held-diff",
+            "R-stack-held-held"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-explicit",
+          "checkpoint_ids": [
+            "R-trunk-explicit-diff",
+            "R-trunk-explicit-verdict"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-automatic",
+          "checkpoint_ids": [
+            "R-trunk-automatic-diff",
+            "R-trunk-automatic-verdict"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-reject-retry",
+          "checkpoint_ids": [
+            "R-trunk-reject-retry-diff",
+            "R-trunk-reject-retry-rejected",
+            "R-trunk-reject-retry-retry",
+            "R-trunk-reject-retry-history",
+            "R-trunk-reject-retry-verdict"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-held",
+          "checkpoint_ids": [
+            "R-trunk-held-diff",
+            "R-trunk-held-held"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-recovery::R1 unsaved edits hold approval and an API client retries without losing dirty work",
+          "checkpoint_ids": [
+            "R1.before",
+            "R1.held",
+            "R1.recovered"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-recovery::R4 stale review requests and foreign PR branch writes cannot overwrite newer work",
+          "checkpoint_ids": [
+            "R4.before",
+            "R4.stale-denied",
+            "R4.published",
+            "R4.foreign-denied"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J03",
+      "journey": "Apply the change",
+      "criteria": [
+        {
+          "scenario_id": "B-026-01",
+          "owner": "P2.6",
+          "criterion": "AC1",
+          "expected": "Approved code reaches lead branch while unrelated user edits stay uncommitted",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "B-026-05",
+          "owner": "P2.6",
+          "criterion": "AC5",
+          "expected": "Overlapping uncommitted edits return apply_pending and remain untouched",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "B-028-01",
+          "owner": "P2.8",
+          "criterion": "AC1",
+          "expected": "Human Apply changes only local working area and pushes nothing",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        }
+      ],
+      "bindings": [
+        {
+          "suite": "loomgit-approve-pr",
+          "file": "tests/aft/suites/loomgit-approve-pr.test.yaml",
+          "case": "Stacked PRs - Approve and create PR opens the next PR of the stack; Approve only waits for Create PR; a declared stack opens none",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "apply-local-only",
+              "ui_assertion": "Approve only leads to applied code and Create PR without remote push",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        }
+      ],
+      "pending_author_binding": {
+        "author_task": "df232431-41a7-4a71-9bc5-88f3b2c46772",
+        "suite": "loomgit-journey-review",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "apply-local-only",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "apply-preserved-edit",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "Old approval helper hides whole journey in one shell step and runs dependents before approval; it is a reviewed source candidate, not execution-ready acceptance proof.",
+        "Recovery author owns overlapping edit hold; explicit visible apply_pending reason/retry controls are absent at baseline per that author.",
+        "Conflicting multi-commit replay, index-lock races and no-network guarantees remain focused-test/runtime gaps."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-review::review-stack-explicit",
+          "checkpoint_ids": [
+            "R-stack-explicit-applied"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-stack-held",
+          "checkpoint_ids": [
+            "R-stack-held-held"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-explicit",
+          "checkpoint_ids": [
+            "R-trunk-explicit-applied"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-held",
+          "checkpoint_ids": [
+            "R-trunk-held-held"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-recovery::R1 unsaved edits hold approval and an API client retries without losing dirty work",
+          "checkpoint_ids": [
+            "R1.before",
+            "R1.held",
+            "R1.recovered"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J04",
+      "journey": "Publish a PR",
+      "criteria": [
+        {
+          "scenario_id": "B-210-01",
+          "owner": "P2.10",
+          "criterion": "AC1",
+          "expected": "Publish creates owned leased remote branch and pub ref at intended head",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "B-210-03",
+          "owner": "P2.10",
+          "criterion": "AC3",
+          "expected": "Foreign PR branch move causes lease denial and preserves foreign head",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "B-219-05",
+          "owner": "P2.19",
+          "criterion": "AC5",
+          "expected": "Retry after Apply/provider failure creates exactly one PR",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        }
+      ],
+      "bindings": [
+        {
+          "suite": "loomgit-approve-pr",
+          "file": "tests/aft/suites/loomgit-approve-pr.test.yaml",
+          "case": "PR per task - each approval opens its own PR to trunk; lead approval follows Lead may approve",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "publish-trunk-pr",
+              "ui_assertion": "PR per task targets trunk and contains task patch",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        }
+      ],
+      "pending_author_binding": {
+        "author_task": "df232431-41a7-4a71-9bc5-88f3b2c46772",
+        "suite": "loomgit-journey-review",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "publish-pr-open",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "publish-idempotent",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "publish-foreign-head-refused",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "Default D29 approval applies and publishes together; split action uses Approve only then Create PR.",
+        "Local fake forge proves orchestration; hosted provider idempotency/lease behavior and provider outage recovery stay unverified until explicitly executed."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-review::review-stack-explicit",
+          "checkpoint_ids": [
+            "R-stack-explicit-pr",
+            "R-stack-explicit-reloaded"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-stack-automatic",
+          "checkpoint_ids": [
+            "R-stack-automatic-pr",
+            "R-stack-automatic-reloaded"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-explicit",
+          "checkpoint_ids": [
+            "R-trunk-explicit-pr",
+            "R-trunk-explicit-reloaded"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-review::review-trunk-automatic",
+          "checkpoint_ids": [
+            "R-trunk-automatic-pr",
+            "R-trunk-automatic-reloaded"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-recovery::R4 stale review requests and foreign PR branch writes cannot overwrite newer work",
+          "checkpoint_ids": [
+            "R4.before",
+            "R4.stale-denied",
+            "R4.published",
+            "R4.foreign-denied"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J05",
+      "journey": "Build a stack",
+      "criteria": [
+        {
+          "scenario_id": "B-219-01",
+          "owner": "P2.19",
+          "criterion": "AC1",
+          "expected": "Approved dependent C is applied above B and PR C has B as base",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "C.P3.7.01",
+          "owner": "P3.7",
+          "criterion": "AC1",
+          "expected": "Approved three-layer chain publishes one native stack with three PRs, correct predecessor bases and leased pushes",
+          "mapping_note": "7dc7c0bd-e025-448d-b47f-601629c04d70"
+        },
+        {
+          "scenario_id": "C.P2.19c.01",
+          "owner": "P2.19c",
+          "criterion": "DoD1",
+          "expected": "After bottom approve-built PR lands, next layer restacks onto trunk, its PR retargets, and a pending merges-after approval continues",
+          "mapping_note": "7dc7c0bd-e025-448d-b47f-601629c04d70"
+        }
+      ],
+      "bindings": [
+        {
+          "suite": "loomgit-approve-pr",
+          "file": "tests/aft/suites/loomgit-approve-pr.test.yaml",
+          "case": "Stacked PRs - Approve and create PR opens the next PR of the stack; Approve only waits for Create PR; a declared stack opens none",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "stack-pair-open",
+              "ui_assertion": "each PR base matches its predecessor and patch contains intended task file",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        }
+      ],
+      "pending_author_binding": {
+        "author_task": "3e4266bd-98b2-4a91-af83-c6ab00e25a79",
+        "suite": "loomgit-journey-stacks",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "stack-three-open",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "stack-bases-and-patches",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "Predecessor approval before next TaskRun is current-tip fixture sequencing, not a resolution of run-ahead policy.",
+        "P1.23 daemon lineage is held/nonintegrated; no claim for #943.",
+        "Native fake-provider membership does not prove real GitHub native stack behavior."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-stacks::Loom stack lower landing then prefix continuation and mode switch",
+          "checkpoint_ids": [
+            "REVIEW-1",
+            "PR-1",
+            "REVIEW-2",
+            "PR-2",
+            "REVIEW-3",
+            "PR-3",
+            "REVIEW-4",
+            "PR-4",
+            "STACK-ORDER-1",
+            "REVIEW-future",
+            "PR-future"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-stacks::Native stack prefix landing and mode switch",
+          "checkpoint_ids": [
+            "REVIEW-1",
+            "PR-1",
+            "REVIEW-2",
+            "PR-2",
+            "REVIEW-3",
+            "PR-3",
+            "REVIEW-4",
+            "PR-4",
+            "REVIEW-future",
+            "PR-future"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-stacks::Native stack lower landing and mode switch",
+          "checkpoint_ids": [
+            "REVIEW-1",
+            "PR-1",
+            "REVIEW-2",
+            "PR-2",
+            "REVIEW-3",
+            "PR-3",
+            "REVIEW-4",
+            "PR-4",
+            "STACK-ORDER-1",
+            "REVIEW-future",
+            "PR-future"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J06",
+      "journey": "Merge part of a stack",
+      "criteria": [
+        {
+          "scenario_id": "C.P3.9.01",
+          "owner": "P3.9",
+          "criterion": "AC1",
+          "expected": "Green four-layer prefix merge lands layers 1\u20133, layer 4 is based on trunk, and Loom marks 1\u20133 landed",
+          "mapping_note": "7dc7c0bd-e025-448d-b47f-601629c04d70"
+        },
+        {
+          "scenario_id": "C.P3.14.01",
+          "owner": "P3.14",
+          "criterion": "AC1",
+          "expected": "Human approval of open bottom PR with passing checks merges it and triggers landing flow",
+          "mapping_note": "7dc7c0bd-e025-448d-b47f-601629c04d70"
+        },
+        {
+          "scenario_id": "E-P5.2.01",
+          "owner": "P5.2",
+          "criterion": "shared infrastructure gate",
+          "expected": "Four real product layers, native HTTP and Loom CLI prefix merge through layer three, repeated three times",
+          "mapping_note": "dd5c9114-f14a-49af-bdd0-917a1e0bf8cb"
+        }
+      ],
+      "bindings": [
+        {
+          "suite": "loomgit-merge-up-to",
+          "file": "tests/aft/suites/loomgit-merge-up-to.test.yaml",
+          "case": "native four-layer stack merges through layer three over HTTP",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "merge-prefix-native",
+              "ui_assertion": "three PRs landed and fourth has correct new base/head",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        },
+        {
+          "suite": "loomgit-merge-up-to",
+          "file": "tests/aft/suites/loomgit-merge-up-to.test.yaml",
+          "case": "Loom four-layer stack merges through layer three from CLI",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "merge-prefix-loom",
+              "ui_assertion": "Git main contains selected patches and fourth PR remains open",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        }
+      ],
+      "pending_author_binding": {
+        "author_task": "3e4266bd-98b2-4a91-af83-c6ab00e25a79",
+        "suite": "loomgit-journey-stacks",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "merge-waiting",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "merge-checks-blocked",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "merge-prefix-landed",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "merge-successor-converged",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "Legacy cases are opaque shell journeys; new author must supply readable steps and current approval-first setup.",
+        "P5.2 repetition remains required; real provider protections/queues and canonical retarget sequencing wording remain outside simulated-provider proof."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-stacks::Loom stack lower landing then prefix continuation and mode switch",
+          "checkpoint_ids": [
+            "STACK-ORDER-1",
+            "LOWER-LANDED",
+            "FOLLOW-UP-2",
+            "STACK-ORDER-3",
+            "PREFIX-LANDED",
+            "FOLLOW-UP-4"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-stacks::Native stack prefix landing and mode switch",
+          "checkpoint_ids": [
+            "STACK-ORDER-3",
+            "PREFIX-LANDED",
+            "FOLLOW-UP-4"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-stacks::Native stack lower landing and mode switch",
+          "checkpoint_ids": [
+            "STACK-ORDER-1",
+            "LOWER-LANDED",
+            "FOLLOW-UP-2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J07",
+      "journey": "Respond to PR feedback",
+      "criteria": [
+        {
+          "scenario_id": "B-219b-01",
+          "owner": "P2.19b",
+          "criterion": "DoD fix-up",
+          "expected": "Signed feedback triggers product fix-up, same PR updates and dependent patch remains",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "B-219b-05",
+          "owner": "P2.19b",
+          "criterion": "DoD stale merge approval",
+          "expected": "Fix-up cancels pending merge-after before changed code merges",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "D.08.01",
+          "owner": "P4.5",
+          "criterion": "AC1; deduplication is D.08.02",
+          "expected": "Signed owned changes-requested feedback plus explicit address action starts copy at pinned published head and normal capture links one revision r+1",
+          "mapping_note": "0e3d1a10-71f1-4205-9333-d0541a88cccc"
+        }
+      ],
+      "bindings": [
+        {
+          "suite": "loomgit-feedback-update",
+          "file": "tests/aft/suites/loomgit-feedback-update.test.yaml",
+          "case": "Loom stack - a review fix-up updates the open PR without Approve, cancels merge-after, and is held on conflict",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "feedback-pushed",
+              "ui_assertion": "UI says Pushed to PR automatically",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            },
+            {
+              "id": "feedback-merge-cancelled",
+              "ui_assertion": "stale merge approval is cancelled",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        },
+        {
+          "suite": "loomgit-feedback-update",
+          "file": "tests/aft/suites/loomgit-feedback-update.test.yaml",
+          "case": "PR per task - a review fix-up updates the task's own PR; a secret-pattern path is never pushed",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "feedback-trunk-updated",
+              "ui_assertion": "same task PR gets actual fix-up head",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        }
+      ],
+      "pending_author_binding": {
+        "author_task": "3e4266bd-98b2-4a91-af83-c6ab00e25a79",
+        "suite": "loomgit-journey-stacks",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "feedback-requested",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "feedback-product-fixup",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "feedback-pr-updated",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "feedback-merge-cancelled",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "Old helper manually INSERTs later feedback and writes fix-ups; those sections are invalid product intake evidence and must not be imported as proof.",
+        "Every new feedback delivery must use signed supported route and actual product fix-up/capture; unreachable seam remains explicit blocked with screenshot/repro.",
+        "Native feedback, interrupted publication and hosted intake remain distinct unverified criteria."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-stacks::Loom signed feedback updates the stack and cancels merge-after",
+          "checkpoint_ids": [
+            "FEEDBACK-PUSHED",
+            "DEPENDENT-PRESERVED",
+            "MERGE-AFTER-WAITING",
+            "FEEDBACK-CANCELLED"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-stacks::Native signed feedback updates the stack and cancels merge-after",
+          "checkpoint_ids": [
+            "FEEDBACK-PUSHED",
+            "DEPENDENT-PRESERVED",
+            "MERGE-AFTER-WAITING",
+            "FEEDBACK-CANCELLED"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-stacks::Trunk signed feedback updates its existing PR",
+          "checkpoint_ids": [
+            "FEEDBACK-PUSHED"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J08",
+      "journey": "Switch delivery mode",
+      "criteria": [
+        {
+          "scenario_id": "B-220-01",
+          "owner": "P2.20",
+          "criterion": "AC1",
+          "expected": "Settings reads all three current Git values from server",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "B-220-02",
+          "owner": "P2.20",
+          "criterion": "AC2",
+          "expected": "New task targets trunk after mode switch while existing PR arrangement stays unchanged",
+          "mapping_note": "64f8dd21-1992-4051-9896-3924f090986a"
+        },
+        {
+          "scenario_id": "C.RF.02",
+          "owner": "D29",
+          "criterion": "accepted refinement 7-9",
+          "expected": "Mode change affects future publication, no Approve only menu on open PR",
+          "mapping_note": "7dc7c0bd-e025-448d-b47f-601629c04d70"
+        }
+      ],
+      "bindings": [
+        {
+          "suite": "loomgit-git-settings",
+          "file": "tests/aft/suites/loomgit-git-settings.test.yaml",
+          "case": "switching from Stacked PRs to PR per task leaves open PRs and sends the next task to trunk",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "mode-stacked-before",
+              "ui_assertion": "existing stacked PR bases before mode switch",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            },
+            {
+              "id": "mode-trunk-after",
+              "ui_assertion": "Settings shows PR per task and new PR targets trunk",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        }
+      ],
+      "pending_author_binding": {
+        "author_task": "3e4266bd-98b2-4a91-af83-c6ab00e25a79",
+        "suite": "loomgit-journey-stacks",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "mode-stacked-before",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "mode-trunk-selected",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "mode-old-prs-preserved",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "mode-new-pr-to-trunk",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "Legacy script requires actor/readable-step audit; reverse trunk-to-stack direction and lead/human permission differences need explicit reconciliation."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-stacks::Loom stack lower landing then prefix continuation and mode switch",
+          "checkpoint_ids": [
+            "MODE-SAVED",
+            "FUTURE-PR"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-stacks::Native stack prefix landing and mode switch",
+          "checkpoint_ids": [
+            "MODE-SAVED",
+            "FUTURE-PR"
+          ]
+        },
+        {
+          "case_id": "loomgit-journey-stacks::Native stack lower landing and mode switch",
+          "checkpoint_ids": [
+            "MODE-SAVED",
+            "FUTURE-PR"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J09",
+      "journey": "Recover from failure",
+      "criteria": [
+        {
+          "scenario_id": "D.06.01",
+          "owner": "P4.1",
+          "criterion": "AC1",
+          "expected": "Owned dirty runner death leads to retained failed capture before ownership release",
+          "mapping_note": "0e3d1a10-71f1-4205-9333-d0541a88cccc"
+        },
+        {
+          "scenario_id": "D.06.02",
+          "owner": "P4.1",
+          "criterion": "AC2",
+          "expected": "Real FleetDB recovery reopens task and releases claim after capture",
+          "mapping_note": "0e3d1a10-71f1-4205-9333-d0541a88cccc"
+        },
+        {
+          "scenario_id": "D.06.03",
+          "owner": "P4.1",
+          "criterion": "AC3",
+          "expected": "Resume uses fresh task copy at saved capture and original base without duplicate revision",
+          "mapping_note": "0e3d1a10-71f1-4205-9333-d0541a88cccc"
+        }
+      ],
+      "bindings": [],
+      "pending_author_binding": {
+        "author_task": "1c76497f-a584-4f92-bad9-ac4e326f04e6",
+        "suite": "loomgit-journey-recovery",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "recovery-dirty-before",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "recovery-held-or-failed",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "recovery-retried",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "recovery-work-preserved",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "No legacy full SIGKILL/serve-restart/resume case established; actual author case and lifecycle seam must be bound by integrator.",
+        "Only owned runtime faults permitted; cannot seed lease/journal state or restart shared stack.",
+        "Real backend crash/recovery and cold two-checkout preservation remain explicitly missing/unrun.",
+        "Authored R1 candidate covers held Apply retry, not owned runner death/serve restart/resume. Those original crash criteria remain missing."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-recovery::R1 unsaved edits hold approval and an API client retries without losing dirty work",
+          "checkpoint_ids": [
+            "R1.before",
+            "R1.held",
+            "R1.recovered"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "J10",
+      "journey": "Delete or clean up",
+      "criteria": [
+        {
+          "scenario_id": "A-P1.7.01",
+          "owner": "P1.7",
+          "criterion": "AC1",
+          "expected": "Deletion without confirmation of task worktree with unpushed commits refuses unsaved_work and lists that worktree",
+          "mapping_note": "57838328-e41e-4746-bd21-9c271b9bbf04"
+        },
+        {
+          "scenario_id": "D.07.02",
+          "owner": "P4.3",
+          "criterion": "AC2",
+          "expected": "Incomplete capture/task copy stays retained; external actions require explicit request",
+          "mapping_note": "0e3d1a10-71f1-4205-9333-d0541a88cccc"
+        },
+        {
+          "scenario_id": "D.10.02",
+          "owner": "P4.6b",
+          "criterion": "DoD2",
+          "expected": "Capture and cleanup leases prevent deletion during active writes",
+          "mapping_note": "0e3d1a10-71f1-4205-9333-d0541a88cccc"
+        }
+      ],
+      "bindings": [
+        {
+          "suite": "loomgit-stack",
+          "file": "tests/aft/suites/loomgit-stack.test.yaml",
+          "case": "abandoning a retained task copy preserves incomplete capture",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "cleanup-incomplete-retained",
+              "ui_assertion": "incomplete capture blocks unsafe cleanup and retained source bytes survive",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        },
+        {
+          "suite": "loomgit-stack",
+          "file": "tests/aft/suites/loomgit-stack.test.yaml",
+          "case": "abandoning published dependent Y preserves its task copy",
+          "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
+          "source_status": "present_on_older_harness_not_imported_by_runner",
+          "runtime_status": "not_run",
+          "checkpoints": [
+            {
+              "id": "cleanup-published-preserved",
+              "ui_assertion": "abandon releases ownership but keeps copy/ref evidence",
+              "binding_status": "requires_readable_author_steps",
+              "screenshot": null
+            }
+          ]
+        }
+      ],
+      "pending_author_binding": {
+        "author_task": "1c76497f-a584-4f92-bad9-ac4e326f04e6",
+        "suite": "loomgit-journey-recovery",
+        "case": null,
+        "source_status": "author_in_progress_integrator_must_bind_exact_case",
+        "runtime_status": "not_run",
+        "checkpoints": [
+          {
+            "id": "cleanup-incomplete",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "cleanup-refused",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          },
+          {
+            "id": "cleanup-owned-evidence-retained",
+            "binding_status": "proposed_wait_or_expect_intent",
+            "screenshot": null
+          }
+        ]
+      },
+      "runtime_status": "not_run",
+      "coverage_status": "partial_candidate_coverage",
+      "gaps": [
+        "Retention kept eligibility and remote expiry policy remain ambiguous; no guessed deletion expectation.",
+        "Writer-lease interleavings and active-work races need focused tests; a successful UI deletion does not establish them.",
+        "Shared helper teardown retains all local Git/provider evidence; guarded delete failure is reported, never bypassed by manually closing review tasks."
+      ],
+      "authored_case_candidates": [
+        {
+          "case_id": "loomgit-journey-recovery::R3 a stale deletion preview and incomplete capture refuse unsafe removal",
+          "checkpoint_ids": [
+            "R3.before",
+            "R3.stale-denied",
+            "R3.incomplete-denied",
+            "R3.retained"
+          ]
+        }
+      ]
+    }
+  ],
+  "global_gaps": [
+    "Run-ahead scheduling policy unresolved; preserve dependency edges and review-first fixture sequencing",
+    "No runtime/browser/paid backend/hosted GitHub execution in runner authoring task",
+    "P4.2 cancelled under D19; P4.9c deferred, neither counted as passed",
+    "docs/testing-terminology.md absent at baseline",
+    "Original min/latest Git, filesystem, real backend, protected/queued provider and required repetition criteria remain required",
+    "CI selector workflow not modified in runner scope"
+  ],
+  "author_snapshot_note": "Read-only snapshots pin filenames/case names/steps and SHA256; authors were still working. Integrator must replace snapshots with final commit SHAs and re-check checkpoint indices before execution.",
+  "authored_suite_snapshots": [
+    {
+      "suite": "loomgit-journey-review",
+      "file": "tests/aft/suites/loomgit-journey-review.test.yaml",
+      "source_path": "/Users/tyson/intent/workspaces/phases-build/wt/aft-journeys-review-oct06/tests/aft/suites/loomgit-journey-review.test.yaml",
+      "source_file_sha256": "a6e817b323648a124e018ce43474589f8707c7c75cbb1393a0b42c8d6ef355f5",
+      "source_status": "author_working_tree_snapshot_requires_final_commit_reconciliation",
+      "source_sha": null,
+      "author_task": "df232431-41a7-4a71-9bc5-88f3b2c46772"
+    },
+    {
+      "suite": "loomgit-journey-recovery",
+      "file": "tests/aft/suites/loomgit-journey-recovery.test.yaml",
+      "source_path": "/Users/tyson/intent/workspaces/phases-build/wt/aft-journeys-recovery-oct06/tests/aft/suites/loomgit-journey-recovery.test.yaml",
+      "source_file_sha256": "dce8a6349aaa0e917e27adaf4fb4484cda4c56f19cbb3fcb13717e23472bf653",
+      "source_status": "author_working_tree_snapshot_requires_final_commit_reconciliation",
+      "source_sha": null,
+      "author_task": "1c76497f-a584-4f92-bad9-ac4e326f04e6"
+    },
+    {
+      "suite": "loomgit-journey-stacks",
+      "file": "tests/aft/suites/loomgit-journey-stacks.test.yaml",
+      "source_path": "/Users/tyson/intent/workspaces/phases-build/wt/aft-journeys-stacks-oct06/tests/aft/suites/loomgit-journey-stacks.test.yaml",
+      "source_file_sha256": "0f7697db2ea62216c710e419d2104771a6f6ed5b1f467b283c62b6a0f654416a",
+      "source_status": "author_working_tree_snapshot_requires_final_commit_reconciliation",
+      "source_sha": null,
+      "author_task": "3e4266bd-98b2-4a91-af83-c6ab00e25a79"
+    }
+  ],
+  "authored_cases": [
+    {
+      "id": "loomgit-journey-review::review-stack-explicit",
+      "suite": "loomgit-journey-review",
+      "case": "review-stack-explicit",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-stack-explicit-task",
+          "step": 4,
+          "intent": "R-stack-explicit-task: the task has the required completion state",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-explicit-diff",
+          "step": 7,
+          "intent": "R-stack-explicit-diff: the reviewer sees the actual code before an enabled verdict",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-explicit-reloaded-task",
+          "step": 21,
+          "intent": "R-stack-explicit-reloaded-task: delivered task closure survives reload",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-explicit-verdict",
+          "step": 12,
+          "intent": "R-stack-explicit-verdict: the exact head has a locked approval",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-explicit-applied",
+          "step": 14,
+          "intent": "R-stack-explicit-applied: approved code is in the working area before publication",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-explicit-pr",
+          "step": 16,
+          "intent": "R-stack-explicit-pr: Loom shows the opened PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-explicit-reloaded",
+          "step": 23,
+          "intent": "R-stack-explicit-reloaded: the same PR is shown with no duplicate Create PR or Approve only",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-review::review-stack-automatic",
+      "suite": "loomgit-journey-review",
+      "case": "review-stack-automatic",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-stack-automatic-task",
+          "step": 4,
+          "intent": "R-stack-automatic-task: the task has the required completion state",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-automatic-diff",
+          "step": 7,
+          "intent": "R-stack-automatic-diff: the reviewer sees the actual code before an enabled verdict",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-automatic-reloaded-task",
+          "step": 18,
+          "intent": "R-stack-automatic-reloaded-task: delivered task closure survives reload",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-automatic-verdict",
+          "step": 11,
+          "intent": "R-stack-automatic-verdict: approval delivered the code and opened its PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-automatic-pr",
+          "step": 13,
+          "intent": "R-stack-automatic-pr: Loom shows the opened PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-automatic-reloaded",
+          "step": 20,
+          "intent": "R-stack-automatic-reloaded: the same PR is shown with no duplicate Create PR or Approve only",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-review::review-stack-empty",
+      "suite": "loomgit-journey-review",
+      "case": "review-stack-empty",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-stack-empty-task",
+          "step": 4,
+          "intent": "R-stack-empty-task: the task has the required completion state",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-empty-no-changes",
+          "step": 6,
+          "intent": "R-stack-empty-no-changes: the complete empty revision shows No changes",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-empty-no-actions",
+          "step": 7,
+          "intent": "R-stack-empty-no-actions: empty code offers no verdict, Apply or PR controls",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-empty-reloaded-task",
+          "step": 10,
+          "intent": "R-stack-empty-reloaded-task: reload preserves closure",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-review::review-trunk-explicit",
+      "suite": "loomgit-journey-review",
+      "case": "review-trunk-explicit",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-trunk-explicit-task",
+          "step": 4,
+          "intent": "R-trunk-explicit-task: the task has the required completion state",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-explicit-diff",
+          "step": 7,
+          "intent": "R-trunk-explicit-diff: the reviewer sees the actual code before an enabled verdict",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-explicit-reloaded-task",
+          "step": 21,
+          "intent": "R-trunk-explicit-reloaded-task: delivered task closure survives reload",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-explicit-verdict",
+          "step": 12,
+          "intent": "R-trunk-explicit-verdict: the exact head has a locked approval",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-explicit-applied",
+          "step": 14,
+          "intent": "R-trunk-explicit-applied: approved code is in the working area before publication",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-explicit-pr",
+          "step": 16,
+          "intent": "R-trunk-explicit-pr: Loom shows the opened PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-explicit-reloaded",
+          "step": 23,
+          "intent": "R-trunk-explicit-reloaded: the same PR is shown with no duplicate Create PR or Approve only",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-review::review-trunk-automatic",
+      "suite": "loomgit-journey-review",
+      "case": "review-trunk-automatic",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-trunk-automatic-task",
+          "step": 4,
+          "intent": "R-trunk-automatic-task: the task has the required completion state",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-automatic-diff",
+          "step": 7,
+          "intent": "R-trunk-automatic-diff: the reviewer sees the actual code before an enabled verdict",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-automatic-reloaded-task",
+          "step": 18,
+          "intent": "R-trunk-automatic-reloaded-task: delivered task closure survives reload",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-automatic-verdict",
+          "step": 11,
+          "intent": "R-trunk-automatic-verdict: approval delivered the code and opened its PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-automatic-pr",
+          "step": 13,
+          "intent": "R-trunk-automatic-pr: Loom shows the opened PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-automatic-reloaded",
+          "step": 20,
+          "intent": "R-trunk-automatic-reloaded: the same PR is shown with no duplicate Create PR or Approve only",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-review::review-trunk-empty",
+      "suite": "loomgit-journey-review",
+      "case": "review-trunk-empty",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-trunk-empty-task",
+          "step": 4,
+          "intent": "R-trunk-empty-task: the task has the required completion state",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-empty-no-changes",
+          "step": 6,
+          "intent": "R-trunk-empty-no-changes: the complete empty revision shows No changes",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-empty-no-actions",
+          "step": 7,
+          "intent": "R-trunk-empty-no-actions: empty code offers no verdict, Apply or PR controls",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-empty-reloaded-task",
+          "step": 10,
+          "intent": "R-trunk-empty-reloaded-task: reload preserves closure",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-recovery::R2 incomplete TaskRun capture stays visible and cannot be approved or applied",
+      "suite": "loomgit-journey-recovery",
+      "case": "R2 incomplete TaskRun capture stays visible and cannot be approved or applied",
+      "snapshot": "loomgit-journey-recovery",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R2.before",
+          "step": 4,
+          "intent": "R2.before checkpoint \u2014 the task has no revision before the product TaskRun starts",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R2.disabled",
+          "step": 10,
+          "intent": "R2.disabled checkpoint \u2014 Incomplete capture is visible and Approve and create PR is disabled",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R2.denied",
+          "step": 13,
+          "intent": "R2.denied checkpoint \u2014 the human still sees the incomplete revision, never No changes; incomplete-denied.json and retained-copy.json prove preserved dirty work",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-review::review-stack-reject-retry",
+      "suite": "loomgit-journey-review",
+      "case": "review-stack-reject-retry",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-stack-reject-retry-diff",
+          "step": 7,
+          "intent": "R-stack-reject-retry-diff: the reviewer sees the actual code before an enabled verdict",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-reject-retry-rejected",
+          "step": 11,
+          "intent": "R-stack-reject-retry-rejected: Reject is recorded and the old head cannot be decided again",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-reject-retry-retry",
+          "step": 18,
+          "intent": "R-stack-reject-retry-retry: only the new patch is awaiting review",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-reject-retry-history",
+          "step": 23,
+          "intent": "R-stack-reject-retry-history: the rejected code is read-only while verdicts remain bound to the newest revision",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-reject-retry-verdict",
+          "step": 26,
+          "intent": "R-stack-reject-retry-verdict: approval delivered the code and opened its PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-review::review-stack-held",
+      "suite": "loomgit-journey-review",
+      "case": "review-stack-held",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-stack-held-diff",
+          "step": 7,
+          "intent": "R-stack-held-diff: the reviewer sees the actual code before an enabled verdict",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-stack-held-held",
+          "step": 11,
+          "intent": "R-stack-held-held: the overlapping edit is named and no PR is shown",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-review::review-trunk-reject-retry",
+      "suite": "loomgit-journey-review",
+      "case": "review-trunk-reject-retry",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-trunk-reject-retry-diff",
+          "step": 7,
+          "intent": "R-trunk-reject-retry-diff: the reviewer sees the actual code before an enabled verdict",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-reject-retry-rejected",
+          "step": 11,
+          "intent": "R-trunk-reject-retry-rejected: Reject is recorded and the old head cannot be decided again",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-reject-retry-retry",
+          "step": 18,
+          "intent": "R-trunk-reject-retry-retry: only the new patch is awaiting review",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-reject-retry-history",
+          "step": 23,
+          "intent": "R-trunk-reject-retry-history: the rejected code is read-only while verdicts remain bound to the newest revision",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-reject-retry-verdict",
+          "step": 26,
+          "intent": "R-trunk-reject-retry-verdict: approval delivered the code and opened its PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-review::review-trunk-held",
+      "suite": "loomgit-journey-review",
+      "case": "review-trunk-held",
+      "snapshot": "loomgit-journey-review",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R-trunk-held-diff",
+          "step": 7,
+          "intent": "R-trunk-held-diff: the reviewer sees the actual code before an enabled verdict",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R-trunk-held-held",
+          "step": 11,
+          "intent": "R-trunk-held-held: the overlapping edit is named and no PR is shown",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-recovery::R1 unsaved edits hold approval and an API client retries without losing dirty work",
+      "suite": "loomgit-journey-recovery",
+      "case": "R1 unsaved edits hold approval and an API client retries without losing dirty work",
+      "snapshot": "loomgit-journey-recovery",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R1.before",
+          "step": 8,
+          "intent": "R1.before checkpoint \u2014 human sees the task awaiting review; hold-before.json records dirty bytes, staged entries, task/revision IDs and local/provider refs",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R1.held",
+          "step": 11,
+          "intent": "R1.held checkpoint \u2014 the mounted approval action reports apply_pending for overlapping unsaved work",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R1.recovered",
+          "step": 19,
+          "intent": "R1.recovered checkpoint \u2014 Changes reports Applied; hold-recovered.json and saved-unsaved-edit.txt prove identity, exactly one result, and preserved dirty work",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-recovery::R4 stale review requests and foreign PR branch writes cannot overwrite newer work",
+      "suite": "loomgit-journey-recovery",
+      "case": "R4 stale review requests and foreign PR branch writes cannot overwrite newer work",
+      "snapshot": "loomgit-journey-recovery",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R4.before",
+          "step": 6,
+          "intent": "R4.before checkpoint \u2014 the current task diff awaits review; captured.json records its exact revision SHA and untouched provider refs",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R4.stale-denied",
+          "step": 8,
+          "intent": "R4.stale-denied checkpoint \u2014 Changes still awaits review after the rejected stale request; stale-verdict-denied.json proves denial and unchanged identities",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R4.published",
+          "step": 14,
+          "intent": "R4.published checkpoint \u2014 the human sees the task's single open PR; foreign-published.json pairs its number/base/head with real Git",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R4.foreign-denied",
+          "step": 17,
+          "intent": "R4.foreign-denied checkpoint \u2014 the original PR remains visible; foreign-denied.json and foreign-publish-denied.json prove refusal and the unchanged foreign provider tip, not a real GitHub or stale-fence claim",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-stacks::Loom stack lower landing then prefix continuation and mode switch",
+      "suite": "loomgit-journey-stacks",
+      "case": "Loom stack lower landing then prefix continuation and mode switch",
+      "snapshot": "loomgit-journey-stacks",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "REVIEW-1",
+          "step": 8,
+          "intent": "Checkpoint REVIEW-1: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-1",
+          "step": 11,
+          "intent": "Checkpoint PR-1: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-2",
+          "step": 18,
+          "intent": "Checkpoint REVIEW-2: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-2",
+          "step": 21,
+          "intent": "Checkpoint PR-2: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-3",
+          "step": 28,
+          "intent": "Checkpoint REVIEW-3: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-3",
+          "step": 31,
+          "intent": "Checkpoint PR-3: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-4",
+          "step": 38,
+          "intent": "Checkpoint REVIEW-4: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-4",
+          "step": 41,
+          "intent": "Checkpoint PR-4: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "STACK-ORDER-1",
+          "step": 46,
+          "intent": "Checkpoint STACK-ORDER-1: the merge preview lists the stack order and exact heads",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-future",
+          "step": 85,
+          "intent": "Checkpoint REVIEW-future: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-future",
+          "step": 88,
+          "intent": "Checkpoint PR-future: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "LOWER-LANDED",
+          "step": 50,
+          "intent": "Checkpoint LOWER-LANDED: selected layers are done and remaining layers are visible",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "FOLLOW-UP-2",
+          "step": 56,
+          "intent": "Checkpoint FOLLOW-UP-2: the remaining open PR has a trunk-based task diff after lower landing",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "STACK-ORDER-3",
+          "step": 60,
+          "intent": "Checkpoint STACK-ORDER-3: the merge preview lists the stack order and exact heads",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PREFIX-LANDED",
+          "step": 64,
+          "intent": "Checkpoint PREFIX-LANDED: selected layers are done and remaining layers are visible",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "FOLLOW-UP-4",
+          "step": 70,
+          "intent": "Checkpoint FOLLOW-UP-4: the remaining open PR has a trunk-based task diff after lower landing",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "MODE-SAVED",
+          "step": 78,
+          "intent": "Checkpoint MODE-SAVED: workspace setting is PR per task and existing PR arrangement is preserved",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "FUTURE-PR",
+          "step": 90,
+          "intent": "Checkpoint FUTURE-PR: future task has its own patch and trunk PR while the earlier remaining stack PR stays open",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-stacks::Native stack prefix landing and mode switch",
+      "suite": "loomgit-journey-stacks",
+      "case": "Native stack prefix landing and mode switch",
+      "snapshot": "loomgit-journey-stacks",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "REVIEW-1",
+          "step": 8,
+          "intent": "Checkpoint REVIEW-1: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-1",
+          "step": 11,
+          "intent": "Checkpoint PR-1: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-2",
+          "step": 18,
+          "intent": "Checkpoint REVIEW-2: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-2",
+          "step": 21,
+          "intent": "Checkpoint PR-2: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-3",
+          "step": 28,
+          "intent": "Checkpoint REVIEW-3: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-3",
+          "step": 31,
+          "intent": "Checkpoint PR-3: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-4",
+          "step": 38,
+          "intent": "Checkpoint REVIEW-4: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-4",
+          "step": 41,
+          "intent": "Checkpoint PR-4: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-future",
+          "step": 71,
+          "intent": "Checkpoint REVIEW-future: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-future",
+          "step": 74,
+          "intent": "Checkpoint PR-future: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "STACK-ORDER-3",
+          "step": 46,
+          "intent": "Checkpoint STACK-ORDER-3: the merge preview lists the stack order and exact heads",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PREFIX-LANDED",
+          "step": 50,
+          "intent": "Checkpoint PREFIX-LANDED: selected layers are done and remaining layers are visible",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "FOLLOW-UP-4",
+          "step": 56,
+          "intent": "Checkpoint FOLLOW-UP-4: the remaining open PR has a trunk-based task diff after lower landing",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "MODE-SAVED",
+          "step": 64,
+          "intent": "Checkpoint MODE-SAVED: workspace setting is PR per task and existing PR arrangement is preserved",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "FUTURE-PR",
+          "step": 76,
+          "intent": "Checkpoint FUTURE-PR: future task has its own patch and trunk PR while the earlier remaining stack PR stays open",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-stacks::Native stack lower landing and mode switch",
+      "suite": "loomgit-journey-stacks",
+      "case": "Native stack lower landing and mode switch",
+      "snapshot": "loomgit-journey-stacks",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "REVIEW-1",
+          "step": 8,
+          "intent": "Checkpoint REVIEW-1: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-1",
+          "step": 11,
+          "intent": "Checkpoint PR-1: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-2",
+          "step": 18,
+          "intent": "Checkpoint REVIEW-2: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-2",
+          "step": 21,
+          "intent": "Checkpoint PR-2: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-3",
+          "step": 28,
+          "intent": "Checkpoint REVIEW-3: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-3",
+          "step": 31,
+          "intent": "Checkpoint PR-3: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-4",
+          "step": 38,
+          "intent": "Checkpoint REVIEW-4: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-4",
+          "step": 41,
+          "intent": "Checkpoint PR-4: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "STACK-ORDER-1",
+          "step": 46,
+          "intent": "Checkpoint STACK-ORDER-1: the merge preview lists the stack order and exact heads",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "REVIEW-future",
+          "step": 71,
+          "intent": "Checkpoint REVIEW-future: the human sees this task patch before approving it",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "PR-future",
+          "step": 74,
+          "intent": "Checkpoint PR-future: the approved task shows its existing PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "LOWER-LANDED",
+          "step": 50,
+          "intent": "Checkpoint LOWER-LANDED: selected layers are done and remaining layers are visible",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "FOLLOW-UP-2",
+          "step": 56,
+          "intent": "Checkpoint FOLLOW-UP-2: the remaining open PR has a trunk-based task diff after lower landing",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "MODE-SAVED",
+          "step": 64,
+          "intent": "Checkpoint MODE-SAVED: workspace setting is PR per task and existing PR arrangement is preserved",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "FUTURE-PR",
+          "step": 76,
+          "intent": "Checkpoint FUTURE-PR: future task has its own patch and trunk PR while the earlier remaining stack PR stays open",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-stacks::Loom signed feedback updates the stack and cancels merge-after",
+      "suite": "loomgit-journey-stacks",
+      "case": "Loom signed feedback updates the stack and cancels merge-after",
+      "snapshot": "loomgit-journey-stacks",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "FEEDBACK-PUSHED",
+          "step": 31,
+          "intent": "Checkpoint FEEDBACK-PUSHED: same PR shows the fix-up and automatic push, with no second human approval",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "DEPENDENT-PRESERVED",
+          "step": 35,
+          "intent": "Checkpoint DEPENDENT-PRESERVED: the upper task still shows its own patch after the lower feedback update",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "MERGE-AFTER-WAITING",
+          "step": 38,
+          "intent": "Checkpoint MERGE-AFTER-WAITING: upper PR is approved to merge only after the lower PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "FEEDBACK-CANCELLED",
+          "step": 48,
+          "intent": "Checkpoint FEEDBACK-CANCELLED: fix-up is pushed to the existing PR and fresh human merge approval is required",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-stacks::Native signed feedback updates the stack and cancels merge-after",
+      "suite": "loomgit-journey-stacks",
+      "case": "Native signed feedback updates the stack and cancels merge-after",
+      "snapshot": "loomgit-journey-stacks",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "FEEDBACK-PUSHED",
+          "step": 31,
+          "intent": "Checkpoint FEEDBACK-PUSHED: same PR shows the fix-up and automatic push, with no second human approval",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "DEPENDENT-PRESERVED",
+          "step": 35,
+          "intent": "Checkpoint DEPENDENT-PRESERVED: the upper task still shows its own patch after the lower feedback update",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "MERGE-AFTER-WAITING",
+          "step": 38,
+          "intent": "Checkpoint MERGE-AFTER-WAITING: upper PR is approved to merge only after the lower PR",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "FEEDBACK-CANCELLED",
+          "step": 48,
+          "intent": "Checkpoint FEEDBACK-CANCELLED: fix-up is pushed to the existing PR and fresh human merge approval is required",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-stacks::Trunk signed feedback updates its existing PR",
+      "suite": "loomgit-journey-stacks",
+      "case": "Trunk signed feedback updates its existing PR",
+      "snapshot": "loomgit-journey-stacks",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "FEEDBACK-PUSHED",
+          "step": 20,
+          "intent": "Checkpoint FEEDBACK-PUSHED: same PR shows the fix-up and automatic push, with no second human approval",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    },
+    {
+      "id": "loomgit-journey-recovery::R3 a stale deletion preview and incomplete capture refuse unsafe removal",
+      "suite": "loomgit-journey-recovery",
+      "case": "R3 a stale deletion preview and incomplete capture refuse unsafe removal",
+      "snapshot": "loomgit-journey-recovery",
+      "runtime_status": "not_run",
+      "checkpoints": [
+        {
+          "id": "R3.before",
+          "step": 9,
+          "intent": "R3.before checkpoint \u2014 the human sees the current preview name the dirty secret-pattern file before confirming removal",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R3.stale-denied",
+          "step": 13,
+          "intent": "R3.stale-denied checkpoint \u2014 the mounted removal action shows the stale work confirmation refusal",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R3.incomplete-denied",
+          "step": 20,
+          "intent": "R3.incomplete-denied checkpoint \u2014 even fresh confirmation cannot remove the folder whose actual product capture is incomplete",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        },
+        {
+          "id": "R3.retained",
+          "step": 25,
+          "intent": "R3.retained checkpoint \u2014 the original task remains reviewable after both refused deletions; delete-incomplete-denied.json pairs this UI with retained folder/identity readback",
+          "binding_status": "author_source_snapshot_not_yet_integrated",
+          "screenshot": null
+        }
+      ]
+    }
+  ]
+}

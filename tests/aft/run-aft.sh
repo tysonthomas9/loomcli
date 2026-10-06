@@ -22,12 +22,13 @@ fi
 
 # --- harness-owned flags ---------------------------------------------------
 # Everything this script does not recognize is forwarded to aft verbatim. These
-# four configure the STACK rather than the test runner, so they are consumed
+# flags configure the STACK rather than the test runner, so they are consumed
 # here and removed from the forwarded args. `set --` rewrites the positional
 # args afterwards, so every later "$@" use stays correct without edits.
 AFT_LIVE=""
 AFT_WITH_DAEMON=""
 AFT_MAX_REAL_CASES=""
+AFT_SUITE_GLOB=""
 AFT_PASSTHRU=()
 LIVE_LOCK_WRITTEN=""
 LIVE_ACCOUNT_LOCK=""
@@ -46,10 +47,53 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { echo "[aft] --max-real-cases needs a value" >&2; exit 1; }
             AFT_MAX_REAL_CASES="$2"; shift 2 ;;
         --max-real-cases=*) AFT_MAX_REAL_CASES="${1#*=}"; shift ;;
+        --suite)
+            [[ $# -ge 2 && -n "$2" ]] || { echo "[aft] --suite needs a suite-name glob" >&2; exit 1; }
+            AFT_SUITE_GLOB="$2"; shift 2 ;;
+        --suite=*)
+            AFT_SUITE_GLOB="${1#*=}"
+            [[ -n "$AFT_SUITE_GLOB" ]] || { echo "[aft] --suite needs a suite-name glob" >&2; exit 1; }
+            shift ;;
         *)                 AFT_PASSTHRU+=("$1"); shift ;;
     esac
 done
 set -- "${AFT_PASSTHRU[@]+"${AFT_PASSTHRU[@]}"}"
+
+if [[ -n "$AFT_SUITE_GLOB" ]]; then
+    if [[ -n "${AFT_SUITES+x}" || -n "$AFT_LIVE" || -n "${AFT_REAL_BACKEND:-}" || "${AFT_REAL_CODEX:-}" == 1 || ! "$AFT_SUITE_GLOB" =~ ^[a-zA-Z0-9_*-]+$ ]]; then
+        echo "[aft] --suite needs a simple name glob and cannot combine with AFT_SUITES or a real/live backend" >&2
+        exit 1
+    fi
+    shopt -s nullglob
+    AFT_SUITE_CANDIDATES=("$SCRIPT_DIR"/suites/${AFT_SUITE_GLOB}.test.yaml "$SCRIPT_DIR"/forge-suites/${AFT_SUITE_GLOB}.test.yaml)
+    shopt -u nullglob
+    AFT_SUITE_PATHS=()
+    for candidate in "${AFT_SUITE_CANDIDATES[@]}"; do
+        [[ -f "$candidate" ]] && AFT_SUITE_PATHS+=("$candidate")
+    done
+    if [[ ${#AFT_SUITE_PATHS[@]} -eq 0 ]]; then
+        echo "[aft] --suite matched no files: $AFT_SUITE_GLOB" >&2
+        exit 1
+    fi
+fi
+
+# Loom Git journeys are deterministic product tests. Refuse paid recovery and
+# real backend flags before dependency installation, port checks or stack launch.
+if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+    saw_no_agent=""
+    for arg in "$@"; do
+        case "$arg" in
+            --strict|--heal)
+                echo "[aft] Loom Git journeys require deterministic execution; remove $arg" >&2
+                exit 1 ;;
+            --no-agent) saw_no_agent=1 ;;
+        esac
+    done
+    if [[ -z "$saw_no_agent" ]]; then
+        echo "[aft] Loom Git journeys require --no-agent; use make test-aft" >&2
+        exit 1
+    fi
+fi
 
 if [[ -n "$AFT_MAX_REAL_CASES" && ! "$AFT_MAX_REAL_CASES" =~ ^[1-9][0-9]*$ ]]; then
     echo "[aft] --max-real-cases needs a positive integer (got '$AFT_MAX_REAL_CASES')" >&2
@@ -262,6 +306,10 @@ preflight_port() {
     local pid cmd owner ours=0 foreign=0
     local mine=()
 
+    if [[ "$AFT_SUITE_GLOB" == loomgit-* && -n "$(port_listener_pids "$port")" ]]; then
+        echo "[aft] Loom Git $role port $port is busy; choose a free port. No listener was stopped." >&2
+        exit 1
+    fi
     for pid in $(port_listener_pids "$port"); do
         cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
         if is_our_stack_cmd "$cmd"; then
@@ -300,7 +348,13 @@ preflight_port() {
 }
 
 preflight_ports() {
-    command -v lsof >/dev/null 2>&1 || return 0
+    if ! command -v lsof >/dev/null 2>&1; then
+        if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+            echo "[aft] Loom Git journeys need lsof to verify free ports before launch" >&2
+            exit 1
+        fi
+        return 0
+    fi
     preflight_port "$E2E_PORT" api
     preflight_port "$E2E_FRONTEND_PORT" frontend
 }
@@ -523,13 +577,13 @@ FAKE_GH_PID=""
 FAKE_GH_BASE=""
 
 # A GitHub-shaped REST fixture, so the PR-review tier can exercise the real
-# connector path without touching github.com. Only started for the live PR tier —
-# every other tier keeps the degraded/no-credential contract the existing suites
-# assert. Started BEFORE serve so its base URL can be injected into the server env.
+# connector path without touching github.com. Live PR-review uses server.mjs;
+# deterministic Loom Git selectors use forge-server.mjs. Other tiers preserve
+# the degraded/no-credential contracts their suites assert. Started BEFORE serve so its base URL can be injected into the server env.
 start_fake_github() {
-    local log="$REPORT_DIR/fake-github.log" port
+    local fixture="${1:-server.mjs}" log="$REPORT_DIR/fake-github.log" port
     : > "$log"
-    node "$SCRIPT_DIR/fixtures/fake-github/server.mjs" >>"$log" 2>&1 &
+    node "$SCRIPT_DIR/fixtures/fake-github/$fixture" >>"$log" 2>&1 &
     FAKE_GH_PID=$!
     for _ in $(seq 1 30); do
         port="$(grep -oE 'listening [0-9]+' "$log" 2>/dev/null | awk '{print $2}' | head -1)"
@@ -548,6 +602,7 @@ start_fake_github() {
     fi
     FAKE_GH_BASE="http://127.0.0.1:$port"
     export AFT_FAKE_GH_BASE="$FAKE_GH_BASE"
+    printf '{"pid":%s,"base_url":"%s","fixture":"%s"}\n' "$FAKE_GH_PID" "$FAKE_GH_BASE" "$fixture" > "$REPORT_DIR/fake-github-runtime.json"
     echo "[aft] fake-github ready at $FAKE_GH_BASE (log: $log)"
 }
 
@@ -707,6 +762,10 @@ LOCK_WRITTEN=1
 # PR-review live tier only: every other tier keeps the degraded-connector contract.
 if [[ -n "$AFT_LIVE" && "${AFT_LIVE_SUITE_KIND:-}" == "prreview" ]]; then
     start_fake_github || exit 1
+elif [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+    start_fake_github forge-server.mjs || exit 1
+    export AFT_GIT_CONFIG_GLOBAL="$REPORT_DIR/operator.gitconfig"
+    printf '[user]\n\tname = AFT Operator\n\temail = aft-operator@example.test\n' > "$AFT_GIT_CONFIG_GLOBAL"
 fi
 echo "[aft] starting e2e stack (api :${E2E_PORT}, frontend :${E2E_FRONTEND_PORT}; log: $REPORT_DIR/server.log)..."
 # Stub AI backends — scoped to the SERVER process only, never this script's env:
@@ -747,10 +806,13 @@ else
     SERVER_PATH="$REPO_ROOT/e2e/stubs:$PATH"
     assert_server_cli_closure "$SERVER_PATH" "$REPO_ROOT/e2e/stubs" || exit 1
     env -u LOOM_WEBUI_GITHUB_TOKEN -u GH_TOKEN -u GITHUB_TOKEN \
+        -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
         -u GEMINI_API_KEY -u GOOGLE_API_KEY \
         E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
+        ${AFT_GIT_CONFIG_GLOBAL:+GIT_CONFIG_GLOBAL="$AFT_GIT_CONFIG_GLOBAL"} \
         PATH="$SERVER_PATH" OPENAI_API_KEY="stub-e2e" FLUE_REPO="$FLUE_REPO" \
         ${FAKE_GH_BASE:+LOOM_CONNECTOR_GITHUB_BASE_URL="$FAKE_GH_BASE"} \
+        ${FAKE_GH_BASE:+GITHUB_TOKEN=aft-fixture-token} \
         LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
         bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
 fi
@@ -785,7 +847,11 @@ export AFT_WS="E2E-WS"   # primary workspace id seeded by start-e2e-server.sh
 export AFT_LOOM_BIN="$REPO_ROOT/tmp/loom-e2e"
 export AFT_LOOM_CONFIG_DIR="$REPO_ROOT/tmp/e2e-workspace/.loom-config"
 export LOOM_BASE_URL="$API_URL"
-export RUN_ID="${RUN_ID:-$(date +%s)}"
+if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+    export RUN_ID="${RUN_ID:-$(date +%s)-$$}"
+else
+    export RUN_ID="${RUN_ID:-$(date +%s)}"
+fi
 export AFT_TESTS_DIR="$SCRIPT_DIR"
 export AFT_REPORT_DIR="$REPORT_DIR"
 # Load-bearing for the live tier: its suite is parameterized by backend (the modal
@@ -844,9 +910,9 @@ command -v caffeinate >/dev/null 2>&1 && CAFFEINATE="caffeinate -dimsu"
 # The deterministic default is one aft invocation over both tiers so reporting and
 # census joins stay combined. Real-* tiers set AFT_SUITES above and therefore keep
 # their exact single-directory override.
-if [[ -n "${AFT_SUITES+x}" ]]; then
+if [[ -z "$AFT_SUITE_GLOB" && -n "${AFT_SUITES+x}" ]]; then
     AFT_SUITE_PATHS=("$AFT_SUITES")
-else
+elif [[ -z "$AFT_SUITE_GLOB" ]]; then
     AFT_SUITE_PATHS=("$SCRIPT_DIR/suites" "$SCRIPT_DIR/surface-suites")
 fi
 

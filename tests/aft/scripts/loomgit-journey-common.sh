@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# Source this file from a journey's narrow phase script, or use its phase CLI.
+# Fixtures create repositories/issues via public APIs; only product TaskRuns
+# capture/freeze revisions. Human verdicts belong in mounted YAML UI controls.
+set -euo pipefail
+
+journey_key() {
+    [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'journey fixture key must contain only letters, numbers, _ or -' >&2; return 1; }
+}
+
+journey_json_id() {
+    python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; assert d.get("id"),d; print(d["id"])'
+}
+
+journey_load() {
+    journey_key "$1"
+    export JOURNEY_STATE="${AFT_WORK_DIR:?}/journey-$1"
+    export JOURNEY_REPO="$JOURNEY_STATE/repo" JOURNEY_REMOTE="$JOURNEY_STATE/origin.git"
+    export JOURNEY_WS="$(cat "$JOURNEY_STATE/workspace.id")"
+    export JOURNEY_FORGE_REPO="$(cat "$JOURNEY_STATE/forge-repo")"
+    export JOURNEY_API="${AFT_BASE_URL:?}/api/workspaces/$JOURNEY_WS"
+}
+
+journey_setup() {
+    local key="$1" mode="${2:-stack}" backend="${3:-loom}" token name
+    journey_key "$key"
+    case "$mode" in stack|trunk) ;; *) echo 'delivery mode must be stack or trunk' >&2; return 1 ;; esac
+    case "$backend" in loom|github) ;; *) echo 'forge backend must be loom or github' >&2; return 1 ;; esac
+    : "${AFT_FAKE_GH_BASE:?Use run-aft.sh --suite loomgit-* to start the forge}"
+    export JOURNEY_STATE="${AFT_WORK_DIR:?}/journey-$key"
+    # Refuse to reuse a case fixture, even after an interrupted setup.
+    mkdir "$JOURNEY_STATE"
+    token="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+    # Loom workspace names are capped at 64 characters. Keep full UUID identity.
+    name="e2e-journey-${key:0:18}-$token"
+    export JOURNEY_REPO="$JOURNEY_STATE/repo" JOURNEY_REMOTE="$JOURNEY_STATE/origin.git"
+    export JOURNEY_FORGE_REPO="owner/journey-$key-$token"
+    printf '%s\n' "$JOURNEY_FORGE_REPO" > "$JOURNEY_STATE/forge-repo"
+    git init -q --bare "$JOURNEY_REMOTE"
+    git -C "$JOURNEY_REMOTE" symbolic-ref HEAD refs/heads/main
+    git init -q -b main "$JOURNEY_REPO"
+    printf 'journey=%s fixture=%s\n' "$key" "$token" > "$JOURNEY_REPO/README.md"
+    git -C "$JOURNEY_REPO" add README.md
+    git -C "$JOURNEY_REPO" -c user.name=AFT -c user.email=aft@example.test commit -q -m 'journey fixture base'
+    # Only this throwaway fixture gets Git configuration, through Git's CLI.
+    git -C "$JOURNEY_REPO" config core.sshCommand "sh '$AFT_TESTS_DIR/fixtures/fake-github/git-ssh-bridge.sh' '$JOURNEY_REMOTE'"
+    git -C "$JOURNEY_REPO" remote add origin "git@github.com:$JOURNEY_FORGE_REPO.git"
+    git -C "$JOURNEY_REPO" push -q origin main
+    python3 - "$JOURNEY_FORGE_REPO" "$JOURNEY_REMOTE" "$backend" <<'PY' |
+import json,sys
+print(json.dumps(dict(repo=sys.argv[1],remote=sys.argv[2],native_stacks=sys.argv[3]=='github')))
+PY
+        curl -fsS -X POST "$AFT_FAKE_GH_BASE/__register" -H 'Content-Type: application/json' -d @- > "$JOURNEY_STATE/forge-register.json"
+    python3 - "$name" "$JOURNEY_REPO" <<'PY' |
+import json,sys
+print(json.dumps(dict(name=sys.argv[1],type='empty',repos=[sys.argv[2]])))
+PY
+        curl -fsS -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json' -d @- > "$JOURNEY_STATE/workspace.json"
+    journey_json_id < "$JOURNEY_STATE/workspace.json" > "$JOURNEY_STATE/workspace.id"
+    journey_load "$key"
+    # Public product configuration; no journal/session/ref records are seeded.
+    LOOM_WORKSPACE="$JOURNEY_WS" LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" delivery-mode "$mode" --workspace "$JOURNEY_WS" > "$JOURNEY_STATE/delivery-mode.txt"
+    curl -fsS -X POST "$JOURNEY_API/agents" -H 'Content-Type: application/json' \
+        -d '{"name":"lead","role_name":"lead","auto":false,"cross_repo":true,"repos":[],"backend":"codex"}' > "$JOURNEY_STATE/lead.json"
+    git -C "$JOURNEY_REPO" rev-parse HEAD > "$JOURNEY_STATE/base.sha"
+    printf '%s\n' "$mode" > "$JOURNEY_STATE/delivery-mode"
+    printf '%s\n' "$backend" > "$JOURNEY_STATE/forge-backend"
+    echo "fixture provisioned: workspace $JOURNEY_WS, forge $JOURNEY_FORGE_REPO"
+}
+
+journey_create_task() {
+    local slot="$1" file="$2" predecessor="${3:-}" epic task
+    journey_key "$slot"
+    [[ ! -e "$JOURNEY_STATE/task-$slot.id" ]] || { echo "task slot $slot already exists" >&2; return 1; }
+    if [[ -n "$predecessor" ]]; then journey_key "$predecessor"; test -s "$JOURNEY_STATE/task-$predecessor.id"; fi
+    python3 - "$JOURNEY_WS" "$slot" <<'PY' |
+import json,sys
+print(json.dumps(dict(title=f'Journey {sys.argv[1]} {sys.argv[2]} epic',issue_type='epic',priority=2)))
+PY
+        curl -fsS -X POST "$JOURNEY_API/issues" -H 'Content-Type: application/json' -d @- > "$JOURNEY_STATE/epic-$slot.json"
+    epic="$(journey_json_id < "$JOURNEY_STATE/epic-$slot.json")"
+    printf '%s\n' "$epic" > "$JOURNEY_STATE/epic-$slot.id"
+    python3 - "$JOURNEY_WS" "$slot" "$epic" "$file" <<'PY' |
+import json,re,sys
+ws,slot,epic,path=sys.argv[1:]
+if path!='empty':
+    assert re.fullmatch(r'[a-zA-Z0-9._/-]+',path) and not path.startswith('/') and '..' not in path.split('/'),path
+print(json.dumps(dict(title=f'Journey {ws} {slot}',issue_type='task',priority=2,parent=epic,design='Check README; no changes needed.' if path=='empty' else f'STUB_CODEX_PATCH={path}')))
+PY
+        curl -fsS -X POST "$JOURNEY_API/issues" -H 'Content-Type: application/json' -d @- > "$JOURNEY_STATE/task-$slot.json"
+    task="$(journey_json_id < "$JOURNEY_STATE/task-$slot.json")"
+    printf '%s\n' "$task" > "$JOURNEY_STATE/task-$slot.id"
+    if [[ -n "$predecessor" ]]; then
+        python3 - "$(cat "$JOURNEY_STATE/task-$predecessor.id")" <<'PY' |
+import json,sys
+print(json.dumps(dict(depends_on_id=sys.argv[1],dep_type='blocks')))
+PY
+            curl -fsS -X POST "$JOURNEY_API/issues/$task/dependencies" -H 'Content-Type: application/json' -d @- > "$JOURNEY_STATE/dependency-$slot.json"
+    fi
+    printf '%s\n' "$file" > "$JOURNEY_STATE/file-$slot"
+    echo "fixture task $slot: $task"
+}
+
+journey_start_task() {
+    local slot="$1"
+    journey_key "$slot"
+    # The YAML intent must name the API-client actor for this mutation.
+    # Each task has its own epic, so a predecessor can be reviewed through UI
+    # before the next run starts, without editing/closing dependencies as a bypass.
+    python3 - "$(cat "$JOURNEY_STATE/epic-$slot.id")" <<'PY' |
+import json,sys
+print(json.dumps(dict(epicId=sys.argv[1],runner='local-task-runner')))
+PY
+        curl -fsS -X POST "$JOURNEY_API/workflows/epic-runner" -H 'Content-Type: application/json' -d @- > "$JOURNEY_STATE/workflow-$slot.json"
+}
+
+journey_wait_revision() {
+    local slot="$1" task count
+    journey_key "$slot"
+    task="$(cat "$JOURNEY_STATE/task-$slot.id")"
+    for _ in $(seq 1 90); do
+        curl -fsS "$JOURNEY_API/issues/$task/revisions" > "$JOURNEY_STATE/revisions-$slot.json"
+        count="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert isinstance(d,list),d; print(len(d))' "$JOURNEY_STATE/revisions-$slot.json")"
+        if [[ "$count" -gt 0 ]]; then
+            python3 - "$JOURNEY_STATE/revisions-$slot.json" <<'PY'
+import json,sys
+r=max(json.load(open(sys.argv[1]))['data'],key=lambda r:r['number'])
+assert r.get('change_id') and r.get('repo') and r.get('head_sha'),r
+print('product revision:',r['change_id'],r['number'],r['head_sha'])
+PY
+            return 0
+        fi
+        sleep 2
+    done
+    echo "task $task produced no revision; retain server log and fixture $JOURNEY_STATE" >&2
+    return 1
+}
+
+journey_readback() {
+    local slot="$1" task change number sha repo_name
+    journey_key "$slot"
+    task="$(cat "$JOURNEY_STATE/task-$slot.id")"
+    curl -fsS "$JOURNEY_API/issues/$task" > "$JOURNEY_STATE/issue-$slot-readback.json"
+    curl -fsS "$JOURNEY_API/issues/$task/revisions" > "$JOURNEY_STATE/revisions-$slot-readback.json"
+    read -r change number sha repo_name < <(python3 -c 'import json,sys; r=max(json.load(open(sys.argv[1]))["data"],key=lambda r:r["number"]); print(r["change_id"],r["number"],r["head_sha"],r["repo"])' "$JOURNEY_STATE/revisions-$slot-readback.json")
+    curl -fsS --get "$JOURNEY_API/changes/$change/revisions/$number/diff" --data-urlencode "repo=$repo_name" > "$JOURNEY_STATE/diff-$slot-readback.json"
+    curl -fsS "$AFT_FAKE_GH_BASE/__pulls?repo=$JOURNEY_FORGE_REPO" > "$JOURNEY_STATE/pulls-$slot-readback.json"
+    git -C "$JOURNEY_REPO" for-each-ref --format='%(refname) %(objectname)' > "$JOURNEY_STATE/refs-$slot-readback.txt"
+    git -C "$JOURNEY_REMOTE" for-each-ref --format='%(refname) %(objectname)' > "$JOURNEY_STATE/remote-refs-$slot-readback.txt"
+    echo "readback retained for task $task at revision $change/$number ($sha); case-specific assertions are required"
+}
+
+journey_open_task() {
+    local slot="$1"
+    journey_key "$slot"
+    # Navigation only. All human mutations remain visible steps in the suite.
+    agent-browser --session "${AFT_SESSION:?}" open "$AFT_BASE_URL/ws/$JOURNEY_WS/kanban" >/dev/null
+    agent-browser --session "$AFT_SESSION" wait '[data-testid="board-toolbar"]' >/dev/null
+    agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$JOURNEY_WS/issues/$(cat "$JOURNEY_STATE/task-$slot.id")" >/dev/null
+}
+
+journey_teardown() {
+    # Public guarded deletion only; never close code-review tasks to bypass it.
+    # On denial, report failure and keep all local evidence. The outer harness
+    # still owns/stops its server and forge. No other fixture or ref is removed.
+    curl -fsS -X DELETE "$JOURNEY_API" > "$JOURNEY_STATE/delete-workspace.json"
+    # Retain provider records and bare refs for the executor's post-run inspection.
+    printf 'workspace API deletion succeeded; local Git/provider evidence retained\n' > "$JOURNEY_STATE/cleanup.txt"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    phase="${1:?phase required}" key="${2:?fixture key required}"
+    shift 2
+    if [[ "$phase" == setup ]]; then
+        journey_setup "$key" "$@"
+    else
+        journey_load "$key"
+        case "$phase" in
+            create-task) journey_create_task "$@" ;;
+            start-task) journey_start_task "$@" ;;
+            wait-revision) journey_wait_revision "$@" ;;
+            readback) journey_readback "$@" ;;
+            open-task) journey_open_task "$@" ;;
+            teardown) journey_teardown ;;
+            *) echo "unknown journey phase: $phase" >&2; exit 2 ;;
+        esac
+    fi
+fi

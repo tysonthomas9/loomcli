@@ -30,6 +30,120 @@ tests/aft/run-aft.sh --record ...  # or call the harness directly with any aft f
 Extra aft flags go through `AFT_ARGS`, e.g.
 `make test-aft AFT_ARGS="--screenshots --record-all"`.
 
+## Loom Git deterministic journeys
+
+`loomgit-journeys.json` maps the ten readable journeys in the workspace verification
+plan to original criterion IDs, exact suite/case bindings and screenshot checkpoints.
+It is an authoring inventory, **not a runtime result**. The integration task must
+reconcile pending bindings with all authors' final suites before reporting coverage.
+A journey may cover only part of its original criteria; gaps stay explicit.
+
+This runner overlays reviewed test-only changes from harness
+`ea006c5b758b5bbb25617411954bef8b4448a99a` onto product #943
+`8267795e0168cef8b1c259f27588ac8d4cfd529f`. Their merge-base is
+`524f150f2bcdde0c45c30f62688180be120af032`. The endpoint trees differ in product
+code; importing the complete old harness tree is invalid. Preserve the baseline's
+`loomgit-task-review` suite/script and prove the final `internal/`, `cmd/`, `api/`
+and frontend trees equal the product baseline. Only reviewed test hunks belong in
+this overlay; generated workflow bundles must remain uncommitted.
+
+Use the wrapper's `--suite` flag, with `AFT_SUITES` unset. It resolves suite-name
+globs under `suites/` and `forge-suites/`. A `loomgit-*` selector starts the loopback
+forge, exports `AFT_FAKE_GH_BASE`, gives serve a fixture-only token and the existing
+`LOOM_CONNECTOR_GITHUB_BASE_URL`, and supplies a run-scoped Git identity config.
+`AFT_SUITES` alone does **not** start the forge. Forge-contract cases are supporting
+fixture evidence, not product acceptance proof. An unmatched/empty selector fails;
+Loom Git selectors require `--no-agent` and reject real/live backend, `--strict`
+and `--heal` options before launching anything. `make test-aft` supplies
+`--no-agent`. Other default suites keep their degraded credential environment.
+
+Evidence coordinates: **journey / deterministic / isolated local serve + FleetDB +
+real Git and processes, stub AI and local fake forge / positive and denial / #943
+Loom Git**. This proves product orchestration only; it does not establish real
+backend inference, hosted GitHub protections or merge queues. No runtime state may
+be hand-seeded. Human test-body mutations use mounted UI controls; an API-client or
+agent mutation names that actor in its intent. Missing UI controls/product failures
+remain blocked or failed with screenshots, rather than skipped assertions.
+
+The integrator owns execution. Use a fresh owned integration worktree plus owned
+or coordinated AFT/FleetDB/Flue dependency checkouts. Record their SHAs, dirty
+status, package-lock/build provenance and the final overlay SHA before launch.
+The runner can install/build dependencies, so do not point it at another author's
+mutable checkout. Confirm disk budget and all chosen ports are free. Loom Git
+preflight requires `lsof` and refuses **any** occupied selected port without reaping
+it. The fake forge binds loopback port 0; its actual PID/base URL/fixture are saved
+in `reports/fake-github-runtime.json` and its process is owned by the runner trap.
+Use a fresh browser session/profile for the execution run. Never reuse the operator's
+persistent local-mode stack.
+
+From the integration worktree, replace dependency paths and ports with owned,
+verified-free selections. The command is an executor instruction, not an authoring
+result:
+
+```bash
+/Users/tyson/.local/share/loom-agent-tools/scripts/with-heavy-lock.sh \
+  bash scripts/with-clean-loom-env.sh \
+  env -u AFT_SUITES -u AFT_REAL_BACKEND -u AFT_REAL_CODEX \
+  AFT_DIR=/absolute/owned/testing-app \
+  FLEET_DB_REPO=/absolute/owned/fleet-db FLUE_REPO=/absolute/owned/flue \
+  E2E_PORT=9892 E2E_FRONTEND_PORT=9893 \
+  make test-aft AFT_ARGS="--suite loomgit-task-review --screenshots --record-all --max-browsers 1"
+```
+
+Run that preserved baseline suite first. Then select each integrated journey by its
+exact suite name in `loomgit-journeys.json`; use `--suite 'loomgit-*'` only after
+reviewing the selected corpus and the legacy suites' actor/setup limitations. Keep
+forge-resetting legacy scenarios serialized. Existing stack scripts that run all
+dependent tasks before predecessor approval need reviewed setup changes for #943.
+Arrange a predecessor's UI approval before the next task run as fixture sequencing;
+retain dependency edges and keep the canonical run-ahead policy unresolved.
+
+AFT has no `screenshot:` action in its step schema. `--screenshots` captures after
+every successful step and captures failures. Name meaningful checkpoints in a
+visible `expect:`/`wait:` step's `intent`, e.g. `Checkpoint review-awaiting: human
+sees the saved task patch`. Screenshots then belong to the same report step as its
+UI assertion. The integrator links the report's actual PNG, step number and Git/API
+readbacks to the map; planned checkpoint names are not screenshot receipts.
+
+### Shared journey helper
+
+`tests/aft/scripts/loomgit-journey-common.sh` is source-able or usable as a narrow
+phase CLI. It creates a UUID-scoped workspace and bare remote under `AFT_WORK_DIR`,
+registers the fixture's unique `owner/journey-*` forge identity without resetting
+another fixture, and creates issues/dependencies through public APIs. The supplied
+Git identity is fixture-only. `STUB_CODEX_PATCH` or `STUB_CODEX_APPEND` instructs the
+stub to edit its actual task copy; normal TaskRun code captures/freezes the result.
+The helper never writes a journal, revision, session, verdict, diff or capture ref.
+
+```bash
+bash "$AFT_TESTS_DIR/scripts/loomgit-journey-common.sh" setup case-key stack loom
+bash "$AFT_TESTS_DIR/scripts/loomgit-journey-common.sh" create-task case-key a a.txt
+bash "$AFT_TESTS_DIR/scripts/loomgit-journey-common.sh" start-task case-key a
+bash "$AFT_TESTS_DIR/scripts/loomgit-journey-common.sh" wait-revision case-key a
+bash "$AFT_TESTS_DIR/scripts/loomgit-journey-common.sh" open-task case-key a
+# Perform human review as distinct YAML UI steps, then:
+bash "$AFT_TESTS_DIR/scripts/loomgit-journey-common.sh" readback case-key a
+bash "$AFT_TESTS_DIR/scripts/loomgit-journey-common.sh" teardown case-key
+```
+
+`setup` accepts delivery `stack|trunk` and forge capability `loom|github`.
+`create-task` accepts `empty` instead of a file and an optional predecessor slot.
+Source the helper and call `journey_load case-key` to get `JOURNEY_WS`,
+`JOURNEY_REPO`, `JOURNEY_REMOTE`, `JOURNEY_API`, `JOURNEY_STATE` and
+`JOURNEY_FORGE_REPO`. Each task gets its own epic so setup can order normal runs
+without changing dependencies. `start-task` must name the API-client actor in the
+suite intent. `open-task` only navigates; verdicts are not hidden in helpers.
+`readback` stores issue/revision/diff/provider JSON and local/remote refs; cases must
+assert their own expected values. `teardown` uses guarded workspace deletion, never
+manually closes code-review tasks, and keeps local Git/provider evidence for review.
+Deletion refusal is a cleanup failure with retained evidence, not silent success.
+
+Original criterion layers beyond these journeys remain required: real backend/crash
+proof, supported Git/filesystem variants, credential boundaries, retention races and
+eligible hosted-provider behavior. `docs/testing-terminology.md` is absent at #943;
+do not claim it was read. CI integration belongs to the executor; this runner task
+does not alter an existing PR, workflow or product head.
+
 The harness starts `scripts/start-e2e-server.sh` (loom API on `E2E_PORT`, default 8090;
 vite preview on `E2E_FRONTEND_PORT`, default 3100, proxying `/api`), waits for readiness,
 and passes both `tests/aft/suites/` and `tests/aft/surface-suites/` to **one aft run
