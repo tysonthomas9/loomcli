@@ -290,17 +290,13 @@ def current_child_tool_events(rows, agent_id, turn_id, sentinel):
     current = [e for e in rows if e["agent_id"] == agent_id and e["turn_id"] == turn_id]
     matching = [e for e in current if e["kind"] == "item.completed"
                 and e["payload"].get("itemKind") == "tool"
-                and "printf" in (e["payload"].get("tool") or {}).get("input", "")]
-    assert matching, "no saved native child tool call retained the safe command"
-    latest = max(matching, key=lambda e: e["seq"])
-    saved_input = (latest["payload"].get("tool") or {}).get("input", "")
+                and "printf" in (e["payload"].get("tool") or {}).get("input", "")
+                and "SAFE" in (e["payload"].get("tool") or {}).get("input", "")]
+    assert len(matching) == 1, "exactly one same-turn saved native child command required"
+    saved_input = (matching[0]["payload"].get("tool") or {}).get("input", "")
     assert "REDACTED" in saved_input and sentinel not in saved_input, \
         "child's saved tool input did not redact the harmless sentinel"
-    steps = [e for e in current if e["kind"] == "item.completed"
-             and e["payload"].get("itemKind") in ("tool", "reasoning")]
-    assert steps and max(steps, key=lambda e: e["seq"])["event_id"] == latest["event_id"], \
-        "the sentinel tool is not the child's latest saved step this turn"
-    return [latest]
+    return matching
 
 
 def tray_capture_script(child_id):
@@ -355,10 +351,24 @@ def tray_capture():
         "REDACTED" in capture["text"], "tray capture did not show the redacted native command"
     assert_private_nodes([{"kind": "agent-tray", "text": capture["text"],
                            "aria": capture["aria"]}], SENTINEL)
+    rows = events("child")
+    try:
+        matching = current_child_tool_events(rows, child_id, turn_id, SENTINEL)
+        native_ids = native_tool_ids("child")
+        assert native_ids == [event_item_id(matching[0])], \
+            "running child tray command did not bind to its one native saved tool step"
+    except Exception:
+        latest = agent("child")
+        save("tray-failure.json", {"child_agent_id": child_id, "expected_turn_id": turn_id,
+             "current_state": latest["state"], "current_turn_id": latest.get("running_turn_id"),
+             "event_count": len(rows), "last_event_kind": rows[-1]["kind"] if rows else None,
+             "reason": "captured running row lacks one matching saved native tool step"})
+        raise AssertionError("captured running row lacks one matching saved native tool step") from None
     save("tray-capture.json", {"child_agent_id": child_id,
          "parent_agent_id": child["parent_agent_id"], "running_turn_id": turn_id,
          "observed_at": capture["observedAt"],
          "tray_row_sha256": hashlib.sha256(capture["text"].encode()).hexdigest(),
+         "tool_event_id": matching[0]["event_id"], "native_item_id": native_ids[0],
          "redacted_command_visible": True})
 
 
@@ -373,8 +383,10 @@ def tray_snapshot():
         "child turn changed after running tray capture"
     matching = current_child_tool_events(events("child"), child["agent_id"],
                                          capture["running_turn_id"], SENTINEL)
-    assert native_tool_ids("child") == [event_item_id(matching[0])], \
-        "native child sentinel tool did not match the current saved redacted event"
+    assert matching[0]["event_id"] == capture["tool_event_id"] and \
+        event_item_id(matching[0]) == capture["native_item_id"] and \
+        native_tool_ids("child") == [capture["native_item_id"]], \
+        "native child sentinel tool did not match the captured saved redacted step"
     save("tray-privacy.json", {"child_agent_id": child["agent_id"],
          "parent_agent_id": child["parent_agent_id"],
          "tool_event_ids": [e["event_id"] for e in matching],
