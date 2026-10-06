@@ -11,7 +11,11 @@ agent_flows_check_manifest
 : "${AFT_SESSION:?AFT named browser session required}"
 : "${AFT_BROWSER_PROFILES:?runner-owned browser profiles required}"
 [[ $# -le 1 ]] || { echo 'expected the current Chat route and at most one matching Lead name' >&2; exit 2; }
-[[ "$AFT_SESSION" =~ ^aft-live-(agent-children|lead-chat|recovery-lifecycle)-[0-9]+$ ]] || { echo 'foreign AFT browser session' >&2; exit 2; }
+jq -e --arg session "$AFT_SESSION" '
+  any(.selection.suites[].name; . as $suite |
+    ($session | startswith("aft-" + $suite + "-")) and
+    ($session | ltrimstr("aft-" + $suite + "-") | test("^[0-9]+$")))' \
+  "$AFT_WORK_DIR/manifest.json" >/dev/null 2>&1 || { echo 'foreign AFT browser session' >&2; exit 2; }
 [[ "$AFT_BROWSER_PROFILES" == "${AFT_WORK_DIR%/evidence}/profiles" ]] || { echo 'browser profile ownership mismatch' >&2; exit 2; }
 [[ "$AFT_REAL_MODEL" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$AFT_REAL_MODEL" != aft/* ]] || exit 2
 [[ -f "$AFT_WORK_DIR/model-selection.json" && ! -L "$AFT_WORK_DIR/model-selection.json" ]] || { echo 'owned model selection is missing' >&2; exit 2; }
@@ -38,12 +42,22 @@ agent_page="$(curl -fsS --max-time 15 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/
   || { echo 'run-owned Lead identity unavailable' >&2; exit 1; }
 agent_name="$(jq -r '.name // empty' <<< "$agent_page" | tr -d '\r')"
 owned_name="^(aft-child-lead-${RUN_ID}|aft-cancel-lead-${RUN_ID}|aft-isolation-[ab]-${RUN_ID}|aft-lead-${RUN_ID}-(chat|persona|busy)|live-recovery-(restart|archive|sibling|dirty)-${RUN_ID})$"
-[[ "$agent_name" =~ $owned_name && ( $# -eq 0 || "$1" == "$agent_name" ) ]] \
+declared="$(agent_flows_declared_agents)" || exit 2
+if [[ "$declared" == null ]]; then
+  [[ "$agent_name" =~ $owned_name ]] || { echo 'Chat route Lead name is not from this run and suite' >&2; exit 1; }
+else
+  jq -e --arg name "$agent_name" --arg session "$AFT_SESSION" '
+    any(.leads[]; .suite as $suite | .name == $name and
+      ($session | startswith("aft-" + $suite + "-")) and
+      ($session | ltrimstr("aft-" + $suite + "-") | test("^[0-9]+$")))' <<< "$declared" >/dev/null \
+    || { echo 'Chat route Lead name is not declared in this batch' >&2; exit 1; }
+fi
+[[ $# -eq 0 || "$1" == "$agent_name" ]] \
   || { echo 'Chat route Lead name is not from this run and suite' >&2; exit 1; }
 jq -e --arg id "$agent_id" --arg name "$agent_name" --arg repo "$AFT_AGENT_FLOW_REPO" '
   .agent_id == $id and .name == $name and .harness == "opencode" and
   .repo == $repo and .preset == "lead" and .created_by_kind == "user" and
-  .parent_agent_id == null' \
+  .parent_agent_id == null and .root_agent_id == null' \
   <<< "$agent_page" >/dev/null || { echo 'Lead is not the owned UI-created OpenCode agent' >&2; exit 1; }
 initial="$(jq -r '.model // empty' <<< "$agent_page" | tr -d '\r')"
 

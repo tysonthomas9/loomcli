@@ -42,6 +42,20 @@ agent_flows_check_manifest() {
     || { echo 'pinned host Podman connection changed' >&2; return 2; }
 }
 
+agent_flows_declared_agents() {
+  jq -c --arg run "$RUN_ID" '
+    if .selection.batch == "default" then null else
+      .selection.agents | {
+        leads: [.leads[] | {name: (.name | split("${RUN_ID}") | join($run)), suite}],
+        children: [.children[] | {
+          name: (.name | split("${RUN_ID}") | join($run)),
+          parent: (.parent | split("${RUN_ID}") | join($run)),
+          suite
+        }]
+      }
+    end' "$AFT_WORK_DIR/manifest.json"
+}
+
 agent_flows_podman() {
   local error_file status reason diagnostic
   error_file="$(mktemp "$AFT_WORK_DIR/.podman-helper.XXXXXXXX")" || return 2
@@ -54,7 +68,7 @@ agent_flows_podman() {
     if rg -qi 'cannot connect to podman|unable to connect|connection refused|no such connection' "$error_file"; then
       reason=connection-unavailable
     fi
-    diagnostic="$(rg -o -m1 'native probe: (agent-row-missing|agent-name-not-run-owned|harness-mismatch|native-id-missing|native-root-missing|native-owner-mismatch|storage-unavailable)' "$error_file" || true)"
+    diagnostic="$(rg -o -m1 'native probe: (agent-row-missing|agent-name-not-run-owned|agent-session-mismatch|repo-mismatch|lead-root-mismatch|child-parent-mismatch|harness-mismatch|native-id-missing|native-root-missing|native-owner-mismatch|storage-unavailable)' "$error_file" || true)"
     printf 'owned Podman %s failed on pinned connection %s (exit %d, %s)\n' \
       "${1:-command}" "$AFT_PODMAN_CONNECTION" "$status" "$reason" >&2
     [[ -z "$diagnostic" ]] || printf '%s\n' "$diagnostic" >&2

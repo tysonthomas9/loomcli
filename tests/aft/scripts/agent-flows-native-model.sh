@@ -4,6 +4,7 @@ set -euo pipefail
 # shellcheck source=tests/aft/scripts/agent-flows-ownership.sh
 source "$(dirname "${BASH_SOURCE[0]}")/agent-flows-ownership.sh"
 agent_flows_check_manifest
+declared="$(agent_flows_declared_agents)" || exit 2
 : "${AFT_AGENT_FLOW_REPO:?owned managed repository required}"
 : "${AFT_REAL_MODEL:?runner-validated UI model required}"
 : "${AFT_NATIVE_SESSION_PROBE:?runner-owned native identity probe required}"
@@ -14,12 +15,18 @@ agent_flows_check_manifest
 agent_id="$1"
 agent_json="$(curl -fsS --max-time 15 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents/$agent_id")" \
   || { echo 'owned child Agent API identity unavailable' >&2; exit 1; }
-jq -e --arg id "$agent_id" --arg run "$RUN_ID" --arg repo "$AFT_AGENT_FLOW_REPO" '
+jq -e --arg id "$agent_id" --arg run "$RUN_ID" --arg repo "$AFT_AGENT_FLOW_REPO" \
+  --arg session "${AFT_SESSION:-}" --argjson declared "$declared" '
   .agent_id == $id and
-  (.name | test("^aft-(child-(a|b)|cancel-child|isolation-(own|foreign))-" + $run + "$")) and
+  (.name as $name |
+    if $declared == null then ($name | test("^aft-(child-(a|b)|cancel-child|isolation-(own|foreign))-" + $run + "$"))
+    else any($declared.children[]; .suite as $suite | .name == $name and
+      ($session | startswith("aft-" + $suite + "-")) and
+      ($session | ltrimstr("aft-" + $suite + "-") | test("^[0-9]+$"))) end) and
   .repo == $repo and
   .harness == "opencode" and .preset == "task" and .created_by_kind == "agent" and
-  (.parent_agent_id | type == "string" and startswith("agt_"))' \
+  (.parent_agent_id | type == "string" and startswith("agt_")) and
+  .root_agent_id == .parent_agent_id' \
   <<< "$agent_json" >/dev/null || { echo 'foreign or non-task child Agent API identity' >&2; exit 1; }
 native_ref="$("$AFT_NATIVE_SESSION_PROBE" "$agent_id")" \
   || { echo 'owned child NativeRef unavailable' >&2; exit 1; }
@@ -38,7 +45,8 @@ if ! result="$("${compose[@]}" exec -T loom-local node -e '
 const fs = require("node:fs");
 const path = require("node:path");
 const {DatabaseSync} = require("node:sqlite");
-const [id, run, repo, target, expectedNativeID, expectedNativeRoot] = process.argv.slice(1);
+const [id, run, repo, target, expectedNativeID, expectedNativeRoot, declaredJSON] = process.argv.slice(1);
+const declared = JSON.parse(declaredJSON);
 const receipt = {agent_id:id, run_id:run, registry_requested_model:null,
   native_reported_model:null, ui_lead_target_model:target,
   completed_answer_evidence:"unavailable", status:"unavailable"};
@@ -48,17 +56,20 @@ const emit = (reason) => {
 };
 (async () => {
   const db = new DatabaseSync("/root/.loom/agents.db", {readOnly:true});
-  const row = db.prepare("SELECT agent_id,name,harness,repo,preset,parent_agent_id,model,worktree_path,harness_session_id AS native_id,harness_session_root AS native_root,state,outcome FROM agents WHERE agent_id=? AND workspace_id=?").get(id,"LOCALMODE");
+  const row = db.prepare("SELECT agent_id,name,harness,repo,preset,parent_agent_id,root_agent_id,model,worktree_path,harness_session_id AS native_id,harness_session_root AS native_root,state,outcome FROM agents WHERE agent_id=? AND workspace_id=?").get(id,"LOCALMODE");
   const ownedName = new RegExp("^aft-(child-(a|b)|cancel-child|isolation-(own|foreign))-" + run + "$");
-  if (!row || !ownedName.test(row.name) || row.harness !== "opencode" || row.repo !== repo ||
-      row.preset !== "task" || !row.parent_agent_id || !row.native_id ||
+  const selectedChild = declared?.children.find(c => c.name === row?.name);
+  if (!row || (declared === null ? !ownedName.test(row.name) : !selectedChild) || row.harness !== "opencode" || row.repo !== repo ||
+      row.preset !== "task" || !row.parent_agent_id || row.root_agent_id !== row.parent_agent_id || !row.native_id ||
       typeof row.native_root !== "string" ||
       !row.worktree_path) return emit("owned child or current NativeRef unavailable");
   if (row.native_id !== expectedNativeID || row.native_root !== expectedNativeRoot)
     return emit("current NativeRef changed after the owned identity probe");
-  const parent = db.prepare("SELECT name,harness,repo FROM agents WHERE agent_id=? AND workspace_id=?").get(row.parent_agent_id,"LOCALMODE");
+  const parent = db.prepare("SELECT name,harness,repo,preset,created_by_kind,parent_agent_id,root_agent_id FROM agents WHERE agent_id=? AND workspace_id=?").get(row.parent_agent_id,"LOCALMODE");
   const ownedParent = new RegExp("^(aft-(child-lead|cancel-lead|isolation-[ab])-" + run + ")$");
-  if (!parent || !ownedParent.test(parent.name) || parent.harness !== "opencode" || parent.repo !== repo)
+  if (!parent || (declared === null ? !ownedParent.test(parent.name) : parent.name !== selectedChild.parent) ||
+      parent.harness !== "opencode" || parent.repo !== repo ||
+      (declared !== null && (parent.preset !== "lead" || parent.created_by_kind !== "user" || parent.parent_agent_id !== null || parent.root_agent_id !== null)))
     return emit("parent is not a run-owned Lead");
   const recorded = db.prepare("SELECT 1 FROM agent_native_sessions WHERE agent_id=? AND harness=? AND native_root=? AND native_id=?").get(id,"opencode",row.native_root,row.native_id);
   if (!recorded) return emit("current NativeRef is not recorded as owned");
@@ -142,7 +153,7 @@ const emit = (reason) => {
   receipt.status = "observed";
   emit();
 })().catch(() => emit("native-model-probe-unexpected-error"));
-' "$agent_id" "$RUN_ID" "$AFT_AGENT_FLOW_REPO" "$AFT_REAL_MODEL" "$native_id" "$native_root")"; then
+' "$agent_id" "$RUN_ID" "$AFT_AGENT_FLOW_REPO" "$AFT_REAL_MODEL" "$native_id" "$native_root" "$declared")"; then
   echo 'owned native model probe could not execute' >&2
   exit 1
 fi
