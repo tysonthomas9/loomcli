@@ -11,7 +11,7 @@ agent_flows_check_manifest() {
   [[ "$AFT_WORK_DIR" == "/private/tmp/aft-agent-flows.${RUN_ID#af}/evidence" ]] || { echo 'runner evidence path mismatch' >&2; return 2; }
   [[ -f "$AFT_WORK_DIR/manifest.json" && ! -L "$AFT_WORK_DIR/manifest.json" ]] || { echo 'owned manifest missing' >&2; return 2; }
   local head
-  head="$(git -C "$AFT_SOURCE_ROOT" rev-parse HEAD)" || return 2
+  head="$(git -C "$AFT_SOURCE_ROOT" rev-parse HEAD | tr -d '\r')" || return 2
   jq -e --arg run "$RUN_ID" --arg project "$AFT_OWNED_PROJECT" \
     --arg source "$AFT_SOURCE_ROOT" --arg head "$head" --arg api "$AFT_API_URL" \
     '.run_id == $run and .source_root == $source and .source_head == $head and
