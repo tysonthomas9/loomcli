@@ -115,11 +115,11 @@ PY
 }
 
 journey_wait_revision() {
-    local slot="$1" task count
+    local slot="$1" task count deadline=$((SECONDS + 90))
     journey_key "$slot"
     task="$(cat "$JOURNEY_STATE/task-$slot.id")"
-    for _ in $(seq 1 90); do
-        curl -fsS "$JOURNEY_API/issues/$task/revisions" > "$JOURNEY_STATE/revisions-$slot.json"
+    while (( SECONDS < deadline )); do
+        curl -fsS --max-time 2 "$JOURNEY_API/issues/$task/revisions" > "$JOURNEY_STATE/revisions-$slot.json"
         count="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert isinstance(d,list),d; print(len(d))' "$JOURNEY_STATE/revisions-$slot.json")"
         if [[ "$count" -gt 0 ]]; then
             python3 - "$JOURNEY_STATE/revisions-$slot.json" <<'PY'
@@ -137,16 +137,17 @@ PY
 }
 
 journey_readback() {
-    local slot="$1" task change number sha repo_name
-    journey_key "$slot"
-    task="$(cat "$JOURNEY_STATE/task-$slot.id")"
-    curl -fsS "$JOURNEY_API/issues/$task" > "$JOURNEY_STATE/issue-$slot-readback.json"
-    curl -fsS "$JOURNEY_API/issues/$task/revisions" > "$JOURNEY_STATE/revisions-$slot-readback.json"
-    read -r change number sha repo_name < <(python3 -c 'import json,sys; r=max(json.load(open(sys.argv[1]))["data"],key=lambda r:r["number"]); print(r["change_id"],r["number"],r["head_sha"],r["repo"])' "$JOURNEY_STATE/revisions-$slot-readback.json")
-    curl -fsS --get "$JOURNEY_API/changes/$change/revisions/$number/diff" --data-urlencode "repo=$repo_name" > "$JOURNEY_STATE/diff-$slot-readback.json"
-    curl -fsS "$AFT_FAKE_GH_BASE/__pulls?repo=$JOURNEY_FORGE_REPO" > "$JOURNEY_STATE/pulls-$slot-readback.json"
-    git -C "$JOURNEY_REPO" for-each-ref --format='%(refname) %(objectname)' > "$JOURNEY_STATE/refs-$slot-readback.txt"
-    git -C "$JOURNEY_REMOTE" for-each-ref --format='%(refname) %(objectname)' > "$JOURNEY_STATE/remote-refs-$slot-readback.txt"
+    local slot="$1" task change number sha repo_name revision_fields
+    journey_key "$slot" || return 1
+    task="$(cat "$JOURNEY_STATE/task-$slot.id")" || return 1
+    curl -fsS --max-time 10 "$JOURNEY_API/issues/$task" > "$JOURNEY_STATE/issue-$slot-readback.json" || return 1
+    curl -fsS --max-time 10 "$JOURNEY_API/issues/$task/revisions" > "$JOURNEY_STATE/revisions-$slot-readback.json" || return 1
+    revision_fields="$(python3 -c 'import json,sys; r=max(json.load(open(sys.argv[1]))["data"],key=lambda r:r["number"]); print(r["change_id"],r["number"],r["head_sha"],r["repo"])' "$JOURNEY_STATE/revisions-$slot-readback.json")" || return 1
+    read -r change number sha repo_name <<< "$revision_fields"
+    curl -fsS --max-time 10 --get "$JOURNEY_API/changes/$change/revisions/$number/diff" --data-urlencode "repo=$repo_name" > "$JOURNEY_STATE/diff-$slot-readback.json" || return 1
+    curl -fsS --max-time 10 "$AFT_FAKE_GH_BASE/__pulls?repo=$JOURNEY_FORGE_REPO" > "$JOURNEY_STATE/pulls-$slot-readback.json" || return 1
+    git -C "$JOURNEY_REPO" for-each-ref --format='%(refname) %(objectname)' > "$JOURNEY_STATE/refs-$slot-readback.txt" || return 1
+    git -C "$JOURNEY_REMOTE" for-each-ref --format='%(refname) %(objectname)' > "$JOURNEY_STATE/remote-refs-$slot-readback.txt" || return 1
     echo "readback retained for task $task at revision $change/$number ($sha); case-specific assertions are required"
 }
 
@@ -163,9 +164,42 @@ journey_teardown() {
     # Public guarded deletion only; never close code-review tasks to bypass it.
     # On denial, report failure and keep all local evidence. The outer harness
     # still owns/stops its server and forge. No other fixture or ref is removed.
-    curl -fsS -X DELETE "$JOURNEY_API" > "$JOURNEY_STATE/delete-workspace.json"
+    local task_file slot area index=0
+    # Write a pessimistic marker before any cleanup work. AFT treats teardown
+    # errors as report-only, so run-aft.sh also checks this marker after AFT exits.
+    printf 'cleanup/readback unfinished; evidence retained\n' > "$JOURNEY_STATE/cleanup.failed"
+    for task_file in "$JOURNEY_STATE"/task-*.id; do
+        [[ -f "$task_file" ]] || continue
+        slot="${task_file##*/task-}"; slot="${slot%.id}"
+        journey_readback "$slot" || return 1
+    done
+    git -C "$JOURNEY_REPO" worktree list --porcelain > "$JOURNEY_STATE/worktrees-before-cleanup.txt" || return 1
+    while IFS= read -r area; do
+        [[ "$area" == 'worktree '* ]] || continue
+        area="${area#worktree }"
+        index=$((index + 1))
+        git -C "$area" status --porcelain > "$JOURNEY_STATE/tree-$index-status.txt" || return 1
+        git -C "$area" diff --binary HEAD > "$JOURNEY_STATE/tree-$index-dirty.patch" || return 1
+        git -C "$area" archive HEAD > "$JOURNEY_STATE/tree-$index-head.tar" || return 1
+        python3 - "$area" "$JOURNEY_STATE/tree-$index-files.tar" <<'PY' || return 1
+import os,pathlib,subprocess,sys,tarfile
+root,out=sys.argv[1:]
+paths=subprocess.check_output(['git','-C',root,'ls-files','-z','--cached','--others','--exclude-standard']).split(b'\0')
+with tarfile.open(out,'w') as archive:
+    for raw in sorted(set(filter(None,paths))):
+        name=os.fsdecode(raw)
+        assert not pathlib.PurePosixPath(name).is_absolute() and '..' not in pathlib.PurePosixPath(name).parts,name
+        path=os.path.join(root,name)
+        if os.path.lexists(path): archive.add(path,arcname=name,recursive=False)
+PY
+    done < "$JOURNEY_STATE/worktrees-before-cleanup.txt"
+    curl -fsS --max-time 10 -X DELETE "$JOURNEY_API" > "$JOURNEY_STATE/delete-workspace.json" || {
+        printf 'guarded workspace deletion refused; evidence retained\n' > "$JOURNEY_STATE/cleanup.failed"
+        return 1
+    }
     # Retain provider records and bare refs for the executor's post-run inspection.
     printf 'workspace API deletion succeeded; local Git/provider evidence retained\n' > "$JOURNEY_STATE/cleanup.txt"
+    rm "$JOURNEY_STATE/cleanup.failed"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

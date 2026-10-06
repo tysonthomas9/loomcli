@@ -73,8 +73,14 @@ mutable checkout. Confirm disk budget and all chosen ports are free. Loom Git
 preflight requires `lsof` and refuses **any** occupied selected port without reaping
 it. The fake forge binds loopback port 0; its actual PID/base URL/fixture are saved
 in `reports/fake-github-runtime.json` and its process is owned by the runner trap.
-Use a fresh browser session/profile for the execution run. Never reuse the operator's
-persistent local-mode stack.
+For `loomgit-*`, the runner uses the installed agent-browser's supported
+`AGENT_BROWSER_PROFILE`, `AGENT_BROWSER_NAMESPACE` and `AGENT_BROWSER_CONFIG`
+settings: a new profile under the run's scratch directory, a unique namespace and
+an empty explicit config. It clears inherited browser settings and disables restore
+saving; AFT supplies a named session per suite. The runner forces one browser so
+suite sessions cannot concurrently open the same profile, and refuses profile
+reuse. Retain that profile with the report. Never reuse the operator's persistent
+local-mode stack. Pin an agent-browser version supporting these settings.
 
 From the integration worktree, replace dependency paths and ports with owned,
 verified-free selections. The command is an executor instruction, not an authoring
@@ -134,9 +140,15 @@ Source the helper and call `journey_load case-key` to get `JOURNEY_WS`,
 without changing dependencies. `start-task` must name the API-client actor in the
 suite intent. `open-task` only navigates; verdicts are not hidden in helpers.
 `readback` stores issue/revision/diff/provider JSON and local/remote refs; cases must
-assert their own expected values. `teardown` uses guarded workspace deletion, never
-manually closes code-review tasks, and keeps local Git/provider evidence for review.
-Deletion refusal is a cleanup failure with retained evidence, not silent success.
+assert their own expected values. `wait-revision` has a 90-second polling deadline
+and bounded requests, below AFT's 120-second shell-step timeout. `teardown` first
+stores task readbacks, worktree/ref inventory, committed file archives, current
+tracked/untracked file archives and dirty patches. It then uses guarded workspace
+deletion, never manually closes code-review tasks, and keeps local Git/provider
+evidence for review. A `cleanup.failed` marker remains on readback/deletion failure;
+the wrapper checks it after AFT exits and returns failure even though AFT itself
+treats teardown errors as report-only. Suites that deliberately retain workspaces
+must state that in their own teardown; retained fixtures are not deletion proof.
 
 Original criterion layers beyond these journeys remain required: real backend/crash
 proof, supported Git/filesystem variants, credential boundaries, retention races and

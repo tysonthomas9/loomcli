@@ -870,6 +870,26 @@ fi
 export AFT_WORK_DIR="$REPORT_DIR/_work/$RUN_ID"  # scratch space for run-step state (issue ids etc.)
 mkdir -p "$AFT_WORK_DIR"
 
+AFT_ISOLATION_ARGS=()
+if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+    # Installed agent-browser supports these environment settings. Clear any
+    # operator attach/restore/provider config before AFT launches named sessions.
+    for browser_env in $(compgen -v); do
+        if [[ "$browser_env" == AGENT_BROWSER_* ]]; then unset "$browser_env"; fi
+    done
+    export AGENT_BROWSER_ARGS="--disable-features=BackForwardCache"
+    export AGENT_BROWSER_CONFIG="$AFT_WORK_DIR/agent-browser.json"
+    export AGENT_BROWSER_PROFILE="$AFT_WORK_DIR/browser-profile"
+    export AGENT_BROWSER_NAMESPACE="aft-loomgit-$(date +%s)-$$"
+    export AGENT_BROWSER_RESTORE_SAVE=never
+    printf '{}\n' > "$AGENT_BROWSER_CONFIG"
+    mkdir "$AGENT_BROWSER_PROFILE" # Refuse profile reuse, including interrupted runs.
+    # A persistent profile cannot be opened by parallel suite sessions. Put this
+    # override last so caller flags cannot accidentally share it concurrently.
+    AFT_ISOLATION_ARGS=(--max-browsers 1)
+    echo "[aft] owned browser profile: $AGENT_BROWSER_PROFILE; namespace: $AGENT_BROWSER_NAMESPACE"
+fi
+
 if [[ -n "$AFT_WITH_DAEMON" ]]; then
     start_owned_daemon
 fi
@@ -924,9 +944,18 @@ set +e
 $CAFFEINATE node "$AFT_DIR/dist/cli.js" run "${AFT_SUITE_PATHS[@]}" --report-dir "$REPORT_DIR" \
     --viewport "${AFT_VIEWPORT:-1920x1080}" --timeout "${AFT_TIMEOUT:-15000}" \
     ${CENSUS:+--census "$CENSUS"} \
-    ${AFT_MAX_BROWSERS:+--max-browsers "$AFT_MAX_BROWSERS"} "$@"
+    ${AFT_MAX_BROWSERS:+--max-browsers "$AFT_MAX_BROWSERS"} "$@" ${AFT_ISOLATION_ARGS[@]+"${AFT_ISOLATION_ARGS[@]}"}
 AFT_EXIT=$?
 set -e
+
+if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+    CLEANUP_FAILURES="$(find "$AFT_WORK_DIR" -type f -name cleanup.failed -print)"
+    if [[ -n "$CLEANUP_FAILURES" ]]; then
+        echo "[aft] journey cleanup/readback failed; retain these receipts:" >&2
+        printf '%s\n' "$CLEANUP_FAILURES" >&2
+        AFT_EXIT=1
+    fi
+fi
 
 # Live cleanup runs while the stack is still up (the EXIT trap has not fired), pass
 # or fail. It is the authoritative one: aft skips a test's own cleanup step after
