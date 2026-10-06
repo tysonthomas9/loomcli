@@ -5,6 +5,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -139,6 +141,30 @@ class QueueOracleTests(unittest.TestCase):
              patch.object(queue.subprocess, "check_output", side_effect=reply), patch.object(queue, "save"):
             with self.assertRaisesRegex(AssertionError, "exact input once"):
                 queue.native_inputs()
+
+    def test_native_probe_cli_rejects_compose_only_exec_flag(self):
+        source = Path(__file__).with_name("coverage-children-queue-native.sh").read_text()
+        line = next(x.strip() for x in source.splitlines() if x.startswith('agent_flows_podman exec '))
+        prefix = line.split(' node -e ', 1)[0]
+        check = ('agent_flows_podman() { [[ "$1" == exec && "$2" == owned && "$3" == /bin/true ]]; }; '
+                 'container=owned; ' + prefix + ' /bin/true')
+        self.assertEqual(subprocess.run(["bash", "-c", check], capture_output=True).returncode, 0)
+        bad = check.replace(' exec "$container" ', ' exec -T "$container" ')
+        self.assertNotEqual(subprocess.run(["bash", "-c", bad], capture_output=True).returncode, 0)
+
+    def test_native_probe_accepts_empty_root_but_rejects_missing_root(self):
+        source = Path(__file__).with_name("coverage-children-queue-native.sh").read_text()
+        match = re.search(r'(const validNativeRow=\(row,run\)=>[\s\S]*?;)\n  if\(!validNativeRow', source)
+        self.assertIsNotNone(match)
+        script = match.group(1) + '''
+const row={name:"cov-child-queue-task-af12345678",harness:"opencode",preset:"task",
+ parent_agent_id:"agt_lead",root_agent_id:"agt_lead",created_by_id:"agt_lead",
+ worktree_path:"/owned/child",native_id:"ses_child",native_root:""};
+if(!validNativeRow(row,"af12345678") || validNativeRow({...row,native_root:null},"af12345678") ||
+   validNativeRow({...row,created_by_id:"agt_foreign"},"af12345678")) process.exit(1);
+'''
+        result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_event_pager_rejects_foreign_child_and_duplicate_event(self):
         expected = {"agent_id": "agt_child", "seq": 1, "event_id": "one", "kind": "message.waiting", "payload": {}}

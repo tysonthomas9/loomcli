@@ -18,7 +18,7 @@ cd "$AFT_SOURCE_ROOT"
 compose=(agent_flows_podman compose -p "$AFT_OWNED_PROJECT" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml")
 container="$("${compose[@]}" ps -q loom-local | tr -d '\r')"
 agent_flows_check_container "$container"
-agent_flows_podman exec -T "$container" node -e '
+agent_flows_podman exec "$container" node -e '
 const fs=require("node:fs");
 const {DatabaseSync}=require("node:sqlite");
 const [id,run,key]=process.argv.slice(1);
@@ -26,9 +26,11 @@ const fail=(why)=>{process.stderr.write("queue native input: "+why+"\n");process
 (async()=>{
   const db=new DatabaseSync("/root/.loom/agents.db",{readOnly:true});
   const row=db.prepare("SELECT agent_id,name,repo,harness,preset,parent_agent_id,root_agent_id,created_by_id,worktree_path,harness_session_id AS native_id,harness_session_root AS native_root FROM agents WHERE agent_id=? AND workspace_id=?").get(id,"LOCALMODE");
-  if(!row || row.name!==`cov-child-queue-task-${run}` || row.harness!=="opencode" || row.preset!=="task" ||
-     !row.parent_agent_id || row.parent_agent_id!==row.root_agent_id || row.parent_agent_id!==row.created_by_id ||
-     !row.worktree_path || !row.native_id || !row.native_root) fail("unowned child or NativeRef");
+  const validNativeRow=(row,run)=>!!row && row.name===`cov-child-queue-task-${run}` &&
+    row.harness==="opencode" && row.preset==="task" && !!row.parent_agent_id &&
+    row.parent_agent_id===row.root_agent_id && row.parent_agent_id===row.created_by_id &&
+    !!row.worktree_path && !!row.native_id && typeof row.native_root==="string";
+  if(!validNativeRow(row,run)) fail("unowned child or NativeRef");
   const parent=db.prepare("SELECT name,repo,preset FROM agents WHERE agent_id=? AND workspace_id=?").get(row.parent_agent_id,"LOCALMODE");
   if(!parent || parent.name!==`cov-child-queue-lead-${run}` || parent.repo!==row.repo || parent.preset!=="lead") fail("wrong parent");
   const owned=db.prepare("SELECT 1 FROM agent_native_sessions WHERE agent_id=? AND harness=? AND native_root=? AND native_id=?").get(id,"opencode",row.native_root,row.native_id);
@@ -46,6 +48,16 @@ const fail=(why)=>{process.stderr.write("queue native input: "+why+"\n");process
      !base.port || base.pathname!=="/" || base.search || base.hash || base.username || base.password ||
      typeof reg.password!=="string" || !reg.password) fail("service registration mismatch");
   const auth="Basic "+Buffer.from("opencode:"+reg.password).toString("base64");
+  const get=async pathname=>{
+    const response=await fetch(new URL(pathname,base),{headers:{Authorization:auth},signal:AbortSignal.timeout(15000)});
+    if(!response.ok) fail("native identity unavailable");
+    return response.json();
+  };
+  const info=await get("/api/info");
+  const session=await get("/api/session/"+encodeURIComponent(row.native_id));
+  if(info?.pid!==reg.pid || session?.data?.id!==row.native_id ||
+     session.data.metadata?.agent_id!==id || session.data.location?.directory!==row.worktree_path)
+    fail("native service/session owner mismatch");
   let cursor="",count=0;
   const seen=new Set();
   for(let page=0;page<100;page++) {
