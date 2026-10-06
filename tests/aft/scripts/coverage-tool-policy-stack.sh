@@ -20,6 +20,7 @@ case "$1" in
     # shellcheck disable=SC2016 # JavaScript template literals belong to Node.
     "${compose[@]}" exec -T loom-local node -e '
       const fs=require("node:fs");
+      const path=require("node:path");
       const {DatabaseSync}=require("node:sqlite");
       const [id,run,repo]=process.argv.slice(1);
       const db=new DatabaseSync("/root/.loom/agents.db",{readOnly:true});
@@ -31,11 +32,14 @@ case "$1" in
         .get(id,"opencode",row.native_root,row.native_id);
       if (!owner) throw Error("native probe ownership missing");
       (async()=>{
-        const file="/root/.loom/agents-opencode/state/opencode/service.json";
+        if (process.env.LOOM_CONFIG_DIR!=="/root/.loom") throw Error("owned service root mismatch");
+        const file=path.join(process.env.LOOM_CONFIG_DIR,"agents-opencode","state","opencode","service.json");
         const registration=JSON.parse(fs.readFileSync(file,"utf8"));
         const base=new URL(registration.url);
         if (base.protocol!=="http:" || !["127.0.0.1","localhost"].includes(base.hostname) ||
-            base.pathname!=="/" || !registration.password || !Number.isInteger(registration.pid))
+            base.username || base.password || base.search || base.hash || base.pathname!=="/" ||
+            typeof registration.password!=="string" || !registration.password ||
+            !Number.isInteger(registration.pid) || registration.pid<1)
           throw Error("native service registration invalid");
         const authorization="Basic "+Buffer.from("opencode:"+registration.password).toString("base64");
         const get=async path=>{
@@ -66,6 +70,7 @@ case "$1" in
     # shellcheck disable=SC2016 # The single-quoted program runs inside Node.
     "${compose[@]}" exec -T loom-local node -e '
       const fs=require("node:fs");
+      const path=require("node:path");
       const {DatabaseSync}=require("node:sqlite");
       const [id,run,repo]=process.argv.slice(1);
       const db=new DatabaseSync("/root/.loom/agents.db",{readOnly:true});
@@ -79,17 +84,21 @@ case "$1" in
         row.parent_agent_id===parent?.agent_id && parent?.preset==="lead" && parent?.repo===repo &&
         parent?.harness==="opencode" && parent?.created_by_kind==="user";
       if (!row || row.agent_id!==id || (!ownedLead && !ownedChild) || row.repo!==repo ||
-          row.harness!=="opencode" || !row.native_id || !row.native_root ||
+          row.harness!=="opencode" || !row.native_id || typeof row.native_root!=="string" ||
           row.worktree_path!==`/root/.loom/worktrees/source-repo/${id}`)
         throw Error("native tool probe identity unavailable");
       const owner=db.prepare("SELECT 1 FROM agent_native_sessions WHERE agent_id=? AND harness=? AND native_root=? AND native_id=?")
         .get(id,"opencode",row.native_root,row.native_id);
       if (!owner) throw Error("native tool probe ownership missing");
       (async()=>{
-        const registration=JSON.parse(fs.readFileSync("/root/.loom/agents-opencode/state/opencode/service.json","utf8"));
+        if (process.env.LOOM_CONFIG_DIR!=="/root/.loom") throw Error("owned service root mismatch");
+        const registration=JSON.parse(fs.readFileSync(path.join(process.env.LOOM_CONFIG_DIR,
+          "agents-opencode","state","opencode","service.json"),"utf8"));
         const base=new URL(registration.url);
         if (base.protocol!=="http:" || !["127.0.0.1","localhost"].includes(base.hostname) ||
-            base.pathname!=="/" || !registration.password || !Number.isInteger(registration.pid))
+            base.username || base.password || base.search || base.hash || base.pathname!=="/" ||
+            typeof registration.password!=="string" || !registration.password ||
+            !Number.isInteger(registration.pid) || registration.pid<1)
           throw Error("native service registration invalid");
         const authorization="Basic "+Buffer.from("opencode:"+registration.password).toString("base64");
         const get=async path=>{
