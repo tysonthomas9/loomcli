@@ -1,0 +1,828 @@
+# #943 product journey authoring; execute with the reviewed runner overlay.
+# Deterministic: actual serve/FleetDB/Git/processes, stub AI, local fake forge.
+# --screenshots records each named R-* wait checkpoint in the AFT report.
+# No seeded revisions/verdicts; fixture setup may use API and real Git.
+# D29: Approve follows the patch into the existing working area automatically.
+# Explicit route: Approve only -> Applied checkpoint -> mounted Create PR.
+# Criterion mapping (same case suffix and checkpoints in stack AND trunk):
+# A-P1.26.01/.02/.06 + B-024-01 + B-218-02/.04: all changed cases, task/diff/verdict.
+# B-R-01 + B-026-03/.11 + B-219-02/.06: explicit/automatic, applied/pr.
+# B-211-03 + duplicate request idempotency: explicit/automatic/reject-retry, pr/reloaded.
+# A-P1.26.02 + B-218-05: reject-retry, rejected/retry/history/pr.
+# A-P1.25.01 + A-P1.26.03 + B-R-04: empty, no-changes/no-actions/reloaded.
+# B-026-05 + B-219-04 + A-P1.26.02: held, held/reloaded.
+# Unrun/missing fault-specific paths stay explicit in task note df232431-41a7-4a71-9bc5-88f3b2c46772.
+suite: loomgit-journey-review
+classification:
+  area: reviews
+  feature: review-apply-publish
+  surface: mixed
+  purpose: journey
+baseUrl: ${AFT_BASE_URL:-http://127.0.0.1:3100}
+setup: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup
+teardown: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" teardown
+tests:
+- name: review-stack-explicit
+  intent: In stack delivery mode, Approve only applies, then the human publishes once. API-client starts and
+    retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-explicit
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-explicit
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-stack-explicit
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-stack-explicit-task: the task has the required completion state'
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=issue-status-badge]'') && !document.querySelector(''[data-testid=status-dropdown]'')
+        && !document.querySelector(''[data-testid=remove-label-code-review]'') && !document.querySelector(''[data-testid=review-action-bar]'')
+        && !document.querySelector(''[data-testid=panel-approve-button]'')'
+    intent: 'R-stack-explicit-locked: code review has a status badge and no header bypass'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelectorAll('[data-testid=task-repo-changes]').length === 1 && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-stack-explicit.txt')
+        && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('task=') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('
+        run=') && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting
+        review')
+    intent: 'R-stack-explicit-diff: the reviewer sees the actual code before an enabled verdict'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-explicit review
+    intent: The observer compares the visible task diff with captured Git refs and verifies no Apply or publish
+      before approval
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-explicit
+    intent: The observer checks the displayed revision number and head against the product API
+  - click:
+      testid: approve-menu-toggle
+    intent: The human opens More approve options
+  - click:
+      testid: approve-only
+    intent: The human chooses Approve only; existing working area follows the approved patch
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('approve') && [...document.querySelectorAll('[data-testid=revisions-section]
+        button')].filter(b => ['Reject','Override','Approve and create PR','▾'].includes(b.textContent.trim())).every(b
+        => b.disabled)
+    intent: 'R-stack-explicit-verdict: the exact head has a locked approval'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-explicit applied
+    intent: The observer checks the human verdict and real Apply result without a provider write
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !!document.querySelector('[data-testid=create-pr]:not([disabled])')
+        && !document.querySelector('[data-testid=revision-pr]')
+    intent: 'R-stack-explicit-applied: approved code is in the working area before publication'
+  - click:
+      testid: create-pr
+    intent: The human publishes the applied change with Create PR
+  - wait:
+      fn: document.querySelector('[data-testid=revision-pr]')?.textContent.includes('is open')
+    intent: 'R-stack-explicit-pr: Loom shows the opened PR'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-explicit published
+    intent: The observer compares task/API state, local publication ref, bare remote patch and fake-provider
+      head/base/body/count
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-explicit
+    intent: The observer checks the published UI revision matches the recorded Git/API head
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retry-publish review-stack-explicit
+    intent: The API-client retries Publish after the human action; the existing PR must be adopted once
+  - reload: true
+    intent: The human reloads the published task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-stack-explicit-reloaded-task: delivered task closure survives reload'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-pr]'') && !document.querySelector(''[data-testid=create-pr]'')
+        && !document.querySelector(''[data-testid=approve-create-pr]'') && !document.querySelector(''[data-testid=approve-menu-toggle]'')
+        && !document.querySelector(''[data-testid=approve-only]'')'
+    intent: 'R-stack-explicit-reloaded: the same PR is shown with no duplicate Create PR or Approve only'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-explicit
+    intent: The observer checks reload remains pinned to the published revision
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-explicit stable
+    intent: The observer verifies retry and reload preserve one PR creation, the same remote head and the same
+      publication record
+- name: review-stack-automatic
+  intent: In stack delivery mode, the human Approve and create PR applies and publishes once. API-client starts
+    and retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-automatic
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-automatic
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-stack-automatic
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-stack-automatic-task: the task has the required completion state'
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=issue-status-badge]'') && !document.querySelector(''[data-testid=status-dropdown]'')
+        && !document.querySelector(''[data-testid=remove-label-code-review]'') && !document.querySelector(''[data-testid=review-action-bar]'')
+        && !document.querySelector(''[data-testid=panel-approve-button]'')'
+    intent: 'R-stack-automatic-locked: code review has a status badge and no header bypass'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelectorAll('[data-testid=task-repo-changes]').length === 1 && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-stack-automatic.txt')
+        && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('task=') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('
+        run=') && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting
+        review')
+    intent: 'R-stack-automatic-diff: the reviewer sees the actual code before an enabled verdict'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-automatic review
+    intent: The observer compares the visible task diff with captured Git refs and verifies no Apply or publish
+      before approval
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-automatic
+    intent: The observer checks the displayed revision number and head against the product API
+  - click:
+      testid: approve-create-pr
+    intent: The human approves, applies and creates the PR through Changes
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !!document.querySelector('[data-testid=revision-pr]')
+    intent: 'R-stack-automatic-verdict: approval delivered the code and opened its PR'
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !document.querySelector('[data-testid=create-pr]')
+        && !document.querySelector('[data-testid=approve-create-pr]') && !document.querySelector('[data-testid=approve-menu-toggle]')
+    intent: 'R-stack-automatic-applied: the real applied result is shown and first-publish controls are removed'
+  - wait:
+      fn: document.querySelector('[data-testid=revision-pr]')?.textContent.includes('is open')
+    intent: 'R-stack-automatic-pr: Loom shows the opened PR'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-automatic published
+    intent: The observer compares task/API state, local publication ref, bare remote patch and fake-provider
+      head/base/body/count
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-automatic
+    intent: The observer checks the published UI revision matches the recorded Git/API head
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retry-publish review-stack-automatic
+    intent: The API-client retries Publish after the human action; the existing PR must be adopted once
+  - reload: true
+    intent: The human reloads the published task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-stack-automatic-reloaded-task: delivered task closure survives reload'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-pr]'') && !document.querySelector(''[data-testid=create-pr]'')
+        && !document.querySelector(''[data-testid=approve-create-pr]'') && !document.querySelector(''[data-testid=approve-menu-toggle]'')
+        && !document.querySelector(''[data-testid=approve-only]'')'
+    intent: 'R-stack-automatic-reloaded: the same PR is shown with no duplicate Create PR or Approve only'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-automatic
+    intent: The observer checks reload remains pinned to the published revision
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-automatic stable
+    intent: The observer verifies retry and reload preserve one PR creation, the same remote head and the same
+      publication record
+- name: review-stack-reject-retry
+  intent: In stack delivery mode, the human Reject preserves old code, and a new attempt is reviewed and published.
+    API-client starts and retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-reject-retry
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-reject-retry
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-stack-reject-retry
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-stack-reject-retry-task: the task has the required completion state'
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=issue-status-badge]'') && !document.querySelector(''[data-testid=status-dropdown]'')
+        && !document.querySelector(''[data-testid=remove-label-code-review]'') && !document.querySelector(''[data-testid=review-action-bar]'')
+        && !document.querySelector(''[data-testid=panel-approve-button]'')'
+    intent: 'R-stack-reject-retry-locked: code review has a status badge and no header bypass'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelectorAll('[data-testid=task-repo-changes]').length === 1 && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-stack-reject-retry.txt')
+        && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('task=') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('
+        run=') && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting
+        review')
+    intent: 'R-stack-reject-retry-diff: the reviewer sees the actual code before an enabled verdict'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-reject-retry review
+    intent: The observer compares the visible task diff with captured Git refs and verifies no Apply or publish
+      before approval
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-reject-retry
+    intent: The observer checks the displayed revision number and head against the product API
+  - click:
+      role: button
+      name: Reject
+      exact: true
+    intent: The human reviewer rejects this exact revision through Changes
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('reject') && [...document.querySelectorAll('[data-testid=revisions-section]
+        button')].filter(b => ['Reject','Override','Approve and create PR','▾'].includes(b.textContent.trim())).every(b
+        => b.disabled)
+    intent: 'R-stack-reject-retry-rejected: Reject is recorded and the old head cannot be decided again'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-reject-retry rejected
+    intent: The observer checks Reject reopens the task, removes code-review, preserves the revision and opens
+      no PR
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retry review-stack-reject-retry
+    intent: The API-client changes only the rejected task design and starts a new TaskRun for that same task
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retried review-stack-reject-retry
+    intent: The system captures a distinct new revision for the same task and change
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-stack-reject-retry
+    intent: The human reviewer opens the retry
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-stack-reject-retry-retry-task: the new attempt returns to code review'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting review')
+        && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-stack-reject-retry-retry.txt')
+    intent: 'R-stack-reject-retry-retry: only the new patch is awaiting review'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-reject-retry retry
+    intent: The observer compares new Git/API patch and retains the rejected source as superseded history
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-reject-retry
+    intent: The observer checks the retry UI is pinned to the new head
+  - click:
+      role: button
+      name: History (1)
+      exact: true
+    intent: The human opens the rejected attempt in History
+  - click:
+      role: button
+      name: Revision 1
+      exact: true
+    intent: The human selects the earlier revision to inspect its own patch
+  - wait:
+      fn: document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('Revision 1 (read-only
+        history)') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-stack-reject-retry.txt')
+        && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Revision 2')
+    intent: 'R-stack-reject-retry-history: the rejected code is read-only while verdicts remain bound to the
+      newest revision'
+  - click:
+      role: button
+      name: Back to the task diff
+      exact: true
+    intent: The human returns to the current task diff
+  - click:
+      testid: approve-create-pr
+    intent: The human approves, applies and creates the PR through Changes
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !!document.querySelector('[data-testid=revision-pr]')
+    intent: 'R-stack-reject-retry-verdict: approval delivered the code and opened its PR'
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !document.querySelector('[data-testid=create-pr]')
+        && !document.querySelector('[data-testid=approve-create-pr]') && !document.querySelector('[data-testid=approve-menu-toggle]')
+    intent: 'R-stack-reject-retry-applied: the real applied result is shown and first-publish controls are
+      removed'
+  - wait:
+      fn: document.querySelector('[data-testid=revision-pr]')?.textContent.includes('is open')
+    intent: 'R-stack-reject-retry-pr: Loom shows the opened PR'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-reject-retry published
+    intent: The observer compares task/API state, local publication ref, bare remote patch and fake-provider
+      head/base/body/count
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-reject-retry
+    intent: The observer checks the published UI revision matches the recorded Git/API head
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retry-publish review-stack-reject-retry
+    intent: The API-client retries Publish after the human action; the existing PR must be adopted once
+  - reload: true
+    intent: The human reloads the published task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-stack-reject-retry-reloaded-task: delivered task closure survives reload'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-pr]'') && !document.querySelector(''[data-testid=create-pr]'')
+        && !document.querySelector(''[data-testid=approve-create-pr]'') && !document.querySelector(''[data-testid=approve-menu-toggle]'')
+        && !document.querySelector(''[data-testid=approve-only]'')'
+    intent: 'R-stack-reject-retry-reloaded: the same PR is shown with no duplicate Create PR or Approve only'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-reject-retry
+    intent: The observer checks reload remains pinned to the published revision
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-reject-retry stable
+    intent: The observer verifies retry and reload preserve one PR creation, the same remote head and the same
+      publication record
+- name: review-stack-empty
+  intent: In stack delivery mode, a complete empty TaskRun closes as No changes without review or delivery
+    controls. API-client starts and retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-empty
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-empty
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-stack-empty
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-stack-empty-task: the task has the required completion state'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-no-changes]'') && document.querySelector(''[data-testid=task-diff-label]'')?.textContent.startsWith(''Revision
+        1 '')'
+    intent: 'R-stack-empty-no-changes: the complete empty revision shows No changes'
+  - wait:
+      fn: '!document.querySelector(''[data-testid=task-changes-tab] button'')'
+    intent: 'R-stack-empty-no-actions: empty code offers no verdict, Apply or PR controls'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-empty empty
+    intent: The observer checks identical Git trees, empty API diff, No changes closure and unchanged remote
+  - reload: true
+    intent: The human reloads the empty task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-stack-empty-reloaded-task: reload preserves closure'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-no-changes]'') && !document.querySelector(''[data-testid=task-changes-tab]
+        button'')'
+    intent: 'R-stack-empty-reloaded: No changes and no actions survive reload'
+- name: review-stack-held
+  intent: In stack delivery mode, unsaved user bytes hold Apply, keeping the approved task in review and opening
+    no PR. API-client starts and retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-held
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-held
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-stack-held
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-stack-held-task: the task has the required completion state'
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=issue-status-badge]'') && !document.querySelector(''[data-testid=status-dropdown]'')
+        && !document.querySelector(''[data-testid=remove-label-code-review]'') && !document.querySelector(''[data-testid=review-action-bar]'')
+        && !document.querySelector(''[data-testid=panel-approve-button]'')'
+    intent: 'R-stack-held-locked: code review has a status badge and no header bypass'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelectorAll('[data-testid=task-repo-changes]').length === 1 && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-stack-held.txt')
+        && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('task=') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('
+        run=') && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting
+        review')
+    intent: 'R-stack-held-diff: the reviewer sees the actual code before an enabled verdict'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-held review
+    intent: The observer compares the visible task diff with captured Git refs and verifies no Apply or publish
+      before approval
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-stack-held
+    intent: The observer checks the displayed revision number and head against the product API
+  - click:
+      testid: approve-create-pr
+    intent: The human asks to approve, apply and publish through the mounted review button
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revisions-section] [role=alert]'') && document.querySelector(''[data-testid=revisions-section]'')?.textContent.includes(''review-stack-held.txt'')
+        && !document.querySelector(''[data-testid=revision-pr]'')'
+    intent: 'R-stack-held-held: the overlapping edit is named and no PR is shown'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-held held
+    intent: The observer checks recorded approval, no premature closure, unchanged HEAD/index/user bytes and
+      no remote or provider mutation
+  - reload: true
+    intent: The human reloads the held task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-stack-held-reloaded-task: held delivery still requires attention'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('approve') && [...document.querySelectorAll('[data-testid=revisions-section]
+        button')].filter(b => ['Reject','Override','Approve and create PR','▾'].includes(b.textContent.trim())).every(b
+        => b.disabled) && !document.querySelector('[data-testid=revision-pr]') && !document.querySelector('[data-testid=create-pr]')
+    intent: 'R-stack-held-reloaded: recorded approval stays locked while the task is held'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-stack-held held
+    intent: The observer checks reload did not overwrite user edits or publish a held change
+- name: review-trunk-explicit
+  intent: In trunk delivery mode, Approve only applies, then the human publishes once. API-client starts and
+    retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-explicit
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-explicit
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-trunk-explicit
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-trunk-explicit-task: the task has the required completion state'
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=issue-status-badge]'') && !document.querySelector(''[data-testid=status-dropdown]'')
+        && !document.querySelector(''[data-testid=remove-label-code-review]'') && !document.querySelector(''[data-testid=review-action-bar]'')
+        && !document.querySelector(''[data-testid=panel-approve-button]'')'
+    intent: 'R-trunk-explicit-locked: code review has a status badge and no header bypass'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelectorAll('[data-testid=task-repo-changes]').length === 1 && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-trunk-explicit.txt')
+        && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('task=') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('
+        run=') && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting
+        review')
+    intent: 'R-trunk-explicit-diff: the reviewer sees the actual code before an enabled verdict'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-explicit review
+    intent: The observer compares the visible task diff with captured Git refs and verifies no Apply or publish
+      before approval
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-explicit
+    intent: The observer checks the displayed revision number and head against the product API
+  - click:
+      testid: approve-menu-toggle
+    intent: The human opens More approve options
+  - click:
+      testid: approve-only
+    intent: The human chooses Approve only; existing working area follows the approved patch
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('approve') && [...document.querySelectorAll('[data-testid=revisions-section]
+        button')].filter(b => ['Reject','Override','Approve and create PR','▾'].includes(b.textContent.trim())).every(b
+        => b.disabled)
+    intent: 'R-trunk-explicit-verdict: the exact head has a locked approval'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-explicit applied
+    intent: The observer checks the human verdict and real Apply result without a provider write
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !!document.querySelector('[data-testid=create-pr]:not([disabled])')
+        && !document.querySelector('[data-testid=revision-pr]')
+    intent: 'R-trunk-explicit-applied: approved code is in the working area before publication'
+  - click:
+      testid: create-pr
+    intent: The human publishes the applied change with Create PR
+  - wait:
+      fn: document.querySelector('[data-testid=revision-pr]')?.textContent.includes('is open')
+    intent: 'R-trunk-explicit-pr: Loom shows the opened PR'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-explicit published
+    intent: The observer compares task/API state, local publication ref, bare remote patch and fake-provider
+      head/base/body/count
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-explicit
+    intent: The observer checks the published UI revision matches the recorded Git/API head
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retry-publish review-trunk-explicit
+    intent: The API-client retries Publish after the human action; the existing PR must be adopted once
+  - reload: true
+    intent: The human reloads the published task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-trunk-explicit-reloaded-task: delivered task closure survives reload'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-pr]'') && !document.querySelector(''[data-testid=create-pr]'')
+        && !document.querySelector(''[data-testid=approve-create-pr]'') && !document.querySelector(''[data-testid=approve-menu-toggle]'')
+        && !document.querySelector(''[data-testid=approve-only]'')'
+    intent: 'R-trunk-explicit-reloaded: the same PR is shown with no duplicate Create PR or Approve only'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-explicit
+    intent: The observer checks reload remains pinned to the published revision
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-explicit stable
+    intent: The observer verifies retry and reload preserve one PR creation, the same remote head and the same
+      publication record
+- name: review-trunk-automatic
+  intent: In trunk delivery mode, the human Approve and create PR applies and publishes once. API-client starts
+    and retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-automatic
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-automatic
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-trunk-automatic
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-trunk-automatic-task: the task has the required completion state'
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=issue-status-badge]'') && !document.querySelector(''[data-testid=status-dropdown]'')
+        && !document.querySelector(''[data-testid=remove-label-code-review]'') && !document.querySelector(''[data-testid=review-action-bar]'')
+        && !document.querySelector(''[data-testid=panel-approve-button]'')'
+    intent: 'R-trunk-automatic-locked: code review has a status badge and no header bypass'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelectorAll('[data-testid=task-repo-changes]').length === 1 && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-trunk-automatic.txt')
+        && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('task=') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('
+        run=') && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting
+        review')
+    intent: 'R-trunk-automatic-diff: the reviewer sees the actual code before an enabled verdict'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-automatic review
+    intent: The observer compares the visible task diff with captured Git refs and verifies no Apply or publish
+      before approval
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-automatic
+    intent: The observer checks the displayed revision number and head against the product API
+  - click:
+      testid: approve-create-pr
+    intent: The human approves, applies and creates the PR through Changes
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !!document.querySelector('[data-testid=revision-pr]')
+    intent: 'R-trunk-automatic-verdict: approval delivered the code and opened its PR'
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !document.querySelector('[data-testid=create-pr]')
+        && !document.querySelector('[data-testid=approve-create-pr]') && !document.querySelector('[data-testid=approve-menu-toggle]')
+    intent: 'R-trunk-automatic-applied: the real applied result is shown and first-publish controls are removed'
+  - wait:
+      fn: document.querySelector('[data-testid=revision-pr]')?.textContent.includes('is open')
+    intent: 'R-trunk-automatic-pr: Loom shows the opened PR'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-automatic published
+    intent: The observer compares task/API state, local publication ref, bare remote patch and fake-provider
+      head/base/body/count
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-automatic
+    intent: The observer checks the published UI revision matches the recorded Git/API head
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retry-publish review-trunk-automatic
+    intent: The API-client retries Publish after the human action; the existing PR must be adopted once
+  - reload: true
+    intent: The human reloads the published task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-trunk-automatic-reloaded-task: delivered task closure survives reload'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-pr]'') && !document.querySelector(''[data-testid=create-pr]'')
+        && !document.querySelector(''[data-testid=approve-create-pr]'') && !document.querySelector(''[data-testid=approve-menu-toggle]'')
+        && !document.querySelector(''[data-testid=approve-only]'')'
+    intent: 'R-trunk-automatic-reloaded: the same PR is shown with no duplicate Create PR or Approve only'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-automatic
+    intent: The observer checks reload remains pinned to the published revision
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-automatic stable
+    intent: The observer verifies retry and reload preserve one PR creation, the same remote head and the same
+      publication record
+- name: review-trunk-reject-retry
+  intent: In trunk delivery mode, the human Reject preserves old code, and a new attempt is reviewed and published.
+    API-client starts and retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-reject-retry
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-reject-retry
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-trunk-reject-retry
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-trunk-reject-retry-task: the task has the required completion state'
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=issue-status-badge]'') && !document.querySelector(''[data-testid=status-dropdown]'')
+        && !document.querySelector(''[data-testid=remove-label-code-review]'') && !document.querySelector(''[data-testid=review-action-bar]'')
+        && !document.querySelector(''[data-testid=panel-approve-button]'')'
+    intent: 'R-trunk-reject-retry-locked: code review has a status badge and no header bypass'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelectorAll('[data-testid=task-repo-changes]').length === 1 && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-trunk-reject-retry.txt')
+        && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('task=') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('
+        run=') && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting
+        review')
+    intent: 'R-trunk-reject-retry-diff: the reviewer sees the actual code before an enabled verdict'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-reject-retry review
+    intent: The observer compares the visible task diff with captured Git refs and verifies no Apply or publish
+      before approval
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-reject-retry
+    intent: The observer checks the displayed revision number and head against the product API
+  - click:
+      role: button
+      name: Reject
+      exact: true
+    intent: The human reviewer rejects this exact revision through Changes
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('reject') && [...document.querySelectorAll('[data-testid=revisions-section]
+        button')].filter(b => ['Reject','Override','Approve and create PR','▾'].includes(b.textContent.trim())).every(b
+        => b.disabled)
+    intent: 'R-trunk-reject-retry-rejected: Reject is recorded and the old head cannot be decided again'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-reject-retry rejected
+    intent: The observer checks Reject reopens the task, removes code-review, preserves the revision and opens
+      no PR
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retry review-trunk-reject-retry
+    intent: The API-client changes only the rejected task design and starts a new TaskRun for that same task
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retried review-trunk-reject-retry
+    intent: The system captures a distinct new revision for the same task and change
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-trunk-reject-retry
+    intent: The human reviewer opens the retry
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-trunk-reject-retry-retry-task: the new attempt returns to code review'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting review')
+        && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-trunk-reject-retry-retry.txt')
+    intent: 'R-trunk-reject-retry-retry: only the new patch is awaiting review'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-reject-retry retry
+    intent: The observer compares new Git/API patch and retains the rejected source as superseded history
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-reject-retry
+    intent: The observer checks the retry UI is pinned to the new head
+  - click:
+      role: button
+      name: History (1)
+      exact: true
+    intent: The human opens the rejected attempt in History
+  - click:
+      role: button
+      name: Revision 1
+      exact: true
+    intent: The human selects the earlier revision to inspect its own patch
+  - wait:
+      fn: document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('Revision 1 (read-only
+        history)') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-trunk-reject-retry.txt')
+        && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Revision 2')
+    intent: 'R-trunk-reject-retry-history: the rejected code is read-only while verdicts remain bound to the
+      newest revision'
+  - click:
+      role: button
+      name: Back to the task diff
+      exact: true
+    intent: The human returns to the current task diff
+  - click:
+      testid: approve-create-pr
+    intent: The human approves, applies and creates the PR through Changes
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !!document.querySelector('[data-testid=revision-pr]')
+    intent: 'R-trunk-reject-retry-verdict: approval delivered the code and opened its PR'
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Applied') && !document.querySelector('[data-testid=create-pr]')
+        && !document.querySelector('[data-testid=approve-create-pr]') && !document.querySelector('[data-testid=approve-menu-toggle]')
+    intent: 'R-trunk-reject-retry-applied: the real applied result is shown and first-publish controls are
+      removed'
+  - wait:
+      fn: document.querySelector('[data-testid=revision-pr]')?.textContent.includes('is open')
+    intent: 'R-trunk-reject-retry-pr: Loom shows the opened PR'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-reject-retry published
+    intent: The observer compares task/API state, local publication ref, bare remote patch and fake-provider
+      head/base/body/count
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-reject-retry
+    intent: The observer checks the published UI revision matches the recorded Git/API head
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" retry-publish review-trunk-reject-retry
+    intent: The API-client retries Publish after the human action; the existing PR must be adopted once
+  - reload: true
+    intent: The human reloads the published task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-trunk-reject-retry-reloaded-task: delivered task closure survives reload'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-pr]'') && !document.querySelector(''[data-testid=create-pr]'')
+        && !document.querySelector(''[data-testid=approve-create-pr]'') && !document.querySelector(''[data-testid=approve-menu-toggle]'')
+        && !document.querySelector(''[data-testid=approve-only]'')'
+    intent: 'R-trunk-reject-retry-reloaded: the same PR is shown with no duplicate Create PR or Approve only'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-reject-retry
+    intent: The observer checks reload remains pinned to the published revision
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-reject-retry stable
+    intent: The observer verifies retry and reload preserve one PR creation, the same remote head and the same
+      publication record
+- name: review-trunk-empty
+  intent: In trunk delivery mode, a complete empty TaskRun closes as No changes without review or delivery
+    controls. API-client starts and retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-empty
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-empty
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-trunk-empty
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-trunk-empty-task: the task has the required completion state'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-no-changes]'') && document.querySelector(''[data-testid=task-diff-label]'')?.textContent.startsWith(''Revision
+        1 '')'
+    intent: 'R-trunk-empty-no-changes: the complete empty revision shows No changes'
+  - wait:
+      fn: '!document.querySelector(''[data-testid=task-changes-tab] button'')'
+    intent: 'R-trunk-empty-no-actions: empty code offers no verdict, Apply or PR controls'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-empty empty
+    intent: The observer checks identical Git trees, empty API diff, No changes closure and unchanged remote
+  - reload: true
+    intent: The human reloads the empty task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'closed'
+    intent: 'R-trunk-empty-reloaded-task: reload preserves closure'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revision-no-changes]'') && !document.querySelector(''[data-testid=task-changes-tab]
+        button'')'
+    intent: 'R-trunk-empty-reloaded: No changes and no actions survive reload'
+- name: review-trunk-held
+  intent: In trunk delivery mode, unsaved user bytes hold Apply, keeping the approved task in review and opening
+    no PR. API-client starts and retry requests are named separately; observers only read product state.
+  steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-held
+    intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-held
+    intent: The system records the completed attempt through product capture and waits for its task state
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" open review-trunk-held
+    intent: The human reviewer navigates to the completed task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-trunk-held-task: the task has the required completion state'
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=issue-status-badge]'') && !document.querySelector(''[data-testid=status-dropdown]'')
+        && !document.querySelector(''[data-testid=remove-label-code-review]'') && !document.querySelector(''[data-testid=review-action-bar]'')
+        && !document.querySelector(''[data-testid=panel-approve-button]'')'
+    intent: 'R-trunk-held-locked: code review has a status badge and no header bypass'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelectorAll('[data-testid=task-repo-changes]').length === 1 && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('review-trunk-held.txt')
+        && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('task=') && document.querySelector('[data-testid=task-changes-tab]')?.textContent.includes('
+        run=') && !document.querySelector('[data-testid=approve-create-pr]')?.disabled && document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting
+        review')
+    intent: 'R-trunk-held-diff: the reviewer sees the actual code before an enabled verdict'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-held review
+    intent: The observer compares the visible task diff with captured Git refs and verifies no Apply or publish
+      before approval
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" ui-pin review-trunk-held
+    intent: The observer checks the displayed revision number and head against the product API
+  - click:
+      testid: approve-create-pr
+    intent: The human asks to approve, apply and publish through the mounted review button
+  - wait:
+      fn: '!!document.querySelector(''[data-testid=revisions-section] [role=alert]'') && document.querySelector(''[data-testid=revisions-section]'')?.textContent.includes(''review-trunk-held.txt'')
+        && !document.querySelector(''[data-testid=revision-pr]'')'
+    intent: 'R-trunk-held-held: the overlapping edit is named and no PR is shown'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-held held
+    intent: The observer checks recorded approval, no premature closure, unchanged HEAD/index/user bytes and
+      no remote or provider mutation
+  - reload: true
+    intent: The human reloads the held task
+  - wait:
+      fn: (document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status')
+        === 'review'
+    intent: 'R-trunk-held-reloaded-task: held delivery still requires attention'
+  - click:
+      role: tab
+      name: Changes
+      exact: true
+    intent: The human reviewer opens Changes to review the task patch
+  - wait:
+      fn: document.querySelector('[data-testid=revisions-section]')?.textContent.includes('approve') && [...document.querySelectorAll('[data-testid=revisions-section]
+        button')].filter(b => ['Reject','Override','Approve and create PR','▾'].includes(b.textContent.trim())).every(b
+        => b.disabled) && !document.querySelector('[data-testid=revision-pr]') && !document.querySelector('[data-testid=create-pr]')
+    intent: 'R-trunk-held-reloaded: recorded approval stays locked while the task is held'
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" check review-trunk-held held
+    intent: The observer checks reload did not overwrite user edits or publish a held change
