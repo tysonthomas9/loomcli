@@ -136,6 +136,47 @@ class ChildProofPredicates(unittest.TestCase):
             with self.subTest(change=change), self.assertRaisesRegex(AssertionError, message):
                 module.mobile_geometry_ok({**good, **change}, self.a, 390, "dark")
 
+    def test_started_rejects_wrong_child_name_count_or_raw_input(self):
+        good = {"markerCount": 1, "ids": [self.a, self.b], "names": ["pair-a", "pair-b"],
+                "toolCount": 2, "colors": ["1", "2"], "rawCode": False}
+        module.assert_started_snapshot(good, [self.a, self.b], ["pair-a", "pair-b"], 2)
+        for change in ({"ids": [self.a, self.a]}, {"names": ["pair-a", "wrong"]},
+                       {"toolCount": 1}, {"rawCode": True}):
+            with self.subTest(change=change), self.assertRaises(AssertionError):
+                module.assert_started_snapshot({**good, **change}, [self.a, self.b], ["pair-a", "pair-b"], 2)
+
+    def test_card_rejects_duplicate_wrong_color_and_raw_completion_bubble(self):
+        kid = {"agent_id": self.a, "name": "pair-a"}
+        good = {"cards": [{"name": "pair-a", "attempt": "0", "color": "3",
+                            "outcome": "completed", "delivery": "delivered"}], "rawBubble": False}
+        with patch.object(module, "load", return_value={"value": "3"}):
+            module.card_snapshot_ok(good, [(kid, 0)])
+            for bad in ({"cards": good["cards"] * 2},
+                        {"cards": [{**good["cards"][0], "color": "4"}]},
+                        {"rawBubble": True}):
+                with self.subTest(bad=bad), self.assertRaises(AssertionError):
+                    module.card_snapshot_ok({**good, **bad}, [(kid, 0)])
+
+    def test_child_ancestry_rejects_wrong_actual_branch_or_merge_base(self):
+        prior = {"branch": "parent", "head": "a" * 40}
+        parent = {"branch": "parent"}
+        child = {"branch": "child", "worktree_path": "/tmp/child"}
+        with patch.object(module.subprocess, "run") as run, patch.object(module, "git_ref", return_value=prior["head"]):
+            module.assert_child_ancestry(prior, parent, child, "child", "b" * 40)
+            run.assert_called_once()
+        with self.assertRaisesRegex(AssertionError, "branch mismatch"):
+            module.assert_child_ancestry(prior, parent, child, "wrong", "b" * 40)
+        with patch.object(module.subprocess, "run"), patch.object(module, "git_ref", return_value="c" * 40):
+            with self.assertRaisesRegex(AssertionError, "does not descend"):
+                module.assert_child_ancestry(prior, parent, child, "child", "b" * 40)
+
+    def test_archive_state_requires_exact_saved_api_state(self):
+        with patch.object(module, "load", return_value={"agent_id": self.a}), \
+             patch.object(module, "save"), patch.object(module, "agent", return_value={"agent_id": self.a, "state": "archived"}):
+            module.archive_state("side", "archived")
+            with self.assertRaises(AssertionError):
+                module.archive_state("side", "active")
+
 
 if __name__ == "__main__":
     unittest.main()

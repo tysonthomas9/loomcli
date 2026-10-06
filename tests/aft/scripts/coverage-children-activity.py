@@ -77,12 +77,34 @@ def bind(label, name, parent_label=""):
     save(label, row)
     (OUT / f"{label}.id").write_text(row["agent_id"] + "\n")
     if parent:
+        prior = load(parent_label + "-precreate-ref")
+        child_head = git_ref(row["worktree_path"], "rev-parse", "HEAD")
+        child_branch = git_ref(row["worktree_path"], "rev-parse", "--abbrev-ref", "HEAD")
+        assert_child_ancestry(prior, parent, row, child_branch, child_head)
+        save(label + "-create-ref", {"parent_head_before": prior["head"], "parent_branch": prior["branch"],
+                                     "child_head_after": child_head, "child_branch": child_branch,
+                                     "parent_worktree": prior["worktree"], "child_worktree": row["worktree_path"]})
+    else:
+        save(label + "-precreate-ref", {"head": git_ref(row["worktree_path"], "rev-parse", "HEAD"),
+                                        "branch": git_ref(row["worktree_path"], "rev-parse", "--abbrev-ref", "HEAD"),
+                                        "worktree": row["worktree_path"]})
+    if parent:
         created = [e for e in events(parent["agent_id"])
                    if e["kind"] == "child.created" and e["payload"].get("child") == row["agent_id"]]
         assert len(created) == 1, "child was not created by the Lead tool"
         tools = [e for e in events(parent["agent_id"]) if calls_operation(e, "agent_create")]
         assert any(name in str(e["payload"]["tool"].get("input", "")) for e in tools)
     print(row["agent_id"])
+
+
+def git_ref(path, *args):
+    return subprocess.check_output(["git", "-C", path, *args], text=True).strip()
+
+
+def assert_child_ancestry(prior, parent, child, branch, head):
+    assert prior["branch"] == parent["branch"] and branch == child["branch"], "actual pre-create branch or child worktree branch mismatch"
+    subprocess.run(["git", "-C", child["worktree_path"], "merge-base", "--is-ancestor", prior["head"], head], check=True)
+    assert git_ref(child["worktree_path"], "merge-base", prior["head"], head) == prior["head"], "child base does not descend from pre-create parent HEAD"
 
 
 def tool_name(event):
@@ -254,6 +276,215 @@ def browser_json(script):
     raise AssertionError("browser did not return JSON geometry")
 
 
+def native_create_count(history):
+    count = 0
+    for event in history:
+        if not calls_operation(event, "agent_create"):
+            continue
+        tool = event["payload"]["tool"]
+        code = tool_code(tool)
+        count += len(re.findall(r"\btools\.loom\.agent_create\s*\(", code)) if code else 1
+    return count
+
+
+def assert_started_snapshot(snapshot, ids, names, native_count):
+    assert not snapshot.get("missing") and snapshot["markerCount"] >= 1
+    assert sorted(snapshot["ids"]) == sorted(ids), "Started chips must match exact saved child IDs once"
+    assert sorted(snapshot["names"]) == sorted(names), "Started chips must show exact full child names"
+    assert snapshot["toolCount"] == native_count == len(ids), "Started tool count differs from saved native creates"
+    assert snapshot["rawCode"] is False, "collapsed Started marker leaked raw bridge input"
+    assert all(snapshot["colors"]), "Started child badge lacks its stable color"
+
+
+def started_ui(lead_label, *child_labels):
+    lead = load(lead_label)
+    kids = [load(label) for label in child_labels]
+    history = events(lead["agent_id"])
+    ids = [kid["agent_id"] for kid in kids]
+    assert len(ids) == len(set(ids))
+    for kid in kids:
+        assert len([e for e in history if e["kind"] == "child.created" and
+                    e["payload"].get("child") == kid["agent_id"]]) == 1
+    shot = browser_json("""JSON.stringify((() => {
+      const markers=Array.from(document.querySelectorAll('[data-testid=started-marker]'));
+      const links=markers.flatMap(m=>Array.from(m.querySelectorAll('a[href]')));
+      const ids=links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''));
+      const names=links.map(a=>a.lastChild?.textContent?.trim()||'');
+      const colors=links.map(a=>a.querySelector('[data-agent-color]')?.getAttribute('data-agent-color')||'');
+      const toolCount=markers.reduce((n,m)=>n+Number(/^([0-9]+) tool calls?$/.exec(m.querySelector('button[aria-expanded]')?.textContent?.trim().replace(/›/g,'').trim()||'')?.[1]||0),0);
+      return {markerCount:markers.length,ids,names,colors,toolCount,
+        rawCode:markers.some(m=>/\\{\\s*["'](?:name|brief|agent_id)["']\\s*:|tools\\.loom\\.agent_create\\s*\\(/.test(m.textContent||'')),
+        expanded:markers.map(m=>m.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')||'')};
+    })())""")
+    assert_started_snapshot(shot, ids, [kid["name"] for kid in kids], native_create_count(history))
+    for kid, color in zip(kids, shot["colors"]):
+        previous = OUT / f"color-{kid['agent_id']}.json"
+        if previous.exists():
+            assert load(f"color-{kid['agent_id']}")["value"] == color
+        else:
+            save(f"color-{kid['agent_id']}", {"value": color})
+    browser("screenshot", str(OUT / f"started-{lead_label}.png"))
+    save(f"started-{lead_label}", {"children": ids, "native_create_count": native_create_count(history), "ui": shot})
+
+
+def expanded_bridge(lead_label):
+    shot = browser_json("""JSON.stringify((() => {
+      const m=document.querySelector('[data-testid=started-marker]');
+      const rows=Array.from(document.querySelectorAll('[data-testid=bridge-call]'));
+      return {expanded:m?.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded'),
+        rows:rows.map(x=>x.textContent?.trim()||''),
+        raw:rows.some(x=>/\\{\\s*["'](?:name|brief|agent_id)["']\\s*:/.test(x.textContent||''))};
+    })())""")
+    assert shot["expanded"] == "true" and any("Started" in x for x in shot["rows"])
+    assert not shot["raw"], "expanded bridge exposed raw tool input"
+    browser("screenshot", str(OUT / f"expanded-{lead_label}.png"))
+    save(f"expanded-{lead_label}", shot)
+
+
+def working_fallback(child_label, stage):
+    child = load(child_label)
+    live = agent(child["agent_id"])
+    shot = browser_json("""JSON.stringify((() => {
+      const id=%s;
+      const row=document.querySelector('[data-testid=agent-tray] li[data-tray-row="'+id+'"]');
+      return {id:row?.dataset.trayRow||'',running:!!row?.querySelector('[data-status=running]'),
+        result:row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim()||''};
+    })())""" % json.dumps(child["agent_id"]))
+    observed = (live["state"] == "active" and bool(live["running_turn_id"]) and
+                shot["id"] == child["agent_id"] and shot["running"] and shot["result"] == "Working…")
+    if observed:
+        current_steps = [e for e in events(child["agent_id"]) if e.get("turn_id") == live["running_turn_id"] and step_prefix(e)]
+        assert not current_steps, "Working fallback shown despite a saved current-turn step"
+        browser("screenshot", str(OUT / f"working-{stage}-{child_label}.png"))
+    save(f"working-{stage}-{child_label}", {"observed": observed, "api_state": live["state"],
+                                               "turn_id": live["running_turn_id"], "ui": shot})
+
+
+def card_snapshot_ok(snapshot, children):
+    expected = [(kid["agent_id"], kid["name"], attempt) for kid, attempt in children]
+    assert len(snapshot["cards"]) == len(expected)
+    assert not snapshot["rawBubble"], "raw task_completed surfaced as a user message"
+    for kid, attempt in children:
+        color = load(f"color-{kid['agent_id']}")["value"]
+        matches = [c for c in snapshot["cards"] if c["name"] == kid["name"] and
+                   c["attempt"] == str(attempt) and c["color"] == color and
+                   c["outcome"] == "completed" and c["delivery"] == "delivered"]
+        assert len(matches) == 1, f"exact completed card missing or duplicated for {kid['agent_id']} attempt {attempt}"
+
+
+def cards_ui(lead_label, *specs):
+    lead = load(lead_label)
+    children = []
+    ev = events(lead["agent_id"])
+    for spec in specs:
+        label, attempt = spec.split(":")
+        kid = load(label)
+        attempt = int(attempt)
+        assert len([e for e in completions(ev, kid["agent_id"]) if
+                    e["event_id"] == f"task_completed:{kid['agent_id']}:{attempt}"]) == 1
+        assert len(deliveries(ev, kid["agent_id"], attempt)) == 1
+        children.append((kid, attempt))
+    shot = browser_json("""JSON.stringify((() => ({
+      cards:Array.from(document.querySelectorAll('[data-testid=completion-record]')).map(c=>({
+        name:c.querySelector('[data-testid=agent-name]')?.textContent?.trim()||c.textContent?.trim()||'',
+        text:c.textContent?.trim()||'',attempt:c.dataset.attempt,color:c.dataset.agentColor,
+        outcome:c.dataset.outcome,delivery:c.dataset.delivery})),
+      rawBubble:Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li[data-kind=user]'))
+        .some(x=>/task_completed:[^\\s]+:[0-9]+/.test(x.textContent||''))
+    }))())""")
+    # The card name is part of a richer card body; match the complete saved name as a token.
+    for card in shot["cards"]:
+        card["name"] = next((kid["name"] for kid, _ in children if kid["name"] in card["text"]), "")
+    card_snapshot_ok(shot, children)
+    browser("screenshot", str(OUT / f"cards-{lead_label}-{'-'.join(specs)}.png"))
+    save(f"cards-{lead_label}-{'-'.join(specs)}", shot)
+
+
+def theme_cards(lead_label, *child_labels):
+    original = browser_json("JSON.stringify({theme:document.documentElement.dataset.theme})")["theme"]
+    assert original in ("dark", "light")
+    kids = [load(label) for label in child_labels]
+    for theme in ("dark", "light"):
+        current = browser_json("JSON.stringify({theme:document.documentElement.dataset.theme})")["theme"]
+        if current != theme:
+            browser("click", f'button[aria-label="Switch to {theme} mode"]')
+        browser("wait", "--fn", f'document.documentElement.dataset.theme === {json.dumps(theme)}')
+        shot = browser_json("""JSON.stringify(Array.from(document.querySelectorAll('[data-testid=completion-record]'))
+          .map(c=>({text:c.textContent||'',color:c.dataset.agentColor,attempt:c.dataset.attempt})))""")
+        assert len(shot) == len(kids)
+        for kid in kids:
+            expected = load(f"color-{kid['agent_id']}")["value"]
+            assert len([c for c in shot if kid["name"] in c["text"] and c["color"] == expected and c["attempt"] == "0"]) == 1
+        browser("screenshot", str(OUT / f"cards-{lead_label}-{theme}.png"))
+        save(f"cards-{lead_label}-{theme}", {"theme": theme, "cards": shot})
+    current = browser_json("JSON.stringify({theme:document.documentElement.dataset.theme})")["theme"]
+    if current != original:
+        browser("click", f'button[aria-label="Switch to {original} mode"]')
+        browser("wait", "--fn", f'document.documentElement.dataset.theme === {json.dumps(original)}')
+
+
+def sidebar_child(parent_label, child_label, stage):
+    parent, child = load(parent_label), load(child_label)
+    live = agent(child["agent_id"])
+    assert live["parent_agent_id"] == parent["agent_id"]
+    shot = browser_json("""JSON.stringify((() => {
+      const parent=%s, id=%s;
+      const group=Array.from(document.querySelectorAll('nav[aria-label=Agents] [role=group]'))
+        .find(x=>x.getAttribute('aria-label')===parent+' children');
+      const link=Array.from(group?.querySelectorAll('a[href]')||[])
+        .find(x=>decodeURIComponent(x.getAttribute('href')?.split('/').pop()||'')===id);
+      const avatar=link?.querySelector('[data-agent-color][data-dot]');
+      return {parentGroup:!!group,count:Array.from(group?.querySelectorAll('a[href]')||[]).length,
+        id:link?decodeURIComponent(link.getAttribute('href').split('/').pop()):'',
+        name:link?.querySelector('[data-testid=agent-list-name]')?.textContent?.trim()||'',
+        logo:!!link?.querySelector('[role=img][aria-label=opencode]'),
+        dot:avatar?.dataset.dot||'',color:avatar?.dataset.agentColor||'',
+        selected:link?.getAttribute('aria-current')==='page'};
+    })())""" % (json.dumps(parent["name"]), json.dumps(child["agent_id"])))
+    expected_dot = {"creating": "working", "active": "working", "stopping": "working",
+                    "waiting": "waiting", "finished": "done"}.get(live["state"])
+    assert shot["parentGroup"] and shot["id"] == child["agent_id"]
+    assert shot["name"] == child["name"] and shot["logo"] and shot["dot"] == expected_dot
+    assert shot["color"] == load(f"color-{child['agent_id']}")["value"]
+    if stage == "finished-open":
+        assert live["state"] == "finished" and shot["selected"]
+    if stage == "reactivated":
+        assert live["state"] in ("active", "waiting") and live["attempt"] == 1
+    browser("screenshot", str(OUT / f"sidebar-{stage}-{child_label}.png"))
+    save(f"sidebar-{stage}-{child_label}", {"api_state": live["state"], "ui": shot})
+
+
+def archive_state(label, expected):
+    row = agent(load(label)["agent_id"])
+    assert (row["state"] == "archived") == (expected == "archived")
+    save(f"archive-{label}-{expected}", {"id": row["agent_id"], "state": row["state"]})
+
+
+def hover_archive(label):
+    row = load(label)
+    target = f'nav[aria-label=Agents] a[href$="/{row["agent_id"]}"]'
+    browser("hover", target)
+    js = """(() => {const id=%s;const link=document.querySelector('nav[aria-label=Agents] a[href$="/'+id+'"]');
+      const button=link?.parentElement?.querySelector('[data-testid=agent-row-archive]');
+      return !!link && getComputedStyle(link).textDecorationLine==='none' && !!button &&
+        button.getAttribute('aria-label')===%s && Number(getComputedStyle(button).opacity)>0.9;
+    })()""" % (json.dumps(row["agent_id"]), json.dumps("Archive " + row["name"]))
+    browser("wait", "--fn", js)
+    browser("screenshot", str(OUT / f"hover-archive-{label}.png"))
+    save(f"hover-archive-{label}", {"id": row["agent_id"], "name": row["name"], "no_underline": True, "archive_visible": True})
+
+
+def keyboard_card(lead_label, child_label, key):
+    assert key in ("Enter", "Space")
+    lead, child = load(lead_label), load(child_label)
+    browser("eval", "(() => { const name=" + json.dumps(child["name"]) + "; const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]')); const card=cards.find(c=>c.textContent?.includes(name)); if(!card) throw Error('exact card missing'); card.focus(); return true; })()")
+    browser("press", key)
+    browser("wait", "--fn", "location.pathname.endsWith(" + json.dumps("/chat/" + child["agent_id"]) + ")")
+    browser("screenshot", str(OUT / f"keyboard-{key}-{child_label}.png"))
+    browser("open", os.environ["AFT_BASE_URL"].rstrip("/") + f"/ws/{WS}/chat/{lead['agent_id']}")
+    browser("wait", "--fn", "location.pathname.endsWith(" + json.dumps("/chat/" + lead["agent_id"]) + ")")
+
+
 def mobile_geometry_ok(geometry, child_id, width, theme):
     assert geometry["width"] == width and geometry["height"] == 844
     assert geometry["theme"] == theme and geometry["navPosition"] == "fixed"
@@ -330,6 +561,7 @@ def mobile(child_label, lead_label, width, theme):
       return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,
         navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',
         childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',
+        headerColors:Array.from(header.querySelectorAll('[data-agent-color]')).map(x=>x.dataset.agentColor),
         rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,
         childWhole,headerHit,childLinkHit,
         partialRows:partial.length,hiddenRows:hidden.length,moreCount,
@@ -341,6 +573,7 @@ def mobile(child_label, lead_label, width, theme):
         tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};
     })())""" % json.dumps(child_id))
     mobile_geometry_ok(geometry, child_id, width, theme)
+    assert load(f"color-{child_id}")["value"] in geometry["headerColors"], "tray avatar changed child color"
     shot = OUT / f"mobile-tray-{width}-{theme}.png"
     browser("screenshot", str(shot))
     save(f"mobile-tray-{width}-{theme}", {"child": child_id, "parent": lead["agent_id"],
