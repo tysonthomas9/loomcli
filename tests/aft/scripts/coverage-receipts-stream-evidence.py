@@ -108,6 +108,85 @@ def claim(label):
     save(label, "identity", {"agent_id": a["agent_id"], "name": a["name"], "repo": a["repo"], "harness": a["harness"], "actor": "production UI user; local stack open-mode user identity"})
 
 
+def create_first():
+    """Use the public user Create route, with no caller-supplied actor fields."""
+    model = os.environ["AFT_REAL_MODEL"]
+    assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", model) and not model.startswith("aft/")
+    body = {"preset": "lead", "name": f"coverage-rs-create-{RUN}",
+            "repo": os.environ["AFT_AGENT_FLOW_REPO"], "base_ref": "main",
+            "external_key": f"coverage-rs-create-{RUN}",
+            "first_message": f"CREATE_FIRST-{RUN}: use a tool to read README.md and name its documented test command with a file citation.",
+            "overrides": {"harness": "opencode", "model": model}}
+    request_id = f"coverage-rs-create-{RUN}-request"
+    created = http(ROOT + "/agents", "POST", body, request_id)
+    assert re.fullmatch(r"agt_[A-Za-z0-9_-]+", created["agent_id"])
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / "create.id").write_text(created["agent_id"] + "\n")
+    assert_create_identity(created, body)
+    save("create", "request", {"body": body, "request_id": request_id,
+                               "agent_id": created["agent_id"], "worktree_path": created["worktree_path"],
+                               "actor": "public authenticated/open-mode user API; server derives actor",
+                               "surface": "public Create API, not UI mutation"})
+    create_replay("initial")
+
+
+def assert_create_identity(a, body):
+    assert a["agent_id"] == agent_id("create") and a["name"] == body["name"]
+    assert a["preset"] == "lead" and a["repo"] == body["repo"] and a["base_ref"] == body["base_ref"]
+    assert a["external_key"] == body["external_key"]
+    assert a["created_by_kind"] == "user" and a["parent_agent_id"] is None
+    assert a["harness"] == "opencode" and a["model"] == body["overrides"]["model"]
+    assert a["worktree_path"] and a["state"] in ("idle", "active")
+
+
+def create_replay(stage):
+    original = load("create", "request")
+    body = original["body"]
+    before = agent("create")
+    assert_create_identity(before, body)
+    before_ids = [e["event_id"] for e in pages("create")]
+    for request_id in (original["request_id"], original["request_id"] + "-external"):
+        replayed = http(ROOT + "/agents", "POST", body, request_id)
+        assert_create_identity(replayed, body)
+        assert replayed["worktree_path"] == original["worktree_path"], "Create replay changed worktree"
+    after = agent("create")
+    assert_create_identity(after, body)
+    assert after["worktree_path"] == original["worktree_path"]
+    events = pages("create")
+    event_ids = [e["event_id"] for e in events]
+    if stage == "after-restart":
+        assert event_ids == before_ids, "Create replay appended an event after recovery"
+    else:
+        assert set(before_ids) <= set(event_ids), "Create replay removed history"
+        assert sum(e["kind"] == "agent.created" for e in events) == 1, "duplicate Create event"
+        assert sum(e["kind"] == "message.delivered" and e["payload"].get("text") == body["first_message"]
+                   for e in events) <= 1, "duplicate first-message delivery"
+    query = urllib.parse.urlencode({"name": body["name"], "include_archived": "true"})
+    rows = http(ROOT + "/agents?" + query)["agents"]
+    assert [a["agent_id"] for a in rows if a["name"] == body["name"]] == [agent_id("create")], "duplicate Create Agent"
+    save("create", stage + "-replay", {"request_ids": [original["request_id"], original["request_id"] + "-external"],
+                                       "external_key": body["external_key"], "agent_id": agent_id("create"),
+                                       "worktree_path": original["worktree_path"], "event_ids": event_ids})
+
+
+def create_native(stage):
+    helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-receipts-stream-native.sh"
+    value = json.loads(subprocess.check_output([str(helper), "probe", agent_id("create")], text=True).strip().splitlines()[-1])
+    assert value["agent_id"] == agent_id("create") and value["harness"] == "opencode"
+    assert value["native_id"] and isinstance(value["native_root"], str)
+    assert value["worktree_path"] == load("create", "request")["worktree_path"]
+    if stage != "before":
+        earlier = load("create", "before-native")
+        assert (value["native_id"], value["native_root"]) == (earlier["native_id"], earlier["native_root"]), "NativeRef changed"
+    save("create", stage + "-native", value)
+
+
+def create_chat():
+    subprocess.run(["agent-browser", "--session", os.environ["AFT_SESSION"], "open",
+                    os.environ["AFT_BASE_URL"] + f"/ws/{WS}/chat/{agent_id('create')}"], check=True,
+                   stdout=subprocess.DEVNULL)
+
+
 OBSERVER = r"""(() => {
   if (window.__coverageRsFetch) return 'already installed';
   const original = window.fetch.bind(window);
@@ -223,7 +302,7 @@ def native_compare(label, first, last):
 
 
 def native_count(label, stage):
-    assert label in ("waiting", "native")
+    assert label in ("waiting", "native", "create")
     key = load(label, stage + "-delivery")["native_input_key"]
     helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-receipts-stream-native.sh"
     value = json.loads(subprocess.check_output([str(helper), "count", agent_id(label), key], text=True).strip().splitlines()[-1])
@@ -293,6 +372,8 @@ def cleanup():
 
 if __name__ == "__main__":
     commands = {"preflight": preflight, "claim": claim, "observe": observe, "capture": capture,
+                "create-first": create_first, "create-replay": create_replay, "create-native": create_native,
+                "create-chat": create_chat,
                 "waiting": waiting, "withdrawn": withdrawn, "replay": replay, "delivered": delivered,
                 "prefix": prefix, "sse": sse, "native": native, "native-compare": native_compare,
                 "native-count": native_count,
