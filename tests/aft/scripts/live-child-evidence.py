@@ -2,6 +2,7 @@
 """Read-only Agent API assertions for the paid child-agent AFT journeys."""
 
 import json
+import hashlib
 import os
 import pathlib
 import sys
@@ -45,7 +46,8 @@ def evidence(label, agent_id):
     a, ev = agent(agent_id), events(agent_id)
     fields = ("agent_id", "workspace_id", "name", "preset", "harness", "model", "repo", "base_ref",
               "parent_agent_id", "root_agent_id", "created_by_kind", "created_by_id",
-              "worktree_path", "branch", "state", "outcome", "archive_reason",
+              "worktree_path", "branch", "state", "state_reason", "attention_reason",
+              "running_turn_id", "outcome", "archive_reason",
               "attempt", "finished_at", "history_purged_at")
     save(label, {key: a.get(key) for key in fields})
     safe_events = []
@@ -63,6 +65,10 @@ def evidence(label, agent_id):
             t = p.get("tool") or {}
             row["payload"] = {"tool": {"name": t.get("name"), "failed": t.get("failed"),
                                          "agent_not_found": "agent_not_found" in t.get("output", "")}}
+        elif e["kind"] == "agent.turn_completed":
+            error = p.get("error") or ""
+            row["payload"] = {"stopReason": p.get("stopReason"), "error_present": bool(error),
+                              "error_sha256": hashlib.sha256(error.encode()).hexdigest() if error else None}
         else:
             continue
         safe_events.append(row)
@@ -193,6 +199,24 @@ def cancelled(label, lead_label, name):
     assert len(delivery) == 1, delivery
 
 
+def rejected(label, owner_label, foreign_name, operation):
+    assert operation in ("agent_get", "agent_send")
+    owner = load(owner_label)
+    foreign_id = (WORK / f"{label}-{foreign_name}.id").read_text().strip()
+    _, ev = evidence(owner_label, owner["agent_id"])
+    matches = [e for e in ev if e["kind"] == "item.completed" and
+               e["payload"].get("itemKind") == "tool" and
+               operation in (e["payload"].get("tool", {}).get("name", "") + " " +
+                             e["payload"].get("tool", {}).get("input", "")) and
+               foreign_id in e["payload"].get("tool", {}).get("input", "") and
+               "agent_not_found" in e["payload"].get("tool", {}).get("output", "")]
+    assert len(matches) == 1, (operation, foreign_id, matches)
+    save(f"{label}-{operation}-rejection", {"operation": operation, "target": foreign_id,
+                                          "event_id": matches[0]["event_id"],
+                                          "turn_id": matches[0]["turn_id"],
+                                          "error_code": "agent_not_found"})
+
+
 def isolation(label, owner_label, own_name, foreign_label, foreign_name):
     owner = load(owner_label)
     own_id = (WORK / f"{label}-{own_name}.id").read_text().strip()
@@ -238,6 +262,7 @@ def cleanup():
     for agent_id in dict.fromkeys(ids):
         a = agent(agent_id)
         assert a["name"].startswith("aft-") and a["name"].endswith(os.environ["RUN_ID"])
+        evidence(f"final-{agent_id}", agent_id)
         if a["state"] == "archived":
             continue
         body = json.dumps({"reason": "cancelled" if a["state"] != "finished" else "done"}).encode()
