@@ -50,8 +50,8 @@ tests:
         intent: "Show the new Lead's real harness in Chat"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" claim chat'
         intent: "Record the actual Chat agent ID and verify its saved repo, owner, preset and harness"
-      - fill: { label: Message, value: "Read README.md in this repository. Is npm test the documented test command? Answer with the command and file name you verified." }
-        intent: "Ask the real Lead a question grounded in the owned repository"
+      - fill: { label: Message, value: "Use a tool to read README.md in this repository. What command does it document for running tests? Cite the file and quote the supporting line." }
+        intent: "Ask an open repository question that requires reading the owned README"
       - press: Enter
         intent: "Send the repository question from Chat"
       - wait:
@@ -61,13 +61,12 @@ tests:
         intent: "Show a real running turn rather than a scripted reply"
       - wait:
           fn: >-
-            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
-              return t.includes('npm test') && t.includes('README.md') &&
-                document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length > 0 &&
+            (() => { const a = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]'));
+              return a.length > 0 && a.some((r) => r.textContent.includes('README.md')) &&
                 !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
         budget: 180000
-        intent: "Show the finished repository-aware answer and its saved user question"
-      - fill: { label: Message, value: "Use your Loom agent_list tool now to list your own child agents. Do not list workspace peers. Report whether your child roster is empty." }
+        intent: "Show the finished answer citing README; saved tool evidence checks its source"
+      - fill: { label: Message, value: "Use your Loom agent_list tool now to list your own child agents. Return its complete raw JSON result unchanged, then explain the roster. Do not list workspace peers." }
         intent: "Ask the Lead to use its Loom child-roster tool"
       - press: Enter
         intent: "Send the Loom tool request from Chat"
@@ -141,18 +140,18 @@ tests:
         intent: "Wait for its Chat route"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" claim persona'
         intent: "Record the actual custom Lead ID and verify its saved identity"
-      - fill: { label: Message, value: "Read README.md and tell me the test command. Follow your persona prefix, and include the exact literal placeholder string your persona names." }
+      - fill: { label: Message, value: "Use a tool to read README.md and tell me which command it documents for running tests. Cite the supporting line. Follow your persona prefix, and include the exact literal placeholder string your persona names." }
         intent: "Ask a repository question that also exercises the custom persona"
       - press: Enter
         intent: "Send the question to the real model"
       - wait:
           fn: >-
-            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
-              return t.includes('PERSONA_${RUN_ID}') && t.includes('{{.AgentName}}') && t.includes('npm test') &&
-                document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]').length > 0 &&
+            (() => { const a = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]'));
+              return a.some((r) => r.textContent.includes('PERSONA_${RUN_ID}') &&
+                r.textContent.includes('{{.AgentName}}') && r.textContent.includes('README.md')) &&
                 !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
         budget: 180000
-        intent: "Show the real answer with the persona prefix, verified test command and safe literal text"
+        intent: "Show the real answer with persona prefix and literal text; saved source evidence checks the command"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot persona answer'
         intent: "Save the real user and assistant events before reload"
       - reload: true
@@ -161,7 +160,7 @@ tests:
           fn: >-
             (() => { const a = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]'));
               return a.length === 1 && a[0].textContent.includes('PERSONA_${RUN_ID}') &&
-                a[0].textContent.includes('{{.AgentName}}') && a[0].textContent.includes('npm test'); })()
+                a[0].textContent.includes('{{.AgentName}}') && a[0].textContent.includes('README.md'); })()
         intent: "Show the same literal-safe persona answer once after reload"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot persona reloaded && python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" assert-persona'
         intent: "Confirm saved event IDs and actual model text survive the reload unchanged"
@@ -278,17 +277,18 @@ tests:
             !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
         budget: 60000
         intent: "Show the interrupted turn has stopped"
-      - fill: { label: Message, value: "BUSY_NEXT: read README.md and tell me the documented test command." }
+      - fill: { label: Message, value: "BUSY_NEXT: use a tool to read README.md and tell me which command it documents for running tests. Cite the supporting line." }
         intent: "Ask a new question after Stop"
       - press: Enter
         intent: "Start the next real turn"
       - wait:
           fn: >-
             (() => { const c = document.querySelector('[data-testid=chat-transcript]');
-              return Array.from(c?.querySelectorAll('li[data-kind=user]') || []).filter((r) => r.textContent.includes('BUSY_NEXT')).length === 1 &&
-                Array.from(c?.querySelectorAll('li[data-kind=agent]') || []).some((r) => r.textContent.includes('npm test')) &&
+              const rows = Array.from(c?.querySelectorAll('li[data-kind]') || []);
+              const next = rows.findIndex((r) => r.dataset.kind === 'user' && r.textContent.includes('BUSY_NEXT'));
+              return next >= 0 && rows.slice(next + 1).some((r) => r.dataset.kind === 'agent' && r.textContent.includes('README.md')) &&
                 !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
         budget: 180000
-        intent: "Show Chat still answers after Stop, with the repository's documented command"
+        intent: "Show Chat still answers after Stop and cites the repository file"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" snapshot busy finished && python3 "$AFT_TESTS_DIR/scripts/live-lead-evidence.py" assert-busy'
         intent: "Verify saved delivery events contain only the final waiting text once, a cancelled turn, and a later answer"
