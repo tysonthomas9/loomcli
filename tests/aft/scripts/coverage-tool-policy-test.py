@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import runpy
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("RUN_ID", "offline")
 os.environ.setdefault("AFT_WS", "LOCALMODE")
@@ -13,6 +14,42 @@ os.environ.setdefault("AFT_WORK_DIR", "/private/tmp/coverage-tool-policy-offline
 policy = runpy.run_path(str(Path(__file__).with_name("coverage-tool-policy.py")))
 assert_private_nodes = policy["assert_private_nodes"]
 assert_native_steps = policy["assert_native_steps"]
+api = policy["api"]
+
+
+class APIResponseOracle(unittest.TestCase):
+    def test_archive_accepts_exact_empty_204(self):
+        class EmptyNoContent:
+            status = 204
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self):
+                return b""
+
+        with patch("urllib.request.urlopen", return_value=EmptyNoContent()):
+            self.assertIsNone(api("/owned-agent/archive", "POST", {"reason": "cancelled"}))
+
+    def test_archive_rejects_unexpected_body_on_204(self):
+        class BadNoContent:
+            status = 204
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self):
+                return b"unexpected"
+
+        with patch("urllib.request.urlopen", return_value=BadNoContent()):
+            with self.assertRaisesRegex(AssertionError, "unexpectedly had a body"):
+                api("/owned-agent/archive", "POST", {"reason": "cancelled"})
 
 
 class ScopedPrivacyOracle(unittest.TestCase):
