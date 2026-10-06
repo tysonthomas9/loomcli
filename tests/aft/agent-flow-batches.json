@@ -13,6 +13,35 @@
           { "name": "cov-files-child-${RUN_ID}", "parent": "cov-files-${RUN_ID}-git", "suite": "coverage-agent-git-files" }
         ]
       }
+    },
+    "receipts-stream": {
+      "files": ["receipts-stream-native.test.yaml", "receipts-stream-sse.test.yaml", "receipts-stream-waiting.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "coverage-rs-native-${RUN_ID}", "suite": "live-receipts-stream-native", "model_required": true },
+          { "name": "coverage-rs-stream-${RUN_ID}", "suite": "live-receipts-stream-sse", "model_required": true },
+          { "name": "coverage-rs-other-${RUN_ID}", "suite": "live-receipts-stream-sse", "model_required": true },
+          { "name": "coverage-rs-waiting-${RUN_ID}", "suite": "live-receipts-stream-waiting", "model_required": true }
+        ],
+        "children": []
+      }
+    },
+    "children-activity": {
+      "files": ["children-activity.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "cov-child-repeat-lead-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true },
+          { "name": "cov-child-pair-lead-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true },
+          { "name": "cov-child-sidebar-a-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true },
+          { "name": "cov-child-sidebar-b-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true }
+        ],
+        "children": [
+          { "name": "cov-child-repeat-${RUN_ID}", "parent": "cov-child-repeat-lead-${RUN_ID}", "suite": "coverage-children-activity" },
+          { "name": "cov-child-pair-a-${RUN_ID}", "parent": "cov-child-pair-lead-${RUN_ID}", "suite": "coverage-children-activity" },
+          { "name": "cov-child-pair-b-${RUN_ID}", "parent": "cov-child-pair-lead-${RUN_ID}", "suite": "coverage-children-activity" },
+          { "name": "cov-child-sidebar-task-${RUN_ID}", "parent": "cov-child-sidebar-b-${RUN_ID}", "suite": "coverage-children-activity" }
+        ]
+      }
     }
   }
 }
