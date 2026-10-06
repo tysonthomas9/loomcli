@@ -39,7 +39,7 @@ tests:
       - wait: { url: "/ws/${AFT_WS}/chat/" }
         intent: "Show the new real OpenCode Lead in its Chat, created through the UI"
       - run: |
-          "$AFT_SELECT_AGENT_MODEL" "live-recovery-restart-${RUN_ID}"
+          "$AFT_SELECT_AGENT_MODEL"
         intent: "Show the explicitly selected real model before sending"
       - run: |
           python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id restart
@@ -128,7 +128,7 @@ tests:
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
       - run: |
-          "$AFT_SELECT_AGENT_MODEL" "live-recovery-archive-${RUN_ID}"
+          "$AFT_SELECT_AGENT_MODEL"
         intent: "Show the explicitly selected real model before sending"
       - run: |
           python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id archive
@@ -212,7 +212,7 @@ tests:
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
       - run: |
-          "$AFT_SELECT_AGENT_MODEL" "live-recovery-sibling-${RUN_ID}"
+          "$AFT_SELECT_AGENT_MODEL"
         intent: "Show the explicitly selected real model before sending"
       - run: |
           python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id sibling
@@ -239,7 +239,7 @@ tests:
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/" }
       - run: |
-          "$AFT_SELECT_AGENT_MODEL" "live-recovery-dirty-${RUN_ID}"
+          "$AFT_SELECT_AGENT_MODEL"
         intent: "Show the explicitly selected real model before sending"
       - run: |
           python3 "$AFT_TESTS_DIR/scripts/live-recovery-evidence.py" id dirty
