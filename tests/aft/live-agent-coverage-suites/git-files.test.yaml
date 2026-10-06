@@ -297,11 +297,17 @@ tests:
           python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
           absent actions "cov-files-${RUN_ID}-renamed.txt"
         intent: "Verify the old top-level name is gone"
-      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label='cov-files-${RUN_ID}-folder']" }
-        intent: "Expand the private destination folder"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          ensure_folder_expanded actions "cov-files-${RUN_ID}-folder"
+        intent: "Keep the exact private destination folder expanded in Agent Files"
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
+            (()=>{const panel=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+            const folder=panel?.querySelector('[role=tree][aria-label="File tree"] [role=treeitem][aria-label="cov-files-${RUN_ID}-folder"]');
+            const child=panel?.querySelector('[role=tree][aria-label="File tree"] [role=treeitem][aria-label="cov-files-${RUN_ID}-renamed.txt"]');
+            return folder?.getAttribute('aria-expanded')==='true' && folder?.getAttribute('data-path')==='cov-files-${RUN_ID}-folder'
+              && child?.getAttribute('data-path')==='cov-files-${RUN_ID}-folder/cov-files-${RUN_ID}-renamed.txt';})()
         intent: "Show the moved file inside the folder"
       - run: |
           agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-renamed.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
