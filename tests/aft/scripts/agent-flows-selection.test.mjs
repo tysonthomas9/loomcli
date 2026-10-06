@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const testsDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -38,6 +38,25 @@ try {
   assert.equal(selected.count, 3);
   assert.deepEqual(selected.cases.map(test => test.suite), Array(3).fill('coverage-one'));
   assert.match(selected.suites[0].sha256, /^[a-f0-9]{64}$/);
+  const writeExpected = expected_cases => writeFileSync(catalog, JSON.stringify({ version: 1,
+    batches: { smoke: { files: ['one.test.yaml'], agents, expected_cases } } }));
+  writeExpected(selected.cases);
+  assert.equal(JSON.parse(run('smoke')).count, 3);
+  writeExpected(selected.cases.slice(0, 2));
+  refuse('smoke'); // Extra selected case cannot enter an exact reviewed batch.
+  writeExpected([selected.cases[1], selected.cases[0], selected.cases[2]]);
+  refuse('smoke');
+  writeExpected([selected.cases[0], selected.cases[0]]);
+  refuse('smoke');
+  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'tool-policy':
+    { files: ['one.test.yaml'], agents } } }));
+  refuse('tool-policy'); // This batch must always pin its three reachable cases.
+  cpSync(join(coverage, 'one.test.yaml'), join(coverage, 'tool-policy.test.yaml'));
+  writeFileSync(catalog, JSON.stringify({ version: 1, batches: { 'tool-policy':
+    { files: ['tool-policy.test.yaml'], agents, expected_cases: [...selected.cases,
+      { suite: 'coverage-one', name: 'unexpected fourth case' }] } } }));
+  refuse('tool-policy');
+  write(['one.test.yaml']);
   assert.equal(JSON.parse(run('default')).count, 9);
   writeFileSync(join(original, 'lead-chat.test.yaml'), originalSource.replace('tests:\n',
     'tests:\n  - name: unexpected tenth default case\n    steps:\n      - open: /ws/${AFT_WS}/agents\n'));
@@ -99,4 +118,30 @@ try {
   console.log('agent-flow selection: default, named batch, and unsafe selections passed');
 } finally {
   rmSync(root, { recursive: true, force: true });
+}
+
+const policyCandidate = process.argv[3];
+if (policyCandidate) {
+  const policyRoot = mkdtempSync('/private/tmp/aft-policy-candidate-');
+  try {
+    const suites = join(policyRoot, 'live-agent-coverage-suites');
+    mkdirSync(suites);
+    cpSync(join(testsDir, 'agent-flow-batches.json'), join(policyRoot, 'agent-flow-batches.json'));
+    for (const file of ['tool-policy.test.yaml', 'tool-policy-denial.test.yaml'])
+      cpSync(join(policyCandidate, file), join(suites, file));
+    const candidateRun = () => execFileSync(process.execPath, [selector, policyRoot, loader, 'tool-policy'],
+      { env: { ...env, AFT_TESTS_DIR: policyRoot, AFT_WORK_DIR: policyRoot }, encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'] });
+    const selected = JSON.parse(candidateRun());
+    const reviewed = JSON.parse(readFileSync(join(testsDir, 'agent-flow-batches.json'), 'utf8')).batches['tool-policy'];
+    assert.equal(selected.count, 3);
+    assert.deepEqual(selected.cases, reviewed.expected_cases);
+    assert.deepEqual(selected.suites.map(suite => basename(suite.path)), ['tool-policy.test.yaml']);
+    assert.equal(selected.agents.reviewers, undefined);
+    cpSync(join(suites, 'tool-policy-denial.test.yaml'), join(suites, 'tool-policy.test.yaml'));
+    assert.throws(candidateRun, 'the denied reviewer suite cannot replace paid policy selection');
+    console.log('agent-flow policy: exact authored three cases selected; reviewer denial refused');
+  } finally {
+    rmSync(policyRoot, { recursive: true, force: true });
+  }
 }
