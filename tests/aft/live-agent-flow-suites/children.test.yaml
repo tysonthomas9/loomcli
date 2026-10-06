@@ -199,6 +199,13 @@ tests:
           fn: >-
             (document.querySelector('[data-testid=agent-tray]')?.textContent || '').includes('aft-cancel-child-${RUN_ID}')
         intent: "Show the exact running child in the expanded tray"
+      - wait:
+          fn: >-
+            (() => { const lead = document.querySelector('[aria-label="Agent chat"] header [data-state]');
+              const tray = document.querySelector('[data-testid=agent-tray]')?.textContent || '';
+              return lead?.dataset.state === 'idle' && !lead.dataset.running &&
+                tray.includes('aft-cancel-child-${RUN_ID}') && tray.includes('1 running'); })()
+        intent: "Wait until the Lead can act immediately while its child is still running"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" children cancel cancel-lead
           "aft-cancel-child-${RUN_ID}"
