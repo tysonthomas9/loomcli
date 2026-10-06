@@ -103,7 +103,13 @@ tests:
             Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
         intent: "Wait until the agents page offers + Add agent"
       - click: { role: button, name: "+ Add agent", exact: true }
-      - wait: { testid: create-agent-overlay }
+      - wait:
+          fn: &leadOverlayVisible >-
+            (() => { const el = document.querySelector('[data-testid="create-agent-overlay"]');
+              if (!el) return false;
+              const rect = el.getBoundingClientRect();
+              return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility === 'visible'; })()
+        intent: "Wait until the Create agent overlay is visible"
       - click: { testid: create-agent-template-lead }
       - fill: { testid: create-agent-name, value: "agv1-modal-${RUN_ID:-local}" }
       - select: { testid: create-agent-backend, value: opencode }
@@ -206,7 +212,9 @@ tests:
             Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
         intent: "Wait until the agents page offers + Add agent"
       - click: { role: button, name: "+ Add agent", exact: true }
-      - wait: { testid: create-agent-overlay }
+      - wait:
+          fn: *leadOverlayVisible
+        intent: "Wait until the Create agent overlay is visible"
       - click: { testid: create-agent-template-lead }
       - fill: { testid: create-agent-name, value: "agv1-badrepo-${RUN_ID:-local}" }
       - select: { testid: create-agent-backend, value: opencode }
@@ -316,7 +324,9 @@ tests:
             Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
         intent: "Wait until the agents page offers + Add agent"
       - click: { role: button, name: "+ Add agent", exact: true }
-      - wait: { testid: create-agent-overlay }
+      - wait:
+          fn: *leadOverlayVisible
+        intent: "Wait until the Create agent overlay is visible"
       - click: { testid: create-agent-template-lead }
       - wait:
           fn: >-
@@ -407,7 +417,9 @@ tests:
             Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
         intent: "Wait until the agents page offers + Add agent"
       - click: { role: button, name: "+ Add agent", exact: true }
-      - wait: { testid: create-agent-overlay }
+      - wait:
+          fn: *leadOverlayVisible
+        intent: "Wait until the Create agent overlay is visible"
       - click: { testid: create-agent-template-lead }
       - fill: { testid: create-agent-name, value: "My Lead" }
       - wait:
