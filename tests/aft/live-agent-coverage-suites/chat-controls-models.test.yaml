@@ -66,8 +66,10 @@ tests:
         intent: "Show the selected alternate model in the composer"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker alternate'
         intent: "Read back the UI selection from the Agent API"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" pick picker target'
-        intent: "Search and select the required connected provider model through the picker"
+      - run: '"$AFT_SELECT_AGENT_MODEL" "cov-controls-picker-${RUN_ID}"'
+        intent: "Select the required connected provider model through the runner's owned real-model UI contract"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker target'
+        intent: "Read back the model selected through that same UI actor"
       - click: { selector: "[data-chat-provider-model-picker]" }
         intent: "Open the picker after two real model selections"
       - click: { selector: '[data-model-picker-provider="recent"]' }
@@ -145,6 +147,16 @@ tests:
         intent: "Show the saved High effort selected in the compact menu"
       - run: 'agent-browser --session "$AFT_SESSION" set viewport 1920 1080'
         intent: "Restore this test session's normal browser viewport"
+
+  - name: MC1 fresh owned boot create has a bounded saved result and retry if catalog is unavailable
+    intent: An explicit Agent API actor creates during a real owned serve and OpenCode restart, preserving the actual warm-up outcome and refusing to call a warm catalog cold.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Keep the API actor's browser session on the owned workspace"
+      - run: ': "${AFT_RESTART_SERVE:?owned restart helper required}"; "$AFT_RESTART_SERVE"'
+        intent: "Restart only this run's owned loom-local service, including its OpenCode process"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" cold-create'
+        intent: "Immediately create with the real selected model, check a typed bounded result and exact saved roster, and retry only after an actual not-ready refusal"
 
   - name: MCS3 custom model added in picker is listed without warning and removed after a readable OpenCode refusal
     intent: A person adds and removes a custom id in the real picker; the API actor creates with it without a model warning, while OpenCode's accepted custom turn limitation remains a readable failure.
