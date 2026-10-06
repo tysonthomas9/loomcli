@@ -3,6 +3,44 @@
 # Create PR stay in YAML UI steps. Only fixture setup and named API-client
 # task starts/design edits mutate through this script.
 set -euo pipefail
+
+# AFT caps every run step/hook at 120 seconds. Keep the entire process tree
+# below that cap, including helper Git/CLI calls, and emit local diagnostics.
+if [[ "${1:-}" != __guarded ]]; then
+    exec python3 - "$0" "$@" <<'PY'
+import os,pathlib,signal,subprocess,sys
+script,*args=sys.argv[1:]
+child=subprocess.Popen(['bash',script,'__guarded',*args],start_new_session=True)
+try:
+    code=child.wait(timeout=105)
+except subprocess.TimeoutExpired:
+    print('Review phase exceeded 105 seconds: '+repr(args),file=sys.stderr)
+    try: os.killpg(child.pid,signal.SIGTERM)
+    except ProcessLookupError: pass
+    try: child.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try: os.killpg(child.pid,signal.SIGKILL)
+        except ProcessLookupError: pass
+        try: child.wait(timeout=2)
+        except subprocess.TimeoutExpired: pass
+    code=124
+if code:
+    key=args[1] if len(args)>1 else ''
+    state=pathlib.Path(os.environ.get('AFT_WORK_DIR','.'),'journey-'+key)
+    print(f'Review phase failed ({code}): {args}; retain {state} and server logs',file=sys.stderr)
+    for name in ('workspace.json','issue.json','revisions.json','workflow-readback.json'):
+        path=state/name
+        if path.is_file():
+            with path.open(errors='replace') as stream:
+                print(name+': '+stream.read(2048),file=sys.stderr)
+    if state.is_dir(): (state/'phase-failure.txt').write_text(f'{args}: exit {code}\n')
+sys.exit(code if code>=0 else 1)
+PY
+fi
+shift
+
+# Bound requests made here AND by sourced fixture helpers. Last options win.
+curl() { command curl "$@" --connect-timeout 2 --max-time 5; }
 source "${AFT_TESTS_DIR:?}/scripts/loomgit-journey-common.sh"
 
 phase="${1:?phase required}"
@@ -17,27 +55,33 @@ assert len(paths)==1, (wanted,blocks)
 print(paths[0])'
 }
 
+if [[ "$phase" == prepare ]]; then
+    # Provisioning is a separate bounded step in EACH case, not ten serial
+    # fixtures inside the single 120-second suite setup hook.
+    test -r "$AFT_TESTS_DIR/scripts/loomgit-journey-common.sh"
+    exit 0
+fi
+
 if [[ "$phase" == setup ]]; then
-    for mode in stack trunk; do
-        for flow in explicit automatic reject-retry empty held; do
-            key="review-$mode-$flow"
-            journey_setup "$key" "$mode" loom
-            file="$key.txt"
-            [[ "$flow" == empty ]] && file=empty
-            journey_create_task task "$file"
-            lead_path > "$JOURNEY_STATE/lead.path"
-            if [[ "$flow" == held ]]; then
-                # Suite setup only: an unsaved user file overlaps the task's
-                # new file. Approval must preserve it, not overwrite it.
-                area="$(lead_path)"
-                printf 'unsaved user edit for %s\n' "$key" > "$area/$file"
-                cp "$area/$file" "$JOURNEY_STATE/unsaved-before.txt"
-                git -C "$area" status --porcelain > "$JOURNEY_STATE/status-before.txt"
-            fi
-            git -C "$JOURNEY_REMOTE" for-each-ref --format='%(refname) %(objectname)' refs/heads > "$JOURNEY_STATE/remote-before.txt"
-            git -C "$JOURNEY_REPO" rev-parse "refs/heads/loom/ws/$JOURNEY_WS/interactive/lead" > "$JOURNEY_STATE/lead-before.sha"
-        done
-    done
+    key="${2:?fixture key required}"
+    case "$key" in review-stack-*) mode=stack ;; review-trunk-*) mode=trunk ;; *) exit 2 ;; esac
+    flow="${key#review-$mode-}"
+    case "$flow" in explicit|automatic|reject-retry|empty|held) ;; *) exit 2 ;; esac
+    journey_setup "$key" "$mode" loom
+    file="$key.txt"
+    [[ "$flow" == empty ]] && file=empty
+    journey_create_task task "$file"
+    lead_path > "$JOURNEY_STATE/lead.path"
+    if [[ "$flow" == held ]]; then
+        # Fixture setup only: an unsaved user file overlaps the task's
+        # new file. Approval must preserve it, not overwrite it.
+        area="$(lead_path)"
+        printf 'unsaved user edit for %s\n' "$key" > "$area/$file"
+        cp "$area/$file" "$JOURNEY_STATE/unsaved-before.txt"
+        git -C "$area" status --porcelain > "$JOURNEY_STATE/status-before.txt"
+    fi
+    git -C "$JOURNEY_REMOTE" for-each-ref --format='%(refname) %(objectname)' refs/heads > "$JOURNEY_STATE/remote-before.txt"
+    git -C "$JOURNEY_REPO" rev-parse "refs/heads/loom/ws/$JOURNEY_WS/interactive/lead" > "$JOURNEY_STATE/lead-before.sha"
     exit 0
 fi
 
@@ -59,6 +103,9 @@ journey_load "$key"
 task="$(cat "$JOURNEY_STATE/task-task.id")"
 file="$(cat "$JOURNEY_STATE/file-task")"
 lead_ref="refs/heads/loom/ws/$JOURNEY_WS/interactive/lead"
+# All successive waits share one wall-clock budget, rather than accumulating
+# three independent 90/180-second polls. Reserve time for the five readbacks.
+poll_deadline=$((SECONDS + 70))
 
 readback() {
     curl -fsS "$JOURNEY_API/issues/$task" > "$JOURNEY_STATE/issue.json"
@@ -70,7 +117,7 @@ readback() {
 
 wait_state() {
     local wanted="$1"
-    for _ in $(seq 1 90); do
+    while (( SECONDS < poll_deadline )); do
         curl -fsS "$JOURNEY_API/issues/$task" > "$JOURNEY_STATE/issue.json"
         if python3 - "$JOURNEY_STATE/issue.json" "$wanted" <<'PY'
 import json,sys
@@ -91,7 +138,7 @@ wait_workflow() {
     # failed/cancelled are failures, never a successful fixture shortcut.
     local run
     run="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_id"])' "$JOURNEY_STATE/workflow-task.json")"
-    for _ in $(seq 1 90); do
+    while (( SECONDS < poll_deadline )); do
         curl -fsS "$JOURNEY_API/runs/$run" > "$JOURNEY_STATE/workflow-readback.json"
         if python3 - "$JOURNEY_STATE/workflow-readback.json" <<'PY'
 import json,sys
@@ -113,16 +160,18 @@ start)
 finished)
     # Own wait: the public TaskRevision has head_sha, not base_sha. Resolve
     # the recorded base ref through Git; never invent an API field.
-    for _ in $(seq 1 90); do
+    captured=false
+    while (( SECONDS < poll_deadline )); do
         curl -fsS "$JOURNEY_API/issues/$task/revisions" > "$JOURNEY_STATE/revisions.json"
         if python3 - "$JOURNEY_STATE/revisions.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1]))['data']
 sys.exit(0 if len(d)==1 and d[0].get('head_sha') else 1)
 PY
-        then break; fi
+        then captured=true; break; fi
         sleep 2
     done
+    "$captured" || { echo "Revision capture timed out for $task" >&2; exit 1; }
     if [[ "$file" == empty ]]; then wait_state closed; else wait_state review; fi
     wait_workflow
     readback
@@ -164,16 +213,18 @@ PY
     journey_start_task task
     ;;
 retried)
-    for _ in $(seq 1 90); do
+    captured=false
+    while (( SECONDS < poll_deadline )); do
         curl -fsS "$JOURNEY_API/issues/$task/revisions" > "$JOURNEY_STATE/revisions.json"
         if python3 - "$JOURNEY_STATE/revisions.json" "$JOURNEY_STATE/source-first.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1]))['data']; old=json.load(open(sys.argv[2]))['data'][0]
 sys.exit(0 if any(r['number']>old['number'] and r['head_sha']!=old['head_sha'] for r in d) else 1)
 PY
-        then break; fi
+        then captured=true; break; fi
         sleep 2
     done
+    "$captured" || { echo "Retry revision capture timed out for $task" >&2; exit 1; }
     wait_state review
     wait_workflow
     readback

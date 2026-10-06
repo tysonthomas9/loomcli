@@ -1,5 +1,6 @@
 # #943 product journey authoring; execute with the reviewed runner overlay.
 # Deterministic: actual serve/FleetDB/Git/processes, stub AI, local fake forge.
+# Every shell phase has a 105-second process budget; each case provisions its own fixture.
 # --screenshots records each named R-* wait checkpoint in the AFT report.
 # No seeded revisions/verdicts; fixture setup may use API and real Git.
 # D29: Approve follows the patch into the existing working area automatically.
@@ -19,13 +20,15 @@ classification:
   surface: mixed
   purpose: journey
 baseUrl: ${AFT_BASE_URL:-http://127.0.0.1:3100}
-setup: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup
+setup: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" prepare
 teardown: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" teardown
 tests:
 - name: review-stack-explicit
   intent: In stack delivery mode, Approve only applies, then the human publishes once. API-client starts and
     retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-stack-explicit
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-explicit
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-explicit
@@ -112,6 +115,8 @@ tests:
   intent: In stack delivery mode, the human Approve and create PR applies and publishes once. API-client starts
     and retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-stack-automatic
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-automatic
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-automatic
@@ -188,6 +193,8 @@ tests:
   intent: In stack delivery mode, the human Reject preserves old code, and a new attempt is reviewed and published.
     API-client starts and retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-stack-reject-retry
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-reject-retry
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-reject-retry
@@ -322,6 +329,8 @@ tests:
   intent: In stack delivery mode, a complete empty TaskRun closes as No changes without review or delivery
     controls. API-client starts and retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-stack-empty
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-empty
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-empty
@@ -365,6 +374,8 @@ tests:
   intent: In stack delivery mode, unsaved user bytes hold Apply, keeping the approved task in review and opening
     no PR. API-client starts and retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-stack-held
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-stack-held
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-stack-held
@@ -428,6 +439,8 @@ tests:
   intent: In trunk delivery mode, Approve only applies, then the human publishes once. API-client starts and
     retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-trunk-explicit
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-explicit
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-explicit
@@ -514,6 +527,8 @@ tests:
   intent: In trunk delivery mode, the human Approve and create PR applies and publishes once. API-client starts
     and retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-trunk-automatic
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-automatic
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-automatic
@@ -590,6 +605,8 @@ tests:
   intent: In trunk delivery mode, the human Reject preserves old code, and a new attempt is reviewed and published.
     API-client starts and retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-trunk-reject-retry
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-reject-retry
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-reject-retry
@@ -724,6 +741,8 @@ tests:
   intent: In trunk delivery mode, a complete empty TaskRun closes as No changes without review or delivery
     controls. API-client starts and retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-trunk-empty
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-empty
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-empty
@@ -767,6 +786,8 @@ tests:
   intent: In trunk delivery mode, unsaved user bytes hold Apply, keeping the approved task in review and opening
     no PR. API-client starts and retry requests are named separately; observers only read product state.
   steps:
+  - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" setup review-trunk-held
+    intent: Fixture setup provisions this independent workspace within its own bounded step
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" start review-trunk-held
     intent: The API-client starts the real local TaskRun; the stub AI writes only the requested fixture file
   - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-review.sh" finished review-trunk-held
