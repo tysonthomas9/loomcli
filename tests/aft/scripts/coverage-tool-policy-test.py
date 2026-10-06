@@ -23,6 +23,7 @@ assert_reviewer_binding = policy["assert_reviewer_binding"]
 current_child_tool_events = policy["current_child_tool_events"]
 tray_snapshot = policy["tray_snapshot"]
 tray_capture_script = policy["tray_capture_script"]
+save_child_failure = policy["save_child_failure"]
 tool_events = policy["tool_events"]
 scoped_dom = policy["SCOPED_DOM"]
 api = policy["api"]
@@ -162,6 +163,29 @@ class NativeUsageOracle(unittest.TestCase):
 
 
 class OwnedEvidenceOracle(unittest.TestCase):
+    def test_child_failure_receipt_excludes_native_error_text(self):
+        sentinel = policy["SENTINEL"]
+        row = {"agent_id": "agt_child", "state": "finished",
+               "running_turn_id": None, "outcome": "failed"}
+        events = [{"kind": "agent.turn_completed", "payload": {
+            "stopReason": "failed", "error": "native error TOKEN=" + sentinel}},
+            {"kind": "agent.settled", "payload": {"outcome": "failed"}}]
+        globals_ = save_child_failure.__globals__
+        old = globals_["WORK"]
+        with tempfile.TemporaryDirectory() as directory:
+            globals_["WORK"] = Path(directory)
+            try:
+                save_child_failure(row, events, "child ended before observation", "turn_now")
+                raw = (Path(directory) / "tray-failure.json").read_text()
+                self.assertNotIn(sentinel, raw)
+                receipt = json.loads(raw)
+                self.assertEqual(receipt["outcome"], "failed")
+                self.assertEqual(receipt["native_stop_reasons"], ["failed"])
+                self.assertTrue(receipt["native_error_present"])
+                self.assertEqual(receipt["saved_tool_count"], 0)
+            finally:
+                globals_["WORK"] = old
+
     def test_completed_child_readback_keeps_captured_row_and_step_identity(self):
         event_id = "item.completed:root:native:msg_1/tool/call_1"
         tool = {"agent_id": "agt_child", "turn_id": "turn_now", "seq": 2,
