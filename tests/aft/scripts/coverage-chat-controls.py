@@ -299,6 +299,9 @@ def picker_receipt(stage):
     assert receipt["route"] == f"/ws/{WS}/chat/{agent_id}" and receipt["dialogOpen"], \
         "picker receipt did not observe the owned open picker"
     save(f"picker-{stage}-ui-prefs.json", {"agent_id": agent_id, "saved_model": wanted, **receipt})
+    if stage == "recent":
+        assert receipt["selectedSection"] == "recent" and receipt["query"] == "", \
+            "Recent picker section or empty search was not selected"
     print(f"saved read-only picker receipt {stage} for {agent_id}")
 
 
