@@ -6,9 +6,11 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -45,6 +47,20 @@ def call(path, method="GET", body=None, key=None, status=200):
     value = json.loads(raw) if raw else None
     assert code == status, f"{method} request: expected HTTP {status}, got {code}; code={value.get('code') if isinstance(value, dict) else 'unknown'}"
     return value
+
+
+def call_result(path, method, body, key):
+    headers = {"Accept": "application/json", "Content-Type": "application/json", "Idempotency-Key": key}
+    req = urllib.request.Request(BASE + path, data=json.dumps(body).encode(), headers=headers, method=method)
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=32) as response:
+            code, raw = response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        code, raw = exc.code, exc.read()
+    elapsed = time.monotonic() - started
+    assert elapsed <= 31, f"fresh-boot create exceeded API response bound: {elapsed:.1f}s"
+    return code, json.loads(raw), elapsed
 
 
 def save(name, data):
@@ -121,6 +137,68 @@ def create(case, preset, model=None):
         assert a["model"] == model
     save(f"{case}-create.json", {k: a.get(k) for k in ("agent_id", "name", "preset", "model", "model_unverified")})
     print(f"{case}: created owned Agent API actor {aid(case)}")
+
+
+def cold_create():
+    """Observe a real owned restart; only a seen warning/not-ready proves warm-up."""
+    log = (Path(env("AFT_WORK_DIR")) / "restarts.log").read_text().splitlines()
+    ready = next((line for line in reversed(log) if line.startswith("ready=")), None)
+    assert ready, "owned whole-service restart receipt missing"
+    stamp = ready.split()[0].removeprefix("ready=")
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(stamp.replace("Z", "+00:00"))).total_seconds()
+    assert 0 <= age <= 30, f"create did not start immediately after owned restart ({age:.1f}s)"
+    name = f"cov-controls-cold-{RUN}"
+    body = {"preset": "lead", "name": name, "repo": env("AFT_AGENT_FLOW_REPO"),
+            "base_ref": "main", "overrides": {"harness": "opencode", "model": MODEL}}
+    code, result, elapsed = call_result(f"{PREFIX}/agents", "POST", body, f"{name}-first")
+    assert code in (201, 503), f"fresh-boot create returned unexpected HTTP {code}"
+    first_code = result.get("code") if code == 503 else None
+    roster_rows = call(f"{PREFIX}/agents?limit=500")["agents"]
+    matching = [row for row in roster_rows if row["name"] == name]
+    assert len(matching) == (1 if code == 201 else 0), "first create left an orphan or duplicate roster row"
+    first_unverified = None
+    if code == 503:
+        assert result.get("code") == "harness_unavailable" and "not ready" in str(result).lower(), \
+            "catalog refusal was not a typed retryable not-ready result"
+        target = json.dumps(MODEL)
+        path = json.dumps(f"{PREFIX}/harnesses/opencode/models")
+        browser("wait", "--fn", f"""(() => {{
+          const state = window.__aftColdCatalog ||= {{ready:false, pending:false}};
+          if (!state.ready && !state.pending) {{
+            state.pending = true;
+            fetch({path}, {{cache:'no-store'}}).then(r => r.ok ? r.json() : null)
+              .then(c => {{state.ready = !!c?.providers?.some(p => p.models?.some(m => m.id === {target}));}})
+              .catch(() => {{state.ready = false;}})
+              .finally(() => {{state.pending = false;}});
+          }}
+          return state.ready;
+        }})()""")
+        retry = call(f"{PREFIX}/agents", "POST", body, f"{name}-retry", 201)
+        assert retry.get("agent_id"), "retry did not create a saved agent"
+        result = retry
+    else:
+        assert result.get("agent_id"), "successful first create did not return an agent ID"
+        first_unverified = result.get("model_unverified")
+    ROOT.mkdir(parents=True, exist_ok=True)
+    (ROOT / "cold.id").write_text(result["agent_id"] + "\n")
+    a = agent("cold")
+    assert a["agent_id"] == result["agent_id"] and a["name"] == name and a["model"] == MODEL
+    if code == 201:
+        first_unverified = a["model_unverified"]
+        if first_unverified:
+            warnings = [e for e in events("cold") if e["kind"] == "model.unverified"]
+            assert len(warnings) == 1, "cold catalog acceptance lacks its saved model warning"
+    roster_rows = call(f"{PREFIX}/agents?limit=500")["agents"]
+    assert [r["agent_id"] for r in roster_rows if r["name"] == name] == [a["agent_id"]], \
+        "retry did not leave exactly one saved agent"
+    warmup_observed = code == 503 or first_unverified is True
+    save("cold-create.json", {"first_status": code, "first_code": first_code,
+                              "first_elapsed_seconds": round(elapsed, 2), "first_model_unverified": first_unverified,
+                              "catalog_warmup_observed": warmup_observed, "saved_agent_id": a["agent_id"],
+                              "saved_model": a["model"], "saved_model_unverified": a["model_unverified"],
+                              "retried_after_not_ready": code == 503})
+    print("fresh-boot API actor: bounded create and exact saved roster; " +
+          ("catalog warm-up observed" if warmup_observed else "cold-catalog state unverified: catalog was already ready"))
 
 
 def catalog():
@@ -353,7 +431,7 @@ def recover(case):
 
 def main():
     command, *args = sys.argv[1:]
-    actions = {"claim": claim, "create": create, "catalog": catalog, "pick": pick,
+    actions = {"claim": claim, "create": create, "cold-create": cold_create, "catalog": catalog, "pick": pick,
                "check-model": check_model, "turn": turn, "ask": ask,
                "resolved": resolved, "malformed": malformed, "custom": custom,
                "unknown": unknown, "recover": recover, "approval-effect": approval_effect,
