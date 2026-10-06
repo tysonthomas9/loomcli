@@ -157,12 +157,15 @@ def fill_long():
 
 def draft(stage):
     state = evaluate("""(() => { const t=document.querySelector('textarea[aria-label=Message]');
-      const send=document.querySelector('form button[title="Send message"]');
-      return {value:t?.value, height:t?.getBoundingClientRect().height,
-        overflow:t && getComputedStyle(t).overflowY, focused:document.activeElement===t,
-        sendDisabled:send?.disabled, rows:document.querySelectorAll('[data-testid=chat-transcript] li').length}; })()""")
+      const forms=document.querySelectorAll('form[data-chat-composer-form=true]');
+      const sends=forms[0]?.querySelectorAll('button[type=submit]')||[];
+      const send=sends[0];
+      return {value:t?.value??null, height:t?.getBoundingClientRect().height??null,
+        overflow:t?getComputedStyle(t).overflowY:null, focused:document.activeElement===t,
+        formCount:forms.length, sendCount:sends.length, sendDisabled:send?.disabled??null,
+        sendTitle:send?.title??null, rows:document.querySelectorAll('[data-testid=chat-transcript] li').length}; })()""")
     if stage == "empty":
-        assert state["value"] == "" and state["sendDisabled"] is True and state["rows"] == 0, state
+        assert_empty_draft(state)
     elif stage == "focused":
         assert state["focused"] and state["height"] >= 70, state
     elif stage == "newline":
@@ -173,6 +176,28 @@ def draft(stage):
     else:
         raise ValueError(stage)
     write(f"draft-{stage}.json", state)
+
+
+def assert_empty_draft(state):
+    assert state.get("value") == "" and state.get("rows") == 0, state
+    assert state.get("formCount") == 1 and state.get("sendCount") == 1, \
+        f"expected one real Chat composer and submit button: {state}"
+    assert state.get("sendDisabled") is True and state.get("sendTitle") == "Type a message to send", \
+        f"empty Chat submit button was not disabled for an empty message: {state}"
+
+
+def self_test_empty_draft():
+    good = {"value": "", "rows": 0, "formCount": 1, "sendCount": 1,
+            "sendDisabled": True, "sendTitle": "Type a message to send"}
+    assert_empty_draft(good)
+    for wrong in ({"sendCount": 0}, {"sendDisabled": None}, {"sendDisabled": False},
+                  {"sendTitle": "Send message"}, {"rows": 1}, {"value": "x"}):
+        try:
+            assert_empty_draft(good | wrong)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"empty composer selector negative passed: {wrong}")
 
 
 def rename(case):
@@ -406,6 +431,7 @@ def mobile_switcher(width):
 
 MOTION_JS = r"""(() => {
   if (window.__aftChatVisual) throw Error('visual probe already armed');
+  window.__aftChatVisualLive=null;
   const p = {start:Date.now(), frames:[], samples:[], shifts:[], maxMs:180000,
     marker:__MARKER__,
     stopped:false, lastText:'', sawCaret:false, sawWorking:false};
@@ -596,16 +622,118 @@ def render_check():
     write("render-oracle.json", {"delivered": delivered, "turn_completed": end, "saved_answer": answer, "saved_tools": tools, "dom": dom})
 
 
-def reasoning_check():
+def reasoning_receipts(between):
+    saved = [{"event_id": e["event_id"], "text": e["payload"].get("text", "")}
+             for e in between if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning"]
+    assert saved and all(item["event_id"] and item["text"].strip() for item in saved), "missing saved reasoning item/content"
+    assert len({item["event_id"] for item in saved}) == len(saved), "duplicate reasoning EventID"
+    return saved
+
+
+def reasoning_preview(text):
+    # WorkRows uses timelineRows.firstLine: strip, first line, plain-text marks, 120-character cap.
+    line = re.sub(r"^#{1,6}\s+", "", text.strip().split("\n")[0])
+    while True:
+        plain = re.sub(r"(\*\*|__|\*|_|`)(.+?)\1", r"\2", line)
+        if plain == line:
+            break
+        line = plain
+    line = line.strip()
+    return line if len(line) <= 120 else line[:119] + "…"
+
+
+REASONING_DOM = r"""(() => [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]
+  .map(x => { const toggle=x.querySelector('[role=button]');
+    return {heading:x.querySelector('[class*=heading]')?.textContent||'',
+      preview:x.querySelector('[class*=preview]')?.textContent||'',
+      expanded:toggle?.getAttribute('aria-expanded')??null,
+      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null}; }))()"""
+
+
+def assert_reasoning_rows(saved, rows, expanded):
+    assert len(rows) == len(saved), "Thinking row count differs from saved reasoning items"
+    for item, row in zip(saved, rows):
+        assert row["heading"] == "Thinking" and row["status"] == "completed", row
+        assert row["preview"] == reasoning_preview(item["text"]) and len(row["preview"]) <= 120, \
+            f"Thinking preview differs from saved first line: {item['event_id']}"
+        assert row["expanded"] == ("true" if expanded else "false"), row
+        assert row["body"] == (item["text"] if expanded else None), \
+            f"Thinking full text differs from saved item: {item['event_id']}"
+
+
+def assert_reasoning_saved_after_reload(before, after):
+    assert after == before, "reload changed reasoning EventID, order, or saved content"
+
+
+def reasoning_check(stage):
+    assert stage in ("before-reload", "reloaded"), stage
+    current("render")
     _, _, between = turn_events("render", "VISUAL_RENDER")
-    saved = [e["payload"].get("text", "") for e in between if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning"]
-    if not saved:
+    if not any(e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning" for e in between):
         write("reasoning-blocked.json", {"status": "blocked", "prerequisite": "actual selected provider must emit saved item.completed reasoning text"})
         raise AssertionError("BLOCKED: selected real provider emitted no saved reasoning item; Thinking UI cannot be claimed")
+    saved = reasoning_receipts(between)
+    if stage == "reloaded":
+        before = json.loads((WORK / "render-reasoning-before-reload.json").read_text())
+        assert_reasoning_saved_after_reload(before["saved"], saved)
+    # Reveal grouped rows without opening the Thinking bodies yet.
+    for _ in range(20):
+        if not evaluate("document.querySelectorAll('[data-testid=tool-group][aria-expanded=false], [data-testid=work-toggle][aria-expanded=false]').length"):
+            break
+        browser("click", "[data-testid=tool-group][aria-expanded=false], [data-testid=work-toggle][aria-expanded=false]")
+    else:
+        raise AssertionError("too many collapsed work groups")
+    collapsed = evaluate(REASONING_DOM)
+    assert_reasoning_rows(saved, collapsed, False)
+    shot("render", f"thinking-{stage}-preview")
     expand_work()
-    dom = evaluate(RENDER_DOM)
-    assert dom["reasoning"] and all(any(text in shown for shown in dom["reasoning"]) for text in saved if text.strip()), "saved reasoning is absent from expanded Thinking UI"
-    write("render-reasoning.json", {"saved": saved, "dom": dom["reasoning"]})
+    expanded = evaluate(REASONING_DOM)
+    assert_reasoning_rows(saved, expanded, True)
+    shot("render", f"thinking-{stage}-expanded")
+    write(f"render-reasoning-{stage}.json", {"saved": saved, "collapsed": collapsed, "expanded": expanded})
+
+
+def self_test_reasoning():
+    item = {"event_id": "reasoning-1", "text": "## **First** line\nFull second line"}
+    event = {"event_id": item["event_id"], "kind": "item.completed",
+             "payload": {"itemKind": "reasoning", "text": item["text"]}}
+    assert reasoning_receipts([event]) == [item]
+    assert reasoning_preview(item["text"]) == "First line"
+    assert reasoning_preview("x" * 121) == "x" * 119 + "…"
+    assert_reasoning_rows([item], [{"heading": "Thinking", "preview": "First line",
+                                    "expanded": "false", "status": "completed", "body": None}], False)
+    assert_reasoning_rows([item], [{"heading": "Thinking", "preview": "First line",
+                                    "expanded": "true", "status": "completed", "body": item["text"]}], True)
+    for bad in ([], [{**event, "payload": {**event["payload"], "text": ""}}],
+                [{**event, "payload": {**event["payload"], "itemKind": "message"}}]):
+        try:
+            reasoning_receipts(bad)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("missing reasoning item/content passed")
+    for wrong in ({"preview": "Wrong"}, {"body": "Wrong"}):
+        row = {"heading": "Thinking", "preview": "First line", "expanded": "true",
+               "status": "completed", "body": item["text"]} | wrong
+        try:
+            assert_reasoning_rows([item], [row], True)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("wrong Thinking preview/content passed")
+    try:
+        assert_reasoning_rows([item], [], True)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("missing Thinking row passed")
+    for changed in ({**item, "event_id": "reasoning-2"}, {**item, "text": "Changed"}):
+        try:
+            assert_reasoning_saved_after_reload([item], [changed])
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("wrong reload receipt passed")
 
 
 def clipboard_check(kind):
@@ -643,16 +771,41 @@ def copy_message():
     browser("find", "last", "[data-testid=chat-transcript] li[data-kind=agent] [data-testid=message-actions] button[aria-label='Copy message']", "click")
 
 
+def assert_live_observation(live, path):
+    assert isinstance(live, dict), "no running-tool observation was captured by the real DOM wait"
+    assert live.get("path") == path and live.get("source") in ("tool-live", "tool-call"), live
+    assert live.get("label") and live.get("live") is True and live.get("working") is True and \
+        live.get("running") is True, live
+    assert "Working" in live.get("workingText", "") and \
+        live.get("stopTitle") == "Stop the running turn", live
+    from datetime import datetime
+    datetime.fromisoformat(live["at"].replace("Z", "+00:00"))
+
+
+def self_test_live_observation():
+    good = {"path": "/ws/offline/chat/agt_owned", "source": "tool-live", "label": "Read package.json",
+            "live": True, "working": True, "running": True, "workingText": "Working for 2s",
+            "stopTitle": "Stop the running turn", "at": "2026-10-06T22:08:20Z"}
+    assert_live_observation(good, good["path"])
+    for wrong in (None, {**good, "source": "tool-group"}, {**good, "label": ""},
+                  {**good, "working": False}, {**good, "workingText": ""},
+                  {**good, "running": False}, {**good, "stopTitle": ""},
+                  {**good, "path": "/ws/other/chat/agt_foreign"}):
+        try:
+            assert_live_observation(wrong, good["path"])
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"invalid live observation passed: {wrong}")
+
+
 def live_check():
     current("render")
     evs = events("render")
     delivered = [e for e in evs if e["kind"] == "message.delivered" and "VISUAL_RENDER" in e["payload"].get("text", "")]
     assert len(delivered) == 1
-    live = evaluate("""(() => { const tool=document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running]');
-      return {at:new Date().toISOString(), label:tool?.textContent||'', live:!!tool,
-        working:!!document.querySelector('[data-testid=working-row]'),
-        running:!!document.querySelector('form button[title="Stop the running turn"]')}; })()""")
-    assert live["live"] and live["working"] and live["running"], "no live tool and working row in the running browser"
+    live = evaluate("window.__aftChatVisualLive??null")
+    assert_live_observation(live, f"/ws/{WS}/chat/{agent_id('render')}")
     write("render-live.json", {"delivered": delivered[0], **live})
 
 
