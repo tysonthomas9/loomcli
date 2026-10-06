@@ -62,7 +62,9 @@ tests:
         intent: Persist the target's owned native tuple before any Delete
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" prepare'
         intent: Read original README through Files API and prepare two distinct local typing inputs
-      - click: { role: button, name: Files, exact: true }
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const tabs=Array.from(document.querySelectorAll("[data-testid=agent-api-page] button[class*=editorTab]")).filter(b=>b.textContent.trim()==="Files"); if(tabs.length!==1) throw Error("expected one agent Files tab"); tabs[0].click(); return true; })()' >/dev/null
+        intent: Select only the target Agent Chat Files tab
       - wait:
           fn: >-
             (() => { const p=document.querySelector('[role=tabpanel]:not([data-hidden])');

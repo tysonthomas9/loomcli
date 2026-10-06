@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 RUN = os.environ["RUN_ID"]
@@ -110,8 +110,32 @@ def check_child_ownership(row, parent):
     assert row["created_by_id"] == parent["agent_id"] and row["repo"] == REPO
 
 
+def checked_file_origin(manifest, ui_url, api_url, source_head):
+    owned = manifest["owned"]
+    assert manifest["run_id"] == RUN and manifest["backend"] == "opencode"
+    assert manifest["source_root"] == os.environ["AFT_SOURCE_ROOT"]
+    assert manifest["source_head"] == source_head
+    assert owned["compose_project"] == os.environ["AFT_OWNED_PROJECT"] == "loom-aft-agents-" + RUN
+    assert owned["evidence_dir"] == os.environ["AFT_WORK_DIR"]
+    assert owned["ui_url"] == ui_url and owned["api_url"] == api_url
+    for candidate, port in ((ui_url, owned["ports"][2]), (api_url, owned["ports"][1])):
+        parsed = urlsplit(candidate)
+        assert parsed.scheme == "http" and parsed.hostname == "127.0.0.1"
+        assert parsed.port == port and parsed.username is None and parsed.password is None
+        assert not parsed.path and not parsed.query and not parsed.fragment
+    assert ui_url != api_url
+    return ui_url
+
+
+def file_origin():
+    manifest = json.loads((Path(os.environ["AFT_WORK_DIR"]) / "manifest.json").read_text())
+    source_head = subprocess.check_output(
+        ["git", "-C", os.environ["AFT_SOURCE_ROOT"], "rev-parse", "HEAD"], text=True).strip()
+    return checked_file_origin(manifest, os.environ["AFT_BASE_URL"], BASE, source_head)
+
+
 def file_path(label):
-    return f"{BASE}/api/workspaces/{quote(WS)}/files?" + urlencode({
+    return f"{file_origin()}/api/workspaces/{quote(WS)}/files?" + urlencode({
         "scope": "agent", "target": load(label)["agent_id"], "repo": Path(REPO).name, "path": "README.md"})
 
 
@@ -134,7 +158,7 @@ def file_saved(stage):
     assert status == 200 and file["content"] == expected and file["version"]
     before = load("file-original") if stage == "one" else load("file-one")
     assert file["version"] != before["version"], "Files Save did not change strong version"
-    status, git = api(f"{BASE}/api/workspaces/{quote(WS)}/files/git-status?" + urlencode({
+    status, git = api(f"{file_origin()}/api/workspaces/{quote(WS)}/files/git-status?" + urlencode({
         "scope": "agent", "target": row["agent_id"], "repo": Path(REPO).name, "path": ""}))
     assert status == 200 and set(git["status"]) == {"README.md"}
     save(f"file-{stage}", {"version": file["version"]})
@@ -257,6 +281,15 @@ def self_test():
     native_row = {"agent_id": "agt_owned", "harness": "opencode", "native_id": "ses_owned", "native_root": ""}
     captured = {"refs": [{"native_id": "ses_owned"}]}
     check_preflight("target", row, native_row, captured)
+    ui_url, api_url, head = "http://127.0.0.1:8283", "http://127.0.0.1:8282", "a" * 40
+    os.environ["AFT_SOURCE_ROOT"] = "/owned/source"
+    os.environ["AFT_OWNED_PROJECT"] = "loom-aft-agents-" + RUN
+    manifest = {"run_id": RUN, "backend": "opencode", "source_root": "/owned/source",
+                "source_head": head,
+                "owned": {"compose_project": os.environ["AFT_OWNED_PROJECT"],
+                          "evidence_dir": os.environ["AFT_WORK_DIR"],
+                          "ui_url": ui_url, "api_url": api_url, "ports": [8281, 8282, 8283]}}
+    assert checked_file_origin(manifest, ui_url, api_url, head) == ui_url
     for action in (
         lambda: check_unsaved(204, body, "/owned", f1),
         lambda: check_unsaved(409, {**body, "fingerprint": f1}, "/owned", f1),
@@ -269,6 +302,11 @@ def self_test():
         lambda: check_preflight("target", row, {**native_row, "agent_id": "agt_foreign"}, captured),
         lambda: check_preflight("target", row, {**native_row, "native_id": "ses_foreign"}, captured),
         lambda: check_preflight("target", row, {**native_row, "native_root": "/foreign"}, captured),
+        lambda: checked_file_origin(manifest, "http://127.0.0.1:9999", api_url, head),
+        lambda: checked_file_origin(manifest, "http://example.org:8283", api_url, head),
+        lambda: checked_file_origin({**manifest, "source_head": "b" * 40}, ui_url, api_url, head),
+        lambda: checked_file_origin({**manifest, "owned": {**manifest["owned"],
+                                    "evidence_dir": "/foreign"}}, ui_url, api_url, head),
     ):
         try:
             action()
