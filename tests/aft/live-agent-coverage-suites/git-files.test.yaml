@@ -337,7 +337,7 @@ tests:
         intent: "Read the exact child's persisted file, version and added patch"
       - run: |
           "$AFT_NATIVE_MODEL_PROBE" "$(cat "$AFT_WORK_DIR/coverage-git-files/git-child.id")"
-        intent: "Verify the completed child used the selected native OpenCode model"
+        intent: "Record the exact child's native completed-answer model, separately from the Lead's requested model"
       - run: |
           agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/coverage-git-files/git-child.id")?tab=git'"
         intent: "Open the saved child's own Git route"
