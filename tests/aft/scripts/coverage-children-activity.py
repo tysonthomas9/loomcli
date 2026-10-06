@@ -78,15 +78,15 @@ def bind(label, name, parent_label=""):
     (OUT / f"{label}.id").write_text(row["agent_id"] + "\n")
     if parent:
         prior = load(parent_label + "-precreate-ref")
-        child_head = git_ref(row["worktree_path"], "rev-parse", "HEAD")
-        child_branch = git_ref(row["worktree_path"], "rev-parse", "--abbrev-ref", "HEAD")
-        assert_child_ancestry(prior, parent, row, child_branch, child_head)
+        actual = read_ref(row, prior["head"])
+        assert_child_ancestry(prior, parent, row, actual)
         save(label + "-create-ref", {"parent_head_before": prior["head"], "parent_branch": prior["branch"],
-                                     "child_head_after": child_head, "child_branch": child_branch,
+                                     "child_head_after": actual["head"], "child_branch": actual["branch"],
+                                     "merge_base": actual["merge_base"],
                                      "parent_worktree": prior["worktree"], "child_worktree": row["worktree_path"]})
     else:
-        save(label + "-precreate-ref", {"head": git_ref(row["worktree_path"], "rev-parse", "HEAD"),
-                                        "branch": git_ref(row["worktree_path"], "rev-parse", "--abbrev-ref", "HEAD"),
+        actual = read_ref(row)
+        save(label + "-precreate-ref", {"head": actual["head"], "branch": actual["branch"],
                                         "worktree": row["worktree_path"]})
     if parent:
         created = [e for e in events(parent["agent_id"])
@@ -97,14 +97,21 @@ def bind(label, name, parent_label=""):
     print(row["agent_id"])
 
 
-def git_ref(path, *args):
-    return subprocess.check_output(["git", "-C", path, *args], text=True).strip()
+def read_ref(row, parent_head=""):
+    helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-children-activity-ref.sh"
+    args = ["bash", str(helper), row["agent_id"], row["name"]]
+    if parent_head:
+        args.append(parent_head)
+    actual = json.loads(subprocess.check_output(args, text=True))
+    assert actual["agent_id"] == row["agent_id"]
+    return actual
 
 
-def assert_child_ancestry(prior, parent, child, branch, head):
-    assert prior["branch"] == parent["branch"] and branch == child["branch"], "actual pre-create branch or child worktree branch mismatch"
-    subprocess.run(["git", "-C", child["worktree_path"], "merge-base", "--is-ancestor", prior["head"], head], check=True)
-    assert git_ref(child["worktree_path"], "merge-base", prior["head"], head) == prior["head"], "child base does not descend from pre-create parent HEAD"
+def assert_child_ancestry(prior, parent, child, actual):
+    assert re.fullmatch(r"[a-f0-9]{40}", prior["head"]) and re.fullmatch(r"[a-f0-9]{40}", actual["head"])
+    assert prior["worktree"] == parent["worktree_path"]
+    assert prior["branch"] == parent["branch"] and actual["branch"] == child["branch"], "actual pre-create branch or child worktree branch mismatch"
+    assert actual["merge_base"] == prior["head"], "child base does not descend from pre-create parent HEAD"
 
 
 def tool_name(event):
@@ -276,14 +283,19 @@ def browser_json(script):
     raise AssertionError("browser did not return JSON geometry")
 
 
-def native_create_count(history):
+def native_create_tool_count(history):
     count = 0
     for event in history:
-        if not calls_operation(event, "agent_create"):
+        if event["kind"] != "item.completed" or event["payload"].get("itemKind") != "tool":
             continue
-        tool = event["payload"]["tool"]
+        tool = event["payload"].get("tool") or {}
         code = tool_code(tool)
-        count += len(re.findall(r"\btools\.loom\.agent_create\s*\(", code)) if code else 1
+        is_execute = tool.get("name", "").split("/")[-1] == "execute"
+        is_create = calls_operation(event, "agent_create") or (
+            is_execute and bool(re.search(r"['\"`]loom\b|\bloom\.", code)) and
+            bool(re.search(r"\bagent_create\b", code)))
+        if is_create and not tool.get("failed"):
+            count += 1
     return count
 
 
@@ -291,7 +303,8 @@ def assert_started_snapshot(snapshot, ids, names, native_count):
     assert not snapshot.get("missing") and snapshot["markerCount"] >= 1
     assert sorted(snapshot["ids"]) == sorted(ids), "Started chips must match exact saved child IDs once"
     assert sorted(snapshot["names"]) == sorted(names), "Started chips must show exact full child names"
-    assert snapshot["toolCount"] == native_count == len(ids), "Started tool count differs from saved native creates"
+    assert 1 <= native_count <= len(ids), "no saved native create tool entries for the children"
+    assert snapshot["toolCount"] == native_count, "Started tool count differs from saved native tool entries"
     assert snapshot["rawCode"] is False, "collapsed Started marker leaked raw bridge input"
     assert all(snapshot["colors"]), "Started child badge lacks its stable color"
 
@@ -302,9 +315,8 @@ def started_ui(lead_label, *child_labels):
     history = events(lead["agent_id"])
     ids = [kid["agent_id"] for kid in kids]
     assert len(ids) == len(set(ids))
-    for kid in kids:
-        assert len([e for e in history if e["kind"] == "child.created" and
-                    e["payload"].get("child") == kid["agent_id"]]) == 1
+    created_ids = [e["payload"].get("child") for e in history if e["kind"] == "child.created"]
+    assert sorted(created_ids) == sorted(ids), "saved child.created IDs differ from the Started children"
     shot = browser_json("""JSON.stringify((() => {
       const markers=Array.from(document.querySelectorAll('[data-testid=started-marker]'));
       const links=markers.flatMap(m=>Array.from(m.querySelectorAll('a[href]')));
@@ -316,7 +328,8 @@ def started_ui(lead_label, *child_labels):
         rawCode:markers.some(m=>/\\{\\s*["'](?:name|brief|agent_id)["']\\s*:|tools\\.loom\\.agent_create\\s*\\(/.test(m.textContent||'')),
         expanded:markers.map(m=>m.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')||'')};
     })())""")
-    assert_started_snapshot(shot, ids, [kid["name"] for kid in kids], native_create_count(history))
+    tool_count = native_create_tool_count(history)
+    assert_started_snapshot(shot, ids, [kid["name"] for kid in kids], tool_count)
     for kid, color in zip(kids, shot["colors"]):
         previous = OUT / f"color-{kid['agent_id']}.json"
         if previous.exists():
@@ -324,7 +337,7 @@ def started_ui(lead_label, *child_labels):
         else:
             save(f"color-{kid['agent_id']}", {"value": color})
     browser("screenshot", str(OUT / f"started-{lead_label}.png"))
-    save(f"started-{lead_label}", {"children": ids, "native_create_count": native_create_count(history), "ui": shot})
+    save(f"started-{lead_label}", {"created_ids": created_ids, "native_tool_entries": tool_count, "ui": shot})
 
 
 def expanded_bridge(lead_label):
@@ -367,9 +380,26 @@ def card_snapshot_ok(snapshot, children):
     for kid, attempt in children:
         color = load(f"color-{kid['agent_id']}")["value"]
         matches = [c for c in snapshot["cards"] if c["name"] == kid["name"] and
+                   c["id"] == kid["agent_id"] and
                    c["attempt"] == str(attempt) and c["color"] == color and
                    c["outcome"] == "completed" and c["delivery"] == "delivered"]
         assert len(matches) == 1, f"exact completed card missing or duplicated for {kid['agent_id']} attempt {attempt}"
+
+
+def focus_exact_card(name, attempt):
+    browser("wait", "--fn", "Array.from(document.querySelectorAll('[data-testid=completion-record]'))" +
+            ".some(c=>c.dataset.attempt===" + json.dumps(str(attempt)) +
+            " && c.querySelector(':scope > span:nth-child(2)')?.textContent?.trim()===" +
+            json.dumps(name) + ")")
+    script = """(() => {
+      const name=%s, attempt=%s;
+      const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]'))
+        .filter(c=>c.dataset.attempt===attempt &&
+          c.querySelector(':scope > span:nth-child(2)')?.textContent?.trim()===name);
+      if(cards.length!==1) throw Error('exact card name and attempt missing or duplicated');
+      cards[0].focus(); return true;
+    })()""" % (json.dumps(name), json.dumps(str(attempt)))
+    assert browser_json(f"JSON.stringify({{focused:{script}}})")["focused"] is True
 
 
 def cards_ui(lead_label, *specs):
@@ -386,15 +416,24 @@ def cards_ui(lead_label, *specs):
         children.append((kid, attempt))
     shot = browser_json("""JSON.stringify((() => ({
       cards:Array.from(document.querySelectorAll('[data-testid=completion-record]')).map(c=>({
-        name:c.querySelector('[data-testid=agent-name]')?.textContent?.trim()||c.textContent?.trim()||'',
-        text:c.textContent?.trim()||'',attempt:c.dataset.attempt,color:c.dataset.agentColor,
+        name:c.querySelector(':scope > span:nth-child(2)')?.textContent?.trim()||'',
+        attempt:c.dataset.attempt,color:c.dataset.agentColor,
         outcome:c.dataset.outcome,delivery:c.dataset.delivery})),
       rawBubble:Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li[data-kind=user]'))
         .some(x=>/task_completed:[^\\s]+:[0-9]+/.test(x.textContent||''))
     }))())""")
-    # The card name is part of a richer card body; match the complete saved name as a token.
-    for card in shot["cards"]:
-        card["name"] = next((kid["name"] for kid, _ in children if kid["name"] in card["text"]), "")
+    for kid, attempt in children:
+        focus_exact_card(kid["name"], attempt)
+        browser("press", "Enter")
+        browser("wait", "--fn", "location.pathname !== " +
+                json.dumps(f"/ws/{WS}/chat/{lead['agent_id']}"))
+        path = browser_json("JSON.stringify({path:location.pathname})")["path"]
+        actual_id = path.split("/")[-1]
+        card = next(c for c in shot["cards"] if c["name"] == kid["name"] and c["attempt"] == str(attempt))
+        card["id"] = actual_id
+        browser("open", os.environ["AFT_BASE_URL"].rstrip("/") + f"/ws/{WS}/chat/{lead['agent_id']}")
+        browser("wait", "--fn", "location.pathname.endsWith(" +
+                json.dumps("/chat/" + lead["agent_id"]) + ")")
     card_snapshot_ok(shot, children)
     browser("screenshot", str(OUT / f"cards-{lead_label}-{'-'.join(specs)}.png"))
     save(f"cards-{lead_label}-{'-'.join(specs)}", shot)
@@ -431,10 +470,13 @@ def sidebar_child(parent_label, child_label, stage):
       const parent=%s, id=%s;
       const group=Array.from(document.querySelectorAll('nav[aria-label=Agents] [role=group]'))
         .find(x=>x.getAttribute('aria-label')===parent+' children');
-      const link=Array.from(group?.querySelectorAll('a[href]')||[])
-        .find(x=>decodeURIComponent(x.getAttribute('href')?.split('/').pop()||'')===id);
+      const matches=Array.from(document.querySelectorAll('nav[aria-label=Agents] a[href]'))
+        .filter(x=>decodeURIComponent(x.getAttribute('href')?.split('/').pop()||'')===id);
+      const link=matches[0];
       const avatar=link?.querySelector('[data-agent-color][data-dot]');
-      return {parentGroup:!!group,count:Array.from(group?.querySelectorAll('a[href]')||[]).length,
+      return {parentGroup:!!group && !!link && group.contains(link),
+        count:Array.from(group?.querySelectorAll('a[href]')||[]).length,
+        exactIdCount:matches.length,
         id:link?decodeURIComponent(link.getAttribute('href').split('/').pop()):'',
         name:link?.querySelector('[data-testid=agent-list-name]')?.textContent?.trim()||'',
         logo:!!link?.querySelector('[role=img][aria-label=opencode]'),
@@ -443,7 +485,7 @@ def sidebar_child(parent_label, child_label, stage):
     })())""" % (json.dumps(parent["name"]), json.dumps(child["agent_id"])))
     expected_dot = {"creating": "working", "active": "working", "stopping": "working",
                     "waiting": "waiting", "finished": "done"}.get(live["state"])
-    assert shot["parentGroup"] and shot["id"] == child["agent_id"]
+    assert_sidebar_exact_link(shot, child["agent_id"])
     assert shot["name"] == child["name"] and shot["logo"] and shot["dot"] == expected_dot
     assert shot["color"] == load(f"color-{child['agent_id']}")["value"]
     if stage == "finished-open":
@@ -452,6 +494,10 @@ def sidebar_child(parent_label, child_label, stage):
         assert live["state"] in ("active", "waiting") and live["attempt"] == 1
     browser("screenshot", str(OUT / f"sidebar-{stage}-{child_label}.png"))
     save(f"sidebar-{stage}-{child_label}", {"api_state": live["state"], "ui": shot})
+
+
+def assert_sidebar_exact_link(shot, child_id):
+    assert shot["parentGroup"] and shot["exactIdCount"] == 1 and shot["id"] == child_id, "sidebar child ID link missing or duplicated"
 
 
 def archive_state(label, expected):
@@ -477,7 +523,7 @@ def hover_archive(label):
 def keyboard_card(lead_label, child_label, key):
     assert key in ("Enter", "Space")
     lead, child = load(lead_label), load(child_label)
-    browser("eval", "(() => { const name=" + json.dumps(child["name"]) + "; const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]')); const card=cards.find(c=>c.textContent?.includes(name)); if(!card) throw Error('exact card missing'); card.focus(); return true; })()")
+    focus_exact_card(child["name"], 0)
     browser("press", key)
     browser("wait", "--fn", "location.pathname.endsWith(" + json.dumps("/chat/" + child["agent_id"]) + ")")
     browser("screenshot", str(OUT / f"keyboard-{key}-{child_label}.png"))
@@ -618,9 +664,9 @@ def repeated(lead_label, child_label):
     assert prior["delivery_seq"] < first_reply < second["delivery_seq"]
     after = [e for e in ev if e["seq"] > second["delivery_seq"] and reply_text(e)]
     assert len(after) == 1 and all(x in reply_text(after[0]) for x in ("first", "second")), "expected one final combined summary"
-    ref_helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-children-activity-ref.sh"
-    actual = json.loads(subprocess.check_output(["bash", str(ref_helper), second["child"]], text=True))
-    original = load(child_label)["branch"]
+    saved_child = load(child_label)
+    actual = read_ref(saved_child)
+    original = saved_child["branch"]
     switched_ref(prior, second, original, actual)
     save("repeat-proof", {"keys": [prior["record_id"], second["record_id"]],
                           "first_reply": load("first-reply"), "final_reply": after[0]["event_id"],
