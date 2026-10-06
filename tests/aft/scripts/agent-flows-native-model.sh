@@ -31,7 +31,7 @@ native_id="$(jq -r '.native_id' <<< "$native_ref" | tr -d '\r')"
 native_root="$(jq -r '.native_root' <<< "$native_ref" | tr -d '\r')"
 
 cd "$AFT_SOURCE_ROOT"
-compose=(podman compose -p "$AFT_OWNED_PROJECT" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml")
+compose=(agent_flows_podman compose -p "$AFT_OWNED_PROJECT" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml")
 container="$("${compose[@]}" ps -q loom-local | tr -d '\r')"
 agent_flows_check_container "$container"
 if ! result="$("${compose[@]}" exec -T loom-local node -e '

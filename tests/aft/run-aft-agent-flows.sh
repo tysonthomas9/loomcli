@@ -70,9 +70,23 @@ echo "[aft-agent-flows] validated ${#suites[@]} suites and $case_count cases (ca
 [[ "$SOURCE_ROOT" == /private/tmp/* ]] || die 'run from a separate /private/tmp source worktree'
 [[ -z "$(git -C "$SOURCE_ROOT" status --porcelain)" ]] || die 'source worktree must be clean and committed before a live run'
 head_sha="$(git -C "$SOURCE_ROOT" rev-parse HEAD | tr -d '\r')"
-for cmd in podman python3 curl jq df shasum; do command -v "$cmd" >/dev/null || die "missing $cmd"; done
+for cmd in podman python3 curl jq df shasum rg; do command -v "$cmd" >/dev/null || die "missing $cmd"; done
+[[ -z "${AFT_PODMAN_HOME:-}${AFT_PODMAN_CONNECTION:-}${CONTAINER_HOST:-}${DOCKER_HOST:-}" ]] \
+  || die 'ambient Podman helper home/connection or host override is refused'
+host_podman_home="$HOME"
+[[ "$host_podman_home" == /* && -d "$host_podman_home" && ! -L "$host_podman_home" ]] \
+  || die 'host Podman HOME must be an owned absolute directory'
+connections="$(podman system connection list --format json)" || die 'host Podman connection registry unavailable'
+podman_connection="${CONTAINER_CONNECTION:-$(jq -r '[.[] | select(.Default == true) | .Name] | if length == 1 then .[0] else empty end' <<< "$connections")}"
+[[ "$podman_connection" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die 'no unambiguous host Podman connection'
+connection_record="$(jq -cS --arg name "$podman_connection" \
+  '[.[] | select(.Name == $name) | {Name,URI,Identity}] | if length == 1 then .[0] else error("selected connection missing") end' \
+  <<< "$connections")" || die 'selected host Podman connection is not registered'
+connection_fingerprint="$(printf '%s' "$connection_record" | shasum -a 256 | awk '{print $1}')"
+export AFT_PODMAN_HOME="$host_podman_home" AFT_PODMAN_CONNECTION="$podman_connection"
+export CONTAINER_CONNECTION="$podman_connection"
 podman compose version >/dev/null 2>&1 || die 'podman compose is unavailable'
-podman info >/dev/null 2>&1 || die 'podman is unavailable'
+podman --connection "$podman_connection" info >/dev/null 2>&1 || die 'selected host Podman connection is unavailable'
 available_kib="$(df -Pk /private/tmp | awk 'NR==2 {print $4}' | tr -d '\r')"
 if [[ ! "$available_kib" =~ ^[0-9]+$ ]] || ((available_kib < 9*1024*1024)); then
   die 'less than 9 GiB free under /private/tmp'
@@ -191,11 +205,13 @@ fi
 jq -n --arg head "$head_sha" --arg source "$SOURCE_ROOT" --arg fleet "$fleet_repo" --arg fleetSha "$fleet_sha" \
   --arg aft "$AFT_DIR" --arg browser "$browser_bin" --arg project "$project" \
   --arg apiUrl "$AFT_API_URL" --arg uiUrl "$AFT_BASE_URL" --arg evidence "$AFT_WORK_DIR" \
+  --arg podmanHome "$AFT_PODMAN_HOME" --arg podmanConnection "$AFT_PODMAN_CONNECTION" \
+  --arg podmanFingerprint "$connection_fingerprint" \
   --arg run "$run_id" --argjson cases "$case_count" --argjson cap "$cap" \
   --argjson fleetPort "$fleet_port" --argjson apiPort "$api_port" --argjson uiPort "$ui_port" \
   --arg aftCliSha "$(shasum -a 256 "$AFT_DIR/dist/cli.js" | awk '{print $1}')" \
   --arg aftLoaderSha "$(shasum -a 256 "$AFT_DIR/dist/runner.js" | awk '{print $1}')" \
-  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:"real OpenCode external model",backend:"opencode",cases:$cases,cap:$cap,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,ports:[$fleetPort,$apiPort,$uiPort]},evidence:"AFT screenshots every step and all videos"}' \
+  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:"real OpenCode external model",backend:"opencode",cases:$cases,cap:$cap,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
   > "$run_root/evidence/manifest.json"
 
 if ! mkdir /private/tmp/dryhawk-stack-build.lock 2>/dev/null; then

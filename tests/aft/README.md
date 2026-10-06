@@ -46,6 +46,9 @@ and records the UI-saved model readback. `$AFT_NATIVE_MODEL_PROBE <child-agent-i
 reads a run-owned child's current OpenCode session model inside the owned
 container. Its receipt distinguishes the registry request, native model, and
 the separate suite evidence needed to prove a completed answer.
+The native and restart helpers use the run's pinned host Podman connection
+while AFT keeps a private browser HOME; the manifest records only connection
+metadata, not credentials.
 
 Extra aft flags go through `AFT_ARGS`, e.g.
 `make test-aft AFT_ARGS="--screenshots --record-all"`.
