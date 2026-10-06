@@ -222,6 +222,16 @@ def native_compare(label, first, last):
     assert a["service_pid"] != b["service_pid"], "OpenCode service process did not restart"
 
 
+def native_count(label, stage):
+    assert label in ("waiting", "native")
+    key = load(label, stage + "-delivery")["native_input_key"]
+    helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-receipts-stream-native.sh"
+    value = json.loads(subprocess.check_output([str(helper), "count", agent_id(label), key], text=True).strip().splitlines()[-1])
+    assert value["agent_id"] == agent_id(label) and value["input_key"] == key
+    assert value["native_user_message_count"] == 1, "native history contains missing or duplicate user input"
+    save(label, stage + "-native-input", value)
+
+
 def sse(label, stage, types, after_stage="zero", other_label="none"):
     """Bounded cursor replay: compare exact filtered rows to paged ListEvents."""
     allowed = types.split(",")
@@ -285,5 +295,6 @@ if __name__ == "__main__":
     commands = {"preflight": preflight, "claim": claim, "observe": observe, "capture": capture,
                 "waiting": waiting, "withdrawn": withdrawn, "replay": replay, "delivered": delivered,
                 "prefix": prefix, "sse": sse, "native": native, "native-compare": native_compare,
+                "native-count": native_count,
                 "cleanup": cleanup}
     commands[sys.argv[1]](*sys.argv[2:])
