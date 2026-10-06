@@ -199,6 +199,30 @@ def route(label, tab, child_id=""):
     assert actual == expected, f"wrong agent/tab route: {actual!r} != {expected!r}"
 
 
+FILES_LENS_SELECTOR = (
+    '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) '
+    '[role=tablist][aria-label="File explorer lens"] [role=tab][aria-label="Files"]'
+)
+
+
+def select_files_lens(label):
+    """Click the actual nested Files tab only after an exact Agent route and unique-control check."""
+    assert label in ("editor", "actions"), "Files lens is only for the owned Files journeys"
+    route(label, "files")
+    script = """(() => { const panels = document.querySelectorAll('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+      const buttons = document.querySelectorAll(%s);
+      return JSON.stringify({panels:panels.length,buttons:buttons.length,selected:buttons[0]?.getAttribute('aria-selected')}); })()""" % json.dumps(FILES_LENS_SELECTOR)
+    raw = subprocess.check_output(
+        ["agent-browser", "--session", env("AFT_SESSION"), "eval", script], text=True
+    ).strip()
+    state = json.loads(raw)
+    if isinstance(state, str):
+        state = json.loads(state)
+    assert state["panels"] == 1 and state["buttons"] == 1, f"ambiguous nested Files lens: {state}"
+    assert state["selected"] in ("true", "false"), f"invalid Files lens state: {state}"
+    subprocess.check_call(["agent-browser", "--session", env("AFT_SESSION"), "click", FILES_LENS_SELECTOR])
+
+
 def file_state(label, stage, path, expected):
     if expected.startswith("@"):
         expected = Path(expected[1:]).read_text()
@@ -508,10 +532,51 @@ def selftest():
     assert suite.index("editor_visible editor") < suite.index('textContent.trim()==='), (
         "exact visible bytes must precede Save"
     )
+    assert suite.count("select_files_lens editor") == 1 and suite.count("select_files_lens actions") == 1
+    assert suite.index("file_state editor reloaded") < suite.index("select_files_lens editor")
+    assert suite.count("getAttribute('aria-selected')==='true'") >= 2, "Files tree waits must require its selected lens"
+    assert FILES_LENS_SELECTOR.startswith("[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) ")
+    tree = (source_root / "internal/webui/frontend/src/components/FileExplorer/FileExplorerTreePanel.tsx").read_text()
+    assert 'aria-label="File explorer lens"' in tree and 'lens === "changes" ? (' in tree
     assert not re.search(r"click: \{ role: button, name: (?:Chat|Info|Git|Diff|Files)\b", suite), "global nav label can steal an Agent tab click"
     tab_clicks = re.findall(r'- click: \{ selector: "([^"]*agent-editor-groups[^"]*)" \}', suite)
     assert len(tab_clicks) == 7 and all('[data-testid=agent-api-page] ' in selector for selector in tab_clicks)
     assert [int(re.search(r'nth-of-type\((\d+)\)', selector)[1]) for selector in tab_clicks] == [5, 3, 2, 1, 4, 5, 4]
+
+    original_route, original_check_output, original_check_call = (
+        globals()["route"], subprocess.check_output, subprocess.check_call
+    )
+    original_session = os.environ.get("AFT_SESSION")
+    os.environ["AFT_SESSION"] = "aft-selftest"
+    def fake_route(label, tab):
+        assert label == "editor" and tab == "files", "wrong Files route"
+
+    globals()["route"] = fake_route
+    clicks = []
+    subprocess.check_call = lambda args: clicks.append(args)
+    try:
+        for state, accepted in (
+            ({"panels": 1, "buttons": 1, "selected": "false"}, True),
+            ({"panels": 1, "buttons": 2, "selected": "false"}, False),
+            ({"panels": 0, "buttons": 1, "selected": "false"}, False),
+            ({"panels": 1, "buttons": 1, "selected": "other"}, False),
+        ):
+            subprocess.check_output = lambda *_args, **_kwargs: json.dumps(json.dumps(state))
+            before_clicks = len(clicks)
+            try:
+                select_files_lens("editor")
+            except AssertionError:
+                assert not accepted and len(clicks) == before_clicks, state
+            else:
+                assert accepted and clicks[-1][-2:] == ["click", FILES_LENS_SELECTOR], state
+    finally:
+        globals()["route"], subprocess.check_output, subprocess.check_call = (
+            original_route, original_check_output, original_check_call
+        )
+        if original_session is None:
+            os.environ.pop("AFT_SESSION", None)
+        else:
+            os.environ["AFT_SESSION"] = original_session
 
     manifest = {"owned": {"ui_url": "http://127.0.0.1:8283", "api_url": "http://127.0.0.1:8282"}}
     file_path = f"{ROOT}/files?scope=agent&target=agt_owned"
