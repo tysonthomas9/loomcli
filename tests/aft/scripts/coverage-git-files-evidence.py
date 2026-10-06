@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read-only, exact-agent receipts for the paid Files and Git journeys."""
 
+import hashlib
 import io
 import json
 import os
@@ -223,14 +224,27 @@ def select_files_lens(label):
     subprocess.check_call(["agent-browser", "--session", env("AFT_SESSION"), "click", FILES_LENS_SELECTOR])
 
 
+def exact_file_content(data, path, expected):
+    assert data["path"] == path, data
+    if expected == "":
+        assert data.get("content", "") == "", data
+        assert type(data["size"]) is int and data["size"] == 0, data
+        assert data["binary"] is False and data["truncated"] is False, data
+        assert data["version"] == "sha256:" + hashlib.sha256(b"").hexdigest(), data
+    else:
+        assert data.get("content") == expected and data["binary"] is False, data
+        assert data["version"], data
+
+
 def file_state(label, stage, path, expected):
     if expected.startswith("@"):
         expected = Path(expected[1:]).read_text()
     data = scoped(label, path)
-    assert data["path"] == path and data["content"] == expected and not data["binary"], data
-    assert data["version"], data
+    exact_file_content(data, path, expected)
     stat = scoped(label, path, "files/stat")
     assert stat["path"] == path and stat["version"] == data["version"], (data, stat)
+    if expected == "":
+        assert type(stat["size"]) is int and stat["size"] == 0, stat
     status = scoped(label, "", "files/git-status")
     assert path in status["status"], status
     checkouts = get(f"{ROOT}/files/checkouts")["checkouts"]
@@ -437,6 +451,29 @@ def cleanup():
 
 def selftest():
     """Check the readback oracle rejects wrong bytes, versions and checkout IDs."""
+    empty = {"path": "empty.txt", "size": 0, "binary": False, "truncated": False,
+             "version": "sha256:" + hashlib.sha256(b"").hexdigest()}
+    exact_file_content(empty, "empty.txt", "")  # JSON omits content for empty text.
+    exact_file_content({**empty, "content": ""}, "empty.txt", "")
+    for mutation in ({"path": "foreign.txt"}, {"content": "x"}, {"size": 1},
+                     {"size": False}, {"binary": True}, {"truncated": True},
+                     {"version": "sha256:" + "a" * 64}):
+        try:
+            exact_file_content({**empty, **mutation}, "empty.txt", "")
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"empty-file oracle accepted {mutation}")
+    nonempty = {**empty, "size": 3, "content": "abc", "version": "sha256:" + hashlib.sha256(b"abc").hexdigest()}
+    exact_file_content(nonempty, "empty.txt", "abc")
+    for mutation in ({"content": "abcx"}, {"content": None}, {"binary": True}):
+        try:
+            exact_file_content({**nonempty, **mutation}, "empty.txt", "abc")
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"nonempty-file oracle accepted {mutation}")
+
     owned_agent = {"agent_id": "agt_owned", "name": f"cov-files-{RUN}-git", "repo": REPO,
                    "preset": "lead", "created_by_kind": "user", "parent_agent_id": None,
                    "root_agent_id": None, "branch": "loom/agent/agt_owned",
@@ -628,6 +665,18 @@ def selftest():
             current["content"] = "expected"
             stat["version"] = "v2"
             checkouts["checkouts"][0]["agent"] = "agt_owned"
+        current.clear()
+        current.update(empty, path="a.txt")
+        stat.update(path="a.txt", version=empty["version"], size=0)
+        file_state("actions", "selftest-empty", "a.txt", "")
+        stat["size"] = 1
+        try:
+            file_state("actions", "selftest-empty-bad-stat", "a.txt", "")
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("empty-file oracle accepted nonzero stat size")
+        stat["size"] = 0
         def missing_tree(path):
             if "/files/tree?" in path:
                 raise urllib.error.HTTPError("http://owned-ui/api/files/tree", 404, "not found", {}, None)
