@@ -86,13 +86,35 @@ project="loom-aft-agents-$run_id"
 account_lock="$primary_root/tmp/aft-live.opencode.lock"
 mkdir -p "$primary_root/tmp" "$run_root/evidence" "$run_root/bin" "$run_root/profiles" "$run_root/aft-home"
 lock_owned=0 stack_attempted=0 build_lock_owned=0
+# shellcheck source=tests/aft/scripts/agent-flows-ownership.sh
+source "$TESTS_DIR/scripts/agent-flows-ownership.sh"
+# shellcheck disable=SC2329 # Invoked by the EXIT/INT/TERM cleanup trap.
+cleanup_owns_stack() {
+  agent_flows_check_manifest || return 1
+  local containers container
+  containers="$(cd "$SOURCE_ROOT" && podman compose -p "$AFT_OWNED_PROJECT" \
+    -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml \
+    -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml" ps -a -q)" || return 1
+  for container in $containers; do
+    podman inspect "$container" | jq -e --arg project "$AFT_OWNED_PROJECT" '
+      .[0].Config.Labels as $labels |
+      $labels["com.docker.compose.project"] == $project and
+      (["redis","fleet-db","loom-local","ui-local"] | index($labels["com.docker.compose.service"])) != null' >/dev/null \
+      || return 1
+  done
+}
 # shellcheck disable=SC2329 # EXIT/INT/TERM trap invokes this function.
 cleanup() {
   status=$?
   trap - EXIT INT TERM
   if ((build_lock_owned)); then rm -f /private/tmp/dryhawk-stack-build.lock/owner; rmdir /private/tmp/dryhawk-stack-build.lock || true; fi
   if ((stack_attempted)); then
-    (cd "$SOURCE_ROOT" && make local-mode-agents-down) >> "$run_root/evidence/teardown.log" 2>&1 || status=1
+    if cleanup_owns_stack; then
+      (cd "$SOURCE_ROOT" && make local-mode-agents-down) >> "$run_root/evidence/teardown.log" 2>&1 || status=1
+    else
+      echo 'owned stack check failed; teardown skipped' >> "$run_root/evidence/teardown.log"
+      status=1
+    fi
   fi
   for registry in "$run_root"/aft-home/.aft/sessions/aft-*.json; do
     [[ -f "$registry" ]] || continue
