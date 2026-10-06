@@ -74,7 +74,23 @@ def events(agent_id):
 def native(agent_id):
     executable = os.environ.get("AFT_NATIVE_SESSION_PROBE")
     assert executable, "AFT_NATIVE_SESSION_PROBE is required for native continuity proof"
-    result = subprocess.run([executable, agent_id], check=True, capture_output=True, text=True)
+    try:
+        result = subprocess.run([executable, agent_id], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as error:
+        # Do not copy arbitrary container stderr into AFT reports: it may include
+        # auth or host paths. Only expose recognized, noncredential diagnostics.
+        stderr = (error.stderr or "").lower()
+        known = (
+            ("cannot connect to podman", "Cannot connect to Podman"),
+            ("owned loom-local is absent", "owned loom-local is absent"),
+            ("compose project or service ownership mismatch", "compose project or service ownership mismatch"),
+            ("owned manifest mismatch", "owned manifest mismatch"),
+            ("runner project mismatch", "runner project mismatch"),
+        )
+        diagnostic = next((safe for phrase, safe in known if phrase in stderr), "unrecognized stderr suppressed")
+        raise AssertionError(
+            f"owned native-session probe exited {error.returncode}; sanitized stderr: {diagnostic}"
+        ) from None
     value = json.loads(result.stdout)
     assert value.get("agent_id") == agent_id and value.get("harness") == os.environ["AFT_REAL_BACKEND"]
     assert value.get("native_id") and value.get("native_root"), "native probe returned no qualified ID/root"
