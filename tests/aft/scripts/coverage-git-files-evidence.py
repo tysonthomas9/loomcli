@@ -23,12 +23,32 @@ WORK = Path(env("AFT_WORK_DIR")) / "coverage-git-files"
 WS = env("AFT_WS")
 RUN = env("RUN_ID")
 BASE = env("AFT_API_URL").rstrip("/")
+FRONTEND = env("AFT_BASE_URL").rstrip("/")
 REPO = env("AFT_AGENT_FLOW_REPO")
 ROOT = f"/api/workspaces/{urllib.parse.quote(WS, safe='')}"
 
 
+def approved_file_url(path, manifest, frontend=FRONTEND, backend=BASE):
+    """Use the owned public Caddy /api proxy, whose Host is an allowed frontend authority."""
+    parts = urllib.parse.urlsplit(frontend)
+    if (parts.scheme != "http" or parts.hostname not in ("127.0.0.1", "localhost", "::1")
+            or not parts.port or parts.path or parts.query or parts.fragment or parts.username or parts.password):
+        raise ValueError("file readback requires the runner's loopback frontend origin")
+    owned = manifest.get("owned", {})
+    if owned.get("ui_url") != frontend or owned.get("api_url") != backend:
+        raise ValueError("file readback URLs differ from the owned run manifest")
+    if not path.startswith(f"{ROOT}/files") or path[len(f"{ROOT}/files"):len(f"{ROOT}/files") + 1] not in ("", "/", "?"):
+        raise ValueError("file readback must use a workspace files route")
+    return frontend + path
+
+
 def get(path):
-    with urllib.request.urlopen(BASE + path, timeout=15) as response:
+    if path.startswith(f"{ROOT}/files"):
+        manifest = json.loads((Path(env("AFT_WORK_DIR")) / "manifest.json").read_text())
+        url = approved_file_url(path, manifest)
+    else:
+        url = BASE + path
+    with urllib.request.urlopen(url, timeout=15) as response:
         return json.load(response)
 
 
@@ -215,6 +235,31 @@ def cleanup():
 
 def selftest():
     """Check the readback oracle rejects wrong bytes, versions and checkout IDs."""
+    source_root = Path(__file__).resolve().parents[3]
+    page = (source_root / "internal/webui/frontend/src/views/AgentChatPage.tsx").read_text()
+    tabs = re.search(r"export const AGENT_API_TABS[^=]*=\s*\[([^]]+)\]", page)
+    assert tabs and re.findall(r'"([a-z]+)"', tabs[1]) == ["chat", "info", "git", "diff", "files"]
+    suite = (source_root / "tests/aft/live-agent-coverage-suites/git-files.test.yaml").read_text()
+    assert not re.search(r"click: \{ role: button, name: (?:Chat|Info|Git|Diff|Files)\b", suite), "global nav label can steal an Agent tab click"
+    tab_clicks = re.findall(r'- click: \{ selector: "([^"]*agent-editor-groups[^"]*)" \}', suite)
+    assert len(tab_clicks) == 7 and all('[data-testid=agent-api-page] ' in selector for selector in tab_clicks)
+    assert [int(re.search(r'nth-of-type\((\d+)\)', selector)[1]) for selector in tab_clicks] == [5, 3, 2, 1, 4, 5, 4]
+
+    manifest = {"owned": {"ui_url": "http://127.0.0.1:8283", "api_url": "http://127.0.0.1:8282"}}
+    file_path = f"{ROOT}/files?scope=agent&target=agt_owned"
+    assert approved_file_url(file_path, manifest, manifest["owned"]["ui_url"], manifest["owned"]["api_url"]) == "http://127.0.0.1:8283" + file_path
+    for frontend, path, owned in (
+        ("http://127.0.0.1:8282", file_path, manifest),  # bare API authority is denied
+        ("http://attacker.example:8283", file_path, manifest),
+        ("http://127.0.0.1:8283", f"{ROOT}/v1/agents/agt_owned", manifest),
+        ("http://127.0.0.1:8283", file_path, {"owned": {"ui_url": "http://127.0.0.1:9999", "api_url": "http://127.0.0.1:8282"}}),
+    ):
+        try:
+            approved_file_url(path, owned, frontend, "http://127.0.0.1:8282")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("file readback accepted a wrong authority, route or manifest")
     original_get, original_identity = globals()["get"], globals()["identity"]
     current = {"path": "a.txt", "content": "expected", "binary": False, "version": "v2"}
     stat = {"path": "a.txt", "version": "v2"}

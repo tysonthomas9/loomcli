@@ -5,7 +5,7 @@ classification: { area: agents, feature: real-agent-api-git-files, surface: mixe
 baseUrl: "${AFT_BASE_URL}"
 setup: |
   set -eu
-  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_SELECT_AGENT_MODEL:?}" "${RUN_ID:?}"
+  : "${AFT_BASE_URL:?}" "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_SELECT_AGENT_MODEL:?}" "${RUN_ID:?}"
   test "$AFT_WS" = LOCALMODE
   test "$AFT_REAL_BACKEND" = opencode
   mkdir -p "$AFT_WORK_DIR/coverage-git-files"
@@ -35,65 +35,72 @@ tests:
         intent: "Show the actual Agent API Chat route"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" claim editor'
         intent: "Bind the route to the saved Lead ID and canonical repo"
-      - click: { role: button, name: Files, exact: true }
+      - click: { selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(5)" }
         intent: "Open this Lead's Files tab"
       - wait:
           fn: >-
             (() => { const id = location.pathname.split('/').pop();
-              const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+              const p = document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
               const root = p?.querySelector('[data-root-key^="agent:' + id + ':"]');
-              if (root?.getAttribute('aria-expanded') === 'false') root.click();
-              return location.search === '?tab=files' && !!p?.querySelector('[aria-label="README.md"]'); })()
-        intent: "Show the owned agent checkout and README before editing"
-      - click: { role: tab, name: "Changes 0" }
+              return location.search === '?tab=files' && !!root; })()
+        intent: "Find this Lead's checkout root on its own Files route"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const id=location.pathname.split('/').pop(); const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const root=p?.querySelector('[data-root-key^=\"agent:' + id + ':\"]'); if (!root || location.search !== '?tab=files') throw Error('wrong Files root'); if (root.getAttribute('aria-expanded') === 'false') root.click(); return true; })()"
+        intent: "Expand this Lead's real checkout root"
+      - wait:
+          fn: >-
+            (() => { const id=location.pathname.split('/').pop(); const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const root=p?.querySelector('[data-root-key^="agent:' + id + ':"]'); return location.search === '?tab=files' && root?.getAttribute('aria-expanded') === 'true' && !!p?.querySelector('[aria-label="README.md"]'); })()
+        intent: "Show the owned README after the checkout root expands"
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tab][aria-label='Changes 0']" }
         intent: "Open Changes before the edit"
-      - click: { role: tab, name: "Working tree · 0" }
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tab][title^='Uncommitted changes']" }
         intent: "Select uncommitted changes for the exact checkout"
-      - click: { role: tab, name: Files, exact: true }
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tab][aria-label=Files]" }
         intent: "Return to Files while the Working tree lens remains selected"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
           prepare_editor editor README.md
         intent: "Record the original README version and prepare an exact expected edit from its read-only content"
-      - click: { selector: "[role=tabpanel]:not([data-hidden]) [aria-label='README.md']" }
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label='README.md']" }
         intent: "Open the checked-in README in the real editor"
       - wait:
           fn: >-
-            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+            (() => { const p = document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
               return p?.querySelector('.cm-content[contenteditable=true]') &&
                 Array.from(p.querySelectorAll('button')).some(b => b.textContent.trim() === 'Save'); })()
         intent: "Show editable CodeMirror and Save before typing"
       - run: |
-          agent-browser --session "$AFT_SESSION" fill '[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]' "$(cat "$AFT_WORK_DIR/coverage-git-files/editor-expected.txt")"
+          agent-browser --session "$AFT_SESSION" fill '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]' "$(cat "$AFT_WORK_DIR/coverage-git-files/editor-expected.txt")"
         intent: "Type the README plus its run marker in the actual CodeMirror editor"
       - wait:
           fn: >-
-            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+            (() => { const p = document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
               return p?.querySelector('.cm-content')?.textContent?.includes('COV_FILES_${RUN_ID}_EDITOR') &&
                 Array.from(p.querySelectorAll('button')).some(b => b.textContent.trim() === 'Save' && !b.disabled); })()
         intent: "Show the unsaved text and enabled Save control"
-      - click: { role: button, name: Save, exact: true }
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const bs=Array.from(p?.querySelectorAll('button')||[]).filter(b=>b.textContent.trim()==='Save' && !b.disabled); if(bs.length!==1 || location.search!=='?tab=files') throw Error('wrong Save control'); bs[0].click(); return true; })()"
         intent: "Save using Files, not an API or shell write"
       - wait:
           fn: >-
-            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+            (() => { const p = document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
               return Array.from(p?.querySelectorAll('button[role=tab]') || []).some(b => b.getAttribute('aria-label') === 'Changes 1'); })()
         intent: "Show Changes 1 without a page reload after Save"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
           file_state editor saved README.md "@$AFT_WORK_DIR/coverage-git-files/editor-expected.txt"
         intent: "Verify exact saved content, changed strong version and one scoped checkout change"
-      - click: { role: tab, name: "Changes 1" }
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tab][aria-label='Changes 1']" }
         intent: "Open the live Changes lens"
       - wait:
           fn: >-
-            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="Open diff for README.md (Modified)"]')
+            !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="Open diff for README.md (Modified)"]')
         intent: "Show the exact README in this agent's Working tree"
-      - click: { role: button, name: "Open diff for README.md (Modified)" }
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label='Open diff for README.md (Modified)']" }
         intent: "Open the changed file's patch"
       - wait:
           fn: >-
-            Array.from(document.querySelectorAll('[role=tabpanel]:not([data-hidden]) [data-type=add]')).some(e => e.textContent.includes('COV_FILES_${RUN_ID}_EDITOR'))
+            Array.from(document.querySelectorAll('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-type=add]')).some(e => e.textContent.includes('COV_FILES_${RUN_ID}_EDITOR'))
         intent: "Show the added marker line in the visible Files diff"
       - reload: true
         intent: "Reload the Files route"
@@ -101,17 +108,24 @@ tests:
         intent: "Confirm reloaded Files still addresses the saved Lead ID"
       - wait:
           fn: >-
-            location.search === '?tab=files' && !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="README.md"]')
+            (() => { const id=location.pathname.split('/').pop(); const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); return !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
+        intent: "Find the saved Lead's checkout after reload"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const id=location.pathname.split('/').pop(); const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const root=p?.querySelector('[data-root-key^=\"agent:' + id + ':\"]'); if (!root || location.search !== '?tab=files') throw Error('wrong reloaded Files root'); if (root.getAttribute('aria-expanded') === 'false') root.click(); return true; })()"
+        intent: "Expand the same checkout after reload if needed"
+      - wait:
+          fn: >-
+            location.search === '?tab=files' && !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="README.md"]')
         intent: "Show the same README persisted after reload"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
           file_state editor reloaded README.md "@$AFT_WORK_DIR/coverage-git-files/editor-expected.txt"
         intent: "Read the same saved content and strong version after reload"
-      - click: { role: button, name: Git, exact: true }
+      - click: { selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(3)" }
         intent: "Open this Lead's Git tab"
       - wait:
           fn: >-
-            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])');
+            (() => { const p = document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
               return p?.textContent.includes('Git history') &&
                 p.textContent.includes('loom/agent/' + location.pathname.split('/').pop()) &&
                 Array.from(p.querySelectorAll('button')).some(b => b.textContent.includes('Create PR')); })()
@@ -122,33 +136,33 @@ tests:
         intent: "Confirm reloaded Git still addresses the saved Lead ID"
       - wait:
           fn: >-
-            location.search === '?tab=git' && document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent.includes('Git history')
+            location.search === '?tab=git' && document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])')?.textContent.includes('Git history')
         intent: "Show Git persisted across reload"
-      - click: { role: button, name: Info, exact: true }
+      - click: { selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(2)" }
         intent: "Open this Lead's Info"
       - wait:
           fn: >-
-            location.search === '?tab=info' && document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent.includes('cov-files-${RUN_ID}-editor')
+            location.search === '?tab=info' && document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])')?.textContent.includes('cov-files-${RUN_ID}-editor')
         intent: "Show Info bound to the same Lead"
       - reload: true
         intent: "Reload Info"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route editor info'
         intent: "Confirm reloaded Info still addresses the saved Lead ID"
-      - click: { role: button, name: Chat, exact: true }
+      - click: { selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(1)" }
         intent: "Return to the same Lead's Chat"
       - wait:
           fn: >-
-            location.search === '' && !!document.querySelector('[role=tabpanel]:not([data-hidden]) [data-testid=chat-transcript]')
+            location.search === '' && !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-testid=chat-transcript]')
         intent: "Show Chat on the same Agent ID"
       - reload: true
         intent: "Reload Chat"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" route editor chat'
         intent: "Confirm reloaded Chat still addresses the saved Lead ID"
-      - click: { role: button, name: Diff, exact: true }
+      - click: { selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(4)" }
         intent: "Open this Lead's Diff"
       - wait:
           fn: >-
-            location.search === '?tab=diff' && !!document.querySelector('[role=tabpanel]:not([data-hidden])')
+            location.search === '?tab=diff' && !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])')
         intent: "Show Diff bound to the same Agent ID"
       - reload: true
         intent: "Reload Diff"
@@ -174,15 +188,21 @@ tests:
         intent: "Save the unaffected sibling's exact bytes and strong version"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" baseline editor other-checkout README.md'
         intent: "Save the separate editor Lead checkout before context actions"
-      - click: { role: button, name: Files, exact: true }
+      - click: { selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(5)" }
       - wait:
           fn: >-
-            (() => { const p = document.querySelector('[role=tabpanel]:not([data-hidden])'); const id=location.pathname.split('/').pop();
-              const root=p?.querySelector('[data-root-key^="agent:' + id + ':"]'); if(root?.getAttribute('aria-expanded')==='false') root.click();
-              return !!p?.querySelector('[aria-label="README.md"]'); })()
+            (() => { const p = document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const id=location.pathname.split('/').pop();
+              return location.search === '?tab=files' && !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
+        intent: "Find the context-action Lead's own checkout root"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const id=location.pathname.split('/').pop(); const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const root=p?.querySelector('[data-root-key^=\"agent:' + id + ':\"]'); if (!root || location.search !== '?tab=files') throw Error('wrong Files root'); if (root.getAttribute('aria-expanded') === 'false') root.click(); return true; })()"
+        intent: "Expand the context-action Lead's checkout root"
+      - wait:
+          fn: >-
+            (() => { const p = document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const id=location.pathname.split('/').pop(); const root=p?.querySelector('[data-root-key^="agent:' + id + ':"]'); return root?.getAttribute('aria-expanded') === 'true' && !!p?.querySelector('[aria-label="README.md"]'); })()
         intent: "Show the owned Files tree before context actions"
       - run: |
-          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"README.md\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label=\"README.md\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
         intent: "Open the README context menu to create a sibling folder"
       - wait:
           fn: >-
@@ -196,10 +216,10 @@ tests:
         intent: "Create the folder through Files"
       - wait:
           fn: >-
-            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-folder"]')
+            !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-folder"]')
         intent: "Show the new folder in the owned tree"
       - run: |
-          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"README.md\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label=\"README.md\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
         intent: "Open the same menu for New File"
       - click: { role: menuitem, name: New File, exact: true }
         intent: "Choose New File"
@@ -209,14 +229,14 @@ tests:
         intent: "Create the file through Files"
       - wait:
           fn: >-
-            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-temporary.txt"]')
+            !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-temporary.txt"]')
         intent: "Show the new file before renaming"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
           file_state actions created "cov-files-${RUN_ID}-temporary.txt" ""
         intent: "Check that the new file belongs to this agent checkout"
       - run: |
-          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-temporary.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-temporary.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
         intent: "Open the disposable file's context menu"
       - click: { role: menuitem, name: Rename, exact: true }
         intent: "Choose Rename"
@@ -226,14 +246,14 @@ tests:
         intent: "Rename the file through Files"
       - wait:
           fn: >-
-            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
+            !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
         intent: "Show the renamed file"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
           absent actions "cov-files-${RUN_ID}-temporary.txt"
         intent: "Verify the old path is absent"
       - run: |
-          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-renamed.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-renamed.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
         intent: "Open the renamed file's menu for Move"
       - click: { role: menuitem, name: "Move to...", exact: true }
         intent: "Choose Move to"
@@ -255,14 +275,14 @@ tests:
           python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
           absent actions "cov-files-${RUN_ID}-renamed.txt"
         intent: "Verify the old top-level name is gone"
-      - click: { selector: "[role=tabpanel]:not([data-hidden]) [aria-label='cov-files-${RUN_ID}-folder']" }
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label='cov-files-${RUN_ID}-folder']" }
         intent: "Expand the private destination folder"
       - wait:
           fn: >-
-            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
+            !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
         intent: "Show the moved file inside the folder"
       - run: |
-          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-renamed.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const el=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label=\"cov-files-${RUN_ID}-renamed.txt\"]'); const r=el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()"
         intent: "Open Delete on the moved file"
       - click: { role: menuitem, name: Delete, exact: true }
         intent: "Choose Delete"
@@ -272,7 +292,7 @@ tests:
         intent: "Confirm Delete in Files"
       - wait:
           fn: >-
-            !document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
+            !document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-renamed.txt"]')
         intent: "Show the moved file removed"
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
@@ -343,26 +363,28 @@ tests:
         intent: "Open the saved child's own Git route"
       - wait:
           fn: >-
-            (() => { const p=document.querySelector('[role=tabpanel]:not([data-hidden])'); const t=p?.textContent||'';
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const t=p?.textContent||'';
               return t.includes('Git history') && t.includes('cov-files-${RUN_ID}-commit') &&
                 t.includes('loom/agent/' + location.pathname.split('/').pop()) &&
                 Array.from(p.querySelectorAll('button')).some(b=>b.textContent.includes('Create PR') && !b.disabled); })()
         intent: "Show the child's own branch, committed history and visible Create PR control"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" git_visible git'
         intent: "Match the visible branch, target, ahead and behind badges to this child's saved Git status"
-      - click: { role: button, name: Create PR, exact: true }
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const bs=Array.from(p?.querySelectorAll('button')||[]).filter(b=>b.textContent.trim()==='Create PR' && !b.disabled); if(bs.length!==1 || location.search!=='?tab=git') throw Error('wrong Create PR control'); bs[0].click(); return true; })()"
         intent: "Open the enabled Create PR form without submitting it"
       - wait:
           fn: >-
-            !!document.querySelector('[role=tabpanel]:not([data-hidden]) input[placeholder=main]')
+            !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) input[placeholder=main]')
         intent: "Show the PR-specific target field; this is separate from the hidden Git target selector"
-      - fill: { label: Target branch, value: "cov-files-preview-${RUN_ID}" }
+      - fill: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) input[placeholder=main]", value: "cov-files-preview-${RUN_ID}" }
         intent: "Show that the per-PR target can be edited locally"
-      - click: { role: button, name: Cancel, exact: true }
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])'); const bs=Array.from(p?.querySelectorAll('button')||[]).filter(b=>b.textContent.trim()==='Cancel'); if(bs.length!==1 || location.search!=='?tab=git') throw Error('wrong PR Cancel control'); bs[0].click(); return true; })()"
         intent: "Cancel the PR form without publishing or changing the Git target"
       - wait:
           fn: >-
-            !document.querySelector('[role=tabpanel]:not([data-hidden]) input[placeholder=main]')
+            !document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) input[placeholder=main]')
         intent: "Show the PR form closed with no external mutation"
       - reload: true
         intent: "Reload the exact child's Git route"
@@ -371,21 +393,21 @@ tests:
         intent: "Confirm Git still addresses the saved child ID"
       - wait:
           fn: >-
-            location.search==='?tab=git' && document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent.includes('cov-files-${RUN_ID}-commit')
+            location.search==='?tab=git' && document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])')?.textContent.includes('cov-files-${RUN_ID}-commit')
         intent: "Show the same child commit after reload"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py" git_visible git'
         intent: "Recheck the child's displayed branch, target and ahead/behind counts after reload"
-      - click: { role: button, name: Diff, exact: true }
+      - click: { selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(4)" }
         intent: "Open the same child's Diff tab"
       - wait:
           fn: >-
-            Array.from(document.querySelectorAll('[role=tabpanel]:not([data-hidden]) [class*="filePath"]')).some(e=>e.textContent.trim()==='cov-files-git-${RUN_ID}.txt')
+            Array.from(document.querySelectorAll('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [class*="filePath"]')).some(e=>e.textContent.trim()==='cov-files-git-${RUN_ID}.txt')
         intent: "Show this child's exact committed file in Diff"
-      - click: { selector: "[role=tabpanel]:not([data-hidden]) [class*='fileRow'][role=button]" }
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [class*='fileRow'][role=button]" }
         intent: "Expand the committed patch"
       - wait:
           fn: >-
-            Array.from(document.querySelectorAll('[role=tabpanel]:not([data-hidden]) [data-type=add]')).some(e=>e.textContent.includes('COV_FILES_${RUN_ID}_CHILD'))
+            Array.from(document.querySelectorAll('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-type=add]')).some(e=>e.textContent.includes('COV_FILES_${RUN_ID}_CHILD'))
         intent: "Show the real child-created added line in Diff"
       - reload: true
         intent: "Reload the same child's Diff"
@@ -394,5 +416,5 @@ tests:
         intent: "Confirm Diff still addresses the saved child ID"
       - wait:
           fn: >-
-            location.search==='?tab=diff' && Array.from(document.querySelectorAll('[role=tabpanel]:not([data-hidden]) [class*="filePath"]')).some(e=>e.textContent.trim()==='cov-files-git-${RUN_ID}.txt')
+            location.search==='?tab=diff' && Array.from(document.querySelectorAll('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [class*="filePath"]')).some(e=>e.textContent.trim()==='cov-files-git-${RUN_ID}.txt')
         intent: "Show the committed file persisted in this child's Diff after reload"
