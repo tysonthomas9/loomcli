@@ -43,9 +43,10 @@ Before Send, each live suite calls `$AFT_SELECT_AGENT_MODEL` on its owned Lead
 Chat route; the optional Lead name must match that route. The runner validates
 `AFT_REAL_MODEL` (default `openai/gpt-5.5`) against the owned OpenCode catalog
 and records the UI-saved model readback. `$AFT_NATIVE_MODEL_PROBE <child-agent-id>`
-reads a run-owned child's current OpenCode session model inside the owned
-container. Its receipt distinguishes the registry request, native model, and
-the separate suite evidence needed to prove a completed answer.
+checks the run-owned OpenCode session and reads its completed assistant model
+inside the owned container. Its receipt distinguishes the registry request,
+optional session selection, and native completed-answer model; suite event
+checks still prove the child finished its task.
 The native and restart helpers use the run's pinned host Podman connection
 while AFT keeps a private browser HOME; the manifest records only connection
 metadata, not credentials.

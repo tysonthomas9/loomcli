@@ -41,7 +41,7 @@ const {DatabaseSync} = require("node:sqlite");
 const [id, run, repo, target, expectedNativeID, expectedNativeRoot] = process.argv.slice(1);
 const receipt = {agent_id:id, run_id:run, registry_requested_model:null,
   native_reported_model:null, ui_lead_target_model:target,
-  completed_answer_evidence:"not assessed by this read-only probe", status:"unavailable"};
+  completed_answer_evidence:"unavailable", status:"unavailable"};
 const emit = (reason) => {
   if (reason) receipt.reason = reason;
   process.stdout.write(JSON.stringify(receipt) + "\n");
@@ -67,34 +67,81 @@ const emit = (reason) => {
   receipt.registry_requested_model = row.model;
   receipt.agent_state = row.state;
   receipt.agent_outcome = row.outcome;
-  const stateRoot = process.env.XDG_STATE_HOME || path.join(process.env.HOME || "/root",".local","state");
-  const reg = JSON.parse(fs.readFileSync(path.join(stateRoot,"opencode","service.json"),"utf8"));
-  const base = new URL(reg.url);
+  if (row.state !== "finished" || row.outcome !== "completed")
+    return emit("child-not-completed");
+  // The owned entrypoint exports XDG_STATE_HOME only to serve and its children;
+  // podman exec sees the Compose environment, not that runtime export.
+  if (process.env.LOOM_CONFIG_DIR !== "/root/.loom")
+    return emit("owned-service-root-mismatch");
+  const registrationFile = path.join(process.env.LOOM_CONFIG_DIR,"agents-opencode","state","opencode","service.json");
+  let registration;
+  try { registration = fs.readFileSync(registrationFile,"utf8"); }
+  catch { return emit("service-registration-unavailable"); }
+  let reg;
+  try { reg = JSON.parse(registration); }
+  catch { return emit("service-registration-invalid-json"); }
+  let base;
+  try { base = new URL(reg.url); }
+  catch { return emit("service-registration-invalid-url"); }
   if (base.protocol !== "http:" || !["127.0.0.1","localhost"].includes(base.hostname) ||
       base.username || base.password || base.pathname !== "/" || !Number.isInteger(reg.pid) ||
       reg.pid < 1 || typeof reg.password !== "string" || !reg.password)
-    return emit("owned OpenCode service registration invalid");
+    return emit("service-registration-invalid");
   const auth = "Basic " + Buffer.from("opencode:" + reg.password).toString("base64");
-  const get = async (url) => {
-    const response = await fetch(url,{headers:{Authorization:auth},signal:AbortSignal.timeout(15000)});
-    if (!response.ok) return null;
-    return response.json();
+  const get = async (url, stage) => {
+    let response;
+    try { response = await fetch(url,{headers:{Authorization:auth},signal:AbortSignal.timeout(15000)}); }
+    catch { return {reason:stage + "-request-unavailable"}; }
+    if (!response.ok) return {reason:stage + "-http-error"};
+    try { return {data:await response.json()}; }
+    catch { return {reason:stage + "-invalid-json"}; }
   };
-  const info = await get(new URL("/api/info",base));
-  if (info?.pid !== reg.pid) return emit("OpenCode service process identity mismatch");
-  const session = await get(new URL("/api/session/" + encodeURIComponent(row.native_id),base));
-  if (session?.data?.metadata?.agent_id !== id ||
-      session?.data?.location?.directory !== row.worktree_path)
-    return emit("OpenCode session identity or location mismatch");
-  const model = session.data.model;
-  if (typeof model?.providerID !== "string" || typeof model?.id !== "string" ||
-      !model.providerID || !model.id || model.providerID === "aft")
-    return emit("native session has no explicit real model");
-  receipt.native_reported_model = model.providerID + "/" + model.id;
+  const info = await get(new URL("/api/info",base),"service-info");
+  if (info.reason) return emit(info.reason);
+  if (info.data?.pid !== reg.pid) return emit("service-process-identity-mismatch");
+  const sessionURL = new URL("/api/session/" + encodeURIComponent(row.native_id),base);
+  const session = await get(sessionURL,"session");
+  if (session.reason) return emit(session.reason);
+  if (session.data?.data?.id !== row.native_id ||
+      session.data.data.metadata?.agent_id !== id ||
+      session.data.data.location?.directory !== row.worktree_path)
+    return emit("session-identity-or-location-mismatch");
+  const selected = session.data.data.model;
+  if (selected !== undefined && selected !== null &&
+      (typeof selected.providerID !== "string" || typeof selected.id !== "string" ||
+       !selected.providerID || !selected.id || selected.providerID === "aft"))
+    return emit("session-selected-model-invalid");
+  receipt.native_session_selected_model = selected ? selected.providerID + "/" + selected.id : null;
+  // OpenCode permits a session without a selected model. Its completed native
+  // assistant messages still carry the model actually used for the answer.
+  const messagesURL = new URL("/api/session/" + encodeURIComponent(row.native_id) + "/message",base);
+  messagesURL.search = new URLSearchParams({type:"assistant",order:"desc",limit:"200"}).toString();
+  const messages = await get(messagesURL,"assistant-messages");
+  if (messages.reason) return emit(messages.reason);
+  if (!Array.isArray(messages.data?.data)) return emit("assistant-messages-invalid-shape");
+  const completed = messages.data.data.filter(m => m?.type === "assistant" &&
+    typeof m.id === "string" && m.id.startsWith("msg_") &&
+    m.time?.completed != null && typeof m.finish === "string" && m.finish && !m.error);
+  if (!completed.length) return emit("completed-assistant-message-missing");
+  const modelOf = (m) => {
+    const model = m.model;
+    if (typeof model?.providerID !== "string" || typeof model?.id !== "string" ||
+        !model.providerID || !model.id || model.providerID === "aft") return null;
+    return model.providerID + "/" + model.id;
+  };
+  const observed = modelOf(completed[0]);
+  if (!observed) return emit("completed-assistant-model-invalid");
+  if (completed.some(m => modelOf(m) !== observed)) return emit("completed-assistant-model-inconsistent");
+  if (receipt.native_session_selected_model && receipt.native_session_selected_model !== observed)
+    return emit("selected-and-completed-model-mismatch");
+  receipt.native_reported_model = observed;
+  receipt.native_reported_model_source = "completed-assistant-message";
+  receipt.completed_assistant_message_id = completed[0].id;
+  receipt.completed_answer_evidence = "native-completed-assistant-message";
   receipt.matches_ui_lead_target = receipt.native_reported_model === target;
   receipt.status = "observed";
   emit();
-})().catch(() => emit("OpenCode session read unavailable"));
+})().catch(() => emit("native-model-probe-unexpected-error"));
 ' "$agent_id" "$RUN_ID" "$AFT_AGENT_FLOW_REPO" "$AFT_REAL_MODEL" "$native_id" "$native_root")"; then
   echo 'owned native model probe could not execute' >&2
   exit 1
@@ -102,6 +149,7 @@ fi
 printf '%s\n' "$result" >> "$AFT_WORK_DIR/native-models.jsonl"
 jq -e --arg id "$agent_id" '.agent_id == $id and .status == "observed" and
   (.native_reported_model | type == "string" and length > 2) and
-  .completed_answer_evidence == "not assessed by this read-only probe"' \
+  .native_reported_model_source == "completed-assistant-message" and
+  .completed_answer_evidence == "native-completed-assistant-message"' \
   <<< "$result" >/dev/null || { echo 'owned child native model unavailable; see native-models.jsonl' >&2; exit 1; }
 printf '%s\n' "$result"
