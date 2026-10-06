@@ -164,6 +164,33 @@ def file_saved(stage):
     save(f"file-{stage}", {"version": file["version"]})
 
 
+def editor_bytes_match(actual, expected):
+    assert actual == expected, f"CodeMirror buffer differs from intended bytes ({len(actual)} vs {len(expected)})"
+
+
+def type_editor(stage):
+    assert stage in ("one", "two")
+    selector = "[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]"
+    session = os.environ["AFT_SESSION"]
+    expected = (OUT / f"readme-{stage}.txt").read_text()
+    for args in (("focus", selector), ("press", "Meta+a"), ("press", "Backspace"),
+                 ("keyboard", "type", expected)):
+        subprocess.run(["agent-browser", "--session", session, *args], check=True,
+                       stdout=subprocess.DEVNULL)
+
+
+def check_editor(stage):
+    assert stage in ("one", "two")
+    expression = """(() => { const p=document.querySelector('[role=tabpanel]:not([data-hidden])');
+      const e=p?.querySelector('.cm-content[contenteditable=true]');
+      if (!e || !p.closest('[data-testid=agent-api-page]')) throw Error('owned editable Files pane missing');
+      return {text:Array.from(e.querySelectorAll('.cm-line')).map(line=>line.textContent).join('\\n')}; })()"""
+    raw = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"],
+                                   "eval", expression], text=True).strip()
+    actual = json.loads(raw)["text"]
+    editor_bytes_match(actual, (OUT / f"readme-{stage}.txt").read_text())
+
+
 def fingerprint(stage):
     assert stage in ("one", "stale")
     row = live("target")
@@ -290,6 +317,7 @@ def self_test():
                           "evidence_dir": os.environ["AFT_WORK_DIR"],
                           "ui_url": ui_url, "api_url": api_url, "ports": [8281, 8282, 8283]}}
     assert checked_file_origin(manifest, ui_url, api_url, head) == ui_url
+    editor_bytes_match("original\nmarker\n", "original\nmarker\n")
     for action in (
         lambda: check_unsaved(204, body, "/owned", f1),
         lambda: check_unsaved(409, {**body, "fingerprint": f1}, "/owned", f1),
@@ -307,6 +335,8 @@ def self_test():
         lambda: checked_file_origin({**manifest, "source_head": "b" * 40}, ui_url, api_url, head),
         lambda: checked_file_origin({**manifest, "owned": {**manifest["owned"],
                                     "evidence_dir": "/foreign"}}, ui_url, api_url, head),
+        lambda: editor_bytes_match("original\nmarker\noriginal", "original\nmarker\n"),
+        lambda: editor_bytes_match("original\nmarker", "original\nmarker\n"),
     ):
         try:
             action()

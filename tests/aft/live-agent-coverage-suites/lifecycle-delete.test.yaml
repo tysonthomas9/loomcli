@@ -81,9 +81,10 @@ tests:
       - click: { selector: "[role=tabpanel]:not([data-hidden]) [aria-label='README.md']" }
       - wait: { fn: "!!document.querySelector('[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]')" }
         intent: Show the real Files editor
-      - run: |
-          agent-browser --session "$AFT_SESSION" fill '[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]' "$(cat "$AFT_WORK_DIR/coverage-lifecycle-delete/readme-one.txt")"
-        intent: Type the first distinct bytes in CodeMirror
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" type_editor one'
+        intent: Focus, select, clear and type the first distinct bytes through CodeMirror keys
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" check_editor one'
+        intent: Require exact visible editor bytes before the first Save
       - click: { role: button, name: Save, exact: true }
         intent: Save the first edit using Files
       - wait:
@@ -112,9 +113,10 @@ tests:
         intent: Keep the target and dismiss the first warning
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native target present'
         intent: Prove Keep preserved the target's owned native session
-      - run: |
-          agent-browser --session "$AFT_SESSION" fill '[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]' "$(cat "$AFT_WORK_DIR/coverage-lifecycle-delete/readme-two.txt")"
-        intent: Type different README bytes through the same real editor
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" type_editor two'
+        intent: Focus, select, clear and type different README bytes through CodeMirror keys
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" check_editor two'
+        intent: Require exact visible editor bytes before the second Save
       - click: { role: button, name: Save, exact: true }
         intent: Save the second edit through Files
       - wait:
