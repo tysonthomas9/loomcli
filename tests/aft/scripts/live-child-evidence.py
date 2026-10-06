@@ -70,6 +70,22 @@ def evidence(label, agent_id):
     return a, ev
 
 
+def repo():
+    response = get(f"{BASE}/api/workspaces/{urllib.parse.quote(WS)}")
+    workspace = response["data"]
+    assert workspace["id"] == WS, "workspace registry returned another workspace"
+    matches = [r for r in workspace["repos"] if r["name"] == "source-repo" and
+               not r.get("is_linked_worktree")]
+    assert len(matches) == 1, f"expected exactly one registered source-repo: {matches}"
+    source = matches[0]
+    assert source["path"] == os.environ["AFT_AGENT_FLOW_REPO"], (
+        "runner repo is not the registered LOCALMODE source-repo", source["path"],
+        os.environ["AFT_AGENT_FLOW_REPO"])
+    assert source["path"].startswith("/"), "registered source-repo path is not absolute"
+    save("source-repo", {"workspace_id": WS, "name": source["name"], "path": source["path"],
+                         "source_repo_id": source.get("source_repo_id")})
+
+
 def tool_calls(ev):
     return [e["payload"]["tool"] for e in ev
             if e["kind"] == "item.completed" and
