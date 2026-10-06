@@ -70,8 +70,18 @@ tests:
                 Array.from(p.querySelectorAll('button')).some(b => b.textContent.trim() === 'Save'); })()
         intent: "Show editable CodeMirror and Save before typing"
       - run: |
-          agent-browser --session "$AFT_SESSION" fill '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]' "$(cat "$AFT_WORK_DIR/coverage-git-files/editor-expected.txt")"
-        intent: "Type the README plus its run marker in the actual CodeMirror editor"
+          editor='[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]'
+          agent-browser --session "$AFT_SESSION" click "$editor"
+          platform="$(agent-browser --session "$AFT_SESSION" eval 'navigator.platform')"
+          case "$platform" in *Mac*) select_all=Meta+a ;; *) select_all=Control+a ;; esac
+          agent-browser --session "$AFT_SESSION" press "$select_all"
+          agent-browser --session "$AFT_SESSION" press Backspace
+          agent-browser --session "$AFT_SESSION" type "$editor" "$(cat "$AFT_WORK_DIR/coverage-git-files/editor-expected.txt")"
+        intent: "Replace the actual CodeMirror document using focus, select all, delete and typing"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          editor_visible editor "@$AFT_WORK_DIR/coverage-git-files/editor-expected.txt"
+        intent: "Compare every visible editor line with the exact expected bytes before Save"
       - wait:
           fn: >-
             (() => { const p = document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
@@ -227,6 +237,10 @@ tests:
         intent: "Name the disposable file"
       - press: Enter
         intent: "Create the file through Files"
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-git-files-evidence.py"
+          capture_context_state actions created "cov-files-${RUN_ID}-temporary.txt"
+        intent: "Save the owned checkout, tree and file responses before checking the visible new file"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="cov-files-${RUN_ID}-temporary.txt"]')
