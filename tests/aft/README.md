@@ -27,6 +27,19 @@ make test-aft-heal                 # local dev: agent may complete a broken step
 tests/aft/run-aft.sh --record ...  # or call the harness directly with any aft flags
 ```
 
+`make test-aft-agent-flows` is a separate paid Agent API tier for the three
+`live-agent-flow-suites/*.test.yaml` suites. It requires real OpenCode auth,
+builds a fresh local-mode Agent API stack under a unique Compose project and
+free ports, and runs AFT with `--no-agent --screenshots --record-all`. The runner
+caps parsed YAML cases at nine and shares the normal live OpenCode account lock.
+It uses the clean compatible `/private/tmp/fdb1-fleet` checkout by default;
+set `FLEET_DB_REPO` to another clean compatible FleetDB worktree if needed.
+It retains reports, screenshots, videos, and a source/image manifest under the
+printed `/private/tmp/aft-agent-flows.*/evidence` path; it removes only its own
+stack, auth seed, and browser profiles. AFT's recovery agent is disabled while
+the real model may incur provider cost. To validate the combined suite schema
+and case count without starting a stack, add `AFT_ARGS=--validate-only`.
+
 Extra aft flags go through `AFT_ARGS`, e.g.
 `make test-aft AFT_ARGS="--screenshots --record-all"`.
 
