@@ -29,7 +29,7 @@ WS = env("AFT_WS")
 BASE = env("AFT_API_URL").rstrip("/")
 WORK = Path(env("AFT_WORK_DIR")) / "coverage-tool-policy"
 API = f"/api/workspaces/{urllib.parse.quote(WS, safe='')}/v1/agents"
-SENTINEL = f"ghp_AFTONLY{RUN}ZZZZZZZZZZZZZZZZ"
+SENTINEL = f"ghp_AFTONLY{RUN}Q7mR2pK9xT4vN8cY6bL5fS3dH1jW0"
 LEAD = f"aft-lead-{RUN}-cov-policy"
 USAGE_LEAD = f"aft-lead-{RUN}-cov-policy-usage"
 TRAY_LEAD = f"aft-lead-{RUN}-cov-policy-tray"
@@ -141,9 +141,18 @@ def create_reviewer():
 
 def usage_rows(kind):
     rows = [e for e in events(kind) if e["kind"] == "usage"]
-    ids = [e["payload"].get("itemID") for e in rows]
+    ids = [event_item_id(e) for e in rows]
     assert len(ids) == len(set(ids)), "usage step counted twice"
     return rows
+
+
+def event_item_id(event):
+    event_id = event["event_id"]
+    assert event_id.startswith(event["kind"] + ":"), "saved event kind/ID mismatch"
+    assert ":seq:" not in event_id, "saved native item ID unavailable"
+    item_id = event_id.rsplit(":", 1)[-1]
+    assert item_id, "saved native item ID unavailable"
+    return item_id
 
 
 FIELDS = {"inputTokens": "total_input_tokens", "outputTokens": "total_output_tokens",
@@ -159,10 +168,10 @@ def usage_totals(rows):
 def assert_native_steps(usage, native_steps):
     native_by_id = {step["itemID"]: step for step in native_steps}
     assert len(native_by_id) == len(native_steps), "duplicate native usage step"
-    assert set(native_by_id) == {e["payload"].get("itemID") for e in usage}, \
+    assert set(native_by_id) == {event_item_id(e) for e in usage}, \
         "native and saved usage step IDs disagree"
     for event in usage:
-        step = native_by_id[event["payload"]["itemID"]]
+        step = native_by_id[event_item_id(event)]
         for source in FIELDS:
             assert math.isclose(event["payload"].get(source, 0), step[source],
                                 rel_tol=0, abs_tol=1e-8), f"saved {source} disagrees with native step"
@@ -203,20 +212,34 @@ def check_usage(kind, zero):
         native_ids = assert_native_steps(usage, native["steps"])
     save(f"{kind}-usage-{'zero' if zero else 'turn'}.json", {
         "agent_id": row["agent_id"], "step_event_ids": [e["event_id"] for e in usage],
-        "step_item_ids": [e["payload"].get("itemID") for e in usage],
+        "step_item_ids": [event_item_id(e) for e in usage],
         "native_step_item_ids": native_ids, "totals": totals,
         "cli_session_count": cli["session_count"]})
 
 
 def tool_events():
     rows = events("lead")
-    calls = [e for e in rows if e["kind"] == "item.completed"
-             and e["payload"].get("itemKind") == "tool"
-             and SENTINEL in (e["payload"].get("tool") or {}).get("input", "")]
-    assert calls, "no actual native tool call carried the harmless sentinel"
-    assert all(not (e["payload"].get("tool") or {}).get("failed") for e in calls), "sentinel tool failed"
-    assert all(SENTINEL not in (e["payload"].get("tool") or {}).get("output", "") for e in calls), "tool output contains sentinel"
+    all_tools = [e for e in rows if e["kind"] == "item.completed"
+                 and e["payload"].get("itemKind") == "tool"]
+    assert len(all_tools) == 1, "privacy turn did not have exactly one saved native tool call"
+    calls = all_tools
+    saved_tool = calls[0]["payload"].get("tool") or {}
+    assert "printf" in saved_tool.get("input", "") and "REDACTED" in saved_tool.get("input", ""), \
+        "saved native tool input did not retain a safe command and redaction receipt"
+    assert SENTINEL not in saved_tool.get("input", "") and SENTINEL not in saved_tool.get("output", ""), \
+        "saved native tool event leaked the harmless sentinel"
+    assert not saved_tool.get("failed"), "sentinel tool failed"
+    assert native_tool_ids("lead") == [event_item_id(calls[0])], \
+        "native sentinel tool did not match the saved redacted event"
     return rows, calls
+
+
+def native_tool_ids(kind):
+    result = json.loads(subprocess.check_output(
+        [str(Path(env("AFT_TESTS_DIR")) / "scripts/coverage-tool-policy-stack.sh"),
+         "native-tool", owned_id(kind)], text=True))
+    assert result["agent_id"] == owned_id(kind) and len(result["tool_item_ids"]) == 1
+    return result["tool_item_ids"]
 
 
 SCOPED_DOM = """(() => {
@@ -225,7 +248,9 @@ SCOPED_DOM = """(() => {
   return nodes.map(n => ({kind:n.getAttribute('data-testid'), text:n.textContent||'',
     aria:[n,...n.querySelectorAll('[aria-label],[title]')]
       .map(e=>(e.getAttribute('aria-label')||'')+' '+(e.getAttribute('title')||'')).join(' '),
-    expanded:n.getAttribute('aria-expanded')}));
+    expanded:n.getAttribute('data-testid')==='tool-call'
+      ? n.querySelector('[role=button][aria-expanded]')?.getAttribute('aria-expanded') ?? null
+      : n.getAttribute('aria-expanded')}));
 })()"""
 
 
@@ -235,35 +260,57 @@ def assert_private_nodes(nodes, sentinel):
         "harmless sentinel leaked from a scoped tool/tray UI surface"
 
 
+def assert_expanded_state(nodes, stage):
+    cards = [n for n in nodes if n["kind"] == "tool-call"]
+    if stage == "collapsed":
+        assert not any(n["expanded"] == "true" for n in cards), \
+            "a native tool card was already expanded at the collapsed checkpoint"
+    else:
+        assert len(cards) == 1 and cards[0]["expanded"] == "true", \
+            "the sole native sentinel tool card was not expanded"
+
+
 def privacy_snapshot(stage):
     rows, calls = tool_events()
     nodes = browser(SCOPED_DOM)
     assert_private_nodes(nodes, SENTINEL)
+    assert_expanded_state(nodes, stage)
     digest = hashlib.sha256(json.dumps(nodes, sort_keys=True).encode()).hexdigest()
     save(f"privacy-{stage}.json", {"agent_id": owned_id("lead"),
          "event_ids": [e["event_id"] for e in rows],
          "sentinel_tool_event_ids": [e["event_id"] for e in calls],
          "ui_sha256": digest, "scoped_node_count": len(nodes),
          "expanded_tool_count": sum(n["kind"] == "tool-call" and n["expanded"] == "true" for n in nodes)})
-    if stage == "expanded":
-        assert any(n["kind"] == "tool-call" and n["expanded"] == "true" for n in nodes), \
-            "no expanded native tool card inspected"
     if stage == "reloaded":
         before = json.loads((WORK / "privacy-expanded.json").read_text())
         assert before["event_ids"] == [e["event_id"] for e in rows], "reload changed saved history"
+
+
+def current_child_tool_events(rows, agent_id, turn_id, sentinel):
+    current = [e for e in rows if e["agent_id"] == agent_id and e["turn_id"] == turn_id]
+    matching = [e for e in current if e["kind"] == "item.completed"
+                and e["payload"].get("itemKind") == "tool"
+                and "printf" in (e["payload"].get("tool") or {}).get("input", "")]
+    assert matching, "no saved native child tool call retained the safe command"
+    latest = max(matching, key=lambda e: e["seq"])
+    saved_input = (latest["payload"].get("tool") or {}).get("input", "")
+    assert "REDACTED" in saved_input and sentinel not in saved_input, \
+        "child's saved tool input did not redact the harmless sentinel"
+    steps = [e for e in current if e["kind"] == "item.completed"
+             and e["payload"].get("itemKind") in ("tool", "reasoning")]
+    assert steps and max(steps, key=lambda e: e["seq"])["event_id"] == latest["event_id"], \
+        "the sentinel tool is not the child's latest saved step this turn"
+    return [latest]
 
 
 def tray_snapshot():
     child = agent("child")
     assert child["state"] == "active" and child.get("running_turn_id"), \
         "child is no longer running during tray privacy observation"
-    events_now = events("child")
-    matching = [e for e in events_now if e["kind"] == "item.completed"
-                and e["payload"].get("itemKind") == "tool"
-                and SENTINEL in (e["payload"].get("tool") or {}).get("input", "")]
-    assert matching, "no saved native child tool call contained the harmless sentinel"
-    assert any("printf" in (e["payload"].get("tool") or {}).get("input", "") for e in matching), \
-        "child's saved tool call was not the requested safe command"
+    matching = current_child_tool_events(events("child"), child["agent_id"],
+                                         child["running_turn_id"], SENTINEL)
+    assert native_tool_ids("child") == [event_item_id(matching[0])], \
+        "native child sentinel tool did not match the current saved redacted event"
     child_id = json.dumps(child["agent_id"])
     row = browser("""(() => {
       const id = CHILD_ID;
@@ -275,6 +322,7 @@ def tray_snapshot():
         childHref:link.getAttribute('href')} : null;
     })()""".replace("CHILD_ID", child_id))
     assert row and row["status"] == "running", "exact child tray row was not running"
+    assert row["childHref"].endswith("/" + child["agent_id"]), "tray link was not the current child"
     assert "Ran command" in row["text"] and "printf" in row["text"], \
         "exact child tray row did not show the real safe command step"
     assert_private_nodes([{"kind": "agent-tray", "text": row["text"], "aria": ""}], SENTINEL)
@@ -300,15 +348,25 @@ def expand_tools():
         "native tool card could not be expanded"
 
 
+def assert_reviewer_binding(row, state, repo):
+    expected = f"/root/.loom/worktrees/source-repo/{row['agent_id']}"
+    assert row["worktree_path"] == expected and row["repo"] == repo, \
+        "reviewer API row has a foreign checkout or source repo"
+    assert row["preset"] == "pr-review-interactive" and row["harness"] == "opencode"
+    assert row["created_by_kind"] == "user" and row["parent_agent_id"] is None
+    assert state["agent_id"] == row["agent_id"] and state["checkout"] == expected, \
+        "Git readback was not bound to the exact saved reviewer Agent ID"
+    assert state["repo"] == repo and state["preset"] == row["preset"] \
+        and state["harness"] == row["harness"], "Git readback changed reviewer identity"
+
+
 def policy_snapshot(stage):
     row = agent("reviewer")
-    checkout = row.get("worktree_path")
-    assert isinstance(checkout, str) and checkout.startswith("/workspace/")
-    assert checkout != env("AFT_AGENT_FLOW_REPO") and not re.search(r"[\r\n]", checkout)
     raw = subprocess.check_output(
         [str(Path(env("AFT_TESTS_DIR")) / "scripts/coverage-tool-policy-stack.sh"),
-         "git-state", checkout], text=True)
+         "git-state", row["agent_id"]], text=True)
     state = json.loads(raw)
+    assert_reviewer_binding(row, state, env("AFT_AGENT_FLOW_REPO"))
     assert state["deniedTargetExists"] is False, "denied target exists in owned checkout"
     save(f"policy-{stage}.json", state)
     if stage == "after":
