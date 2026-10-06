@@ -86,6 +86,7 @@ project="loom-aft-agents-$run_id"
 account_lock="$primary_root/tmp/aft-live.opencode.lock"
 mkdir -p "$primary_root/tmp" "$run_root/evidence" "$run_root/bin" "$run_root/profiles" "$run_root/aft-home"
 lock_owned=0 stack_attempted=0 build_lock_owned=0
+# shellcheck disable=SC2329 # EXIT/INT/TERM trap invokes this function.
 cleanup() {
   status=$?
   trap - EXIT INT TERM
@@ -175,7 +176,7 @@ catalog="$(curl -fsS --max-time 30 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/har
 model="${LOCAL_MODE_AGENTS_MODEL:-$(jq -r '[.providers[].models[] | select(.is_default) | .id][0] // empty' <<< "$catalog")}"
 [[ -n "$model" && "$model" != aft/* ]] || die 'OpenCode has no selected real model; refusing paid cases'
 jq -e --arg model "$model" 'any(.providers[].models[]; .id == $model)' <<< "$catalog" >/dev/null || die "selected OpenCode model $model is unavailable"
-jq --arg model "$model" '.model=$model' "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
+jq --arg model "$model" '.selected_catalog_model=$model' "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
 mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"
 for image in "$LOCAL_MODE_LOOM_AGENTS_IMAGE" "$LOCAL_MODE_FLEETDB_IMAGE"; do
   podman image inspect "$image" | jq -e --arg project "$project" '.[0] | select(.Labels["io.loom.local-mode.project"] == $project) | {Id,RepoTags,Labels}' \
@@ -183,5 +184,25 @@ for image in "$LOCAL_MODE_LOOM_AGENTS_IMAGE" "$LOCAL_MODE_FLEETDB_IMAGE"; do
 done
 
 echo "[aft-agent-flows] running $case_count paid cases on owned $project; model $model; screenshots and videos in $run_root/evidence"
+aft_status=0
 HOME="$run_root/aft-home" node "$AFT_DIR/dist/cli.js" run "${suites[@]}" --no-agent --screenshots --record-all \
-  --report-dir "$run_root/evidence" --viewport 1920x1080 --timeout 30000
+  --report-dir "$run_root/evidence" --viewport 1920x1080 --timeout 30000 || aft_status=$?
+
+# AgentInfo.model is the model saved on each actual Agent API row. The catalog
+# selection above is only a preflight candidate and may differ from UI defaults.
+agents_json="$(curl -fsS --max-time 30 "$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents?include_archived=true&limit=500")" \
+  || die 'AFT finished but actual Agent API model readback failed'
+jq -e '.next == null' <<< "$agents_json" >/dev/null || die 'Agent API model readback was truncated'
+jq --arg run "$run_id" '[.agents[] | select(.name | contains($run)) |
+  {agent_id,name,harness,model,model_unverified,state}]' <<< "$agents_json" \
+  > "$run_root/evidence/actual-agent-models.json"
+jq -e 'length > 0 and all(.[]; .harness == "opencode" and (.model | type == "string" and length > 0 and (startswith("aft/") | not)))' \
+  "$run_root/evidence/actual-agent-models.json" >/dev/null || die 'actual Agent API model identities are missing or not real OpenCode'
+jq -e --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
+  '. as $catalog | all($observed[0][]; .model as $m | any($catalog.providers[].models[]; .id == $m))' \
+  <<< "$catalog" >/dev/null || die 'an actual Agent API model is absent from the real OpenCode catalog'
+jq --slurpfile observed "$run_root/evidence/actual-agent-models.json" \
+  '.observed_agents=$observed[0] | .observed_models=($observed[0] | map(.model) | unique)' \
+  "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
+mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"
+exit "$aft_status"
