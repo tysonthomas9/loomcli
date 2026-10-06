@@ -259,12 +259,12 @@ def create_mobile_roster():
         assert response["success"] and isinstance(response["data"], dict), response
         row = next((w for w in response["data"]["workspaces"] if w["name"] == name), None)
         assert row and row["id"] and row["id"] != WS, response
+        created.append({"id": row["id"], "name": name})
+        write("mobile-workspace-created.json", created)
         actual = workspace_data(f"/api/workspaces/{urllib.parse.quote(row['id'], safe='')}")
         assert actual["id"] == row["id"] and actual["name"] == name and actual["repos"] == [], actual
         active = workspace_data(active_path)
         assert any(w["id"] == row["id"] and w["name"] == name for w in active["workspaces"]), active
-        created.append({"id": row["id"], "name": name, "repos": actual["repos"]})
-        write("mobile-workspace-created.json", created)
     write("mobile-workspace-roster.json", {"baseline": plan["baseline"], "created": created})
 
 
@@ -857,30 +857,128 @@ def cleanup_agents():
             request(f"{PREFIX}/{a['agent_id']}/archive", "POST", {"reason": "cancelled"}, f"cov-visual-{RUN}-{case}-archive")
 
 
+def owned_workspace_targets(plan, created, roster):
+    planned = set(plan["planned_names"])
+    baseline = {row["id"] for row in plan["baseline"]}
+    assert all(row["name"] in planned and row["id"] not in baseline and row["id"] != WS for row in created), created
+    assert len({row["id"] for row in created}) == len(created), "duplicate saved workspace ID receipt"
+    assert len({row["name"] for row in created}) == len(created), "duplicate saved workspace name receipt"
+    owned = {(row["id"], row["name"]) for row in created}
+    unknown = [{"id": row["id"], "name": row["name"]} for row in roster
+               if row["name"] in planned and (row["id"], row["name"]) not in owned]
+    assert not unknown, f"LEFTOVER: planned-name workspace has no matching successful-Create ID receipt: {unknown}"
+    targets = []
+    for saved in created:
+        matches = [row for row in roster if row["id"] == saved["id"]]
+        assert len(matches) <= 1, matches
+        if matches:
+            assert matches[0]["name"] == saved["name"], f"saved workspace ID was renamed: {matches[0]}"
+            targets.append(saved)
+    return targets
+
+
+def self_test_roster_cleanup():
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    name = MOBILE_WS_NAMES[0]
+    owned_id = "AFT-OWNED-ONE"
+    baseline = {"id": WS, "name": "LOCALMODE"}
+    created_row = {"id": owned_id, "name": name}
+    response = {"success": True, "data": {"workspaces": [baseline, created_row]}}
+    calls = iter(({"workspaces": [baseline]}, RuntimeError("detail readback failed")))
+
+    def readback(_path):
+        result = next(calls)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    with TemporaryDirectory(prefix="aft-visual-roster-oracle-") as temp:
+        with patch.dict(globals(), WORK=Path(temp), MOBILE_WS_NAMES=[name]), patch(__name__ + ".current"), \
+             patch(__name__ + ".workspace_data", side_effect=readback) as read_mock, \
+             patch(__name__ + ".request", return_value=response) as request_mock:
+            try:
+                create_mobile_roster()
+            except RuntimeError as exc:
+                assert "detail readback failed" in str(exc), exc
+            else:
+                raise AssertionError("expected detail readback failure")
+            plan = json.loads((Path(temp) / "mobile-workspace-plan.json").read_text())
+            created = json.loads((Path(temp) / "mobile-workspace-created.json").read_text())
+            assert created == [created_row], "Create ID receipt was not persisted before failing detail readback"
+            assert owned_workspace_targets(plan, created, [baseline, created_row]) == [created_row]
+            try:
+                owned_workspace_targets(plan, created, [baseline, {"id": "OTHER", "name": name}])
+            except AssertionError as exc:
+                assert "LEFTOVER" in str(exc), exc
+            else:
+                raise AssertionError("same-name different-ID workspace was incorrectly adopted for deletion")
+            try:
+                owned_workspace_targets(plan, [], [baseline, created_row])
+            except AssertionError as exc:
+                assert "LEFTOVER" in str(exc), exc
+            else:
+                raise AssertionError("planned name without saved Create receipt was incorrectly adopted")
+            request_mock.reset_mock()
+            read_mock.side_effect = [{"workspaces": [baseline, {"id": "OTHER", "name": name}]}]
+            try:
+                cleanup_mobile_workspaces()
+            except AssertionError as exc:
+                assert "LEFTOVER" in str(exc), exc
+            else:
+                raise AssertionError("cleanup adopted a same-name different-ID workspace")
+            assert request_mock.call_count == 0, "cleanup called DELETE for an unowned same-name workspace"
+            assert (Path(temp) / "mobile-workspace-leftover.json").exists()
+            read_mock.side_effect = [
+                {"workspaces": [baseline, created_row]},
+                {"id": owned_id, "name": name, "repos": []},
+                {"workspaces": [baseline]},
+                {"workspaces": [baseline]},
+            ]
+            request_mock.return_value = {"success": True}
+            cleanup_mobile_workspaces()
+            assert request_mock.call_count == 1
+            args, kwargs = request_mock.call_args
+            assert args == (f"/api/workspaces/{owned_id}", "DELETE") and kwargs == {"expected_status": 200}, (args, kwargs)
+            (Path(temp) / "mobile-workspace-created.json").unlink()
+            request_mock.reset_mock()
+            read_mock.side_effect = [{"workspaces": [baseline, created_row]}]
+            try:
+                cleanup_mobile_workspaces()
+            except AssertionError as exc:
+                assert "LEFTOVER" in str(exc), exc
+            else:
+                raise AssertionError("cleanup adopted a planned name without a saved ID receipt")
+            assert request_mock.call_count == 0, "cleanup called DELETE without a saved Create ID receipt"
+
+
 def cleanup_mobile_workspaces():
     plan_path = WORK / "mobile-workspace-plan.json"
     if not plan_path.exists():
         return
     plan = json.loads(plan_path.read_text())
     assert all(name in MOBILE_WS_NAMES for name in plan["planned_names"]), plan
-    baseline = {row["id"] for row in plan["baseline"]}
     active_path = f"/api/workspaces/{urllib.parse.quote(WS, safe='')}"
     roster = workspace_data(active_path)["workspaces"]
+    created_path = WORK / "mobile-workspace-created.json"
+    created = json.loads(created_path.read_text()) if created_path.exists() else []
+    try:
+        targets = owned_workspace_targets(plan, created, roster)
+    except AssertionError as exc:
+        write("mobile-workspace-leftover.json", {"status": "blocked", "reason": str(exc),
+              "planned_names": plan["planned_names"], "created": created,
+              "roster": [{"id": row["id"], "name": row["name"]} for row in roster]})
+        raise
     removed = []
-    for name in plan["planned_names"]:
-        matches = [row for row in roster if row["name"] == name]
-        assert len(matches) <= 1, matches
-        if not matches:
-            continue
-        row = matches[0]
-        assert row["id"] not in baseline and row["id"] != WS, row
+    for row in targets:
         actual = workspace_data(f"/api/workspaces/{urllib.parse.quote(row['id'], safe='')}")
-        assert actual["id"] == row["id"] and actual["name"] == name and actual["repos"] == [], actual
+        assert actual["id"] == row["id"] and actual["name"] == row["name"] and actual["repos"] == [], actual
         response = request(f"/api/workspaces/{urllib.parse.quote(row['id'], safe='')}", "DELETE", expected_status=200)
         assert response["success"], response
         remaining = workspace_data(active_path)["workspaces"]
         assert not any(w["id"] == row["id"] for w in remaining), remaining
-        removed.append({"id": row["id"], "name": name})
+        removed.append(row)
         write("mobile-workspace-cleanup.json", removed)
     assert all(any(row["id"] == original["id"] and row["name"] == original["name"] for row in workspace_data(active_path)["workspaces"])
                for original in plan["baseline"]), "baseline workspace roster changed during owned cleanup"
