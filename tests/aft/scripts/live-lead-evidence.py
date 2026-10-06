@@ -144,7 +144,11 @@ def assert_persona():
 
 def assert_busy():
     evs = rows("busy", "finished")
+    receipts = [e["event_id"] for e in evs if e["kind"] == "message.waiting"]
+    assert len(receipts) == 6 and len(set(receipts)) == 6, f"expected one saved Send receipt event per six user sends: {receipts}"
+    assert sum(e["kind"] == "message.withdrawn" for e in evs) == 1, "Clear did not save one withdrawal"
     delivered = text_events(evs, "message.delivered")
+    assert len(delivered) == 3, f"expected only initial, final waiting and post-Stop deliveries: {delivered}"
     for absent in ("BUSY_A", "BUSY_B", "BUSY_C"):
         assert not any(absent in t for t in delivered), f"withdrawn text reached the model: {absent}"
     assert sum("BUSY_D" in t for t in delivered) == 1, delivered
