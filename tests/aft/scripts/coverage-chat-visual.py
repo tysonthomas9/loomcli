@@ -252,7 +252,8 @@ MOBILE_LAYOUT_JS = r"""(() => {
   return {vw,vh,scrollWidth:document.documentElement.scrollWidth,overflow,nav:n,form:c,switcher:sw,
     centers,active:a,activeName:active?.getAttribute('aria-label'),title:title?.textContent,
     titleClipped:!!title&&title.scrollWidth>title.clientWidth,covered,
-    header:header&&box(header),field:field&&box(field),theme:document.documentElement.dataset.theme};
+    header:header&&box(header),headerCount:document.querySelectorAll('section[aria-label="Agent chat"] header').length,
+    field:field&&box(field),theme:document.documentElement.dataset.theme};
 })()"""
 
 
@@ -277,7 +278,8 @@ def mobile_layout(width):
         assert state["active"]["right"] <= state["switcher"]["right"] + 4, state
         assert state["title"] == NAMES["input"] and not state["titleClipped"], state
         assert form["bottom"] <= nav["top"] and not state["covered"], state
-        assert state["header"] and state["header"]["bottom"] <= state["field"]["top"], state
+        assert state["headerCount"] == 1 and state["header"]["right"] <= width + 1, state
+        assert state["header"]["bottom"] <= state["field"]["top"], state
         results.append(state)
         shot("input", f"mobile-{width}-{theme}")
     write(f"input-mobile-{width}.json", results)
