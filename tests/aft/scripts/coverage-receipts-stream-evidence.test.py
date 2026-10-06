@@ -2,6 +2,8 @@
 """Offline regressions for the public evidence oracle; no Loom state is made."""
 
 import importlib.util
+import io
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -24,6 +26,30 @@ def row(seq, kind="message.waiting"):
 
 
 class OracleTests(unittest.TestCase):
+    def test_public_send_202_and_archive_empty_204(self):
+        send = {"message_id": "msg_1", "state": "waiting", "replaced": False}
+        response = io.BytesIO(json.dumps(send).encode())
+        response.status = 202
+        with patch.object(evidence.urllib.request, "urlopen", return_value=response):
+            self.assertEqual(evidence.http(evidence.ROOT + "/agents/agt_1/messages", "POST",
+                                           {"text": "hello"}, "req-1"), send)
+        response = io.BytesIO(b"")
+        response.status = 204
+        with patch.object(evidence.urllib.request, "urlopen", return_value=response):
+            self.assertIsNone(evidence.http(evidence.ROOT + "/agents/agt_1/archive", "POST",
+                                            {"reason": "cancelled"}, "req-2"))
+
+    def test_ui_receipts_require_send_202_and_withdraw_200(self):
+        send = {"method": "POST", "path": evidence.ROOT + "/agents/agt_1/messages",
+                "key": "send-1", "status": 202, "result": {"message_id": "msg_1", "state": "waiting"}}
+        withdraw = {"method": "DELETE", "path": evidence.ROOT + "/agents/agt_1/messages/waiting",
+                    "key": "clear-1", "status": 200, "result": {"result": "withdrawn"}}
+        with patch.object(evidence, "agent_id", return_value="agt_1"):
+            self.assertTrue(evidence.valid_ui_receipt(send, "waiting"))
+            self.assertTrue(evidence.valid_ui_receipt(withdraw, "waiting"))
+            self.assertFalse(evidence.valid_ui_receipt({**send, "status": 201}, "waiting"))
+            self.assertFalse(evidence.valid_ui_receipt({**withdraw, "status": 204, "result": None}, "waiting"))
+
     def test_paging_pins_first_snapshot_when_new_rows_arrive(self):
         calls = []
 
