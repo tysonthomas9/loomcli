@@ -136,6 +136,51 @@ def prepare_editor(label, path):
     (WORK / f"{label}-expected.txt").write_text(original + f"COV_FILES_{RUN}_EDITOR")
 
 
+def editor_visible(label, expected):
+    route(label, "files")
+    if expected.startswith("@"):
+        expected = Path(expected[1:]).read_text()
+    script = """(() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+      const cm=p?.querySelector('.cm-content[contenteditable=true]');
+      if (!cm) throw Error('owned CodeMirror editor is not visible');
+      return JSON.stringify(Array.from(cm.querySelectorAll('.cm-line')).map(line=>line.textContent).join('\\n')); })()"""
+    raw = subprocess.check_output(
+        ["agent-browser", "--session", env("AFT_SESSION"), "eval", script], text=True
+    ).strip()
+    actual = json.loads(raw)
+    if isinstance(actual, str) and actual.startswith('"'):
+        actual = json.loads(actual)
+    save(f"{label}-before-save-visible", {"text": actual, "expected": expected})
+    assert actual == expected, f"visible editor differs from expected: {len(actual)} vs {len(expected)} characters"
+
+
+def capture_context_state(label, stage, path):
+    """Preserve read-only responses even if the subsequent visible tree assertion fails."""
+    agent = identity(label)
+    query = urllib.parse.urlencode({"scope": "agent", "target": agent["agent_id"], "repo": Path(REPO).name, "path": path})
+    checkout_query = urllib.parse.urlencode({"scope": "agent", "target": agent["agent_id"], "repo": Path(REPO).name})
+
+    def observed(url):
+        try:
+            return {"status": 200, "body": get(url)}
+        except urllib.error.HTTPError as error:
+            return {"status": error.code}
+
+    all_checkouts = observed(f"{ROOT}/files/checkouts")
+    if all_checkouts["status"] == 200:
+        body = all_checkouts["body"]
+        all_checkouts["body"] = {"partial": body.get("partial"), "errors": body.get("errors"),
+                                  "checkouts": [c for c in body.get("checkouts", []) if
+                                                c.get("kind") == "agent" and c.get("agent") == agent["agent_id"]]}
+    save(f"{label}-{stage}-context", {
+        "agent": {k: agent.get(k) for k in ("agent_id", "state", "worktree_path", "branch", "deleted_at")},
+        "checkouts": all_checkouts,
+        "tree": observed(f"{ROOT}/files/tree?{checkout_query}"),
+        "file": observed(f"{ROOT}/files?{query}"),
+        "git_status": observed(f"{ROOT}/files/git-status?{checkout_query}"),
+    })
+
+
 def unchanged(label, path, before_stage):
     before = json.loads((WORK / f"{label}-{before_stage}.json").read_text())["file"]
     now = scoped(label, path)
@@ -177,17 +222,27 @@ def committed(label, path, marker):
     assert current["agent_id"] == value["agent_id"] and current["branch"] == value["branch"]
     query = urllib.parse.urlencode({"scope": "agent", "target": value["agent_id"], "repo": Path(REPO).name, "path": path})
     file = get(f"{ROOT}/files?{query}")
-    assert marker in file["content"] and file["version"], file
     diff = get(f"{ROOT}/files/diff?{query}&from=main&to=HEAD")
-    assert path in diff["patch"] and marker in diff["patch"], diff
     git = get(f"{ROOT}/agents/{value['agent_id']}/git/status")
-    assert git["branch"] == value["branch"] and git["ahead"] >= 1 and git["target_branch"], git
     parent = identity(label)
     events = get(f"{ROOT}/v1/agents/{parent['agent_id']}/events?limit=500")
-    assert not events["more"], "parent completion proof truncated"
     completed = [e for e in events["events"] if e["kind"] == "task_completed" and
                  e["payload"].get("child") == value["agent_id"] and
                  e["payload"].get("outcome") == "completed"]
+    save(f"{label}-committed-observed", {
+        "agent": {k: current.get(k) for k in ("agent_id", "name", "branch", "base_ref", "worktree_path", "state")},
+        "file": {k: file.get(k) for k in ("path", "content", "version")},
+        "diff": {k: diff.get(k) for k in ("path", "patch")},
+        "git": git,
+        "completion_events": [{"event_id": e.get("event_id"),
+                               "payload": {k: e["payload"].get(k) for k in ("child", "outcome", "branch", "head")}}
+                              for e in completed],
+        "events_more": events["more"],
+    })
+    assert marker in file["content"] and file["version"], file
+    assert path in diff["patch"] and marker in diff["patch"], diff
+    assert not events["more"], "parent completion proof truncated"
+    assert git["branch"] == value["branch"] and git["ahead"] >= 1 and git["target_branch"] == value["base_ref"], git
     assert len(completed) == 1 and completed[0]["payload"].get("branch") == value["branch"], completed
     save(f"{label}-committed", {"agent": current, "file": file, "diff": diff, "git": git,
                                  "completion": {"event_id": completed[0]["event_id"], "payload": completed[0]["payload"]}})
@@ -235,6 +290,27 @@ def cleanup():
 
 def selftest():
     """Check the readback oracle rejects wrong bytes, versions and checkout IDs."""
+    original_route, original_check_output = globals()["route"], subprocess.check_output
+    original_session = os.environ.get("AFT_SESSION")
+    os.environ["AFT_SESSION"] = "aft-selftest"
+    globals()["route"] = lambda _label, _tab: None
+    try:
+        subprocess.check_output = lambda *_args, **_kwargs: json.dumps(json.dumps("expectedexpected"))
+        try:
+            editor_visible("editor", "expected")
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("visible editor oracle accepted appended original text")
+        subprocess.check_output = lambda *_args, **_kwargs: json.dumps(json.dumps("expected"))
+        editor_visible("editor", "expected")
+    finally:
+        globals()["route"], subprocess.check_output = original_route, original_check_output
+        if original_session is None:
+            os.environ.pop("AFT_SESSION", None)
+        else:
+            os.environ["AFT_SESSION"] = original_session
+
     source_root = Path(__file__).resolve().parents[3]
     page = (source_root / "internal/webui/frontend/src/views/AgentChatPage.tsx").read_text()
     tabs = re.search(r"export const AGENT_API_TABS[^=]*=\s*\[([^]]+)\]", page)
@@ -295,6 +371,17 @@ def selftest():
             current["content"] = "expected"
             stat["version"] = "v2"
             checkouts["checkouts"][0]["agent"] = "agt_owned"
+        def missing_tree(path):
+            if "/files/tree?" in path:
+                raise urllib.error.HTTPError("http://owned-ui/api/files/tree", 404, "not found", {}, None)
+            if "/files/checkouts" in path:
+                return {"checkouts": [], "partial": False, "errors": []}
+            return fake_get(path)
+        globals()["get"] = missing_tree
+        capture_context_state("actions", "selftest-missing", "a.txt")
+        captured = json.loads((WORK / "actions-selftest-missing-context.json").read_text())
+        assert captured["tree"]["status"] == 404 and captured["file"]["status"] == 200
+        assert captured["checkouts"]["body"]["checkouts"] == []
     finally:
         globals()["get"], globals()["identity"] = original_get, original_identity
 
