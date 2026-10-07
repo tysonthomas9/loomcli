@@ -231,6 +231,8 @@ def started_create_role(event):
     if event["kind"] != "item.completed" or event["payload"].get("itemKind") != "tool":
         return None
     tool = event["payload"].get("tool") or {}
+    if tool.get("failed"):
+        return None
     name = (tool.get("name") or "").strip()
     raw = tool.get("input") or ""
     raw = raw if isinstance(raw, str) else json.dumps(raw)
@@ -240,6 +242,7 @@ def started_create_role(event):
         parsed = None
     parsed = parsed if isinstance(parsed, dict) else None
     code = parsed.get("code", "") if parsed else ""
+    code = code if isinstance(code, str) else ""
     if re.search(r"(?:^|[^a-z])agent_create$", name, re.I) or re.search(r"tools\.loom\.agent_create\s*\(", code):
         return "create"
     execute = re.search(r"(?:^|[^a-z])execute$", name, re.I)
@@ -250,12 +253,25 @@ def started_create_role(event):
     return None
 
 
+def saved_chat_item(event):
+    kind, payload = event["kind"], event["payload"]
+    if kind == "message.delivered":
+        sender = payload.get("sender") or ""
+        if not sender.startswith("agent:"):
+            return True
+        message = payload.get("message") if "completions" in payload else payload.get("text")
+        return bool(isinstance(message, str) and message.strip())
+    if kind == "agent.turn_completed":
+        reason = payload.get("stopReason")
+        return bool(reason and reason != "completed")
+    return kind in ("item.completed", "child.created", "task_completed", "harness.changed")
+
+
 def started_group(lead_events, child_id, native_create_id):
     markers = [e for e in lead_events if e["kind"] == "child.created"]
     demand(len(markers) == 1 and markers[0]["payload"].get("child") == child_id,
            "Lead did not save exactly one child.created for the owned child")
-    visible = [e for e in lead_events if e["kind"] in ("item.completed", "child.created", "message.delivered",
-                                                        "task_completed", "harness.changed")]
+    visible = [e for e in lead_events if saved_chat_item(e)]
     index = next(i for i, e in enumerate(visible) if e["event_id"] == markers[0]["event_id"])
     before, after = [], []
     for e in reversed(visible[:index]):
@@ -313,11 +329,11 @@ def lead_ui(stage):
       const expandedRows=[];
       if(button?.getAttribute('aria-expanded')==='true') {
         let next=m?.closest('li')?.nextElementSibling;
-        for(let i=0;i<EXPECTED;i++) {
+        for(let i=0;i<=EXPECTED;i++) {
           const entry=next?.dataset.kind==='work' ? next.querySelector('[data-testid=tool-call][data-in-group=true]') : null;
           if(!entry) break;
-          const head=entry.querySelector(':scope > div');
-          expandedRows.push({label:head?.getAttribute('aria-label')||head?.textContent?.trim()||'',
+          const heading=entry.querySelector(':scope > div > span[class*=heading]');
+          expandedRows.push({label:heading?.textContent?.trim()||'',
             status:entry.dataset.status,inGroup:entry.dataset.inGroup});
           next=next?.nextElementSibling;
         }
