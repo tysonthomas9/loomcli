@@ -59,9 +59,9 @@ def self_test_request_204():
         assert request(f"{PREFIX}/agt_self_test/archive", "POST", {"reason": "cancelled"}) is None
 
 
-def browser(*args):
+def browser(*args, timeout=None):
     return subprocess.check_output(
-        ["agent-browser", "--session", required("AFT_SESSION"), *args], text=True
+        ["agent-browser", "--session", required("AFT_SESSION"), *args], text=True, timeout=timeout
     ).strip()
 
 
@@ -149,10 +149,38 @@ def long_text():
 
 
 def fill_long():
-    assert len(long_text()) > 5000
-    browser("fill", "textarea[aria-label=Message]", long_text())
-    assert evaluate("document.querySelector('textarea[aria-label=Message]')?.value") == long_text()
-    write("input-source.json", {"text": long_text(), "length": len(long_text())})
+    source = long_text()
+    assert len(source) > 5000
+    browser("fill", "textarea[aria-label=Message]", "")
+    assert evaluate("document.querySelector('textarea[aria-label=Message]')?.value") == "", \
+        "multiline draft was not cleared through the real composer"
+    browser("click", "textarea[aria-label=Message]")
+    assert evaluate("document.activeElement===document.querySelector('textarea[aria-label=Message]')"), \
+        "long input textarea did not gain keyboard focus"
+    previous = ""
+    for index, prefix in enumerate(long_text_prefixes(source)):
+        try:
+            browser("keyboard", "inserttext", prefix[len(previous):], timeout=20)
+        except subprocess.TimeoutExpired as exc:
+            raise AssertionError(f"real keyboard insertion stalled at chunk {index + 1}") from exc
+        assert evaluate("document.querySelector('textarea[aria-label=Message]')?.value") == prefix, \
+            f"real keyboard insertion changed/truncated the long input at chunk {index + 1}"
+        previous = prefix
+    write("input-source.json", {"text": source, "length": len(source)})
+
+
+def long_text_prefixes(source, size=1024):
+    assert source and size > 0
+    return [source[:end] for end in range(size, len(source), size)] + [source]
+
+
+def self_test_long_text_prefixes():
+    source = long_text()
+    prefixes = long_text_prefixes(source)
+    assert len(source) > 5000 and all(0 < len(p) <= len(source) for p in prefixes)
+    assert prefixes[-1] == source and all(len(b) - len(a) <= 1024 for a, b in zip(["", *prefixes[:-1]], prefixes))
+    assert "".join(b[len(a):] for a, b in zip(["", *prefixes[:-1]], prefixes)) == source
+    assert '<img src="x" onerror="alert(1)">' in source and "\n" in source
 
 
 def draft(stage):
@@ -435,6 +463,8 @@ MOTION_JS = r"""(() => {
   const p = {start:Date.now(), frames:[], samples:[], shifts:[], maxMs:180000,
     marker:__MARKER__,
     stopped:false, lastText:'', sawCaret:false, sawWorking:false};
+  const root=document.querySelector('section[aria-label="Agent chat"]');
+  if(!root)throw Error('real Agent Chat root missing before send');
   const transcript = () => document.querySelector('[data-testid=chat-transcript]');
   const state = () => { const t=transcript(); const a=[...(t?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);
     const text=a?.querySelector('[data-testid=chat-markdown]')?.textContent||'';
@@ -442,14 +472,26 @@ MOTION_JS = r"""(() => {
     const working=!!t?.querySelector('[data-testid=working-row]');
     const gap=t?Math.max(0,t.scrollHeight-t.scrollTop-t.clientHeight):null;
     return {at:Date.now(),text,caret,working,gap,stop:!!document.querySelector('form button[title="Stop the running turn"]')}; };
-  const frame=() => { if(p.stopped)return; const s=state();
+  const captureLive=() => {if(p.stopped||window.__aftChatVisualLive)return;
+    const tool=root.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running]');
+    const working=root.querySelector('[data-testid=working-row]');
+    const stop=root.querySelector('form button[title="Stop the running turn"]');
+    const label=tool?.textContent?.trim()||'';
+    if(!tool||!working||!stop||!label)return;
+    window.__aftChatVisualLive={path:location.pathname,at:new Date().toISOString(),
+      source:tool.dataset.testid,label,live:!!tool,working:!!working,running:!!stop,
+      workingText:working.textContent,stopTitle:stop.title};
+    p.liveObserver?.disconnect(); };
+  p.liveObserver=new MutationObserver(captureLive);
+  p.liveObserver.observe(root,{subtree:true,childList:true,attributes:true,characterData:true});
+  const frame=() => { if(p.stopped)return; captureLive(); const s=state();
     if(s.text!==p.lastText) {const before=p.lastText.trim().split(/\s+/).filter(Boolean).length;
       const after=s.text.trim().split(/\s+/).filter(Boolean).length;
       const marker=s.text.includes(p.marker);
       p.frames.push({at:s.at,chars:s.text.length,words:after,addedWords:Math.max(0,after-before),
         marker,...(marker?{text:s.text}:{})}); p.lastText=s.text;}
     p.sawCaret ||= s.caret; p.sawWorking ||= s.working;
-    if(Date.now()-p.start>p.maxMs) {p.stopped=true;return;} requestAnimationFrame(frame); };
+    if(Date.now()-p.start>p.maxMs) {p.stopped=true;p.liveObserver.disconnect();return;} requestAnimationFrame(frame); };
   p.timer=setInterval(()=>{ if(p.stopped){clearInterval(p.timer);return;}
     const s=state(); p.samples.push({at:s.at,chars:s.text.length,caret:s.caret,working:s.working,gap:s.gap,stop:s.stop});
   },100);
@@ -498,7 +540,7 @@ def self_test_final_text():
 def motion_finish(case):
     current(case)
     probe = evaluate("""(() => { const p=window.__aftChatVisual; if(!p)throw Error('motion probe missing');
-      p.stopped=true; clearInterval(p.timer); p.observer?.disconnect();
+      p.stopped=true; clearInterval(p.timer); p.observer?.disconnect(); p.liveObserver?.disconnect();
       const c=document.querySelector('[data-testid=chat-transcript]');
       const a=[...(c?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);
       const finalText=a?.querySelector('[data-testid=chat-markdown]')?.textContent||'';
