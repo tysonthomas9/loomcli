@@ -47,11 +47,16 @@ if (batchName === 'default') {
     suite: 'coverage-children-queue', model_required: true }],
   children: [{ name: 'cov-child-queue-task-${RUN_ID}', parent: 'cov-child-queue-lead-${RUN_ID}',
     suite: 'coverage-children-queue' }] };
+  const visualSkip = { files: ['chat-visual-skip.test.yaml'], expected_cases: [
+    { suite: 'live-chat-visual-skip', name: 'normal-motion skip link stays hidden after mouse focus' }],
+  agents: { leads: [{ name: 'cov-visual-skip-${RUN_ID}', suite: 'live-chat-visual-skip', model_required: false }],
+    children: [] } };
   if (!(exactKeys(batch, ['files', 'agents']) || exactKeys(batch, ['files', 'agents', 'expected_cases'])) ||
       !Array.isArray(batch.files) ||
       (batchName === 'children-queue' && (batch.files.join(',') !== 'children-queue.test.yaml' ||
         JSON.stringify(batch.expected_cases) !== JSON.stringify([queueCase]) ||
         JSON.stringify(batch.agents) !== JSON.stringify(queueAgents))) ||
+      (batchName === 'chat-visual-skip' && JSON.stringify(batch) !== JSON.stringify(visualSkip)) ||
       (batchName === 'tool-policy' && (!Array.isArray(batch.expected_cases) ||
         batch.expected_cases.length !== 3 || batch.files.join(',') !== 'tool-policy.test.yaml')) ||
       (batch.expected_cases !== undefined && (!Array.isArray(batch.expected_cases) || !batch.expected_cases.length ||
@@ -105,6 +110,14 @@ for (const file of files) {
   regular(file);
   const parsed = loadSuite(file);
   if (!Array.isArray(parsed.tests) || !parsed.tests.length) fail(`empty parsed suite: ${file}`);
+  if (batchName === 'chat-visual-skip') {
+    const steps = parsed.tests.flatMap(test => test.steps ?? []);
+    const createdNames = steps.filter(step => step.fill?.testid === 'create-agent-name').map(step => step.fill.value);
+    if (createdNames.length !== 1 || createdNames[0] !== `cov-visual-skip-${process.env.RUN_ID}` ||
+        !steps.some(step => step.select?.testid === 'create-agent-backend' && step.select.value === 'opencode') ||
+        steps.some(step => step.fill?.label === 'Message'))
+      fail('visual skip suite must create only its declared OpenCode Lead without a Chat message');
+  }
   if (batchName === 'default' && parsed.tests.length !== 3) fail(`default suite must contain exactly three cases: ${file}`);
   if (typeof parsed.suite !== 'string' || !namePattern.test(parsed.suite) || suites.some(suite => suite.name === parsed.suite))
     fail(`duplicate or unsafe suite name: ${file}`);
