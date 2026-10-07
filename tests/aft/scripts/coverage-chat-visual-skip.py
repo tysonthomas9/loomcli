@@ -76,13 +76,18 @@ def current():
     assert observed == {"origin": ORIGIN, "path": route()}, "foreign Chat origin, route or Agent"
 
 
-def identity():
-    current()
+def api_identity():
     agent = request(f"{PREFIX}/{agent_id()}")
     expected = {"agent_id": agent_id(), "name": NAME,
                 "repo": required("AFT_AGENT_FLOW_REPO"), "harness": "opencode",
                 "preset": "lead", "created_by_kind": "user", "parent_agent_id": None}
     assert all(agent.get(key) == value for key, value in expected.items()), "saved Lead identity changed"
+    return expected, agent
+
+
+def identity():
+    current()
+    expected, _ = api_identity()
     return expected
 
 
@@ -326,12 +331,17 @@ def mouse_focus():
 def cleanup():
     if not (WORK / "agent.id").exists():
         return
+    saved = json.loads((WORK / "identity.json").read_text())
+    owner, _ = api_identity()
+    assert saved == owner, "SK1 cleanup refused foreign Agent"
     try:
-        no_turn("teardown")
+        baseline = json.loads((WORK / "baseline-events.json").read_text())
+        actual = event_receipts()
+        write("no-turn-teardown.json", {"agent": owner, "baseline": baseline, "events": actual})
+        assert actual == baseline, "SK1 teardown saved events changed after no-Send proof"
     finally:
-        saved = json.loads((WORK / "identity.json").read_text())
-        agent = request(f"{PREFIX}/{agent_id()}")
-        assert all(agent.get(key) == value for key, value in saved.items()), "SK1 cleanup refused foreign Agent"
+        current_owner, agent = api_identity()
+        assert current_owner == saved, "SK1 cleanup refused foreign Agent"
         if not agent.get("archived_at"):
             request(f"{PREFIX}/{agent_id()}/archive", "POST", {"reason": "cancelled"})
 
@@ -446,6 +456,70 @@ def self_test():
                 assert "message, turn or Chat draft" in str(exc), exc
             else:
                 raise AssertionError("no-Send oracle accepted changed saved history")
+
+    def teardown_case(*, events=None, foreign=False, changed_receipt=False,
+                      archive_failure=False, already_archived=False):
+        baseline = [{"event_id": "evt_created", "seq": 1, "kind": "agent.created"}]
+        actual = baseline if events is None else events
+        owner = {"agent_id": "agt_owned", "name": NAME, "repo": "/tmp/source-repo",
+                 "harness": "opencode", "preset": "lead", "created_by_kind": "user",
+                 "parent_agent_id": None}
+        calls = []
+
+        def fake_request(path, method="GET", body=None):
+            calls.append((path, method))
+            if path.endswith("/events?after=0&limit=500"):
+                return {"events": actual, "more": False}
+            if path.endswith("/archive"):
+                if archive_failure:
+                    raise RuntimeError("archive failed")
+                return None
+            assert path.endswith("/agt_owned") and method == "GET", "foreign cleanup API path"
+            return {**owner, "name": "foreign" if foreign else NAME,
+                    "archived_at": "done" if already_archived else None}
+
+        def closed_browser(*_args, **_kwargs):
+            raise AssertionError("teardown touched the closed browser")
+
+        with TemporaryDirectory(prefix="aft-sk1-teardown-") as temp, \
+             patch.dict(os.environ, AFT_AGENT_FLOW_REPO="/tmp/source-repo"), \
+             patch.dict(globals(), WORK=Path(temp), request=fake_request,
+                        evaluate=closed_browser, browser=closed_browser):
+            (Path(temp) / "agent.id").write_text("agt_owned\n")
+            write("identity.json", {**owner, "name": "changed" if changed_receipt else NAME})
+            write("baseline-events.json", baseline)
+            try:
+                cleanup()
+            except (AssertionError, RuntimeError) as exc:
+                failure = str(exc)
+            else:
+                failure = None
+            receipt = Path(temp) / "no-turn-teardown.json"
+            saved = json.loads(receipt.read_text()) if receipt.exists() else None
+        return calls, saved, failure
+
+    calls, saved, failure = teardown_case()
+    assert failure is None and saved["events"] == saved["baseline"]
+    assert [method for _, method in calls] == ["GET", "GET", "GET", "POST"]
+    calls, saved, failure = teardown_case(already_archived=True)
+    assert failure is None and saved is not None and not any(method == "POST" for _, method in calls)
+    changed = [{"event_id": "evt_created", "seq": 1, "kind": "agent.created"},
+               {"event_id": "evt_changed", "seq": 2, "kind": "agent.state_changed"}]
+    calls, saved, failure = teardown_case(events=changed)
+    assert failure == "SK1 teardown saved events changed after no-Send proof"
+    assert saved["events"] == changed and any(method == "POST" for _, method in calls)
+    calls, saved, failure = teardown_case(events=[{"event_id": "evt_1", "seq": 1,
+                                                  "kind": "message.delivered"}])
+    assert failure == "no-Send SK1 Agent created a message or turn" and saved is None
+    assert any(method == "POST" for _, method in calls)
+    for options in ({"foreign": True}, {"changed_receipt": True}):
+        calls, saved, failure = teardown_case(**options)
+        expected_failure = "saved Lead identity changed" if options.get("foreign") else \
+            "SK1 cleanup refused foreign Agent"
+        assert failure == expected_failure
+        assert saved is None and not any(method == "POST" for _, method in calls)
+    calls, saved, failure = teardown_case(archive_failure=True)
+    assert failure == "archive failed" and saved is not None and calls[-1][1] == "POST"
 
     node_test = r"""
 const vm=require('vm'),fs=require('fs'),assert=require('assert');
