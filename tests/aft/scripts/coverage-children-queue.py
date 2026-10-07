@@ -746,9 +746,33 @@ def replay_u3():
     replayed = http(f"{ROOT}/{quote(identity('child'))}/messages", receipt["body"], receipt["request_id"])
     after_events = events("child")
     after_agent = agent("child")
+    fields = ("message_id", "state", "replaced", "interrupted", "turn_id")
+    def safe_result(value):
+        if not isinstance(value, dict):
+            return {}
+        result = {}
+        for key in fields:
+            if key in value:
+                expected_type = bool if key in ("replaced", "interrupted") else str
+                result[key] = value[key] if isinstance(value[key], expected_type) else "<invalid type>"
+        return result
+    before_ids = [(e["seq"], e["event_id"]) for e in before_events]
+    after_ids = [(e["seq"], e["event_id"]) for e in after_events]
+    save("u3-replay-diagnostic", {"original_request_id": receipt["request_id"],
+                                  "retry_request_id": receipt["request_id"],
+                                  "original": safe_result(receipt["result"]), "replay": safe_result(replayed),
+                                  "original_fields_present": [key for key in fields if key in receipt["result"]],
+                                  "replay_fields_present": [key for key in fields if isinstance(replayed, dict) and key in replayed],
+                                  "receipt_equal": replayed == receipt["result"],
+                                  "events_before": before_ids, "events_after": after_ids,
+                                  "events_equal": after_ids == before_ids,
+                                  "agent_before": {"state": before_agent["state"], "attempt": before_agent["attempt"],
+                                                   "waiting_count": len(before_agent["waiting_messages"])},
+                                  "agent_after": {"state": after_agent["state"], "attempt": after_agent["attempt"],
+                                                  "waiting_count": len(after_agent["waiting_messages"])},
+                                  "slots_equal": after_agent["waiting_messages"] == before_agent["waiting_messages"]})
     demand(replayed == receipt["result"], "same U3 RequestID did not replay its exact receipt")
-    demand([(e["seq"], e["event_id"]) for e in after_events] ==
-           [(e["seq"], e["event_id"]) for e in before_events], "U3 replay added a saved event")
+    demand(after_ids == before_ids, "U3 replay added a saved event")
     demand(after_agent["state"] == before_agent["state"] and
            after_agent["attempt"] == before_agent["attempt"] and
            after_agent["waiting_messages"] == before_agent["waiting_messages"],
