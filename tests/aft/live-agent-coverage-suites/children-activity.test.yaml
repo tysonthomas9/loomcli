@@ -137,6 +137,15 @@ tests:
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" arm_reactivation repeat-lead repeat
         intent: Arm an exact saved-ID observer before Send to witness the attempt-two running tray and nested sidebar together
       - press: Enter
+      - wait:
+          fn: >-
+            (() => { const tray=document.querySelector('[data-testid=agent-tray]');
+              const header=tray?.querySelector('button[aria-expanded=false]');
+              return tray?.dataset.open==='false' && /\b1 running\b/.test(header?.getAttribute('aria-label')||''); })()
+        intent: Await the genuine running child header while the saved-ID observer remains armed
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" open_reactivation_tray repeat-lead repeat
+        intent: Open the collapsed Lead tray through its real header during the saved second child turn
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" reactivation_checkpoint repeat-lead repeat
         intent: Require captured attempt-two running tray and nested sidebar activity with a matching saved current-turn event; cards alone are diagnostic
@@ -445,11 +454,11 @@ tests:
       - run: |
           set -eu
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_focus sidebar-b
-          agent-browser --session "$AFT_SESSION" press Space
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_key sidebar-b Space lifted
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b lifted
-          agent-browser --session "$AFT_SESSION" press ArrowUp
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_key sidebar-b ArrowUp moved
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b moved
-          agent-browser --session "$AFT_SESSION" press Space
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_key sidebar-b Space attempted
         intent: Reorder Lead B above Lead A and save exact route and row diagnostics after lift and move
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b attempted
