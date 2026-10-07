@@ -478,6 +478,127 @@ def rename_restored(case):
     write(f"{case}-rename-restored.json", {"agent": saved, "header": shown})
 
 
+def rename_restored_reloaded(case):
+    current(case)
+    before = json.loads((WORK / f"{case}-rename-restored.json").read_text())
+    saved = request(f"{PREFIX}/{agent_id(case)}")
+    shown = evaluate("document.querySelector('section[aria-label=\"Agent chat\"] header h2')?.textContent")
+    assert saved["agent_id"] == before["agent"]["agent_id"] == agent_id(case), (saved, before)
+    assert saved["name"] == before["agent"]["name"] == before["header"] == shown == NAMES[case], \
+        (saved, before, shown)
+    write(f"{case}-rename-restored-reloaded.json", {"agent": saved, "header": shown})
+
+
+def assert_input_journey_order(steps):
+    def run_index(command):
+        matches = [i for i, step in enumerate(steps)
+                   if f'coverage-chat-visual.py" {command}' in step.get("run", "")]
+        assert len(matches) == 1, f"expected one {command} step, got {matches}"
+        return matches[0]
+
+    declared = "aft-${RUN_ID}-cov-visual-input"
+    def name_fill(value):
+        matches = [i for i, step in enumerate(steps)
+                   if step.get("fill") == {"label": "Agent name", "value": value}]
+        assert len(matches) == 1, f"expected one header name fill for {value}: {matches}"
+        return matches[0]
+
+    grown = run_index("draft grown")
+    long = run_index("fill-long")
+    collapsed = run_index("input-check collapsed")
+    full = run_index("input-check all")
+    reloaded = run_index("input-reload-check")
+    mobile = run_index("mobile-switcher 360")
+    renamed = run_index("rename input")
+    renamed_reloaded = run_index("rename-reloaded input")
+    restored = run_index("rename-restored input")
+    restored_reloaded = run_index("rename-restored-reloaded input")
+    suffix_fill = name_fill(declared + "-renamed")
+    original_fill = name_fill(declared)
+    assert grown < long < collapsed < full < reloaded < mobile < suffix_fill < renamed < renamed_reloaded < original_fill < restored < restored_reloaded, \
+        "input, saved text and mobile checks must precede both header commits"
+    assert steps[long + 1].get("press") == "Enter", "long literal text must be sent with composer Enter"
+    assert all(step.get("press") != "Enter" and
+               not (isinstance(step.get("fill"), dict) and step["fill"].get("label") == "Agent name")
+               for step in steps[:long]), "header Enter/rename occurred before long input"
+    assert steps[suffix_fill - 1].get("click") == {"role": "button", "name": "Rename agent", "exact": True}
+    assert steps[suffix_fill + 1].get("click") == {"testid": "harness-label"}, \
+        "first header rename must commit through a real blur click"
+    assert steps[suffix_fill + 2].get("wait", {}).get("fn") and renamed == suffix_fill + 3
+    assert steps[renamed + 1].get("reload") is True and steps[renamed + 2].get("wait", {}).get("fn")
+    assert renamed_reloaded == renamed + 3, "blur rename must retain saved API and reload readbacks"
+    assert steps[original_fill - 1].get("click") == {"role": "button", "name": "Rename agent", "exact": True}
+    assert steps[original_fill + 1].get("press") == "Enter", "original name must be committed by header Enter"
+    assert steps[original_fill + 2].get("wait", {}).get("fn") and restored == original_fill + 3
+    assert steps[restored + 1].get("reload") is True and steps[restored + 2].get("wait", {}).get("fn")
+    assert restored_reloaded == restored + 3, "Enter restore must retain saved API and reload readbacks"
+
+
+def self_test_input_journey_order():
+    from copy import deepcopy
+    import yaml
+
+    suite = yaml.safe_load((Path(__file__).parents[1] / "live-agent-coverage-suites/chat-visual.test.yaml").read_text())
+    assert suite["suite"] == "live-chat-visual" and len(suite["tests"]) == 2
+    steps = next(test["steps"] for test in suite["tests"] if test["name"].startswith("chat composer and long"))
+    assert_input_journey_order(steps)
+
+    def rejects(change):
+        candidate = deepcopy(steps)
+        change(candidate)
+        try:
+            assert_input_journey_order(candidate)
+        except AssertionError:
+            return
+        raise AssertionError("input journey order accepted a missing UI0 or saved-text proof")
+
+    def index(command):
+        return next(i for i, step in enumerate(steps)
+                    if f'coverage-chat-visual.py" {command}' in step.get("run", ""))
+
+    rejects(lambda c: c.insert(index("fill-long"), c.pop(index("rename input") - 3)))
+    rejects(lambda c: c[index("rename input") - 2].update(click={"role": "button", "name": "Rename agent"}))
+    rejects(lambda c: c.pop(index("rename input") + 1))
+    rejects(lambda c: c[index("rename-restored input") - 2].update(press="Shift+Enter"))
+    rejects(lambda c: c.pop(index("input-reload-check")))
+    rejects(lambda c: c.pop(index("rename-restored-reloaded input")))
+
+
+def self_test_restored_reload():
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    with TemporaryDirectory() as folder, patch.dict(globals(), WORK=Path(folder)):
+        original = {"agent_id": "agt_input", "name": NAMES["input"]}
+        write("input-rename-restored.json", {"agent": original, "header": original["name"]})
+
+        def check(saved, header, should_pass):
+            with patch.dict(globals(), current=lambda case: None, agent_id=lambda case: "agt_input",
+                            request=lambda path: saved, evaluate=lambda script: header):
+                try:
+                    rename_restored_reloaded("input")
+                except AssertionError:
+                    assert not should_pass
+                else:
+                    assert should_pass, "reload accepted changed saved identity or title"
+
+        check(original, original["name"], True)
+        assert json.loads((WORK / "input-rename-restored-reloaded.json").read_text())["agent"] == original
+        for saved, header in (({**original, "agent_id": "agt_other"}, original["name"]),
+                              ({**original, "name": "changed"}, original["name"]),
+                              (original, "changed")):
+            check(saved, header, False)
+        (WORK / "input-rename-restored.json").unlink()
+        with patch.dict(globals(), current=lambda case: None, agent_id=lambda case: "agt_input",
+                        request=lambda path: original, evaluate=lambda script: original["name"]):
+            try:
+                rename_restored_reloaded("input")
+            except FileNotFoundError:
+                pass
+            else:
+                raise AssertionError("reload accepted missing pre-reload rename receipt")
+
+
 def skip_link(stage):
     current("input")
     result = evaluate("""(() => {const a=document.querySelector('a[href="#main-content"]');
