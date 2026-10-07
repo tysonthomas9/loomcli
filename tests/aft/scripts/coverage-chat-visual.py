@@ -1138,21 +1138,205 @@ def turn_events(case, marker):
     return delivered[0], end, [e for e in evs if delivered[0]["seq"] < e["seq"] < end["seq"]]
 
 
+GROUP_COLLAPSED = ("[data-testid=chat-transcript] [data-testid=tool-group][aria-expanded=false], "
+                   "[data-testid=chat-transcript] [data-testid=work-toggle][aria-expanded=false]")
+ENTRY_COLLAPSED = ("[data-testid=chat-transcript] [data-testid=tool-call] [role=button][aria-expanded=false], "
+                   "[data-testid=chat-transcript] [data-testid=reasoning] [role=button][aria-expanded=false]")
+
+
+def expansion_geometry(selector):
+    # Only geometry, DOM identity and hit ownership leave the browser; never tool text.
+    js = """(() => {
+      const pane=document.querySelector('[data-testid=chat-transcript]');
+      const matches=[...document.querySelectorAll(SELECTOR)];
+      const target=matches[0];
+      if(!pane || !target) return {route:location.pathname,count:matches.length,panePresent:!!pane};
+      const r=target.getBoundingClientRect(), p=pane.getBoundingClientRect();
+      const x=r.left+r.width/2,y=r.top+r.height/2;
+      const hit=document.elementFromPoint(x,y);
+      const row=target.closest('li[data-kind]');
+      return {route:location.pathname,count:matches.length,panePresent:true,
+        inPane:pane.contains(target),rowIndex:row?[...pane.querySelectorAll('li[data-kind]')].indexOf(row):-1,
+        kind:target.dataset.testid||target.closest('[data-testid]')?.dataset.testid||null,
+        button:target.tagName==='BUTTON'||target.getAttribute('role')==='button',
+        expanded:target.getAttribute('aria-expanded'),status:target.closest('[data-status]')?.dataset.status||null,
+        rect:{left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height},
+        pane:{left:p.left,top:p.top,right:p.right,bottom:p.bottom},
+        viewport:{width:innerWidth,height:innerHeight},
+        hitTag:hit?.tagName||null,hitTarget:!!hit&&(hit===target||target.contains(hit)),
+        centerInPane:x>=p.left&&x<=p.right&&y>=p.top&&y<=p.bottom,
+        centerInViewport:x>=0&&x<=innerWidth&&y>=0&&y<=innerHeight};
+    })()""".replace("SELECTOR", json.dumps(selector))
+    return evaluate(js)
+
+
+def record_expansion_geometry(entry):
+    path = WORK / "render-expand-geometry.json"
+    history = json.loads(path.read_text()) if path.exists() else []
+    assert isinstance(history, list) and len(history) < 768, "bounded expansion geometry history exhausted"
+    history.append(entry)
+    write(path.name, history)
+
+
+def validate_expansion_target(geometry, expected_kinds, after_scroll):
+    assert geometry.get("route") == f"/ws/{WS}/chat/{agent_id('render')}", "work toggle changed owned Chat route"
+    assert geometry.get("panePresent") and geometry.get("inPane") and geometry.get("count", 0) > 0, \
+        "work toggle missing from owned transcript"
+    assert geometry.get("kind") in expected_kinds and geometry.get("button") and \
+        geometry.get("expanded") == "false" and geometry.get("rowIndex", -1) >= 0, \
+        "work toggle identity, role or collapsed state changed"
+    if expected_kinds == ("tool-call", "reasoning"):
+        assert geometry.get("status") in ("completed", "failed"), "work entry is not completed"
+    if after_scroll:
+        rect = geometry.get("rect") or {}
+        assert rect.get("width", 0) > 0 and rect.get("height", 0) > 0 and \
+            geometry.get("centerInPane") and geometry.get("centerInViewport") and \
+            geometry.get("hitTarget"), "centered work toggle remains covered or outside Chat pane"
+
+
+def click_collapsed_work(selector, expected_kinds):
+    before = expansion_geometry(selector)
+    record = {"kinds": expected_kinds, "selector": selector, "before": before, "outcome": "pending"}
+    record_expansion_geometry(record)
+    validate_expansion_target(before, expected_kinds, False)
+    try:
+        browser("scrollintoview", selector)
+    except Exception:
+        record_expansion_geometry({**record, "outcome": "scroll-failed"})
+        raise
+    after = expansion_geometry(selector)
+    record = {**record, "after": after, "outcome": "centered-pending-hit-test"}
+    record_expansion_geometry(record)
+    assert (after.get("count"), after.get("kind"), after.get("rowIndex"), after.get("status")) == \
+        (before.get("count"), before.get("kind"), before.get("rowIndex"), before.get("status")), \
+        "first collapsed work toggle changed during centering"
+    validate_expansion_target(after, expected_kinds, True)
+    try:
+        browser("click", selector)
+    except Exception:
+        record_expansion_geometry({**record, "outcome": "click-failed"})
+        raise
+    record_expansion_geometry({**record, "outcome": "clicked"})
+
+
 def expand_work():
     for _ in range(20):
-        closed = evaluate("document.querySelectorAll('[data-testid=tool-group][aria-expanded=false], [data-testid=work-toggle][aria-expanded=false]').length")
+        closed = evaluate(f"document.querySelectorAll({json.dumps(GROUP_COLLAPSED)}).length")
         if not closed:
             break
-        browser("click", "[data-testid=tool-group][aria-expanded=false], [data-testid=work-toggle][aria-expanded=false]")
+        click_collapsed_work(GROUP_COLLAPSED, ("tool-group", "work-toggle"))
     else:
         raise AssertionError("too many collapsed work groups")
     for _ in range(30):
-        closed = evaluate("document.querySelectorAll('[data-testid=tool-call] [role=button][aria-expanded=false], [data-testid=reasoning] [role=button][aria-expanded=false]').length")
+        closed = evaluate(f"document.querySelectorAll({json.dumps(ENTRY_COLLAPSED)}).length")
         if not closed:
             break
-        browser("click", "[data-testid=tool-call] [role=button][aria-expanded=false], [data-testid=reasoning] [role=button][aria-expanded=false]")
+        click_collapsed_work(ENTRY_COLLAPSED, ("tool-call", "reasoning"))
     else:
         raise AssertionError("too many collapsed work entries")
+
+
+def self_test_collapsed_work_click():
+    from copy import deepcopy
+    from tempfile import TemporaryDirectory
+    from unittest.mock import call, patch
+
+    route = f"/ws/{WS}/chat/agt_test"
+    before = {"route": route, "count": 2, "panePresent": True, "inPane": True,
+              "rowIndex": 1, "kind": "tool-call", "button": True, "expanded": "false",
+              "status": "completed", "rect": {"width": 300, "height": 30},
+              "centerInPane": False, "centerInViewport": True, "hitTarget": False,
+              "hitTag": "HEADER"}
+    centered = {**before, "centerInPane": True, "hitTarget": True, "hitTag": "DIV"}
+
+    def trial(first=before, second=centered, error=None, expected_calls=2):
+        with TemporaryDirectory() as folder, patch.dict(globals(), WORK=Path(folder)):
+            (WORK / "render.id").write_text("agt_test\n")
+            with patch.object(sys.modules[__name__], "expansion_geometry", side_effect=[first, second]) as geometry, \
+                 patch.object(sys.modules[__name__], "browser") as drive:
+                if error:
+                    try:
+                        click_collapsed_work(ENTRY_COLLAPSED, ("tool-call", "reasoning"))
+                    except AssertionError as exc:
+                        assert error in str(exc), (error, exc)
+                    else:
+                        raise AssertionError(f"invalid work toggle accepted: {error}")
+                else:
+                    click_collapsed_work(ENTRY_COLLAPSED, ("tool-call", "reasoning"))
+                assert drive.call_args_list == [
+                    call("scrollintoview", ENTRY_COLLAPSED), call("click", ENTRY_COLLAPSED)
+                ][:expected_calls], drive.call_args_list
+                assert geometry.call_count == (2 if expected_calls else 1)
+            history = json.loads((WORK / "render-expand-geometry.json").read_text())
+            assert history[0]["before"] == first and len(history) >= 1
+            assert all("text" not in str(item).lower() for item in history), "raw tool text in geometry receipt"
+            if error and expected_calls == 1:
+                assert history[-1]["outcome"] == "centered-pending-hit-test"
+
+    trial()
+    trial(second={**centered, "hitTarget": False, "hitTag": "HEADER"},
+          error="remains covered", expected_calls=1)
+    trial(first={**before, "route": "/ws/FOREIGN/chat/agt_test"},
+          error="owned Chat route", expected_calls=0)
+    trial(first={**before, "panePresent": False, "count": 0},
+          error="missing from owned transcript", expected_calls=0)
+    trial(second={**centered, "count": 1},
+          error="changed during centering", expected_calls=1)
+    trial(first={**before, "status": "running"}, error="not completed", expected_calls=0)
+    trial(first={**before, "expanded": "true"}, error="collapsed state", expected_calls=0)
+    trial(first={**before, "button": False}, error="role or collapsed", expected_calls=0)
+
+    with TemporaryDirectory() as folder, patch.dict(globals(), WORK=Path(folder)):
+        (WORK / "render.id").write_text("agt_test\n")
+        with patch.object(sys.modules[__name__], "expansion_geometry", return_value=before), \
+             patch.object(sys.modules[__name__], "browser", side_effect=RuntimeError("scroll failed")):
+            try:
+                click_collapsed_work(ENTRY_COLLAPSED, ("tool-call", "reasoning"))
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("failed scroll was ignored")
+        history = json.loads((WORK / "render-expand-geometry.json").read_text())
+        assert history[-1]["outcome"] == "scroll-failed"
+
+    with TemporaryDirectory() as folder, patch.dict(globals(), WORK=Path(folder)):
+        (WORK / "render.id").write_text("agt_test\n")
+        with patch.object(sys.modules[__name__], "expansion_geometry", side_effect=[before, centered]), \
+             patch.object(sys.modules[__name__], "browser", side_effect=["", RuntimeError("click failed")]) as drive:
+            try:
+                click_collapsed_work(ENTRY_COLLAPSED, ("tool-call", "reasoning"))
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("failed real click was ignored")
+            assert drive.call_args_list == [call("scrollintoview", ENTRY_COLLAPSED),
+                                            call("click", ENTRY_COLLAPSED)]
+        history = json.loads((WORK / "render-expand-geometry.json").read_text())
+        assert history[-1]["outcome"] == "click-failed"
+
+    with TemporaryDirectory() as folder, patch.dict(globals(), WORK=Path(folder)):
+        (WORK / "render.id").write_text("agt_test\n")
+        group = {**before, "kind": "tool-group", "status": None}
+        centered_group = {**centered, "kind": "tool-group", "status": None}
+        with patch.object(sys.modules[__name__], "expansion_geometry", side_effect=[group, centered_group]), \
+             patch.object(sys.modules[__name__], "browser") as drive:
+            click_collapsed_work(GROUP_COLLAPSED, ("tool-group", "work-toggle"))
+            assert drive.call_args_list == [call("scrollintoview", GROUP_COLLAPSED),
+                                            call("click", GROUP_COLLAPSED)]
+
+    with patch.object(sys.modules[__name__], "evaluate", return_value=centered) as read:
+        assert expansion_geometry(ENTRY_COLLAPSED) == centered
+        source = read.call_args.args[0]
+        assert "document.elementFromPoint" in source and \
+            "pane.contains(target)" in source and json.dumps(ENTRY_COLLAPSED) in source
+
+    with patch.object(sys.modules[__name__], "evaluate", side_effect=[1, 0, 1, 0]), \
+         patch.object(sys.modules[__name__], "click_collapsed_work") as click_work:
+        expand_work()
+        assert click_work.call_args_list == [
+            call(GROUP_COLLAPSED, ("tool-group", "work-toggle")),
+            call(ENTRY_COLLAPSED, ("tool-call", "reasoning")),
+        ]
 
 
 RENDER_DOM = r"""(() => { const c=document.querySelector('[data-testid=chat-transcript]');
@@ -1315,9 +1499,9 @@ def reasoning_capture(stage):
     write(f"render-reasoning-{stage}-receipts.json", reasoning_receipt_diagnostic(reasoning_items))
     # Reveal grouped rows without opening the Thinking bodies yet.
     for _ in range(20):
-        if not evaluate("document.querySelectorAll('[data-testid=tool-group][aria-expanded=false], [data-testid=work-toggle][aria-expanded=false]').length"):
+        if not evaluate(f"document.querySelectorAll({json.dumps(GROUP_COLLAPSED)}).length"):
             break
-        browser("click", "[data-testid=tool-group][aria-expanded=false], [data-testid=work-toggle][aria-expanded=false]")
+        click_collapsed_work(GROUP_COLLAPSED, ("tool-group", "work-toggle"))
     else:
         raise AssertionError("too many collapsed work groups")
     collapsed = evaluate(REASONING_DOM)
