@@ -124,6 +124,11 @@
   white-space: nowrap;
 }
 
+/* Keep the header fixed when a turn changes active to idle. */
+.statePill[data-state] {
+  min-width: 6rem;
+}
+
 .stateDot {
   width: 6px;
   height: 6px;
