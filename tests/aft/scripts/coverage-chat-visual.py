@@ -608,6 +608,7 @@ def skip_link(stage):
     result = evaluate("""(() => {const a=document.querySelector('a[href="#main-content"]');
       const m=document.querySelector('main#main-content'), r=a?.getBoundingClientRect();
       return {text:a?.textContent?.trim(), focused:document.activeElement===a,
+        focusVisible:a?.matches(':focus-visible')===true,
         inViewport:!!r&&r.bottom>0&&r.top<innerHeight, hash:location.hash,
         focusInMain:!!m&&m.contains(document.activeElement)&&m!==document.activeElement};})()""")
     assert result["text"] == "Skip to main content", result
@@ -618,7 +619,7 @@ def skip_link(stage):
     elif stage == "entered":
         assert result["hash"] == "#main-content" and result["focusInMain"], result
     elif stage == "mouse_focus":
-        assert result["focused"] and not result["inViewport"], result
+        assert result["focused"] and result["inViewport"] is result["focusVisible"], result
     else:
         raise ValueError(stage)
     write(f"input-skip-link-{stage}.json", result)
@@ -766,7 +767,21 @@ def self_test_skip_link_diagnostic():
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    def exercise(*, visible=False, drift=False, replaced=False, cleanup_failure=False,
+    for focus_visible, in_viewport, accepted in ((False, False, True), (True, True, True),
+                                                 (True, False, False), (False, True, False)):
+        observed = {"text": "Skip to main content", "focused": True,
+                    "focusVisible": focus_visible, "inViewport": in_viewport,
+                    "hash": "#main-content", "focusInMain": False}
+        with patch.dict(globals(), current=lambda _: None, evaluate=lambda _: observed,
+                        write=lambda *_: None, shot=lambda *_: None):
+            try:
+                skip_link("mouse_focus")
+            except AssertionError:
+                assert not accepted, "valid focus-visible state was rejected"
+            else:
+                assert accepted, "mismatched focus-visible state was accepted"
+
+    def exercise(*, focus_visible=False, in_viewport=False, drift=False, replaced=False, cleanup_failure=False,
                  install_timeout=False, install_absent=False, foreign_cleanup=False):
         calls, receipts = [], {}
         state = {"current": 0, "listeners_attached": False}
@@ -794,13 +809,14 @@ def self_test_skip_link_diagnostic():
                     return {"removed": False, "aborted": False, "status": "absent"}
                 state["listeners_attached"] = False
                 return {"removed": True, "aborted": True}
-            return {"link": {"focused": True, "focusVisible": visible, "inViewport": visible}}
+            return {"link": {"focused": True, "focusVisible": focus_visible,
+                             "inViewport": in_viewport}}
 
         def strict(stage):
             calls.append("strict:" + stage)
             assert "input-skip-mouse-diagnostic.json" in receipts, "diagnostic was not saved before strict assertion"
             observed = receipts["input-skip-mouse-diagnostic.json"]["stages"]["settled"]["link"]
-            assert observed["focused"] and not observed["inViewport"], observed
+            assert observed["focused"] and observed["inViewport"] is observed["focusVisible"], observed
 
         with TemporaryDirectory(prefix="aft-visual-skip-offline-") as temp, \
              patch.dict(globals(), WORK=Path(temp), current=owned, skip_probe=probe,
@@ -821,9 +837,14 @@ def self_test_skip_link_diagnostic():
     calls, receipt, error, _, _ = exercise()
     assert error is None and calls[-1] == "strict:mouse_focus" and receipt["cleanup"]["aborted"]
     assert list(receipt["stages"]) == ["before_click", "after_click", "before_focus", "after_focus", "settled"]
-    calls, receipt, error, _, _ = exercise(visible=True)
+    calls, receipt, error, _, _ = exercise(focus_visible=True, in_viewport=True)
+    assert error is None and calls[-1] == "strict:mouse_focus"
+    assert receipt["stages"]["settled"]["link"]["focusVisible"] and receipt["cleanup"]["removed"]
+    calls, receipt, error, _, _ = exercise(focus_visible=True, in_viewport=False)
     assert error and "inViewport" in error and calls[-1] == "strict:mouse_focus"
     assert receipt["stages"]["settled"]["link"]["focusVisible"] and receipt["cleanup"]["removed"]
+    calls, receipt, error, _, _ = exercise(focus_visible=False, in_viewport=True)
+    assert error and "inViewport" in error and calls[-1] == "strict:mouse_focus"
     calls, receipt, error, _, _ = exercise(drift=True)
     assert error == "Chat changed agents" and calls[-1] == "cleanup" and receipt["failure_type"] == "AssertionError"
     calls, receipt, error, _, _ = exercise(replaced=True)

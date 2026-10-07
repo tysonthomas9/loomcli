@@ -298,8 +298,9 @@ def mouse_focus():
         write("focus-events.json", {"agent": identity(), "events": probe("read", token)})
         no_turn("after-focus")
         assert_normal(focused)
-        assert focused["link"]["focused"] and not focused["link"]["inViewport"], \
-            "SK1 link visible after mouse then programmatic focus"
+        assert focused["link"]["focused"] and \
+            focused["link"]["inViewport"] is focused["link"]["focusVisible"], \
+            "SK1 link visibility did not match focus-visible after programmatic focus"
     except Exception as exc:
         failure = type(exc).__name__
         raise
@@ -367,9 +368,10 @@ def self_test():
         else:
             raise AssertionError("SK1 normal-motion gate accepted a missing prerequisite")
 
-    def exercise(*, visible=False, trusted=True, down_failure=False):
+    def exercise(*, focus_visible=False, in_viewport=False, trusted=True, down_failure=False):
         calls, states = [], [deepcopy(normal), deepcopy(normal), deepcopy(normal)]
-        states[2]["link"].update({"focused": True, "focusVisible": visible, "inViewport": visible})
+        states[2]["link"].update({"focused": True, "focusVisible": focus_visible,
+                                  "inViewport": in_viewport})
         pointer = {"events": [{"type": kind, "trusted": trusted, "inMain": True, "button": 0}
                               for kind in ("mousedown", "mouseup", "click")], "dropped": 0}
 
@@ -415,12 +417,16 @@ def self_test():
         ("mouse", "move", "795", "645"), ("mouse", "down"), ("mouse", "up")]
     assert ("no-turn", "after-focus") in calls and \
         "after-mouse-programmatic-focus.json" in receipts
-    calls, receipts, failure = exercise(visible=True)
-    assert failure == "SK1 link visible after mouse then programmatic focus"
+    calls, receipts, failure = exercise(focus_visible=True, in_viewport=True)
+    assert failure is None and ("no-turn", "after-focus") in calls
     assert "after-real-mouse-hidden.json" in receipts and \
         receipts["after-mouse-programmatic-focus.json"]["state"]["link"]["inViewport"]
     assert receipts["probe-cleanup.json"]["cleanup"]["aborted"] and \
         len([c for c in calls if c[:1] == ("screenshot",)]) == 2
+    for focus_visible, in_viewport in ((True, False), (False, True)):
+        calls, receipts, failure = exercise(focus_visible=focus_visible, in_viewport=in_viewport)
+        assert failure == "SK1 link visibility did not match focus-visible after programmatic focus"
+        assert receipts["probe-cleanup.json"]["cleanup"]["aborted"]
     calls, receipts, failure = exercise(trusted=False)
     assert failure == "pointer did not hit main" and \
         "after-real-mouse-hidden.json" in receipts and \
