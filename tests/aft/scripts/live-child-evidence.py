@@ -11,6 +11,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -145,6 +146,7 @@ def pair_timeout(lead_label, *names):
     save("pair-timeout-capture", capture)
     previous_handler = signal.signal(signal.SIGALRM, capture_budget_alarm)
     signal.setitimer(signal.ITIMER_REAL, 25)
+    deadline = time.monotonic() + 25
     try:
         try:
             pair_timeout_api(lead_label, names)
@@ -175,10 +177,16 @@ def pair_timeout(lead_label, *names):
             save("pair-timeout-dom", {"available": False, "failure_category": "snapshot_failed"})
         finally:
             capture["dom_ended_at"] = utc_now()
+        snapshot = load("pair-timeout-api")
+        for child in snapshot["children"]:
+            native_failure("wait", child["agent_id"], snapshot["lead"]["agent_id"],
+                           snapshot["events"].get(child["agent_id"], []), deadline=deadline)
     except CaptureBudgetExpired:
         if capture["api_status"] != "complete":
             capture["api_status"] = "unavailable"
             capture["api_failure_category"] = "capture_budget_exhausted"
+        elif capture["dom_status"] != "not_attempted" and "dom_ended_at" in capture:
+            capture["native_status"] = "capture_budget_exhausted"
         else:
             capture["dom_status"] = "unavailable"
             capture["dom_failure_category"] = "capture_budget_exhausted"
@@ -206,6 +214,77 @@ def pair_timeout_api(lead_label, names):
     for agent_id in (lead_id, *ids):
         snapshot["events"][agent_id] = safe_failure_events(agent_id)
         save("pair-timeout-api", snapshot)
+
+
+def native_failure(stage, child_id, lead_id, safe_events, deadline=None):
+    label = f"pair-native-failure-{child_id}-{stage}"
+    unavailable = {"status": "unavailable", "reason": "native-probe-unavailable", "agent_id": child_id}
+    remaining = min(8, deadline - time.monotonic() - 1) if deadline is not None else 8
+    if remaining <= 0:
+        save(label, {**unavailable, "reason": "capture_budget_exhausted"})
+        return
+    failed = [e for e in safe_events if e["kind"] == "agent.turn_completed" and
+              e["payload"].get("stopReason") == "failed"]
+    if len(failed) > 1:
+        save(label, {**unavailable, "reason": "loom-turn-ambiguous"})
+        return
+    anchor = failed[0] if failed else None
+    error = anchor["payload"] if anchor else {}
+    digest = error.get("error_sha256") or (error.get("error") or {}).get("sha256") or ""
+    args = ([anchor["event_id"], str(anchor["seq"]), anchor["turn_id"], digest]
+            if anchor and digest else ["", "", "", ""])
+    command = [str(pathlib.Path(os.environ["AFT_TESTS_DIR"]) / "scripts/agent-flows-native-failure.sh"),
+               child_id, lead_id, *args]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=remaining, check=False)
+        if result.returncode != 0 or len(result.stdout.encode()) > 8192:
+            save(label, unavailable)
+            return
+        row = json.loads(result.stdout)
+        allowed = {"status", "reason", "agent_id", "native_id", "native_root", "registry_requested_model",
+                   "native_session_selected_model", "native_service_default_model", "model_evidence",
+                   "default_model_status", "failure_count", "native_failure", "loom_turn"}
+        if (not isinstance(row, dict) or set(row) - allowed or row.get("agent_id") != child_id or
+                row.get("status") not in ("unavailable", "unlinked", "linked")):
+            save(label, unavailable)
+            return
+        native = row.get("native_failure")
+        loom = row.get("loom_turn")
+        if (not isinstance(row.get("reason", ""), str) or
+                not re.fullmatch(r"[a-z][a-z-]{0,63}", row.get("reason", "native")) or
+                not isinstance(row.get("native_root"), str) or
+                not re.fullmatch(r"ses_[A-Za-z0-9_-]+", row.get("native_id", "")) or
+                any(value is not None and (not isinstance(value, str) or
+                    not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{1,119}", value))
+                    for value in (row.get("registry_requested_model"),
+                                  row.get("native_session_selected_model"),
+                                  row.get("native_service_default_model"))) or
+                (row["status"] in ("linked", "unlinked") and not isinstance(native, dict)) or
+                (row["status"] == "linked" and not isinstance(loom, dict))):
+            save(label, unavailable)
+            return
+        if native and (set(native) != {
+                "event_id", "seq", "session_id", "type", "status", "message_byte_length",
+                "message_sha256", "watermark"} or
+                native["session_id"] != row["native_id"] or
+                not re.fullmatch(r"evt_[A-Za-z0-9_-]+", native["event_id"]) or
+                not isinstance(native["seq"], int) or native["seq"] < 0 or
+                not isinstance(native["message_byte_length"], int) or native["message_byte_length"] < 0 or
+                not re.fullmatch(r"[a-f0-9]{64}", native["message_sha256"]) or
+                not re.fullmatch(r"[a-z][a-z.-]{0,63}", native["type"]) or
+                (native["status"] is not None and
+                 (not isinstance(native["status"], int) or not 100 <= native["status"] <= 599))):
+            save(label, unavailable)
+            return
+        if loom and (set(loom) != {"event_id", "seq", "turn_id", "error_sha256"} or
+                     not anchor or loom != {"event_id": anchor["event_id"], "seq": anchor["seq"],
+                                              "turn_id": anchor["turn_id"], "error_sha256": digest} or
+                     not native or native["message_sha256"] != digest):
+            save(label, unavailable)
+            return
+        save(label, row)
+    except (OSError, ValueError, TypeError, KeyError, subprocess.TimeoutExpired):
+        save(label, unavailable)
 
 
 def evidence(label, agent_id):
@@ -456,10 +535,18 @@ def cleanup():
         if agent_id:
             ids.append(agent_id)
     ids.extend(leads)
+    pair_children = {path.read_text().strip() for path in WORK.glob("pair-aft-child-*.id")}
+    pair_lead = (WORK / "pair-lead").read_text().strip() if (WORK / "pair-lead").exists() else ""
     for agent_id in dict.fromkeys(ids):
         a = agent(agent_id)
         assert a["name"].startswith("aft-") and a["name"].endswith(os.environ["RUN_ID"])
-        evidence(f"final-{agent_id}", agent_id)
+        _, raw_events = evidence(f"final-{agent_id}", agent_id)
+        if agent_id in pair_children and pair_lead:
+            if all(event.get("agent_id") == agent_id for event in raw_events):
+                native_failure("final", agent_id, pair_lead, load(f"final-{agent_id}-events"))
+            else:
+                save(f"pair-native-failure-{agent_id}-final",
+                     {"status": "unavailable", "reason": "foreign-loom-event", "agent_id": agent_id})
         if a["state"] == "archived":
             continue
         body = json.dumps({"reason": "cancelled" if a["state"] != "finished" else "done"}).encode()
