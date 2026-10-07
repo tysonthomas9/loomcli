@@ -67,29 +67,40 @@ tests:
         intent: Select only the target Agent Chat Files tab
       - wait:
           fn: >-
-            (() => { const p=document.querySelector('[role=tabpanel]:not([data-hidden])');
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              return location.search==='?tab=files' &&
+                !!p?.querySelector('[role=tablist][aria-label="File explorer lens"] [role=tab][aria-label=Files]'); })()
+        intent: Show the target's nested Files lens
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" select_files_lens'
+        intent: Select the unique nested Files lens on the exact target route
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
               const id=location.pathname.split('/').pop();
-              return !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
+              return location.search==='?tab=files' && !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
         intent: Show the target's Files root
       - run: |
-          agent-browser --session "$AFT_SESSION" eval '(() => { const p=document.querySelector("[role=tabpanel]:not([data-hidden])"); const id=location.pathname.split("/").pop(); const root=p?.querySelector("[data-root-key^=\"agent:" + id + ":\"]"); if(!root) throw Error("owned Files root missing"); if(root.getAttribute("aria-expanded")==="false") root.click(); return true; })()' >/dev/null
+          agent-browser --session "$AFT_SESSION" eval '(() => { const p=document.querySelector("[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"); const id=location.pathname.split("/").pop(); const root=p?.querySelector("[data-root-key^=\"agent:" + id + ":\"]"); const lens=p?.querySelector("[role=tablist][aria-label=\"File explorer lens\"] [role=tab][aria-label=Files]"); if(!root || location.search!=="?tab=files" || lens?.getAttribute("aria-selected")!=="true") throw Error("owned Files root missing"); if(root.getAttribute("aria-expanded")==="false") root.click(); return true; })()' >/dev/null
         intent: Expand only this target's owned Files root when collapsed
       - wait:
           fn: >-
-            !!document.querySelector('[role=tabpanel]:not([data-hidden]) [aria-label="README.md"]')
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              return location.search==='?tab=files' &&
+                p?.querySelector('[role=tablist][aria-label="File explorer lens"] [role=tab][aria-label=Files]')?.getAttribute('aria-selected')==='true' &&
+                !!p.querySelector('[aria-label="README.md"]'); })()
         intent: Show tracked README in the expanded owned Files tree
-      - click: { selector: "[role=tabpanel]:not([data-hidden]) [aria-label='README.md']" }
-      - wait: { fn: "!!document.querySelector('[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]')" }
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label='README.md']" }
+      - wait: { fn: "!!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]')" }
         intent: Show the real Files editor
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" type_editor one'
         intent: Focus, select, clear and type the first distinct bytes through CodeMirror keys
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" check_editor one'
         intent: Require exact visible editor bytes before the first Save
-      - click: { role: button, name: Save, exact: true }
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" save_editor one'
         intent: Save the first edit using Files
       - wait:
           fn: >-
-            Array.from(document.querySelectorAll('[role=tabpanel]:not([data-hidden]) button[role=tab]'))
+            Array.from(document.querySelectorAll('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) button[role=tab]'))
               .some(b=>b.getAttribute('aria-label')==='Changes 1')
         intent: Show the changed tracked file after the first Files Save
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" file_saved one'
@@ -117,11 +128,11 @@ tests:
         intent: Focus, select, clear and type different README bytes through CodeMirror keys
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" check_editor two'
         intent: Require exact visible editor bytes before the second Save
-      - click: { role: button, name: Save, exact: true }
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" save_editor two'
         intent: Save the second edit through Files
       - wait:
           fn: >-
-            (() => { const p=document.querySelector('[role=tabpanel]:not([data-hidden])');
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
               return p?.querySelector('.cm-content')?.textContent?.includes('COV_DELETE_${RUN_ID}_TWO') &&
                 Array.from(p?.querySelectorAll('button') || []).some(b=>b.textContent.trim()==='Save' && b.disabled); })()
         intent: Show the second distinct bytes saved and the editor no longer dirty

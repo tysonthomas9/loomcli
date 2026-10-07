@@ -19,6 +19,9 @@ ROOT = f"{BASE}/api/workspaces/{quote(WS)}/v1/agents"
 OUT = Path(os.environ["AFT_WORK_DIR"]) / "coverage-lifecycle-delete"
 NATIVE = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-lifecycle-delete-native.sh"
 NAMES = {label: f"cov-delete-{label}-{RUN}" for label in ("target", "control", "parent", "child")}
+PANEL = "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+FILES_LENS = PANEL + ' [role=tablist][aria-label="File explorer lens"] [role=tab][aria-label="Files"]'
+EDITOR = PANEL + " .cm-content[contenteditable=true]"
 
 
 def api(path, method="GET"):
@@ -168,31 +171,92 @@ def editor_bytes_match(actual, expected):
     assert actual == expected, f"CodeMirror buffer differs from intended bytes ({len(actual)} vs {len(expected)})"
 
 
-def select_all_key(platform):
-    return "Meta+a" if platform == "darwin" else "Control+a"
+def browser_json(expression):
+    raw = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"],
+                                   "eval", expression], text=True).strip()
+    result = json.loads(raw)
+    return json.loads(result) if isinstance(result, str) else result
+
+
+def file_scope_state():
+    return browser_json("""(() => { const p=document.querySelectorAll('%s');
+      const lens=document.querySelectorAll('%s');
+      return JSON.stringify({path:location.pathname,search:location.search,panels:p.length,
+        lenses:lens.length,selected:lens[0]?.getAttribute('aria-selected')}); })()""" % (PANEL, FILES_LENS))
+
+
+def check_file_scope(state, selected=True):
+    assert state["path"] == f"/ws/{WS}/chat/{load('target')['agent_id']}" and state["search"] == "?tab=files"
+    assert state["panels"] == 1 and state["lenses"] == 1, "ambiguous owned Files lens"
+    assert state["selected"] in ("true", "false")
+    if selected:
+        assert state["selected"] == "true", "nested Files lens is not selected"
+
+
+def select_files_lens():
+    state = file_scope_state()
+    check_file_scope(state, selected=False)
+    if state["selected"] == "false":
+        subprocess.run(["agent-browser", "--session", os.environ["AFT_SESSION"],
+                        "click", FILES_LENS], check=True, stdout=subprocess.DEVNULL)
+    check_file_scope(file_scope_state())
+
+
+def editor_state():
+    return browser_json("""(() => { const p=document.querySelectorAll('%s');
+      const lens=document.querySelectorAll('%s'); const editors=p[0]?.querySelectorAll('.cm-content[contenteditable=true]');
+      const cm=editors?.[0]; const selection=window.getSelection();
+      return JSON.stringify({path:location.pathname,search:location.search,panels:p.length,
+        lenses:lens.length,selected:lens[0]?.getAttribute('aria-selected'),editors:editors?.length ?? 0,
+        focused:document.activeElement===cm,
+        selection_inside:!!cm && !!selection && cm.contains(selection.anchorNode) && cm.contains(selection.focusNode),
+        selected_text:selection?.toString() ?? '',
+        text:cm ? Array.from(cm.querySelectorAll('.cm-line')).map(line=>line.textContent).join('\\n') : null}); })()""" % (PANEL, FILES_LENS))
+
+
+def check_editor_state(state, expected=None, focused=False, selected=False):
+    check_file_scope(state)
+    assert state["editors"] == 1, "expected one owned editable CodeMirror"
+    if focused:
+        assert state["focused"] is True, "CodeMirror did not receive keyboard focus"
+    if selected:
+        assert state["selection_inside"] is True and state["selected_text"], "CodeMirror text was not selected"
+    if expected is not None:
+        editor_bytes_match(state["text"], expected)
 
 
 def type_editor(stage):
     assert stage in ("one", "two")
-    selector = "[role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]"
     session = os.environ["AFT_SESSION"]
     expected = (OUT / f"readme-{stage}.txt").read_text()
-    for args in (("focus", selector), ("press", select_all_key(sys.platform)), ("press", "Backspace"),
-                 ("keyboard", "type", expected)):
+    check_editor_state(editor_state())
+    for args in (("click", EDITOR), ("focus", EDITOR)):
         subprocess.run(["agent-browser", "--session", session, *args], check=True,
                        stdout=subprocess.DEVNULL)
+    check_editor_state(editor_state(), focused=True)
+    subprocess.run(["agent-browser", "--session", session, "press", "Control+a"],
+                   check=True, stdout=subprocess.DEVNULL)
+    check_editor_state(editor_state(), focused=True, selected=True)
+    subprocess.run(["agent-browser", "--session", session, "press", "Backspace"],
+                   check=True, stdout=subprocess.DEVNULL)
+    check_editor_state(editor_state(), expected="", focused=True)
+    subprocess.run(["agent-browser", "--session", session, "keyboard", "inserttext", expected],
+                   check=True, stdout=subprocess.DEVNULL)
 
 
 def check_editor(stage):
     assert stage in ("one", "two")
-    expression = """(() => { const p=document.querySelector('[role=tabpanel]:not([data-hidden])');
-      const e=p?.querySelector('.cm-content[contenteditable=true]');
-      if (!e || !p.closest('[data-testid=agent-api-page]')) throw Error('owned editable Files pane missing');
-      return {text:Array.from(e.querySelectorAll('.cm-line')).map(line=>line.textContent).join('\\n')}; })()"""
-    raw = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"],
-                                   "eval", expression], text=True).strip()
-    actual = json.loads(raw)["text"]
-    editor_bytes_match(actual, (OUT / f"readme-{stage}.txt").read_text())
+    check_editor_state(editor_state(), expected=(OUT / f"readme-{stage}.txt").read_text())
+
+
+def save_editor(stage):
+    check_editor(stage)
+    clicked = browser_json("""(() => { const p=document.querySelector('%s');
+      const buttons=Array.from(p?.querySelectorAll('button') || [])
+        .filter(button=>button.textContent.trim()==='Save' && !button.disabled);
+      if (buttons.length!==1) throw Error('expected one enabled owned Files Save');
+      buttons[0].click(); return true; })()""" % PANEL)
+    assert clicked is True
 
 
 def fingerprint(stage):
@@ -322,7 +386,26 @@ def self_test():
                           "ui_url": ui_url, "api_url": api_url, "ports": [8281, 8282, 8283]}}
     assert checked_file_origin(manifest, ui_url, api_url, head) == ui_url
     editor_bytes_match("original\nmarker\n", "original\nmarker\n")
-    assert select_all_key("darwin") == "Meta+a" and select_all_key("linux") == "Control+a"
+    owned_scope = {"path": "/ws/LOCALMODE/chat/agt_owned", "search": "?tab=files", "panels": 1,
+                   "lenses": 1, "selected": "true", "editors": 1, "focused": True,
+                   "selection_inside": True, "selected_text": "original", "text": ""}
+    original_target = load
+    globals()["load"] = lambda _label: {"agent_id": "agt_owned"}
+    try:
+        check_editor_state(owned_scope, expected="", focused=True)
+        check_editor_state(owned_scope, focused=True, selected=True)
+        for change in ({"path": "/ws/LOCALMODE/chat/agt_foreign"}, {"search": "?tab=git"},
+                       {"panels": 2}, {"lenses": 2}, {"selected": "false"},
+                       {"editors": 2}, {"focused": False}, {"selection_inside": False},
+                       {"selected_text": ""}, {"text": "not empty"}):
+            try:
+                check_editor_state({**owned_scope, **change}, expected="", focused=True, selected=True)
+            except AssertionError:
+                pass
+            else:
+                raise AssertionError(f"editor scope accepted {change}")
+    finally:
+        globals()["load"] = original_target
     for action in (
         lambda: check_unsaved(204, body, "/owned", f1),
         lambda: check_unsaved(409, {**body, "fingerprint": f1}, "/owned", f1),
