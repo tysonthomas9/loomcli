@@ -151,17 +151,48 @@ def long_text():
 
 
 INPUT_STATE_JS = """(() => { const t=document.querySelector('textarea[aria-label=Message]');
+  const style=t && getComputedStyle(t);
   return {route:location.pathname, focused:document.activeElement===t,
     length:t?.value.length??null, selectionStart:t?.selectionStart??null,
-    selectionEnd:t?.selectionEnd??null, value:t?.value??null}; })()"""
+    selectionEnd:t?.selectionEnd??null, value:t?.value??null,
+    textareaCount:document.querySelectorAll('textarea[aria-label=Message]').length,
+    scrollTop:t?.scrollTop??null, scrollHeight:t?.scrollHeight??null,
+    clientHeight:t?.clientHeight??null, textColor:style?.color??null,
+    visibility:style?.visibility??null}; })()"""
+
+
+def input_value_shape(value):
+    if not isinstance(value, str):
+        return {"value_type": type(value).__name__}
+    return {"value_sha256": hashlib.sha256(value.encode()).hexdigest(),
+            "whitespace_count": sum(c.isspace() for c in value),
+            "newline_count": value.count("\n"),
+            "alphanumeric_count": sum(c.isalnum() for c in value),
+            "printable_count": sum(c.isprintable() for c in value)}
 
 
 def input_progress(stage, status, state=None, expected_length=None):
     state = state or {}
-    write("input-long-progress.json", {"stage": stage, "status": status,
+    entry = {"stage": stage, "status": status,
           "route": state.get("route"), "focused": state.get("focused"),
           "current_length": state.get("length"), "expected_length": expected_length,
-          "selection_start": state.get("selectionStart"), "selection_end": state.get("selectionEnd")})
+          "selection_start": state.get("selectionStart"), "selection_end": state.get("selectionEnd"),
+          "textarea_count": state.get("textareaCount"), "scroll_top": state.get("scrollTop"),
+          "scroll_height": state.get("scrollHeight"), "client_height": state.get("clientHeight"),
+          "text_color": state.get("textColor"), "visibility": state.get("visibility"),
+          **input_value_shape(state.get("value"))}
+    write("input-long-progress.json", entry)
+    history_path = WORK / "input-long-history.json"
+    history = json.loads(history_path.read_text()) if history_path.exists() else {
+        "total": 0, "first": [], "recent": [], "failures": []}
+    assert isinstance(history, dict) and isinstance(history.get("recent"), list), "invalid long-input diagnostic history"
+    history["total"] += 1
+    if len(history["first"]) < 4:
+        history["first"].append(entry)
+    history["recent"] = [*history["recent"], entry][-32:]
+    if status in ("CalledProcessError", "TimeoutExpired", "total-budget-exhausted", "oracle-failed"):
+        history["failures"] = [*history["failures"], entry][-8:]
+    write("input-long-history.json", history)
 
 
 def input_timeout(stage, deadline, state, expected_length):
@@ -195,12 +226,63 @@ def input_readback(stage, previous, expected_length, deadline):
     return state
 
 
+MAX_CLEAR_DRAFT_CHARS = 1024
+MAX_CLEAR_NAV_KEYS = 128
+MAX_CLEAR_DELETE_KEYS = 1024
+
+
+def require_clear_state(stage, state, expected, selection=None):
+    valid = state.get("focused") is True and state.get("value") == expected
+    start, end = state.get("selectionStart"), state.get("selectionEnd")
+    valid = valid and type(start) is int and type(end) is int and 0 <= start == end <= len(expected)
+    if selection is not None:
+        valid = valid and start == selection
+    if not valid:
+        input_progress(stage, "oracle-failed", state, len(expected))
+        raise AssertionError(f"real composer keyboard clear changed focus, selection or draft at {stage}")
+
+
+def clear_draft(initial, deadline):
+    original = initial["value"]
+    if len(original) > MAX_CLEAR_DRAFT_CHARS or len(original) > MAX_CLEAR_DELETE_KEYS:
+        input_progress("clear-limit", "oracle-failed", initial, 0)
+        raise AssertionError(f"real composer draft exceeds bounded keyboard-clear length ({len(original)})")
+    selector = "textarea[aria-label=Message]"
+    input_action("clear-focus", initial, len(original), deadline, "focus", selector)
+    state = input_readback("after-clear-focus", initial, len(original), deadline)
+    require_clear_state("after-clear-focus", state, original)
+    for index in range(MAX_CLEAR_NAV_KEYS):
+        if state["selectionStart"] == 0:
+            break
+        previous_position = state["selectionStart"]
+        input_action(f"clear-home-{index + 1}", state, len(original), deadline, "press", "Home")
+        state = input_readback(f"after-clear-home-{index + 1}", state, len(original), deadline)
+        require_clear_state(f"after-clear-home-{index + 1}", state, original)
+        if state["selectionStart"] == 0:
+            break
+        input_action(f"clear-up-{index + 1}", state, len(original), deadline, "press", "ArrowUp")
+        state = input_readback(f"after-clear-up-{index + 1}", state, len(original), deadline)
+        require_clear_state(f"after-clear-up-{index + 1}", state, original)
+        if state["selectionStart"] >= previous_position:
+            input_progress(f"after-clear-up-{index + 1}", "oracle-failed", state, 0)
+            raise AssertionError("real composer caret did not move toward the start")
+    require_clear_state("before-clear-delete", state, original, selection=0)
+    for index in range(len(original)):
+        input_action(f"clear-delete-{index + 1}", state, len(original) - index - 1,
+                     deadline, "press", "Delete")
+        state = input_readback(f"after-clear-delete-{index + 1}", state,
+                               len(original) - index - 1, deadline)
+        require_clear_state(f"after-clear-delete-{index + 1}", state,
+                            original[index + 1:], selection=0)
+    return state
+
+
 def fill_long():
     source = long_text()
     assert len(source) > 5000
     deadline = time.monotonic() + 140
     state = input_readback("initial", None, None, deadline)
-    input_action("clear-draft", state, 0, deadline, "fill", "textarea[aria-label=Message]", "")
+    state = clear_draft(state, deadline)
     state = input_readback("after-clear", state, 0, deadline)
     assert state["focused"] and state["value"] == "", \
         f"multiline draft was not cleared through the real composer (remaining length: {state['length']})"
@@ -221,12 +303,107 @@ def long_text_prefixes(source, size=1024):
 
 
 def self_test_long_text_prefixes():
+    import tempfile
+    from unittest.mock import patch
+
     source = long_text()
     prefixes = long_text_prefixes(source)
     assert len(source) > 5000 and all(0 < len(p) <= len(source) for p in prefixes)
     assert prefixes[-1] == source and all(len(b) - len(a) <= 1024 for a, b in zip(["", *prefixes[:-1]], prefixes))
     assert "".join(b[len(a):] for a, b in zip(["", *prefixes[:-1]], prefixes)) == source
     assert '<img src="x" onerror="alert(1)">' in source and "\n" in source
+    with tempfile.TemporaryDirectory() as directory, patch.dict(globals(), {"WORK": Path(directory)}):
+        input_progress("initial", "readback-returned", {"value": " \nX", "length": 3}, 3)
+        input_progress("after-clear", "readback-returned", {"value": "", "length": 0}, 0)
+        history = json.loads((WORK / "input-long-history.json").read_text())
+        assert history["total"] == 2
+        assert [(item["stage"], item["current_length"]) for item in history["recent"]] == [
+            ("initial", 3), ("after-clear", 0)]
+        assert history["recent"][0]["whitespace_count"] == 2 and history["recent"][0]["newline_count"] == 1
+        assert history["recent"][0]["alphanumeric_count"] == 1 and history["recent"][1]["whitespace_count"] == 0
+        assert all("value" not in item for item in history["recent"]), "long-input diagnostic stored literal text"
+
+
+def self_test_clear_draft():
+    import tempfile
+    from unittest.mock import patch
+
+    class Composer:
+        def __init__(self, value, fault=None):
+            self.value = self.react_value = value
+            self.position = len(value)
+            self.focused = False
+            self.fault = fault
+            self.deleted = 0
+            self.commands = []
+
+        def browser(self, *args, timeout=None):
+            self.commands.append(args)
+            if args[0] == "focus":
+                self.focused = True
+            elif args == ("press", "Home"):
+                if self.fault != "stuck-navigation":
+                    self.position = self.value.rfind("\n", 0, self.position) + 1
+            elif args == ("press", "ArrowUp"):
+                if self.fault != "stuck-navigation":
+                    start = self.value.rfind("\n", 0, self.position) + 1
+                    self.position = self.value.rfind("\n", 0, max(0, start - 1)) + 1
+            elif args == ("press", "Delete"):
+                if self.fault == "failed-delete":
+                    raise subprocess.CalledProcessError(2, ["agent-browser", "press", "Delete"])
+                if self.fault != "no-op-delete" and self.position < len(self.value):
+                    self.value = self.value[:self.position] + self.value[self.position + 1:]
+                    self.react_value = self.value
+                self.deleted += 1
+                if self.fault == "lost-focus":
+                    self.focused = False
+            else:
+                raise AssertionError(f"unexpected browser action in clear test: {args}")
+            return "done"
+
+        def evaluate(self, _script, timeout=None):
+            return {"route": f"/ws/{WS}/chat/agt_selftest", "focused": self.focused,
+                    "length": len(self.value), "selectionStart": self.position,
+                    "selectionEnd": self.position, "value": self.value}
+
+    def exercise(value, fault=None):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "input.id").write_text("agt_selftest\n")
+            composer = Composer(value, fault)
+            with patch.dict(globals(), {"WORK": root, "browser": composer.browser,
+                                        "evaluate": composer.evaluate}):
+                initial = input_readback("initial", None, len(value), time.monotonic() + 10)
+                if fault or len(value) > MAX_CLEAR_DRAFT_CHARS:
+                    try:
+                        clear_draft(initial, time.monotonic() + 10)
+                    except AssertionError:
+                        pass
+                    else:
+                        raise AssertionError(f"keyboard clear accepted {fault or 'oversized draft'}")
+                else:
+                    final = clear_draft(initial, time.monotonic() + 10)
+                    assert final["value"] == composer.react_value == "" and final["focused"]
+                    assert composer.deleted == len(value)
+                    assert all(args[0] in ("focus", "press") for args in composer.commands)
+                history = json.loads((root / "input-long-history.json").read_text())
+                assert len(history["recent"]) <= 32 and len(history["first"]) <= 4
+                assert all("value" not in row for row in history["recent"])
+                if fault in ("failed-delete", "no-op-delete", "lost-focus", "stuck-navigation"):
+                    assert history["failures"], f"failure diagnostic missing for {fault}"
+                if fault == "failed-delete":
+                    assert history["failures"][-1]["status"] == "CalledProcessError"
+                    assert history["failures"][-1]["stage"] == "clear-delete-1"
+                return composer, history
+
+    composer, history = exercise("first line\nsecond line\nthird line")
+    assert history["total"] > 100 and composer.commands.count(("press", "Delete")) == 33
+    assert history["first"][1]["stage"] == "initial"
+    exercise("one line")
+    exercise("")
+    for fault in ("lost-focus", "failed-delete", "no-op-delete", "stuck-navigation"):
+        exercise("first line\nsecond line", fault)
+    exercise("x" * (MAX_CLEAR_DRAFT_CHARS + 1))
 
 
 def draft(stage):
@@ -918,11 +1095,22 @@ def render_check():
 
 
 def reasoning_receipts(between):
-    saved = [{"event_id": e["event_id"], "text": e["payload"].get("text", "")}
+    saved = [{"event_id": e.get("event_id"), "text": e["payload"].get("text", "")}
              for e in between if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning"]
-    assert saved and all(item["event_id"] and item["text"].strip() for item in saved), "missing saved reasoning item/content"
+    assert saved and all(item["event_id"] and isinstance(item["text"], str) and item["text"].strip()
+                         for item in saved), "missing saved reasoning item/content"
     assert len({item["event_id"] for item in saved}) == len(saved), "duplicate reasoning EventID"
     return saved
+
+
+def reasoning_receipt_diagnostic(items):
+    result = []
+    for event in items:
+        text = event["payload"].get("text")
+        result.append({"event_id": event.get("event_id"),
+                       "text_length": len(text) if isinstance(text, str) else None,
+                       "text_type": type(text).__name__})
+    return {"items": result}
 
 
 def reasoning_preview(text):
@@ -964,7 +1152,10 @@ def reasoning_check(stage):
     assert stage in ("before-reload", "reloaded"), stage
     current("render")
     _, _, between = turn_events("render", "VISUAL_RENDER")
-    if not any(e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning" for e in between):
+    reasoning_items = [e for e in between if e["kind"] == "item.completed" and
+                       e["payload"].get("itemKind") == "reasoning"]
+    write(f"render-reasoning-{stage}-receipts.json", reasoning_receipt_diagnostic(reasoning_items))
+    if not reasoning_items:
         write("reasoning-blocked.json", {"status": "blocked", "prerequisite": "actual selected provider must emit saved item.completed reasoning text"})
         raise AssertionError("BLOCKED: selected real provider emitted no saved reasoning item; Thinking UI cannot be claimed")
     saved = reasoning_receipts(between)
@@ -992,6 +1183,17 @@ def self_test_reasoning():
     item = {"event_id": "reasoning-1", "text": "## **First** line\nFull second line"}
     event = {"event_id": item["event_id"], "kind": "item.completed",
              "payload": {"itemKind": "reasoning", "text": item["text"]}}
+    assert reasoning_receipt_diagnostic([event]) == {"items": [{
+        "event_id": item["event_id"], "text_length": len(item["text"]), "text_type": "str"}]}
+    missing = {**event, "event_id": None, "payload": {"itemKind": "reasoning", "text": ""}}
+    assert reasoning_receipt_diagnostic([missing]) == {"items": [{
+        "event_id": None, "text_length": 0, "text_type": "str"}]}
+    try:
+        reasoning_receipts([missing])
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("missing reasoning receipt passed after diagnostic")
     assert reasoning_receipts([event]) == [item]
     assert reasoning_preview(item["text"]) == "First line"
     assert reasoning_preview("x" * 121) == "x" * 119 + "…"
