@@ -27,6 +27,24 @@
         "children": []
       }
     },
+    "receipts-edges": {
+      "files": ["receipts-stream-edges.test.yaml"],
+      "expected_cases": [
+        { "suite": "live-receipts-stream-edges", "name": "LIVE 1.5d interrupt with message cancels running turn and delivers replacement once" },
+        { "suite": "live-receipts-stream-edges", "name": "LIVE 1.6c 1.7b queued UTF-8 body limit and rejected over-cap receipt" },
+        { "suite": "live-receipts-stream-edges", "name": "LIVE CR1 2.0n rejected Create inputs leave no Agent or worktree then same-name retry succeeds" }
+      ],
+      "agents": {
+        "leads": [
+          { "name": "coverage-rs-edges-interrupt-${RUN_ID}", "suite": "live-receipts-stream-edges", "model_required": true },
+          { "name": "coverage-rs-edges-create-${RUN_ID}", "suite": "live-receipts-stream-edges", "model_required": true, "model_proof": "api_post_create" }
+        ],
+        "reviewers": [
+          { "name": "coverage-rs-edges-large-${RUN_ID}", "suite": "live-receipts-stream-edges" }
+        ],
+        "children": []
+      }
+    },
     "children-activity": {
       "files": ["children-activity.test.yaml"],
       "agents": {

@@ -51,12 +51,26 @@ if (batchName === 'default') {
     { suite: 'live-chat-visual-skip', name: 'normal-motion skip link stays hidden after mouse focus' }],
   agents: { leads: [{ name: 'cov-visual-skip-${RUN_ID}', suite: 'live-chat-visual-skip', model_required: false }],
     children: [] } };
+  const receiptsEdges = { files: ['receipts-stream-edges.test.yaml'], expected_cases: [
+    { suite: 'live-receipts-stream-edges',
+      name: 'LIVE 1.5d interrupt with message cancels running turn and delivers replacement once' },
+    { suite: 'live-receipts-stream-edges',
+      name: 'LIVE 1.6c 1.7b queued UTF-8 body limit and rejected over-cap receipt' },
+    { suite: 'live-receipts-stream-edges',
+      name: 'LIVE CR1 2.0n rejected Create inputs leave no Agent or worktree then same-name retry succeeds' }],
+  agents: { leads: [
+    { name: 'coverage-rs-edges-interrupt-${RUN_ID}', suite: 'live-receipts-stream-edges', model_required: true },
+    { name: 'coverage-rs-edges-create-${RUN_ID}', suite: 'live-receipts-stream-edges',
+      model_required: true, model_proof: 'api_post_create' }],
+  reviewers: [{ name: 'coverage-rs-edges-large-${RUN_ID}', suite: 'live-receipts-stream-edges' }],
+  children: [] } };
   if (!(exactKeys(batch, ['files', 'agents']) || exactKeys(batch, ['files', 'agents', 'expected_cases'])) ||
       !Array.isArray(batch.files) ||
       (batchName === 'children-queue' && (batch.files.join(',') !== 'children-queue.test.yaml' ||
         JSON.stringify(batch.expected_cases) !== JSON.stringify([queueCase]) ||
         JSON.stringify(batch.agents) !== JSON.stringify(queueAgents))) ||
       (batchName === 'chat-visual-skip' && JSON.stringify(batch) !== JSON.stringify(visualSkip)) ||
+      (batchName === 'receipts-edges' && JSON.stringify(batch) !== JSON.stringify(receiptsEdges)) ||
       (batchName === 'tool-policy' && (!Array.isArray(batch.expected_cases) ||
         batch.expected_cases.length !== 3 || batch.files.join(',') !== 'tool-policy.test.yaml')) ||
       (batch.expected_cases !== undefined && (!Array.isArray(batch.expected_cases) || !batch.expected_cases.length ||
