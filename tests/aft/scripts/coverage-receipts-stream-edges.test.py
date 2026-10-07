@@ -43,6 +43,106 @@ class Response:
 
 
 class EdgeOracles(unittest.TestCase):
+    def interrupt_fixture(self, edge, directory):
+        edge.OUT = Path(directory)
+        (edge.OUT / "interrupt.id").write_text("agt_owned\n")
+        edge.save("interrupt", "identity", {"agent_id": "agt_owned"})
+        edge.save("interrupt", "running", {"turn_id": "turn_original"})
+        old = {"body": {"text": "PRIVATE_OLD_TEXT"}, "key": "old-request",
+               "receipt": {"message_id": "msg_old", "state": "waiting", "replaced": False}}
+        new = {"body": {"text": "PRIVATE_NEW_TEXT"}, "key": "rs-edges-offline-interrupt-new",
+               "receipt": {"message_id": "msg_new", "state": "waiting", "replaced": True,
+                           "interrupted": True, "authorization": "PRIVATE_TOKEN"}}
+        edge.save("interrupt", "old", old)
+        return old, new
+
+    def test_replace_interrupt_records_safe_mismatch_before_original_assertion(self):
+        for stage in ("handed", "wrong-id", "missing", "null"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                edge = module()
+                old, new = self.interrupt_fixture(edge, directory)
+                retries = {
+                    "handed": {**new["receipt"], "state": "handed"},
+                    "wrong-id": {**new["receipt"], "message_id": "msg_foreign"},
+                    "missing": {k: v for k, v in new["receipt"].items() if k != "state"},
+                    "null": None,
+                }
+                with mock.patch.object(edge, "send", return_value=(new["body"], new["receipt"])), \
+                     mock.patch.object(edge, "agent_path", return_value="/owned/agent"), \
+                     mock.patch.object(edge, "call", side_effect=[old["receipt"], retries[stage]]):
+                    with self.assertRaises(AssertionError):
+                        edge.replace_interrupt()
+                initial = json.loads((edge.OUT / "interrupt-new-initial-receipt.json").read_text())
+                observed = json.loads((edge.OUT / "interrupt-replace-new-replay.json").read_text())
+                self.assertEqual(initial["original_request_id"], new["key"])
+                self.assertNotIn("retry", initial)
+                self.assertEqual((observed["agent_id"], observed["running_turn_id"]),
+                                 ("agt_owned", "turn_original"))
+                self.assertEqual((observed["original_request_id"], observed["retry_request_id"]),
+                                 (new["key"], new["key"]))
+                self.assertEqual(observed["original"]["fields"]["message_id"], "msg_new")
+                if stage == "handed":
+                    self.assertEqual(observed["retry"]["fields"]["state"], "handed")
+                elif stage == "wrong-id":
+                    self.assertEqual(observed["retry"]["fields"]["message_id"], "msg_foreign")
+                elif stage == "missing":
+                    self.assertEqual(observed["retry"]["missing_required"], ["state"])
+                else:
+                    self.assertEqual(observed["retry"]["shape"], "null")
+                for file in ("interrupt-new-initial-receipt.json", "interrupt-replace-old-replay.json",
+                             "interrupt-replace-new-replay.json"):
+                    self.assertNotIn("PRIVATE_", (edge.OUT / file).read_text())
+                self.assertFalse((edge.OUT / "interrupt-new.json").exists())
+
+    def test_replace_interrupt_equal_replays_keep_success_oracle(self):
+        edge = module()
+        with tempfile.TemporaryDirectory() as directory:
+            old, new = self.interrupt_fixture(edge, directory)
+            with mock.patch.object(edge, "send", return_value=(new["body"], new["receipt"])), \
+                 mock.patch.object(edge, "agent_path", return_value="/owned/agent"), \
+                 mock.patch.object(edge, "call", side_effect=[old["receipt"], new["receipt"]]) as public:
+                edge.replace_interrupt()
+            self.assertEqual(public.call_count, 2)
+            self.assertEqual(edge.load("interrupt", "new")["new_receipt"], new["receipt"])
+            observed = edge.load("interrupt", "replace-new-replay")
+            self.assertEqual(observed["original"], observed["retry"])
+
+    def test_interrupt_after_retains_replay_evidence_and_native_once_oracle(self):
+        for retry_state in ("handed", "waiting"):
+            with self.subTest(retry_state=retry_state), tempfile.TemporaryDirectory() as directory:
+                edge = module()
+                old, new = self.interrupt_fixture(edge, directory)
+                edge.save("interrupt", "new", new)
+                evs = [
+                    {"kind": "agent.turn_completed", "turn_id": "turn_original", "seq": 1,
+                     "event_id": "evt_cancel", "payload": {"stopReason": "cancelled"}},
+                    {"kind": "turn.started", "turn_id": "turn_new", "seq": 2,
+                     "event_id": "evt_start", "payload": {}},
+                    {"kind": "message.delivered", "turn_id": "turn_new", "seq": 3,
+                     "event_id": "evt_delivered", "payload": {"text": new["body"]["text"], "inputKey": "msg_native"}},
+                    {"kind": "agent.turn_completed", "turn_id": "turn_new", "seq": 4,
+                     "event_id": "evt_completed", "payload": {"stopReason": "completed"}},
+                ]
+                retry = {**new["receipt"], "state": retry_state}
+                with mock.patch.object(edge, "events", return_value=evs), \
+                     mock.patch.object(edge, "agent", return_value={"waiting_messages": []}), \
+                     mock.patch.object(edge, "event_ids", return_value=[e["event_id"] for e in evs]), \
+                     mock.patch.object(edge, "agent_path", return_value="/owned/agent"), \
+                     mock.patch.object(edge, "call", side_effect=[old["receipt"], retry]), \
+                     mock.patch.object(edge, "native", return_value={"native_user_message_count": 1}) as native:
+                    if retry_state == "handed":
+                        with self.assertRaises(AssertionError):
+                            edge.interrupt_after()
+                        native.assert_not_called()
+                    else:
+                        edge.interrupt_after()
+                        native.assert_called_once_with("count", "interrupt", "msg_native")
+                observed = json.loads((edge.OUT / "interrupt-after-new-replay.json").read_text())
+                self.assertEqual(observed["retry"]["fields"]["state"], retry_state)
+                self.assertEqual(observed["original_request_id"], new["key"])
+                self.assertEqual(observed["retry_request_id"], new["key"])
+                self.assertEqual((edge.OUT / "interrupt-delivered.json").exists(), retry_state == "waiting")
+
     def test_unicode_escape_and_json_cap_are_exact_bytes(self):
         edge = module()
         hundred = edge.text_for("hundred-k")
