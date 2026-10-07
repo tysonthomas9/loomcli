@@ -2,9 +2,13 @@
 """Offline regressions for event-backed child completion predicates."""
 
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
+import re
+import shlex
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,9 +18,37 @@ os.environ.setdefault("RUN_ID", "af12345678")
 os.environ.setdefault("AFT_WS", "LOCALMODE")
 os.environ.setdefault("AFT_API_URL", "http://127.0.0.1:1")
 os.environ.setdefault("AFT_WORK_DIR", tempfile.mkdtemp(prefix="coverage-child-predicates-"))
+os.environ.setdefault("AFT_AGENT_FLOW_REPO", "source-repo")
+os.environ.setdefault("AFT_REAL_BACKEND", "opencode")
 spec = importlib.util.spec_from_file_location("child_oracles", Path(__file__).with_name("coverage-children-activity.py"))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+
+
+def parsed_commands():
+    tests = Path(__file__).resolve().parents[1]
+    suite_path = tests / "live-agent-coverage-suites/children-activity.test.yaml"
+    loader = Path(os.environ.get("AFT_DIR", "/Users/tyson/codebase/code-agents/testing-app")) / "dist/runner.js"
+    assert loader.is_file(), f"AFT parsed-suite loader missing: {loader}"
+    code = """import {pathToFileURL} from 'node:url';
+const [loader,file]=process.argv.slice(2);
+const {loadSuite}=await import(pathToFileURL(loader).href);
+const suite=loadSuite(file);
+console.log(JSON.stringify([suite.teardown,...suite.tests.flatMap(t=>t.steps.filter(s=>s.run).map(s=>s.run))]));"""
+    env = {**os.environ, "AFT_BASE_URL": "http://127.0.0.1:1", "AFT_REAL_MODEL": "offline",
+           "AFT_NATIVE_MODEL_PROBE": "/bin/true", "AFT_SELECT_AGENT_MODEL": "/bin/true"}
+    output = subprocess.check_output(["node", "--input-type=module", "-", str(loader), str(suite_path)],
+                                     input=code, env=env, text=True)
+    commands = []
+    for run in json.loads(output):
+        if not isinstance(run, str):
+            continue
+        for line in run.splitlines():
+            match = re.search(r'python3 "\$AFT_TESTS_DIR/scripts/coverage-children-activity\.py"\s+(.+)', line)
+            if match:
+                args = match[1].strip().removesuffix(')"')
+                commands.append(shlex.split(args))
+    return commands
 
 
 def event(kind, seq, event_id, payload=None, turn_id=""):
@@ -37,6 +69,49 @@ class ChildProofPredicates(unittest.TestCase):
                        "busy": {"children": [self.a, self.b], "lead_turn": "turn-busy", "last_lead_seq": 10},
                        "pair-a": {"agent_id": self.a, "name": "pair-a"},
                        "pair-b": {"agent_id": self.b, "name": "pair-b"}}
+
+    def test_parsed_yaml_cli_arity_and_child_bind_contract(self):
+        commands = parsed_commands()
+        self.assertGreaterEqual(len(commands), 40, "parsed suite lost helper invocations")
+        for command, *args in commands:
+            with self.subTest(command=command, args=args):
+                inspect.signature(getattr(module, command)).bind(*args)
+        binds = [args for command, *args in commands if command == "bind"]
+        self.assertEqual(len(binds), 8)
+        children = [args for args in binds if len(args) == 3]
+        self.assertEqual(len(children), 4)
+        expected = {"repeat": "repeat-lead", "pair-a": "pair-lead", "pair-b": "pair-lead",
+                    "sidebar-task": "sidebar-b"}
+        with tempfile.TemporaryDirectory(prefix="parsed-child-bind-") as temp, patch.object(module, "OUT", Path(temp)):
+            for label, name_template, parent_label in children:
+                with self.subTest(label=label):
+                    name = name_template.replace("${RUN_ID}", module.RUN)
+                    self.assertEqual(parent_label, expected[label])
+                    self.assertEqual(name, f"cov-child-{label}-{module.RUN}")
+                    parent_id, child_id = f"agt_parent_{label}", f"agt_child_{label}"
+                    parent = {"agent_id": parent_id, "name": f"cov-child-{parent_label}-{module.RUN}",
+                              "branch": "main", "worktree_path": f"/owned/{parent_label}"}
+                    prior = {"head": "a" * 40, "branch": "main", "worktree": parent["worktree_path"]}
+                    child = {"agent_id": child_id, "name": name, "repo": os.environ["AFT_AGENT_FLOW_REPO"],
+                             "harness": os.environ["AFT_REAL_BACKEND"], "preset": "task", "created_by_kind": "agent",
+                             "created_by_id": parent_id, "parent_agent_id": parent_id, "root_agent_id": parent_id,
+                             "worktree_path": f"/owned/{label}", "base_ref": "main", "branch": f"branch-{label}"}
+                    ref = {"agent_id": child_id, "branch": child["branch"], "head": "b" * 40,
+                           "merge_base": prior["head"]}
+                    created = event("child.created", 1, "created", {"child": child_id})
+                    tool = event("item.completed", 2, "tool", {"itemKind": "tool", "tool": {
+                        "name": "loom.agent_create", "input": json.dumps({"name": name})}})
+                    module.save(parent_label, parent)
+                    module.save(parent_label + "-precreate-ref", prior)
+                    with patch.object(module, "listed", side_effect=lambda pid: [{"agent_id": child_id, "name": name}] if pid == parent_id else []), \
+                         patch.object(module, "agent", return_value=child), \
+                         patch.object(module, "read_ref", return_value=ref), \
+                         patch.object(module, "events", return_value=[created, tool]), \
+                         patch("builtins.print"):
+                        module.bind(label, name, parent_label)
+                        self.assertEqual(module.load(label)["agent_id"], child_id)
+                        with self.assertRaises((FileNotFoundError, AssertionError)):
+                            module.bind(label, parent_label, name)
 
     def run_pair(self):
         with patch.object(module, "load", side_effect=lambda label: self.labels[label]), \
