@@ -193,8 +193,7 @@ tests:
           value: >-
             Use Loom agent_create twice, creating task children cov-child-pair-a-${RUN_ID}
             and cov-child-pair-b-${RUN_ID}. Each must independently inspect README.md,
-            docs/loom-glossary.md, internal/loomagent/delegation.go, and
-            internal/loomagent/send.go, then create and commit only its own file
+            package.json, and app.js in this repository, then create and commit only its own file
             aft-child-fixtures/${RUN_ID}/pair-a.txt or pair-b.txt respectively.
             The file must include its own name and complete. Do not push or open
             a PR. Reply briefly as soon as both have started; I will give you
@@ -234,12 +233,12 @@ tests:
       - fill:
           label: Message
           value: >-
-            While your children work, inspect docs/loom-glossary.md,
-            internal/loomagent/delegation.go, internal/loomagent/send.go,
-            internal/loomagent/reconcile.go, and internal/loomagent/events.go.
-            Explain the relation between completion records and saved deliveries.
-            Keep the analysis factual. After their notices arrive, give exactly
-            one combined summary of both child files and outcomes.
+            While your children work, inspect README.md, BACKLOG.md,
+            package.json, server.js, app.js, and app.test.js in this repository.
+            Trace how a posted message reaches stored history and cite the files.
+            Stay within this repository and do not run package scripts.
+            After both child notices arrive, give exactly one combined summary
+            of both child files and outcomes.
       - press: Enter
       - wait:
           fn: >-
@@ -434,26 +433,41 @@ tests:
               const names=Array.from(nav?.querySelectorAll(':scope > div [data-testid=sortable-agent-row] > a') || []).map(a=>a.textContent || '');
               return names.some(n=>n.includes('cov-child-sidebar-a-${RUN_ID}')) && names.some(n=>n.includes('cov-child-sidebar-b-${RUN_ID}')); })()
         intent: Screenshot the two independent Lead rows before reorder
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b before
+        intent: Save the exact API Lead IDs, sidebar order and Chat route before keyboard drag
       - run: |
-          agent-browser --session "$AFT_SESSION" click '[aria-label="Drag to reorder cov-child-sidebar-b-${RUN_ID}"]'
+          set -eu
+          agent-browser --session "$AFT_SESSION" eval '(() => { const h=document.querySelector("[aria-label=\"Drag to reorder cov-child-sidebar-b-${RUN_ID}\"]"); if(!h) throw Error("saved Lead drag handle missing"); h.focus(); if(document.activeElement!==h) throw Error("drag handle did not take keyboard focus"); return true; })()' | rg -q true
           agent-browser --session "$AFT_SESSION" press Space
           agent-browser --session "$AFT_SESSION" press ArrowUp
           agent-browser --session "$AFT_SESSION" press Space
         intent: Reorder Lead B above Lead A through the sidebar keyboard drag handle
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b attempted
+        intent: Record exact Lead ID order and route immediately after the keyboard action, including a missing sidebar
       - wait:
           fn: >-
             (() => { const nav=document.querySelector('nav[aria-label=Agents]');
-              const names=Array.from(nav?.querySelectorAll('a') || []).map(a=>a.textContent || '');
-              return names.findIndex(n=>n.includes('cov-child-sidebar-b-${RUN_ID}')) < names.findIndex(n=>n.includes('cov-child-sidebar-a-${RUN_ID}')); })()
+              const names=Array.from(nav?.querySelectorAll('[data-testid=sortable-agent-row] > a[href] [data-testid=agent-list-name]') || []).map(x=>x.textContent?.trim());
+              const a=names.indexOf('cov-child-sidebar-a-${RUN_ID}');
+              const b=names.indexOf('cov-child-sidebar-b-${RUN_ID}');
+              return a>=0 && b>=0 && b<a; })()
         intent: Screenshot the visibly changed Lead order (SB4)
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b after
+        intent: Prove the changed sidebar order by the same exact saved API Lead IDs
       - reload: true
       - wait:
           fn: >-
-            (() => { const names=Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).map(a=>a.textContent || '');
-              const a=names.findIndex(n=>n.includes('cov-child-sidebar-a-${RUN_ID}'));
-              const b=names.findIndex(n=>n.includes('cov-child-sidebar-b-${RUN_ID}'));
+            (() => { const names=Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href] [data-testid=agent-list-name]')).map(x=>x.textContent?.trim());
+              const a=names.indexOf('cov-child-sidebar-a-${RUN_ID}');
+              const b=names.indexOf('cov-child-sidebar-b-${RUN_ID}');
               return a>=0 && b>=0 && b<a; })()
         intent: Screenshot persisted sidebar order after reload
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b reload
+        intent: Prove both saved Lead IDs retain the reordered position and Chat route after reload
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" hover_archive sidebar-b
         intent: Hover the exact Lead row and require no underline plus a visible Archive action

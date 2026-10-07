@@ -301,6 +301,29 @@ class ChildProofPredicates(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 module.archive_state("side", "active")
 
+    def test_expanded_started_requires_exact_native_rows_and_hidden_input(self):
+        good = {"expanded": "true", "rows": ["Ran code", "Started cov-child-repeat"], "raw": False}
+        module.expanded_bridge_ok(good, 2)
+        for bad, count in (({**good, "rows": ["Started cov-child-repeat"]}, 2),
+                           ({**good, "rows": ["Ran code", "Checked agent"]}, 2),
+                           ({**good, "rows": ["Ran code", "Started tools.loom.agent_create"]}, 2),
+                           ({**good, "raw": True}, 2), ({**good, "expanded": "false"}, 2)):
+            with self.subTest(bad=bad), self.assertRaises(AssertionError):
+                module.expanded_bridge_ok(bad, count)
+
+    def test_sidebar_order_requires_two_saved_ids_and_stable_chat_route(self):
+        good = {"path": f"/ws/LOCALMODE/chat/{self.b}", "nav": True, "ids": [self.a, self.b]}
+        module.sidebar_order_ok(good, self.a, self.b, "before")
+        module.sidebar_order_ok({**good, "ids": [self.b, self.a]}, self.a, self.b, "after")
+        module.sidebar_order_ok({**good, "ids": [self.b, self.a]}, self.a, self.b, "reload")
+        for bad, stage in (({**good, "ids": [self.a, self.b]}, "after"),
+                           ({**good, "ids": [self.a]}, "attempted"),
+                           ({**good, "ids": [self.a, self.b, self.b]}, "attempted"),
+                           ({**good, "path": "/ws/LOCALMODE/home"}, "attempted"),
+                           ({**good, "nav": False}, "attempted")):
+            with self.subTest(bad=bad), self.assertRaises(AssertionError):
+                module.sidebar_order_ok(bad, self.a, self.b, stage)
+
 
 if __name__ == "__main__":
     unittest.main()
