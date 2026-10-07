@@ -97,6 +97,88 @@ def bind(label, name, parent_label=""):
     print(row["agent_id"])
 
 
+def inventory_result(lead, child, history):
+    """Require Code Mode's own namespace enumeration, not a model's narration."""
+    lead_id = lead["agent_id"]
+    assert child["parent_agent_id"] == lead_id and child["created_by_id"] == lead_id
+    native_id = lead.get("harness_session_id")
+    native_root = lead.get("harness_session_root")
+    assert isinstance(native_id, str) and native_id and isinstance(native_root, str)
+
+    def native_tool(event):
+        if event.get("agent_id") != lead_id or event.get("kind") != "item.completed":
+            return None
+        payload = event.get("payload") or {}
+        if payload.get("itemKind") != "tool" or payload.get("session") != native_id:
+            return None
+        item_id = payload.get("itemId")
+        if not isinstance(item_id, str) or not item_id:
+            return None
+        if event.get("event_id") != f"item.completed:{native_root}:{native_id}:{item_id}":
+            return None
+        tool = payload.get("tool")
+        if not isinstance(tool, dict) or tool.get("failed", False) is not False:
+            return None
+        return tool
+
+    creates = [event for event in history if native_tool(event) and
+               calls_operation(event, "agent_create") and
+               child["name"] in str(native_tool(event).get("input", ""))]
+    assert len(creates) == 1, "expected one owned completed native child create"
+    create = creates[0]
+    turn_id = create.get("turn_id")
+    assert isinstance(turn_id, str) and turn_id
+    starts = [event for event in history if event.get("kind") == "turn.started" and
+              event.get("agent_id") == lead_id and event.get("turn_id") == turn_id and
+              event.get("payload", {}).get("session") == native_id and
+              event.get("event_id") == f"turn.started:{native_root}:{native_id}:{turn_id}"]
+    assert len(starts) == 1 and starts[0]["seq"] < create["seq"], "native delegation turn is unbound"
+    created = [event for event in history if event.get("kind") == "child.created" and
+               event.get("agent_id") == lead_id and
+               event.get("payload", {}).get("child") == child["agent_id"] and
+               event.get("event_id") == f"child.created:{child['agent_id']}"]
+    assert len(created) == 1, "missing exact saved child creation"
+
+    inventory = []
+    for event in history:
+        tool = native_tool(event)
+        if not tool or tool.get("name") != "execute":
+            continue
+        try:
+            raw_input = json.loads(tool.get("input", ""))
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(raw_input, dict) or set(raw_input) != {"code"} or \
+                not isinstance(raw_input["code"], str) or \
+                raw_input["code"].strip().removesuffix(";").strip() != "return Object.keys(tools.loom)":
+            continue
+        inventory.append((event, tool, raw_input["code"]))
+    assert len(inventory) == 1, "missing or repeated native Loom namespace enumeration"
+    event, tool, code = inventory[0]
+    assert event["turn_id"] == turn_id and starts[0]["seq"] < event["seq"] < created[0]["seq"] < create["seq"], \
+        "inventory did not precede creation in the same owned native turn"
+    try:
+        names = json.loads(tool.get("output", ""))
+    except (TypeError, ValueError) as exc:
+        raise AssertionError("native inventory output is not a JSON name array") from exc
+    expected = {"agent_create", "agent_list", "agent_get", "agent_send", "agent_archive", "github_read"}
+    assert isinstance(names, list) and len(names) == len(expected) and \
+        all(isinstance(name, str) for name in names) and set(names) == expected, \
+        "installed Loom namespace differs from the Lead bridge contract"
+    return {"lead": lead_id, "child": child["agent_id"], "turn_id": turn_id,
+            "native_session_id": native_id, "native_root": native_root,
+            "event_id": event["event_id"], "item_id": event["payload"]["itemId"],
+            "input": code, "installed_names": sorted(names),
+            "create_event_id": create["event_id"], "child_created_event_id": created[0]["event_id"]}
+
+
+def inventory(lead_label, child_label):
+    lead = agent(load(lead_label)["agent_id"])
+    child = agent(load(child_label)["agent_id"])
+    proof = inventory_result(lead, child, events(lead["agent_id"]))
+    save("installed-loom-tools", proof)
+
+
 def read_ref(row, parent_head=""):
     helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/coverage-children-activity-ref.sh"
     args = ["bash", str(helper), row["agent_id"], row["name"]]
