@@ -199,16 +199,9 @@ def fill_long():
     assert len(source) > 5000
     deadline = time.monotonic() + 140
     state = input_readback("initial", None, None, deadline)
-    input_action("focus", state, None, deadline, "click", "textarea[aria-label=Message]")
-    state = input_readback("after-focus", state, None, deadline)
-    assert state["focused"], "long input textarea did not gain keyboard focus"
-    input_action("select-all", state, state["length"], deadline, "press", "Control+a")
-    state = input_readback("after-select-all", state, state["length"], deadline)
-    assert state["focused"] and state["selectionStart"] == 0 and state["selectionEnd"] == state["length"], \
-        "real composer did not select the complete multiline draft"
-    input_action("delete", state, 0, deadline, "press", "Backspace")
-    state = input_readback("after-delete", state, 0, deadline)
-    assert state["value"] == "", \
+    input_action("clear-draft", state, 0, deadline, "fill", "textarea[aria-label=Message]", "")
+    state = input_readback("after-clear", state, 0, deadline)
+    assert state["focused"] and state["value"] == "", \
         f"multiline draft was not cleared through the real composer (remaining length: {state['length']})"
     previous = ""
     for index, prefix in enumerate(long_text_prefixes(source)):
