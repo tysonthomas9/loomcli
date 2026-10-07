@@ -68,6 +68,18 @@
         "children": []
       }
     },
+    "chat-visual-skip": {
+      "files": ["chat-visual-skip.test.yaml"],
+      "expected_cases": [
+        { "suite": "live-chat-visual-skip", "name": "normal-motion skip link stays hidden after mouse focus" }
+      ],
+      "agents": {
+        "leads": [
+          { "name": "cov-visual-skip-${RUN_ID}", "suite": "live-chat-visual-skip", "model_required": false }
+        ],
+        "children": []
+      }
+    },
     "tool-policy": {
       "files": ["tool-policy.test.yaml"],
       "expected_cases": [
