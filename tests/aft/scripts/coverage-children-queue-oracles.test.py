@@ -593,23 +593,45 @@ agent_flows_podman() {
     def test_u3_exact_request_replay_rejects_new_event_or_changed_receipt(self):
         receipt = {"request_id": "request-u3", "body": {"text": queue.TEXT["u3"], "delivery": "interrupt"},
                    "result": {"message_id": "m3", "state": "waiting", "replaced": False, "interrupted": True}}
-        proof = {"delivered": [{"input_key": "msg_" + "a" * 26}, {"input_key": "msg_" + "b" * 26}]}
-        saved = {"receipt-u3": receipt, "first-delivery": proof}
+        key = "msg_" + hashlib.sha256(b"agt_child\x00request-u3").hexdigest()[:26]
+        other = "msg_" + "b" * 26
+        proof = {"delivered": [{"event_id": "one", "input_key": key}, {"event_id": "two", "input_key": other}]}
+        native = [{"agent_id": "agt_child", "input_key": key, "native_id": "ses_owned", "native_root": "",
+                   "native_user_message_count": 1},
+                  {"agent_id": "agt_child", "input_key": other, "native_id": "ses_owned", "native_root": "",
+                   "native_user_message_count": 1}]
+        saved = {"receipt-u3": receipt, "first-delivery": proof, "first-native-inputs": native}
         row = {"state": "finished", "attempt": 1, "waiting_messages": []}
-        event = {"seq": 10, "event_id": "one"}
+        event = {"seq": 10, "event_id": "one", "agent_id": "agt_child", "kind": "message.delivered",
+                 "payload": {"text": queue.TEXT["u3"], "inputKey": key}}
         with patch.object(queue, "load", side_effect=saved.__getitem__), patch.object(queue, "identity", return_value="agt_child"), \
              patch.object(queue, "agent", return_value=row), patch.object(queue, "events", side_effect=[[event], [event]]), \
-             patch.object(queue, "http", return_value=receipt["result"]) as post, patch.object(queue, "save") as persist:
+             patch.object(queue, "http", return_value=receipt["result"]) as post, patch.object(queue, "save") as persist, \
+             patch.object(queue, "native_inputs") as native_probe:
             queue.replay_u3()
             self.assertEqual(post.call_args.args[2], receipt["request_id"])
             self.assertTrue(next(c.args[1] for c in persist.call_args_list if c.args[0] == "u3-replay-diagnostic")["receipt_equal"])
+            native_probe.assert_called_once()
+        progressed = {**receipt["result"], "state": "handed"}
+        with patch.object(queue, "load", side_effect=saved.__getitem__), patch.object(queue, "identity", return_value="agt_child"), \
+             patch.object(queue, "agent", return_value=row), patch.object(queue, "events", side_effect=[[event], [event]]), \
+             patch.object(queue, "http", return_value=progressed), patch.object(queue, "save") as persist, \
+             patch.object(queue, "native_inputs") as native_probe:
+            queue.replay_u3()
+            diagnostic = next(c.args[1] for c in persist.call_args_list if c.args[0] == "u3-replay-diagnostic")
+            self.assertFalse(diagnostic["receipt_equal"])
+            self.assertTrue(diagnostic["receipt_accepted"])
+            native_probe.assert_called_once()
         for replay, after in (({**receipt["result"], "replaced": True}, [event]),
                               ({key: value for key, value in receipt["result"].items() if key != "state"}, [event]),
                               ({**receipt["result"], "foreign_field": 173}, [event]),
+                              ({**progressed, "message_id": "msg_foreign"}, [event]),
+                              ({**progressed, "interrupted": False}, [event]),
                               (receipt["result"], [event, {"seq": 11, "event_id": "extra"}])):
             with patch.object(queue, "load", side_effect=saved.__getitem__), patch.object(queue, "identity", return_value="agt_child"), \
                  patch.object(queue, "agent", return_value=row), patch.object(queue, "events", side_effect=[[event], after]), \
-                 patch.object(queue, "http", return_value=replay), patch.object(queue, "save") as persist:
+                 patch.object(queue, "http", return_value=replay), patch.object(queue, "save") as persist, \
+                 patch.object(queue, "native_inputs"):
                 with self.assertRaises(AssertionError):
                     queue.replay_u3()
                 diagnostic = next(c.args[1] for c in persist.call_args_list if c.args[0] == "u3-replay-diagnostic")
@@ -621,6 +643,40 @@ agent_flows_podman() {
                 self.assertEqual(diagnostic["agent_before"], {"state": "finished", "attempt": 1, "waiting_count": 0})
                 self.assertTrue(all(set(value).issubset({"message_id", "state", "replaced", "interrupted", "turn_id"})
                                     for value in (diagnostic["original"], diagnostic["replay"])))
+
+        for stage in ("missing-delivery", "wrong-key", "missing-native", "wrong-native-count"):
+            local = {**saved, "first-native-inputs": native}
+            observed = {**event, "payload": dict(event["payload"])}
+            if stage == "missing-delivery":
+                before = []
+            else:
+                before = [observed]
+            if stage == "wrong-key":
+                observed["payload"]["inputKey"] = "msg_foreign"
+            if stage == "missing-native":
+                local["first-native-inputs"] = []
+            if stage == "wrong-native-count":
+                local["first-native-inputs"] = [{**native[0], "native_user_message_count": 0}, native[1]]
+            with self.subTest(stage=stage), patch.object(queue, "load", side_effect=local.__getitem__), \
+                 patch.object(queue, "identity", return_value="agt_child"), patch.object(queue, "agent", return_value=row), \
+                 patch.object(queue, "events", side_effect=[before, before]), patch.object(queue, "http", return_value=progressed), \
+                 patch.object(queue, "save") as persist, patch.object(queue, "native_inputs") as native_probe:
+                with self.assertRaises(AssertionError):
+                    queue.replay_u3()
+                native_probe.assert_not_called()
+                diagnostic = next(c.args[1] for c in persist.call_args_list if c.args[0] == "u3-replay-diagnostic")
+                self.assertFalse(diagnostic["receipt_accepted"])
+
+        repeat = [{**native[0], "native_user_message_count": 2}, native[1]]
+        local = dict(saved)
+        def repeat_probe():
+            local["first-native-inputs"] = repeat
+        with patch.object(queue, "load", side_effect=local.__getitem__), patch.object(queue, "identity", return_value="agt_child"), \
+             patch.object(queue, "agent", return_value=row), patch.object(queue, "events", side_effect=[[event], [event]]), \
+             patch.object(queue, "http", return_value=progressed), patch.object(queue, "save"), \
+             patch.object(queue, "native_inputs", side_effect=repeat_probe):
+            with self.assertRaisesRegex(AssertionError, "changed the owned native input count"):
+                queue.replay_u3()
 
     def test_parsed_queue_checks_native_inputs_before_replay(self):
         command = next(p for p in parsed_queue_prompts() if "native-inputs" in p and "replay-u3" in p)

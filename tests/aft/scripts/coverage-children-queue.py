@@ -793,6 +793,36 @@ def replay_u3():
     after_events = events("child")
     after_agent = agent("child")
     fields = ("message_id", "state", "replaced", "interrupted", "turn_id")
+    def accepted_result(original, retry, handed_proof):
+        allowed = set(fields)
+        if not isinstance(original, dict) or not isinstance(retry, dict) or set(original) != set(retry) or not set(original) <= allowed:
+            return False
+        if not {"message_id", "state", "replaced", "interrupted"} <= set(original):
+            return False
+        if (not isinstance(original["message_id"], str) or not original["message_id"] or
+                original["state"] not in ("waiting", "handed") or type(retry["state"]) is not str or
+                any(type(value[key]) is not bool for value in (original, retry) for key in ("replaced", "interrupted")) or
+                any(type(value["turn_id"]) is not str for value in (original, retry) if "turn_id" in value)):
+            return False
+        if any(original[key] != retry[key] for key in set(original) - {"state"}):
+            return False
+        return original["state"] == retry["state"] or (original["state"] == "waiting" and
+               retry["state"] == "handed" and handed_proof)
+
+    def handed_proof():
+        child = identity("child")
+        key = "msg_" + hashlib.sha256((child + "\x00" + receipt["request_id"]).encode()).hexdigest()[:26]
+        pair = load("first-delivery")["delivered"]
+        native = load("first-native-inputs")
+        rows = [e for e in before_events if e.get("agent_id") == child and e["kind"] == "message.delivered" and
+                e["payload"].get("text") == TEXT["u3"] and e["payload"].get("inputKey") == key]
+        return (len(rows) == 1 and len(pair) == len(native) == 2 and
+                pair[0]["event_id"] == rows[0]["event_id"] and pair[0]["input_key"] == key and
+                native[0]["agent_id"] == child and native[0]["input_key"] == key and
+                native[0]["native_user_message_count"] == 1)
+
+    progressed = isinstance(replayed, dict) and receipt["result"]["state"] == "waiting" and replayed.get("state") == "handed"
+    accepted = accepted_result(receipt["result"], replayed, handed_proof() if progressed else False)
     def safe_result(value):
         if not isinstance(value, dict):
             return {}
@@ -810,6 +840,7 @@ def replay_u3():
                                   "original_fields_present": [key for key in fields if key in receipt["result"]],
                                   "replay_fields_present": [key for key in fields if isinstance(replayed, dict) and key in replayed],
                                   "receipt_equal": replayed == receipt["result"],
+                                  "receipt_accepted": accepted,
                                   "events_before": before_ids, "events_after": after_ids,
                                   "events_equal": after_ids == before_ids,
                                   "agent_before": {"state": before_agent["state"], "attempt": before_agent["attempt"],
@@ -817,7 +848,7 @@ def replay_u3():
                                   "agent_after": {"state": after_agent["state"], "attempt": after_agent["attempt"],
                                                   "waiting_count": len(after_agent["waiting_messages"])},
                                   "slots_equal": after_agent["waiting_messages"] == before_agent["waiting_messages"]})
-    demand(replayed == receipt["result"], "same U3 RequestID did not replay its exact receipt")
+    demand(accepted, "same U3 RequestID changed stable receipt fields or lacks saved handover proof")
     demand(after_ids == before_ids, "U3 replay added a saved event")
     demand(after_agent["state"] == before_agent["state"] and
            after_agent["attempt"] == before_agent["attempt"] and
@@ -825,6 +856,13 @@ def replay_u3():
            "U3 replay mutated the finished child")
     pair = load("first-delivery")["delivered"]
     demand(len(pair) == 2 and all(x["input_key"] for x in pair), "First delivery input keys missing")
+    prior_native = load("first-native-inputs")
+    native_inputs()
+    after_native = load("first-native-inputs")
+    demand([(p["agent_id"], p["input_key"], p["native_id"], p["native_root"], p["native_user_message_count"])
+            for p in after_native] ==
+           [(p["agent_id"], p["input_key"], p["native_id"], p["native_root"], 1) for p in prior_native],
+           "U3 replay changed the owned native input count")
     save("u3-replay", {"request_id": receipt["request_id"], "result": replayed,
                        "event_ids_before_after": [e["event_id"] for e in after_events],
                        "input_keys": [x["input_key"] for x in pair]})

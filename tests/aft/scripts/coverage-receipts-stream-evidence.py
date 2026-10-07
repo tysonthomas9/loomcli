@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Public API and read-only browser-network evidence for owned real Agent runs."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -267,8 +268,44 @@ def withdrawn(label, stage):
 
 def public_send_receipt(result):
     # SendResult fields from the public v1 route; never persist request bodies or headers.
+    if not isinstance(result, dict):
+        return {}
     return {key: result[key] for key in ("message_id", "state", "replaced", "turn_id", "interrupted")
             if key in result}
+
+
+def same_send_result(original, retry, delivered_proof=False):
+    fields = {"message_id", "state", "replaced", "turn_id", "interrupted"}
+    if not isinstance(original, dict) or not isinstance(retry, dict) or set(original) != set(retry) or not set(original) <= fields:
+        return False
+    if not {"message_id", "state", "replaced"} <= set(original) or not isinstance(original["message_id"], str) or not original["message_id"]:
+        return False
+    if (type(original["replaced"]) is not bool or type(retry["replaced"]) is not bool or
+            original["state"] not in ("waiting", "handed") or type(retry["state"]) is not str):
+        return False
+    if any(type(value[key]) is not (bool if key == "interrupted" else str)
+           for value in (original, retry) for key in ("turn_id", "interrupted") if key in value):
+        return False
+    if any(original[key] != retry[key] for key in set(original) - {"state"}):
+        return False
+    return original["state"] == retry["state"] or (original["state"] == "waiting" and
+           retry["state"] == "handed" and delivered_proof)
+
+
+def handed_delivery(label, stage, call, before):
+    body = json.loads(call["body"])
+    key = "msg_" + hashlib.sha256((agent_id(label) + "\x00" + call["key"]).encode()).hexdigest()[:26]
+    matches = [e for e in before["events"] if e["kind"] == "message.delivered" and
+               e["payload"].get("text") == body.get("text") and e["payload"].get("inputKey") == key]
+    if len(matches) != 1:
+        return False
+    try:
+        proof, native = load(label, stage + "-delivery"), load(label, stage + "-native-input")
+    except (FileNotFoundError, KeyError):
+        return False
+    return (proof["event_id"] == matches[0]["event_id"] and proof["native_input_key"] == key and
+            proof["text"] == body["text"] and native["input_key"] == key and
+            native["agent_id"] == agent_id(label) and native["native_user_message_count"] == 1)
 
 
 def replay(label, calls_stage, state_stage, count):
@@ -278,20 +315,33 @@ def replay(label, calls_stage, state_stage, count):
     calls = [c for c in load(label, calls_stage)["ui_calls"] if c["method"] == "POST"][:int(count)]
     assert len(calls) == int(count) and calls, "UI request records absent"
     assert len({c["key"] for c in calls}) == len(calls), "UI reused a RequestID"
+    progressed, observed = False, []
     for c in calls:
         assert c["path"] == path(label) + "/messages"
         result = http(c["path"], c["method"], json.loads(c["body"]) if c["body"] else None, c["key"])
-        if result != c["result"]:
+        changed = isinstance(result, dict) and isinstance(c["result"], dict) and result.get("state") != c["result"].get("state")
+        proof = handed_delivery(label, state_stage, c, before) if changed and result.get("state") == "handed" else False
+        if not same_send_result(c["result"], result, proof):
             save(label, state_stage + "-receipt-mismatch", {"request_id": c["key"],
                   "original": public_send_receipt(c["result"]), "retry": public_send_receipt(result)})
-        assert result == c["result"], "retry changed the saved public receipt"
+        assert same_send_result(c["result"], result, proof), "retry changed stable public receipt fields or lacks exact handover proof"
+        progressed |= changed
+        observed.append(public_send_receipt(result))
     after = agent(label)
     assert after["waiting_messages"] == before["waiting"], "old RequestID changed waiting slots"
-    kinds = {"message.waiting", "message.withdrawn"}
+    kinds = {"message.waiting", "message.withdrawn", "message.delivered"} if progressed else {"message.waiting", "message.withdrawn"}
     before_ids = [e["event_id"] for e in before["events"] if e["kind"] in kinds]
     after_ids = [e["event_id"] for e in pages(label) if e["kind"] in kinds]
     assert after_ids == before_ids, "retry appended a waiting or withdrawn event"
-    save(label, state_stage + "-replay", {"request_ids": [c["key"] for c in calls], "receipts": [c["result"] for c in calls], "slot_event_ids": before_ids})
+    if progressed:
+        prior_native = load(label, state_stage + "-native-input")
+        native_count(label, state_stage)
+        after_native = load(label, state_stage + "-native-input")
+        assert (after_native["agent_id"], after_native["input_key"], after_native["native_user_message_count"]) == (
+            prior_native["agent_id"], prior_native["input_key"], 1), "retry changed owned native input count"
+    save(label, state_stage + "-replay", {"request_ids": [c["key"] for c in calls],
+                                          "receipts": [c["result"] for c in calls],
+                                          "replayed_receipts": observed, "slot_event_ids": before_ids})
 
 
 def delivered(label, stage, text, absent=""):
