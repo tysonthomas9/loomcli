@@ -243,10 +243,14 @@ tests:
           label: Message
           value: >-
             While your children work, inspect README.md, BACKLOG.md,
-            package.json, server.js, app.js, and app.test.js in this repository.
-            Run node --test once, as specified by package.json. In this single turn,
-            trace a valid post, an invalid post, and a history read through the
-            handlers and tests, citing the files and actual test result.
+            package.json, public/index.html, server.js, app.js, and app.test.js
+            in this repository. Run node --check app.js and node --check server.js.
+            Run node --test once, as specified by package.json. In this single
+            turn, trace the UI's channel selection, valid post, and history read
+            through the fetch calls, handlers, store, and tests. Also trace the
+            400 invalid-post and 404 unknown-route paths from the actual handlers;
+            distinguish tested behavior from source-only behavior when citing
+            these files and the actual test result.
             Stay within this repository; do not inspect LoomCLI source or use
             agent_get. Finish the full analysis and test run in this turn before
             replying once with your findings; do not pause to wait for child notices.
