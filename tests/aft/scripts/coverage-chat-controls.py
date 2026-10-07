@@ -417,7 +417,10 @@ def ask_history(case, stage, counts, compare=False):
                e["payload"].get("askId") for e in rows), "saved ask event identity/content missing"
     key = f"{case}-{stage}-ask-history.json"
     if compare:
-        assert rows == saved(key)["events"], "reload changed full saved ask EventID/content history"
+        before = saved(key)
+        assert before["agent_id"] == aid(case) and before["expected_counts"] == wanted, \
+            "saved ask history belongs to another agent or outcome"
+        assert rows == before["events"], "reload changed full saved ask EventID/content history"
     else:
         save(key, {"agent_id": aid(case), "events": rows, "expected_counts": wanted})
 
@@ -490,6 +493,20 @@ def roster(stage, expected=None):
     save(f"roster-{stage}.json", {"agent_ids": ids})
 
 
+def modal_backends():
+    wired = call(f"{PREFIX}/presets/lead")["harnesses"]
+    assert wired and "opencode" in wired and len(wired) == len(set(wired)), "real Lead harness list unavailable"
+    selector = "[data-testid=create-agent-backend]"
+    browser("wait", "--fn", f"(() => {{ const s=document.querySelector({json.dumps(selector)}); "
+            f"return !!s && JSON.stringify([...s.options].map(o=>o.value)) === {json.dumps(json.dumps(wired))}; }})()")
+    result = json.loads(browser("eval", f"(() => {{ const s=document.querySelector({json.dumps(selector)}); "
+                                     "return {options:[...s.options].map(o=>o.value),selected:s.value}; })()"))
+    save("modal-wired-backends.json", {"wired": wired, "options": result["options"],
+                                      "selected_default": result["selected"]})
+    assert result["options"] == wired and result["selected"] in wired, \
+        "Create modal default or available backends differ from wired Lead preset"
+
+
 def history(case, stage, compare=None):
     ids = [e["event_id"] for e in events(case)]
     if compare:
@@ -552,7 +569,8 @@ def main():
                "resolved": resolved, "ask-terminal": ask_terminal, "malformed": malformed, "custom": custom,
                "unknown": unknown, "recover": recover, "approval-effect": approval_effect,
                "question-answers": question_answers, "lost": lost, "roster": roster,
-               "history": history, "respond-receipt": respond_receipt}
+               "history": history, "respond-receipt": respond_receipt,
+               "modal-backends": modal_backends}
     if command == "check-model" and len(args) == 3:
         actions[command](args[0], args[1], args[2] == "effort")
     elif command == "custom":

@@ -132,6 +132,39 @@ class OracleTest(unittest.TestCase):
                  f"if ({guard}) process.exit(1);"
         subprocess.run(["node", "-e", script], check=True)
 
+    def test_reload_refuses_changed_saved_ask_content(self):
+        original = {"event_id": "ask.opened::ses:per_1", "seq": 1,
+                    "kind": "ask.opened", "turn_id": "turn_1",
+                    "payload": {"askId": "per_1", "text": "owned command"}}
+        with patch.object(module, "events", return_value=[original]), \
+             patch.object(module, "aid", return_value="agt_a"):
+            module.ask_history("approval", "once", "1,0,0")
+        changed = {**original, "payload": {"askId": "per_1", "text": "changed command"}}
+        with patch.object(module, "events", return_value=[changed]), \
+             patch.object(module, "aid", return_value="agt_a"):
+            with self.assertRaisesRegex(AssertionError, "full saved ask"):
+                module.ask_history("approval", "once", "1,0,0", True)
+
+    def test_modal_refuses_default_outside_wired_harnesses(self):
+        for result in ({"options": ["opencode"], "selected": "codex"},
+                       {"options": ["opencode", "codex"], "selected": "opencode"}):
+            with self.subTest(result=result), \
+                 patch.object(module, "call", return_value={"harnesses": ["opencode"]}), \
+                 patch.object(module, "browser", side_effect=["", json.dumps(result)]):
+                with self.assertRaisesRegex(AssertionError, "differ from wired"):
+                    module.modal_backends()
+                self.assertEqual(module.saved("modal-wired-backends.json")["options"], result["options"])
+
+    def test_ask_reload_refuses_identical_events_from_foreign_agent(self):
+        event = {"event_id": "ask.opened::ses:per_1", "seq": 1,
+                 "kind": "ask.opened", "turn_id": "turn_1", "payload": {"askId": "per_1"}}
+        module.save("approval-once-ask-history.json", {
+            "agent_id": "agt_foreign", "expected_counts": [1, 0, 0], "events": [event]})
+        with patch.object(module, "events", return_value=[event]), \
+             patch.object(module, "aid", return_value="agt_owned"):
+            with self.assertRaisesRegex(AssertionError, "another agent"):
+                module.ask_history("approval", "once", "1,0,0", True)
+
 
 if __name__ == "__main__":
     unittest.main()
