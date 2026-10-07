@@ -6,6 +6,7 @@ import hashlib
 import base64
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import urllib.parse
@@ -108,6 +109,12 @@ def pair_timeout_dom(lead_id, names):
 
 def pair_timeout(lead_label, *names):
     assert lead_label == "pair-lead" and len(names) == 2
+    wait_keys = ("AFT_PAIR_WAIT_FIRST_STARTED_AT", "AFT_PAIR_WAIT_FIRST_ENDED_AT",
+                 "AFT_PAIR_WAIT_SECOND_STARTED_AT", "AFT_PAIR_WAIT_SECOND_ENDED_AT")
+    wait_window = {key: os.environ[key] for key in wait_keys}
+    assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", value)
+               for value in wait_window.values()), "invalid pair wait timestamps"
+    save("pair-timeout-wait", wait_window)
     lead_id = (WORK / lead_label).read_text().strip()
     lead = agent(lead_id)
     assert lead["agent_id"] == lead_id and lead["name"] == f"aft-child-lead-{os.environ['RUN_ID']}"
