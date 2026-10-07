@@ -40,7 +40,89 @@ console.log(JSON.stringify(suite.tests.flatMap(t=>t.steps).filter(s=>s.fill?.lab
     return json.loads(output)
 
 
+def parsed_queue_waits():
+    tests = Path(__file__).resolve().parents[1]
+    loader = Path(os.environ.get("AFT_DIR", "/Users/tyson/codebase/code-agents/testing-app")) / "dist/runner.js"
+    code = """import {pathToFileURL} from 'node:url';
+const [loader,file]=process.argv.slice(2);
+const {loadSuite}=await import(pathToFileURL(loader).href);
+const suite=loadSuite(file);
+console.log(JSON.stringify(suite.tests.flatMap(t=>t.steps).filter(s=>s.wait?.fn).map(s=>s.wait.fn)));"""
+    env = {**os.environ, "RUN_ID": queue.RUN, "AFT_WS": "LOCALMODE", "AFT_BASE_URL": "http://127.0.0.1:1",
+           "AFT_REAL_MODEL": "offline", "AFT_NATIVE_MODEL_PROBE": "/bin/true",
+           "AFT_NATIVE_SESSION_PROBE": "/bin/true", "AFT_SELECT_AGENT_MODEL": "/bin/true"}
+    output = subprocess.check_output(["node", "--input-type=module", "-", str(loader),
+                                      str(tests / "live-agent-coverage-suites/children-queue.test.yaml")],
+                                     input=code, env=env, text=True)
+    return json.loads(output)
+
+
 class QueueOracleTests(unittest.TestCase):
+    def test_native_send_settles_with_reply_without_queue_marker(self):
+        lead, child = "agt_lead", "agt_child"
+        marker = "QUEUE-P1-"
+        call = {"agent_id": lead, "kind": "item.completed", "event_id": "send", "seq": 10,
+                "turn_id": "turn-two", "payload": {"itemKind": "tool", "tool": {"name": "agent_send",
+                    "input": json.dumps({"agent": child, "text": marker + "sample"}), "output": "Message sent"}}}
+        reply = {"agent_id": lead, "kind": "item.completed", "event_id": "reply", "seq": 11,
+                 "turn_id": "turn-two", "payload": {"itemKind": "message", "text": "Message sent once; receipt recorded."}}
+        end = {"agent_id": lead, "kind": "agent.turn_completed", "event_id": "end", "seq": 12,
+               "turn_id": "turn-two", "payload": {"stopReason": "end_turn"}}
+        self.assertEqual(queue.settled_send_turn([call, reply, end], lead, child, marker), (call, end, [reply]))
+        cases = (([{**call, "agent_id": "agt_foreign"}, reply, end], "missing or duplicate"),
+                 ([{**call, "payload": {**call["payload"], "tool": {**call["payload"]["tool"],
+                     "input": json.dumps({"agent": "agt_foreign", "text": marker + "sample"})}}}, reply, end], "missing or duplicate"),
+                 ([{**call, "payload": {**call["payload"], "tool": {**call["payload"]["tool"],
+                     "input": json.dumps({"agent": child, "text": "foreign"})}}}, reply, end], "missing or duplicate"),
+                 ([{**call, "payload": {**call["payload"], "tool": {**call["payload"]["tool"], "failed": True}}}, reply, end], "failed or lacks"),
+                 ([call, end], "lacks a completed reply"),
+                 ([call, {**reply, "agent_id": "agt_foreign"}, end], "lacks a completed reply"),
+                 ([call, reply, {**end, "turn_id": "wrong"}], "did not complete"),
+                 ([call, reply, {**end, "payload": {"stopReason": "failed"}}], "did not complete"))
+        for rows, message in cases:
+            with self.subTest(rows=rows), self.assertRaisesRegex(AssertionError, message):
+                queue.settled_send_turn(rows, lead, child, marker)
+
+    def test_parsed_parent_send_waits_accept_reply_without_marker(self):
+        waits = parsed_queue_waits()
+        for marker in ("QUEUE-P1-", "QUEUE-P2-", "QUEUE-P3-", "QUEUE-P3B-"):
+            matching = [w for w in waits if marker + queue.RUN in w and "[data-state=idle]" in w]
+            self.assertEqual(len(matching), 1, marker)
+            expression = matching[0]
+            code = """const expr=process.argv[1], marker=process.argv[2], haveReply=process.argv[3]==='true';
+const rows=[{dataset:{kind:'user'},textContent:'Use agent_send with '+marker},
+  ...(haveReply?[{dataset:{kind:'agent'},textContent:'Message sent once; receipt msg_123, state waiting.'}]:[])];
+const document={querySelector:()=>({}),querySelectorAll:()=>rows};
+console.log(JSON.stringify(new Function('document','return '+expr)(document)));"""
+            def shown(have_reply):
+                result = subprocess.run(["node", "--input-type=module", "-e", code, expression,
+                                         marker + queue.RUN, str(have_reply).lower()], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return json.loads(result.stdout)
+            self.assertTrue(shown(True), marker)
+            self.assertFalse(shown(False), marker)
+
+    def test_finished_child_after_real_parent_receipt_is_inconclusive_for_fifo(self):
+        call = {"event_id": "send-p1"}
+        wait = {"kind": "message.waiting", "event_id": "agt_child:send:agent_tool-ABCDEFGHIJKLMNOPQRSTUVWXY2:message.waiting",
+                "payload": {"reason": "agent:agt_lead"}}
+        child = {"agent_id": "agt_child", "state": "finished", "running_turn_id": None,
+                 "attempt": 0, "waiting_messages": []}
+        saved = {}
+        with patch.object(queue, "settled_lead_send", return_value=call), \
+             patch.object(queue, "native_send_result", return_value={"message_id": "msg_exact"}), \
+             patch.object(queue, "events", return_value=[wait]), \
+             patch.object(queue, "agent", return_value=child), \
+             patch.object(queue, "identity", side_effect=lambda label: "agt_lead" if label == "lead" else "agt_child"), \
+             patch.object(queue, "load", return_value={"turn": "turn-busy"}), \
+             patch.object(queue, "native_wait_request", return_value="agent_tool-ABCDEFGHIJKLMNOPQRSTUVWXY2"), \
+             patch.object(queue, "save", side_effect=lambda name, value: saved.update({name: value})), \
+             self.assertRaisesRegex(AssertionError, "inconclusive: child finished"):
+            queue.fifo_parent()
+        self.assertEqual(saved["fifo-parent-precondition"]["state"], "finished")
+        self.assertEqual(saved["fifo-parent-precondition"]["saved_waiting_event_ids"], [wait["event_id"]])
+        self.assertEqual(saved["fifo-parent-receipt"]["tool_event_id"], "send-p1")
+
     def test_started_group_binds_one_child_to_two_adjacent_saved_tool_entries(self):
         search = {"kind": "item.completed", "event_id": "search", "seq": 10,
                   "payload": {"itemKind": "tool", "tool": {"name": "execute", "input": json.dumps({
