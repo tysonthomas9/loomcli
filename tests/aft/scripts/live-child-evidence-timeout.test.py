@@ -152,6 +152,43 @@ console.log(eval(code));"""
                 self.assertRegex(capture[key], r"^\d{4}-\d\d-\d\dT.*Z$")
             self.assertNotIn("private", "".join(p.read_text() for p in child.WORK.glob("pair-timeout-*.json")))
 
+    def test_total_capture_budget_preserves_partial_api_and_original_wait_window(self):
+        window = {key: "2026-10-07T16:17:00Z" for key in (
+            "AFT_PAIR_WAIT_FIRST_STARTED_AT", "AFT_PAIR_WAIT_FIRST_ENDED_AT",
+            "AFT_PAIR_WAIT_SECOND_STARTED_AT", "AFT_PAIR_WAIT_SECOND_ENDED_AT")}
+        def partial_api(_label, _names):
+            child.save("pair-timeout-api", {"lead": {"agent_id": "agt_lead"}, "events": {}})
+            raise child.CaptureBudgetExpired()
+        with tempfile.TemporaryDirectory() as tmp, patch.object(child, "WORK", Path(tmp)), \
+             patch.dict(os.environ, window), patch.object(child, "pair_timeout_api", side_effect=partial_api), \
+             patch.object(child, "pair_timeout_dom") as browser:
+            child.pair_timeout("pair-lead", "a", "b")
+            browser.assert_not_called()
+            self.assertEqual(child.load("pair-timeout-wait"), window)
+            self.assertEqual(child.load("pair-timeout-api")["lead"]["agent_id"], "agt_lead")
+            receipt = child.load("pair-timeout-capture")
+            self.assertEqual((receipt["api_status"], receipt["api_failure_category"], receipt["dom_status"]),
+                             ("unavailable", "capture_budget_exhausted", "not_attempted"))
+            self.assertLessEqual(receipt["capture_started_at"], receipt["capture_ended_at"])
+            self.assertNotIn("private", json.dumps(receipt))
+
+    def test_cleanup_evidence_projects_safe_late_native_error(self):
+        agent_id = "agt_child"
+        errors = ["opencode: auth_failed (401): private credential", "private unknown failure"]
+        with tempfile.TemporaryDirectory() as tmp, patch.object(child, "WORK", Path(tmp)), \
+             patch.object(child, "agent", return_value={"agent_id": agent_id, "finished_at": "2026-10-07T16:17:57Z"}):
+            for index, error in enumerate(errors):
+                event = {"event_id": f"end-{index}", "seq": 6, "kind": "agent.turn_completed",
+                         "turn_id": "turn", "payload": {"stopReason": "failed", "error": error}}
+                with patch.object(child, "events", return_value=[event]):
+                    child.evidence(f"final-{index}", agent_id)
+                saved = child.load(f"final-{index}-events")[0]["payload"]
+                self.assertEqual(saved["error_category"], ("opencode_auth_failed", "unknown")[index])
+                self.assertEqual(saved["error_byte_length"], len(error.encode()))
+                self.assertEqual(saved["error_sha256"], child.safe_turn_error(error)["sha256"])
+                self.assertTrue(saved["error_present"])
+                self.assertNotIn("private", json.dumps(saved))
+
     def test_actual_parsed_wait_wrapper_preserves_failure_and_only_snapshots_on_failure(self):
         command = parsed_wait_command()
         self.assertIn("r.length === 2", command)

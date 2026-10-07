@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import urllib.parse
@@ -33,6 +34,14 @@ def save(label, value):
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+class CaptureBudgetExpired(Exception):
+    pass
+
+
+def capture_budget_alarm(_signum, _frame):
+    raise CaptureBudgetExpired()
 
 
 def load(label):
@@ -134,32 +143,49 @@ def pair_timeout(lead_label, *names):
     capture = {"capture_started_at": utc_now(), "api_started_at": utc_now(),
                "api_status": "pending", "dom_status": "not_attempted"}
     save("pair-timeout-capture", capture)
+    previous_handler = signal.signal(signal.SIGALRM, capture_budget_alarm)
+    signal.setitimer(signal.ITIMER_REAL, 25)
     try:
-        pair_timeout_api(lead_label, names)
-    except Exception:
-        capture["api_status"] = "failed"
-        capture["api_failure_category"] = "snapshot_failed"
-        raise
-    else:
-        capture["api_status"] = "complete"
+        try:
+            pair_timeout_api(lead_label, names)
+        except CaptureBudgetExpired:
+            raise
+        except Exception:
+            capture["api_status"] = "failed"
+            capture["api_failure_category"] = "snapshot_failed"
+            raise
+        else:
+            capture["api_status"] = "complete"
+        finally:
+            capture["api_ended_at"] = utc_now()
+            save("pair-timeout-capture", capture)
+        lead_id = (WORK / lead_label).read_text().strip()
+        capture["dom_started_at"] = utc_now()
+        try:
+            dom = pair_timeout_dom(lead_id, names)
+            save("pair-timeout-dom", dom)
+            capture["dom_status"] = "available" if dom["available"] else "unavailable"
+            if not dom["available"]:
+                capture["dom_failure_category"] = dom["failure_category"]
+        except CaptureBudgetExpired:
+            raise
+        except Exception:
+            capture["dom_status"] = "unavailable"
+            capture["dom_failure_category"] = "snapshot_failed"
+            save("pair-timeout-dom", {"available": False, "failure_category": "snapshot_failed"})
+        finally:
+            capture["dom_ended_at"] = utc_now()
+    except CaptureBudgetExpired:
+        if capture["api_status"] != "complete":
+            capture["api_status"] = "unavailable"
+            capture["api_failure_category"] = "capture_budget_exhausted"
+        else:
+            capture["dom_status"] = "unavailable"
+            capture["dom_failure_category"] = "capture_budget_exhausted"
+            save("pair-timeout-dom", {"available": False, "failure_category": "capture_budget_exhausted"})
     finally:
-        capture["api_ended_at"] = utc_now()
-        capture["capture_ended_at"] = utc_now()
-        save("pair-timeout-capture", capture)
-    lead_id = (WORK / lead_label).read_text().strip()
-    capture["dom_started_at"] = utc_now()
-    try:
-        dom = pair_timeout_dom(lead_id, names)
-        save("pair-timeout-dom", dom)
-        capture["dom_status"] = "available" if dom["available"] else "unavailable"
-        if not dom["available"]:
-            capture["dom_failure_category"] = dom["failure_category"]
-    except Exception:
-        capture["dom_status"] = "unavailable"
-        capture["dom_failure_category"] = "snapshot_failed"
-        save("pair-timeout-dom", {"available": False, "failure_category": "snapshot_failed"})
-    finally:
-        capture["dom_ended_at"] = utc_now()
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
         capture["capture_ended_at"] = utc_now()
         save("pair-timeout-capture", capture)
 
@@ -207,8 +233,11 @@ def evidence(label, agent_id):
                                          "agent_not_found": "agent_not_found" in t.get("output", "")}}
         elif e["kind"] == "agent.turn_completed":
             error = p.get("error") or ""
+            safe_error = safe_turn_error(error)
             row["payload"] = {"stopReason": p.get("stopReason"), "error_present": bool(error),
-                              "error_sha256": hashlib.sha256(error.encode()).hexdigest() if error else None}
+                              "error_sha256": safe_error["sha256"],
+                              "error_category": safe_error["category"],
+                              "error_byte_length": safe_error["byte_length"]}
         else:
             continue
         safe_events.append(row)
