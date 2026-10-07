@@ -58,6 +58,71 @@ console.log(JSON.stringify(suite.tests.flatMap(t=>t.steps).filter(s=>s.wait?.fn)
 
 
 class QueueOracleTests(unittest.TestCase):
+    def test_bind_child_preserves_create_call_diagnostics_without_changing_one_call(self):
+        lead = {"agent_id": "agt_lead", "branch": "main", "repo": "fixture", "worktree_path": "/lead",
+                "state": "active", "running_turn_id": "lead-turn"}
+        child = {"agent_id": "agt_child", "name": queue.CHILD_NAME, "parent_agent_id": "agt_lead",
+                 "root_agent_id": "agt_lead", "created_by_id": "agt_lead", "created_by_kind": "agent",
+                 "preset": "task", "repo": "fixture", "worktree_path": "/child", "base_ref": "main",
+                 "branch": "child-branch", "harness": "opencode"}
+        prior = {"head": "a" * 40, "branch": "main", "worktree_path": "/lead"}
+        created = {"agent_id": "agt_lead", "kind": "child.created", "event_id": "created-child",
+                   "seq": 1, "payload": {"child": "agt_child"}}
+        def tool(event_id, name="agent_create", raw=None, failed=False, kind="item.completed"):
+            if raw is None:
+                raw = json.dumps({"name": queue.CHILD_NAME, "note": "code-must-not-be-exported"})
+            return {"agent_id": "agt_lead", "kind": kind, "event_id": event_id,
+                    "seq": int(event_id.rsplit("-", 1)[-1]), "turn_id": "lead-turn",
+                    "payload": {"itemKind": "tool", "tool": {"name": name, "input": raw, "failed": failed}}}
+        truncated = '{"code":"tools.loom.agent_create({name: \"' + queue.CHILD_NAME + '\"});…'
+        truncated_before_call = '{"code":"const l=loom;' + "x" * 16360 + '…'
+        cases = (
+            ("zero", [], False, 0, 0),
+            ("duplicate", [tool("tool-2"), tool("tool-3")], False, 2, 0),
+            ("failed-side-effect", [tool("tool-2", failed=True), tool("tool-3")], False, 2, 0),
+            ("truncated", [tool("tool-2", name="execute", raw=truncated)], True, 1, 0),
+            ("truncated-before-call", [tool("tool-2", name="execute", raw=truncated_before_call)], False, 0, 0),
+            ("pending", [tool("tool-2", kind="tool.started")], False, 0, 1),
+        )
+        for label, tools, succeeds, count, pending_count in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp, \
+                 patch.object(queue, "OUT", Path(tmp) / "coverage-children-queue"), \
+                 patch.dict(os.environ, {"AFT_AGENT_FLOW_REPO": "fixture"}), \
+                 patch.object(queue, "agent", side_effect=lambda name: lead if name == "lead" else child), \
+                 patch.object(queue, "http", return_value={"agents": [child], "next": None}), \
+                 patch.object(queue, "native_ref", return_value={"branch": "child-branch", "merge_base": prior["head"], "head": "b" * 40}), \
+                 patch.object(queue, "events", return_value=[created, *tools]):
+                queue.OUT.mkdir(parents=True)
+                (queue.OUT / "lead.id").write_text("agt_lead\n")
+                queue.save("lead-pre-create-ref", prior)
+                if succeeds:
+                    queue.bind_child()
+                else:
+                    with self.assertRaisesRegex(AssertionError, "expected one completed native agent_create"):
+                        queue.bind_child()
+                diagnostic = queue.load("create-call-diagnostic")
+                self.assertEqual(diagnostic["lead_agent_id"], "agt_lead")
+                self.assertEqual(diagnostic["child_agent_id"], "agt_child")
+                self.assertEqual(diagnostic["child_created_event_ids"], ["created-child"])
+                self.assertEqual(diagnostic["matching_completed_count"], count)
+                self.assertEqual(len(diagnostic["pending_candidates"]), pending_count)
+                self.assertNotIn("code-must-not-be-exported", json.dumps(diagnostic))
+                self.assertNotIn(queue.CHILD_NAME, json.dumps(diagnostic["completed_candidates"] + diagnostic["pending_candidates"]))
+                if label == "failed-side-effect":
+                    self.assertEqual([c["status"] for c in diagnostic["completed_candidates"]], ["failed", "completed"])
+                if label.startswith("truncated"):
+                    self.assertTrue(diagnostic["completed_candidates"][0]["input_truncated"])
+
+    def test_bind_create_diagnostic_rejects_foreign_event_identity(self):
+        source = [{"agent_id": "agt_foreign", "kind": "item.completed", "event_id": "foreign",
+                   "seq": 2, "turn_id": "turn", "payload": {"itemKind": "tool", "tool": {"name": "agent_create", "input": queue.CHILD_NAME}}}]
+        with tempfile.TemporaryDirectory() as tmp, patch.object(queue, "OUT", Path(tmp)), \
+             patch.object(queue, "identity", side_effect=lambda name: "agt_lead" if name == "lead" else "agt_child"):
+            with self.assertRaisesRegex(AssertionError, "foreign create-call diagnostic identity"):
+                queue.create_call_diagnostic(source, {"agent_id": "agt_lead"},
+                                             {"agent_id": "agt_child", "parent_agent_id": "agt_lead"}, [])
+            self.assertFalse((queue.OUT / "create-call-diagnostic.json").exists())
+
     def test_first_parent_proof_survives_real_capture_shot_and_replacement_path(self):
         child, lead, sender, turn = "agt_child", "agt_lead", "agent:agt_lead", "child-turn"
         requests = ["agent_tool-" + c * 26 for c in ("A", "B")]
