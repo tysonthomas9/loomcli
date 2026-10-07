@@ -82,6 +82,7 @@ function parseSse(raw, native) {
       events.slice(0, -1).some((event) => event.type === 'log.synced'))
     return unavailable('log-not-synced')
   const durable = events.slice(0, -1)
+  if (!durable.length && synced.seq === undefined) return unavailable('log-no-durable-events')
   if (!durable.length || durable.length > 500 || !Number.isInteger(synced.seq))
     return unavailable('log-empty-or-truncated')
   if (durable[0].type !== 'session.created' || durable[0].durable?.seq !== 0)
@@ -99,7 +100,7 @@ function parseSse(raw, native) {
   return {status: 'parsed', events: durable, watermark: synced.seq}
 }
 
-function projectLog(raw, native, anchor) {
+function projectLog(raw, native, anchor, root) {
   const parsed = parseSse(raw, native)
   if (parsed.status !== 'parsed') return parsed
   const failures = parsed.events.filter((event) => event.type === 'session.execution.failed')
@@ -114,7 +115,9 @@ function projectLog(raw, native, anchor) {
     type: error.type, status: error.status ?? null, message_byte_length: Buffer.byteLength(canonical),
     message_sha256: sha(canonical), watermark: parsed.watermark}
   if (!anchor) return {status: 'unlinked', reason: 'loom-turn-not-finished', native_failure: nativeFailure}
-  if (!/^evt_[A-Za-z0-9_-]+$/.test(anchor.event_id) || !Number.isInteger(anchor.seq) ||
+  if (typeof root !== 'string' ||
+      anchor.event_id !== `agent.turn_completed:${root}:${native}:${anchor.turn_id}` ||
+      !Number.isInteger(anchor.seq) ||
       typeof anchor.turn_id !== 'string' || !anchor.turn_id ||
       !/^[a-f0-9]{64}$/.test(anchor.error_sha256)) return unavailable('loom-anchor-invalid')
   if (nativeFailure.message_sha256 !== anchor.error_sha256)
@@ -193,7 +196,7 @@ async function main() {
       url.searchParams.set('follow', 'false')
       const response = await fetch(url, {headers: {Authorization: auth}, signal: AbortSignal.timeout(3000)})
       if (!response.headers.get('content-type')?.startsWith('text/event-stream')) return fail('log-content-type-invalid')
-      const result = projectLog(await read(response, 262144), native, anchor)
+      const result = projectLog(await read(response, 262144), native, anchor, root)
       emit(result)
     } catch { fail('native-log-unavailable') }
   } catch { fail('native-diagnostic-unavailable') }

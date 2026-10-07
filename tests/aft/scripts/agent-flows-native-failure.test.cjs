@@ -6,7 +6,9 @@ const probe = require('./agent-flows-native-failure.cjs')
 const id = 'ses_owned'
 const message = 'private native provider detail'
 const digest = crypto.createHash('sha256').update(message).digest('hex')
-const anchor = {event_id: 'evt_loom', seq: 6, turn_id: 'turn_child', error_sha256: digest}
+const anchor = {event_id: 'agent.turn_completed::ses_owned:turn_child', seq: 6,
+  turn_id: 'turn_child', error_sha256: digest}
+const project = (raw, native, saved, root = '') => probe.projectLog(raw, native, saved, root)
 const event = (seq, type, data) => ({id: `evt_${seq}`, type, data: {sessionID: id, ...data},
   durable: {aggregateID: id, seq, version: 1}})
 const log = (rows, synced = true) => [...rows, ...(synced ? [{type: 'log.synced', aggregateID: id,
@@ -15,7 +17,7 @@ const rows = [event(0, 'session.created', {}),
   event(1, 'session.execution.failed', {error: {type: 'provider.auth', message, status: 401}})]
 
 test('exact synced native failure links by owned session and saved Loom hash without message', () => {
-  const linked = probe.projectLog(log(rows), id, anchor)
+  const linked = project(log(rows), id, anchor, '')
   assert.equal(linked.status, 'linked')
   assert.deepEqual(linked.loom_turn, anchor)
   assert.equal(linked.native_failure.type, 'provider.auth')
@@ -26,26 +28,27 @@ test('exact synced native failure links by owned session and saved Loom hash wit
   assert.equal(linked.native_failure.seq, 1)
   assert.equal(linked.native_failure.session_id, id)
   assert.doesNotMatch(JSON.stringify(linked), /private|detail/)
-  const waiting = probe.projectLog(log(rows), id, null)
+  const waiting = project(log(rows), id, null, '')
   assert.equal(waiting.status, 'unlinked')
   assert.equal(waiting.reason, 'loom-turn-not-finished')
 })
 
 test('missing marker, truncation, foreign session, duplicate sequence/failure, and wrong hash fail closed', () => {
-  assert.equal(probe.projectLog(log(rows, false), id, anchor).reason, 'log-not-synced')
-  assert.equal(probe.projectLog(log(rows).slice(0, -2), id, anchor).reason, 'log-truncated')
-  assert.equal(probe.projectLog(log(rows), 'ses_foreign', anchor).reason, 'log-not-synced')
-  assert.equal(probe.projectLog(log(rows.slice(1)), id, anchor).reason, 'log-prefix-missing')
-  assert.equal(probe.projectLog(log([rows[0], {...rows[1], durable: {...rows[1].durable, seq: 0}}]), id, anchor).reason,
+  assert.equal(project(log([]), id, anchor).reason, 'log-no-durable-events')
+  assert.equal(project(log(rows, false), id, anchor).reason, 'log-not-synced')
+  assert.equal(project(log(rows).slice(0, -2), id, anchor).reason, 'log-truncated')
+  assert.equal(project(log(rows), 'ses_foreign', anchor).reason, 'log-not-synced')
+  assert.equal(project(log(rows.slice(1)), id, anchor).reason, 'log-prefix-missing')
+  assert.equal(project(log([rows[0], {...rows[1], durable: {...rows[1].durable, seq: 0}}]), id, anchor).reason,
     'log-foreign-or-order')
-  assert.equal(probe.projectLog(log([...rows, event(2, 'session.execution.failed', rows[1].data)]), id, anchor).reason,
+  assert.equal(project(log([...rows, event(2, 'session.execution.failed', rows[1].data)]), id, anchor).reason,
     'native-failure-count')
-  assert.equal(probe.projectLog(log(rows), id, {...anchor, error_sha256: '0'.repeat(64)}).reason,
+  assert.equal(project(log(rows), id, {...anchor, error_sha256: '0'.repeat(64)}).reason,
     'native-loom-error-hash-mismatch')
   const skippedInternalSeq = [rows[0], {...rows[1], durable: {...rows[1].durable, seq: 3}}]
-  assert.equal(probe.projectLog(log(skippedInternalSeq), id, anchor).status, 'linked')
+  assert.equal(project(log(skippedInternalSeq), id, anchor).status, 'linked')
   const hiddenAfterLastVisible = log(rows).replace('"seq":1}\n\n', '"seq":4}\n\n')
-  assert.equal(probe.projectLog(hiddenAfterLastVisible, id, anchor).status, 'linked')
+  assert.equal(project(hiddenAfterLastVisible, id, anchor).status, 'linked')
 })
 
 test('structured type, HTTP status, and message are allowlisted and redacted', () => {
@@ -55,10 +58,24 @@ test('structured type, HTTP status, and message are allowlisted and redacted', (
     {type: 'provider.auth', message, status: '401'},
     {type: 'provider.auth', message: {secret: 'private'}},
   ]) {
-    const result = probe.projectLog(log([rows[0], event(1, 'session.execution.failed', {error})]), id, anchor)
+    const result = project(log([rows[0], event(1, 'session.execution.failed', {error})]), id, anchor)
     assert.equal(result.reason, 'native-error-invalid-shape')
     assert.doesNotMatch(JSON.stringify(result), /private|secret/)
   }
+})
+
+test('saved Loom event identity uses the exact native root, session, and turn', () => {
+  assert.equal(project(log(rows), id, anchor).status, 'linked')
+  for (const changed of [
+    {...anchor, event_id: 'evt_loom'},
+    {...anchor, event_id: 'agent.turn_completed:/foreign:ses_owned:turn_child'},
+    {...anchor, event_id: 'agent.turn_completed::ses_foreign:turn_child'},
+    {...anchor, event_id: 'agent.turn_completed::ses_owned:turn_other'},
+    {...anchor, turn_id: 'turn_other'},
+  ]) assert.equal(project(log(rows), id, changed).reason, 'loom-anchor-invalid')
+  const rooted = {...anchor, event_id: 'agent.turn_completed:/owned:ses_owned:turn_child'}
+  assert.equal(project(log(rows), id, rooted, '/owned').status, 'linked')
+  assert.equal(project(log(rows), id, rooted, '/foreign').reason, 'loom-anchor-invalid')
 })
 
 test('ownership, service PID, and selected/default models stay distinct', () => {
