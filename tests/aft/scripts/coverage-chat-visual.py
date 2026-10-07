@@ -2,6 +2,7 @@
 """Read-only saved-event and browser oracles for the real chat visual journeys."""
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -586,31 +587,78 @@ def self_test_final_text():
     assert final_text_lag({"at": 700}, 800) == -100, "valid pre-completion final render was rejected"
 
 
-def motion_finish(case):
+def motion_digest(snapshot):
+    raw = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def save_motion_capture(snapshot):
+    capture = WORK / "render-motion-capture.json"
+    seal = WORK / "render-motion-seal.json"
+    assert not capture.exists() and not seal.exists(), "first-turn motion capture already exists"
+    write(capture.name, snapshot)
+    write(seal.name, {"sha256": motion_digest(snapshot), "case": snapshot["case"],
+                      "ws": snapshot["ws"], "run": snapshot["run"], "agent_id": snapshot["agent_id"]})
+
+
+def load_motion_capture(case):
+    capture = WORK / "render-motion-capture.json"
+    seal = WORK / "render-motion-seal.json"
+    assert all(p.is_file() and not p.is_symlink() for p in (capture, seal)), "first-turn motion capture or seal missing"
+    try:
+        snapshot = json.loads(capture.read_text())
+        receipt = json.loads(seal.read_text())
+    except (ValueError, OSError) as exc:
+        raise AssertionError("first-turn motion capture is unreadable") from exc
+    assert isinstance(snapshot, dict) and isinstance(receipt, dict), "first-turn motion capture has invalid shape"
+    expected = {"sha256": motion_digest(snapshot), "case": case, "ws": WS,
+                "run": RUN, "agent_id": agent_id(case)}
+    assert receipt == expected, "first-turn motion capture changed or belongs to a foreign run"
+    assert all(snapshot.get(key) == value for key, value in expected.items() if key != "sha256"), \
+        "first-turn motion capture identity changed"
+    assert snapshot.get("version") == 1 and snapshot.get("probe", {}).get("route") == snapshot.get("route"), \
+        "first-turn motion capture version or probe route changed"
+    assert snapshot.get("route") == f"/ws/{WS}/chat/{agent_id(case)}", "first-turn motion capture changed Chat route"
+    return snapshot
+
+
+def motion_capture(case):
+    assert case == "render", case
     current(case)
     probe = evaluate("""(() => { const p=window.__aftChatVisual; if(!p)throw Error('motion probe missing');
       p.stopped=true; clearInterval(p.timer); p.observer?.disconnect(); p.liveObserver?.disconnect();
       const c=document.querySelector('[data-testid=chat-transcript]');
       const a=[...(c?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);
       const finalText=a?.querySelector('[data-testid=chat-markdown]')?.textContent||'';
-      return {start:p.start,frames:p.frames,finalText,samples:p.samples,shifts:p.shifts,
+      return {route:location.pathname,start:p.start,frames:p.frames,finalText,samples:p.samples,shifts:p.shifts,
+        caretGone:!!c && !c.querySelector('[data-streaming-caret], [data-testid=working-row]'),
         sawCaret:p.sawCaret,sawWorking:p.sawWorking,observerError:p.observerError||null}; })()""")
+    assert probe["route"] == f"/ws/{WS}/chat/{agent_id(case)}", "motion capture changed Chat route"
     evs = events(case)
-    delivered = [e for e in evs if e["kind"] == "message.delivered" and "VISUAL_RENDER" in e["payload"].get("text", "")]
+    delivered = [e for e in evs if e["kind"] == "message.delivered" and f"VISUAL_RENDER_{RUN}" in e["payload"].get("text", "")]
     assert len(delivered) == 1, delivered
     end = [e for e in evs if e["kind"] == "agent.turn_completed" and e["seq"] > delivered[0]["seq"]]
     assert len(end) == 1, end
     replies = [e for e in evs if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "message" and delivered[0]["seq"] < e["seq"] < end[0]["seq"]]
     assert replies, "real turn saved no assistant message"
     answer = "\n".join(e["payload"].get("text", "") for e in replies)
+    snapshot = {"version": 1, "case": case, "ws": WS, "run": RUN,
+                "agent_id": agent_id(case), "route": probe["route"], "probe": probe,
+                "delivered": delivered[0], "turn_completed": end[0],
+                "replies": replies, "answer": answer}
+    save_motion_capture(snapshot)
     marker = f"VISUAL_END_{RUN}"
     frames = probe["frames"]
     end_at = end[0].get("created_at")
     from datetime import datetime
-    turn_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000 if end_at else None
+    try:
+        turn_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000 if end_at else None
+    except ValueError:
+        turn_ms = None
     candidate_frame = next((frame for frame in frames if frame.get("marker")), None)
     word_count = len(answer.split())
     write("render-motion-diagnostic.json", {
+        "validation": "pending", "capture_sha256": motion_digest(snapshot),
         "probe": probe, "delivered_event_id": delivered[0]["event_id"],
         "turn_completed": end[0], "saved_answer_chars": len(answer),
         "saved_answer_ends_with_marker": answer.endswith(marker),
@@ -620,6 +668,26 @@ def motion_finish(case):
         "max_added_words_per_frame": max((frame["addedWords"] for frame in frames), default=None),
         "non_input_layout_shift": sum(shift["value"] for shift in probe["shifts"]),
     })
+
+
+def assert_motion_capture(snapshot):
+    probe = snapshot["probe"]
+    delivered = snapshot["delivered"]
+    end = snapshot["turn_completed"]
+    replies = snapshot["replies"]
+    answer = snapshot["answer"]
+    assert delivered["kind"] == "message.delivered" and f"VISUAL_RENDER_{RUN}" in delivered["payload"]["text"], \
+        "frozen motion delivery is not the real rendering request"
+    assert end["kind"] == "agent.turn_completed" and end["seq"] > delivered["seq"], \
+        "frozen motion turn completion does not follow delivery"
+    assert replies and all(e["kind"] == "item.completed" and e["payload"].get("itemKind") == "message" and
+                           delivered["seq"] < e["seq"] < end["seq"] for e in replies), \
+        "frozen motion reply items are missing or outside the turn"
+    assert answer == "\n".join(e["payload"].get("text", "") for e in replies), \
+        "frozen motion answer differs from saved assistant items"
+    marker = f"VISUAL_END_{RUN}"
+    frames = probe["frames"]
+    word_count = len(answer.split())
     assert word_count >= 300, f"model supplied only {word_count} words; 300-word motion criterion unverified"
     assert probe["observerError"] is None, probe["observerError"]
     assert probe["sawCaret"] and probe["sawWorking"], "streaming caret/working row were not observed"
@@ -630,10 +698,134 @@ def motion_finish(case):
     marker_frame = final_text_frame(answer, frames, probe["finalText"], marker)
     # The completed event timestamp is saved by the product. Browser Date.now
     # and serve share this host clock; this proven-final DOM frame is the bound.
+    end_at = end.get("created_at")
     assert end_at, "turn completion lacks a saved timestamp"
+    from datetime import datetime
+    turn_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000
     lag_ms = final_text_lag(marker_frame, turn_ms)
-    assert evaluate("!document.querySelector('[data-streaming-caret], [data-testid=working-row]')"), "caret or working row remained after turn"
-    write("render-motion.json", {"probe": probe, "turn_completed": end[0], "answer": answer, "final_frame": marker_frame, "turn_ms": turn_ms, "lag_ms": lag_ms})
+    assert probe["caretGone"], "caret or working row remained after turn"
+    return marker_frame, turn_ms, lag_ms
+
+
+def motion_assert(case):
+    assert case == "render", case
+    snapshot = load_motion_capture(case)
+    marker_frame, turn_ms, lag_ms = assert_motion_capture(snapshot)
+    write("render-motion.json", {"probe": snapshot["probe"], "turn_completed": snapshot["turn_completed"],
+                                 "answer": snapshot["answer"], "final_frame": marker_frame,
+                                 "turn_ms": turn_ms, "lag_ms": lag_ms,
+                                 "capture_sha256": motion_digest(snapshot)})
+
+
+def self_test_motion_assert():
+    from copy import deepcopy
+    from datetime import datetime
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    end_at = "2026-10-07T00:00:00Z"
+    end_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000
+    marker = f"VISUAL_END_{RUN}"
+    words = ["word"] * 299 + [marker]
+    answer = " ".join(words)
+    frames = [{"at": end_ms - 40 - (len(words) - i) * 16,
+               "chars": len(" ".join(words[:i])), "words": i,
+               "addedWords": 1, "marker": i == len(words),
+               **({"text": answer} if i == len(words) else {})}
+              for i in range(1, len(words) + 1)]
+    route = f"/ws/{WS}/chat/agt_test"
+    probe = {"route": route, "start": frames[0]["at"] - 16,
+             "frames": frames, "finalText": answer,
+             "samples": [{"stop": True, "gap": 0}], "shifts": [],
+             "sawCaret": True, "sawWorking": True,
+             "observerError": None, "caretGone": True}
+    reply = {"kind": "item.completed", "event_id": "reply", "seq": 2,
+             "payload": {"itemKind": "message", "text": answer}}
+    snapshot = {"version": 1, "case": "render", "ws": WS, "run": RUN,
+                "agent_id": "agt_test", "route": route, "probe": probe,
+                "delivered": {"kind": "message.delivered", "event_id": "delivered", "seq": 1,
+                              "payload": {"text": f"VISUAL_RENDER_{RUN}"}},
+                "turn_completed": {"kind": "agent.turn_completed", "event_id": "completed",
+                                   "seq": 3, "created_at": end_at},
+                "replies": [reply], "answer": answer}
+    assert assert_motion_capture(snapshot)[2] == -40
+
+    def rejects(change, expected):
+        candidate = deepcopy(snapshot)
+        change(candidate)
+        try:
+            with patch.object(sys.modules[__name__], "load_motion_capture", return_value=candidate), \
+                 patch.object(sys.modules[__name__], "write", side_effect=AssertionError("wrote a pass artifact")):
+                motion_assert("render")
+        except AssertionError as exc:
+            assert expected in str(exc), (expected, exc)
+        else:
+            raise AssertionError(f"motion oracle accepted {expected}")
+
+    def short(candidate):
+        text = " ".join(["word"] * 233 + [marker])
+        candidate["answer"] = candidate["replies"][0]["payload"]["text"] = text
+
+    rejects(short, "300-word")  # The real provider's 234-word short answer must fail.
+    rejects(lambda c: c["probe"]["frames"][0].update(addedWords=17), "visible block")
+    rejects(lambda c: c["probe"]["shifts"].append({"value": 0.012443148334330491}), "layout shift")
+    rejects(lambda c: c["probe"].update(observerError="observer failed"), "observer failed")
+    rejects(lambda c: c["probe"].update(sawCaret=False), "streaming caret/working")
+    rejects(lambda c: c["probe"].update(sawWorking=False), "streaming caret/working")
+    rejects(lambda c: c["probe"].update(frames=c["probe"]["frames"][:3]), "no measured real text")
+    rejects(lambda c: [f.update(chars=1) for f in c["probe"]["frames"]], "no measured real text")
+    rejects(lambda c: c["probe"].update(samples=[]), "live follow")
+    rejects(lambda c: c["probe"]["samples"][0].update(gap=1), "live follow")
+    rejects(lambda c: c["probe"]["frames"][0].update(marker=True), "before later rendered text")
+    rejects(lambda c: c["probe"]["frames"][-1].update(text="changed"), "last measured frame")
+    rejects(lambda c: c["probe"]["frames"][-1].update(at=end_ms + 301), "final text lagged")
+    rejects(lambda c: c["probe"].update(caretGone=False), "caret or working row remained")
+    rejects(lambda c: c["turn_completed"].update(created_at=""), "lacks a saved timestamp")
+    rejects(lambda c: c["delivered"]["payload"].update(text="foreign"), "not the real rendering")
+    rejects(lambda c: c.update(answer="changed"), "differs from saved assistant")
+    rejects(lambda c: c["replies"][0].update(seq=4), "outside the turn")
+
+    with TemporaryDirectory() as folder, patch.dict(globals(), WORK=Path(folder)):
+        (WORK / "render.id").write_text("agt_test\n")
+        try:
+            load_motion_capture("render")
+        except AssertionError as exc:
+            assert "missing" in str(exc), exc
+        else:
+            raise AssertionError("missing motion capture was accepted")
+        save_motion_capture(snapshot)
+        assert load_motion_capture("render") == snapshot
+        try:
+            save_motion_capture(snapshot)
+        except AssertionError as exc:
+            assert "already exists" in str(exc), exc
+        else:
+            raise AssertionError("reduced-motion turn could overwrite first-turn capture")
+        with patch.object(sys.modules[__name__], "evaluate", side_effect=AssertionError("late DOM read")), \
+             patch.object(sys.modules[__name__], "events", side_effect=AssertionError("late event read")), \
+             patch.object(sys.modules[__name__], "current", side_effect=AssertionError("late route read")):
+            motion_assert("render")
+        assert (WORK / "render-motion.json").is_file()
+        changed = deepcopy(snapshot)
+        changed["probe"]["finalText"] = "mutated"
+        write("render-motion-capture.json", changed)
+        try:
+            load_motion_capture("render")
+        except AssertionError as exc:
+            assert "changed or belongs" in str(exc), exc
+        else:
+            raise AssertionError("mutated motion capture was accepted")
+        foreign = deepcopy(snapshot)
+        foreign["run"] = "FOREIGN"
+        write("render-motion-capture.json", foreign)
+        write("render-motion-seal.json", {"sha256": motion_digest(foreign), "case": "render",
+                                          "ws": WS, "run": "FOREIGN", "agent_id": "agt_test"})
+        try:
+            load_motion_capture("render")
+        except AssertionError as exc:
+            assert "foreign run" in str(exc), exc
+        else:
+            raise AssertionError("foreign motion capture was accepted")
 
 
 def turn_events(case, marker):

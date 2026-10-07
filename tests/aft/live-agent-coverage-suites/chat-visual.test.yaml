@@ -78,8 +78,8 @@ tests:
                 !c.querySelector('[data-streaming-caret], [data-testid=working-row]'); })()
         budget: 180000
         intent: "Wait for the saved real turn to finish, flush text and remove caret and working row"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render end && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" motion-finish render'
-        intent: "Capture the named final frame and assert frame growth, final-byte timing, zero CLS and zero bottom gap"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render end && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" motion-capture render'
+        intent: "Freeze the first turn's final frame, saved events and caret state at the original checkpoint; motion validation remains pending"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=chat-transcript] [data-testid=chat-codeblock][data-language=json] code span')
@@ -151,6 +151,8 @@ tests:
         intent: "Wait for the actual reduced-motion reply to complete"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reduced-saved-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render reduced-end'
         intent: "Compare the second real reply to its saved turn and capture the final reduced-motion frame"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" motion-assert render'
+        intent: "Fail this case if the sealed first-turn capture misses any original word, frame, CLS, bottom-gap, caret or final-byte timing criterion"
   # UI0 empty/focus/keyboard/autogrow/header; 1.8a/1.8c literal text;
   # UI6/7/7b hover and narrow geometry; SK1 and MB1/MB1b actual viewport.
   # The source is a genuine user send;
