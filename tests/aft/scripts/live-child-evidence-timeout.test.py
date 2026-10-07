@@ -194,7 +194,8 @@ console.log(eval(code));"""
     def test_native_probe_uses_exact_saved_failed_turn_and_rejects_raw_or_timeout(self):
         child_id, lead_id = "agt_child", "agt_lead"
         digest = "a" * 64
-        event = {"kind": "agent.turn_completed", "event_id": "evt_end", "seq": 6,
+        event = {"kind": "agent.turn_completed",
+                 "event_id": "agent.turn_completed::ses_child:turn_child", "seq": 6,
                  "turn_id": "turn_child", "payload": {"stopReason": "failed", "error_sha256": digest}}
         safe = {"agent_id": child_id, "native_id": "ses_child", "native_root": "",
                 "registry_requested_model": None, "native_session_selected_model": None,
@@ -202,7 +203,8 @@ console.log(eval(code));"""
                 "status": "linked", "native_failure": {"event_id": "evt_native", "seq": 9,
                   "session_id": "ses_child", "type": "provider.auth", "status": 401,
                   "message_byte_length": 80, "message_sha256": digest, "watermark": 9},
-                "loom_turn": {"event_id": "evt_end", "seq": 6, "turn_id": "turn_child",
+                "loom_turn": {"event_id": "agent.turn_completed::ses_child:turn_child",
+                              "seq": 6, "turn_id": "turn_child",
                               "error_sha256": digest}}
         with tempfile.TemporaryDirectory() as tmp, patch.object(child, "WORK", Path(tmp)), \
              patch.dict(os.environ, {"AFT_TESTS_DIR": tmp}):
@@ -210,7 +212,8 @@ console.log(eval(code));"""
             with patch.object(child.subprocess, "run", return_value=response) as command:
                 child.native_failure("final", child_id, lead_id, [event])
             self.assertEqual(command.call_args.args[0][-6:],
-                             [child_id, lead_id, "evt_end", "6", "turn_child", digest])
+                             [child_id, lead_id, "agent.turn_completed::ses_child:turn_child",
+                              "6", "turn_child", digest])
             self.assertEqual(command.call_args.kwargs["timeout"], 8)
             self.assertEqual(child.load(f"pair-native-failure-{child_id}-final"), safe)
             self.assertNotIn("private", (child.WORK / f"pair-native-failure-{child_id}-final.json").read_text())
@@ -237,7 +240,8 @@ console.log(eval(code));"""
             agents = {lead_id: {"name": "aft-child-lead-af12345678", "state": "finished"},
                       child_id: {"name": "aft-child-a-af12345678", "state": "finished"}}
             def evidence(label, agent_id):
-                child.save(f"{label}-events", [{"kind": "agent.turn_completed", "event_id": "evt_end",
+                child.save(f"{label}-events", [{"kind": "agent.turn_completed",
+                                                  "event_id": "agent.turn_completed::ses_child:turn_child",
                                                   "seq": 6, "turn_id": "turn_child",
                                                   "payload": {"stopReason": "failed", "error_sha256": "a" * 64}}])
                 return {}, [{"agent_id": agent_id}]
@@ -249,7 +253,8 @@ console.log(eval(code));"""
                 child.cleanup()
             probe.assert_called_once()
             self.assertEqual(probe.call_args.args[:3], ("final", child_id, lead_id))
-            self.assertEqual(probe.call_args.args[3][0]["event_id"], "evt_end")
+            self.assertEqual(probe.call_args.args[3][0]["event_id"],
+                             "agent.turn_completed::ses_child:turn_child")
             self.assertEqual(archive.call_count, 2)
 
     def test_actual_parsed_wait_wrapper_preserves_failure_and_only_snapshots_on_failure(self):
