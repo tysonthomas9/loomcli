@@ -24,7 +24,7 @@ tests:
         intent: "Open the actual New Agent form"
       - click: { testid: create-agent-template-lead }
         intent: "Choose a real Lead"
-      - fill: { testid: create-agent-name, value: "aft-${RUN_ID}-cov-visual-skip" }
+      - fill: { testid: create-agent-name, value: "cov-visual-skip-${RUN_ID}" }
         intent: "Name this run's only SK1 Lead"
       - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
         intent: "Use the real OpenCode backend without sending a model request"
@@ -43,7 +43,7 @@ tests:
         intent: "Load a fresh owned Chat document before the first Tab"
       - wait:
           fn: >-
-            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-skip' &&
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'cov-visual-skip-${RUN_ID}' &&
             !!document.querySelector('textarea[aria-label="Message"]')
         intent: "Wait for the exact Lead's empty Chat without clicking or focusing"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual-skip.py" start'

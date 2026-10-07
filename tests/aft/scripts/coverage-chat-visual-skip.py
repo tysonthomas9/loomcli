@@ -25,7 +25,7 @@ WS = required("AFT_WS")
 API = required("AFT_API_URL").rstrip("/")
 ORIGIN = required("AFT_BASE_URL").rstrip("/")
 WORK = Path(required("AFT_WORK_DIR")) / "chat-visual-skip"
-NAME = f"aft-{RUN}-cov-visual-skip"
+NAME = f"cov-visual-skip-{RUN}"
 PREFIX = f"/api/workspaces/{urllib.parse.quote(WS, safe='')}/v1/agents"
 
 
