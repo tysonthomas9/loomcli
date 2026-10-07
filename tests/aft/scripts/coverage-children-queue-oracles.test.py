@@ -534,16 +534,32 @@ agent_flows_podman() {
         event = {"seq": 10, "event_id": "one"}
         with patch.object(queue, "load", side_effect=saved.__getitem__), patch.object(queue, "identity", return_value="agt_child"), \
              patch.object(queue, "agent", return_value=row), patch.object(queue, "events", side_effect=[[event], [event]]), \
-             patch.object(queue, "http", return_value=receipt["result"]) as post, patch.object(queue, "save"):
+             patch.object(queue, "http", return_value=receipt["result"]) as post, patch.object(queue, "save") as persist:
             queue.replay_u3()
             self.assertEqual(post.call_args.args[2], receipt["request_id"])
+            self.assertTrue(next(c.args[1] for c in persist.call_args_list if c.args[0] == "u3-replay-diagnostic")["receipt_equal"])
         for replay, after in (({**receipt["result"], "replaced": True}, [event]),
+                              ({key: value for key, value in receipt["result"].items() if key != "state"}, [event]),
+                              ({**receipt["result"], "foreign_field": 173}, [event]),
                               (receipt["result"], [event, {"seq": 11, "event_id": "extra"}])):
             with patch.object(queue, "load", side_effect=saved.__getitem__), patch.object(queue, "identity", return_value="agt_child"), \
                  patch.object(queue, "agent", return_value=row), patch.object(queue, "events", side_effect=[[event], after]), \
-                 patch.object(queue, "http", return_value=replay), patch.object(queue, "save"):
+                 patch.object(queue, "http", return_value=replay), patch.object(queue, "save") as persist:
                 with self.assertRaises(AssertionError):
                     queue.replay_u3()
+                diagnostic = next(c.args[1] for c in persist.call_args_list if c.args[0] == "u3-replay-diagnostic")
+                self.assertEqual(diagnostic["original_request_id"], receipt["request_id"])
+                self.assertEqual(diagnostic["retry_request_id"], receipt["request_id"])
+                self.assertEqual(diagnostic["receipt_equal"], replay == receipt["result"])
+                self.assertEqual(diagnostic["events_equal"], after == [event])
+                self.assertNotIn("foreign_field", json.dumps(diagnostic))
+                self.assertEqual(diagnostic["agent_before"], {"state": "finished", "attempt": 1, "waiting_count": 0})
+                self.assertTrue(all(set(value).issubset({"message_id", "state", "replaced", "interrupted", "turn_id"})
+                                    for value in (diagnostic["original"], diagnostic["replay"])))
+
+    def test_parsed_queue_checks_native_inputs_before_replay(self):
+        command = next(p for p in parsed_queue_prompts() if "native-inputs" in p and "replay-u3" in p)
+        self.assertLess(command.index("native-inputs"), command.index("replay-u3"))
 
     def test_native_input_probe_rejects_missing_or_duplicate_count(self):
         keys = ["msg_" + "a" * 26, "msg_" + "b" * 26]
