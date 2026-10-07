@@ -1372,7 +1372,7 @@ def clipboard_primary_pids(profile, processes):
     return primary
 
 
-def clipboard_owned_config(manifest, env, origin, route, endpoint, devtools_lines, processes, wrapper):
+def clipboard_owned_config(manifest, env, origin, route, endpoint, devtools_lines, processes, wrapper, case="render"):
     evidence = Path(env["AFT_WORK_DIR"])
     run_root = evidence.parent
     session = env["AFT_SESSION"]
@@ -1395,7 +1395,7 @@ def clipboard_owned_config(manifest, env, origin, route, endpoint, devtools_line
        wrapper.resolve() != tests_dir / "scripts/agent-flows-browser":
         raise PermissionError("foreign clipboard runner identity")
     if origin != env["AFT_BASE_URL"] or not re.fullmatch(r"http://127\.0\.0\.1:[0-9]+", origin) or \
-       route != f"/ws/{WS}/chat/{agent_id('render')}":
+       route != f"/ws/{WS}/chat/{agent_id(case)}":
         raise PermissionError("foreign clipboard Chat origin or route")
     url = urllib.parse.urlsplit(endpoint)
     if url.scheme != "ws" or url.hostname != "127.0.0.1" or not url.port or \
@@ -1410,7 +1410,7 @@ def clipboard_owned_config(manifest, env, origin, route, endpoint, devtools_line
             "route": route, "pid": primary[0]}
 
 
-def clipboard_preflight():
+def clipboard_preflight(case="render"):
     env = {name: required(name) for name in
            ("AFT_WORK_DIR", "AFT_SESSION", "AFT_BROWSER_PROFILES", "AFT_TESTS_DIR",
             "AFT_BASE_URL", "AGENT_BROWSER_SOCKET_DIR", "AFT_BROWSER_SOCKET_RECEIPT",
@@ -1445,7 +1445,7 @@ def clipboard_preflight():
     route = evaluate("location.pathname")
     endpoint = browser("get", "cdp-url")
     return clipboard_owned_config(manifest, env, origin, route, endpoint,
-                                  devtools_lines, processes, wrapper)
+                                  devtools_lines, processes, wrapper, case)
 
 
 def clipboard_holder_ack(process):
@@ -1598,6 +1598,17 @@ def self_test_clipboard_ownership():
             changed = deepcopy(manifest)
             changed["run_id"] = "foreign"
             rejects(m=changed)
+            with patch.dict(globals(), agent_id=lambda case: "agt_input" if case == "input" else "agt_owned"):
+                input_route = "/ws/OFFLINE/chat/agt_input"
+                assert clipboard_owned_config(manifest, env, origin, input_route, endpoint,
+                                              lines, processes, wrapper, "input")["route"] == input_route
+                try:
+                    clipboard_owned_config(manifest, env, origin, route, endpoint,
+                                           lines, processes, wrapper, "input")
+                except PermissionError:
+                    pass
+                else:
+                    raise AssertionError("foreign locale Agent passed owned browser preflight")
 
 
 def self_test_clipboard_holder():
@@ -1998,35 +2009,145 @@ def layout():
     write("input-layout.json", {"measurements": measurements, "large_font": font})
 
 
+def locale_saved_identity(original, saved):
+    source = long_text()
+    assert original.get("event_id") and original.get("agent_id") == agent_id("input") and \
+           original.get("kind") == "message.delivered" and original["payload"].get("text") == source, \
+           "locale setup lacks the exact owned saved user receipt"
+    same = [e for e in saved if e.get("event_id") == original["event_id"]]
+    assert same == [original], "locale reload changed saved EventID or full message"
+    assert len([e for e in saved if e.get("kind") == "message.delivered" and
+                e.get("agent_id") == agent_id("input") and e["payload"].get("text") == source]) == 1, \
+        "locale reload changed the exact delivered message count"
+    return {"event_id": original["event_id"], "seq": original["seq"], "agent_id": original["agent_id"],
+            "text_length": len(source), "text_sha256": hashlib.sha256(source.encode()).hexdigest()}
+
+
+def locale_holder_receipt(receipt, status, config, target=None):
+    assert isinstance(receipt, dict) and isinstance(receipt.get("targetId"), str) and receipt["targetId"], \
+        "locale holder omitted owned target ID"
+    assert receipt == {"status": status, "targetId": receipt["targetId"],
+                       "origin": config["origin"], "route": config["route"]}, \
+        "locale holder changed owned origin, route or status"
+    if target is not None:
+        assert receipt["targetId"] == target, "locale reload changed the owned browser target"
+    return receipt["targetId"]
+
+
+def require_locale_time(observed):
+    assert isinstance(observed, str) and "অপৰাহ্ন ১২.৫৯" in observed, \
+        "BLOCKED: documented long time did not render on the owned Chat row"
+
+
+def self_test_locale_stress():
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    with TemporaryDirectory(prefix="aft-visual-locale-oracle-") as folder:
+        work = Path(folder)
+        (work / "input.id").write_text("agt_owned\n")
+        source = long_text()
+        original = {"event_id": "event_owned", "agent_id": "agt_owned", "seq": 7,
+                    "kind": "message.delivered", "payload": {"text": source}}
+        config = {"origin": "http://127.0.0.1:1234", "route": "/ws/OFFLINE/chat/agt_owned"}
+        installed = {"status": "installed", "targetId": "target_owned", **config}
+        with patch.dict(globals(), WORK=work):
+            identity = locale_saved_identity(original, [original])
+            assert identity["text_length"] == len(source) and identity["event_id"] == "event_owned"
+            assert locale_holder_receipt(installed, "installed", config) == "target_owned"
+            assert locale_holder_receipt({**installed, "status": "reloaded"}, "reloaded",
+                                         config, "target_owned") == "target_owned"
+            require_locale_time("অপৰাহ্ন ১২.৫৯")
+            negatives = (
+                lambda: locale_saved_identity(original, []),
+                lambda: locale_saved_identity(original, [{**original, "event_id": "changed"}]),
+                lambda: locale_saved_identity(original, [{**original, "payload": {"text": "changed"}}]),
+                lambda: locale_saved_identity(original, [original, original]),
+                lambda: locale_saved_identity({**original, "agent_id": "agt_foreign"}, [original]),
+                lambda: locale_holder_receipt({**installed, "route": "/ws/OFFLINE/chat/agt_foreign"},
+                                               "installed", config),
+                lambda: locale_holder_receipt({**installed, "targetId": "target_foreign",
+                                                "status": "reloaded"}, "reloaded", config, "target_owned"),
+                lambda: require_locale_time("9:24 PM"),
+            )
+            for reject in negatives:
+                try:
+                    reject()
+                except AssertionError:
+                    continue
+                raise AssertionError("invalid locale setup or saved receipt passed")
+
+
 def locale_stress():
     current("input")
-    # Chromium's as-IN ICU data may fall back to an English short time. The
-    # exact long format from the UI7 task is a local formatting stimulus only;
-    # the underlying user message and timestamp remain real saved events.
-    evaluate("(() => { window.__aftOriginalTime = Date.prototype.toLocaleTimeString; Date.prototype.toLocaleTimeString = () => 'অপৰাহ্ন ১২.৫৯'; return true; })()")
-    theme = evaluate("document.documentElement.dataset.theme")
-    opposite = "light" if theme == "dark" else "dark"
-    browser("click", 'button[aria-label="Switch to ' + opposite + ' mode"]')
-    observed = evaluate("""(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].at(-1);
-      return r?.querySelector('[data-testid=message-actions]')?.textContent||'';})()""")
-    if "অপৰাহ্ন ১২.৫৯" not in observed:
-        write("locale-layout-blocked.json", {"status": "blocked", "prerequisite": "a browser locale or formatter that renders the documented long time", "observed": observed})
-        raise AssertionError("BLOCKED: long locale format was not rendered by current Chat")
+    original = json.loads((WORK / "input-all.json").read_text())["delivered"]
+    identity = locale_saved_identity(original, events("input"))
+    # The source Playwright UI7 test adds this local formatter before Chat loads.
+    # The timestamp and message remain actual saved events, not injected content.
+    config = clipboard_preflight("input")
+    process = None
+    stage = "setup"
+    observed = None
     measurements = []
-    for width in (130, 105, 80):
-        evaluate("(() => { document.querySelector('[data-testid=chat-transcript]').style.setProperty('--chat-column', '" + str(width) + "px'); return true; })()")
-        browser("hover", "[data-testid=chat-transcript] li[data-kind=user]")
-        result = evaluate("""(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].at(-1);
-          const p=r.querySelector('[data-testid=message-actions]'),b=r.querySelector('[class*=userBubble]'),c=p.querySelector('button[aria-label="Copy your message"]');
-          const q=e=>{const x=e.getBoundingClientRect();return {left:x.left,right:x.right,width:x.width};};
-          return {row:q(r),pill:q(p),bubble:q(b),copy:q(c),time:p.textContent};})()""")
-        assert abs(result["row"]["width"] - width) <= 1, result
-        assert result["pill"]["left"] >= result["row"]["left"] - 1 and result["pill"]["right"] <= result["bubble"]["left"] + 1, result
-        assert result["copy"]["width"] >= 14 and result["copy"]["right"] <= result["pill"]["right"] + 1, result
-        measurements.append(result)
-        shot("input", f"long-locale-{width}")
-    evaluate("(() => {document.querySelector('[data-testid=chat-transcript]').style.removeProperty('--chat-column'); Date.prototype.toLocaleTimeString=window.__aftOriginalTime; delete window.__aftOriginalTime; return true;})()")
-    write("input-locale-layout.json", {"stimulus": "documented long as-IN time via local formatter override", "measurements": measurements})
+    receipt = None
+    failure = None
+    try:
+        script = Path(required("AFT_TESTS_DIR")) / "scripts/coverage-chat-visual-locale.mjs"
+        process = subprocess.Popen(["node", str(script), "hold"], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        process.stdin.write(json.dumps(config) + "\n")
+        process.stdin.flush()
+        receipt = clipboard_holder_ack(process)
+        target = locale_holder_receipt(receipt, "installed", config)
+        stage = "reload"
+        process.stdin.write("reload\n")
+        process.stdin.flush()
+        locale_holder_receipt(clipboard_holder_ack(process), "reloaded", config, target)
+        browser("wait", "--fn", """(() => {
+          const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].at(-1);
+          return r?.querySelector('[data-testid=message-actions]')?.textContent.includes('অপৰাহ্ন ১২.৫৯') || false;
+        })()""", timeout=30)
+        current("input")
+        observed = evaluate("""(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].at(-1);
+          return r?.querySelector('[data-testid=message-actions]')?.textContent||'';})()""")
+        require_locale_time(observed)
+        stage = "measure"
+        assert locale_saved_identity(original, events("input")) == identity
+        for width in (130, 105, 80):
+            evaluate("(() => { document.querySelector('[data-testid=chat-transcript]').style.setProperty('--chat-column', '" + str(width) + "px'); return true; })()")
+            browser("hover", "[data-testid=chat-transcript] li[data-kind=user]")
+            result = evaluate("""(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].at(-1);
+              const p=r.querySelector('[data-testid=message-actions]'),b=r.querySelector('[class*=userBubble]'),c=p.querySelector('button[aria-label="Copy your message"]');
+              const q=e=>{const x=e.getBoundingClientRect();return {left:x.left,right:x.right,width:x.width};};
+              return {row:q(r),pill:q(p),bubble:q(b),copy:q(c),time:p.textContent};})()""")
+            require_locale_time(result["time"])
+            assert abs(result["row"]["width"] - width) <= 1, result
+            assert result["pill"]["left"] >= result["row"]["left"] - 1 and result["pill"]["right"] <= result["bubble"]["left"] + 1, result
+            assert result["copy"]["width"] >= 14 and result["copy"]["right"] <= result["pill"]["right"] + 1, result
+            measurements.append(result)
+            shot("input", f"long-locale-{width}")
+        stage = "verified"
+    except Exception as exc:
+        failure = type(exc).__name__
+        write("locale-layout-blocked.json", {"status": "blocked", "stage": stage,
+              "failure_type": failure, "observed": observed, "saved_identity": identity})
+        raise
+    finally:
+        exit_code, holder_reason = close_clipboard_holder(process)
+        write("locale-stimulus-cleanup.json", {"run": RUN, "case": "input", "stage": stage,
+              "failure_type": failure, "holder_exit": exit_code, "holder_reason": holder_reason,
+              "target_id": receipt.get("targetId") if isinstance(receipt, dict) else None})
+        if process is not None and exit_code != 0:
+            raise PermissionError("owned locale script was not removed and formatter restored")
+        if stage in ("measure", "verified"):
+            path = evaluate("location.pathname", timeout=5)
+            assert path == f"/ws/{WS}/chat/{agent_id('input')}", "locale cleanup changed Chat route"
+            evaluate("(() => {document.querySelector('[data-testid=chat-transcript]')?.style.removeProperty('--chat-column'); return true;})()", timeout=5)
+    assert evaluate("!Object.prototype.hasOwnProperty.call(window, '__aftVisualLocaleOriginal')"), \
+        "locale formatter remained installed after bounded cleanup"
+    write("input-locale-layout.json", {"stimulus": "documented long as-IN time via owned pre-load formatter",
+          "proof": "injected layout, not native locale", "saved_identity": identity,
+          "observed_time": observed, "measurements": measurements})
 
 
 def stop_if_running():
