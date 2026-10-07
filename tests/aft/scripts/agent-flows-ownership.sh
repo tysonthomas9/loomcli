@@ -47,12 +47,13 @@ agent_flows_declared_agents() {
     if .selection.batch == "default" then null else
       .selection.agents | {
         leads: [.leads[] | {name: (.name | split("${RUN_ID}") | join($run)), suite, model_required,
-          model_exception: (.model_exception // false), model_proof: (.model_proof // "ui_selection")}],
+          model_exception: (.model_exception // false), model_proof: (.model_proof // "ui_selection"),
+          end_state: (.end_state // "present")}],
         reviewers: [(.reviewers // [])[] | {name: (.name | split("${RUN_ID}") | join($run)), suite}],
         children: [.children[] | {
           name: (.name | split("${RUN_ID}") | join($run)),
           parent: (.parent | split("${RUN_ID}") | join($run)),
-          suite
+          suite, end_state: (.end_state // "present")
         }]
       }
     end' "$AFT_WORK_DIR/manifest.json"

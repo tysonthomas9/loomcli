@@ -41,6 +41,15 @@ if (batchName === 'default') {
   agents = null;
 } else {
   const batch = catalog.batches[batchName];
+  const lifecycleDelete = { files: ['lifecycle-delete.test.yaml'], expected_cases: [
+    { suite: 'coverage-lifecycle-delete', name: 'stale-delete' },
+    { suite: 'coverage-lifecycle-delete', name: 'native-cascade' }],
+  agents: { leads: [
+    { name: 'cov-delete-control-${RUN_ID}', suite: 'coverage-lifecycle-delete', model_required: true },
+    { name: 'cov-delete-target-${RUN_ID}', suite: 'coverage-lifecycle-delete', model_required: true, end_state: 'deleted' },
+    { name: 'cov-delete-parent-${RUN_ID}', suite: 'coverage-lifecycle-delete', model_required: true, end_state: 'deleted' }],
+  children: [{ name: 'cov-delete-child-${RUN_ID}', parent: 'cov-delete-parent-${RUN_ID}',
+    suite: 'coverage-lifecycle-delete', end_state: 'deleted' }] } };
   const queueCase = { suite: 'coverage-children-queue',
     name: 'live task child keeps user and parent FIFO slots then hands a later user interrupt first' };
   const queueAgents = { leads: [{ name: 'cov-child-queue-lead-${RUN_ID}',
@@ -53,6 +62,7 @@ if (batchName === 'default') {
     children: [] } };
   if (!(exactKeys(batch, ['files', 'agents']) || exactKeys(batch, ['files', 'agents', 'expected_cases'])) ||
       !Array.isArray(batch.files) ||
+      (batchName === 'lifecycle-delete' && JSON.stringify(batch) !== JSON.stringify(lifecycleDelete)) ||
       (batchName === 'children-queue' && (batch.files.join(',') !== 'children-queue.test.yaml' ||
         JSON.stringify(batch.expected_cases) !== JSON.stringify([queueCase]) ||
         JSON.stringify(batch.agents) !== JSON.stringify(queueAgents))) ||
@@ -72,9 +82,12 @@ if (batchName === 'default') {
   if (!(batch.agents.leads.length || batch.agents.reviewers?.length) ||
       !batch.agents.leads.every(lead => (exactKeys(lead, ['name', 'suite', 'model_required']) ||
         exactKeys(lead, ['name', 'suite', 'model_required', 'model_exception']) ||
-        exactKeys(lead, ['name', 'suite', 'model_required', 'model_proof'])) &&
+        exactKeys(lead, ['name', 'suite', 'model_required', 'model_proof']) ||
+        (batchName === 'lifecycle-delete' && batch.files.join(',') === 'lifecycle-delete.test.yaml' &&
+          lead.suite === 'coverage-lifecycle-delete' && exactKeys(lead, ['name', 'suite', 'model_required', 'end_state']))) &&
         typeof lead.name === 'string' && agentPattern.test(lead.name) && typeof lead.suite === 'string' &&
         typeof lead.model_required === 'boolean' &&
+        (lead.end_state === undefined || (lead.end_state === 'deleted' && lead.model_required)) &&
         (lead.model_exception === undefined || typeof lead.model_exception === 'boolean') &&
         (lead.model_proof === undefined || (lead.model_required && lead.model_proof === 'api_post_create')) &&
         !(lead.model_required && lead.model_exception)))
@@ -89,7 +102,11 @@ if (batchName === 'default') {
   if (!unique(reviewerNames) || reviewerNames.some(name => leadNames.includes(name))) fail('duplicate declared root agent');
   const childNames = [];
   for (const child of batch.agents.children) {
-    if (!exactKeys(child, ['name', 'parent', 'suite']) || typeof child.name !== 'string' ||
+    if (!(exactKeys(child, ['name', 'parent', 'suite']) ||
+        (batchName === 'lifecycle-delete' && batch.files.join(',') === 'lifecycle-delete.test.yaml' &&
+          child.suite === 'coverage-lifecycle-delete' && exactKeys(child, ['name', 'parent', 'suite', 'end_state']) &&
+          child.end_state === 'deleted')) ||
+        typeof child.name !== 'string' ||
         !agentPattern.test(child.name) || typeof child.suite !== 'string' ||
         !batch.agents.leads.some(lead => lead.name === child.parent && lead.suite === child.suite))
       fail('invalid declared child or parent');

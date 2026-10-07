@@ -56,6 +56,10 @@ try {
     { files: ['tool-policy.test.yaml'], agents, expected_cases: [...selected.cases,
       { suite: 'coverage-one', name: 'unexpected fourth case' }] } } }));
   refuse('tool-policy');
+  agents.leads[0].end_state = 'deleted';
+  write(['one.test.yaml']);
+  refuse('smoke');
+  delete agents.leads[0].end_state;
   write(['one.test.yaml']);
   assert.equal(JSON.parse(run('default')).count, 9);
   writeFileSync(join(original, 'lead-chat.test.yaml'), originalSource.replace('tests:\n',
@@ -81,9 +85,9 @@ try {
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ selection: { batch: 'smoke', agents } }));
   const expanded = JSON.parse(execFileSync('bash', ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],
     { env: { ...env, AFT_WORK_DIR: root, RUN_ID: 'af12345678' }, encoding: 'utf8' }));
-  assert.deepEqual(expanded, { leads: [{ name: 'aft-coverage-af12345678', suite: 'coverage-one', model_required: true, model_exception: false, model_proof: 'ui_selection' }],
+  assert.deepEqual(expanded, { leads: [{ name: 'aft-coverage-af12345678', suite: 'coverage-one', model_required: true, model_exception: false, model_proof: 'ui_selection', end_state: 'present' }],
     reviewers: [],
-    children: [{ name: 'aft-child-af12345678', parent: 'aft-coverage-af12345678', suite: 'coverage-one' }] });
+    children: [{ name: 'aft-child-af12345678', parent: 'aft-coverage-af12345678', suite: 'coverage-one', end_state: 'present' }] });
   writeFileSync(join(root, 'manifest.json'), JSON.stringify({ selection: { batch: 'default', agents: null } }));
   assert.equal(execFileSync('bash', ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],
     { env: { ...env, AFT_WORK_DIR: root, RUN_ID: 'af12345678' }, encoding: 'utf8' }).trim(), 'null');
@@ -194,7 +198,7 @@ if (queueCandidate) {
       { env: { ...env, AFT_WORK_DIR: queueRoot, RUN_ID: 'af12345678' }, encoding: 'utf8' }));
     assert.deepEqual(expanded, { leads: [{ name: 'cov-child-queue-lead-af12345678',
       suite: 'coverage-children-queue', model_required: true, model_exception: false,
-      model_proof: 'ui_selection' }], reviewers: [],
+      model_proof: 'ui_selection', end_state: 'present' }], reviewers: [],
     children: [{ name: 'cov-child-queue-task-af12345678', parent: 'cov-child-queue-lead-af12345678',
       suite: 'coverage-children-queue' }] });
     console.log('agent-flow queue: authored case and exact Lead/child ownership selected; mutations refused');
