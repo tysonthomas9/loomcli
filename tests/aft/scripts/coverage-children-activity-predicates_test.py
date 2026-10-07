@@ -233,6 +233,42 @@ class ChildProofPredicates(unittest.TestCase):
             with self.subTest(rows=rows, result=result), self.assertRaises(AssertionError):
                 module.reactivation_event(rows, self.a, 10, result)
 
+    def test_reactivation_opens_real_collapsed_tray_only_during_saved_second_turn(self):
+        lead = {"agent_id": "agt_lead", "name": "lead"}
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "repeat"}
+        baseline = {"child": self.a, "parent": "agt_lead", "last_seq": 10}
+        started = event("turn.started", 11, "second-start", turn_id="turn-two")
+        started["agent_id"] = self.a
+        before = {"path": "/ws/LOCALMODE/chat/agt_lead", "open": "false", "expanded": "false",
+                  "header": "1 agent: 1 running", "observerArmed": True, "capturedBeforeClick": False}
+        after = {"path": before["path"], "open": "true", "expanded": "true", "captured": True}
+        calls, saved, scripts = [], {}, []
+        def run(before_value=before, live_state="active", history=None):
+            values = iter((before_value, after))
+            with patch.object(module, "load", side_effect=lambda label: lead if label == "repeat-lead" else
+                              baseline if label == "reactivation-armed" else child), \
+                 patch.object(module, "agent", return_value={**child, "state": live_state, "attempt": 1,
+                                                              "running_turn_id": "turn-two"}), \
+                 patch.object(module, "events", return_value=[started] if history is None else history), \
+                 patch.object(module, "browser_json", side_effect=lambda script: (scripts.append(script) or next(values))), \
+                 patch.object(module, "browser", side_effect=lambda *args: calls.append(args)), \
+                 patch.object(module, "save", side_effect=lambda name, value: saved.update({name: value})):
+                module.open_reactivation_tray("repeat-lead", "repeat")
+        run()
+        self.assertEqual(calls[0], ("click", "[data-testid=agent-tray] button[aria-expanded=false]"))
+        self.assertEqual(calls[1][0], "screenshot")
+        for script in scripts[:2]:
+            check = subprocess.run(["node", "--input-type=module", "-e", "new Function('return '+process.argv[1])", script],
+                                   capture_output=True, text=True)
+            self.assertEqual(check.returncode, 0, check.stderr)
+        self.assertEqual(saved["reactivation-tray-before-click"]["started_event_ids"], ["second-start"])
+        for bad in ({**before, "open": "true"}, {**before, "header": "1 agent: 1 done"},
+                    {**before, "observerArmed": False}, {**before, "path": "/ws/FOREIGN/chat/agt_lead"}):
+            with self.subTest(bad=bad), self.assertRaises(AssertionError):
+                run(before_value=bad)
+        with self.assertRaisesRegex(AssertionError, "exact child attempt-two turn"):
+            run(history=[])
+
     def test_reactivation_wait_compiles_and_saved_step_binds_capture(self):
         child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "cov-child-repeat-" + module.RUN}
         capture = {"path": "/ws/LOCALMODE/chat/agt_lead", "rowId": self.a, "linkId": self.a,
@@ -406,6 +442,34 @@ class ChildProofPredicates(unittest.TestCase):
                 with self.subTest(bad=bad), self.assertRaises(AssertionError):
                     module.card_snapshot_ok({**good, **bad}, [(kid, 0)])
 
+    def test_card_route_requires_exact_saved_child_and_hydrated_header(self):
+        good = {"path": f"/ws/LOCALMODE/chat/{self.a}", "name": "pair-a", "harness": "opencode"}
+        module.card_route_ok(good, self.a, "pair-a")
+        for bad in ({**good, "path": "about:blank"}, {**good, "path": f"/ws/FOREIGN/chat/{self.a}"},
+                    {**good, "path": f"/ws/LOCALMODE/chat/{self.b}"}, {**good, "name": ""},
+                    {**good, "harness": ""}):
+            with self.subTest(bad=bad), self.assertRaises(AssertionError):
+                module.card_route_ok(bad, self.a, "pair-a")
+
+    def test_new_card_and_sidebar_dom_scripts_compile(self):
+        scripts = []
+        card = {"count": 1, "name": "pair-a", "attempt": "0", "role": "link",
+                "tabIndex": 0, "focused": True, "visible": True}
+        with patch.object(module, "browser"), patch.object(module, "browser_json",
+             side_effect=lambda script: (scripts.append(script) or card)):
+            module.focus_exact_card("pair-a", 0)
+            module.card_route()
+            with patch.object(module, "load", return_value={"agent_id": self.b,
+                 "name": f"cov-child-sidebar-b-{module.RUN}"}):
+                module.sidebar_drag_state("sidebar-b")
+        self.assertEqual(len(scripts), 3)
+        self.assertIn("scrollIntoView", scripts[0])
+        self.assertIn("getBoundingClientRect", scripts[0])
+        for script in scripts:
+            check = subprocess.run(["node", "--input-type=module", "-e", "new Function('return '+process.argv[1])", script],
+                                   capture_output=True, text=True)
+            self.assertEqual(check.returncode, 0, check.stderr)
+
     def test_child_ancestry_rejects_wrong_actual_branch_or_merge_base(self):
         prior = {"branch": "parent", "head": "a" * 40, "worktree": "/tmp/parent"}
         parent = {"branch": "parent", "worktree_path": "/tmp/parent"}
@@ -475,6 +539,7 @@ class ChildProofPredicates(unittest.TestCase):
         with patch.object(module, "load", return_value=saved), \
              patch.object(module, "agent", return_value=saved), \
              patch.object(module, "browser_json", side_effect=inspect_script), \
+             patch.object(module, "sidebar_tab", return_value={"target_id": "owned", "url_path": route}), \
              patch.object(module, "save"):
             module.sidebar_focus("sidebar-b")
             self.assertIn(json.dumps(name), scripts[0])
@@ -490,6 +555,54 @@ class ChildProofPredicates(unittest.TestCase):
                      self.assertRaises(AssertionError):
                     module.sidebar_focus("sidebar-b")
 
+    def test_sidebar_tab_requires_one_active_target_and_local_route(self):
+        tab = {"id": "t1", "targetId": "owned", "active": True,
+               "url": f"http://127.0.0.1/ws/LOCALMODE/chat/{self.b}"}
+        with patch.dict(os.environ, {"AFT_SESSION": "owned-session"}):
+            good = module.sidebar_tab_result({"data": {"tabs": [tab, {"id": "t2", "targetId": "other",
+                                                       "active": False, "url": "about:blank"}]}})
+            self.assertEqual(good["target_id"], "owned")
+            self.assertEqual(good["url_path"], f"/ws/LOCALMODE/chat/{self.b}")
+            for bad in ({"data": {"tabs": [{**tab, "active": False}]}},
+                        {"data": {"tabs": [tab, {**tab, "targetId": "foreign"}]}},
+                        {"data": {"tabs": []}}):
+                with self.subTest(bad=bad), self.assertRaises(AssertionError):
+                    module.sidebar_tab_result(bad)
+
+    def test_sidebar_key_saves_before_after_and_rejects_blank_or_foreign_tab(self):
+        name = f"cov-child-sidebar-b-{module.RUN}"
+        route = f"/ws/LOCALMODE/chat/{self.b}"
+        saved_agent = {"agent_id": self.b, "name": name}
+        tab = {"target_id": "owned", "url_path": route}
+        ui = {"path": route, "nav": True, "linkCount": 1, "handleCount": 1, "focused": True}
+        def run(after_tab=tab, after_ui=ui, before_ui=ui, status=0):
+            saved = {}
+            with patch.object(module, "load", side_effect=lambda label: tab if label == "sidebar-drag-tab" else saved_agent), \
+                 patch.object(module, "sidebar_tab", side_effect=[tab, after_tab]), \
+                 patch.object(module, "sidebar_drag_state", side_effect=[before_ui, after_ui]), \
+                 patch.object(module.subprocess, "run", return_value=subprocess.CompletedProcess([], status)), \
+                 patch.object(module, "browser"), \
+                 patch.object(module, "save", side_effect=lambda name, value: saved.update({name: value})), \
+                 patch.dict(os.environ, {"AFT_SESSION": "owned-session"}):
+                try:
+                    module.sidebar_key("sidebar-b", "Space", "lifted")
+                finally:
+                    self.assertIn("sidebar-key-lifted-before", saved)
+                    if before_ui == ui:
+                        self.assertIn("sidebar-key-lifted-after", saved)
+            return saved
+        self.assertEqual(run()["sidebar-key-lifted-after"]["command_status"], 0)
+        for bad_tab, bad_ui in (({**tab, "target_id": "foreign"}, ui),
+                                ({**tab, "url_path": "about:blank"}, {**ui, "path": "about:blank", "nav": False}),
+                                (tab, {**ui, "path": "/ws/FOREIGN/chat/" + self.b})):
+            with self.subTest(bad_tab=bad_tab, bad_ui=bad_ui), self.assertRaises(AssertionError):
+                run(after_tab=bad_tab, after_ui=bad_ui)
+        with self.assertRaisesRegex(AssertionError, "browser keyboard Space failed"):
+            run(status=1)
+        for bad in ({**ui, "focused": False}, {**ui, "handleCount": 0}, {**ui, "path": "about:blank"}):
+            with self.subTest(before=bad), self.assertRaises(AssertionError):
+                run(before_ui=bad)
+
     def test_parsed_sidebar_keyboard_block_runs_through_shell_with_exact_helper_args(self):
         run = next(r for r in parsed_runs() if isinstance(r, str) and "sidebar_focus sidebar-b" in r)
         self.assertNotIn("agent-browser --session \"$AFT_SESSION\" eval", run)
@@ -497,7 +610,7 @@ class ChildProofPredicates(unittest.TestCase):
             bindir = Path(temp)
             log = bindir / "calls"
             python = bindir / "python3"
-            python.write_text("#!/bin/sh\nif [ \"$2\" = sidebar_focus ]; then [ \"$#\" = 3 ] && [ \"$3\" = sidebar-b ] || exit 41; printf 'focus\\n' >> \"$AFT_STUB_LOG\"; elif [ \"$2\" = sidebar_order ]; then [ \"$#\" = 5 ] && [ \"$3\" = sidebar-a ] && [ \"$4\" = sidebar-b ] && { [ \"$5\" = lifted ] || [ \"$5\" = moved ]; } || exit 43; printf 'order:%s\\n' \"$5\" >> \"$AFT_STUB_LOG\"; else exit 44; fi\n")
+            python.write_text("#!/bin/sh\nif [ \"$2\" = sidebar_focus ]; then [ \"$#\" = 3 ] && [ \"$3\" = sidebar-b ] || exit 41; printf 'focus\\n' >> \"$AFT_STUB_LOG\"; elif [ \"$2\" = sidebar_order ]; then [ \"$#\" = 5 ] && [ \"$3\" = sidebar-a ] && [ \"$4\" = sidebar-b ] && { [ \"$5\" = lifted ] || [ \"$5\" = moved ]; } || exit 43; printf 'order:%s\\n' \"$5\" >> \"$AFT_STUB_LOG\"; elif [ \"$2\" = sidebar_key ]; then [ \"$#\" = 5 ] && [ \"$3\" = sidebar-b ] && { [ \"$4:$5\" = Space:lifted ] || [ \"$4:$5\" = ArrowUp:moved ] || [ \"$4:$5\" = Space:attempted ]; } || exit 45; printf 'key:%s:%s\\n' \"$4\" \"$5\" >> \"$AFT_STUB_LOG\"; else exit 44; fi\n")
             python.chmod(0o755)
             agent_browser = bindir / "agent-browser"
             agent_browser.write_text("#!/bin/sh\n[ \"$#\" = 4 ] && [ \"$1\" = --session ] && [ \"$2\" = stub-session ] && [ \"$3\" = press ] || exit 42\nprintf 'press:%s\\n' \"$4\" >> \"$AFT_STUB_LOG\"\n")
@@ -506,7 +619,7 @@ class ChildProofPredicates(unittest.TestCase):
                    "AFT_TESTS_DIR": "/owned/tests", "AFT_SESSION": "stub-session", "AFT_STUB_LOG": str(log)}
             good = subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, text=True)
             self.assertEqual(good.returncode, 0, good.stderr)
-            self.assertEqual(log.read_text().splitlines(), ["focus", "press:Space", "order:lifted", "press:ArrowUp", "order:moved", "press:Space"])
+            self.assertEqual(log.read_text().splitlines(), ["focus", "key:Space:lifted", "order:lifted", "key:ArrowUp:moved", "order:moved", "key:Space:attempted"])
             bad = run.replace("sidebar_focus sidebar-b", "sidebar_focus 'cov-child-sidebar-b-${RUN_ID}'")
             failed = subprocess.run(["bash", "-e", "-c", bad], env=env, capture_output=True, text=True)
             self.assertNotEqual(failed.returncode, 0, "literal unexpanded name must not pass the real shell block")
