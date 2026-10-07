@@ -265,12 +265,17 @@ console.log(JSON.stringify(eval(process.argv[4])));"""
         self.assertIn("FROM local-mode AS agents\nCOPY --from=docker.io/library/node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node", dockerfile)
         prompts = parsed_queue_prompts()
         initial = next(p for p in prompts if "Brief it to inspect" in p)
+        p1 = next(p for p in prompts if "QUEUE-P1-" in p and "agent_send now" in p)
         p2 = next(p for p in prompts if "QUEUE-P2-" in p)
         p3b = next(p for p in prompts if "QUEUE-P3B-" in p and "agent_send exactly once again" in p)
         self.assertTrue(all(name in initial and name in p2 for name in names))
         self.assertIn("node --test once", initial)
         self.assertIn(queue.TEXT["p2"].replace(queue.RUN, "${RUN_ID}"), p2)
         self.assertIn(queue.TEXT["p3b"].replace(queue.RUN, "${RUN_ID}"), p3b)
+        self.assertIn(queue.TEXT["p1"].replace(queue.RUN, "${RUN_ID}"), p1)
+        for required in ("return JSON.stringify of the actual agent_send result", "replaced", "message_id", "state", "Do not call agent_get"):
+            self.assertIn(required, p1)
+        self.assertNotIn("briefly report the receipt", p1)
         for prompt in (initial, p2, p3b):
             self.assertNotRegex(prompt, r"docs/loom-glossary\.md|AGENTS\.md|internal/loomagent/|agentsv1|send\.go")
 
