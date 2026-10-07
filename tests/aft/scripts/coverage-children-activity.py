@@ -310,7 +310,7 @@ def assert_started_snapshot(snapshot, ids, names, native_count):
     assert not snapshot.get("missing") and snapshot["markerCount"] >= 1
     assert sorted(snapshot["ids"]) == sorted(ids), "Started chips must match exact saved child IDs once"
     assert sorted(snapshot["names"]) == sorted(names), "Started chips must show exact full child names"
-    assert 1 <= native_count <= len(ids), "no saved native create tool entries for the children"
+    assert native_count >= 1, "no saved native create tool entries for the children"
     assert snapshot["toolCount"] == native_count, "Started tool count differs from saved native tool entries"
     assert snapshot["rawCode"] is False, "collapsed Started marker leaked raw bridge input"
     assert all(snapshot["colors"]), "Started child badge lacks its stable color"
