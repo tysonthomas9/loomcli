@@ -42,6 +42,23 @@ console.log(JSON.stringify([suite.teardown,...suite.tests.flatMap(t=>t.steps.fil
     return json.loads(output)
 
 
+def parsed_pair_busy_prompt():
+    tests = Path(__file__).resolve().parents[1]
+    loader = Path(os.environ.get("AFT_DIR", "/Users/tyson/codebase/code-agents/testing-app")) / "dist/runner.js"
+    code = """import {pathToFileURL} from 'node:url';
+const [loader,file]=process.argv.slice(2);
+const {loadSuite}=await import(pathToFileURL(loader).href);
+const suite=loadSuite(file);
+const steps=suite.tests.find(t=>t.name.startsWith('two task children finish')).steps;
+console.log(JSON.stringify(steps.filter(s=>s.fill?.label==='Message').map(s=>s.fill.value)));"""
+    env = {**os.environ, "AFT_BASE_URL": "http://127.0.0.1:1", "AFT_REAL_MODEL": "offline",
+           "AFT_NATIVE_MODEL_PROBE": "/bin/true", "AFT_SELECT_AGENT_MODEL": "/bin/true"}
+    output = subprocess.check_output(["node", "--input-type=module", "-", str(loader),
+                                      str(tests / "live-agent-coverage-suites/children-activity.test.yaml")],
+                                     input=code, env=env, text=True)
+    return next(prompt for prompt in json.loads(output) if "valid post" in prompt)
+
+
 def parsed_commands():
     commands = []
     for run in parsed_runs():
@@ -381,6 +398,16 @@ class ChildProofPredicates(unittest.TestCase):
             bad = run.replace("sidebar_focus sidebar-b", "sidebar_focus 'cov-child-sidebar-b-${RUN_ID}'")
             failed = subprocess.run(["bash", "-e", "-c", bad], env=env, capture_output=True, text=True)
             self.assertNotEqual(failed.returncode, 0, "literal unexpanded name must not pass the real shell block")
+
+    def test_pair_busy_command_matches_fixture_and_agent_image(self):
+        root = Path(__file__).resolve().parents[3]
+        fixture = json.loads((root / "tests/fixtures/slack-clone/package.json").read_text())
+        dockerfile = (root / "test/local-mode/Dockerfile").read_text()
+        prompt = parsed_pair_busy_prompt()
+        self.assertEqual(fixture["scripts"]["test"], "node --test")
+        self.assertIn("FROM local-mode AS agents\nCOPY --from=docker.io/library/node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node", dockerfile)
+        self.assertIn("Run node --test once", prompt)
+        self.assertNotIn("npm test", prompt)
 
 
 if __name__ == "__main__":
