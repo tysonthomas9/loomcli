@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 import re
+import selectors
+import shutil
 import subprocess
 import sys
 import time
@@ -1355,6 +1357,380 @@ def self_test_reasoning():
             raise AssertionError("wrong reload receipt passed")
 
 
+def clipboard_primary_pids(profile, processes):
+    profile_flag = f"--user-data-dir={profile}"
+    primary = []
+    for line in processes:
+        match = re.match(r"\s*([0-9]+)\s+(.*)", line)
+        if not match:
+            continue
+        command = match[2]
+        if re.search(rf"(?:^|\s){re.escape(profile_flag)}(?:\s|$)", command) and \
+           re.search(r"(?:^|\s)--remote-debugging-port=[0-9]+(?:\s|$)", command) and \
+           not re.search(r"(?:^|\s)--type=", command):
+            primary.append(int(match[1]))
+    return primary
+
+
+def clipboard_owned_config(manifest, env, origin, route, endpoint, devtools_lines, processes, wrapper):
+    evidence = Path(env["AFT_WORK_DIR"])
+    run_root = evidence.parent
+    session = env["AFT_SESSION"]
+    profile_root = Path(env["AFT_BROWSER_PROFILES"])
+    profile = profile_root / session
+    tests_dir = Path(env["AFT_TESTS_DIR"])
+    owned = manifest["owned"]
+    if not re.fullmatch(r"aft-live-chat-visual-[0-9]+", session) or \
+       not re.fullmatch(r"/private/tmp/aft-agent-flows\.[A-Za-z0-9]{8}", str(run_root)) or \
+       evidence != run_root / "evidence" or evidence.resolve() != evidence or \
+       profile_root != run_root / "profiles" or profile_root.resolve() != profile_root or \
+       not profile.is_dir() or profile.is_symlink() or profile.resolve() != profile or \
+       manifest["run_id"] != RUN or manifest["selection"]["batch"] != "chat-visual" or \
+       owned["evidence_dir"] != str(evidence) or owned["ui_url"] != env["AFT_BASE_URL"] or \
+       owned["browser_socket_dir"] != env["AGENT_BROWSER_SOCKET_DIR"] or \
+       env["AFT_BROWSER_SOCKET_RECEIPT"] != str(evidence / "browser-socket.json") or \
+       manifest["browser_binary"] != env["AFT_BROWSER_BIN"] or \
+       tests_dir != Path(manifest["source_root"]) / "tests/aft" or \
+       wrapper != run_root / "bin/agent-browser" or \
+       wrapper.resolve() != tests_dir / "scripts/agent-flows-browser":
+        raise PermissionError("foreign clipboard runner identity")
+    if origin != env["AFT_BASE_URL"] or not re.fullmatch(r"http://127\.0\.0\.1:[0-9]+", origin) or \
+       route != f"/ws/{WS}/chat/{agent_id('render')}":
+        raise PermissionError("foreign clipboard Chat origin or route")
+    url = urllib.parse.urlsplit(endpoint)
+    if url.scheme != "ws" or url.hostname != "127.0.0.1" or not url.port or \
+       not re.fullmatch(r"/devtools/browser/[A-Za-z0-9-]+", url.path) or \
+       url.username or url.password or url.query or url.fragment or \
+       devtools_lines != [str(url.port), url.path]:
+        raise PermissionError("foreign clipboard CDP endpoint")
+    primary = clipboard_primary_pids(profile, processes)
+    if len(primary) != 1:
+        raise PermissionError("ambiguous owned Chrome primary process")
+    return {"endpoint": endpoint, "profile": str(profile), "origin": origin,
+            "route": route, "pid": primary[0]}
+
+
+def clipboard_preflight():
+    env = {name: required(name) for name in
+           ("AFT_WORK_DIR", "AFT_SESSION", "AFT_BROWSER_PROFILES", "AFT_TESTS_DIR",
+            "AFT_BASE_URL", "AGENT_BROWSER_SOCKET_DIR", "AFT_BROWSER_SOCKET_RECEIPT",
+            "AFT_BROWSER_BIN")}
+    receipt = Path(env["AFT_BROWSER_SOCKET_RECEIPT"])
+    if receipt != Path(env["AFT_WORK_DIR"]) / "browser-socket.json":
+        raise PermissionError("foreign browser socket receipt")
+    subprocess.run(["node", str(Path(env["AFT_TESTS_DIR"]) / "scripts/agent-flows-browser-socket.mjs"),
+                    "verify", str(receipt), env["AGENT_BROWSER_SOCKET_DIR"]],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=5)
+    manifest_file = Path(env["AFT_WORK_DIR"]) / "manifest.json"
+    if manifest_file.is_symlink():
+        raise PermissionError("foreign clipboard run manifest")
+    manifest = json.loads(manifest_file.read_text())
+    source_head = subprocess.check_output(["git", "-C", manifest["source_root"], "rev-parse", "HEAD"],
+                                          text=True, timeout=5).strip()
+    if source_head != manifest["source_head"]:
+        raise PermissionError("clipboard source differs from owned run manifest")
+    processes = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True, timeout=5).splitlines()
+    profile = Path(env["AFT_BROWSER_PROFILES"]) / env["AFT_SESSION"]
+    port_file = profile / "DevToolsActivePort"
+    if not profile.is_dir() or profile.is_symlink() or port_file.is_symlink():
+        raise PermissionError("foreign clipboard profile")
+    if len(clipboard_primary_pids(profile, processes)) != 1:
+        raise PermissionError("ambiguous owned Chrome primary process")
+    devtools_lines = port_file.read_text().splitlines()
+    wrapper = Path(shutil.which("agent-browser") or "")
+    if wrapper != Path(env["AFT_WORK_DIR"]).parent / "bin/agent-browser" or \
+       wrapper.resolve() != Path(env["AFT_TESTS_DIR"]) / "scripts/agent-flows-browser":
+        raise PermissionError("foreign clipboard browser wrapper")
+    origin = evaluate("location.origin")
+    route = evaluate("location.pathname")
+    endpoint = browser("get", "cdp-url")
+    return clipboard_owned_config(manifest, env, origin, route, endpoint,
+                                  devtools_lines, processes, wrapper)
+
+
+def clipboard_holder_ack(process):
+    with selectors.DefaultSelector() as selector:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        if not selector.select(timeout=10):
+            raise PermissionError("clipboard permission holder timed out")
+        line = process.stdout.readline()
+    if not line:
+        raise PermissionError("clipboard permission holder exited before grant")
+    return json.loads(line)
+
+
+def close_clipboard_holder(process):
+    if process is None:
+        return None, None
+    if process.poll() is None:
+        try:
+            process.stdin.write("close\n")
+            process.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+    try:
+        process.stdin.close()
+    except (BrokenPipeError, OSError):
+        pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=2)
+    reason = None
+    for line in process.stderr.read(512).splitlines()[:1]:
+        try:
+            candidate = json.loads(line).get("reason")
+            if re.fullmatch(r"[a-z-]+", candidate or ""):
+                reason = candidate
+        except json.JSONDecodeError:
+            pass
+    process.stdout.close()
+    process.stderr.close()
+    return process.returncode, reason
+
+
+def with_owned_clipboard_read(kind, verify):
+    process = None
+    stage = "preflight"
+    failure_type = None
+    config = None
+    receipt = None
+    try:
+        config = clipboard_preflight()
+        stage = "grant"
+        script = Path(required("AFT_TESTS_DIR")) / "scripts/coverage-chat-visual-clipboard.mjs"
+        process = subprocess.Popen(["node", str(script), "hold"], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        process.stdin.write(json.dumps(config) + "\n")
+        process.stdin.flush()
+        receipt = clipboard_holder_ack(process)
+        if not isinstance(receipt, dict) or receipt != {"status": "granted", "targetId": receipt.get("targetId"),
+                       "context": "owned-default", "origin": config["origin"],
+                       "route": config["route"]} or not receipt["targetId"]:
+            raise PermissionError("foreign clipboard permission receipt")
+        stage = "readback"
+        result = verify()
+        stage = "verified"
+        return result
+    except Exception as exc:
+        failure_type = type(exc).__name__
+        raise
+    finally:
+        exit_code, holder_reason = close_clipboard_holder(process)
+        write(f"clipboard-{kind}-permission.json", {"status": "closed" if exit_code == 0 and
+              stage == "verified" and failure_type is None else "blocked",
+              "run": RUN, "case": "render", "agent_id": agent_id("render"), "kind": kind,
+              "stage": stage, "failure_type": failure_type, "holder_exit": exit_code,
+              "holder_reason": holder_reason, "owned_origin": config["origin"] if config else None,
+              "owned_profile": config is not None,
+              "target_id": receipt.get("targetId") if isinstance(receipt, dict) else None})
+        if process is not None and exit_code != 0:
+            raise PermissionError("clipboard permission holder did not close cleanly")
+
+
+def self_test_clipboard_ownership():
+    from copy import deepcopy
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    with TemporaryDirectory(prefix="aft-agent-flows.", dir="/private/tmp") as folder:
+        root = Path(folder)
+        evidence = root / "evidence"
+        evidence.mkdir()
+        session = "aft-live-chat-visual-123"
+        profile_root = root / "profiles"
+        profile = profile_root / session
+        profile.mkdir(parents=True)
+        source = root / "source"
+        tests = source / "tests/aft"
+        script = tests / "scripts/agent-flows-browser"
+        script.parent.mkdir(parents=True)
+        script.write_text("owned wrapper\n")
+        wrapper = root / "bin/agent-browser"
+        wrapper.parent.mkdir()
+        wrapper.symlink_to(script)
+        origin = "http://127.0.0.1:1234"
+        route = "/ws/OFFLINE/chat/agt_owned"
+        endpoint = "ws://127.0.0.1:1235/devtools/browser/owned"
+        lines = ["1235", "/devtools/browser/owned"]
+        processes = [f"123 /Applications/Chrome --remote-debugging-port=0 --user-data-dir={profile}"]
+        env = {"AFT_WORK_DIR": str(evidence), "AFT_SESSION": session,
+               "AFT_BROWSER_PROFILES": str(profile_root), "AFT_TESTS_DIR": str(tests),
+               "AFT_BASE_URL": origin, "AGENT_BROWSER_SOCKET_DIR": str(root / "socket"),
+               "AFT_BROWSER_SOCKET_RECEIPT": str(evidence / "browser-socket.json"),
+               "AFT_BROWSER_BIN": "/owned/bin/agent-browser"}
+        manifest = {"run_id": RUN, "selection": {"batch": "chat-visual"},
+                    "source_root": str(source), "browser_binary": env["AFT_BROWSER_BIN"],
+                    "owned": {"evidence_dir": str(evidence), "ui_url": origin,
+                              "browser_socket_dir": env["AGENT_BROWSER_SOCKET_DIR"]}}
+        with patch.dict(globals(), agent_id=lambda case: "agt_owned"):
+            def check(m=manifest, e=env, o=origin, r=route, u=endpoint,
+                      p=lines, ps=processes, w=wrapper):
+                return clipboard_owned_config(m, e, o, r, u, p, ps, w)
+
+            assert check() == {"endpoint": endpoint, "profile": str(profile), "origin": origin,
+                               "route": route, "pid": 123}
+            def rejects(**changes):
+                try:
+                    check(**changes)
+                except PermissionError:
+                    return
+                raise AssertionError("foreign clipboard ownership passed")
+
+            rejects(e={**env, "AFT_BROWSER_PROFILES": str(root / "foreign-profiles")})
+            rejects(ps=[])
+            rejects(ps=processes + [processes[0].replace("123 ", "456 ")])
+            rejects(o="http://127.0.0.1:9999")
+            rejects(r="/ws/OFFLINE/chat/agt_foreign")
+            rejects(u="ws://127.0.0.1:9999/devtools/browser/owned")
+            rejects(w=root / "bin/foreign")
+            changed = deepcopy(manifest)
+            changed["run_id"] = "foreign"
+            rejects(m=changed)
+
+
+def self_test_clipboard_holder():
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    config = {"endpoint": "ws://127.0.0.1:1235/devtools/browser/owned",
+              "profile": "/private/tmp/owned", "origin": "http://127.0.0.1:1234",
+              "route": "/ws/OFFLINE/chat/agt_owned", "pid": 123}
+
+    class Process:
+        def __init__(self):
+            from io import StringIO
+            self.stdin = StringIO()
+
+    def exercise(preflight=None, grant=None, verify=None, close=(0, None), expected="closed"):
+        with TemporaryDirectory() as folder:
+            process = Process()
+            closed = []
+            def stop(actual):
+                if actual is not None:
+                    closed.append(actual)
+                    return close
+                return None, None
+            def approval(_actual):
+                if isinstance(grant, Exception):
+                    raise grant
+                return grant or {"status": "granted", "targetId": "target_1",
+                                 "context": "owned-default", "origin": config["origin"],
+                                 "route": config["route"]}
+            with patch.dict(globals(), {"WORK": Path(folder), "agent_id": lambda case: "agt_owned",
+                                        "clipboard_preflight": lambda: config if preflight is None else (_ for _ in ()).throw(preflight),
+                                        "clipboard_holder_ack": approval,
+                                        "close_clipboard_holder": stop}), \
+                 patch("subprocess.Popen", return_value=process):
+                try:
+                    result = with_owned_clipboard_read("code", verify or (lambda: "copied"))
+                except Exception:
+                    assert expected == "blocked"
+                else:
+                    assert expected == "closed" and result == "copied"
+                receipt = json.loads((Path(folder) / "clipboard-code-permission.json").read_text())
+                assert receipt["status"] == expected and receipt["kind"] == "code"
+                assert receipt["run"] == RUN and receipt["agent_id"] == "agt_owned"
+                assert receipt["owned_origin"] in (None, config["origin"])
+                assert "endpoint" not in receipt and "profile" not in (receipt.get("owned_origin") or "")
+                assert closed == ([] if preflight else [process]), "owned holder cleanup was skipped"
+                return receipt
+
+    exercise()
+    assert exercise(grant=PermissionError("grant refused"), expected="blocked")["stage"] == "grant"
+    assert exercise(grant={"status": "granted", "targetId": "target_1", "context": "foreign",
+                           "origin": config["origin"], "route": config["route"]},
+                    expected="blocked")["stage"] == "grant"
+    def failed_read():
+        raise subprocess.CalledProcessError(1, ["agent-browser", "eval"])
+    assert exercise(verify=failed_read, expected="blocked")["stage"] == "readback"
+    assert exercise(close=(1, "holder-close-timeout"), expected="blocked")["holder_exit"] == 1
+    assert exercise(preflight=PermissionError("foreign profile"), expected="blocked")["owned_profile"] is False
+
+
+def self_test_close_clipboard_holder():
+    from io import StringIO
+
+    class Process:
+        def __init__(self, timeouts):
+            self.stdin = StringIO()
+            self.stdout = StringIO()
+            self.stderr = StringIO('{"reason":"holder-timeout"}\n')
+            self.timeouts = timeouts
+            self.calls = []
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout):
+            self.calls.append(("wait", timeout))
+            if self.timeouts:
+                self.timeouts -= 1
+                raise subprocess.TimeoutExpired("owned holder", timeout)
+            self.returncode = 0
+            return 0
+
+        def terminate(self):
+            self.calls.append(("terminate",))
+
+        def kill(self):
+            self.calls.append(("kill",))
+
+    for timeouts, expected in ((0, []), (1, [("terminate",)]),
+                               (2, [("terminate",), ("kill",)])):
+        process = Process(timeouts)
+        assert close_clipboard_holder(process) == (0, "holder-timeout")
+        assert process.calls[0] == ("wait", 5)
+        assert [call for call in process.calls if call[0] != "wait"] == expected
+        assert process.stdin.closed and process.stdout.closed and process.stderr.closed
+
+
+def self_test_clipboard_oracle():
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    saved = {"kind": "item.completed", "payload": {"itemKind": "message", "text": "saved answer"}}
+
+    def exercise(readback, feedback, should_pass):
+        with TemporaryDirectory() as folder:
+            def observe(script):
+                if script == RENDER_DOM:
+                    return {"code": [], "table": []}
+                if script == "navigator.clipboard.readText()":
+                    return readback
+                return feedback
+            with patch.dict(globals(), {"WORK": Path(folder), "current": lambda case: None,
+                                        "evaluate": observe, "turn_events": lambda case, marker: (None, None, [saved]),
+                                        "with_owned_clipboard_read": lambda kind, verify: verify()}):
+                try:
+                    clipboard_check("message")
+                except AssertionError:
+                    assert not should_pass
+                else:
+                    assert should_pass, "wrong copied bytes or feedback passed"
+                receipt = Path(folder) / "clipboard-message.json"
+                assert receipt.exists() == should_pass
+                if should_pass:
+                    assert json.loads(receipt.read_text()) == {"expected": "saved answer",
+                                                             "actual": "saved answer", "feedback": True}
+
+    exercise("saved answer", True, True)
+    exercise("changed answer", True, False)
+    exercise("saved answer", False, False)
+
+
 def clipboard_check(kind):
     current("render")
     dom = evaluate(RENDER_DOM)
@@ -1374,14 +1750,19 @@ def clipboard_check(kind):
         expected = replies[-1]
     else:
         raise ValueError(kind)
-    try:
+    def verify_copy():
         actual = evaluate("navigator.clipboard.readText()")
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-        write(f"clipboard-{kind}-blocked.json", {"status": "blocked", "prerequisite": "browser clipboard read permission", "error": str(exc)})
-        raise AssertionError("BLOCKED: browser denied real clipboard readback") from exc
-    assert actual == expected, f"{kind} copy bytes differ from actual rendered/saved source"
-    copied = evaluate("!!document.querySelector('[data-testid=chat-transcript] button[aria-label=Copied]') || !![...document.querySelectorAll('[data-testid=chat-transcript] button')].find(b=>b.textContent==='Copied')")
-    assert copied, f"{kind} copy showed no success feedback"
+        assert actual == expected, f"{kind} copy bytes differ from actual rendered/saved source"
+        copied = evaluate("!!document.querySelector('[data-testid=chat-transcript] button[aria-label=Copied]') || !![...document.querySelectorAll('[data-testid=chat-transcript] button')].find(b=>b.textContent==='Copied')")
+        assert copied, f"{kind} copy showed no success feedback"
+        return actual, copied
+
+    try:
+        actual, copied = with_owned_clipboard_read(kind, verify_copy)
+    except (PermissionError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        write(f"clipboard-{kind}-blocked.json", {"status": "blocked",
+              "prerequisite": "owned browser clipboard-read permission", "failure_type": type(exc).__name__})
+        raise AssertionError("BLOCKED: owned browser clipboard readback unavailable") from exc
     write(f"clipboard-{kind}.json", {"expected": expected, "actual": actual, "feedback": copied})
 
 
