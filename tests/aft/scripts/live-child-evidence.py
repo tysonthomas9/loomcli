@@ -3,8 +3,10 @@
 
 import json
 import hashlib
+import base64
 import os
 import pathlib
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -40,6 +42,88 @@ def events(agent_id):
     page = get(f"{ROOT}/{urllib.parse.quote(agent_id)}/events?limit=500")
     assert not page["more"], "event page truncated"
     return page["events"]
+
+
+def safe_turn_error(error):
+    assert isinstance(error, str)
+    codes = ("harness_down", "auth_failed", "ask_missing", "session_missing",
+             "input_id_conflict", "bad_request")
+    category = next((f"opencode_{code}" for code in codes
+                     if error.startswith(f"opencode: {code} (")), None)
+    if category is None and (error == "model not found" or error.startswith("model not found\n")):
+        category = "model_not_found"
+    return {"category": category or "unknown", "present": bool(error),
+            "byte_length": len(error.encode()),
+            "sha256": hashlib.sha256(error.encode()).hexdigest() if error else None}
+
+
+def safe_failure_events(agent_id):
+    rows = []
+    for event in events(agent_id):
+        assert event["agent_id"] == agent_id, "foreign failure event"
+        kind = event["kind"]
+        if kind not in ("child.created", "task_completed", "agent.turn_completed", "message.delivered"):
+            continue
+        payload = event["payload"]
+        row = {key: event[key] for key in ("event_id", "seq", "kind", "turn_id")}
+        if kind == "child.created":
+            row["payload"] = {key: payload.get(key) for key in ("child", "name", "preset")}
+        elif kind == "task_completed":
+            row["payload"] = {key: payload.get(key) for key in ("child", "attempt", "outcome", "head")}
+            row["payload"]["summary_present"] = bool(payload.get("summary"))
+        elif kind == "agent.turn_completed":
+            row["payload"] = {"stopReason": payload.get("stopReason"),
+                              "error": safe_turn_error(payload.get("error") or "")}
+        else:
+            completions = payload.get("completions") or []
+            row["payload"] = {"completion_keys": [{"child": c.get("child"), "attempt": c.get("attempt")}
+                                                   for c in completions]}
+        rows.append(row)
+    return rows
+
+
+def pair_timeout_dom(lead_id, names):
+    script = """JSON.stringify((() => {const lead=LEAD,names=NAMES;
+      const cards=[...document.querySelectorAll('[data-testid=completion-record]')];
+      const tray=document.querySelector('[data-testid=agent-tray]');
+      return {lead_route_matches:location.pathname===`/ws/${WS}/chat/${lead}`,
+        card_count:cards.length,cards:cards.map(c=>({
+          outcome:['completed','failed','cancelled'].includes(c.dataset.outcome)?c.dataset.outcome:'unknown',
+          delivery:['delivered','pending'].includes(c.dataset.delivery)?c.dataset.delivery:'unknown',
+          child_name_matches:names.map(n=>c.textContent.includes(n))})),
+        tray_present:!!tray,tray_row_count:tray?.querySelectorAll('[data-tray-row]').length||0,
+        tray_running_count:tray?.querySelectorAll('[data-tray-row] [data-status=running]').length||0,
+        lead_running:!!document.querySelector('section[aria-label="Agent chat"] header [data-running=true]')};})())"""
+    script = script.replace("LEAD", json.dumps(lead_id)).replace("NAMES", json.dumps(names)).replace("${WS}", WS)
+    raw = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"], "eval", "-b",
+                                   base64.b64encode(script.encode()).decode()], text=True).strip()
+    for _ in range(2):
+        value = json.loads(raw)
+        if isinstance(value, dict):
+            return value
+        assert isinstance(value, str), "browser failure snapshot is not JSON"
+        raw = value
+    raise AssertionError("browser failure snapshot is not an object")
+
+
+def pair_timeout(lead_label, *names):
+    assert lead_label == "pair-lead" and len(names) == 2
+    lead_id = (WORK / lead_label).read_text().strip()
+    lead = agent(lead_id)
+    assert lead["agent_id"] == lead_id and lead["name"] == f"aft-child-lead-{os.environ['RUN_ID']}"
+    ids = [(WORK / f"pair-{name}.id").read_text().strip() for name in names]
+    children = [agent(child_id) for child_id in ids]
+    assert all(c["agent_id"] == child_id and c["name"] == name and
+               c["parent_agent_id"] == c["root_agent_id"] == lead_id
+               for c, child_id, name in zip(children, ids, names)), "foreign pair child failure snapshot"
+    selected = ("agent_id", "name", "state", "running_turn_id", "attempt", "outcome", "finished_at")
+    snapshot = {"lead": {key: lead.get(key) for key in selected},
+                "children": [{key: c.get(key) for key in selected} for c in children], "events": {}}
+    save("pair-timeout-api", snapshot)
+    for agent_id in (lead_id, *ids):
+        snapshot["events"][agent_id] = safe_failure_events(agent_id)
+        save("pair-timeout-api", snapshot)
+    save("pair-timeout-dom", pair_timeout_dom(lead_id, names))
 
 
 def evidence(label, agent_id):
