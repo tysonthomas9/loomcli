@@ -78,10 +78,11 @@ class QueueOracleTests(unittest.TestCase):
         p2 = {"agent_id": child, "kind": "message.delivered", "seq": 1,
               "event_id": "p2-delivered", "turn_id": turn,
               "payload": {"text": queue.TEXT["p2"], "sender": sender, "inputKey": "p2-input"}}
-        stage = {"replacement": False}
+        stage = {"replacement": False, "finished": False}
         def row(_label):
             slot = {"sender": sender, "text": queue.TEXT["p3b" if stage["replacement"] else "p3"], "since": "fifo-place"}
-            return {"agent_id": child, "state": "active", "running_turn_id": turn,
+            return {"agent_id": child, "state": "finished" if stage["finished"] else "active",
+                    "running_turn_id": None if stage["finished"] else turn,
                     "attempt": 1, "waiting_messages": [slot]}
         def child_events(_label):
             return [p2, waits[0], *([waits[1]] if stage["replacement"] else [])]
@@ -109,9 +110,23 @@ class QueueOracleTests(unittest.TestCase):
                 self.assertEqual(receipt["tool_event_ids"], [c["event_id"] for c in calls])
                 self.assertEqual(receipt["waiting_event_ids"], [w["event_id"] for w in waits])
                 self.assertEqual(receipt["native_results"], native)
+                self.assertEqual(receipt["stage"], "saved waiting linkage verified")
                 queue.save("first-parent-initial", {**proof, "tool_event_id": "wrong-tool"})
                 with self.assertRaisesRegex(AssertionError, "initial native result changed"):
                     queue.first_parent()
+                pending = queue.load("first-parent-replacement-receipt")
+                self.assertEqual(pending["stage"], "parsed_native; waiting linkage pending")
+                self.assertEqual(pending["native_results"], native)
+                self.assertNotIn("waiting_event_ids", pending)
+                queue.save("first-parent-initial", proof)
+                stage["finished"] = True
+                with self.assertRaisesRegex(AssertionError, "exact child turn is not running"):
+                    queue.first_parent()
+                pending = queue.load("first-parent-replacement-receipt")
+                self.assertEqual(pending["stage"], "parsed_native; waiting linkage pending")
+                self.assertEqual(pending["tool_event_ids"], [c["event_id"] for c in calls])
+                self.assertEqual(pending["native_results"], native)
+                self.assertNotIn("request_ids", pending)
 
     def test_native_send_settles_with_reply_without_queue_marker(self):
         lead, child = "agt_lead", "agt_child"
