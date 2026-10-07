@@ -149,8 +149,54 @@ def actual_call(event, operation, target, marker):
     return target in text and marker in text
 
 
-def one_call(operation, marker):
-    rows = [e for e in events("lead") if actual_call(e, operation, identity("child") if operation == "agent_send" else CHILD_NAME, marker)]
+def create_call_diagnostic(source, lead, child, created):
+    demand(lead["agent_id"] == identity("lead") and child["agent_id"] == identity("child") and
+           child["parent_agent_id"] == lead["agent_id"] and
+           all(e["agent_id"] == lead["agent_id"] for e in source + created),
+           "foreign create-call diagnostic identity")
+    completed, pending = [], []
+    other_tools = 0
+    for event in source:
+        if event["kind"] not in ("item.completed", "tool.started", "item.started") or event["payload"].get("itemKind") != "tool":
+            continue
+        tool = event["payload"].get("tool") or {}
+        name = tool.get("name") or ""
+        raw = tool.get("input")
+        input_text = raw if isinstance(raw, str) else json.dumps(raw or {})
+        code = tool_code(tool)
+        direct = name.endswith("agent_create")
+        operation_match = direct or bool(re.search(r"\btools\.loom\.agent_create\s*\(", code))
+        target_match = CHILD_NAME in (input_text if direct else code)
+        truncated = isinstance(raw, str) and raw.endswith("…")
+        matched = actual_call(event, "agent_create", CHILD_NAME, CHILD_NAME)
+        relevant = operation_match or target_match or (truncated and name.endswith("execute") and "loom" in input_text)
+        if not relevant:
+            other_tools += 1
+            continue
+        done = event["kind"] == "item.completed"
+        (completed if done else pending).append({
+            "event_id": event["event_id"], "seq": event["seq"], "turn_id": event.get("turn_id"),
+            "kind": event["kind"], "status": "failed" if done and tool.get("failed") else "completed" if done else "pending",
+            "failed": bool(tool.get("failed")) if done else "unknown",
+            "operation_match": operation_match, "target_match": target_match, "matcher_match": matched,
+            "input_truncated": truncated, "input_bytes": len(input_text.encode()),
+        })
+    save("create-call-diagnostic", {
+        "lead_agent_id": lead["agent_id"], "child_agent_id": child["agent_id"],
+        "child_created_event_ids": [e["event_id"] for e in created],
+        "lead_state": lead["state"], "lead_running_turn_id": lead.get("running_turn_id"),
+        "completed_candidates": completed, "pending_candidates": pending,
+        "matching_completed_count": sum(e["matcher_match"] for e in completed),
+        "other_tool_event_count": other_tools,
+        "pending_visibility": "saved events only; live tool starts may be absent",
+    })
+
+
+def one_call(operation, marker, create_context=None):
+    source = events("lead")
+    rows = [e for e in source if actual_call(e, operation, identity("child") if operation == "agent_send" else CHILD_NAME, marker)]
+    if create_context is not None:
+        create_call_diagnostic(source, *create_context)
     demand(len(rows) == 1, f"expected one completed native {operation} call for {marker}")
     return rows[0]
 
@@ -248,7 +294,7 @@ def bind_child():
     demand(child_ref["merge_base"] == prior["head"], "owned child does not descend from exact pre-create parent HEAD")
     created = [e for e in events("lead") if e["kind"] == "child.created" and e["payload"].get("child") == child["agent_id"]]
     demand(len(created) == 1, "missing exact saved child.created")
-    one_call("agent_create", CHILD_NAME)
+    one_call("agent_create", CHILD_NAME, (lead, child, created))
     save("child", child)
     save("child-create-ref", {"parent_head_before": prior["head"], "parent_branch": prior["branch"],
                               "child_head_after": child_ref["head"], "child_branch": child_ref["branch"],
