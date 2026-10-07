@@ -96,7 +96,7 @@ tests:
         intent: Let the Lead's first turn finish before its next instruction
       - run: |
           id="$(cat "$AFT_WORK_DIR/coverage-children-queue/child.id")"
-          agent-browser --session "$AFT_SESSION" fill 'textarea[aria-label=Message]' "Use Loom agent_send now to your own child $id with exactly this text: QUEUE-P1-${RUN_ID}: after the current task, name its test command. Do not interrupt. Send once, then briefly report the receipt without agent_get."
+          agent-browser --session "$AFT_SESSION" fill 'textarea[aria-label=Message]' "Use Loom agent_send now to your own child $id with exactly this text: QUEUE-P1-${RUN_ID}: after the current task, name its test command. Do not interrupt. Send once. In the Loom execute code, return JSON.stringify of the actual agent_send result, including replaced, message_id and state; do not just state these in your chat reply. Do not call agent_get."
         intent: Person asks the Lead to invoke agent_send against the exact saved child ID
       - press: Enter
       - wait:
