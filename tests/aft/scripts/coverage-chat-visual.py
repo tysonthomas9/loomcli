@@ -151,12 +151,14 @@ def long_text():
 def fill_long():
     source = long_text()
     assert len(source) > 5000
-    browser("fill", "textarea[aria-label=Message]", "")
-    assert evaluate("document.querySelector('textarea[aria-label=Message]')?.value") == "", \
-        "multiline draft was not cleared through the real composer"
     browser("click", "textarea[aria-label=Message]")
     assert evaluate("document.activeElement===document.querySelector('textarea[aria-label=Message]')"), \
         "long input textarea did not gain keyboard focus"
+    browser("press", "Meta+A")
+    browser("press", "Backspace")
+    remaining = evaluate("document.querySelector('textarea[aria-label=Message]')?.value")
+    assert remaining == "", \
+        f"multiline draft was not cleared through the real composer (remaining length: {len(remaining) if isinstance(remaining, str) else 'missing'})"
     previous = ""
     for index, prefix in enumerate(long_text_prefixes(source)):
         try:
@@ -554,11 +556,26 @@ def motion_finish(case):
     replies = [e for e in evs if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "message" and delivered[0]["seq"] < e["seq"] < end[0]["seq"]]
     assert replies, "real turn saved no assistant message"
     answer = "\n".join(e["payload"].get("text", "") for e in replies)
-    assert len(answer.split()) >= 300, f"model supplied only {len(answer.split())} words; 300-word motion criterion unverified"
     marker = f"VISUAL_END_{RUN}"
+    frames = probe["frames"]
+    end_at = end[0].get("created_at")
+    from datetime import datetime
+    turn_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000 if end_at else None
+    candidate_frame = next((frame for frame in frames if frame.get("marker")), None)
+    word_count = len(answer.split())
+    write("render-motion-diagnostic.json", {
+        "probe": probe, "delivered_event_id": delivered[0]["event_id"],
+        "turn_completed": end[0], "saved_answer_chars": len(answer),
+        "saved_answer_ends_with_marker": answer.endswith(marker),
+        "word_count": word_count, "required_word_count": 300,
+        "candidate_marker_frame": candidate_frame, "turn_ms": turn_ms,
+        "candidate_lag_ms": candidate_frame["at"] - turn_ms if candidate_frame and turn_ms is not None else None,
+        "max_added_words_per_frame": max((frame["addedWords"] for frame in frames), default=None),
+        "non_input_layout_shift": sum(shift["value"] for shift in probe["shifts"]),
+    })
+    assert word_count >= 300, f"model supplied only {word_count} words; 300-word motion criterion unverified"
     assert probe["observerError"] is None, probe["observerError"]
     assert probe["sawCaret"] and probe["sawWorking"], "streaming caret/working row were not observed"
-    frames = probe["frames"]
     assert len(frames) > 3 and len(set(f["chars"] for f in frames)) > 3, "no measured real text progression"
     assert max(f["addedWords"] for f in frames) <= 2, "visible block exceeded two words in a rendered frame"
     assert sum(s["value"] for s in probe["shifts"]) == 0, "non-input layout shift during streaming"
@@ -566,10 +583,7 @@ def motion_finish(case):
     marker_frame = final_text_frame(answer, frames, probe["finalText"], marker)
     # The completed event timestamp is saved by the product. Browser Date.now
     # and serve share this host clock; this proven-final DOM frame is the bound.
-    end_at = end[0].get("created_at")
     assert end_at, "turn completion lacks a saved timestamp"
-    from datetime import datetime
-    turn_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000
     lag_ms = final_text_lag(marker_frame, turn_ms)
     assert evaluate("!document.querySelector('[data-streaming-caret], [data-testid=working-row]')"), "caret or working row remained after turn"
     write("render-motion.json", {"probe": probe, "turn_completed": end[0], "answer": answer, "final_frame": marker_frame, "turn_ms": turn_ms, "lag_ms": lag_ms})

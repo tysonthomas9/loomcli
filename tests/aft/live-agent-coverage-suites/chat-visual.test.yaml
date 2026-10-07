@@ -51,7 +51,7 @@ tests:
         intent: "Arm bounded 100ms and rendered-frame observers before the real send"
       - fill:
           label: Message
-          value: "VISUAL_RENDER_${RUN_ID}. Use your real file tools: read README.md and package.json, then attempt to read visual-missing-${RUN_ID}.txt; do not create it and let the missing-file error stand. From the two successful files, write at least 300 words. Include a GFM table with a README.md row giving the test command and a package.json row giving its test script. Include a fenced json code block with the actual test script from package.json. Explain the missing read. Cite only facts from those reads. Do not edit files. End with the exact text VISUAL_END_${RUN_ID}."
+          value: "VISUAL_RENDER_${RUN_ID}. Use your real file tools: read README.md and package.json, then attempt to read visual-missing-${RUN_ID}.txt; do not create it and let the missing-file error stand. From the two successful files, write between 450 and 550 words. Include a GFM table with a README.md row giving the test command and a package.json row giving its test script. Include a fenced json code block with the actual test script from package.json. Explain the missing read. Cite only facts from those reads. Do not edit files. End with the exact text VISUAL_END_${RUN_ID}."
         intent: "Ask for a long repository-grounded answer, real tool calls and a benign failed read"
       - press: Enter
         intent: "Send the request through Chat"
