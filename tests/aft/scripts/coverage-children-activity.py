@@ -749,7 +749,7 @@ def roster(*labels):
 
 
 def sidebar_order_ok(shot, a, b, stage):
-    assert shot["path"].endswith("/chat/" + quote(b)), "sidebar drag changed the Chat route"
+    assert shot["path"] == f"/ws/{quote(WS, safe='')}/chat/{quote(b, safe='')}", "sidebar drag changed the Chat route"
     assert shot["nav"], "Agents sidebar disappeared during drag"
     assert shot["ids"].count(a) == shot["ids"].count(b) == 1, "saved Lead rows missing or duplicated"
     if stage == "before":
