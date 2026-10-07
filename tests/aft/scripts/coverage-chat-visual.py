@@ -661,9 +661,10 @@ SKIP_PROBE_JS = r"""(async () => {
         hash:location.hash==='#main-content'?'#main-content':(location.hash===''?'':'other'),
         reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,
         events:events.slice(),dropped};};
-    const probe=Object.freeze({token,snapshot,link:a,controller});
-    const cleanup=Object.freeze({token,probe,close:()=>{controller.abort();
-      return controller.signal.aborted;}});
+    const probe={token,snapshot,link:a,controller};
+    const cleanup=Object.freeze({token,probe});
+    probe.cleanup=cleanup;
+    Object.freeze(probe);
     try{
       Object.defineProperty(window,name,{value:probe,writable:false,configurable:true});
       Object.defineProperty(window,cleanupName,{value:cleanup,writable:false,configurable:true});
@@ -672,19 +673,24 @@ SKIP_PROBE_JS = r"""(async () => {
   }
   if(action==='cleanup'){
     const c=window[cleanupName], p=window[name];
-    if(!c||c.token!==token)throw Error('skip probe cleanup owner changed');
-    const aborted=c.close();
-    delete window[cleanupName];
-    if(p===c.probe)delete window[name];
-    if(!aborted || Object.prototype.hasOwnProperty.call(window,cleanupName) ||
-       (p===c.probe && Object.prototype.hasOwnProperty.call(window,name)) || p!==c.probe)
+    if(!p&&!c)return {removed:false,aborted:false,status:'absent'};
+    const original=(c?.token===token&&c.probe?.cleanup===c&&c.probe.token===token)?c.probe:
+      (p?.token===token&&p.cleanup?.probe===p&&p.cleanup.token===token)?p:null;
+    if(!original)throw Error('foreign skip probe cleanup owner');
+    original.controller.abort();
+    const aborted=original.controller.signal.aborted===true;
+    const consistent=p===original&&c===original.cleanup&&c.probe===original;
+    if(p===original)delete window[name];
+    if(c===original.cleanup)delete window[cleanupName];
+    if(!aborted||!consistent||(p===original&&Object.prototype.hasOwnProperty.call(window,name))||
+       (c===original.cleanup&&Object.prototype.hasOwnProperty.call(window,cleanupName)))
       throw Error('skip probe replaced or cleanup failed');
     return {removed:true,aborted:true};
   }
   if(!owned())throw Error('foreign skip route');
   const p=window[name], c=window[cleanupName];
   const descriptor=Object.getOwnPropertyDescriptor(window,name);
-  if(!p||!c||p.token!==token||c.token!==token||c.probe!==p||descriptor?.value!==p||
+  if(!p||!c||p.token!==token||c.token!==token||c.probe!==p||p.cleanup!==c||descriptor?.value!==p||
      descriptor.writable!==false||p.controller.signal.aborted)
     throw Error('skip probe missing or replaced');
   if(action==='settled'){
@@ -714,11 +720,12 @@ def mouse_focus_skip_link():
     token = secrets.token_hex(12)
     receipt = {"run": RUN, "case": "input", "agent_id": agent_id("input"),
                "stages": {}, "cleanup": None, "failure_type": None}
-    installed = False
+    install_attempted = False
+    original_failure = None
     try:
         current("input")
+        install_attempted = True
         result = skip_probe("install", token)
-        installed = True
         assert result == {"installed": True}, "skip-link event probe failed to install"
         for stage in ("before_click",):
             current("input")
@@ -733,17 +740,21 @@ def mouse_focus_skip_link():
         current("input")
         receipt["stages"]["settled"] = skip_probe("settled", token)
     except Exception as exc:
+        original_failure = exc
         receipt["failure_type"] = type(exc).__name__
         raise
     finally:
-        if installed:
+        if install_attempted:
             try:
                 receipt["cleanup"] = skip_probe("cleanup", token)
-                assert receipt["cleanup"] == {"removed": True, "aborted": True}, \
-                    "skip-link event probe did not close"
+                if receipt["cleanup"] != {"removed": True, "aborted": True} and original_failure is None:
+                    raise AssertionError("skip-link event probe did not close")
             except Exception as exc:
-                receipt["cleanup"] = {"removed": False, "failure_type": type(exc).__name__}
-                raise
+                receipt["cleanup"] = {**receipt["cleanup"], "failure_type": type(exc).__name__} \
+                    if isinstance(receipt["cleanup"], dict) else \
+                    {"removed": False, "failure_type": type(exc).__name__}
+                if original_failure is None:
+                    raise
             finally:
                 write("input-skip-mouse-diagnostic.json", receipt)
         else:
@@ -755,9 +766,10 @@ def self_test_skip_link_diagnostic():
     from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    def exercise(*, visible=False, drift=False, replaced=False, cleanup_failure=False):
+    def exercise(*, visible=False, drift=False, replaced=False, cleanup_failure=False,
+                 install_timeout=False, install_absent=False, foreign_cleanup=False):
         calls, receipts = [], {}
-        state = {"current": 0}
+        state = {"current": 0, "listeners_attached": False}
 
         def owned(_case):
             state["current"] += 1
@@ -770,9 +782,17 @@ def self_test_skip_link_diagnostic():
                 raise RuntimeError("skip probe missing or replaced")
             if cleanup_failure and action == "cleanup":
                 raise RuntimeError("skip probe cleanup failed")
+            if foreign_cleanup and action == "cleanup":
+                raise PermissionError("foreign skip probe cleanup owner")
             if action == "install":
+                state["listeners_attached"] = not install_absent
+                if install_timeout:
+                    raise subprocess.TimeoutExpired(["agent-browser", "eval"], 5)
                 return {"installed": True}
             if action == "cleanup":
+                if install_absent:
+                    return {"removed": False, "aborted": False, "status": "absent"}
+                state["listeners_attached"] = False
                 return {"removed": True, "aborted": True}
             return {"link": {"focused": True, "focusVisible": visible, "inViewport": visible}}
 
@@ -790,26 +810,37 @@ def self_test_skip_link_diagnostic():
                         write=lambda name, data: receipts.update({name: json.loads(json.dumps(data))})):
             try:
                 mouse_focus_skip_link()
-            except (AssertionError, RuntimeError) as exc:
+            except (AssertionError, RuntimeError, subprocess.TimeoutExpired) as exc:
                 error = str(exc)
+                error_type = type(exc).__name__
             else:
                 error = None
-        return calls, receipts["input-skip-mouse-diagnostic.json"], error
+                error_type = None
+        return calls, receipts["input-skip-mouse-diagnostic.json"], error, error_type, state
 
-    calls, receipt, error = exercise()
+    calls, receipt, error, _, _ = exercise()
     assert error is None and calls[-1] == "strict:mouse_focus" and receipt["cleanup"]["aborted"]
     assert list(receipt["stages"]) == ["before_click", "after_click", "before_focus", "after_focus", "settled"]
-    calls, receipt, error = exercise(visible=True)
+    calls, receipt, error, _, _ = exercise(visible=True)
     assert error and "inViewport" in error and calls[-1] == "strict:mouse_focus"
     assert receipt["stages"]["settled"]["link"]["focusVisible"] and receipt["cleanup"]["removed"]
-    calls, receipt, error = exercise(drift=True)
+    calls, receipt, error, _, _ = exercise(drift=True)
     assert error == "Chat changed agents" and calls[-1] == "cleanup" and receipt["failure_type"] == "AssertionError"
-    calls, receipt, error = exercise(replaced=True)
+    calls, receipt, error, _, _ = exercise(replaced=True)
     assert error == "skip probe missing or replaced" and calls[-1] == "cleanup"
     assert receipt["failure_type"] == "RuntimeError"
-    calls, receipt, error = exercise(cleanup_failure=True)
+    calls, receipt, error, _, _ = exercise(cleanup_failure=True)
     assert error == "skip probe cleanup failed" and receipt["cleanup"]["removed"] is False
     assert "strict:mouse_focus" not in calls
+    calls, receipt, error, error_type, state = exercise(install_timeout=True)
+    assert error_type == "TimeoutExpired" and calls == ["install", "cleanup"], error
+    assert receipt["failure_type"] == "TimeoutExpired" and receipt["cleanup"]["aborted"]
+    assert not state["listeners_attached"], "timed-out installation retained listeners"
+    calls, receipt, _, error_type, state = exercise(install_timeout=True, install_absent=True)
+    assert error_type == "TimeoutExpired" and calls == ["install", "cleanup"]
+    assert receipt["cleanup"]["status"] == "absent" and not state["listeners_attached"]
+    calls, receipt, _, error_type, _ = exercise(install_timeout=True, foreign_cleanup=True)
+    assert error_type == "TimeoutExpired" and receipt["cleanup"]["failure_type"] == "PermissionError"
 
 
 def self_test_skip_probe_javascript():
@@ -866,6 +897,20 @@ function page(timeoutNow=false){
   await assert.rejects(sameToken.run('before_click'),/missing or replaced/);
   await assert.rejects(sameToken.run('cleanup'),/replaced or cleanup failed/);
   assert([...sameToken.listeners.values()].every(s=>s.size===0));
+  const replacedCleanup=page();await replacedCleanup.run('install');
+  const original=replacedCleanup.window.__aftVisualSkipProbe;
+  delete replacedCleanup.window.__aftVisualSkipCleanup;
+  Object.defineProperty(replacedCleanup.window,'__aftVisualSkipCleanup',
+    {value:{token:'0123456789abcdef01234567',probe:original,close:()=>true},
+      writable:false,configurable:true});
+  await assert.rejects(replacedCleanup.run('before_click'),/missing or replaced/);
+  await assert.rejects(replacedCleanup.run('cleanup'),/replaced or cleanup failed/);
+  assert.equal(original.controller.signal.aborted,true);
+  assert([...replacedCleanup.listeners.values()].every(s=>s.size===0));
+  const absent=page();assert.equal((await absent.run('cleanup')).status,'absent');
+  const foreignOwner=page();foreignOwner.window.__aftVisualSkipProbe={token:'foreign'};
+  await assert.rejects(foreignOwner.run('cleanup'),/foreign skip probe cleanup owner/);
+  assert.equal(foreignOwner.window.__aftVisualSkipProbe.token,'foreign');
   const timeout=page(true);await timeout.run('install');timeout.setPending(true);
   await assert.rejects(timeout.run('settled'),/skip animation timed out/);
   await timeout.run('cleanup');assert([...timeout.listeners.values()].every(s=>s.size===0));
