@@ -78,6 +78,7 @@ export async function localeLifecycle(call, config, nextCommand, emit) {
     const targetId = assertTargets(targetInfos, browserContextIds, page);
     ({ sessionId } = await call('Target.attachToTarget', { targetId, flatten: true }));
     if (typeof sessionId !== 'string' || !sessionId) fail('locale-attach-failed');
+    await call('Page.enable', {}, sessionId);
     ({ identifier } = await call('Page.addScriptToEvaluateOnNewDocument',
       { source: initSource(page) }, sessionId));
     if (typeof identifier !== 'string' || !identifier) fail('locale-setup-failed');
@@ -167,8 +168,8 @@ async function selfTest() {
   const targetInfos = [owned, { type: 'page', url: 'chrome://newtab/',
     targetId: 'newtab', browserContextId: 'default' }];
   const run = async (mutate, commands = ['reload', 'close']) => {
-    const calls = [];
-    const emitted = [];
+    const calls = mutate?.trace ?? [];
+    const emitted = mutate?.emitted ?? [];
     const call = async (method, params = {}, sessionId) => {
       calls.push({ method, params, sessionId });
       if (mutate?.method === method) throw new Error(mutate.code);
@@ -189,8 +190,18 @@ async function selfTest() {
     return { calls, emitted };
   };
   const ok = await run();
+  const lifecycle = ok.calls.map(x => x.method).filter(x => [
+    'Target.attachToTarget', 'Page.enable', 'Page.addScriptToEvaluateOnNewDocument',
+    'Page.reload', 'Page.removeScriptToEvaluateOnNewDocument', 'Runtime.evaluate',
+    'Target.detachFromTarget',
+  ].includes(x));
   if (ok.emitted.map(x => x.status).join(',') !== 'installed,reloaded' ||
-      ok.calls.filter(x => x.method === 'Page.removeScriptToEvaluateOnNewDocument').length !== 1 ||
+      lifecycle.join(',') !== [
+        'Target.attachToTarget', 'Page.enable', 'Page.addScriptToEvaluateOnNewDocument',
+        'Page.reload', 'Page.removeScriptToEvaluateOnNewDocument', 'Runtime.evaluate',
+        'Target.detachFromTarget',
+      ].join(',') ||
+      ok.calls.find(x => x.method === 'Page.enable')?.sessionId !== 'session' ||
       ok.calls.some(x => x.method === 'Browser.setPermission') ||
       !initSource(page).includes(TIME)) fail('locale-happy-path-failed');
   const original = () => 'short';
@@ -221,6 +232,13 @@ async function selfTest() {
   await rejects({ targetsAfter: [{ ...owned, targetId: 'replacement' }] }, 'locale-target-changed');
   await rejects({ contexts: ['foreign-context'] }, 'ambiguous-locale-context');
   await rejects({ frameUrl: origin + '/foreign' }, 'locale-frame-changed');
+  const enableFailure = { method: 'Page.enable', code: 'locale-cdp-command-failed',
+    trace: [], emitted: [] };
+  await rejects(enableFailure, 'locale-cdp-command-failed');
+  if (enableFailure.emitted.length ||
+      enableFailure.trace.some(x => ['Page.addScriptToEvaluateOnNewDocument', 'Page.reload'].includes(x.method)) ||
+      enableFailure.trace.at(-1)?.method !== 'Target.detachFromTarget')
+    fail('locale-page-enable-failure-not-closed');
   await rejects({ method: 'Page.addScriptToEvaluateOnNewDocument',
     code: 'locale-cdp-command-failed' }, 'locale-cdp-command-failed');
   await rejects({ method: 'Page.removeScriptToEvaluateOnNewDocument',
