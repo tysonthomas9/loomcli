@@ -98,6 +98,10 @@
     },
     "lifecycle-delete": {
       "files": ["lifecycle-delete.test.yaml"],
+      "expected_cases": [
+        { "suite": "coverage-lifecycle-delete", "name": "stale-delete" },
+        { "suite": "coverage-lifecycle-delete", "name": "native-cascade" }
+      ],
       "agents": {
         "leads": [
           { "name": "cov-delete-control-${RUN_ID}", "suite": "coverage-lifecycle-delete", "model_required": true },

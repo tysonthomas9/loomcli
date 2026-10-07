@@ -41,8 +41,18 @@ if (batchName === 'default') {
   agents = null;
 } else {
   const batch = catalog.batches[batchName];
+  const lifecycleDelete = { files: ['lifecycle-delete.test.yaml'], expected_cases: [
+    { suite: 'coverage-lifecycle-delete', name: 'stale-delete' },
+    { suite: 'coverage-lifecycle-delete', name: 'native-cascade' }],
+  agents: { leads: [
+    { name: 'cov-delete-control-${RUN_ID}', suite: 'coverage-lifecycle-delete', model_required: true },
+    { name: 'cov-delete-target-${RUN_ID}', suite: 'coverage-lifecycle-delete', model_required: true, end_state: 'deleted' },
+    { name: 'cov-delete-parent-${RUN_ID}', suite: 'coverage-lifecycle-delete', model_required: true, end_state: 'deleted' }],
+  children: [{ name: 'cov-delete-child-${RUN_ID}', parent: 'cov-delete-parent-${RUN_ID}',
+    suite: 'coverage-lifecycle-delete', end_state: 'deleted' }] } };
   if (!(exactKeys(batch, ['files', 'agents']) || exactKeys(batch, ['files', 'agents', 'expected_cases'])) ||
       !Array.isArray(batch.files) ||
+      (batchName === 'lifecycle-delete' && JSON.stringify(batch) !== JSON.stringify(lifecycleDelete)) ||
       (batchName === 'tool-policy' && (!Array.isArray(batch.expected_cases) ||
         batch.expected_cases.length !== 3 || batch.files.join(',') !== 'tool-policy.test.yaml')) ||
       (batch.expected_cases !== undefined && (!Array.isArray(batch.expected_cases) || !batch.expected_cases.length ||

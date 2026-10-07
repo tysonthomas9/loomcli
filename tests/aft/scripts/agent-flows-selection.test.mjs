@@ -61,25 +61,35 @@ try {
   write(['one.test.yaml']);
   refuse('smoke'); // A generic batch cannot relax its surviving-Agent proof.
   const lifecycleFile = 'lifecycle-delete.test.yaml';
-  writeFileSync(join(coverage, lifecycleFile), originalSource.replace('suite: live-lead-chat', 'suite: coverage-lifecycle-delete'));
-  agents.leads[0].suite = 'coverage-lifecycle-delete';
-  agents.children[0].suite = 'coverage-lifecycle-delete';
-  const writeLifecycle = files => writeFileSync(catalog,
-    JSON.stringify({ version: 1, batches: { 'lifecycle-delete': { files, agents } } }));
-  writeLifecycle([lifecycleFile]);
-  assert.equal(JSON.parse(run('lifecycle-delete')).agents.leads[0].end_state, 'deleted');
-  writeLifecycle(['one.test.yaml']);
+  const lifecycleSource = `suite: coverage-lifecycle-delete
+classification: { area: agents, feature: lifecycle-delete, surface: browser, purpose: journey }
+baseUrl: "${env.AFT_BASE_URL}"
+tests:
+  - name: stale-delete
+    steps:
+      - open: /ws/LOCALMODE/agents
+  - name: native-cascade
+    steps:
+      - open: /ws/LOCALMODE/agents
+`;
+  writeFileSync(join(coverage, lifecycleFile), lifecycleSource);
+  const lifecycle = JSON.parse(readFileSync(join(testsDir, 'agent-flow-batches.json'), 'utf8')).batches['lifecycle-delete'];
+  const writeLifecycle = batch => writeFileSync(catalog,
+    JSON.stringify({ version: 1, batches: { 'lifecycle-delete': batch } }));
+  writeLifecycle(lifecycle);
+  assert.equal(JSON.parse(run('lifecycle-delete')).count, 2);
+  writeLifecycle({ ...lifecycle, files: ['one.test.yaml'] });
   refuse('lifecycle-delete');
-  agents.leads[0].model_required = false;
-  writeLifecycle([lifecycleFile]);
+  writeLifecycle({ ...lifecycle, agents: { ...lifecycle.agents, leads: lifecycle.agents.leads.map(lead =>
+    lead.name === 'cov-delete-target-${RUN_ID}' ? { ...lead, model_required: false } : lead) } });
   refuse('lifecycle-delete');
-  agents.leads[0].model_required = true;
-  agents.leads[0].end_state = 'missing';
-  writeLifecycle([lifecycleFile]);
+  writeLifecycle({ ...lifecycle, agents: { ...lifecycle.agents, children: [{ ...lifecycle.agents.children[0],
+    parent: 'cov-delete-control-${RUN_ID}' }] } });
+  refuse('lifecycle-delete');
+  writeLifecycle({ ...lifecycle, agents: { ...lifecycle.agents, leads: lifecycle.agents.leads.map(lead =>
+    lead.name === 'cov-delete-parent-${RUN_ID}' ? { ...lead, end_state: 'missing' } : lead) } });
   refuse('lifecycle-delete');
   delete agents.leads[0].end_state;
-  agents.leads[0].suite = 'coverage-one';
-  agents.children[0].suite = 'coverage-one';
   write(['one.test.yaml']);
   assert.equal(JSON.parse(run('default')).count, 9);
   writeFileSync(join(original, 'lead-chat.test.yaml'), originalSource.replace('tests:\n',
