@@ -151,17 +151,41 @@ def long_text():
 
 
 INPUT_STATE_JS = """(() => { const t=document.querySelector('textarea[aria-label=Message]');
+  const style=t && getComputedStyle(t);
   return {route:location.pathname, focused:document.activeElement===t,
     length:t?.value.length??null, selectionStart:t?.selectionStart??null,
-    selectionEnd:t?.selectionEnd??null, value:t?.value??null}; })()"""
+    selectionEnd:t?.selectionEnd??null, value:t?.value??null,
+    textareaCount:document.querySelectorAll('textarea[aria-label=Message]').length,
+    scrollTop:t?.scrollTop??null, scrollHeight:t?.scrollHeight??null,
+    clientHeight:t?.clientHeight??null, textColor:style?.color??null,
+    visibility:style?.visibility??null}; })()"""
+
+
+def input_value_shape(value):
+    if not isinstance(value, str):
+        return {"value_type": type(value).__name__}
+    return {"value_sha256": hashlib.sha256(value.encode()).hexdigest(),
+            "whitespace_count": sum(c.isspace() for c in value),
+            "newline_count": value.count("\n"),
+            "alphanumeric_count": sum(c.isalnum() for c in value),
+            "printable_count": sum(c.isprintable() for c in value)}
 
 
 def input_progress(stage, status, state=None, expected_length=None):
     state = state or {}
-    write("input-long-progress.json", {"stage": stage, "status": status,
+    entry = {"stage": stage, "status": status,
           "route": state.get("route"), "focused": state.get("focused"),
           "current_length": state.get("length"), "expected_length": expected_length,
-          "selection_start": state.get("selectionStart"), "selection_end": state.get("selectionEnd")})
+          "selection_start": state.get("selectionStart"), "selection_end": state.get("selectionEnd"),
+          "textarea_count": state.get("textareaCount"), "scroll_top": state.get("scrollTop"),
+          "scroll_height": state.get("scrollHeight"), "client_height": state.get("clientHeight"),
+          "text_color": state.get("textColor"), "visibility": state.get("visibility"),
+          **input_value_shape(state.get("value"))}
+    write("input-long-progress.json", entry)
+    history_path = WORK / "input-long-history.json"
+    history = json.loads(history_path.read_text()) if history_path.exists() else []
+    assert isinstance(history, list) and len(history) < 100, "invalid long-input diagnostic history"
+    write("input-long-history.json", [*history, entry])
 
 
 def input_timeout(stage, deadline, state, expected_length):
@@ -221,12 +245,24 @@ def long_text_prefixes(source, size=1024):
 
 
 def self_test_long_text_prefixes():
+    import tempfile
+    from unittest.mock import patch
+
     source = long_text()
     prefixes = long_text_prefixes(source)
     assert len(source) > 5000 and all(0 < len(p) <= len(source) for p in prefixes)
     assert prefixes[-1] == source and all(len(b) - len(a) <= 1024 for a, b in zip(["", *prefixes[:-1]], prefixes))
     assert "".join(b[len(a):] for a, b in zip(["", *prefixes[:-1]], prefixes)) == source
     assert '<img src="x" onerror="alert(1)">' in source and "\n" in source
+    with tempfile.TemporaryDirectory() as directory, patch.dict(globals(), {"WORK": Path(directory)}):
+        input_progress("initial", "readback-returned", {"value": " \nX", "length": 3}, 3)
+        input_progress("after-clear", "readback-returned", {"value": "", "length": 0}, 0)
+        history = json.loads((WORK / "input-long-history.json").read_text())
+        assert [(item["stage"], item["current_length"]) for item in history] == [
+            ("initial", 3), ("after-clear", 0)]
+        assert history[0]["whitespace_count"] == 2 and history[0]["newline_count"] == 1
+        assert history[0]["alphanumeric_count"] == 1 and history[1]["whitespace_count"] == 0
+        assert all("value" not in item for item in history), "long-input diagnostic stored literal text"
 
 
 def draft(stage):
@@ -918,11 +954,22 @@ def render_check():
 
 
 def reasoning_receipts(between):
-    saved = [{"event_id": e["event_id"], "text": e["payload"].get("text", "")}
+    saved = [{"event_id": e.get("event_id"), "text": e["payload"].get("text", "")}
              for e in between if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning"]
-    assert saved and all(item["event_id"] and item["text"].strip() for item in saved), "missing saved reasoning item/content"
+    assert saved and all(item["event_id"] and isinstance(item["text"], str) and item["text"].strip()
+                         for item in saved), "missing saved reasoning item/content"
     assert len({item["event_id"] for item in saved}) == len(saved), "duplicate reasoning EventID"
     return saved
+
+
+def reasoning_receipt_diagnostic(items):
+    result = []
+    for event in items:
+        text = event["payload"].get("text")
+        result.append({"event_id": event.get("event_id"),
+                       "text_length": len(text) if isinstance(text, str) else None,
+                       "text_type": type(text).__name__})
+    return {"items": result}
 
 
 def reasoning_preview(text):
@@ -964,7 +1011,10 @@ def reasoning_check(stage):
     assert stage in ("before-reload", "reloaded"), stage
     current("render")
     _, _, between = turn_events("render", "VISUAL_RENDER")
-    if not any(e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning" for e in between):
+    reasoning_items = [e for e in between if e["kind"] == "item.completed" and
+                       e["payload"].get("itemKind") == "reasoning"]
+    write(f"render-reasoning-{stage}-receipts.json", reasoning_receipt_diagnostic(reasoning_items))
+    if not reasoning_items:
         write("reasoning-blocked.json", {"status": "blocked", "prerequisite": "actual selected provider must emit saved item.completed reasoning text"})
         raise AssertionError("BLOCKED: selected real provider emitted no saved reasoning item; Thinking UI cannot be claimed")
     saved = reasoning_receipts(between)
@@ -992,6 +1042,17 @@ def self_test_reasoning():
     item = {"event_id": "reasoning-1", "text": "## **First** line\nFull second line"}
     event = {"event_id": item["event_id"], "kind": "item.completed",
              "payload": {"itemKind": "reasoning", "text": item["text"]}}
+    assert reasoning_receipt_diagnostic([event]) == {"items": [{
+        "event_id": item["event_id"], "text_length": len(item["text"]), "text_type": "str"}]}
+    missing = {**event, "event_id": None, "payload": {"itemKind": "reasoning", "text": ""}}
+    assert reasoning_receipt_diagnostic([missing]) == {"items": [{
+        "event_id": None, "text_length": 0, "text_type": "str"}]}
+    try:
+        reasoning_receipts([missing])
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("missing reasoning receipt passed after diagnostic")
     assert reasoning_receipts([event]) == [item]
     assert reasoning_preview(item["text"]) == "First line"
     assert reasoning_preview("x" * 121) == "x" * 119 + "…"
