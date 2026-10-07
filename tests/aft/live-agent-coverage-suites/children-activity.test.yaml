@@ -235,7 +235,7 @@ tests:
           value: >-
             While your children work, inspect README.md, BACKLOG.md,
             package.json, server.js, app.js, and app.test.js in this repository.
-            Run the documented npm test command once. In this single turn,
+            Run node --test once, as specified by package.json. In this single turn,
             trace a valid post, an invalid post, and a history read through the
             handlers and tests, citing the files and actual test result.
             Stay within this repository; do not inspect LoomCLI source or use
