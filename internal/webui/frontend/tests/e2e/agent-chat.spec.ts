@@ -743,6 +743,65 @@ test("streamed wide table keeps columns and controls stable until completion", a
   );
 });
 
+test("state pill fits every Agent state without widening the history warning", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const m = mock();
+  await open(page, m);
+  const header = page.locator("header:has([data-state])");
+  const pill = header.locator("[data-state]");
+  for (const state of [
+    "creating",
+    "idle",
+    "active",
+    "waiting",
+    "stopping",
+    "finished",
+    "archived",
+  ]) {
+    m.agent = agent({ state });
+    await page.reload();
+    await expect(pill).toHaveAttribute("data-state", state);
+    await expect(pill).toHaveText(state);
+    const bounds = await header.evaluate((el) => {
+      const headerRect = el.getBoundingClientRect();
+      const pillRect = el
+        .querySelector("[data-state]")!
+        .getBoundingClientRect();
+      const titleRect = el.querySelector("h2")!.getBoundingClientRect();
+      return {
+        pillWidth: pillRect.width,
+        pillRight: pillRect.right,
+        headerRight: headerRect.right,
+        titleWidth: titleRect.width,
+      };
+    });
+    expect(bounds.pillWidth).toBeGreaterThanOrEqual(96);
+    expect(bounds.pillRight).toBeLessThanOrEqual(bounds.headerRight);
+    expect(bounds.titleWidth).toBeGreaterThan(0);
+  }
+
+  await page.setViewportSize({ width: 760, height: 844 });
+  m.agent = agent({
+    history_purge_failed_at: "2026-10-07T20:00:00Z",
+    history_purged_at: null,
+  });
+  await page.reload();
+  const warning = header
+    .locator('[role="status"]')
+    .filter({ hasText: "History expiry incomplete" });
+  await expect(warning).toBeVisible();
+  expect(await warning.getAttribute("data-state")).toBeNull();
+  const warningSize = await warning.evaluate((el) => ({
+    width: el.getBoundingClientRect().width,
+    clientWidth: el.clientWidth,
+    scrollWidth: el.scrollWidth,
+  }));
+  expect(warningSize.width).toBeGreaterThan(96);
+  expect(warningSize.scrollWidth).toBe(warningSize.clientWidth);
+});
+
 test("one agent's one-line messages sit close, and the hover pill takes no space (UI6)", async ({
   page,
 }) => {
