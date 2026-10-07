@@ -4,6 +4,7 @@
 import json
 import hashlib
 import base64
+from datetime import datetime, timezone
 import os
 import pathlib
 import re
@@ -28,6 +29,10 @@ def get(path):
 
 def save(label, value):
     (WORK / f"{label}.json").write_text(json.dumps(value, indent=2) + "\n")
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def load(label):
@@ -96,15 +101,26 @@ def pair_timeout_dom(lead_id, names):
         tray_running_count:tray?.querySelectorAll('[data-tray-row] [data-status=running]').length||0,
         lead_running:!!document.querySelector('section[aria-label="Agent chat"] header [data-running=true]')};})())"""
     script = script.replace("LEAD", json.dumps(lead_id)).replace("NAMES", json.dumps(names)).replace("${WS}", WS)
-    raw = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"], "eval", "-b",
-                                   base64.b64encode(script.encode()).decode()], text=True).strip()
-    for _ in range(2):
-        value = json.loads(raw)
-        if isinstance(value, dict):
-            return value
-        assert isinstance(value, str), "browser failure snapshot is not JSON"
-        raw = value
-    raise AssertionError("browser failure snapshot is not an object")
+    try:
+        raw = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"], "eval", "-b",
+                                       base64.b64encode(script.encode()).decode()], text=True, timeout=10).strip()
+    except subprocess.TimeoutExpired:
+        return {"available": False, "failure_category": "timeout"}
+    except subprocess.CalledProcessError:
+        return {"available": False, "failure_category": "command_failed"}
+    except OSError:
+        return {"available": False, "failure_category": "command_unavailable"}
+    try:
+        for _ in range(2):
+            value = json.loads(raw)
+            if isinstance(value, dict):
+                return {"available": True, **value}
+            if not isinstance(value, str):
+                break
+            raw = value
+    except (TypeError, ValueError):
+        pass
+    return {"available": False, "failure_category": "invalid_response"}
 
 
 def pair_timeout(lead_label, *names):
@@ -115,6 +131,40 @@ def pair_timeout(lead_label, *names):
     assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", value)
                for value in wait_window.values()), "invalid pair wait timestamps"
     save("pair-timeout-wait", wait_window)
+    capture = {"capture_started_at": utc_now(), "api_started_at": utc_now(),
+               "api_status": "pending", "dom_status": "not_attempted"}
+    save("pair-timeout-capture", capture)
+    try:
+        pair_timeout_api(lead_label, names)
+    except Exception:
+        capture["api_status"] = "failed"
+        capture["api_failure_category"] = "snapshot_failed"
+        raise
+    else:
+        capture["api_status"] = "complete"
+    finally:
+        capture["api_ended_at"] = utc_now()
+        capture["capture_ended_at"] = utc_now()
+        save("pair-timeout-capture", capture)
+    lead_id = (WORK / lead_label).read_text().strip()
+    capture["dom_started_at"] = utc_now()
+    try:
+        dom = pair_timeout_dom(lead_id, names)
+        save("pair-timeout-dom", dom)
+        capture["dom_status"] = "available" if dom["available"] else "unavailable"
+        if not dom["available"]:
+            capture["dom_failure_category"] = dom["failure_category"]
+    except Exception:
+        capture["dom_status"] = "unavailable"
+        capture["dom_failure_category"] = "snapshot_failed"
+        save("pair-timeout-dom", {"available": False, "failure_category": "snapshot_failed"})
+    finally:
+        capture["dom_ended_at"] = utc_now()
+        capture["capture_ended_at"] = utc_now()
+        save("pair-timeout-capture", capture)
+
+
+def pair_timeout_api(lead_label, names):
     lead_id = (WORK / lead_label).read_text().strip()
     lead = agent(lead_id)
     assert lead["agent_id"] == lead_id and lead["name"] == f"aft-child-lead-{os.environ['RUN_ID']}"
@@ -130,7 +180,6 @@ def pair_timeout(lead_label, *names):
     for agent_id in (lead_id, *ids):
         snapshot["events"][agent_id] = safe_failure_events(agent_id)
         save("pair-timeout-api", snapshot)
-    save("pair-timeout-dom", pair_timeout_dom(lead_id, names))
 
 
 def evidence(label, agent_id):

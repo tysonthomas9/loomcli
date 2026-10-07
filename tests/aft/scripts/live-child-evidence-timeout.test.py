@@ -12,10 +12,11 @@ from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("live-child-evidence.py")
-with patch.dict(os.environ, {"AFT_WORK_DIR": "/tmp", "AFT_API_URL": "http://127.0.0.1:1", "AFT_WS": "LOCALMODE"}):
-    spec = importlib.util.spec_from_file_location("live_child_evidence", SCRIPT)
-    child = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(child)
+with tempfile.TemporaryDirectory(prefix="aft-child-timeout-offline-") as module_work:
+    with patch.dict(os.environ, {"AFT_WORK_DIR": module_work, "AFT_API_URL": "http://127.0.0.1:1", "AFT_WS": "LOCALMODE"}):
+        spec = importlib.util.spec_from_file_location("live_child_evidence", SCRIPT)
+        child = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(child)
 
 
 def parsed_wait_command():
@@ -75,7 +76,7 @@ class PairTimeoutTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.object(child, "WORK", Path(tmp)), \
              patch.dict(os.environ, {"RUN_ID": run, **window}), patch.object(child, "agent", side_effect=agents.__getitem__), \
              patch.object(child, "events", side_effect=event_rows.__getitem__), \
-             patch.object(child, "pair_timeout_dom", return_value={"card_count": 0, "lead_route_matches": True}):
+             patch.object(child, "pair_timeout_dom", return_value={"available": True, "card_count": 0, "lead_route_matches": True}):
             (child.WORK / "pair-lead").write_text(lead_id)
             for name, agent_id in zip(names, (a_id, b_id)):
                 (child.WORK / f"pair-{name}.id").write_text(agent_id)
@@ -85,6 +86,11 @@ class PairTimeoutTests(unittest.TestCase):
             self.assertEqual(api["events"][a_id][0]["payload"]["error"]["category"], "unknown")
             self.assertEqual(api["events"][lead_id][0]["payload"]["summary_present"], True)
             self.assertEqual(child.load("pair-timeout-dom")["card_count"], 0)
+            capture = child.load("pair-timeout-capture")
+            self.assertEqual((capture["api_status"], capture["dom_status"]), ("complete", "available"))
+            self.assertRegex(capture["capture_started_at"], r"^\d{4}-\d\d-\d\dT.*Z$")
+            self.assertRegex(capture["capture_ended_at"], r"^\d{4}-\d\d-\d\dT.*Z$")
+            self.assertLessEqual(capture["capture_started_at"], capture["capture_ended_at"])
             self.assertNotIn("private", json.dumps(api))
             event_rows[a_id][0]["agent_id"] = "agt_foreign"
             with self.assertRaisesRegex(AssertionError, "foreign failure event"):
@@ -98,18 +104,53 @@ const card={dataset:{outcome:'failed',delivery:'delivered'},textContent:'aft-chi
 const tray={querySelectorAll:(selector)=>selector.includes('running')?[{},{}]:[{},{}]};
 globalThis.document={querySelectorAll:()=>[card],querySelector:(selector)=>selector.includes('agent-tray')?tray:null};
 console.log(eval(code));"""
-        def evaluate(args, text):
+        def evaluate(args, text, timeout):
             self.assertEqual(args[:4], ["agent-browser", "--session", "owned", "eval"])
+            self.assertEqual(timeout, 10)
             return real_check_output(["node", "--input-type=module", "-e", js, args[-1],
                                       "/ws/LOCALMODE/chat/agt_lead"], text=True)
         with patch.dict(os.environ, {"AFT_SESSION": "owned"}), patch.object(child.subprocess, "check_output", side_effect=evaluate):
             row = child.pair_timeout_dom("agt_lead", ["aft-child-a-offline", "aft-child-b-offline"])
         self.assertTrue(row["lead_route_matches"])
+        self.assertTrue(row["available"])
         self.assertEqual(row["card_count"], 1)
         self.assertEqual(row["cards"], [{"outcome": "failed", "delivery": "delivered",
                                          "child_name_matches": [True, False]}])
         self.assertEqual(row["tray_running_count"], 2)
         self.assertNotIn("private body", json.dumps(row))
+
+    def test_dom_timeout_keeps_api_and_only_safe_failure_receipts(self):
+        run = "offline"
+        lead_id, a_id, b_id = "agt_lead", "agt_a", "agt_b"
+        names = [f"aft-child-{letter}-{run}" for letter in "ab"]
+        agents = {
+            lead_id: {"agent_id": lead_id, "name": f"aft-child-lead-{run}", "state": "active"},
+            a_id: {"agent_id": a_id, "name": names[0], "parent_agent_id": lead_id, "root_agent_id": lead_id},
+            b_id: {"agent_id": b_id, "name": names[1], "parent_agent_id": lead_id, "root_agent_id": lead_id},
+        }
+        wait_window = {key: "2026-10-07T16:17:00Z" for key in (
+            "AFT_PAIR_WAIT_FIRST_STARTED_AT", "AFT_PAIR_WAIT_FIRST_ENDED_AT",
+            "AFT_PAIR_WAIT_SECOND_STARTED_AT", "AFT_PAIR_WAIT_SECOND_ENDED_AT")}
+        timeout = subprocess.TimeoutExpired(cmd="agent-browser", timeout=10, stderr=b"private browser error")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(child, "WORK", Path(tmp)), \
+             patch.dict(os.environ, {"RUN_ID": run, "AFT_SESSION": "owned", **wait_window}), \
+             patch.object(child, "agent", side_effect=agents.__getitem__), \
+             patch.object(child, "events", return_value=[]), \
+             patch.object(child.subprocess, "check_output", side_effect=timeout) as browser:
+            (child.WORK / "pair-lead").write_text(lead_id)
+            for name, agent_id in zip(names, (a_id, b_id)):
+                (child.WORK / f"pair-{name}.id").write_text(agent_id)
+            child.pair_timeout("pair-lead", *names)
+            self.assertEqual(browser.call_args.kwargs["timeout"], 10)
+            self.assertEqual(child.load("pair-timeout-api")["events"], {lead_id: [], a_id: [], b_id: []})
+            self.assertEqual(child.load("pair-timeout-dom"), {"available": False, "failure_category": "timeout"})
+            capture = child.load("pair-timeout-capture")
+            self.assertEqual((capture["api_status"], capture["dom_status"], capture["dom_failure_category"]),
+                             ("complete", "unavailable", "timeout"))
+            for key in ("capture_started_at", "api_started_at", "api_ended_at", "dom_started_at",
+                        "dom_ended_at", "capture_ended_at"):
+                self.assertRegex(capture[key], r"^\d{4}-\d\d-\d\dT.*Z$")
+            self.assertNotIn("private", "".join(p.read_text() for p in child.WORK.glob("pair-timeout-*.json")))
 
     def test_actual_parsed_wait_wrapper_preserves_failure_and_only_snapshots_on_failure(self):
         command = parsed_wait_command()
