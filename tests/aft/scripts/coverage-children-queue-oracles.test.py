@@ -41,6 +41,76 @@ console.log(JSON.stringify(suite.tests.flatMap(t=>t.steps).filter(s=>s.fill?.lab
 
 
 class QueueOracleTests(unittest.TestCase):
+    def test_started_group_binds_one_child_to_two_adjacent_saved_tool_entries(self):
+        search = {"kind": "item.completed", "event_id": "search", "seq": 10,
+                  "payload": {"itemKind": "tool", "tool": {"name": "execute", "input": json.dumps({
+                      "code": "return await tools.loom.search({namespace:'loom',query:'agent_create'})"})}}}
+        create = {"kind": "item.completed", "event_id": "create", "seq": 11,
+                  "payload": {"itemKind": "tool", "tool": {"name": "execute", "input": json.dumps({
+                      "code": f"return await tools.loom.agent_create({{name:'{queue.CHILD_NAME}'}})"})}}}
+        marker = {"kind": "child.created", "event_id": "created", "seq": 12,
+                  "payload": {"child": "agt_child", "name": queue.CHILD_NAME}}
+        self.assertEqual(queue.started_create_role(search), "code")
+        self.assertEqual(queue.started_create_role(create), "create")
+        group = queue.started_group([search, create, marker], "agt_child", "create")
+        self.assertEqual(group, {"marker_event_id": "created", "entries": [
+            {"event_id": "search", "role": "code"}, {"event_id": "create", "role": "create"}]})
+        queue.started_group_ui_ok({"toolCount": 2, "expanded": "false", "expandedRows": []}, group, "collapsed")
+        expanded = {"toolCount": 2, "expanded": "true", "expandedRows": [
+            {"label": "Ran code", "status": "completed", "inGroup": "true"},
+            {"label": "Started " + queue.CHILD_NAME, "status": "completed", "inGroup": "true"}]}
+        queue.started_group_ui_ok(expanded, group, "expanded")
+        for bad in ({**expanded, "toolCount": 1},
+                    {**expanded, "expandedRows": expanded["expandedRows"][:1]},
+                    {**expanded, "expandedRows": [{**expanded["expandedRows"][0], "label": "Started foreign"}, expanded["expandedRows"][1]]},
+                    {**expanded, "expandedRows": [{**expanded["expandedRows"][0], "inGroup": "false"}, expanded["expandedRows"][1]]}):
+            with self.subTest(bad=bad), self.assertRaises(AssertionError):
+                queue.started_group_ui_ok(bad, group, "expanded")
+        boundary = {"kind": "item.completed", "event_id": "other", "seq": 10.5,
+                    "payload": {"itemKind": "message", "text": "foreign work group"}}
+        separated = queue.started_group([search, boundary, create, marker], "agt_child", "create")
+        self.assertEqual([e["event_id"] for e in separated["entries"]], ["create"])
+        with self.assertRaises(AssertionError):
+            queue.started_group_ui_ok(expanded, separated, "expanded")
+        with self.assertRaises(AssertionError):
+            queue.started_group([search, create, marker], "agt_child", "search")
+        with self.assertRaises(AssertionError):
+            queue.started_group([search, create, marker, {**marker, "event_id": "foreign", "payload": {"child": "agt_foreign"}}], "agt_child", "create")
+
+    def test_started_group_truncated_loom_fallback_rejects_non_loom_input(self):
+        truncated = {"kind": "item.completed", "payload": {"itemKind": "tool", "tool": {
+            "name": "execute", "input": "{'namespace':'loom', 'query':'agent_create'"}}}
+        self.assertEqual(queue.started_create_role(truncated), "code")
+        self.assertIsNone(queue.started_create_role({**truncated, "payload": {"itemKind": "tool", "tool": {
+            "name": "execute", "input": "{'query':'agent_create'"}}}))
+
+    def test_started_ui_scopes_expanded_rows_to_exact_marker_siblings(self):
+        create = {"kind": "item.completed", "event_id": "create", "seq": 1,
+                  "payload": {"itemKind": "tool", "tool": {"name": "loom.agent_create",
+                      "input": json.dumps({"name": queue.CHILD_NAME})}}}
+        marker = {"kind": "child.created", "event_id": "created", "seq": 2,
+                  "payload": {"child": "agt_child", "name": queue.CHILD_NAME}}
+        scripts = []
+        def inspect_browser(expr):
+            if expr == "location.pathname":
+                return "/ws/LOCALMODE/chat/agt_lead"
+            scripts.append(expr)
+            return {"markerCount": 0, "ownCount": 0, "links": [], "toolCount": 0,
+                    "expandedRows": [], "callText": "", "color": None}
+        with patch.dict(os.environ, {"AFT_WS": "LOCALMODE"}), \
+             patch.object(queue, "identity", side_effect=lambda label: "agt_lead" if label == "lead" else "agt_child"), \
+             patch.object(queue, "events", return_value=[create, marker]), \
+             patch.object(queue, "browser", side_effect=inspect_browser), patch.object(queue, "save"), \
+             self.assertRaisesRegex(AssertionError, "Started child name/count/link mismatch"):
+            queue.lead_ui("collapsed")
+        self.assertEqual(len(scripts), 1)
+        self.assertIn("nextElementSibling", scripts[0])
+        self.assertIn("[data-testid=tool-call][data-in-group=true]", scripts[0])
+        self.assertNotIn("querySelectorAll('[data-testid=bridge-call]')", scripts[0])
+        parsed = subprocess.run(["node", "--input-type=module", "-e", "new Function('return '+process.argv[1])", scripts[0]],
+                                capture_output=True, text=True)
+        self.assertEqual(parsed.returncode, 0, parsed.stderr)
+
     def test_parsed_child_prompts_use_only_present_fixture_paths(self):
         fixture = Path(__file__).resolve().parents[2] / "fixtures/slack-clone"
         names = ("README.md", "BACKLOG.md", "package.json", "server.js", "app.js", "app.test.js")

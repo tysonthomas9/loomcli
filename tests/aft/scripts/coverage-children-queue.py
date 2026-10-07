@@ -227,9 +227,77 @@ def bind_child():
                               "child_worktree": child["worktree_path"]})
 
 
+def started_create_role(event):
+    if event["kind"] != "item.completed" or event["payload"].get("itemKind") != "tool":
+        return None
+    tool = event["payload"].get("tool") or {}
+    name = (tool.get("name") or "").strip()
+    raw = tool.get("input") or ""
+    raw = raw if isinstance(raw, str) else json.dumps(raw)
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        parsed = None
+    parsed = parsed if isinstance(parsed, dict) else None
+    code = parsed.get("code", "") if parsed else ""
+    if re.search(r"(?:^|[^a-z])agent_create$", name, re.I) or re.search(r"tools\.loom\.agent_create\s*\(", code):
+        return "create"
+    execute = re.search(r"(?:^|[^a-z])execute$", name, re.I)
+    loom_marker = re.search(r"[\"'`]loom\b|\bloom\.", raw)
+    if execute and loom_marker and (re.search(r"\bagent_create\b", raw) or
+                                    (parsed is None and not re.search(r"tools\.loom\.\w+\s*\(", raw))):
+        return "code"
+    return None
+
+
+def started_group(lead_events, child_id, native_create_id):
+    markers = [e for e in lead_events if e["kind"] == "child.created"]
+    demand(len(markers) == 1 and markers[0]["payload"].get("child") == child_id,
+           "Lead did not save exactly one child.created for the owned child")
+    visible = [e for e in lead_events if e["kind"] in ("item.completed", "child.created", "message.delivered",
+                                                        "task_completed", "harness.changed")]
+    index = next(i for i, e in enumerate(visible) if e["event_id"] == markers[0]["event_id"])
+    before, after = [], []
+    for e in reversed(visible[:index]):
+        if not started_create_role(e):
+            break
+        before.insert(0, e)
+    for e in visible[index + 1:]:
+        if not started_create_role(e):
+            break
+        after.append(e)
+    group = before + after
+    demand(group and len([e for e in group if e["event_id"] == native_create_id and
+                          started_create_role(e) == "create"]) == 1,
+           "exact native agent_create did not belong to the saved Started group")
+    return {"marker_event_id": markers[0]["event_id"],
+            "entries": [{"event_id": e["event_id"], "role": started_create_role(e)} for e in group]}
+
+
+def started_group_ui_ok(value, group, stage):
+    count = len(group["entries"])
+    demand(count > 0 and value["toolCount"] == count, "Started tool count differs from exact saved group entries")
+    if stage == "collapsed":
+        demand(value["expanded"] == "false" and not value["expandedRows"], "Started group was not collapsed")
+    if stage == "expanded":
+        rows = value["expandedRows"]
+        demand(value["expanded"] == "true" and len(rows) == count,
+               "expanded Started rows differ from exact saved group entries")
+        for saved, shown in zip(group["entries"], rows):
+            expected = "Started " if saved["role"] == "create" else "Ran code"
+            demand(shown["status"] == "completed" and shown["inGroup"] == "true" and
+                   shown["label"].startswith(expected) and not re.search(r"tools\.loom|\{|brief:", shown["label"]),
+                   f"expanded Started row differs from saved group event {saved['event_id']}")
+
+
 def lead_ui(stage):
     lead_id, child_id = identity("lead"), identity("child")
     demand(browser("location.pathname") == f"/ws/{os.environ['AFT_WS']}/chat/{lead_id}", "UI is not exact Lead Chat")
+    lead_events = events("lead")
+    native = [e for e in lead_events if actual_call(e, "agent_create", CHILD_NAME, CHILD_NAME)]
+    demand(len(native) == 1, "expected one completed native agent_create for the exact child")
+    group = started_group(lead_events, child_id, native[0]["event_id"])
+    expected_count = len(group["entries"])
     child_path = f"/ws/{os.environ['AFT_WS']}/chat/{child_id}"
     expr = """(() => {
       const marker=[...document.querySelectorAll('[data-testid=started-marker]')];
@@ -242,9 +310,21 @@ def lead_ui(stage):
       const cards=[...document.querySelectorAll('[data-testid=completion-record]')];
       const card=cards.find(c=>c.dataset.attempt==='0');
       const raw=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].some(x=>x.textContent.includes('task_completed:'));
-      return {markerCount:own.length,links:links.map(a=>({href:a.getAttribute('href'),name:a.lastChild?.textContent?.trim()||''})),
+      const expandedRows=[];
+      if(button?.getAttribute('aria-expanded')==='true') {
+        let next=m?.closest('li')?.nextElementSibling;
+        for(let i=0;i<EXPECTED;i++) {
+          const entry=next?.dataset.kind==='work' ? next.querySelector('[data-testid=tool-call][data-in-group=true]') : null;
+          if(!entry) break;
+          const head=entry.querySelector(':scope > div');
+          expandedRows.push({label:head?.getAttribute('aria-label')||head?.textContent?.trim()||'',
+            status:entry.dataset.status,inGroup:entry.dataset.inGroup});
+          next=next?.nextElementSibling;
+        }
+      }
+      return {markerCount:marker.length,ownCount:own.length,links:links.map(a=>({href:a.getAttribute('href'),name:a.lastChild?.textContent?.trim()||''})),
         callText:button?.textContent.trim(),expanded:button?.getAttribute('aria-expanded'),
-        bridge:[...document.querySelectorAll('[data-testid=bridge-call]')].map(x=>x.textContent.trim()),
+        toolCount:Number(/^([0-9]+) tool calls?/.exec(button?.textContent.trim()||'')?.[1]||0),expandedRows,
         markerText:m?.textContent.trim(),color:badge?.getAttribute('data-agent-color'),
         trayColor:trayBadge?.getAttribute('data-agent-color'),
         cards:cards.map(c=>({color:c.getAttribute('data-agent-color'),badge:c.querySelector('[data-agent-color]')?.getAttribute('data-agent-color'),
@@ -252,22 +332,24 @@ def lead_ui(stage):
         card:card?{color:card.getAttribute('data-agent-color'),badge:card.querySelector('[data-agent-color]')?.getAttribute('data-agent-color'),
           outcome:card.dataset.outcome,delivery:card.dataset.delivery,role:card.getAttribute('role'),tabIndex:card.tabIndex,
           name:card.textContent.trim()}:null,rawCompletionBubble:raw};
-    })()""".replace("CHILD", json.dumps(child_path))
+    })()""".replace("CHILD", json.dumps(child_path)).replace("EXPECTED", str(expected_count))
     value = browser(expr)
-    demand(value["markerCount"] == 1 and value["links"] == [{"href": child_path, "name": CHILD_NAME}], "Started child name/count/link mismatch")
-    demand(value["callText"].startswith("1 tool call") and value["color"] is not None, "Started call count/color missing")
+    save("started-group-" + stage, {"child": child_id, "marker_event_id": group["marker_event_id"],
+                                   "entry_event_ids": [e["event_id"] for e in group["entries"]],
+                                   "entry_roles": [e["role"] for e in group["entries"]],
+                                   "ui_marker_count": value["markerCount"], "ui_tool_count": value["toolCount"],
+                                   "ui_adjacent_rows": value["expandedRows"]})
+    demand(value["markerCount"] == value["ownCount"] == 1 and value["links"] == [{"href": child_path, "name": CHILD_NAME}], "Started child name/count/link mismatch")
+    expected_text = f"{expected_count} tool {'call' if expected_count == 1 else 'calls'}"
+    demand(value["callText"].startswith(expected_text) and value["color"] is not None, "Started call count/color missing")
+    started_group_ui_ok(value, group, stage)
     demand("{" not in value["markerText"] and "tools.loom" not in value["markerText"] and "brief:" not in value["markerText"],
            "Started marker exposed raw bridge code or input")
     demand(not value["rawCompletionBubble"], "raw task_completed leaked as a user bubble")
     if stage == "collapsed":
-        demand(value["expanded"] == "false" and not [b for b in value["bridge"] if b.startswith("Started ")], "Started bridge was not collapsed")
         demand(value["trayColor"] == value["color"], "Started and live tray child colours differ")
         save("started-color", value["color"])
-    elif stage == "expanded":
-        started_calls = [b for b in value["bridge"] if b.startswith("Started ")]
-        demand(value["expanded"] == "true" and len(started_calls) == 1, "Started did not expand one bridge call")
-        demand("tools.loom" not in started_calls[0] and "{" not in started_calls[0], "expanded bridge showed raw code")
-    elif stage in ("card", "card-final"):
+    if stage in ("card", "card-final"):
         card = value["card"]
         demand(card and card["outcome"] == "completed" and card["delivery"] == "delivered", "first child completion card missing")
         demand(card["role"] == "link" and card["tabIndex"] == 0 and CHILD_NAME in card["name"], "E1 card is not keyboard accessible for exact child")
@@ -291,7 +373,7 @@ def lead_ui(stage):
             demand(all(c["outcome"] == "completed" and c["delivery"] == "delivered" and
                        c["color"] == c["badge"] == load("started-color") and CHILD_NAME in c["name"]
                        for c in value["cards"]), "final result card name, colour or delivery mismatch")
-    else:
+    elif stage not in ("collapsed", "expanded"):
         raise AssertionError("unknown Lead UI stage")
     save("ui-" + stage, value)
     subprocess.run(["agent-browser", "--session", os.environ["AFT_SESSION"], "screenshot", str(OUT / f"ui-{stage}.png")], check=True)
