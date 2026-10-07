@@ -1946,11 +1946,27 @@ def with_owned_clipboard_read(kind, verify):
 
 
 def self_test_clipboard_ownership():
+    from contextlib import contextmanager
     from copy import deepcopy
-    from tempfile import TemporaryDirectory
     from unittest.mock import patch
 
-    with TemporaryDirectory(prefix="aft-agent-flows.", dir="/private/tmp") as folder:
+    @contextmanager
+    def runner_shaped_root():
+        # Match run-aft-agent-flows.sh's mktemp template: Python's default
+        # TemporaryDirectory alphabet can include '_' rejected by the real guard.
+        folder = subprocess.check_output(
+            ["mktemp", "-d", "/private/tmp/aft-agent-flows.XXXXXXXX"], text=True
+        ).strip()
+        root = Path(folder)
+        owned = bool(re.fullmatch(r"/private/tmp/aft-agent-flows\.[A-Za-z0-9]{8}", folder))
+        try:
+            assert owned and root.is_dir() and not root.is_symlink(), "test root differs from real runner shape"
+            yield folder
+        finally:
+            if owned and root.is_dir() and not root.is_symlink():
+                shutil.rmtree(root)
+
+    with runner_shaped_root() as folder:
         root = Path(folder)
         evidence = root / "evidence"
         evidence.mkdir()
