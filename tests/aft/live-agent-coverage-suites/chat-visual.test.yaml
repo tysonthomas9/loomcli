@@ -57,17 +57,9 @@ tests:
         intent: "Send the request through Chat"
       - wait:
           fn: >-
-            (() => { const tool=document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running]');
-              const working=document.querySelector('[data-testid=working-row]');
-              const stop=document.querySelector('form button[title="Stop the running turn"]');
-              const label=tool?.textContent?.trim()||'';
-              if (!tool || !working || !stop || !label) return false;
-              window.__aftChatVisualLive ||= {path:location.pathname, at:new Date().toISOString(),
-                source:tool.dataset.testid, label, live:!!tool, working:!!working, running:!!stop,
-                workingText:working.textContent, stopTitle:stop.title};
-              return true; })()
+            !!window.__aftChatVisualLive
         budget: 120000
-        intent: "Capture the first actual running tool, working row and Stop control in the same DOM read before the tool completes"
+        intent: "Wait for the pre-send DOM observer to capture an actual simultaneous running tool, Working row and Stop control"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" live-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render tool-transition'
         intent: "Read back the observed live state and capture its possibly completed transition; compare the later saved tool by time and file"
       - wait:
@@ -214,8 +206,28 @@ tests:
         intent: "Wait for the new header title"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename input'
         intent: "Confirm header rename persisted on the exact saved Agent API row"
+      - reload: true
+        intent: "Reload Chat to prove the changed header survives a fresh document"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input-renamed'
+        intent: "Wait for the saved renamed Agent header"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-reloaded input'
+        intent: "Compare the reloaded header with the exact renamed Agent API row"
+      - click: { role: button, name: "Rename agent", exact: true }
+        intent: "Open inline rename to restore the runner-declared Lead identity"
+      - fill: { label: "Agent name", value: "aft-${RUN_ID}-cov-visual-input" }
+        intent: "Restore the exact cataloged Lead name through real Chat UI"
+      - press: Enter
+        intent: "Save the restored Lead name"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input'
+        intent: "Wait for the original name in the Chat header"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-restored input'
+        intent: "Read back the exact restored name before long-input and layout checks"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" fill-long'
-        intent: "Enter literal HTML-shaped text longer than 8000 characters through the composer"
+        intent: "Insert literal HTML-shaped text longer than 8000 characters through focused Chat keyboard input, checking every chunk"
       - press: Enter
         intent: "Send the long message using Enter"
       - wait:
@@ -256,20 +268,6 @@ tests:
         intent: "Reveal all saved characters after reload"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" input-reload-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot input reloaded'
         intent: "Compare the exact saved user event and full safe rendered text after reload"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-reloaded input'
-        intent: "Prove the changed header name survived reload in the exact saved Agent row"
-      - click: { role: button, name: "Rename agent", exact: true }
-        intent: "Open inline rename again to restore the runner-declared Lead identity"
-      - fill: { label: "Agent name", value: "aft-${RUN_ID}-cov-visual-input" }
-        intent: "Restore the exact cataloged Lead name through real Chat UI"
-      - press: Enter
-        intent: "Save the restored Lead name"
-      - wait:
-          fn: >-
-            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input'
-        intent: "Wait for the original name in the Chat header"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-restored input'
-        intent: "Read back the exact restored name from the saved Agent row and visible header"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" create-mobile-roster'
         intent: "Create only the needed real empty workspaces through the isolated serve API, saving exact IDs for teardown"
       - reload: true
