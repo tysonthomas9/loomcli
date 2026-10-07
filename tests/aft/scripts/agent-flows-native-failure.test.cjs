@@ -73,10 +73,24 @@ test('ownership, service PID, and selected/default models stay distinct', () => 
   assert.equal(probe.owned({...row, native_id: 'ses_foreign'}, parent, {owned: true}, expected), false)
   assert.equal(probe.owned(row, {...parent, name: 'foreign'}, {owned: true}, expected), false)
   assert.equal(probe.owned(row, parent, null, expected), false)
+  const proc = (entries) => ({readdirSync: () => Object.keys(entries),
+    readFileSync: (name) => Buffer.from(entries[name.split('/')[2]] ?? '')})
+  const serve = '/usr/local/bin/opencode\0serve\0--service\0'
+  assert.equal(probe.soleServicePid(proc({'42': serve, self: 'ignored'})), 42)
+  assert.equal(probe.soleServicePid(proc({})), null)
+  assert.equal(probe.soleServicePid(proc({'1': serve})), null)
+  assert.equal(probe.soleServicePid(proc({'42': serve, '43': serve})), null)
+  assert.equal(probe.soleServicePid(proc({'42': '/usr/local/bin/other\0serve\0--service\0'})), null)
+  assert.equal(probe.soleServicePid(proc({'42': serve + '--foreign\0'})), null)
   const reg = {url: 'http://127.0.0.1:1234/', pid: 42, password: 'private'}
-  assert.ok(probe.serviceRegistration(reg, {pid: 42}))
-  assert.equal(probe.serviceRegistration(reg, {pid: 43}), null)
-  assert.equal(probe.serviceRegistration({...reg, url: 'http://foreign:1234/'}, {pid: 42}), null)
+  assert.ok(probe.serviceRegistration(reg, 42))
+  assert.equal(probe.serviceRegistration(reg, 43), null)
+  assert.equal(probe.serviceRegistration({...reg, url: 'http://foreign:1234/'}, 42), null)
+  assert.equal(probe.serviceRegistration({...reg, url: 'http://127.0.0.1/'}, 42), null)
+  assert.equal(probe.serviceRegistration({...reg, url: 'http://127.0.0.1:1234/?foreign=1'}, 42), null)
+  assert.equal(probe.serviceRegistration({...reg, url: 'http://127.0.0.1:1234/#foreign'}, 42), null)
+  assert.equal(probe.serviceInfoOwned({pid: 42}, 42), true)
+  assert.equal(probe.serviceInfoOwned({pid: 43}, 42), false)
   const session = {data: {id, metadata: {agent_id: expected.agent}, location: {directory: expected.worktree}}}
   assert.equal(probe.sessionOwned(session, expected), true)
   assert.equal(probe.sessionOwned({...session, data: {...session.data, metadata: {agent_id: 'agt_foreign'}}}, expected), false)
