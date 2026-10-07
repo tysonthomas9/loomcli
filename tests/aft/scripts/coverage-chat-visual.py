@@ -147,7 +147,8 @@ def shot(case, stage):
 
 def long_text():
     prefix = '<img src="x" onerror="alert(1)"> <script>alert(2)</script> &lt;b&gt;literal&lt;/b&gt;'
-    return f"VISUAL_{RUN} " + prefix + "\n" + ("The narrow chat bubble keeps this exact harmless sentence. " * 160)
+    return f"VISUAL_{RUN} " + prefix + "\n" + " ".join(
+        ["The narrow chat bubble keeps this exact harmless sentence."] * 160)
 
 
 INPUT_STATE_JS = """(() => { const t=document.querySelector('textarea[aria-label=Message]');
@@ -1456,11 +1457,99 @@ def agent_hover():
         write("agent-spacing-blocked.json", {"status": "blocked", "prerequisite": "two consecutive saved assistant message items from one real author; this one-answer turn supplied only one"})
 
 
+def input_delivery_diagnostic(evs, source, owned_agent):
+    rows = []
+    marker = f"VISUAL_{RUN} "
+    for event in evs:
+        if event["kind"] != "message.delivered":
+            continue
+        value = event["payload"].get("text")
+        text = value if isinstance(value, str) else None
+        rows.append({"event_id": event["event_id"], "seq": event["seq"],
+                     "turn_id": event.get("turn_id"),
+                     "owned_agent": event.get("agent_id") == owned_agent,
+                     "text_length": len(text) if text is not None else None,
+                     "text_sha256": hashlib.sha256(text.encode()).hexdigest() if text is not None else None,
+                     "has_marker": text.startswith(marker) if text is not None else False,
+                     "matches_source": text == source,
+                     "matches_trimmed_source": text == source.strip()})
+    return {"run": RUN, "case": "input", "agent_id": owned_agent,
+            "source_length": len(source), "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+            "source_has_edge_whitespace": source != source.strip(),
+            "counts": {"delivered": len(rows),
+                       "marker": sum(row["has_marker"] for row in rows),
+                       "exact": sum(row["matches_source"] for row in rows),
+                       "trimmed": sum(row["matches_trimmed_source"] for row in rows),
+                       "owned_exact": sum(row["owned_agent"] and row["matches_source"] for row in rows)},
+            "events": rows}
+
+
+def self_test_input_delivery():
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    source = long_text()
+    assert len(source) > 8000 and source == source.strip() and source.endswith("sentence.")
+    assert '<img src="x" onerror="alert(1)">' in source
+
+    def delivered(text, event_id="ev_1", owned="agt_owned"):
+        return {"kind": "message.delivered", "event_id": event_id, "seq": int(event_id[-1]),
+                "turn_id": "turn_1", "agent_id": owned, "payload": {"text": text}}
+
+    def exercise(test_source, saved, should_pass, counts):
+        with TemporaryDirectory() as folder:
+            dom = {"text": test_source, "collapsed": "false", "showFull": False,
+                   "showAll": False, "unsafeNodes": 0, "width": 100, "scrollWidth": 100}
+            def read_dom(_script):
+                if not should_pass:
+                    raise AssertionError("delivery failure reached DOM readback")
+                return dom
+
+            with patch.dict(globals(), {"WORK": Path(folder), "long_text": lambda: test_source,
+                                        "agent_id": lambda case: "agt_owned", "current": lambda case: None,
+                                        "events": lambda case: saved, "evaluate": read_dom}):
+                try:
+                    input_check("all")
+                except AssertionError as exc:
+                    assert not should_pass and "delivered exactly once" in str(exc), exc
+                else:
+                    assert should_pass, "missing, duplicate, foreign or trimmed delivery passed"
+                receipt = json.loads((Path(folder) / "input-delivery-diagnostic.json").read_text())
+                assert receipt["run"] == RUN and receipt["case"] == "input"
+                assert receipt["agent_id"] == "agt_owned" and receipt["counts"] == counts, receipt
+                assert receipt["source_length"] == len(test_source)
+                assert receipt["source_sha256"] == hashlib.sha256(test_source.encode()).hexdigest()
+                assert receipt["source_has_edge_whitespace"] == (test_source != test_source.strip())
+                assert all(set(row) == {"event_id", "seq", "turn_id", "owned_agent", "text_length",
+                                        "text_sha256", "has_marker", "matches_source",
+                                        "matches_trimmed_source"} for row in receipt["events"])
+                serialized = json.dumps(receipt)
+                assert test_source not in serialized and "<img" not in serialized, "diagnostic leaked text"
+                return receipt
+
+    matched = {"delivered": 1, "marker": 1, "exact": 1, "trimmed": 1, "owned_exact": 1}
+    success = exercise(source, [delivered(source)], True, matched)
+    assert success["events"][0]["text_sha256"] == hashlib.sha256(source.encode()).hexdigest()
+    old_source = source + " "
+    mismatch = exercise(old_source, [delivered(source)], False,
+                        {"delivered": 1, "marker": 1, "exact": 0, "trimmed": 1, "owned_exact": 0})
+    assert mismatch["events"][0]["text_length"] == len(old_source) - 1
+    exercise(source, [], False, {"delivered": 0, "marker": 0, "exact": 0, "trimmed": 0, "owned_exact": 0})
+    exercise(source, [delivered(source), delivered(source, "ev_2")], False,
+             {"delivered": 2, "marker": 2, "exact": 2, "trimmed": 2, "owned_exact": 2})
+    foreign = exercise(source, [delivered(source, owned="agt_foreign")], False,
+                       {"delivered": 1, "marker": 1, "exact": 1, "trimmed": 1, "owned_exact": 0})
+    assert foreign["events"][0]["owned_agent"] is False
+
+
 def input_check(stage):
     current("input")
     evs = events("input")
     source = long_text()
-    delivered = [e for e in evs if e["kind"] == "message.delivered" and e["payload"].get("text") == source]
+    diagnostic = input_delivery_diagnostic(evs, source, agent_id("input"))
+    write("input-delivery-diagnostic.json", diagnostic)
+    delivered = [e for e in evs if e["kind"] == "message.delivered" and
+                 e.get("agent_id") == diagnostic["agent_id"] and e["payload"].get("text") == source]
     assert len(delivered) == 1, "long literal text was not delivered exactly once through Chat"
     assert len(source) > 8000, "source did not cross the LongText Show all threshold"
     dom = evaluate("""(() => { const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].at(-1);
