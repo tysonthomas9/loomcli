@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import selectors
 import shutil
 import subprocess
@@ -624,10 +625,253 @@ def skip_link(stage):
     shot("input", f"skip-link-{stage}")
 
 
+SKIP_PROBE_JS = r"""(async () => {
+  const action=__ACTION__, token=__TOKEN__, route=__ROUTE__;
+  const name='__aftVisualSkipProbe', cleanupName='__aftVisualSkipCleanup';
+  const owned=()=>location.pathname===route;
+  const safeTag=e=>['A','BODY','BUTTON','DIV','MAIN','TEXTAREA','INPUT','SPAN'].includes(e?.tagName)?e.tagName:'OTHER';
+  const safeId=e=>e?.id==='main-content'?'main-content':(e?.id?'other':'');
+  const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();
+    return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};};
+  if(action==='install'){
+    if(!owned() || Object.prototype.hasOwnProperty.call(window,name) ||
+       Object.prototype.hasOwnProperty.call(window,cleanupName))throw Error('foreign skip probe or route');
+    const a=document.querySelector('a[href="#main-content"]'), m=document.querySelector('main#main-content');
+    if(!a||!m||a.textContent.trim()!=='Skip to main content')throw Error('skip probe target absent');
+    const controller=new AbortController(), events=[];
+    let dropped=0;
+    const handler=e=>{if(events.length>=80){dropped++;return;}
+      events.push({type:e.type, trusted:e.isTrusted===true, tag:safeTag(e.target), id:safeId(e.target),
+        key:e instanceof KeyboardEvent?(['Tab','Enter'].includes(e.key)?e.key:'other'):null,
+        button:e instanceof MouseEvent?e.button:null,
+        transform:e.type==='transitionend'?e.propertyName==='transform':null});};
+    for(const type of ['keydown','keyup','mousedown','mouseup','click','focusin','focusout','transitionend'])
+      document.addEventListener(type,handler,{capture:true,signal:controller.signal});
+    const snapshot=()=>{if(!owned())throw Error('foreign skip route');
+      const link=document.querySelector('a[href="#main-content"]'), main=document.querySelector('main#main-content');
+      if(link!==a||main!==m)throw Error('skip probe target changed');
+      const lr=rect(link), mr=rect(main), style=getComputedStyle(link);
+      const hit=mr?document.elementFromPoint(mr.left+mr.width/2,mr.top+mr.height/2):null;
+      return {routeOwned:true, active:{tag:safeTag(document.activeElement),id:safeId(document.activeElement),
+        focusVisible:document.activeElement?.matches(':focus-visible')===true},
+        link:{focused:document.activeElement===link,focusVisible:link.matches(':focus-visible'),
+          inViewport:!!lr&&lr.bottom>0&&lr.top<innerHeight,rect:lr,
+          transform:style.transform,transitionDuration:style.transitionDuration},
+        main:{rect:mr,centerHit:{tag:safeTag(hit),id:safeId(hit),inside:!!hit&&main.contains(hit)}},
+        hash:location.hash==='#main-content'?'#main-content':(location.hash===''?'':'other'),
+        reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,
+        events:events.slice(),dropped};};
+    const probe=Object.freeze({token,snapshot,link:a,controller});
+    const cleanup=Object.freeze({token,probe,close:()=>{controller.abort();
+      return controller.signal.aborted;}});
+    try{
+      Object.defineProperty(window,name,{value:probe,writable:false,configurable:true});
+      Object.defineProperty(window,cleanupName,{value:cleanup,writable:false,configurable:true});
+    }catch(e){controller.abort();delete window[name];throw e;}
+    return {installed:true};
+  }
+  if(action==='cleanup'){
+    const c=window[cleanupName], p=window[name];
+    if(!c||c.token!==token)throw Error('skip probe cleanup owner changed');
+    const aborted=c.close();
+    delete window[cleanupName];
+    if(p===c.probe)delete window[name];
+    if(!aborted || Object.prototype.hasOwnProperty.call(window,cleanupName) ||
+       (p===c.probe && Object.prototype.hasOwnProperty.call(window,name)) || p!==c.probe)
+      throw Error('skip probe replaced or cleanup failed');
+    return {removed:true,aborted:true};
+  }
+  if(!owned())throw Error('foreign skip route');
+  const p=window[name], c=window[cleanupName];
+  const descriptor=Object.getOwnPropertyDescriptor(window,name);
+  if(!p||!c||p.token!==token||c.token!==token||c.probe!==p||descriptor?.value!==p||
+     descriptor.writable!==false||p.controller.signal.aborted)
+    throw Error('skip probe missing or replaced');
+  if(action==='settled'){
+    let guard;
+    try{
+      const deadline=new Promise((_,reject)=>{guard=setTimeout(()=>reject(Error('skip animation timed out')),1500);});
+      await Promise.race([(async()=>{
+        await new Promise(resolve=>requestAnimationFrame(resolve));
+        await Promise.all(p.link.getAnimations().map(a=>a.finished));
+      })(),deadline]);
+    }finally{clearTimeout(guard);}
+  }else if(!['before_click','after_click','before_focus','after_focus'].includes(action))
+    throw Error('unknown skip probe action');
+  return p.snapshot();
+})()"""
+
+
+def skip_probe(action, token):
+    assert re.fullmatch(r"[0-9a-f]{24}", token), "invalid skip probe token"
+    script = SKIP_PROBE_JS.replace("__ACTION__", json.dumps(action)) \
+        .replace("__TOKEN__", json.dumps(token)) \
+        .replace("__ROUTE__", json.dumps(f"/ws/{WS}/chat/{agent_id('input')}"))
+    return evaluate(script, timeout=5)
+
+
 def mouse_focus_skip_link():
-    browser("click", "main#main-content")
-    assert evaluate("(() => { const a=document.querySelector('a[href=\"#main-content\"]'); a.focus(); return document.activeElement===a; })()")
+    token = secrets.token_hex(12)
+    receipt = {"run": RUN, "case": "input", "agent_id": agent_id("input"),
+               "stages": {}, "cleanup": None, "failure_type": None}
+    installed = False
+    try:
+        current("input")
+        result = skip_probe("install", token)
+        installed = True
+        assert result == {"installed": True}, "skip-link event probe failed to install"
+        for stage in ("before_click",):
+            current("input")
+            receipt["stages"][stage] = skip_probe(stage, token)
+        browser("click", "main#main-content")
+        for stage in ("after_click", "before_focus"):
+            current("input")
+            receipt["stages"][stage] = skip_probe(stage, token)
+        assert evaluate("(() => { const a=document.querySelector('a[href=\"#main-content\"]'); a.focus(); return document.activeElement===a; })()")
+        current("input")
+        receipt["stages"]["after_focus"] = skip_probe("after_focus", token)
+        current("input")
+        receipt["stages"]["settled"] = skip_probe("settled", token)
+    except Exception as exc:
+        receipt["failure_type"] = type(exc).__name__
+        raise
+    finally:
+        if installed:
+            try:
+                receipt["cleanup"] = skip_probe("cleanup", token)
+                assert receipt["cleanup"] == {"removed": True, "aborted": True}, \
+                    "skip-link event probe did not close"
+            except Exception as exc:
+                receipt["cleanup"] = {"removed": False, "failure_type": type(exc).__name__}
+                raise
+            finally:
+                write("input-skip-mouse-diagnostic.json", receipt)
+        else:
+            write("input-skip-mouse-diagnostic.json", receipt)
     skip_link("mouse_focus")
+
+
+def self_test_skip_link_diagnostic():
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    def exercise(*, visible=False, drift=False, replaced=False, cleanup_failure=False):
+        calls, receipts = [], {}
+        state = {"current": 0}
+
+        def owned(_case):
+            state["current"] += 1
+            if drift and state["current"] == 3:
+                raise AssertionError("Chat changed agents")
+
+        def probe(action, _token):
+            calls.append(action)
+            if replaced and action == "after_click":
+                raise RuntimeError("skip probe missing or replaced")
+            if cleanup_failure and action == "cleanup":
+                raise RuntimeError("skip probe cleanup failed")
+            if action == "install":
+                return {"installed": True}
+            if action == "cleanup":
+                return {"removed": True, "aborted": True}
+            return {"link": {"focused": True, "focusVisible": visible, "inViewport": visible}}
+
+        def strict(stage):
+            calls.append("strict:" + stage)
+            assert "input-skip-mouse-diagnostic.json" in receipts, "diagnostic was not saved before strict assertion"
+            observed = receipts["input-skip-mouse-diagnostic.json"]["stages"]["settled"]["link"]
+            assert observed["focused"] and not observed["inViewport"], observed
+
+        with TemporaryDirectory(prefix="aft-visual-skip-offline-") as temp, \
+             patch.dict(globals(), WORK=Path(temp), current=owned, skip_probe=probe,
+                        browser=lambda *args: calls.append("browser:" + args[0]),
+                        evaluate=lambda _: True, agent_id=lambda _: "agt_owned",
+                        skip_link=strict,
+                        write=lambda name, data: receipts.update({name: json.loads(json.dumps(data))})):
+            try:
+                mouse_focus_skip_link()
+            except (AssertionError, RuntimeError) as exc:
+                error = str(exc)
+            else:
+                error = None
+        return calls, receipts["input-skip-mouse-diagnostic.json"], error
+
+    calls, receipt, error = exercise()
+    assert error is None and calls[-1] == "strict:mouse_focus" and receipt["cleanup"]["aborted"]
+    assert list(receipt["stages"]) == ["before_click", "after_click", "before_focus", "after_focus", "settled"]
+    calls, receipt, error = exercise(visible=True)
+    assert error and "inViewport" in error and calls[-1] == "strict:mouse_focus"
+    assert receipt["stages"]["settled"]["link"]["focusVisible"] and receipt["cleanup"]["removed"]
+    calls, receipt, error = exercise(drift=True)
+    assert error == "Chat changed agents" and calls[-1] == "cleanup" and receipt["failure_type"] == "AssertionError"
+    calls, receipt, error = exercise(replaced=True)
+    assert error == "skip probe missing or replaced" and calls[-1] == "cleanup"
+    assert receipt["failure_type"] == "RuntimeError"
+    calls, receipt, error = exercise(cleanup_failure=True)
+    assert error == "skip probe cleanup failed" and receipt["cleanup"]["removed"] is False
+    assert "strict:mouse_focus" not in calls
+
+
+def self_test_skip_probe_javascript():
+    script = r"""
+const vm=require('vm'), fs=require('fs'), assert=require('assert');
+const template=fs.readFileSync(0,'utf8'), route='/ws/OFFLINE/chat/agt_owned';
+function page(timeoutNow=false){
+  const listeners=new Map(), window={}, location={pathname:route,hash:''};
+  let active, pending=false, guardCleared=false;
+  const link={tagName:'A',id:'',textContent:'Skip to main content',
+    matches:s=>s===':focus-visible'&&active===link,
+    getBoundingClientRect:()=>({left:16,right:180,top:8,bottom:42,width:164,height:34}),
+    getAnimations:()=>pending?[{finished:new Promise(()=>{})}]:[]};
+  const main={tagName:'MAIN',id:'main-content',matches:()=>false,contains:e=>e===main,
+    getBoundingClientRect:()=>({left:0,right:800,top:50,bottom:650,width:800,height:600})};
+  const document={activeElement:main,querySelector:s=>s.startsWith('a[')?link:main,
+    elementFromPoint:()=>main,addEventListener(type,handler,opts){
+      if(!listeners.has(type))listeners.set(type,new Set());
+      listeners.get(type).add(handler);
+      opts.signal.addEventListener('abort',()=>listeners.get(type).delete(handler));}};
+  active=main;
+  class KeyboardEvent{constructor(key){this.key=key;this.type='keydown';this.target=main;this.isTrusted=true;}}
+  class MouseEvent{}
+  const context={window,document,location,innerHeight:800,KeyboardEvent,MouseEvent,AbortController,
+    getComputedStyle:()=>({transform:'matrix(1, 0, 0, 1, 0, 8)',transitionDuration:'0.15s'}),
+    matchMedia:()=>({matches:false}),requestAnimationFrame:cb=>cb(),
+    setTimeout:fn=>{if(timeoutNow)queueMicrotask(fn);return 1;},clearTimeout:()=>{guardCleared=true;}};
+  const run=(action,token='0123456789abcdef01234567')=>vm.runInNewContext(template.replace('__ACTION__',JSON.stringify(action))
+    .replace('__TOKEN__',JSON.stringify(token)).replace('__ROUTE__',JSON.stringify(route)),context);
+  return {run,window,location,listeners,KeyboardEvent,setPending:v=>{pending=v;},guardCleared:()=>guardCleared};
+}
+(async()=>{
+  const p=page();assert.deepStrictEqual(JSON.parse(JSON.stringify(await p.run('install'))),{installed:true});
+  for(let i=0;i<85;i++)for(const listener of p.listeners.get('keydown'))listener(new p.KeyboardEvent('user-secret'));
+  const snapshot=await p.run('before_click');
+  assert.equal(snapshot.events.length,80);assert.equal(snapshot.dropped,5);
+  assert(snapshot.events.every(e=>e.key==='other'&&!JSON.stringify(e).includes('user-secret')));
+  assert.equal((await p.run('settled')).link.inViewport,true);assert(p.guardCleared());
+  assert.equal((await p.run('cleanup')).aborted,true);
+  assert([...p.listeners.values()].every(s=>s.size===0));
+  await assert.rejects(p.run('before_click'),/missing or replaced/);
+  const foreign=page();await foreign.run('install');foreign.location.pathname='/ws/OFFLINE/chat/agt_foreign';
+  await assert.rejects(foreign.run('before_click'),/foreign skip route/);
+  await foreign.run('cleanup');assert([...foreign.listeners.values()].every(s=>s.size===0));
+  const changed=page();await changed.run('install');
+  delete changed.window.__aftVisualSkipProbe;
+  changed.window.__aftVisualSkipProbe={token:'foreign'};
+  await assert.rejects(changed.run('before_click'),/missing or replaced/);
+  await assert.rejects(changed.run('cleanup'),/replaced or cleanup failed/);
+  assert([...changed.listeners.values()].every(s=>s.size===0));
+  const sameToken=page();await sameToken.run('install');
+  delete sameToken.window.__aftVisualSkipProbe;
+  sameToken.window.__aftVisualSkipProbe={token:'0123456789abcdef01234567'};
+  await assert.rejects(sameToken.run('before_click'),/missing or replaced/);
+  await assert.rejects(sameToken.run('cleanup'),/replaced or cleanup failed/);
+  assert([...sameToken.listeners.values()].every(s=>s.size===0));
+  const timeout=page(true);await timeout.run('install');timeout.setPending(true);
+  await assert.rejects(timeout.run('settled'),/skip animation timed out/);
+  await timeout.run('cleanup');assert([...timeout.listeners.values()].every(s=>s.size===0));
+})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+    subprocess.run(["node", "-e", script], input=SKIP_PROBE_JS, text=True, check=True, timeout=10)
 
 
 def workspace_data(path):
