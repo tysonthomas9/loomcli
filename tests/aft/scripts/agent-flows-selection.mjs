@@ -41,8 +41,17 @@ if (batchName === 'default') {
   agents = null;
 } else {
   const batch = catalog.batches[batchName];
+  const queueCase = { suite: 'coverage-children-queue',
+    name: 'live task child keeps user and parent FIFO slots then hands a later user interrupt first' };
+  const queueAgents = { leads: [{ name: 'cov-child-queue-lead-${RUN_ID}',
+    suite: 'coverage-children-queue', model_required: true }],
+  children: [{ name: 'cov-child-queue-task-${RUN_ID}', parent: 'cov-child-queue-lead-${RUN_ID}',
+    suite: 'coverage-children-queue' }] };
   if (!(exactKeys(batch, ['files', 'agents']) || exactKeys(batch, ['files', 'agents', 'expected_cases'])) ||
       !Array.isArray(batch.files) ||
+      (batchName === 'children-queue' && (batch.files.join(',') !== 'children-queue.test.yaml' ||
+        JSON.stringify(batch.expected_cases) !== JSON.stringify([queueCase]) ||
+        JSON.stringify(batch.agents) !== JSON.stringify(queueAgents))) ||
       (batchName === 'tool-policy' && (!Array.isArray(batch.expected_cases) ||
         batch.expected_cases.length !== 3 || batch.files.join(',') !== 'tool-policy.test.yaml')) ||
       (batch.expected_cases !== undefined && (!Array.isArray(batch.expected_cases) || !batch.expected_cases.length ||
