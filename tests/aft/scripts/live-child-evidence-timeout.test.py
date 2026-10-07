@@ -76,7 +76,8 @@ class PairTimeoutTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.object(child, "WORK", Path(tmp)), \
              patch.dict(os.environ, {"RUN_ID": run, **window}), patch.object(child, "agent", side_effect=agents.__getitem__), \
              patch.object(child, "events", side_effect=event_rows.__getitem__), \
-             patch.object(child, "pair_timeout_dom", return_value={"available": True, "card_count": 0, "lead_route_matches": True}):
+             patch.object(child, "pair_timeout_dom", return_value={"available": True, "card_count": 0, "lead_route_matches": True}), \
+             patch.object(child, "native_failure"):
             (child.WORK / "pair-lead").write_text(lead_id)
             for name, agent_id in zip(names, (a_id, b_id)):
                 (child.WORK / f"pair-{name}.id").write_text(agent_id)
@@ -136,7 +137,8 @@ console.log(eval(code));"""
              patch.dict(os.environ, {"RUN_ID": run, "AFT_SESSION": "owned", **wait_window}), \
              patch.object(child, "agent", side_effect=agents.__getitem__), \
              patch.object(child, "events", return_value=[]), \
-             patch.object(child.subprocess, "check_output", side_effect=timeout) as browser:
+             patch.object(child.subprocess, "check_output", side_effect=timeout) as browser, \
+             patch.object(child, "native_failure"):
             (child.WORK / "pair-lead").write_text(lead_id)
             for name, agent_id in zip(names, (a_id, b_id)):
                 (child.WORK / f"pair-{name}.id").write_text(agent_id)
@@ -188,6 +190,67 @@ console.log(eval(code));"""
                 self.assertEqual(saved["error_sha256"], child.safe_turn_error(error)["sha256"])
                 self.assertTrue(saved["error_present"])
                 self.assertNotIn("private", json.dumps(saved))
+
+    def test_native_probe_uses_exact_saved_failed_turn_and_rejects_raw_or_timeout(self):
+        child_id, lead_id = "agt_child", "agt_lead"
+        digest = "a" * 64
+        event = {"kind": "agent.turn_completed", "event_id": "evt_end", "seq": 6,
+                 "turn_id": "turn_child", "payload": {"stopReason": "failed", "error_sha256": digest}}
+        safe = {"agent_id": child_id, "native_id": "ses_child", "native_root": "",
+                "registry_requested_model": None, "native_session_selected_model": None,
+                "native_service_default_model": "opencode/exo-free", "model_evidence": "selected-and-default-only",
+                "status": "linked", "native_failure": {"event_id": "evt_native", "seq": 9,
+                  "session_id": "ses_child", "type": "provider.auth", "status": 401,
+                  "message_byte_length": 80, "message_sha256": digest, "watermark": 9},
+                "loom_turn": {"event_id": "evt_end", "seq": 6, "turn_id": "turn_child",
+                              "error_sha256": digest}}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(child, "WORK", Path(tmp)), \
+             patch.dict(os.environ, {"AFT_TESTS_DIR": tmp}):
+            response = subprocess.CompletedProcess([], 0, json.dumps(safe), "private stderr")
+            with patch.object(child.subprocess, "run", return_value=response) as command:
+                child.native_failure("final", child_id, lead_id, [event])
+            self.assertEqual(command.call_args.args[0][-6:],
+                             [child_id, lead_id, "evt_end", "6", "turn_child", digest])
+            self.assertEqual(command.call_args.kwargs["timeout"], 8)
+            self.assertEqual(child.load(f"pair-native-failure-{child_id}-final"), safe)
+            self.assertNotIn("private", (child.WORK / f"pair-native-failure-{child_id}-final.json").read_text())
+            with patch.object(child.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    [], 0, json.dumps({**safe, "raw_error": "private"}), "")):
+                child.native_failure("final", child_id, lead_id, [event])
+            self.assertEqual(child.load(f"pair-native-failure-{child_id}-final")["status"], "unavailable")
+            with patch.object(child.subprocess, "run", side_effect=subprocess.TimeoutExpired("probe", 8,
+                                                                                        stderr=b"private")):
+                child.native_failure("wait", child_id, lead_id, [event])
+            self.assertEqual(child.load(f"pair-native-failure-{child_id}-wait")["status"], "unavailable")
+            with patch.object(child.subprocess, "run") as command:
+                child.native_failure("wait", child_id, lead_id, [event], deadline=child.time.monotonic())
+            command.assert_not_called()
+            self.assertEqual(child.load(f"pair-native-failure-{child_id}-wait")["reason"],
+                             "capture_budget_exhausted")
+
+    def test_cleanup_invokes_pair_native_probe_before_archive(self):
+        lead_id, child_id = "agt_lead", "agt_child"
+        with tempfile.TemporaryDirectory() as tmp, patch.object(child, "WORK", Path(tmp)), \
+             patch.dict(os.environ, {"RUN_ID": "af12345678"}):
+            (child.WORK / "pair-lead").write_text(lead_id)
+            (child.WORK / "pair-aft-child-a-af12345678.id").write_text(child_id)
+            agents = {lead_id: {"name": "aft-child-lead-af12345678", "state": "finished"},
+                      child_id: {"name": "aft-child-a-af12345678", "state": "finished"}}
+            def evidence(label, agent_id):
+                child.save(f"{label}-events", [{"kind": "agent.turn_completed", "event_id": "evt_end",
+                                                  "seq": 6, "turn_id": "turn_child",
+                                                  "payload": {"stopReason": "failed", "error_sha256": "a" * 64}}])
+                return {}, [{"agent_id": agent_id}]
+            with patch.object(child, "get", return_value={"agents": [], "next": None}), \
+                 patch.object(child, "agent", side_effect=agents.__getitem__), \
+                 patch.object(child, "evidence", side_effect=evidence), \
+                 patch.object(child, "native_failure") as probe, \
+                 patch.object(child.urllib.request, "urlopen") as archive:
+                child.cleanup()
+            probe.assert_called_once()
+            self.assertEqual(probe.call_args.args[:3], ("final", child_id, lead_id))
+            self.assertEqual(probe.call_args.args[3][0]["event_id"], "evt_end")
+            self.assertEqual(archive.call_count, 2)
 
     def test_actual_parsed_wait_wrapper_preserves_failure_and_only_snapshots_on_failure(self):
         command = parsed_wait_command()
