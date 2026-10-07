@@ -214,6 +214,31 @@ def save_interrupt_receipt(stage, original_key, original, retry_key=None, retry=
     save("interrupt", stage, value)
 
 
+def same_interrupt_receipt(original, retry, delivery=None):
+    fields = {"message_id", "state", "replaced", "turn_id", "interrupted"}
+    if not isinstance(original, dict) or not isinstance(retry, dict) or set(original) != set(retry) or not set(original) <= fields:
+        return False
+    if not {"message_id", "state", "replaced"} <= set(original) or not isinstance(original["message_id"], str) or not original["message_id"]:
+        return False
+    if (original["state"] not in ("waiting", "handed") or type(retry["state"]) is not str or
+            type(original["replaced"]) is not bool or type(retry["replaced"]) is not bool):
+        return False
+    if any(type(value[key]) is not (bool if key == "interrupted" else str)
+           for value in (original, retry) for key in ("turn_id", "interrupted") if key in value):
+        return False
+    if any(original[key] != retry[key] for key in set(original) - {"state"}):
+        return False
+    return original["state"] == retry["state"] or (original["state"] == "waiting" and
+           retry["state"] == "handed" and delivery is not None)
+
+
+def exact_interrupt_delivery(evs, body, request_id):
+    key = native_key("interrupt", request_id)
+    found = [e for e in evs if e["kind"] == "message.delivered" and
+             e["payload"].get("text") == body["text"] and e["payload"].get("inputKey") == key]
+    return found[0] if len(found) == 1 else None
+
+
 def queue_interrupt():
     text = f"INTERRUPT_OLD-{RUN}: superseded waiting text"
     key = f"rs-edges-{RUN}-interrupt-old"
@@ -237,7 +262,9 @@ def replace_interrupt():
     new_retry = call(agent_path("interrupt") + "/messages", "POST", body, key, 202)
     save_interrupt_receipt("replace-old-replay", old["key"], old["receipt"], old["key"], old_retry)
     save_interrupt_receipt("replace-new-replay", key, receipt, key, new_retry)
-    assert old_retry == old["receipt"] and new_retry == receipt
+    progress = isinstance(new_retry, dict) and new_retry.get("state") == "handed" and receipt["state"] == "waiting"
+    delivery = exact_interrupt_delivery(events("interrupt"), body, key) if progress else None
+    assert same_interrupt_receipt(old["receipt"], old_retry) and same_interrupt_receipt(receipt, new_retry, delivery)
     save("interrupt", "new", {"body": body, "key": key, "receipt": receipt,
                                "old_receipt": old_retry, "new_receipt": new_retry})
 
@@ -259,8 +286,10 @@ def interrupt_after():
     for slot, entry in (("old", old), ("new", new)):
         retry = call(agent_path("interrupt") + "/messages", "POST", entry["body"], entry["key"], 202)
         save_interrupt_receipt(f"after-{slot}-replay", entry["key"], entry["receipt"], entry["key"], retry)
-        assert retry == entry["receipt"]
+        proof = row if slot == "new" and row["payload"]["inputKey"] == native_key("interrupt", entry["key"]) else None
+        assert same_interrupt_receipt(entry["receipt"], retry, proof), "retry changed stable receipt fields or lacks saved delivery"
     assert event_ids("interrupt") == before, "RequestID retry appended an event after delivery"
+    assert not agent("interrupt")["waiting_messages"], "RequestID retry changed waiting slots after delivery"
     native_result = native("count", "interrupt", row["payload"]["inputKey"])
     assert native_result["native_user_message_count"] == 1
     save("interrupt", "delivered", {"event_id": row["event_id"], "input_key": row["payload"]["inputKey"],
