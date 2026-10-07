@@ -405,6 +405,23 @@ def ask_terminal(case, stage, reasons):
                                            "idle": True})
 
 
+def ask_history(case, stage, counts, compare=False):
+    wanted = [int(n) for n in counts.split(",")]
+    assert len(wanted) == 3, "need opened,resolved,lost counts"
+    kinds = ("ask.opened", "ask.resolved", "ask.lost")
+    rows = [{k: e[k] for k in ("event_id", "seq", "kind", "turn_id", "payload")}
+            for e in events(case) if e["kind"] in kinds]
+    assert [sum(e["kind"] == kind for e in rows) for kind in kinds] == wanted, \
+        "saved ask history has the wrong opened/resolved/lost counts"
+    assert all(e["event_id"].startswith(e["kind"] + ":") and
+               e["payload"].get("askId") for e in rows), "saved ask event identity/content missing"
+    key = f"{case}-{stage}-ask-history.json"
+    if compare:
+        assert rows == saved(key)["events"], "reload changed full saved ask EventID/content history"
+    else:
+        save(key, {"agent_id": aid(case), "events": rows, "expected_counts": wanted})
+
+
 def respond_receipt(case, stage):
     identity = saved(f"{case}-{stage}-ask.json")
     suffix = f"/v1/agents/{aid(case)}/asks/{identity['ask_id']}"

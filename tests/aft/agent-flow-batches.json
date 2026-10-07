@@ -179,6 +179,19 @@
         ],
         "children": []
       }
+    },
+    "chat-stop": {
+      "files": ["chat-controls-stop.test.yaml"],
+      "expected_cases": [
+        { "suite": "live-chat-controls-stop", "name": "OC1 bare Chat Stop loses the native ask without executing it and permits a real next turn" }
+      ],
+      "agents": {
+        "leads": [],
+        "reviewers": [
+          { "name": "cov-controls-stop-${RUN_ID}", "suite": "live-chat-controls-stop" }
+        ],
+        "children": []
+      }
     }
   }
 }
