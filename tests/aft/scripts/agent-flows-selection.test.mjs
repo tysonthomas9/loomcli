@@ -200,7 +200,7 @@ if (queueCandidate) {
       suite: 'coverage-children-queue', model_required: true, model_exception: false,
       model_proof: 'ui_selection', end_state: 'present' }], reviewers: [],
     children: [{ name: 'cov-child-queue-task-af12345678', parent: 'cov-child-queue-lead-af12345678',
-      suite: 'coverage-children-queue' }] });
+      suite: 'coverage-children-queue', end_state: 'present' }] });
     console.log('agent-flow queue: authored case and exact Lead/child ownership selected; mutations refused');
   } finally {
     rmSync(queueRoot, { recursive: true, force: true });
