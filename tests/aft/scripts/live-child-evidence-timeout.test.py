@@ -69,14 +69,18 @@ class PairTimeoutTests(unittest.TestCase):
                     "turn_id": "turn-a", "payload": {"stopReason": "failed", "error": "private child error"}}],
             b_id: [],
         }
+        window = {key: "2026-10-07T16:17:00Z" for key in (
+            "AFT_PAIR_WAIT_FIRST_STARTED_AT", "AFT_PAIR_WAIT_FIRST_ENDED_AT",
+            "AFT_PAIR_WAIT_SECOND_STARTED_AT", "AFT_PAIR_WAIT_SECOND_ENDED_AT")}
         with tempfile.TemporaryDirectory() as tmp, patch.object(child, "WORK", Path(tmp)), \
-             patch.dict(os.environ, {"RUN_ID": run}), patch.object(child, "agent", side_effect=agents.__getitem__), \
+             patch.dict(os.environ, {"RUN_ID": run, **window}), patch.object(child, "agent", side_effect=agents.__getitem__), \
              patch.object(child, "events", side_effect=event_rows.__getitem__), \
              patch.object(child, "pair_timeout_dom", return_value={"card_count": 0, "lead_route_matches": True}):
             (child.WORK / "pair-lead").write_text(lead_id)
             for name, agent_id in zip(names, (a_id, b_id)):
                 (child.WORK / f"pair-{name}.id").write_text(agent_id)
             child.pair_timeout("pair-lead", *names)
+            self.assertEqual(child.load("pair-timeout-wait"), window)
             api = child.load("pair-timeout-api")
             self.assertEqual(api["events"][a_id][0]["payload"]["error"]["category"], "unknown")
             self.assertEqual(api["events"][lead_id][0]["payload"]["summary_present"], True)
@@ -118,21 +122,26 @@ console.log(eval(code));"""
             path = Path(tmp)
             browser = path / "agent-browser"
             python = path / "python3"
-            browser.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TEST_BROWSER_ARGS\"\nexit \"$TEST_BROWSER_EXIT\"\n")
-            python.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TEST_PYTHON_ARGS\"\n")
+            browser.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$TEST_BROWSER_ARGS\"\nprintf 'timeout=%s\\n' \"$AGENT_BROWSER_DEFAULT_TIMEOUT\" >> \"$TEST_BROWSER_ARGS\"\nexit \"$TEST_BROWSER_EXIT\"\n")
+            python.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TEST_PYTHON_ARGS\"\nprintf '%s\\n' \"$AFT_PAIR_WAIT_FIRST_STARTED_AT\" \"$AFT_PAIR_WAIT_FIRST_ENDED_AT\" \"$AFT_PAIR_WAIT_SECOND_STARTED_AT\" \"$AFT_PAIR_WAIT_SECOND_ENDED_AT\" >> \"$TEST_PYTHON_ARGS\"\n")
             browser.chmod(0o755)
             python.chmod(0o755)
             env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "AFT_SESSION": "owned-session",
                    "AFT_TESTS_DIR": tmp, "RUN_ID": "offline", "TEST_BROWSER_ARGS": str(path / "browser.args"),
-                   "TEST_PYTHON_ARGS": str(path / "python.args"), "TEST_BROWSER_EXIT": "17"}
+                   "TEST_PYTHON_ARGS": str(path / "python.args"), "TEST_BROWSER_EXIT": "17",
+                   "AGENT_BROWSER_DEFAULT_TIMEOUT": "30000"}
             result = subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 17, result.stderr)
-            self.assertIn("wait\n--fn\n", (path / "browser.args").read_text())
+            self.assertEqual((path / "browser.args").read_text().count("wait\n--fn\n"), 2)
+            self.assertEqual((path / "browser.args").read_text().count("timeout=30000"), 2)
             self.assertIn("pair_timeout\npair-lead\naft-child-a-offline\naft-child-b-offline", (path / "python.args").read_text())
+            self.assertEqual((path / "python.args").read_text().count("2026-"), 4)
             (path / "python.args").unlink()
+            (path / "browser.args").unlink()
             env["TEST_BROWSER_EXIT"] = "0"
             result = subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((path / "browser.args").read_text().count("wait\n--fn\n"), 1)
             self.assertFalse((path / "python.args").exists())
 
 
