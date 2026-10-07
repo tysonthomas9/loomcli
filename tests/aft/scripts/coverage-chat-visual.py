@@ -1272,20 +1272,47 @@ def assert_reasoning_saved_after_reload(before, after):
     assert after == before, "reload changed reasoning EventID, order, or saved content"
 
 
-def reasoning_check(stage):
+def save_reasoning_capture(stage, snapshot):
+    capture = WORK / f"render-reasoning-{stage}-capture.json"
+    seal = WORK / f"render-reasoning-{stage}-seal.json"
+    assert all(not p.exists() and not p.is_symlink() for p in (capture, seal)), \
+        "reasoning checkpoint already captured"
+    write(capture.name, snapshot)
+    write(seal.name, {"sha256": motion_digest(snapshot), "stage": stage, "case": "render",
+                      "ws": WS, "run": RUN, "agent_id": snapshot["agent_id"]})
+
+
+def load_reasoning_capture(stage):
+    assert stage in ("before-reload", "reloaded"), stage
+    capture = WORK / f"render-reasoning-{stage}-capture.json"
+    seal = WORK / f"render-reasoning-{stage}-seal.json"
+    assert all(p.is_file() and not p.is_symlink() for p in (capture, seal)), "reasoning capture or seal missing"
+    try:
+        snapshot = json.loads(capture.read_text())
+        receipt = json.loads(seal.read_text())
+    except (ValueError, OSError) as exc:
+        raise AssertionError("reasoning capture is unreadable") from exc
+    assert isinstance(snapshot, dict) and isinstance(receipt, dict), "reasoning capture has invalid shape"
+    expected = {"sha256": motion_digest(snapshot), "stage": stage, "case": "render",
+                "ws": WS, "run": RUN, "agent_id": agent_id("render")}
+    assert receipt == expected, "reasoning capture changed or belongs to a foreign run"
+    assert all(snapshot.get(key) == value for key, value in expected.items() if key != "sha256"), \
+        "reasoning capture identity changed"
+    assert snapshot.get("version") == 1 and snapshot.get("validation") == "pending", \
+        "reasoning capture version or pending state changed"
+    assert snapshot.get("route") == f"/ws/{WS}/chat/{agent_id('render')}", "reasoning capture changed Chat route"
+    for key in ("delivered", "turn_completed", "items", "collapsed", "expanded"):
+        assert key in snapshot, f"reasoning capture lacks {key}"
+    return snapshot
+
+
+def reasoning_capture(stage):
     assert stage in ("before-reload", "reloaded"), stage
     current("render")
-    _, _, between = turn_events("render", "VISUAL_RENDER")
+    delivered, end, between = turn_events("render", "VISUAL_RENDER")
     reasoning_items = [e for e in between if e["kind"] == "item.completed" and
                        e["payload"].get("itemKind") == "reasoning"]
     write(f"render-reasoning-{stage}-receipts.json", reasoning_receipt_diagnostic(reasoning_items))
-    if not reasoning_items:
-        write("reasoning-blocked.json", {"status": "blocked", "prerequisite": "actual selected provider must emit saved item.completed reasoning text"})
-        raise AssertionError("BLOCKED: selected real provider emitted no saved reasoning item; Thinking UI cannot be claimed")
-    saved = reasoning_receipts(between)
-    if stage == "reloaded":
-        before = json.loads((WORK / "render-reasoning-before-reload.json").read_text())
-        assert_reasoning_saved_after_reload(before["saved"], saved)
     # Reveal grouped rows without opening the Thinking bodies yet.
     for _ in range(20):
         if not evaluate("document.querySelectorAll('[data-testid=tool-group][aria-expanded=false], [data-testid=work-toggle][aria-expanded=false]').length"):
@@ -1294,13 +1321,85 @@ def reasoning_check(stage):
     else:
         raise AssertionError("too many collapsed work groups")
     collapsed = evaluate(REASONING_DOM)
-    assert_reasoning_rows(saved, collapsed, False)
     shot("render", f"thinking-{stage}-preview")
     expand_work()
     expanded = evaluate(REASONING_DOM)
-    assert_reasoning_rows(saved, expanded, True)
     shot("render", f"thinking-{stage}-expanded")
-    write(f"render-reasoning-{stage}.json", {"saved": saved, "collapsed": collapsed, "expanded": expanded})
+    current("render")
+    final_delivered, final_end, final_between = turn_events("render", "VISUAL_RENDER")
+    final_items = [e for e in final_between if e["kind"] == "item.completed" and
+                   e["payload"].get("itemKind") == "reasoning"]
+    assert (final_delivered, final_end, final_items) == (delivered, end, reasoning_items), \
+        "saved reasoning turn changed during UI capture"
+    snapshot = {"version": 1, "validation": "pending", "stage": stage, "case": "render",
+                "ws": WS, "run": RUN, "agent_id": agent_id("render"),
+                "route": f"/ws/{WS}/chat/{agent_id('render')}", "delivered": delivered,
+                "turn_completed": end, "items": reasoning_items,
+                "collapsed": collapsed, "expanded": expanded}
+    save_reasoning_capture(stage, snapshot)
+    write(f"render-reasoning-{stage}-diagnostic.json", {
+        "validation": "pending", "capture_sha256": motion_digest(snapshot),
+        "delivered_event_id": delivered["event_id"], "turn_event_id": end["event_id"],
+        **reasoning_receipt_diagnostic(reasoning_items)})
+
+
+def assert_reasoning_captures(before, after):
+    for stage, capture in (("before-reload", before), ("reloaded", after)):
+        delivered, end, items = capture["delivered"], capture["turn_completed"], capture["items"]
+        assert delivered["kind"] == "message.delivered" and \
+            f"VISUAL_RENDER_{RUN}" in delivered["payload"]["text"], f"{stage}: foreign rendering delivery"
+        assert end["kind"] == "agent.turn_completed" and end["seq"] > delivered["seq"], \
+            f"{stage}: turn completion does not follow delivery"
+        assert isinstance(items, list), f"{stage}: reasoning items missing"
+        assert all(e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning" and
+                   delivered["seq"] < e["seq"] < end["seq"] for e in items), \
+            f"{stage}: reasoning item outside saved turn"
+        seqs = [e["seq"] for e in items]
+        assert seqs == sorted(set(seqs)), f"{stage}: duplicate or unordered reasoning sequence"
+    assert_reasoning_saved_after_reload(before["delivered"], after["delivered"])
+    assert_reasoning_saved_after_reload(before["turn_completed"], after["turn_completed"])
+    assert_reasoning_saved_after_reload(before["items"], after["items"])
+    if not before["items"]:
+        write("reasoning-blocked.json", {"status": "blocked", "prerequisite":
+              "actual selected provider must emit saved item.completed reasoning text"})
+        raise AssertionError("BLOCKED: selected real provider emitted no saved reasoning item; Thinking UI cannot be claimed")
+    saved = reasoning_receipts(before["items"])
+    assert_reasoning_saved_after_reload(saved, reasoning_receipts(after["items"]))
+    for capture in (before, after):
+        assert_reasoning_rows(saved, capture["collapsed"], False)
+        assert_reasoning_rows(saved, capture["expanded"], True)
+    return saved
+
+
+def reasoning_assert():
+    before = load_reasoning_capture("before-reload")
+    after = load_reasoning_capture("reloaded")
+    motion = load_motion_capture("render")
+    assert (before["delivered"], before["turn_completed"]) == \
+        (motion["delivered"], motion["turn_completed"]), \
+        "frozen reasoning and motion captures belong to different saved turns"
+    saved = assert_reasoning_captures(before, after)
+    write("render-reasoning.json", {"validation": "passed", "saved": saved,
+          "before_sha256": motion_digest(before), "reloaded_sha256": motion_digest(after)})
+
+
+def final_visual_assert():
+    verdict = {}
+    for name, check in (("motion", lambda: motion_assert("render")),
+                        ("reasoning", reasoning_assert)):
+        try:
+            check()
+        except Exception as exc:
+            detail = str(exc)
+            if name == "reasoning" and detail.lstrip().startswith(("{", "[")):
+                detail = "Thinking DOM row mismatched its saved item"
+            verdict[name] = {"status": "failed", "error_type": type(exc).__name__,
+                             "reason": detail[:400]}
+        else:
+            verdict[name] = {"status": "passed"}
+    write("render-final-verdict.json", verdict)
+    assert all(item["status"] == "passed" for item in verdict.values()), \
+        f"first-turn visual validation failed: {verdict}"
 
 
 def self_test_reasoning():
@@ -1355,6 +1454,129 @@ def self_test_reasoning():
             pass
         else:
             raise AssertionError("wrong reload receipt passed")
+
+
+def self_test_final_visual_assert():
+    from copy import deepcopy
+    from datetime import datetime
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    end_at = "2026-10-07T00:00:00Z"
+    end_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000
+    marker = f"VISUAL_END_{RUN}"
+    answer = " ".join(["word"] * 299 + [marker])
+    words = answer.split()
+    frames = [{"at": end_ms - 40 - (len(words) - i) * 16,
+               "chars": len(" ".join(words[:i])), "words": i,
+               "addedWords": 1, "marker": i == len(words),
+               **({"text": answer} if i == len(words) else {})}
+              for i in range(1, len(words) + 1)]
+    route = f"/ws/{WS}/chat/agt_test"
+    delivered = {"kind": "message.delivered", "event_id": "delivered", "seq": 1,
+                 "payload": {"text": f"VISUAL_RENDER_{RUN}"}}
+    end = {"kind": "agent.turn_completed", "event_id": "completed", "seq": 4,
+           "created_at": end_at}
+    text = "## **First** line\nFull second line"
+    reasoning = {"kind": "item.completed", "event_id": "reasoning-1", "seq": 2,
+                 "payload": {"itemKind": "reasoning", "text": text}}
+    collapsed = {"heading": "Thinking", "preview": "First line", "expanded": "false",
+                 "status": "completed", "body": None}
+    expanded = {**collapsed, "expanded": "true", "body": text}
+    motion = {"version": 1, "case": "render", "ws": WS, "run": RUN,
+              "agent_id": "agt_test", "route": route,
+              "probe": {"route": route, "start": frames[0]["at"] - 16, "frames": frames,
+                        "finalText": answer, "samples": [{"stop": True, "gap": 0}], "shifts": [],
+                        "sawCaret": True, "sawWorking": True, "observerError": None,
+                        "caretGone": True},
+              "delivered": delivered, "turn_completed": end,
+              "replies": [{"kind": "item.completed", "event_id": "reply", "seq": 3,
+                           "payload": {"itemKind": "message", "text": answer}}],
+              "answer": answer}
+    base = {"version": 1, "validation": "pending", "case": "render", "ws": WS,
+            "run": RUN, "agent_id": "agt_test", "route": route,
+            "delivered": delivered, "turn_completed": end, "items": [reasoning],
+            "collapsed": [collapsed], "expanded": [expanded]}
+    assert assert_motion_capture(motion)[2] == -40
+
+    def trial(change=None, expected_motion="passed", expected_reasoning="passed", tamper=None):
+        with TemporaryDirectory() as folder, patch.dict(globals(), WORK=Path(folder)):
+            (WORK / "render.id").write_text("agt_test\n")
+            first, after, measured = deepcopy(base), deepcopy(base), deepcopy(motion)
+            first["stage"], after["stage"] = "before-reload", "reloaded"
+            if change:
+                change(first, after, measured)
+            save_motion_capture(measured)
+            save_reasoning_capture("before-reload", first)
+            save_reasoning_capture("reloaded", after)
+            if tamper:
+                tamper()
+            with patch.object(sys.modules[__name__], "evaluate", side_effect=AssertionError("late DOM read")), \
+                 patch.object(sys.modules[__name__], "events", side_effect=AssertionError("late event read")), \
+                 patch.object(sys.modules[__name__], "current", side_effect=AssertionError("late route read")), \
+                 patch.object(sys, "argv", [__file__, "final-visual-assert"]):
+                if (expected_motion, expected_reasoning) == ("passed", "passed"):
+                    main()
+                else:
+                    try:
+                        main()
+                    except AssertionError as exc:
+                        assert "first-turn visual validation failed" in str(exc), exc
+                    else:
+                        raise AssertionError("final command accepted a failed visual capture")
+            verdict = json.loads((WORK / "render-final-verdict.json").read_text())
+            assert (verdict["motion"]["status"], verdict["reasoning"]["status"]) == \
+                (expected_motion, expected_reasoning), verdict
+            assert (WORK / "render-motion.json").exists() == (expected_motion == "passed")
+            assert (WORK / "render-reasoning.json").exists() == (expected_reasoning == "passed")
+
+    trial()
+    trial(lambda a, b, m: a["items"].clear(), expected_reasoning="failed")
+    trial(lambda a, b, m: a["items"][0]["payload"].update(text=None), expected_reasoning="failed")
+    trial(lambda a, b, m: a["items"][0]["payload"].update(text=""), expected_reasoning="failed")
+    trial(lambda a, b, m: a["items"][0]["payload"].pop("text"), expected_reasoning="failed")
+    trial(lambda a, b, m: a["items"].append(deepcopy(a["items"][0])), expected_reasoning="failed")
+    trial(lambda a, b, m: a["collapsed"][0].update(preview="Wrong"), expected_reasoning="failed")
+    trial(lambda a, b, m: a["expanded"][0].update(body="Wrong"), expected_reasoning="failed")
+    trial(lambda a, b, m: b["items"][0]["payload"].update(text="Changed"), expected_reasoning="failed")
+    trial(lambda a, b, m: b["delivered"].update(event_id="other-turn"), expected_reasoning="failed")
+    trial(lambda a, b, m: m["probe"]["frames"][0].update(addedWords=17), expected_motion="failed")
+    trial(lambda a, b, m: (a["items"][0]["payload"].update(text=None),
+                           m["probe"]["shifts"].append({"value": 0.012443148334330491})),
+          expected_motion="failed", expected_reasoning="failed")
+    trial(expected_reasoning="failed", tamper=lambda: (WORK / "render-reasoning-reloaded-seal.json").unlink())
+    trial(expected_reasoning="failed", tamper=lambda: write("render-reasoning-reloaded-seal.json", {
+        "sha256": "foreign", "stage": "reloaded", "case": "render", "ws": WS,
+        "run": "FOREIGN", "agent_id": "agt_test"}))
+
+    with TemporaryDirectory() as folder, patch.dict(globals(), WORK=Path(folder)):
+        (WORK / "render.id").write_text("agt_test\n")
+        first = {**deepcopy(base), "stage": "before-reload"}
+        save_reasoning_capture("before-reload", first)
+        try:
+            save_reasoning_capture("before-reload", first)
+        except AssertionError as exc:
+            assert "already captured" in str(exc), exc
+        else:
+            raise AssertionError("duplicate reasoning capture passed")
+        foreign = {**first, "run": "FOREIGN"}
+        write("render-reasoning-before-reload-capture.json", foreign)
+        write("render-reasoning-before-reload-seal.json", {
+            "sha256": motion_digest(foreign), "stage": "before-reload", "case": "render",
+            "ws": WS, "run": "FOREIGN", "agent_id": "agt_test"})
+        try:
+            load_reasoning_capture("before-reload")
+        except AssertionError as exc:
+            assert "foreign run" in str(exc), exc
+        else:
+            raise AssertionError("foreign reasoning seal passed")
+        write("render-reasoning-before-reload-capture.json", first)
+        try:
+            load_reasoning_capture("before-reload")
+        except AssertionError as exc:
+            assert "changed or belongs" in str(exc), exc
+        else:
+            raise AssertionError("mutated reasoning capture passed")
 
 
 def clipboard_primary_pids(profile, processes):

@@ -85,8 +85,8 @@ tests:
             !!document.querySelector('[data-testid=chat-transcript] [data-testid=chat-codeblock][data-language=json] code span')
         budget: 30000
         intent: "Wait for completed JSON code highlighting before reading its token spans"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-check before-reload'
-        intent: "Match each genuine saved reasoning EventID and first-line Thinking preview to its expanded full body before reload; record BLOCKED if none exists"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-capture before-reload'
+        intent: "Freeze actual saved reasoning EventIDs and raw text, including null, with collapsed and genuinely expanded Thinking DOM before reload; validation remains pending"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" render-check'
         intent: "Expand through UI clicks and compare table, highlighted code and all tool bodies with actual saved events"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render expanded'
@@ -115,8 +115,8 @@ tests:
               return c?.textContent.includes('VISUAL_END_${RUN_ID}') && !!c.querySelector('table') &&
                 !!c.querySelector('[data-testid=chat-codeblock]'); })()
         intent: "Wait for persisted table, code and final answer"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-check reloaded'
-        intent: "Match the same saved reasoning EventIDs, text, short Thinking previews and expanded full bodies after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-capture reloaded'
+        intent: "Freeze actual saved reasoning and collapsed/expanded Thinking DOM after reload without treating absent or null text as a pass"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" render-reload-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render reloaded'
         intent: "Compare exact saved event IDs and rendered tool/table/code after reload"
       - run: 'agent-browser --session "$AFT_SESSION" set media light reduced-motion'
@@ -151,8 +151,8 @@ tests:
         intent: "Wait for the actual reduced-motion reply to complete"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reduced-saved-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render reduced-end'
         intent: "Compare the second real reply to its saved turn and capture the final reduced-motion frame"
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" motion-assert render'
-        intent: "Fail this case if the sealed first-turn capture misses any original word, frame, CLS, bottom-gap, caret or final-byte timing criterion"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" final-visual-assert'
+        intent: "Independently validate both sealed reasoning checkpoints and original first-turn motion thresholds; record both verdicts and fail if either fails"
   # UI0 empty/focus/keyboard/autogrow/header; 1.8a/1.8c literal text;
   # UI6/7/7b hover and narrow geometry; SK1 and MB1/MB1b actual viewport.
   # The source is a genuine user send;
