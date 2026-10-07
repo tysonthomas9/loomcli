@@ -58,6 +58,61 @@ console.log(JSON.stringify(suite.tests.flatMap(t=>t.steps).filter(s=>s.wait?.fn)
 
 
 class QueueOracleTests(unittest.TestCase):
+    def test_first_parent_proof_survives_real_capture_shot_and_replacement_path(self):
+        child, lead, sender, turn = "agt_child", "agt_lead", "agent:agt_lead", "child-turn"
+        requests = ["agent_tool-" + c * 26 for c in ("A", "B")]
+        def result(request, replaced):
+            return {"message_id": "msg_" + hashlib.sha256(f"{child}\0{sender}\0{request}".encode()).digest()[:13].hex(),
+                    "state": "waiting", "replaced": replaced}
+        native = [result(requests[0], False), result(requests[1], True)]
+        calls = [
+            {"kind": "item.completed", "event_id": f"tool-{i}", "turn_id": f"lead-turn-{i}",
+             "payload": {"itemKind": "tool", "tool": {"output": json.dumps(native[i])}}}
+            for i in range(2)
+        ]
+        waits = [
+            {"agent_id": child, "kind": "message.waiting", "seq": i + 2,
+             "event_id": f"{child}:send:{requests[i]}:message.waiting", "turn_id": turn,
+             "payload": {"reason": sender}} for i in range(2)
+        ]
+        p2 = {"agent_id": child, "kind": "message.delivered", "seq": 1,
+              "event_id": "p2-delivered", "turn_id": turn,
+              "payload": {"text": queue.TEXT["p2"], "sender": sender, "inputKey": "p2-input"}}
+        stage = {"replacement": False}
+        def row(_label):
+            slot = {"sender": sender, "text": queue.TEXT["p3b" if stage["replacement"] else "p3"], "since": "fifo-place"}
+            return {"agent_id": child, "state": "active", "running_turn_id": turn,
+                    "attempt": 1, "waiting_messages": [slot]}
+        def child_events(_label):
+            return [p2, waits[0], *([waits[1]] if stage["replacement"] else [])]
+        def browser(expression):
+            if expression == "location.pathname":
+                return "/ws/LOCALMODE/chat/agt_child"
+            return {"waiting": [queue.TEXT["p3"]], "user": [], "history": [], "running": True}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(queue, "OUT", Path(tmp)), \
+             patch.object(queue, "identity", side_effect=lambda label: child if label == "child" else lead), \
+             patch.object(queue, "agent", side_effect=row), patch.object(queue, "events", side_effect=child_events), \
+             patch.object(queue, "settled_lead_send", side_effect=lambda name, _marker: calls[1 if name == "p3b" else 0]), \
+             patch.object(queue, "browser", side_effect=browser), patch.object(queue.subprocess, "run"):
+            with patch.dict(os.environ, {"AFT_WS": "LOCALMODE", "AFT_SESSION": "owned"}):
+                queue.save("parent-started", {"turn": turn})
+                queue.first_parent_queued()
+                proof = queue.load("first-parent-initial")
+                self.assertEqual(proof["tool_event_id"], calls[0]["event_id"])
+                self.assertEqual(proof["waiting_event_id"], waits[0]["event_id"])
+                queue.shot("first-parent-initial", [f"QUEUE-P3-{queue.RUN}"])
+                self.assertEqual(queue.load("first-parent-initial"), proof)
+                self.assertEqual(queue.load("first-parent-initial-state")["turn"], turn)
+                stage["replacement"] = True
+                queue.first_parent()
+                receipt = queue.load("first-parent-replacement-receipt")
+                self.assertEqual(receipt["tool_event_ids"], [c["event_id"] for c in calls])
+                self.assertEqual(receipt["waiting_event_ids"], [w["event_id"] for w in waits])
+                self.assertEqual(receipt["native_results"], native)
+                queue.save("first-parent-initial", {**proof, "tool_event_id": "wrong-tool"})
+                with self.assertRaisesRegex(AssertionError, "initial native result changed"):
+                    queue.first_parent()
+
     def test_native_send_settles_with_reply_without_queue_marker(self):
         lead, child = "agt_lead", "agt_child"
         marker = "QUEUE-P1-"

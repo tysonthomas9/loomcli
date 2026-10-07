@@ -676,7 +676,7 @@ def first_parent_queued():
                                   "native_result": initial, "waiting_event_id": waits[0]["event_id"],
                                   "request_id": request_id,
                                   "waiting_seq": waits[0]["seq"], "slot": slot[0], "turn": row["running_turn_id"]})
-    capture("first-parent-initial")
+    capture("first-parent-initial-state")
 
 
 def first_parent():
@@ -702,6 +702,10 @@ def first_parent():
            "parent replacement lacks two saved sends")
     first_request = native_wait_request(waits[0], row["agent_id"], slot[0]["sender"], initial)
     replacement_request = native_wait_request(waits[1], row["agent_id"], slot[0]["sender"], replacement)
+    save("first-parent-replacement-receipt", {"tool_event_ids": [first["event_id"], second["event_id"]],
+                                              "waiting_event_ids": [waits[0]["event_id"], waits[1]["event_id"]],
+                                              "request_ids": [first_request, replacement_request],
+                                              "native_results": [initial, replacement]})
     demand(first_request == prior["request_id"] and first_request != replacement_request,
            "native replacement did not use two exact RequestIDs")
     demand(not [e for e in ev if e["kind"] == "message.delivered" and e["payload"].get("text") == TEXT["p3"]],
