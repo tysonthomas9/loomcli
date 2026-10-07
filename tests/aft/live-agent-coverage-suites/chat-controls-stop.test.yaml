@@ -1,0 +1,66 @@
+# Bare Chat Stop uses the production Agent API interrupt on a real native ask.
+# The actor is API-created; Stop and the next Send are genuine Chat UI actions.
+suite: live-chat-controls-stop
+classification: { area: agents, feature: native-ask-bare-stop, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+tests:
+  - name: OC1 bare Chat Stop loses the native ask without executing it and permits a real next turn
+    intent: A person stops a real pending OpenCode permission ask directly in Chat, sees the stopped turn survive reload, and reuses the same agent.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop.py" create'
+        intent: "Create an owned production ask-policy Agent API actor with the real model"
+      - run: 'agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/chat-controls/stop.id")"'
+        intent: "Open the actor's actual Agent API Chat"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show the owned Chat route"
+      - run: 'bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop-effect.sh"'
+        intent: "Require the run-owned proposed command marker to be absent before the turn"
+      - fill:
+          label: Message
+          value: "BARE_STOP_${RUN_ID}: use your shell tool to run exactly printf 'STOP_EFFECT_${RUN_ID}\\n' > /tmp/cov-controls-stop-effect-${RUN_ID}, then report its output."
+        intent: "Trigger the real pr-review-interactive bash ask for an exact harmless owned command"
+      - press: Enter
+        intent: "Send the real native-tool request"
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('cov-controls-stop-effect-${RUN_ID}') &&
+            !!document.querySelector('form button[title="Stop the running turn"]')
+        budget: 180000
+        intent: "Show the actual native permission ask while the composer still has Stop"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop.py" pending'
+        intent: "Save the exact native ask and turn while no answer or loss exists"
+      - click: { selector: 'form button[title="Stop the running turn"]' }
+        intent: "Click Chat Stop directly, without Decline, Cancel or Respond"
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=ask-card]') &&
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('Turn cancelled') &&
+            !document.querySelector('form button[title="Stop the running turn"]')
+        budget: 180000
+        intent: "Show that the native ask and running turn have ended"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop.py" stopped && bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop-effect.sh"'
+        intent: "Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker"
+      - reload: true
+        intent: "Reload the real Chat after the bare Stop"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=chat-transcript]') &&
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('Turn cancelled') &&
+            !document.querySelector('[data-testid=ask-card]') &&
+            !document.querySelector('form button[title="Stop the running turn"]')
+        intent: "Show preserved Chat with no stale pending ask or running turn"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop.py" reloaded && bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop-effect.sh"'
+        intent: "Compare the full saved ask history after reload and confirm the proposed effect remains absent"
+      - fill: { label: Message, value: "STOP_RECOVER_${RUN_ID}: use your read tool to read README.md and cite its test command." }
+        intent: "Ask a new real repository question on the same agent"
+      - press: Enter
+        intent: "Send a fresh native turn after Stop"
+      - wait:
+          fn: >-
+            (() => { const c=document.querySelector('[data-testid=chat-transcript]');
+              return [...(c?.querySelectorAll('li[data-kind=agent]') || [])].some(r => r.textContent.includes('README.md')) &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show a completed real answer while the composer is reusable"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop.py" reused && bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop-effect.sh" && bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-stop-native.sh"'
+        intent: "Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model"

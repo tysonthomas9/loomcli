@@ -73,6 +73,11 @@ if (batchName === 'default') {
       model_required: true, model_proof: 'api_post_create' }],
   reviewers: [{ name: 'coverage-rs-edges-large-${RUN_ID}', suite: 'live-receipts-stream-edges' }],
   children: [] } };
+  const chatStop = { files: ['chat-controls-stop.test.yaml'], expected_cases: [
+    { suite: 'live-chat-controls-stop',
+      name: 'OC1 bare Chat Stop loses the native ask without executing it and permits a real next turn' }],
+  agents: { leads: [], reviewers: [
+    { name: 'cov-controls-stop-${RUN_ID}', suite: 'live-chat-controls-stop' }], children: [] } };
   if (!(exactKeys(batch, ['files', 'agents']) || exactKeys(batch, ['files', 'agents', 'expected_cases'])) ||
       !Array.isArray(batch.files) ||
       (batchName === 'lifecycle-delete' && JSON.stringify(batch) !== JSON.stringify(lifecycleDelete)) ||
@@ -81,6 +86,7 @@ if (batchName === 'default') {
         JSON.stringify(batch.agents) !== JSON.stringify(queueAgents))) ||
       (batchName === 'chat-visual-skip' && JSON.stringify(batch) !== JSON.stringify(visualSkip)) ||
       (batchName === 'receipts-edges' && JSON.stringify(batch) !== JSON.stringify(receiptsEdges)) ||
+      (batchName === 'chat-stop' && JSON.stringify(batch) !== JSON.stringify(chatStop)) ||
       (batchName === 'tool-policy' && (!Array.isArray(batch.expected_cases) ||
         batch.expected_cases.length !== 3 || batch.files.join(',') !== 'tool-policy.test.yaml')) ||
       (batch.expected_cases !== undefined && (!Array.isArray(batch.expected_cases) || !batch.expected_cases.length ||
