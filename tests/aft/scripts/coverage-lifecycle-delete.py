@@ -171,6 +171,11 @@ def editor_bytes_match(actual, expected):
     assert actual == expected, f"CodeMirror buffer differs from intended bytes ({len(actual)} vs {len(expected)})"
 
 
+def select_all_key(platform):
+    assert isinstance(platform, str) and platform
+    return "Meta+a" if "Mac" in platform else "Control+a"
+
+
 def browser_json(expression):
     raw = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"],
                                    "eval", expression], text=True).strip()
@@ -221,6 +226,7 @@ def check_editor_state(state, expected=None, focused=False, selected=False):
         assert state["focused"] is True, "CodeMirror did not receive keyboard focus"
     if selected:
         assert state["selection_inside"] is True and state["selected_text"], "CodeMirror text was not selected"
+        editor_bytes_match(state["selected_text"], state["text"])
     if expected is not None:
         editor_bytes_match(state["text"], expected)
 
@@ -234,7 +240,8 @@ def type_editor(stage):
         subprocess.run(["agent-browser", "--session", session, *args], check=True,
                        stdout=subprocess.DEVNULL)
     check_editor_state(editor_state(), focused=True)
-    subprocess.run(["agent-browser", "--session", session, "press", "Control+a"],
+    platform = browser_json("JSON.stringify({platform:navigator.platform})")["platform"]
+    subprocess.run(["agent-browser", "--session", session, "press", select_all_key(platform)],
                    check=True, stdout=subprocess.DEVNULL)
     check_editor_state(editor_state(), focused=True, selected=True)
     subprocess.run(["agent-browser", "--session", session, "press", "Backspace"],
@@ -386,20 +393,21 @@ def self_test():
                           "ui_url": ui_url, "api_url": api_url, "ports": [8281, 8282, 8283]}}
     assert checked_file_origin(manifest, ui_url, api_url, head) == ui_url
     editor_bytes_match("original\nmarker\n", "original\nmarker\n")
+    assert select_all_key("MacIntel") == "Meta+a" and select_all_key("Linux x86_64") == "Control+a"
     owned_scope = {"path": "/ws/LOCALMODE/chat/agt_owned", "search": "?tab=files", "panels": 1,
                    "lenses": 1, "selected": "true", "editors": 1, "focused": True,
-                   "selection_inside": True, "selected_text": "original", "text": ""}
+                   "selection_inside": True, "selected_text": "original", "text": "original"}
     original_target = load
     globals()["load"] = lambda _label: {"agent_id": "agt_owned"}
     try:
-        check_editor_state(owned_scope, expected="", focused=True)
+        check_editor_state(owned_scope, expected="original", focused=True)
         check_editor_state(owned_scope, focused=True, selected=True)
         for change in ({"path": "/ws/LOCALMODE/chat/agt_foreign"}, {"search": "?tab=git"},
                        {"panels": 2}, {"lenses": 2}, {"selected": "false"},
                        {"editors": 2}, {"focused": False}, {"selection_inside": False},
-                       {"selected_text": ""}, {"text": "not empty"}):
+                       {"selected_text": ""}, {"selected_text": "partial"}, {"text": ""}):
             try:
-                check_editor_state({**owned_scope, **change}, expected="", focused=True, selected=True)
+                check_editor_state({**owned_scope, **change}, expected="original", focused=True, selected=True)
             except AssertionError:
                 pass
             else:
@@ -407,6 +415,7 @@ def self_test():
     finally:
         globals()["load"] = original_target
     for action in (
+        lambda: select_all_key(""),
         lambda: check_unsaved(204, body, "/owned", f1),
         lambda: check_unsaved(409, {**body, "fingerprint": f1}, "/owned", f1),
         lambda: check_unsaved(409, {**body, "code": "conflict"}, "/owned", f1),
