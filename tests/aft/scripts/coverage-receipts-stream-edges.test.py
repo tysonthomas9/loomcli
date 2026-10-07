@@ -43,6 +43,101 @@ class Response:
 
 
 class EdgeOracles(unittest.TestCase):
+    @staticmethod
+    def approval_fixture(edge):
+        a = {"agent_id": "agt_owned", "preset": "pr-review-interactive",
+             "state": "waiting", "waiting_on": "approval", "running_turn_id": "turn_owned",
+             "open_asks": [{"id": "ask_owned", "type": "approval", "about": "PRIVATE_COMMAND"}],
+             "waiting_messages": []}
+        evs = [{"kind": "ask.opened", "event_id": "evt_ask", "turn_id": "turn_owned",
+                "payload": {"askId": "ask_owned", "text": "PRIVATE_COMMAND"}}]
+        return a, evs
+
+    def test_parsed_interrupt_case_selects_exact_lead_model_before_claim(self):
+        import yaml
+
+        suite = yaml.safe_load((SCRIPT.parents[1] / "live-agent-coverage-suites/receipts-stream-edges.test.yaml").read_text())
+        self.assertEqual(suite["suite"], "live-receipts-stream-edges")
+        self.assertEqual(len(suite["tests"]), 3)
+        run = next(step["run"] for step in suite["tests"][0]["steps"] if "claim-interrupt" in step.get("run", ""))
+        self.assertLess(run.index('"$AFT_SELECT_AGENT_MODEL" "coverage-rs-edges-interrupt-${RUN_ID}"'),
+                        run.index("claim-interrupt"))
+
+    def test_real_waiting_approval_baseline_is_strict_and_saves_bounded_evidence(self):
+        for invalid in ("active", "wrong-waiting-on", "missing-ask", "wrong-type", "stale-turn",
+                        "wrong-ask-id", "duplicate-ask", "missing-event"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                edge = module()
+                edge.OUT = Path(directory)
+                a, evs = self.approval_fixture(edge)
+                if invalid == "active":
+                    a["state"] = "active"
+                elif invalid == "wrong-waiting-on":
+                    a["waiting_on"] = "input"
+                elif invalid == "missing-ask":
+                    a["open_asks"] = []
+                elif invalid == "wrong-type":
+                    a["open_asks"][0]["type"] = "question"
+                elif invalid == "stale-turn":
+                    evs[0]["turn_id"] = "turn_stale"
+                elif invalid == "wrong-ask-id":
+                    evs[0]["payload"]["askId"] = "ask_foreign"
+                elif invalid == "duplicate-ask":
+                    evs.append({**evs[0], "event_id": "evt_duplicate"})
+                else:
+                    evs.clear()
+                with mock.patch.object(edge, "agent", return_value=a), mock.patch.object(edge, "events", return_value=evs):
+                    with self.assertRaises(AssertionError):
+                        edge.ask_baseline()
+                saved = edge.load("large", "ask-precondition")
+                self.assertEqual(saved["agent_id"], "agt_owned")
+                self.assertEqual(saved["state"], a["state"])
+                self.assertEqual(saved["waiting_on"], a["waiting_on"])
+                self.assertEqual(saved["event_ids"], [e["event_id"] for e in evs])
+                self.assertNotIn("PRIVATE_COMMAND", (edge.OUT / "large-ask-precondition.json").read_text())
+                self.assertFalse((edge.OUT / "large-ask.json").exists())
+
+        with tempfile.TemporaryDirectory() as directory:
+            edge = module()
+            edge.OUT = Path(directory)
+            a, evs = self.approval_fixture(edge)
+            with mock.patch.object(edge, "agent", return_value=a), mock.patch.object(edge, "events", return_value=evs):
+                edge.ask_baseline()
+            self.assertEqual(edge.load("large", "ask")["ask_id"], "ask_owned")
+            self.assertEqual(edge.load("large", "ask")["turn_id"], "turn_owned")
+
+    def test_large_send_rechecks_same_waiting_approval_and_retains_failure_snapshot(self):
+        for invalid in (None, "active", "wrong-waiting-on", "changed-turn", "changed-ask", "duplicate-ask"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as directory:
+                edge = module()
+                edge.OUT = Path(directory)
+                edge.save("large", "ask", {"turn_id": "turn_owned", "ask_id": "ask_owned"})
+                a, evs = self.approval_fixture(edge)
+                a["waiting_messages"] = [{"text": edge.text_for("hundred-k")}]
+                if invalid == "active":
+                    a["state"] = "active"
+                elif invalid == "wrong-waiting-on":
+                    a["waiting_on"] = "input"
+                elif invalid == "changed-turn":
+                    a["running_turn_id"] = evs[0]["turn_id"] = "turn_other"
+                elif invalid == "changed-ask":
+                    a["open_asks"][0]["id"] = evs[0]["payload"]["askId"] = "ask_other"
+                elif invalid == "duplicate-ask":
+                    evs.append({**evs[0], "event_id": "evt_duplicate"})
+                receipt = {"message_id": "msg_owned", "state": "waiting", "replaced": False}
+                with mock.patch.object(edge, "send", return_value=({"text": a["waiting_messages"][0]["text"]}, receipt)), \
+                     mock.patch.object(edge, "agent", return_value=a), mock.patch.object(edge, "events", return_value=evs):
+                    if invalid is None:
+                        edge.large_send("hundred-k")
+                    else:
+                        with self.assertRaises(AssertionError):
+                            edge.large_send("hundred-k")
+                saved = edge.load("large", "hundred-k-precondition")
+                self.assertEqual(saved["running_turn_id"], a["running_turn_id"])
+                self.assertEqual(saved["ask_ids"], [a["open_asks"][0]["id"]])
+                self.assertNotIn("PRIVATE_COMMAND", (edge.OUT / "large-hundred-k-precondition.json").read_text())
+                self.assertEqual((edge.OUT / "large-hundred-k.json").exists(), invalid is None)
+
     def interrupt_fixture(self, edge, directory):
         edge.OUT = Path(directory)
         (edge.OUT / "interrupt.id").write_text("agt_owned\n")

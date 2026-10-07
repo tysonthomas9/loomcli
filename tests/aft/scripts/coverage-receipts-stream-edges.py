@@ -282,13 +282,41 @@ def interrupt_next():
     save("interrupt", "next", {"event_id": row["event_id"], "completed_event_id": completed["event_id"], "event_ids": after})
 
 
-def ask_baseline():
-    a = agent("large")
-    assert a["preset"] == "pr-review-interactive" and a["state"] == "active"
-    assert a["running_turn_id"] and len(a["open_asks"]) == 1 and not a["waiting_messages"]
-    evs = events("large")
+def save_ask_precondition(stage, a, evs):
+    opened = [e for e in evs if e["kind"] == "ask.opened"]
+    save("large", stage, {
+        "agent_id": a.get("agent_id"), "state": a.get("state"),
+        "waiting_on": a.get("waiting_on"), "running_turn_id": a.get("running_turn_id"),
+        "ask_ids": [ask.get("id") for ask in a.get("open_asks", [])][:20],
+        "ask_types": [ask.get("type") for ask in a.get("open_asks", [])][:20],
+        "ask_count": len(a.get("open_asks", [])),
+        "waiting_message_count": len(a.get("waiting_messages", [])),
+        "event_ids": [e["event_id"] for e in evs[-100:]], "event_count": len(evs),
+        "ask_opened": [{"event_id": e["event_id"], "ask_id": e["payload"].get("askId"),
+                        "turn_id": e["turn_id"]} for e in opened[-20:]],
+        "ask_opened_count": len(opened),
+    })
+
+
+def require_open_approval(a, evs, expected=None):
+    assert a["state"] == "waiting" and a["waiting_on"] == "approval", "native approval did not hold the turn"
+    assert a["running_turn_id"] and len(a["open_asks"]) == 1, "exactly one native ask must remain open"
     ask = a["open_asks"][0]
-    assert len([e for e in evs if e["kind"] == "ask.opened" and e["payload"].get("askId") == ask["id"]]) == 1
+    assert ask["id"] and ask["type"] == "approval", "the pending ask is not an approval"
+    opened = [e for e in evs if e["kind"] == "ask.opened" and e["turn_id"] == a["running_turn_id"]]
+    assert len(opened) == 1 and opened[0]["payload"].get("askId") == ask["id"], \
+        "one saved ask.opened must match the same running turn and native ask"
+    if expected is not None:
+        assert a["running_turn_id"] == expected["turn_id"] and ask["id"] == expected["ask_id"], \
+            "the saved approval changed while a message was queued"
+    return ask
+
+
+def ask_baseline():
+    a, evs = agent("large"), events("large")
+    save_ask_precondition("ask-precondition", a, evs)
+    assert a["preset"] == "pr-review-interactive" and not a["waiting_messages"]
+    ask = require_open_approval(a, evs)
     save("large", "ask", {"ask_id": ask["id"], "turn_id": a["running_turn_id"],
                            "delivered_ids": [e["event_id"] for e in evs if e["kind"] == "message.delivered"],
                            "actor": "public user API queue while genuine OpenCode approval is pending"})
@@ -314,14 +342,14 @@ def large_send(stage):
     text = text_for(stage)
     key = f"rs-edges-{RUN}-{stage}"
     body, receipt = send("large", text, key)
-    a = agent("large")
-    assert a["state"] == "active" and a["running_turn_id"] == load("large", "ask")["turn_id"]
-    assert len(a["open_asks"]) == 1 and a["open_asks"][0]["id"] == load("large", "ask")["ask_id"]
+    a, evs = agent("large"), events("large")
+    save_ask_precondition(f"{stage}-precondition", a, evs)
+    require_open_approval(a, evs, load("large", "ask"))
     assert len(a["waiting_messages"]) == 1 and a["waiting_messages"][0]["text"].encode("utf-8") == text.encode("utf-8")
     assert receipt["state"] == "waiting" and receipt["replaced"] is (stage == "near-cap")
     save("large", stage, {"key": key, "receipt": receipt, "text_bytes": len(text.encode("utf-8")),
                            "json_body_bytes": len(packed(body)), "sha256": hashlib.sha256(text.encode()).hexdigest(),
-                           "event_ids": event_ids("large")})
+                           "event_ids": [e["event_id"] for e in evs]})
 
 
 def large_over():

@@ -27,7 +27,7 @@ tests:
         intent: "Show the canonical owned source repository selected"
       - click: { testid: create-agent-submit }
       - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
-      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" claim-interrupt && "$AFT_SELECT_AGENT_MODEL"'
+      - run: '"$AFT_SELECT_AGENT_MODEL" "coverage-rs-edges-interrupt-${RUN_ID}" && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-edges.py" claim-interrupt'
         intent: "Bind this exact UI Lead and visibly select the real model"
       - fill: { label: Message, value: "Read README.md, BACKLOG.md, package.json, server.js, app.js and app.test.js with tools. Trace the message handling path with file citations. Keep files unchanged and do not run package scripts." }
         intent: "Start a finite real repository inspection"
