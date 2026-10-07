@@ -683,6 +683,10 @@ def first_parent():
     first = settled_lead_send("p3", "QUEUE-P3-")
     second = settled_lead_send("p3b", "QUEUE-P3B-")
     initial, replacement = replacement_result(first, second)
+    receipt = {"stage": "parsed_native; waiting linkage pending",
+               "tool_event_ids": [first["event_id"], second["event_id"]],
+               "native_results": [initial, replacement]}
+    save("first-parent-replacement-receipt", receipt)
     prior = load("first-parent-initial")
     demand(prior["tool_event_id"] == first["event_id"] and prior["native_result"] == initial,
            "initial native result changed before replacement")
@@ -702,14 +706,13 @@ def first_parent():
            "parent replacement lacks two saved sends")
     first_request = native_wait_request(waits[0], row["agent_id"], slot[0]["sender"], initial)
     replacement_request = native_wait_request(waits[1], row["agent_id"], slot[0]["sender"], replacement)
-    save("first-parent-replacement-receipt", {"tool_event_ids": [first["event_id"], second["event_id"]],
-                                              "waiting_event_ids": [waits[0]["event_id"], waits[1]["event_id"]],
-                                              "request_ids": [first_request, replacement_request],
-                                              "native_results": [initial, replacement]})
     demand(first_request == prior["request_id"] and first_request != replacement_request,
            "native replacement did not use two exact RequestIDs")
     demand(not [e for e in ev if e["kind"] == "message.delivered" and e["payload"].get("text") == TEXT["p3"]],
            "superseded native parent text was delivered")
+    save("first-parent-replacement-receipt", {**receipt, "stage": "saved waiting linkage verified",
+                                              "waiting_event_ids": [waits[0]["event_id"], waits[1]["event_id"]],
+                                              "request_ids": [first_request, replacement_request]})
     save("first-parent-proof", {"event_ids": [e["event_id"] for e in waits], "seq": waits[1]["seq"],
                                 "turn": row["running_turn_id"], "native_result": replacement,
                                 "request_ids": [first_request, replacement_request],
