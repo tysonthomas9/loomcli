@@ -320,6 +320,8 @@ class ChildProofPredicates(unittest.TestCase):
                            ({**good, "ids": [self.a]}, "attempted"),
                            ({**good, "ids": [self.a, self.b, self.b]}, "attempted"),
                            ({**good, "path": "/ws/LOCALMODE/home"}, "attempted"),
+                           ({**good, "path": f"/ws/FOREIGN/chat/{self.b}"}, "attempted"),
+                           ({**good, "path": f"/prefix/ws/LOCALMODE/chat/{self.b}"}, "attempted"),
                            ({**good, "nav": False}, "attempted")):
             with self.subTest(bad=bad), self.assertRaises(AssertionError):
                 module.sidebar_order_ok(bad, self.a, self.b, stage)
