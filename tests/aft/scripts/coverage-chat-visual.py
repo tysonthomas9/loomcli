@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -65,8 +66,8 @@ def browser(*args, timeout=None):
     ).strip()
 
 
-def evaluate(js):
-    raw = browser("eval", "-b", base64.b64encode(js.encode()).decode())
+def evaluate(js, timeout=None):
+    raw = browser("eval", "-b", base64.b64encode(js.encode()).decode(), timeout=timeout)
     return json.loads(raw)
 
 
@@ -148,25 +149,74 @@ def long_text():
     return f"VISUAL_{RUN} " + prefix + "\n" + ("The narrow chat bubble keeps this exact harmless sentence. " * 160)
 
 
+INPUT_STATE_JS = """(() => { const t=document.querySelector('textarea[aria-label=Message]');
+  return {route:location.pathname, focused:document.activeElement===t,
+    length:t?.value.length??null, selectionStart:t?.selectionStart??null,
+    selectionEnd:t?.selectionEnd??null, value:t?.value??null}; })()"""
+
+
+def input_progress(stage, status, state=None, expected_length=None):
+    state = state or {}
+    write("input-long-progress.json", {"stage": stage, "status": status,
+          "route": state.get("route"), "focused": state.get("focused"),
+          "current_length": state.get("length"), "expected_length": expected_length,
+          "selection_start": state.get("selectionStart"), "selection_end": state.get("selectionEnd")})
+
+
+def input_timeout(stage, deadline, state, expected_length):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        input_progress(stage, "total-budget-exhausted", state, expected_length)
+        raise AssertionError(f"long input exceeded its 140s command budget at {stage}")
+    return min(20, remaining)
+
+
+def input_action(stage, state, expected_length, deadline, *args):
+    input_progress(stage, "action-started", state, expected_length)
+    try:
+        browser(*args, timeout=input_timeout(stage, deadline, state, expected_length))
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+        input_progress(stage, type(exc).__name__, state, expected_length)
+        raise AssertionError(f"real composer action stalled or failed at {stage}") from None
+    input_progress(stage, "action-returned", state, expected_length)
+
+
+def input_readback(stage, previous, expected_length, deadline):
+    input_progress(stage, "readback-started", previous, expected_length)
+    try:
+        state = evaluate(INPUT_STATE_JS, timeout=input_timeout(stage, deadline, previous, expected_length))
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+        input_progress(stage, type(exc).__name__, previous, expected_length)
+        raise AssertionError(f"real composer readback stalled or failed at {stage}") from None
+    input_progress(stage, "readback-returned", state, expected_length)
+    assert state["route"] == f"/ws/{WS}/chat/{agent_id('input')}", "long input changed Chat route"
+    assert isinstance(state["value"], str) and state["length"] == len(state["value"]), "real composer textarea missing"
+    return state
+
+
 def fill_long():
     source = long_text()
     assert len(source) > 5000
-    browser("click", "textarea[aria-label=Message]")
-    assert evaluate("document.activeElement===document.querySelector('textarea[aria-label=Message]')"), \
-        "long input textarea did not gain keyboard focus"
-    browser("press", "Meta+A")
-    browser("press", "Backspace")
-    remaining = evaluate("document.querySelector('textarea[aria-label=Message]')?.value")
-    assert remaining == "", \
-        f"multiline draft was not cleared through the real composer (remaining length: {len(remaining) if isinstance(remaining, str) else 'missing'})"
+    deadline = time.monotonic() + 140
+    state = input_readback("initial", None, None, deadline)
+    input_action("focus", state, None, deadline, "click", "textarea[aria-label=Message]")
+    state = input_readback("after-focus", state, None, deadline)
+    assert state["focused"], "long input textarea did not gain keyboard focus"
+    input_action("select-all", state, state["length"], deadline, "press", "Meta+A")
+    state = input_readback("after-select-all", state, state["length"], deadline)
+    assert state["focused"] and state["selectionStart"] == 0 and state["selectionEnd"] == state["length"], \
+        "real composer did not select the complete multiline draft"
+    input_action("delete", state, 0, deadline, "press", "Backspace")
+    state = input_readback("after-delete", state, 0, deadline)
+    assert state["value"] == "", \
+        f"multiline draft was not cleared through the real composer (remaining length: {state['length']})"
     previous = ""
     for index, prefix in enumerate(long_text_prefixes(source)):
-        try:
-            browser("keyboard", "inserttext", prefix[len(previous):], timeout=20)
-        except subprocess.TimeoutExpired as exc:
-            raise AssertionError(f"real keyboard insertion stalled at chunk {index + 1}") from exc
-        assert evaluate("document.querySelector('textarea[aria-label=Message]')?.value") == prefix, \
-            f"real keyboard insertion changed/truncated the long input at chunk {index + 1}"
+        input_action(f"insert-{index + 1}", state, len(prefix), deadline,
+                     "keyboard", "inserttext", prefix[len(previous):])
+        state = input_readback(f"after-insert-{index + 1}", state, len(prefix), deadline)
+        assert state["value"] == prefix, \
+            f"real keyboard insertion changed/truncated long input at chunk {index + 1} (length {state['length']} != {len(prefix)})"
         previous = prefix
     write("input-source.json", {"text": source, "length": len(source)})
 
@@ -497,8 +547,12 @@ MOTION_JS = r"""(() => {
   p.timer=setInterval(()=>{ if(p.stopped){clearInterval(p.timer);return;}
     const s=state(); p.samples.push({at:s.at,chars:s.text.length,caret:s.caret,working:s.working,gap:s.gap,stop:s.stop});
   },100);
+  const rect=r=>r?{x:r.x,y:r.y,width:r.width,height:r.height}:null;
   try { p.observer=new PerformanceObserver(list=>{ for(const e of list.getEntries())
-    if(!e.hadRecentInput) p.shifts.push({at:Date.now(),value:e.value}); });
+    if(!e.hadRecentInput) p.shifts.push({at:Date.now(),value:e.value,
+      sources:(e.sources||[]).slice(0,4).map(s=>({tag:s.node?.tagName||null,
+        testid:s.node?.closest?.('[data-testid]')?.getAttribute('data-testid')||null,
+        previous:rect(s.previousRect),current:rect(s.currentRect)}))}); });
     p.observer.observe({type:'layout-shift', buffered:false}); }
   catch(e) {p.observerError=String(e);}
   window.__aftChatVisual=p; requestAnimationFrame(frame); return 'armed';
