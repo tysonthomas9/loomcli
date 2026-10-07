@@ -145,3 +145,60 @@ if (policyCandidate) {
     rmSync(policyRoot, { recursive: true, force: true });
   }
 }
+
+const queueCandidate = process.argv[4];
+if (queueCandidate) {
+  const queueRoot = mkdtempSync('/private/tmp/aft-queue-candidate-');
+  try {
+    const suites = join(queueRoot, 'live-agent-coverage-suites');
+    mkdirSync(suites);
+    const queueFile = join(suites, 'children-queue.test.yaml');
+    cpSync(join(testsDir, 'agent-flow-batches.json'), join(queueRoot, 'agent-flow-batches.json'));
+    cpSync(join(queueCandidate, 'children-queue.test.yaml'), queueFile);
+    const runQueue = () => JSON.parse(execFileSync(process.execPath,
+      [selector, queueRoot, loader, 'children-queue'],
+      { env: { ...env, AFT_TESTS_DIR: queueRoot, AFT_WORK_DIR: queueRoot }, encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'] }));
+    const selected = runQueue();
+    assert.equal(selected.count, 1);
+    assert.deepEqual(selected.cases, [{ suite: 'coverage-children-queue',
+      name: 'live task child keeps user and parent FIFO slots then hands a later user interrupt first' }]);
+    assert.deepEqual(selected.agents, {
+      leads: [{ name: 'cov-child-queue-lead-${RUN_ID}', suite: 'coverage-children-queue', model_required: true }],
+      children: [{ name: 'cov-child-queue-task-${RUN_ID}', parent: 'cov-child-queue-lead-${RUN_ID}',
+        suite: 'coverage-children-queue' }] });
+    const suiteSource = readFileSync(queueFile, 'utf8');
+    writeFileSync(queueFile, suiteSource.replace('hands a later user interrupt first', 'hands a foreign result first'));
+    assert.throws(runQueue, 'changed authored case must be refused');
+    writeFileSync(queueFile, suiteSource.replace('tests:\n',
+      'tests:\n  - name: extra paid case\n    steps:\n      - open: /ws/${AFT_WS}/agents\n'));
+    assert.throws(runQueue, 'extra paid case must be refused');
+    writeFileSync(queueFile, suiteSource);
+    const catalogSource = readFileSync(join(queueRoot, 'agent-flow-batches.json'), 'utf8');
+    const catalogObject = JSON.parse(catalogSource);
+    catalogObject.batches['children-queue'].agents.children[0].parent = 'cov-child-foreign-${RUN_ID}';
+    writeFileSync(join(queueRoot, 'agent-flow-batches.json'), JSON.stringify(catalogObject));
+    assert.throws(runQueue, 'foreign child parent must be refused');
+    catalogObject.batches['children-queue'].agents.children[0].parent = 'cov-child-queue-lead-${RUN_ID}';
+    catalogObject.batches['children-queue'].agents.leads[0].name = 'cov-child-foreign-${RUN_ID}';
+    writeFileSync(join(queueRoot, 'agent-flow-batches.json'), JSON.stringify(catalogObject));
+    assert.throws(runQueue, 'foreign Lead must be refused');
+    catalogObject.batches['children-queue'].agents.leads[0].name = 'cov-child-queue-lead-${RUN_ID}';
+    catalogObject.batches['children-queue'].agents.leads[0].model_required = false;
+    writeFileSync(join(queueRoot, 'agent-flow-batches.json'), JSON.stringify(catalogObject));
+    assert.throws(runQueue, 'missing real-model receipt requirement must be refused');
+    writeFileSync(join(queueRoot, 'agent-flow-batches.json'), catalogSource);
+    writeFileSync(join(queueRoot, 'manifest.json'), JSON.stringify({ selection: selected }));
+    const expanded = JSON.parse(execFileSync('bash',
+      ['-c', 'source "$1"; agent_flows_declared_agents', 'bash', ownership],
+      { env: { ...env, AFT_WORK_DIR: queueRoot, RUN_ID: 'af12345678' }, encoding: 'utf8' }));
+    assert.deepEqual(expanded, { leads: [{ name: 'cov-child-queue-lead-af12345678',
+      suite: 'coverage-children-queue', model_required: true, model_exception: false,
+      model_proof: 'ui_selection' }], reviewers: [],
+    children: [{ name: 'cov-child-queue-task-af12345678', parent: 'cov-child-queue-lead-af12345678',
+      suite: 'coverage-children-queue' }] });
+    console.log('agent-flow queue: authored case and exact Lead/child ownership selected; mutations refused');
+  } finally {
+    rmSync(queueRoot, { recursive: true, force: true });
+  }
+}

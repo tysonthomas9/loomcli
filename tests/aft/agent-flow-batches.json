@@ -44,6 +44,20 @@
         ]
       }
     },
+    "children-queue": {
+      "files": ["children-queue.test.yaml"],
+      "expected_cases": [
+        { "suite": "coverage-children-queue", "name": "live task child keeps user and parent FIFO slots then hands a later user interrupt first" }
+      ],
+      "agents": {
+        "leads": [
+          { "name": "cov-child-queue-lead-${RUN_ID}", "suite": "coverage-children-queue", "model_required": true }
+        ],
+        "children": [
+          { "name": "cov-child-queue-task-${RUN_ID}", "parent": "cov-child-queue-lead-${RUN_ID}", "suite": "coverage-children-queue" }
+        ]
+      }
+    },
     "chat-visual": {
       "files": ["chat-visual.test.yaml"],
       "agents": {
