@@ -15,6 +15,7 @@ interface Mock {
   agent: Record<string, unknown>;
   events: ReturnType<typeof ev>[];
   writes: { method: string; url: string; key: string | null; body: unknown }[];
+  reads: number;
 }
 
 let seq = 0;
@@ -72,7 +73,10 @@ async function open(page: Page, m: Mock) {
   await page.route(`${BASE}/v1/agents/a1/events*`, (r) =>
     json(r, { events: m.events, snapshot_seq: seq, next: seq, more: false }),
   );
-  await page.route(`${BASE}/v1/agents/a1`, (r) => json(r, m.agent));
+  await page.route(`${BASE}/v1/agents/a1`, (r) => {
+    m.reads++;
+    return json(r, m.agent);
+  });
   await page.route(
     `${BASE}/v1/agents/a1/{messages,messages/waiting,asks/*}`,
     (r) => {
@@ -100,6 +104,7 @@ const mock = (over: Partial<Mock> = {}): Mock => ({
   agent: agent(),
   events: [],
   writes: [],
+  reads: 0,
   ...over,
 });
 
@@ -442,6 +447,300 @@ test("streaming reveals smoothly with no layout shift and the end kept in view",
   expect(r.gaps.length).toBeGreaterThan(10);
   expect(Math.max(...r.gaps)).toBeLessThanOrEqual(0);
   expect(r.cls).toBe(0);
+});
+
+test("streamed wide table keeps columns and controls stable until completion", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(60_000);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: "http://localhost:3000",
+  });
+  const history = Array.from({ length: 30 }, (_, i) =>
+    ev("item.completed", { itemKind: "message", text: `Earlier reply ${i}.` }),
+  );
+  const m = mock({
+    agent: agent({ state: "active", running_turn_id: "t1" }),
+    events: history,
+  });
+  await open(page, m);
+  await expect(transcript(page).getByText("Earlier reply 29.")).toBeVisible();
+  await expect(page.getByText("Unavailable", { exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => matchMedia("(prefers-reduced-motion: reduce)").matches,
+    ),
+  ).toBe(false);
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __visualCls: {
+        value: number;
+        sources: {
+          tag: string;
+          className: string;
+          previous: number[];
+          current: number[];
+        }[];
+      }[];
+      __visualGaps: number[];
+      __visualWords: number[];
+      __visualObserver: PerformanceObserver;
+      __visualDrain: () => void;
+    };
+    w.__visualCls = [];
+    w.__visualGaps = [];
+    w.__visualWords = [];
+    const collect = (entries: PerformanceEntry[]) => {
+      for (const entry of entries as (PerformanceEntry & {
+        value: number;
+        hadRecentInput: boolean;
+        sources?: {
+          node: Node | null;
+          previousRect: DOMRectReadOnly;
+          currentRect: DOMRectReadOnly;
+        }[];
+      })[]) {
+        if (entry.hadRecentInput) continue;
+        w.__visualCls.push({
+          value: entry.value,
+          sources: (entry.sources ?? []).map((s) => ({
+            tag: s.node instanceof Element ? s.node.tagName : "unknown",
+            className:
+              s.node instanceof Element && typeof s.node.className === "string"
+                ? s.node.className
+                : "",
+            previous: [
+              s.previousRect.x,
+              s.previousRect.y,
+              s.previousRect.width,
+              s.previousRect.height,
+            ],
+            current: [
+              s.currentRect.x,
+              s.currentRect.y,
+              s.currentRect.width,
+              s.currentRect.height,
+            ],
+          })),
+        });
+      }
+    };
+    w.__visualObserver = new PerformanceObserver((list) =>
+      collect(list.getEntries()),
+    );
+    w.__visualDrain = () => collect(w.__visualObserver.takeRecords());
+    w.__visualObserver.observe({ type: "layout-shift" });
+  });
+  const lead =
+    "This answer checks the repository behavior through a concrete example. ".repeat(
+      12,
+    );
+  const table =
+    "\n\n| Component | Observed behavior | Evidence | Owner | Receipt | Outcome |\n| --- | --- | --- | --- | --- | --- |\n" +
+    Array.from(
+      { length: 8 },
+      (_, i) =>
+        `| Row ${i + 1} | A saved event updates the visible transcript and retains the full source | Event ${i + 1} | Agent | Saved ${i + 1} | Complete |\n`,
+    ).join("");
+  const list =
+    "\n\n" +
+    Array.from(
+      { length: 12 },
+      (_, i) =>
+        `- Check ${i + 1} confirms the layout remains usable during a genuine stream.\n`,
+    ).join("");
+  const answer = lead + table + list;
+  for (let end = 48; end < answer.length + 48; end += 48) {
+    await push(
+      page,
+      m,
+      ev(
+        "delta",
+        {
+          itemId: "m1",
+          itemKind: "message",
+          text: answer.slice(Math.max(0, end - 48), end),
+        },
+        true,
+      ),
+    );
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        __visualGaps: number[];
+        __visualWords: number[];
+      };
+      const el = document.querySelector('[data-testid="chat-transcript"]')!;
+      w.__visualGaps.push(el.scrollHeight - el.scrollTop - el.clientHeight);
+      const md = el.querySelectorAll('[data-testid="chat-markdown"]');
+      w.__visualWords.push(
+        md.length
+          ? (md[md.length - 1].textContent?.trim().split(/\s+/).length ?? 0)
+          : 0,
+      );
+    });
+  }
+  await expect(
+    transcript(page).getByTestId("chat-markdown").last(),
+  ).toContainText("Check 12");
+  const tableActions = transcript(page)
+    .getByTestId("chat-markdown")
+    .last()
+    .locator('[class*="tableActions"]');
+  await expect(tableActions).toHaveCount(1);
+  const columnStyle = await tableActions.locator("..").getAttribute("style");
+  const controlsHiddenDuring = await tableActions.isHidden();
+  await expect(transcript(page).locator('li[data-kind="working"]')).toHaveCount(
+    1,
+  );
+  await testInfo.attach("streaming-table", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+  await push(
+    page,
+    m,
+    ev("item.completed", { itemId: "m1", itemKind: "message", text: answer }),
+  );
+  const readsBeforeCompletion = m.reads;
+  m.agent = agent({ state: "idle", running_turn_id: null });
+  await push(page, m, ev("agent.turn_completed", { stopReason: "completed" }));
+  await expect.poll(() => m.reads).toBeGreaterThan(readsBeforeCompletion);
+  await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
+  await expect(transcript(page).locator('li[data-kind="working"]')).toHaveCount(
+    0,
+  );
+  await expect(transcript(page).locator("[data-streaming-caret]")).toHaveCount(
+    0,
+  );
+  await expect(
+    transcript(page).getByTestId("chat-markdown").last(),
+  ).toContainText("Check 12");
+  await expect(
+    transcript(page).getByTestId("chat-markdown").last().locator("li").last(),
+  ).toHaveText(
+    "Check 12 confirms the layout remains usable during a genuine stream.",
+  );
+  await expect(tableActions.locator("..").getByRole("row")).toHaveCount(9);
+  await expect(tableActions).toBeVisible();
+  expect(m.events.at(-2)?.payload).toMatchObject({ text: answer });
+  expect(m.events.at(-1)?.kind).toBe("agent.turn_completed");
+  const result = await page.evaluate(async () => {
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    const w = window as unknown as {
+      __visualCls: {
+        value: number;
+        sources: {
+          tag: string;
+          className: string;
+          previous: number[];
+          current: number[];
+        }[];
+      }[];
+      __visualGaps: number[];
+      __visualWords: number[];
+      __visualObserver: PerformanceObserver;
+      __visualDrain: () => void;
+    };
+    w.__visualDrain();
+    w.__visualObserver.disconnect();
+    const chat = document.querySelector('[data-testid="chat-transcript"]')!;
+    const markdown = chat.querySelectorAll('[data-testid="chat-markdown"]');
+    return {
+      cls: w.__visualCls.reduce((sum, e) => sum + e.value, 0),
+      shifts: w.__visualCls,
+      maxGap: Math.max(...w.__visualGaps),
+      terminalGap: chat.scrollHeight - chat.scrollTop - chat.clientHeight,
+      firstVisibleWords: w.__visualWords.find((n) => n > 0),
+      maxAddedSampleWords: Math.max(
+        ...w.__visualWords.map((n, i) =>
+          Math.max(0, n - (w.__visualWords[i - 1] ?? 0)),
+        ),
+      ),
+      beforeCompletionWords: w.__visualWords.at(-1),
+      words: markdown[markdown.length - 1]?.textContent?.trim().split(/\s+/)
+        .length,
+    };
+  });
+  const shiftSummary = result.shifts.map((shift) => ({
+    value: shift.value,
+    sources: shift.sources
+      .map((source) => ({
+        tag: source.tag,
+        className: source.className,
+        dx: source.current[0] - source.previous[0],
+        dy: source.current[1] - source.previous[1],
+      }))
+      .slice(0, 3),
+  }));
+  expect(result.words).toBeGreaterThanOrEqual(300);
+  expect(result.firstVisibleWords).toBeGreaterThan(0);
+  expect(result.maxGap).toBe(0);
+  expect(result.terminalGap).toBe(0);
+  console.log("streamed table terminal", {
+    cls: result.cls,
+    maxGap: result.maxGap,
+    terminalGap: result.terminalGap,
+    words: result.words,
+    shifts: shiftSummary,
+    controlsHiddenDuring,
+    columnStyle,
+  });
+  await testInfo.attach("completed-table", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+  expect.soft(controlsHiddenDuring).toBe(true);
+  expect.soft(columnStyle ?? "").toMatch(/--table-columns: 6/);
+  expect.soft(result.cls, JSON.stringify(shiftSummary)).toBe(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const overflow = await tableActions.locator("..").evaluate((el) => {
+    const scroll = el.querySelector('[class*="tableScroll"]')!;
+    const chat = el.closest('[data-testid="chat-transcript"]')!;
+    return {
+      inner: scroll.scrollWidth - scroll.clientWidth,
+      outer: chat.scrollWidth - chat.clientWidth,
+    };
+  });
+  console.log("streamed table layout", {
+    cls: result.cls,
+    maxGap: result.maxGap,
+    overflow,
+  });
+  expect(overflow.inner).toBeGreaterThan(0);
+  expect(overflow.outer).toBeLessThanOrEqual(0);
+  await tableActions
+    .getByRole("button", { name: "Expand table cells" })
+    .click();
+  await expect(tableActions.locator("..")).toHaveAttribute(
+    "data-expanded",
+    "true",
+  );
+  await tableActions.getByRole("button", { name: "Copy as Markdown" }).click();
+  const copiedMarkdown = await page.evaluate(() =>
+    navigator.clipboard.readText(),
+  );
+  expect(copiedMarkdown).toContain(
+    "| Component | Observed behavior | Evidence | Owner | Receipt | Outcome |",
+  );
+  expect(copiedMarkdown).toContain(
+    "| Row 8 | A saved event updates the visible transcript and retains the full source | Event 8 | Agent | Saved 8 | Complete |",
+  );
+  await tableActions.getByRole("button", { name: "Copy as CSV" }).click();
+  const copiedCsv = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copiedCsv).toContain(
+    "Component,Observed behavior,Evidence,Owner,Receipt,Outcome",
+  );
+  expect(copiedCsv).toContain(
+    "Row 8,A saved event updates the visible transcript and retains the full source,Event 8,Agent,Saved 8,Complete",
+  );
 });
 
 test("one agent's one-line messages sit close, and the hover pill takes no space (UI6)", async ({

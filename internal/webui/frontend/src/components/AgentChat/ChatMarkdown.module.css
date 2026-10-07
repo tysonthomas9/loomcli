@@ -292,8 +292,9 @@
 }
 
 .markdown table {
-  width: 100%;
-  min-width: max-content;
+  width: max(100%, calc(var(--table-columns) * 9rem));
+  min-width: 0;
+  table-layout: fixed;
   border-collapse: collapse;
   overflow-wrap: normal;
   word-break: normal;
@@ -338,6 +339,11 @@
   justify-content: space-between;
   margin-top: 2px;
   user-select: none;
+}
+
+/* A growing tbody would move already-visible controls on every streamed row. */
+.markdown[data-streaming="true"] .tableActions {
+  visibility: hidden;
 }
 
 .tkKeyword {

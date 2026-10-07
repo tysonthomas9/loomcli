@@ -17,6 +17,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import Markdown, { type Components } from "react-markdown";
@@ -227,6 +228,19 @@ export function serializeTableElementToCsv(table: Element): string {
     .join("\n");
 }
 
+function firstTableRowColumns(nodes: ReactNode): number {
+  for (const node of Children.toArray(nodes)) {
+    if (!isValidElement<{ children?: ReactNode }>(node)) continue;
+    if (node.type === "tr") {
+      return Children.toArray(node.props.children).filter(isValidElement)
+        .length;
+    }
+    const nested = firstTableRowColumns(node.props.children);
+    if (nested) return nested;
+  }
+  return 0;
+}
+
 function MarkdownTable({ children, ...props }: ComponentProps<"table">) {
   const tableRef = useRef<HTMLTableElement | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -245,6 +259,11 @@ function MarkdownTable({ children, ...props }: ComponentProps<"table">) {
     <div
       className={styles.tableContainer}
       data-expanded={expanded ? "true" : "false"}
+      style={
+        {
+          "--table-columns": Math.max(1, firstTableRowColumns(children)),
+        } as CSSProperties
+      }
     >
       <div className={styles.tableScroll}>
         <table ref={tableRef} {...props}>
@@ -466,7 +485,11 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   const blocks = useMemo(() => splitBlocks(text), [text]);
   const lastStart = text.length - (blocks[blocks.length - 1] ?? "").length;
   return (
-    <div className={styles.markdown} data-testid="chat-markdown">
+    <div
+      className={styles.markdown}
+      data-testid="chat-markdown"
+      data-streaming={streaming ? "true" : undefined}
+    >
       {blocks.map((block, i) => (
         <MarkdownBlock
           key={i}
