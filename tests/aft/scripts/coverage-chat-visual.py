@@ -202,7 +202,7 @@ def fill_long():
     input_action("focus", state, None, deadline, "click", "textarea[aria-label=Message]")
     state = input_readback("after-focus", state, None, deadline)
     assert state["focused"], "long input textarea did not gain keyboard focus"
-    input_action("select-all", state, state["length"], deadline, "press", "Meta+A")
+    input_action("select-all", state, state["length"], deadline, "press", "Control+a")
     state = input_readback("after-select-all", state, state["length"], deadline)
     assert state["focused"] and state["selectionStart"] == 0 and state["selectionEnd"] == state["length"], \
         "real composer did not select the complete multiline draft"
