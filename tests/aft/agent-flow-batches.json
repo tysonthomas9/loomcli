@@ -98,6 +98,50 @@
         ]
       }
     },
+    "lifecycle-delete": {
+      "files": [
+        "lifecycle-delete.test.yaml"
+      ],
+      "expected_cases": [
+        {
+          "suite": "coverage-lifecycle-delete",
+          "name": "stale-delete"
+        },
+        {
+          "suite": "coverage-lifecycle-delete",
+          "name": "native-cascade"
+        }
+      ],
+      "agents": {
+        "leads": [
+          {
+            "name": "cov-delete-control-${RUN_ID}",
+            "suite": "coverage-lifecycle-delete",
+            "model_required": true
+          },
+          {
+            "name": "cov-delete-target-${RUN_ID}",
+            "suite": "coverage-lifecycle-delete",
+            "model_required": true,
+            "end_state": "deleted"
+          },
+          {
+            "name": "cov-delete-parent-${RUN_ID}",
+            "suite": "coverage-lifecycle-delete",
+            "model_required": true,
+            "end_state": "deleted"
+          }
+        ],
+        "children": [
+          {
+            "name": "cov-delete-child-${RUN_ID}",
+            "parent": "cov-delete-parent-${RUN_ID}",
+            "suite": "coverage-lifecycle-delete",
+            "end_state": "deleted"
+          }
+        ]
+      }
+    },
     "chat-controls": {
       "files": ["chat-controls-asks.test.yaml", "chat-controls-create.test.yaml", "chat-controls-models.test.yaml"],
       "agents": {
