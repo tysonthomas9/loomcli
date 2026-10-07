@@ -1,0 +1,62 @@
+# Focused no-Send SK1 proof. A fresh real Chat Lead is the only fixture;
+# the mouse/focus assertion is independent of model output or the paid visual case.
+suite: live-chat-visual-skip
+classification: { area: agents, feature: normal-motion-skip-link, surface: browser, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -e
+  python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual-skip.py" preflight
+teardown: |
+  set -e
+  python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual-skip.py" cleanup
+
+tests:
+  - name: normal-motion skip link stays hidden after mouse focus
+    intent: A fresh owned Chat keeps its skip link hidden on load and after a real bottom-right main click and programmatic focus, while Tab and Enter still reveal and activate it.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the isolated workspace's real Agents page"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === '+ Add agent')
+        intent: "Wait for New Agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open the actual New Agent form"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose a real Lead"
+      - fill: { testid: create-agent-name, value: "aft-${RUN_ID}-cov-visual-skip" }
+        intent: "Name this run's only SK1 Lead"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Use the real OpenCode backend without sending a model request"
+      - wait:
+          fn: >-
+            (() => { const r=[...document.querySelectorAll('[data-testid=create-agent-repo-chips] button')];
+              return r.length===1 && r[0].textContent.includes('source-repo') && r[0].getAttribute('aria-pressed')==='true'; })()
+        intent: "Verify the run-owned repository is selected"
+      - click: { testid: create-agent-submit }
+        intent: "Create the Lead through the UI"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Wait for its genuine Chat route"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual-skip.py" claim'
+        intent: "Bind exact UI-created Agent ID, name, repo and empty saved events"
+      - reload: true
+        intent: "Load a fresh owned Chat document before the first Tab"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-skip' &&
+            !!document.querySelector('textarea[aria-label="Message"]')
+        intent: "Wait for the exact Lead's empty Chat without clicking or focusing"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual-skip.py" start'
+        intent: "Require normal motion and capture the hidden skip link, fresh focus and empty saved Chat"
+      - press: Tab
+        intent: "Use the first real keyboard Tab"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual-skip.py" tab'
+        intent: "Read focused visible skip link after CSS settles and capture keyboard screenshot"
+      - press: Enter
+        intent: "Activate the real skip link"
+      - press: Tab
+        intent: "Continue into main content with the keyboard"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual-skip.py" entered'
+        intent: "Check main hash and focus and capture the hidden link after keyboard activation"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual-skip.py" mouse-focus'
+        intent: "Use actual bottom-right main mouse coordinates; capture trusted events and hidden link before focus, then genuine programmatic focus and strict post-settlement hidden check with failure screenshot"
