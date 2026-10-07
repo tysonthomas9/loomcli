@@ -61,13 +61,17 @@ export const prefersReducedMotion = () =>
 export function useSmoothText(
   text: string,
   streaming: boolean,
+  newlyLive = false,
 ): { text: string; fresh: FreshRun[] } {
   const smooth = streaming && !prefersReducedMotion();
   const [, render] = useReducer((n: number) => n + 1, 0);
+  // A new synced row begins with its first delta; an existing midstream row
+  // keeps the text it already had when this component mounted.
+  const initial = smooth && newlyLive ? 0 : text.length;
   const s = useRef({
     text,
-    pos: text.length,
-    shown: text.length,
+    pos: initial,
+    shown: initial,
     runs: [] as { from: number; at: number }[],
     arrivals: [] as { end: number; at: number }[],
     now: 0,

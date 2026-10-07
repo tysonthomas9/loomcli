@@ -198,7 +198,12 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
               data-kind={rowKind(row)}
               data-enter={entering.has(row.id) || undefined}
             >
-              <Row row={row} workspaceId={workspaceId} onToggle={toggleGroup} />
+              <Row
+                row={row}
+                workspaceId={workspaceId}
+                onToggle={toggleGroup}
+                newlyLive={entering.has(row.id)}
+              />
             </li>
           ))}
           {working.mounted && (
@@ -713,14 +718,18 @@ function Row({
   row,
   workspaceId,
   onToggle,
+  newlyLive,
 }: {
   row: TimelineRow;
   workspaceId: string;
   onToggle: (groupId: string) => void;
+  newlyLive: boolean;
 }) {
   switch (row.kind) {
     case "item":
-      return <Item item={row.item} workspaceId={workspaceId} />;
+      return (
+        <Item item={row.item} workspaceId={workspaceId} newlyLive={newlyLive} />
+      );
     case "work":
       return (
         <WorkEntryRow
@@ -760,13 +769,15 @@ function AgentMessage({
   text,
   streaming,
   at,
+  newlyLive,
 }: {
   text: string;
   streaming: boolean;
   at?: string | undefined;
+  newlyLive: boolean;
 }) {
   const [all, setAll] = useState(false);
-  const smooth = useSmoothText(text, streaming);
+  const smooth = useSmoothText(text, streaming, newlyLive);
   const cut = !all && smooth.text.length > LONG_TEXT_LIMIT;
   return (
     <div className={page.agentMessage}>
@@ -785,7 +796,15 @@ function AgentMessage({
   );
 }
 
-function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
+function Item({
+  item,
+  workspaceId,
+  newlyLive,
+}: {
+  item: ChatItem;
+  workspaceId: string;
+  newlyLive: boolean;
+}) {
   switch (item.kind) {
     // Started markers are their own rows (see deriveTimelineRows).
     case "started":
@@ -829,6 +848,7 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
           text={item.text}
           streaming={!!item.streaming}
           at={item.at}
+          newlyLive={newlyLive}
         />
       );
     case "user":

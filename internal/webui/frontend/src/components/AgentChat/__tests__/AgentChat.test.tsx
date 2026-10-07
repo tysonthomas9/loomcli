@@ -733,6 +733,82 @@ describe("AgentChat", () => {
     expect(screen.getAllByText("Hello!")).toHaveLength(1);
   });
 
+  it("smooths the first delta of a newly inserted live assistant row", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => {
+      frames.push(frame);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    try {
+      const { container } = await mount(agent());
+      const stream = api.streams[0];
+      await act(async () => stream.opts.onResync?.());
+      const firstChunk = Array.from({ length: 15 }, (_, i) => `word${i}`).join(
+        " ",
+      );
+      act(() =>
+        stream.opts.onNotice?.({
+          ...ev("delta", {
+            itemId: "m1",
+            itemKind: "message",
+            text: firstChunk,
+          }),
+          seq: 0,
+        }),
+      );
+      const row = container.querySelector('li[data-kind="agent"]');
+      expect(row).toHaveAttribute("data-enter");
+      const markdown = row?.querySelector('[data-testid="chat-markdown"]');
+      expect(markdown).not.toBeNull();
+      const words = () =>
+        markdown?.textContent?.trim().split(/\s+/).filter(Boolean).length ?? 0;
+      expect(words()).toBeLessThanOrEqual(2);
+      let previous = words();
+      for (let i = 1; i <= 24 && words() < 15; i++) {
+        const scheduled = frames.splice(0);
+        act(() => scheduled.forEach((frame) => frame((i * 1000) / 60)));
+        expect(words() - previous).toBeLessThanOrEqual(2);
+        previous = words();
+      }
+      expect(markdown).toHaveTextContent(firstChunk);
+      deliver(
+        ev("item.completed", {
+          itemId: "m1",
+          itemKind: "message",
+          text: firstChunk,
+        }),
+      );
+      expect(container.querySelectorAll('li[data-kind="agent"]')).toHaveLength(
+        1,
+      );
+      expect(
+        container.querySelector('li[data-kind="agent"]'),
+      ).toHaveTextContent(firstChunk);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows preexisting unsynced midstream text immediately", async () => {
+    const { container } = await mount(agent());
+    const firstChunk = Array.from({ length: 15 }, (_, i) => `word${i}`).join(
+      " ",
+    );
+    act(() =>
+      api.streams[0].opts.onNotice?.({
+        ...ev("delta", { itemId: "m1", itemKind: "message", text: firstChunk }),
+        seq: 0,
+      }),
+    );
+    const row = container.querySelector('li[data-kind="agent"]');
+    expect(row).not.toHaveAttribute("data-enter");
+    expect(
+      row?.querySelector('[data-testid="chat-markdown"]'),
+    ).toHaveTextContent(firstChunk);
+  });
+
   it.each([1, 2])(
     "fades in a message that arrives live, not a %i-row history load",
     async (n) => {
