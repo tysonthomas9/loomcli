@@ -25,7 +25,7 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
-def parsed_commands():
+def parsed_runs():
     tests = Path(__file__).resolve().parents[1]
     suite_path = tests / "live-agent-coverage-suites/children-activity.test.yaml"
     loader = Path(os.environ.get("AFT_DIR", "/Users/tyson/codebase/code-agents/testing-app")) / "dist/runner.js"
@@ -39,8 +39,12 @@ console.log(JSON.stringify([suite.teardown,...suite.tests.flatMap(t=>t.steps.fil
            "AFT_NATIVE_MODEL_PROBE": "/bin/true", "AFT_SELECT_AGENT_MODEL": "/bin/true"}
     output = subprocess.check_output(["node", "--input-type=module", "-", str(loader), str(suite_path)],
                                      input=code, env=env, text=True)
+    return json.loads(output)
+
+
+def parsed_commands():
     commands = []
-    for run in json.loads(output):
+    for run in parsed_runs():
         if not isinstance(run, str):
             continue
         for line in run.splitlines():
@@ -58,6 +62,7 @@ def event(kind, seq, event_id, payload=None, turn_id=""):
 class ChildProofPredicates(unittest.TestCase):
     def setUp(self):
         self.a, self.b = "agt_pairA", "agt_pairB"
+        self.saved = {}
         self.records = [event("task_completed", 11, f"task_completed:{self.a}:0", {"outcome": "completed", "head": "abc"}),
                         event("task_completed", 12, f"task_completed:{self.b}:0", {"outcome": "completed", "head": "abc"})]
         self.delivery = event("message.delivered", 21, "delivered", {"completions": [
@@ -122,7 +127,7 @@ class ChildProofPredicates(unittest.TestCase):
              patch.object(module, "get", side_effect=lambda url: {"data": {
                  "files": [{"path": f"aft-child-fixtures/{module.RUN}/pair-{'a' if self.a in url else 'b'}.txt"}]}}
                  if "/files?" in url else {"data": {"commits": [{"hash": "abc"}]}}), \
-             patch.object(module, "save"):
+             patch.object(module, "save", side_effect=lambda name, data: self.saved.update({name: data})):
             module.pair("pair-lead", "pair-a", "pair-b")
 
     def test_qualified_tool_name_is_not_missed(self):
@@ -145,6 +150,8 @@ class ChildProofPredicates(unittest.TestCase):
         self.records[1]["seq"] = 21
         with self.assertRaisesRegex(AssertionError, "while the Lead was busy"):
             self.run_pair()
+        self.assertEqual(self.saved["pair-chronology"]["busy_end"][0]["seq"], 20)
+        self.assertEqual([r["events"][0]["seq"] for r in self.saved["pair-chronology"]["child_records"]], [11, 21])
 
     def test_duplicate_delivery_is_rejected(self):
         self.history.append(event("message.delivered", 23, "duplicate", {"completions": [
@@ -325,6 +332,55 @@ class ChildProofPredicates(unittest.TestCase):
                            ({**good, "nav": False}, "attempted")):
             with self.subTest(bad=bad), self.assertRaises(AssertionError):
                 module.sidebar_order_ok(bad, self.a, self.b, stage)
+
+    def test_sidebar_focus_uses_saved_identity_and_valid_browser_script(self):
+        name = f"cov-child-sidebar-b-{module.RUN}"
+        saved = {"agent_id": self.b, "name": name}
+        route = f"/ws/LOCALMODE/chat/{self.b}"
+        shot = {"path": route, "id": self.b, "name": name,
+                "linkCount": 1, "handleCount": 1, "focused": True}
+        scripts = []
+        def inspect_script(script):
+            scripts.append(script)
+            return shot
+        with patch.object(module, "load", return_value=saved), \
+             patch.object(module, "agent", return_value=saved), \
+             patch.object(module, "browser_json", side_effect=inspect_script), \
+             patch.object(module, "save"):
+            module.sidebar_focus("sidebar-b")
+            self.assertIn(json.dumps(name), scripts[0])
+            self.assertIn(json.dumps(self.b), scripts[0])
+            self.assertNotIn("${RUN_ID}", scripts[0])
+            check = subprocess.run(["node", "--input-type=module", "-e",
+                                    'let s="";for await(const x of process.stdin)s+=x;new Function("return "+s);'],
+                                   input=scripts[0], text=True, capture_output=True)
+            self.assertEqual(check.returncode, 0, check.stderr)
+            for bad in ({**shot, "focused": False}, {**shot, "linkCount": 0},
+                        {**shot, "handleCount": 0}, {**shot, "id": self.a}):
+                with self.subTest(bad=bad), patch.object(module, "browser_json", return_value=bad), \
+                     self.assertRaises(AssertionError):
+                    module.sidebar_focus("sidebar-b")
+
+    def test_parsed_sidebar_keyboard_block_runs_through_shell_with_exact_helper_args(self):
+        run = next(r for r in parsed_runs() if isinstance(r, str) and "sidebar_focus sidebar-b" in r)
+        self.assertNotIn("agent-browser --session \"$AFT_SESSION\" eval", run)
+        with tempfile.TemporaryDirectory(prefix="child-sidebar-shell-") as temp:
+            bindir = Path(temp)
+            log = bindir / "calls"
+            python = bindir / "python3"
+            python.write_text("#!/bin/sh\n[ \"$#\" = 3 ] && [ \"$2\" = sidebar_focus ] && [ \"$3\" = sidebar-b ] || exit 41\nprintf 'focus\\n' >> \"$AFT_STUB_LOG\"\n")
+            python.chmod(0o755)
+            agent_browser = bindir / "agent-browser"
+            agent_browser.write_text("#!/bin/sh\n[ \"$#\" = 4 ] && [ \"$1\" = --session ] && [ \"$2\" = stub-session ] && [ \"$3\" = press ] || exit 42\nprintf 'press:%s\\n' \"$4\" >> \"$AFT_STUB_LOG\"\n")
+            agent_browser.chmod(0o755)
+            env = {**os.environ, "PATH": f"{temp}:{os.environ['PATH']}",
+                   "AFT_TESTS_DIR": "/owned/tests", "AFT_SESSION": "stub-session", "AFT_STUB_LOG": str(log)}
+            good = subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, text=True)
+            self.assertEqual(good.returncode, 0, good.stderr)
+            self.assertEqual(log.read_text().splitlines(), ["focus", "press:Space", "press:ArrowUp", "press:Space"])
+            bad = run.replace("sidebar_focus sidebar-b", "sidebar_focus 'cov-child-sidebar-b-${RUN_ID}'")
+            failed = subprocess.run(["bash", "-e", "-c", bad], env=env, capture_output=True, text=True)
+            self.assertNotEqual(failed.returncode, 0, "literal unexpanded name must not pass the real shell block")
 
 
 if __name__ == "__main__":

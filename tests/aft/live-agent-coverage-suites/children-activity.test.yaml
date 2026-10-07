@@ -36,7 +36,7 @@ tests:
           label: Message
           value: >-
             Use Loom agent_create to delegate one task child named cov-child-repeat-${RUN_ID}.
-            Brief it to inspect README.md and docs/loom-glossary.md, create only
+            Brief it to inspect README.md and package.json in this repository, create only
             aft-child-fixtures/${RUN_ID}/first.txt with the words first complete,
             git add and commit that file on its assigned branch, and report its
             result. Do not push. When its task_completed notice reaches you,
@@ -89,7 +89,7 @@ tests:
       - run: |
           set -eu
           id="$(cat "$AFT_WORK_DIR/coverage-children-activity/repeat.id")"
-          agent-browser --session "$AFT_SESSION" wait --fn "(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\"$id\"]'); const result=row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(▸|💭)/.test(result) && / · [0-9]+:[0-9][0-9]$/.test(result); })()"
+          agent-browser --session "$AFT_SESSION" wait --fn "(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\"$id\"]'); const running=row?.querySelector('[data-status=running]'); const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim() || ''; const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(▸|💭)/.test(result) && /[0-9]+m [0-9][0-9]s$/.test(elapsed); })()"
           agent-browser --session "$AFT_SESSION" screenshot "$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png"
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" activity repeat
         intent: Match the exact visible child row and its current step to a saved event in that same running turn
@@ -192,8 +192,8 @@ tests:
           label: Message
           value: >-
             Use Loom agent_create twice, creating task children cov-child-pair-a-${RUN_ID}
-            and cov-child-pair-b-${RUN_ID}. Each must independently inspect README.md,
-            package.json, and app.js in this repository, then create and commit only its own file
+            and cov-child-pair-b-${RUN_ID}. Each must independently inspect README.md
+            in this repository, then create and commit only its own file
             aft-child-fixtures/${RUN_ID}/pair-a.txt or pair-b.txt respectively.
             The file must include its own name and complete. Do not push or open
             a PR. Reply briefly as soon as both have started; I will give you
@@ -235,10 +235,14 @@ tests:
           value: >-
             While your children work, inspect README.md, BACKLOG.md,
             package.json, server.js, app.js, and app.test.js in this repository.
-            Trace how a posted message reaches stored history and cite the files.
-            Stay within this repository and do not run package scripts.
-            After both child notices arrive, give exactly one combined summary
-            of both child files and outcomes.
+            Run the documented npm test command once. In this single turn,
+            trace a valid post, an invalid post, and a history read through the
+            handlers and tests, citing the files and actual test result.
+            Stay within this repository; do not inspect LoomCLI source or use
+            agent_get. Finish the full analysis and test run in this turn before
+            replying once with your findings; do not pause to wait for child notices.
+            When both child notices are later delivered, give exactly one combined
+            summary of both child files and outcomes.
       - press: Enter
       - wait:
           fn: >-
@@ -438,7 +442,7 @@ tests:
         intent: Save the exact API Lead IDs, sidebar order and Chat route before keyboard drag
       - run: |
           set -eu
-          agent-browser --session "$AFT_SESSION" eval '(() => { const h=document.querySelector("[aria-label=\"Drag to reorder cov-child-sidebar-b-${RUN_ID}\"]"); if(!h) throw Error("saved Lead drag handle missing"); h.focus(); if(document.activeElement!==h) throw Error("drag handle did not take keyboard focus"); return true; })()' | rg -q true
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_focus sidebar-b
           agent-browser --session "$AFT_SESSION" press Space
           agent-browser --session "$AFT_SESSION" press ArrowUp
           agent-browser --session "$AFT_SESSION" press Space
