@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import urlopen
 
 
@@ -415,9 +415,34 @@ def focus_exact_card(name, attempt):
         .filter(c=>c.dataset.attempt===attempt &&
           c.querySelector(':scope > span:nth-child(2)')?.textContent?.trim()===name);
       if(cards.length!==1) throw Error('exact card name and attempt missing or duplicated');
-      cards[0].focus(); return true;
+      cards[0].scrollIntoView({block:'center'});
+      cards[0].focus();
+      const box=cards[0].getBoundingClientRect();
+      return {path:location.pathname,href:location.href,readyState:document.readyState,
+        count:cards.length,name:cards[0].querySelector(':scope > span:nth-child(2)')?.textContent?.trim()||'',
+        attempt:cards[0].dataset.attempt,color:cards[0].dataset.agentColor,
+        outcome:cards[0].dataset.outcome,delivery:cards[0].dataset.delivery,
+        role:cards[0].getAttribute('role'),tabIndex:cards[0].tabIndex,
+        focused:document.activeElement===cards[0],
+        visible:box.width>0 && box.height>0 && box.top>=0 && box.bottom<=innerHeight,
+        bounds:{top:box.top,bottom:box.bottom,height:box.height}};
     })()""" % (json.dumps(name), json.dumps(str(attempt)))
-    assert browser_json(f"JSON.stringify({{focused:{script}}})")["focused"] is True
+    shot = browser_json(f"JSON.stringify({script})")
+    assert shot["count"] == 1 and shot["name"] == name and shot["attempt"] == str(attempt)
+    assert shot["role"] == "link" and shot["tabIndex"] == 0 and shot["focused"] and shot["visible"]
+    return shot
+
+
+def card_route_ok(shot, agent_id, name):
+    route = f"/ws/{quote(WS, safe='')}/chat/{quote(agent_id, safe='')}"
+    assert shot["path"] == route and shot["name"] == name and shot["harness"] == "opencode", "card keyboard navigation did not hydrate the exact saved agent Chat"
+
+
+def card_route():
+    return browser_json("""JSON.stringify((() => ({path:location.pathname,href:location.href,
+      readyState:document.readyState,
+      name:document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent?.trim()||'',
+      harness:document.querySelector('section[aria-label="Agent chat"] header [data-testid=harness-label]')?.textContent?.trim()||''}))())""")
 
 
 def cards_ui(lead_label, *specs):
@@ -440,18 +465,43 @@ def cards_ui(lead_label, *specs):
       rawBubble:Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li[data-kind=user]'))
         .some(x=>/task_completed:[^\\s]+:[0-9]+/.test(x.textContent||''))
     }))())""")
+    save(f"cards-initial-{lead_label}", {"lead": lead["agent_id"],
+                                          "expected_children": [{"id": kid["agent_id"], "name": kid["name"], "attempt": attempt}
+                                                                for kid, attempt in children], "ui": shot})
     for kid, attempt in children:
-        focus_exact_card(kid["name"], attempt)
+        focused = focus_exact_card(kid["name"], attempt)
+        tab_before = sidebar_tab()
+        save(f"card-focus-{lead_label}-{kid['agent_id']}-{attempt}", {"expected_id": kid["agent_id"],
+                                                                      "tab": tab_before, "ui": focused})
+        assert focused["path"] == f"/ws/{quote(WS, safe='')}/chat/{quote(lead['agent_id'], safe='')}"
+        assert tab_before["url_path"] == focused["path"]
+        browser("screenshot", str(OUT / f"card-focus-{lead_label}-{kid['agent_id']}-{attempt}.png"))
         browser("press", "Enter")
-        browser("wait", "--fn", "location.pathname !== " +
-                json.dumps(f"/ws/{WS}/chat/{lead['agent_id']}"))
-        path = browser_json("JSON.stringify({path:location.pathname})")["path"]
-        actual_id = path.split("/")[-1]
+        expected_route = f"/ws/{quote(WS, safe='')}/chat/{quote(kid['agent_id'], safe='')}"
+        try:
+            browser("wait", "--fn", "location.pathname === " + json.dumps(expected_route) +
+                    " && document.querySelector('section[aria-label=\"Agent chat\"] header h2')?.textContent?.trim() === " +
+                    json.dumps(kid["name"]))
+        except subprocess.CalledProcessError:
+            save(f"card-navigation-failed-{kid['agent_id']}-{attempt}", card_route())
+            raise
+        navigated = card_route()
+        tab_child = sidebar_tab()
+        save(f"card-navigation-{kid['agent_id']}-{attempt}", {"tab": tab_child, "ui": navigated})
+        assert tab_child["target_id"] == tab_before["target_id"] and tab_child["url_path"] == expected_route
+        card_route_ok(navigated, kid["agent_id"], kid["name"])
         card = next(c for c in shot["cards"] if c["name"] == kid["name"] and c["attempt"] == str(attempt))
-        card["id"] = actual_id
+        card["id"] = kid["agent_id"]
         browser("open", os.environ["AFT_BASE_URL"].rstrip("/") + f"/ws/{WS}/chat/{lead['agent_id']}")
-        browser("wait", "--fn", "location.pathname.endsWith(" +
-                json.dumps("/chat/" + lead["agent_id"]) + ")")
+        lead_route = f"/ws/{quote(WS, safe='')}/chat/{quote(lead['agent_id'], safe='')}"
+        browser("wait", "--fn", "location.pathname === " + json.dumps(lead_route) +
+                " && document.querySelector('section[aria-label=\"Agent chat\"] header h2')?.textContent?.trim() === " +
+                json.dumps(lead["name"]))
+        returned = card_route()
+        tab_return = sidebar_tab()
+        save(f"card-return-{kid['agent_id']}-{attempt}", {"tab": tab_return, "ui": returned})
+        assert tab_return["target_id"] == tab_before["target_id"] and tab_return["url_path"] == lead_route
+        card_route_ok(returned, lead["agent_id"], lead["name"])
     card_snapshot_ok(shot, children)
     browser("screenshot", str(OUT / f"cards-{lead_label}-{'-'.join(specs)}.png"))
     save(f"cards-{lead_label}-{'-'.join(specs)}", shot)
@@ -551,12 +601,34 @@ def hover_archive(label):
 def keyboard_card(lead_label, child_label, key):
     assert key in ("Enter", "Space")
     lead, child = load(lead_label), load(child_label)
-    focus_exact_card(child["name"], 0)
+    focused = focus_exact_card(child["name"], 0)
+    tab_before = sidebar_tab()
+    save(f"keyboard-focus-{key}-{child_label}", {"expected_id": child["agent_id"],
+                                                "tab": tab_before, "ui": focused})
+    assert focused["path"] == f"/ws/{quote(WS, safe='')}/chat/{quote(lead['agent_id'], safe='')}"
+    assert tab_before["url_path"] == focused["path"]
+    browser("screenshot", str(OUT / f"keyboard-focus-{key}-{child_label}.png"))
     browser("press", key)
-    browser("wait", "--fn", "location.pathname.endsWith(" + json.dumps("/chat/" + child["agent_id"]) + ")")
+    child_route = f"/ws/{quote(WS, safe='')}/chat/{quote(child['agent_id'], safe='')}"
+    browser("wait", "--fn", "location.pathname === " + json.dumps(child_route) +
+            " && document.querySelector('section[aria-label=\"Agent chat\"] header h2')?.textContent?.trim() === " +
+            json.dumps(child["name"]))
+    navigated = card_route()
+    tab_child = sidebar_tab()
+    save(f"keyboard-navigation-{key}-{child_label}", {"tab": tab_child, "ui": navigated})
+    assert tab_child["target_id"] == tab_before["target_id"] and tab_child["url_path"] == child_route
+    card_route_ok(navigated, child["agent_id"], child["name"])
     browser("screenshot", str(OUT / f"keyboard-{key}-{child_label}.png"))
     browser("open", os.environ["AFT_BASE_URL"].rstrip("/") + f"/ws/{WS}/chat/{lead['agent_id']}")
-    browser("wait", "--fn", "location.pathname.endsWith(" + json.dumps("/chat/" + lead["agent_id"]) + ")")
+    lead_route = f"/ws/{quote(WS, safe='')}/chat/{quote(lead['agent_id'], safe='')}"
+    browser("wait", "--fn", "location.pathname === " + json.dumps(lead_route) +
+            " && document.querySelector('section[aria-label=\"Agent chat\"] header h2')?.textContent?.trim() === " +
+            json.dumps(lead["name"]))
+    returned = card_route()
+    tab_return = sidebar_tab()
+    save(f"keyboard-return-{key}-{child_label}", {"tab": tab_return, "ui": returned})
+    assert tab_return["target_id"] == tab_before["target_id"] and tab_return["url_path"] == lead_route
+    card_route_ok(returned, lead["agent_id"], lead["name"])
 
 
 def mobile_geometry_ok(geometry, child_id, width, theme):
@@ -727,6 +799,36 @@ def arm_reactivation(lead_label, child_label):
     save("reactivation-armed", {"child": child_id, "parent": lead["agent_id"], "last_seq": last_seq, "ui": armed})
 
 
+def open_reactivation_tray(lead_label, child_label):
+    lead, child = load(lead_label), load(child_label)
+    baseline = load("reactivation-armed")
+    assert baseline["child"] == child["agent_id"] and baseline["parent"] == lead["agent_id"]
+    live = agent(child["agent_id"])
+    started = [e for e in events(child["agent_id"]) if e["kind"] == "turn.started" and
+               e["seq"] > baseline["last_seq"] and e.get("turn_id") == live.get("running_turn_id")]
+    route = f"/ws/{quote(WS, safe='')}/chat/{quote(lead['agent_id'], safe='')}"
+    shot = browser_json("""JSON.stringify((() => {const tray=document.querySelector('[data-testid=agent-tray]');
+      const header=tray?.querySelector('button[aria-expanded]');
+      return {path:location.pathname,open:tray?.dataset.open||'',expanded:header?.getAttribute('aria-expanded')||'',
+        header:header?.getAttribute('aria-label')||'',observerArmed:!!window.__aftChildReactivation?.observer,
+        capturedBeforeClick:!!window.__aftChildReactivation?.capture};})())""")
+    save("reactivation-tray-before-click", {"child": child["agent_id"], "api_state": live["state"],
+                                            "api_attempt": live["attempt"], "running_turn_id": live.get("running_turn_id"),
+                                            "started_event_ids": [e["event_id"] for e in started], "ui": shot})
+    assert live["parent_agent_id"] == lead["agent_id"] and live["state"] == "active" and live["attempt"] == 1
+    assert live.get("running_turn_id") and len(started) == 1, "exact child attempt-two turn is not running"
+    assert shot["path"] == route and shot["open"] == shot["expanded"] == "false"
+    assert re.search(r"\b1 running\b", shot["header"]) and shot["observerArmed"] and not shot["capturedBeforeClick"]
+    browser("click", "[data-testid=agent-tray] button[aria-expanded=false]")
+    opened = browser_json("""JSON.stringify((() => {const tray=document.querySelector('[data-testid=agent-tray]');
+      return {path:location.pathname,open:tray?.dataset.open||'',
+        expanded:tray?.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')||'',
+        captured:!!window.__aftChildReactivation?.capture};})())""")
+    save("reactivation-tray-after-click", {"child": child["agent_id"], "ui": opened})
+    assert opened["path"] == route and opened["open"] == opened["expanded"] == "true", "real tray click did not open the exact Lead tray"
+    browser("screenshot", str(OUT / f"reactivation-tray-open-{child_label}.png"))
+
+
 def reactivation_checkpoint_ok(shot, child):
     captured = shot.get("capture")
     assert captured, "attempt-two running tray and nested sidebar were not witnessed; completed cards alone do not count"
@@ -882,6 +984,71 @@ def sidebar_order_ok(shot, a, b, stage):
         assert shot["ids"].index(b) < shot["ids"].index(a), "keyboard drag did not reorder saved Leads"
 
 
+def sidebar_tab_result(value):
+    data = value.get("data", value) if isinstance(value, dict) else value
+    tabs = data.get("tabs", []) if isinstance(data, dict) else data
+    active_id = data.get("activeTabId") if isinstance(data, dict) else None
+    assert isinstance(tabs, list), "browser tab list has no tab rows"
+    active = [tab for tab in tabs if isinstance(tab, dict) and
+              (tab.get("active") or tab.get("isActive") or tab.get("selected") or tab.get("current") or
+              (active_id and active_id in (tab.get("id"), tab.get("targetId"))))]
+    assert len(active) == 1 and active[0].get("targetId"), "one owned active browser tab is required"
+    tab = active[0]
+    parsed = urlsplit(tab.get("url") or "")
+    return {"session": os.environ["AFT_SESSION"], "target_id": tab["targetId"],
+            "tab_id": tab.get("id", ""), "tab_count": len(tabs),
+            "url_path": parsed.path if parsed.scheme in ("http", "https") else tab.get("url", "")}
+
+
+def sidebar_tab():
+    raw = subprocess.check_output(["agent-browser", "--session", os.environ["AFT_SESSION"],
+                                   "--json", "tab", "list"], text=True)
+    return sidebar_tab_result(json.loads(raw))
+
+
+def sidebar_drag_state(label):
+    saved = load(label)
+    route = f"/ws/{quote(WS, safe='')}/chat/{quote(saved['agent_id'], safe='')}"
+    script = """JSON.stringify((() => {const id=%s,name=%s,route=%s;
+      const nav=document.querySelector('nav[aria-label=Agents]');
+      const links=Array.from(nav?.querySelectorAll('[data-testid=sortable-agent-row] > a[href]')||[]);
+      const match=links.filter(a=>a.getAttribute('href')===route);
+      const handle=match[0]?.closest('[data-testid=sortable-agent-row]')?.querySelector('[aria-label="Drag to reorder '+name+'"]');
+      return {path:location.pathname,href:location.href,readyState:document.readyState,nav:!!nav,
+        ids:links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||'')),
+        linkCount:match.length,handleCount:handle?1:0,focused:document.activeElement===handle};})())""" % (
+        json.dumps(saved["agent_id"]), json.dumps(saved["name"]), json.dumps(route))
+    return browser_json(script)
+
+
+def sidebar_key(label, key, phase):
+    assert (key, phase) in (("Space", "lifted"), ("ArrowUp", "moved"), ("Space", "attempted"))
+    saved = load(label)
+    route = f"/ws/{quote(WS, safe='')}/chat/{quote(saved['agent_id'], safe='')}"
+    tab_before, ui_before = sidebar_tab(), sidebar_drag_state(label)
+    baseline = load("sidebar-drag-tab")
+    save(f"sidebar-key-{phase}-before", {"key": key, "tab": tab_before, "ui": ui_before})
+    assert tab_before["target_id"] == baseline["target_id"] and tab_before["url_path"] == route
+    assert ui_before["path"] == route and ui_before["nav"] and ui_before["linkCount"] == 1 and ui_before["handleCount"] == 1 and ui_before["focused"]
+    command = subprocess.run(["agent-browser", "--session", os.environ["AFT_SESSION"], "press", key],
+                             capture_output=True, text=True)
+    diagnostic = {"key": key, "command_status": command.returncode}
+    try:
+        diagnostic["tab"] = sidebar_tab()
+        diagnostic["ui"] = sidebar_drag_state(label)
+    except (subprocess.CalledProcessError, ValueError, AssertionError) as error:
+        diagnostic["diagnostic_error"] = type(error).__name__
+    try:
+        browser("screenshot", str(OUT / f"sidebar-key-{phase}.png"))
+        diagnostic["screenshot"] = f"sidebar-key-{phase}.png"
+    except subprocess.CalledProcessError as error:
+        diagnostic["screenshot_error_exit"] = error.returncode
+    save(f"sidebar-key-{phase}-after", diagnostic)
+    assert command.returncode == 0, f"browser keyboard {key} failed"
+    assert diagnostic.get("tab", {}).get("target_id") == baseline["target_id"], "sidebar drag left its owned browser tab"
+    assert diagnostic.get("tab", {}).get("url_path") == route and diagnostic.get("ui", {}).get("path") == route, "sidebar drag changed the exact Chat route"
+
+
 def sidebar_focus(label):
     saved = load(label)
     live = agent(saved["agent_id"])
@@ -903,6 +1070,9 @@ def sidebar_focus(label):
     save("sidebar-keyboard-focus", shot)
     assert shot == {"path": route, "id": saved["agent_id"], "name": saved["name"],
                     "linkCount": 1, "handleCount": 1, "focused": True}, "saved Lead drag handle missing or unfocused"
+    tab = sidebar_tab()
+    save("sidebar-drag-tab", tab)
+    assert tab["url_path"] == route, "drag focus is not on the exact saved Lead tab"
 
 
 def sidebar_order(first_label, second_label, stage):
@@ -916,13 +1086,16 @@ def sidebar_order(first_label, second_label, stage):
         ids:links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''))};
     })())"""
     try:
+        tab = sidebar_tab()
         shot = browser_json(script)
     except subprocess.CalledProcessError as error:
         save(f"sidebar-order-{stage}", {"browser_error_exit": error.returncode})
         raise
-    save(f"sidebar-order-{stage}", {"saved_ids": [a["agent_id"], b["agent_id"]], "ui": shot})
+    save(f"sidebar-order-{stage}", {"saved_ids": [a["agent_id"], b["agent_id"]], "tab": tab, "ui": shot})
     if stage in ("lifted", "moved", "attempted"):
         browser("screenshot", str(OUT / f"sidebar-order-{stage}.png"))
+    if stage != "before":
+        assert tab["target_id"] == load("sidebar-drag-tab")["target_id"], "sidebar order used a different browser tab"
     sidebar_order_ok(shot, a["agent_id"], b["agent_id"], stage)
 
 
