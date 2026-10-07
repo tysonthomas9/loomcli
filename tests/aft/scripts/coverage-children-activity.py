@@ -350,15 +350,26 @@ def started_ui(lead_label, *child_labels):
 def expanded_bridge(lead_label):
     shot = browser_json("""JSON.stringify((() => {
       const m=document.querySelector('[data-testid=started-marker]');
-      const rows=Array.from(document.querySelectorAll('[data-testid=bridge-call]'));
+      const rows=[];
+      for(let li=m?.closest('li')?.nextElementSibling; li?.dataset.kind==='work'; li=li.nextElementSibling) {
+        const row=li.querySelector('[data-testid=tool-call][data-in-group=true]');
+        if(!row) break;
+        rows.push(row);
+      }
       return {expanded:m?.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded'),
-        rows:rows.map(x=>x.textContent?.trim()||''),
+        rows:rows.map(x=>x.querySelector('[role=button]')?.textContent?.trim()||x.textContent?.trim()||''),
         raw:rows.some(x=>/\\{\\s*["'](?:name|brief|agent_id)["']\\s*:/.test(x.textContent||''))};
     })())""")
-    assert shot["expanded"] == "true" and any("Started" in x for x in shot["rows"])
-    assert not shot["raw"], "expanded bridge exposed raw tool input"
+    expanded_bridge_ok(shot, load(f"started-{lead_label}")["native_tool_entries"])
     browser("screenshot", str(OUT / f"expanded-{lead_label}.png"))
     save(f"expanded-{lead_label}", shot)
+
+
+def expanded_bridge_ok(shot, expected_count):
+    assert shot["expanded"] == "true" and len(shot["rows"]) == expected_count
+    assert any("Started" in row for row in shot["rows"]), "expanded Started calls lack the delegation label"
+    assert all(row and not re.search(r"\btools\.loom\.|\bsearch\(", row) for row in shot["rows"])
+    assert shot["raw"] is False, "expanded bridge exposed raw tool input"
 
 
 def working_fallback(child_label, stage):
@@ -735,6 +746,35 @@ def roster(*labels):
     save("roster", {"ids": ids, "rows": [{"agent_id": row["agent_id"], "name": row["name"],
                                              "state": row["state"], "parent_agent_id": row.get("parent_agent_id")}
                                             for row in rows]})
+
+
+def sidebar_order_ok(shot, a, b, stage):
+    assert shot["path"].endswith("/chat/" + quote(b)), "sidebar drag changed the Chat route"
+    assert shot["nav"], "Agents sidebar disappeared during drag"
+    assert shot["ids"].count(a) == shot["ids"].count(b) == 1, "saved Lead rows missing or duplicated"
+    if stage == "before":
+        assert shot["ids"].index(a) < shot["ids"].index(b), "initial Lead order differs"
+    if stage in ("after", "reload"):
+        assert shot["ids"].index(b) < shot["ids"].index(a), "keyboard drag did not reorder saved Leads"
+
+
+def sidebar_order(first_label, second_label, stage):
+    a, b = load(first_label), load(second_label)
+    rows = listed()
+    assert all(sum(row["agent_id"] == lead["agent_id"] for row in rows) == 1 for lead in (a, b))
+    script = """JSON.stringify((() => {
+      const nav=document.querySelector('nav[aria-label=Agents]');
+      const links=Array.from(nav?.querySelectorAll('[data-testid=sortable-agent-row] > a[href]') || []);
+      return {path:location.pathname,nav:!!nav,
+        ids:links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''))};
+    })())"""
+    try:
+        shot = browser_json(script)
+    except subprocess.CalledProcessError as error:
+        save(f"sidebar-order-{stage}", {"browser_error_exit": error.returncode})
+        raise
+    save(f"sidebar-order-{stage}", {"saved_ids": [a["agent_id"], b["agent_id"]], "ui": shot})
+    sidebar_order_ok(shot, a["agent_id"], b["agent_id"], stage)
 
 
 def home_expected():
