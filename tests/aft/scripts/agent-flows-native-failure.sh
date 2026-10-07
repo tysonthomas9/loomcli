@@ -12,7 +12,7 @@ event_seq="$4"
 turn_id="$5"
 error_sha="$6"
 if [[ -n "$error_sha" ]]; then
-  [[ "$event_id" =~ ^evt_[A-Za-z0-9_-]+$ && "$event_seq" =~ ^[0-9]+$ &&
+  [[ "$event_id" == agent.turn_completed:* && "$event_seq" =~ ^[0-9]+$ &&
      "$turn_id" =~ ^[A-Za-z0-9_-]+$ && "$error_sha" =~ ^[a-f0-9]{64}$ ]] || exit 2
 else
   [[ -z "$event_id$event_seq$turn_id" ]] || exit 2
@@ -23,6 +23,10 @@ native_ref="$("$AFT_NATIVE_SESSION_PROBE" "$agent_id")" || exit 1
 native_id="$(jq -er --arg id "$agent_id" 'select(.agent_id == $id and .harness == "opencode" and
   (.native_id | type == "string" and length > 0) and (.native_root | type == "string")) | .native_id' <<< "$native_ref")" || exit 1
 native_root="$(jq -er '.native_root' <<< "$native_ref")" || exit 1
+if [[ -n "$error_sha" ]]; then
+  # loomagent.nativeRow keys a saved turn end by root, native session, and TurnID.
+  [[ "$event_id" == "agent.turn_completed:${native_root}:${native_id}:${turn_id}" ]] || exit 2
+fi
 cd "$AFT_SOURCE_ROOT"
 compose=(agent_flows_podman compose -p "$AFT_OWNED_PROJECT" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f "$AFT_WORK_DIR/fleet-override.yml")
 container="$("${compose[@]}" ps -q loom-local | tr -d '\r')"
