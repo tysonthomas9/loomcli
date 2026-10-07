@@ -221,6 +221,14 @@ class ChildProofPredicates(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(AssertionError):
                 module.assert_started_snapshot({**good, **change}, [self.a, self.b], ["pair-a", "pair-b"], 1)
 
+    def test_one_child_can_have_two_saved_native_tool_entries(self):
+        shot = {"markerCount": 1, "ids": [self.a], "names": ["pair-a"],
+                "toolCount": 2, "colors": ["1"], "rawCode": False}
+        module.assert_started_snapshot(shot, [self.a], ["pair-a"], 2)
+        for ui_count, native_count in ((1, 2), (2, 1), (2, 0)):
+            with self.subTest(ui_count=ui_count, native_count=native_count), self.assertRaises(AssertionError):
+                module.assert_started_snapshot({**shot, "toolCount": ui_count}, [self.a], ["pair-a"], native_count)
+
     def test_one_native_tool_entry_can_create_two_distinct_children(self):
         both = event("item.completed", 1, "both", {"itemKind": "tool", "tool": {
             "name": "execute", "input": json.dumps({"code":
@@ -231,6 +239,7 @@ class ChildProofPredicates(unittest.TestCase):
             "name": "execute", "input": json.dumps({"code":
                 "const t=search({namespace:'loom',query:'agent_create'}); await t[0].call({name:'pair-a'})"})}})
         self.assertEqual(module.native_create_tool_count([searched]), 1)
+        self.assertEqual(module.native_create_tool_count([searched, both]), 2)
         both["payload"]["tool"]["failed"] = True
         self.assertEqual(module.native_create_tool_count([both]), 0)
 
