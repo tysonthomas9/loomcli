@@ -90,12 +90,17 @@ tests:
       - run: |
           agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/live-children/pair-lead")'"
         intent: "Return to the Lead Chat after viewing child A's Chat"
-      - wait:
-          fn: >-
-            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
-              return r.length === 2 && r.every((e) => e.dataset.outcome === 'completed' && e.dataset.delivery === 'delivered') &&
-                r.some((e) => e.textContent.includes('aft-child-a-${RUN_ID}')) &&
-                r.some((e) => e.textContent.includes('aft-child-b-${RUN_ID}')); })()
+      - run: |
+          if agent-browser --session "$AFT_SESSION" wait --fn "(() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+            return r.length === 2 && r.every((e) => e.dataset.outcome === 'completed' && e.dataset.delivery === 'delivered') &&
+              r.some((e) => e.textContent.includes('aft-child-a-${RUN_ID}')) &&
+              r.some((e) => e.textContent.includes('aft-child-b-${RUN_ID}')); })()"; then
+            :
+          else
+            wait_status=$?
+            python3 "$AFT_TESTS_DIR/scripts/live-child-evidence.py" pair_timeout pair-lead "aft-child-a-${RUN_ID}" "aft-child-b-${RUN_ID}" || true
+            exit "$wait_status"
+          fi
         intent: "Wait for exactly one delivered completion card for each real child attempt"
       - wait:
           fn: >-
