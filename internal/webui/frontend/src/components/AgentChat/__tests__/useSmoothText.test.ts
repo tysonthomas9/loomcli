@@ -96,6 +96,29 @@ describe("useSmoothText", () => {
     expect(result.current.text).toBe("Hello there my friend");
   });
 
+  it("reveals a new live row from zero and flushes its backlog at completion", () => {
+    const first = "word ".repeat(15).trim();
+    const { result, rerender } = renderHook(
+      ({ t, s }) => useSmoothText(t, s, true),
+      { initialProps: { t: first, s: true } },
+    );
+    expect(result.current.text).toBe("");
+    tick();
+    expect(result.current.text.trim().split(/\s+/)).toHaveLength(1);
+    rerender({ t: `${first} final`, s: false });
+    expect(result.current.text).toBe(`${first} final`);
+    expect(result.current.fresh).toEqual([]);
+  });
+
+  it("shows a new live row immediately under reduced motion", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+    const first = "word ".repeat(15).trim();
+    const { result } = renderHook(() => useSmoothText(first, true, true));
+    expect(result.current.text).toBe(first);
+    expect(result.current.fresh).toEqual([]);
+    expect(frames).toHaveLength(0);
+  });
+
   it("shows a 900-character burst within 300ms of its arrival", () => {
     const burst = "word ".repeat(180);
     const { result, rerender } = renderHook(({ t, s }) => useSmoothText(t, s), {
