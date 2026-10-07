@@ -73,6 +73,30 @@ tests:
         intent: Show the target's nested Files lens
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" select_files_lens'
         intent: Select the unique nested Files lens on the exact target route
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const p=document.querySelector("[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"); if(!p || location.search!=="?tab=files") throw Error("owned Files panel missing"); const tabs=Array.from(p.querySelectorAll("[role=tablist][aria-label=\"File explorer lens\"] [role=tab][aria-label^=\"Changes \"]")); if(tabs.length!==1) throw Error("expected one owned Changes lens"); tabs[0].click(); return true; })()' >/dev/null
+        intent: Show the target's Changes lens to choose the uncommitted working-tree comparison
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              return location.search==='?tab=files' &&
+                !!p?.querySelector('[role=tablist][aria-label="Compare mode"] [role=tab][title^="Uncommitted changes in each checkout"]'); })()
+        intent: Show the product's Working tree comparison option
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const p=document.querySelector("[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"); if(!p || location.search!=="?tab=files") throw Error("owned Changes panel missing"); const tabs=Array.from(p.querySelectorAll("[role=tablist][aria-label=\"Compare mode\"] [role=tab][title^=\"Uncommitted changes in each checkout\"]")); if(tabs.length!==1) throw Error("expected one owned Working tree option"); tabs[0].click(); return true; })()' >/dev/null
+        intent: Compare the target's uncommitted working-tree files
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              const lens=p?.querySelector('[role=tablist][aria-label="File explorer lens"] [role=tab][aria-label^="Changes "]');
+              const working=p?.querySelectorAll('[role=tablist][aria-label="Compare mode"] [role=tab][title^="Uncommitted changes in each checkout"]');
+              const branch=p?.querySelectorAll('[role=tablist][aria-label="Compare mode"] [role=tab][title^="Committed changes on each agent branch"]');
+              return location.search==='?tab=files' && lens?.getAttribute('aria-selected')==='true' &&
+                working?.length===1 && working[0].getAttribute('aria-selected')==='true' &&
+                branch?.length===1 && branch[0].getAttribute('aria-selected')==='false'; })()
+        intent: Require the Working tree comparison to be selected before the edit
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" select_files_lens'
+        intent: Return to the unique target Files lens with Working tree comparison retained
       - wait:
           fn: >-
             (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
