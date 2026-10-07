@@ -509,7 +509,8 @@ def sidebar_child(parent_label, child_label, stage):
     if stage == "finished-open":
         assert live["state"] == "finished" and shot["selected"]
     if stage == "reactivated":
-        assert live["state"] in ("active", "waiting") and live["attempt"] == 1
+        assert live["attempt"] == 1 and live["state"] in ("active", "waiting", "finished")
+        assert load("reactivation-checkpoint")["stage"] in ("running", "completed")
     browser("screenshot", str(OUT / f"sidebar-{stage}-{child_label}.png"))
     save(f"sidebar-{stage}-{child_label}", {"api_state": live["state"], "ui": shot})
 
@@ -666,6 +667,40 @@ def switched_ref(prior, second, original, actual):
     assert not second["head"], "CL3 must not report an unowned head"
 
 
+def reactivation_checkpoint_ok(shot, child):
+    assert shot["path"] == f"/ws/{quote(WS, safe='')}/chat/{quote(child['parent_agent_id'], safe='')}"
+    assert shot["rowIds"].count(child["agent_id"]) <= 1
+    running = shot["rowIds"].count(child["agent_id"]) == 1 and shot["running"] and shot["attemptChip"] == "attempt 2"
+    completed = sorted(shot["cardAttempts"]) == ["0", "1"]
+    assert running or completed, "same-child attempt two has neither a running chip nor two exact cards"
+    return "running" if running else "completed"
+
+
+def reactivation_checkpoint(lead_label, child_label):
+    lead, child = load(lead_label), load(child_label)
+    assert child["parent_agent_id"] == lead["agent_id"]
+    child_id, name = child["agent_id"], child["name"]
+    script = """(() => {
+      const id=%s, name=%s;
+      const rows=Array.from(document.querySelectorAll('[data-testid=agent-tray] li[data-tray-row]'));
+      const row=rows.find(r=>r.dataset.trayRow===id);
+      const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]'))
+        .filter(c=>c.querySelector(':scope > span:nth-child(2)')?.textContent?.trim()===name &&
+          c.dataset.outcome==='completed' && c.dataset.delivery==='delivered');
+      return {path:location.pathname,rowIds:rows.map(r=>r.dataset.trayRow),
+        running:!!row?.querySelector('[data-status=running]'),
+        attemptChip:row?.querySelector('[data-chip=attempt]')?.textContent?.trim()||'',
+        cardAttempts:cards.map(c=>c.dataset.attempt)};
+    })()""" % (json.dumps(child_id), json.dumps(name))
+    browser("wait", "--fn", "(() => { const s=" + script + "; return (s.running && s.attemptChip==='attempt 2') || JSON.stringify(s.cardAttempts.sort())==='[\"0\",\"1\"]'; })()")
+    shot = browser_json("JSON.stringify(" + script + ")")
+    stage = reactivation_checkpoint_ok(shot, child)
+    live = agent(child_id)
+    assert live["parent_agent_id"] == lead["agent_id"] and live["attempt"] == 1
+    browser("screenshot", str(OUT / f"reactivated-{stage}-{child_label}.png"))
+    save("reactivation-checkpoint", {"stage": stage, "api_state": live["state"], "ui": shot})
+
+
 def repeated(lead_label, child_label):
     prior = load("first")
     second, ev = completion(lead_label, child_label, 1, "second")
@@ -742,10 +777,12 @@ def pair(lead_label, first_label, second_label):
     assert all(records[i][0]["seq"] < grouped[0]["seq"] for i in (0, 1))
     assert not [e for e in ev if calls_operation(e, "agent_get")]
     replies = [e for e in ev if e["seq"] > grouped[0]["seq"] and reply_text(e)]
+    finished = [e for e in ev if e["kind"] == "agent.turn_completed" and e["seq"] > grouped[0]["seq"]]
+    assert len(finished) == 1 and all(reply["seq"] < finished[0]["seq"] for reply in replies), "Lead final reply is not a persisted finished turn"
     assert len(replies) == 1 and all(load(label)["name"] in reply_text(replies[0]) for label in (first_label, second_label))
     save("pair-proof", {"children": ids, "record_ids": [rows[0]["event_id"] for rows in records],
                         "delivery_id": grouped[0]["event_id"], "final_reply_id": replies[0]["event_id"],
-                        "busy_lead_turn": busy_at["lead_turn"]})
+                        "final_turn_end_id": finished[0]["event_id"], "busy_lead_turn": busy_at["lead_turn"]})
 
 
 def roster(*labels):
@@ -798,7 +835,7 @@ def sidebar_order(first_label, second_label, stage):
     script = """JSON.stringify((() => {
       const nav=document.querySelector('nav[aria-label=Agents]');
       const links=Array.from(nav?.querySelectorAll('[data-testid=sortable-agent-row] > a[href]') || []);
-      return {path:location.pathname,nav:!!nav,
+      return {path:location.pathname,href:location.href,readyState:document.readyState,nav:!!nav,
         ids:links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''))};
     })())"""
     try:
@@ -807,6 +844,8 @@ def sidebar_order(first_label, second_label, stage):
         save(f"sidebar-order-{stage}", {"browser_error_exit": error.returncode})
         raise
     save(f"sidebar-order-{stage}", {"saved_ids": [a["agent_id"], b["agent_id"]], "ui": shot})
+    if stage in ("lifted", "moved", "attempted"):
+        browser("screenshot", str(OUT / f"sidebar-order-{stage}.png"))
     sidebar_order_ok(shot, a["agent_id"], b["agent_id"], stage)
 
 

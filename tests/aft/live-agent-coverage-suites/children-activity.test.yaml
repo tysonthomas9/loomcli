@@ -134,15 +134,12 @@ tests:
           agent-browser --session "$AFT_SESSION" fill "textarea[aria-label=Message]" "Use Loom agent_send once to your existing finished child $id. Ask it to git switch -c cov-child-switched-${RUN_ID} in its own worktree, create only aft-child-fixtures/${RUN_ID}/second.txt with the words second complete, git add and commit it on that switched branch, and report the outcome. Do not create another child. After the new task_completed notice, give one final summary with the words first and second, without agent_get."
         intent: Put the exact saved child ID into the person's Lead Chat request
       - press: Enter
-      - wait:
-          fn: >-
-            (() => { const tray=document.querySelector('[data-testid=agent-tray]');
-              const row=Array.from(tray?.querySelectorAll('li[data-tray-row]')||[]).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));
-              return !!row?.querySelector('[data-status=running] [data-chip=attempt]') && row.textContent?.includes('attempt 2'); })()
-        intent: Await the real same-child attempt-two running tray row
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" reactivation_checkpoint repeat-lead repeat
+        intent: Capture the exact second-attempt running tray chip or its delivered card if the child has already finished
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_child repeat-lead repeat reactivated
-        intent: Require the exact saved finished child ID to reappear active under its parent after native agent_send
+        intent: Require the same child ID and attempt under its parent after native agent_send, including if it finished before this checkpoint
       - wait:
           fn: >-
             (() => { const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]'));
@@ -262,9 +259,11 @@ tests:
           fn: >-
             (() => { const rows=Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li'));
               const last=rows.findLastIndex(r=>r.querySelector('[data-testid=completion-record]'));
-              return last>=0 && rows.slice(last+1).some(r=>r.dataset.kind==='agent' &&
-                r.textContent?.includes('cov-child-pair-a-${RUN_ID}') && r.textContent?.includes('cov-child-pair-b-${RUN_ID}')); })()
-        intent: Screenshot the final combined Lead result
+              const header=document.querySelector('section[aria-label="Agent chat"] header [data-state]');
+              return last>=0 && !!header && header.getAttribute('data-running')!=='true' &&
+                rows.slice(last+1).some(r=>r.dataset.kind==='agent' &&
+                  r.textContent?.includes('cov-child-pair-a-${RUN_ID}') && r.textContent?.includes('cov-child-pair-b-${RUN_ID}')); })()
+        intent: Await the finished Lead turn before checking its persisted combined reply
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" pair pair-lead pair-a pair-b
         intent: Require one saved delivery containing both completion keys, one final reply, and no agent_get
@@ -444,9 +443,11 @@ tests:
           set -eu
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_focus sidebar-b
           agent-browser --session "$AFT_SESSION" press Space
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b lifted
           agent-browser --session "$AFT_SESSION" press ArrowUp
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b moved
           agent-browser --session "$AFT_SESSION" press Space
-        intent: Reorder Lead B above Lead A through the sidebar keyboard drag handle
+        intent: Reorder Lead B above Lead A and save exact route and row diagnostics after lift and move
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_order sidebar-a sidebar-b attempted
         intent: Record exact Lead ID order and route immediately after the keyboard action, including a missing sidebar

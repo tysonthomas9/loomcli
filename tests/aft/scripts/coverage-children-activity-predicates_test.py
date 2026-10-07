@@ -86,7 +86,8 @@ class ChildProofPredicates(unittest.TestCase):
             {"child": self.a, "attempt": 0}, {"child": self.b, "attempt": 0}]})
         self.history = self.records + [event("agent.turn_completed", 20, "busy-end", turn_id="turn-busy"),
                                        self.delivery,
-                                       event("item.completed", 22, "reply", {"itemKind": "message", "text": "pair-a pair-b done"})]
+                                       event("item.completed", 22, "reply", {"itemKind": "message", "text": "pair-a pair-b done"}),
+                                       event("agent.turn_completed", 23, "reply-end", turn_id="turn-final")]
         self.labels = {"pair-lead": {"agent_id": "agt_lead"},
                        "busy": {"children": [self.a, self.b], "lead_turn": "turn-busy", "last_lead_seq": 10},
                        "pair-a": {"agent_id": self.a, "name": "pair-a"},
@@ -175,6 +176,42 @@ class ChildProofPredicates(unittest.TestCase):
             {"child": self.a, "attempt": 0}]}))
         with self.assertRaises(AssertionError):
             self.run_pair()
+
+    def test_pair_rejects_streaming_reply_without_saved_final_turn_end(self):
+        self.history = [e for e in self.history if e["event_id"] != "reply-end"]
+        with self.assertRaisesRegex(AssertionError, "persisted finished turn"):
+            self.run_pair()
+
+    def test_reactivation_requires_exact_route_and_attempt_or_cards(self):
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead"}
+        shot = {"path": "/ws/LOCALMODE/chat/agt_lead", "rowIds": [self.a],
+                "running": True, "attemptChip": "attempt 2", "cardAttempts": ["0"]}
+        self.assertEqual(module.reactivation_checkpoint_ok(shot, child), "running")
+        done = {**shot, "rowIds": [], "running": False, "attemptChip": "", "cardAttempts": ["0", "1"]}
+        self.assertEqual(module.reactivation_checkpoint_ok(done, child), "completed")
+        for bad in ({**shot, "path": "/ws/FOREIGN/chat/agt_lead"},
+                    {**shot, "attemptChip": "attempt 1"},
+                    {**shot, "rowIds": [self.b]},
+                    {**shot, "rowIds": [self.a, self.a]},
+                    {**done, "cardAttempts": ["0", "0"]}):
+            with self.subTest(bad=bad), self.assertRaises(AssertionError):
+                module.reactivation_checkpoint_ok(bad, child)
+
+    def test_reactivation_wait_uses_saved_child_id_and_valid_js(self):
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "cov-child-repeat-" + module.RUN}
+        shot = {"path": "/ws/LOCALMODE/chat/agt_lead", "rowIds": [self.a],
+                "running": True, "attemptChip": "attempt 2", "cardAttempts": ["0"]}
+        calls = []
+        with patch.object(module, "load", side_effect=lambda label: {"agent_id": "agt_lead"} if label == "repeat-lead" else child), \
+             patch.object(module, "agent", return_value={**child, "attempt": 1, "state": "active"}), \
+             patch.object(module, "browser", side_effect=lambda *args: calls.append(args)), \
+             patch.object(module, "browser_json", return_value=shot), patch.object(module, "save"):
+            module.reactivation_checkpoint("repeat-lead", "repeat")
+        wait = next(args[2] for args in calls if args[:2] == ("wait", "--fn"))
+        self.assertIn(json.dumps(self.a), wait)
+        check = subprocess.run(["node", "--input-type=module", "-e", "new Function('return '+process.argv[1])", wait],
+                               capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, check.stderr)
 
     def test_preview_rejects_prior_turn(self):
         prior = event("item.completed", 1, "prior", {"itemKind": "tool", "tool": {"name": "bash"}}, "turn-old")
@@ -338,6 +375,8 @@ class ChildProofPredicates(unittest.TestCase):
     def test_sidebar_order_requires_two_saved_ids_and_stable_chat_route(self):
         good = {"path": f"/ws/LOCALMODE/chat/{self.b}", "nav": True, "ids": [self.a, self.b]}
         module.sidebar_order_ok(good, self.a, self.b, "before")
+        module.sidebar_order_ok(good, self.a, self.b, "lifted")
+        module.sidebar_order_ok({**good, "ids": [self.b, self.a]}, self.a, self.b, "moved")
         module.sidebar_order_ok({**good, "ids": [self.b, self.a]}, self.a, self.b, "after")
         module.sidebar_order_ok({**good, "ids": [self.b, self.a]}, self.a, self.b, "reload")
         for bad, stage in (({**good, "ids": [self.a, self.b]}, "after"),
@@ -345,6 +384,8 @@ class ChildProofPredicates(unittest.TestCase):
                            ({**good, "ids": [self.a, self.b, self.b]}, "attempted"),
                            ({**good, "path": "/ws/LOCALMODE/home"}, "attempted"),
                            ({**good, "path": f"/ws/FOREIGN/chat/{self.b}"}, "attempted"),
+                           ({**good, "path": f"/ws/FOREIGN/chat/{self.b}"}, "lifted"),
+                           ({**good, "nav": False}, "moved"),
                            ({**good, "path": f"/prefix/ws/LOCALMODE/chat/{self.b}"}, "attempted"),
                            ({**good, "nav": False}, "attempted")):
             with self.subTest(bad=bad), self.assertRaises(AssertionError):
@@ -385,7 +426,7 @@ class ChildProofPredicates(unittest.TestCase):
             bindir = Path(temp)
             log = bindir / "calls"
             python = bindir / "python3"
-            python.write_text("#!/bin/sh\n[ \"$#\" = 3 ] && [ \"$2\" = sidebar_focus ] && [ \"$3\" = sidebar-b ] || exit 41\nprintf 'focus\\n' >> \"$AFT_STUB_LOG\"\n")
+            python.write_text("#!/bin/sh\nif [ \"$2\" = sidebar_focus ]; then [ \"$#\" = 3 ] && [ \"$3\" = sidebar-b ] || exit 41; printf 'focus\\n' >> \"$AFT_STUB_LOG\"; elif [ \"$2\" = sidebar_order ]; then [ \"$#\" = 5 ] && [ \"$3\" = sidebar-a ] && [ \"$4\" = sidebar-b ] && { [ \"$5\" = lifted ] || [ \"$5\" = moved ]; } || exit 43; printf 'order:%s\\n' \"$5\" >> \"$AFT_STUB_LOG\"; else exit 44; fi\n")
             python.chmod(0o755)
             agent_browser = bindir / "agent-browser"
             agent_browser.write_text("#!/bin/sh\n[ \"$#\" = 4 ] && [ \"$1\" = --session ] && [ \"$2\" = stub-session ] && [ \"$3\" = press ] || exit 42\nprintf 'press:%s\\n' \"$4\" >> \"$AFT_STUB_LOG\"\n")
@@ -394,7 +435,7 @@ class ChildProofPredicates(unittest.TestCase):
                    "AFT_TESTS_DIR": "/owned/tests", "AFT_SESSION": "stub-session", "AFT_STUB_LOG": str(log)}
             good = subprocess.run(["bash", "-e", "-c", run], env=env, capture_output=True, text=True)
             self.assertEqual(good.returncode, 0, good.stderr)
-            self.assertEqual(log.read_text().splitlines(), ["focus", "press:Space", "press:ArrowUp", "press:Space"])
+            self.assertEqual(log.read_text().splitlines(), ["focus", "press:Space", "order:lifted", "press:ArrowUp", "order:moved", "press:Space"])
             bad = run.replace("sidebar_focus sidebar-b", "sidebar_focus 'cov-child-sidebar-b-${RUN_ID}'")
             failed = subprocess.run(["bash", "-e", "-c", bad], env=env, capture_output=True, text=True)
             self.assertNotEqual(failed.returncode, 0, "literal unexpanded name must not pass the real shell block")
