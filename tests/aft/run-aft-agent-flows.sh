@@ -44,7 +44,7 @@ selection="$(node "$TESTS_DIR/scripts/agent-flows-selection.mjs" "$TESTS_DIR" "$
   || die 'suite selection or schema validation failed'
 case_count="$(jq -r '.count' <<< "$selection")" || die 'could not read selected case count'
 [[ "$case_count" =~ ^[1-9][0-9]*$ ]] || die 'could not count parsed AFT cases'
-((case_count <= cap && case_count <= 10)) || die "$case_count selected paid cases exceed cap $cap or the absolute ten-case ceiling"
+((case_count <= cap && case_count <= 10)) || die "$case_count selected cases exceed cap $cap or the absolute ten-case ceiling"
 suites=()
 while IFS= read -r suite; do suites+=("$suite"); done < <(jq -r '.suites[].path' <<< "$selection")
 if ((validate_only)); then
@@ -52,7 +52,11 @@ if ((validate_only)); then
   jq -c --arg source "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" '. + {source_head:$source}' <<< "$selection"
   exit 0
 fi
-echo "[aft-agent-flows] validated batch $coverage_batch: ${#suites[@]} suites, $case_count cases (cap $cap); real OpenCode will consume provider account usage"
+if [[ "$coverage_batch" == chat-visual-skip ]]; then
+  echo "[aft-agent-flows] validated no-answer batch $coverage_batch: $case_count case (cap $cap); real OpenCode catalog may access external model metadata"
+else
+  echo "[aft-agent-flows] validated batch $coverage_batch: ${#suites[@]} suites, $case_count cases (cap $cap); real OpenCode will consume provider account usage"
+fi
 
 primary_root="$(git -C "$SOURCE_ROOT" worktree list --porcelain | sed -n '1s/^worktree //p' | tr -d '\r')"
 [[ -n "$primary_root" ]] || die 'could not locate the shared account lock root'
@@ -216,7 +220,7 @@ jq -n --arg head "$head_sha" --arg source "$SOURCE_ROOT" --arg fleet "$fleet_rep
   --argjson fleetPort "$fleet_port" --argjson apiPort "$api_port" --argjson uiPort "$ui_port" \
   --arg aftCliSha "$(shasum -a 256 "$AFT_DIR/dist/cli.js" | awk '{print $1}')" \
   --arg aftLoaderSha "$(shasum -a 256 "$AFT_DIR/dist/runner.js" | awk '{print $1}')" \
-  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:(if $selection.batch == "default" then "real OpenCode external model" else "real OpenCode stack; paid model evidence is per selected suite" end),backend:"opencode",cases:$cases,cap:$cap,selection:$selection,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,fleetdb_rate_limit_enabled:false,fleetdb_compose_override_sha256:$fleetOverrideSha,browser_socket_dir:$browserSocket,browser_socket_max_bytes:$browserSocketBytes,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
+  '{source_head:$head,source_root:$source,fleet_source:$fleet,fleet_head:$fleetSha,harness:$aft,aft_cli_sha256:$aftCliSha,aft_loader_sha256:$aftLoaderSha,browser_binary:$browser,run_id:$run,realness:(if $selection.batch == "default" then "real OpenCode external model" elif $selection.batch == "chat-visual-skip" then "real OpenCode stack; authored no-answer case; catalog may access external model metadata" else "real OpenCode stack; paid model evidence is per selected suite" end),backend:"opencode",cases:$cases,cap:$cap,selection:$selection,owned:{compose_project:$project,evidence_dir:$evidence,api_url:$apiUrl,ui_url:$uiUrl,fleetdb_rate_limit_enabled:false,fleetdb_compose_override_sha256:$fleetOverrideSha,browser_socket_dir:$browserSocket,browser_socket_max_bytes:$browserSocketBytes,ports:[$fleetPort,$apiPort,$uiPort],podman_home:$podmanHome,podman_connection:$podmanConnection,podman_connection_fingerprint:$podmanFingerprint},evidence:"AFT screenshots every step and all videos"}' \
   > "$run_root/evidence/manifest.json"
 
 if ! mkdir /private/tmp/dryhawk-stack-build.lock 2>/dev/null; then
@@ -276,7 +280,11 @@ for image in "$LOCAL_MODE_LOOM_AGENTS_IMAGE" "$LOCAL_MODE_FLEETDB_IMAGE"; do
     >> "$run_root/evidence/images.jsonl" || die "built image $image lacks owned project provenance"
 done
 
-echo "[aft-agent-flows] running $case_count selected real-stack cases on owned $project; required UI model $real_model; catalog candidate $model; screenshots and videos in $run_root/evidence"
+if [[ "$coverage_batch" == chat-visual-skip ]]; then
+  echo "[aft-agent-flows] running one authored no-answer case on owned $project; catalog candidate $model may use external metadata; screenshots and video in $run_root/evidence"
+else
+  echo "[aft-agent-flows] running $case_count selected real-stack cases on owned $project; required UI model $real_model; catalog candidate $model; screenshots and videos in $run_root/evidence"
+fi
 [[ "$(node "$TESTS_DIR/scripts/agent-flows-selection.mjs" "$TESTS_DIR" "$AFT_DIR/dist/runner.js" "$coverage_batch")" == "$selection" ]] \
   || die 'selected suite contents changed after preflight'
 aft_status=0
@@ -375,6 +383,8 @@ jq --slurpfile observed "$run_root/evidence/actual-agent-models.json" --arg batc
      "UI-saved model on surviving Leads; null child defaults need separate turn-level proof"
      elif any($declared.leads[]; .model_required) then
        "Exact-ID saved-model receipts on declared runner-required Leads; API Create first-message and native answer proof remain suite-owned"
+     elif $batch == "chat-visual-skip" then
+       "No provider answer requested or proved; exact owned Lead and empty Chat are suite-owned"
      else "No runner-level model receipt in this batch; suite assertions and independent live review required" end)' \
   "$run_root/evidence/manifest.json" > "$run_root/evidence/manifest.tmp"
 mv "$run_root/evidence/manifest.tmp" "$run_root/evidence/manifest.json"
