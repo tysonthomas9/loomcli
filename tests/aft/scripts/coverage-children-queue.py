@@ -155,6 +155,36 @@ def one_call(operation, marker):
     return rows[0]
 
 
+def settled_send_turn(rows, lead_id, child_id, marker):
+    calls = [e for e in rows if e.get("agent_id") == lead_id and
+             actual_call(e, "agent_send", child_id, marker)]
+    demand(len(calls) == 1, f"missing or duplicate saved native send for {marker}")
+    call = calls[0]
+    tool = call["payload"].get("tool") or {}
+    demand(not tool.get("failed") and isinstance(tool.get("output"), str) and tool["output"].strip(),
+           f"native send failed or lacks a receipt for {marker}")
+    turn = call.get("turn_id")
+    demand(bool(turn), f"native send lacks a Lead turn for {marker}")
+    ends = [e for e in rows if e.get("agent_id") == lead_id and e["kind"] == "agent.turn_completed" and e.get("turn_id") == turn and
+            e["seq"] > call["seq"] and e["payload"].get("stopReason") not in ("failed", "cancelled") and
+            not e["payload"].get("error")]
+    demand(len(ends) == 1, f"saved Lead send turn did not complete for {marker}")
+    replies = [e for e in rows if e.get("agent_id") == lead_id and e["kind"] == "item.completed" and e.get("turn_id") == turn and
+               e["payload"].get("itemKind") == "message" and isinstance(e["payload"].get("text"), str) and
+               e["payload"]["text"].strip() and call["seq"] < e["seq"] < ends[0]["seq"]]
+    demand(replies, f"saved Lead send turn lacks a completed reply for {marker}")
+    return call, ends[0], replies
+
+
+def settled_lead_send(stage, marker):
+    call, end, replies = settled_send_turn(events("lead"), identity("lead"), identity("child"), marker)
+    save(f"lead-send-{stage}", {"child": identity("child"), "tool_event_id": call["event_id"],
+                               "turn_id": call["turn_id"], "turn_end_event_id": end["event_id"],
+                               "reply_event_ids": [e["event_id"] for e in replies],
+                               "native_output_present": True})
+    return call
+
+
 def native_send_result(event, expected_replaced):
     demand(event["kind"] == "item.completed" and event["payload"].get("itemKind") == "tool", "native send is not a completed tool")
     tool = event["payload"].get("tool") or {}
@@ -539,8 +569,28 @@ def fifo_before():
 
 
 def fifo_parent():
-    one_call("agent_send", "QUEUE-P1-")
+    first = settled_lead_send("p1", "QUEUE-P1-")
+    child_events = events("child")
+    sender = f"agent:{identity('lead')}"
+    waits = [e for e in child_events if e["kind"] == "message.waiting" and
+             e["payload"].get("reason") == sender]
     row = agent("child")
+    precondition = {"child": row["agent_id"], "state": row["state"],
+                    "running_turn_id": row.get("running_turn_id"), "attempt": row["attempt"],
+                    "expected_turn_id": load("fifo-before")["turn"],
+                    "native_tool_event_id": first["event_id"],
+                    "saved_waiting_event_ids": [e["event_id"] for e in waits],
+                    "live_waiting_senders": [w["sender"] for w in row["waiting_messages"]]}
+    save("fifo-parent-precondition", precondition)
+    receipt = native_send_result(first, False)
+    precondition["native_message_id"] = receipt["message_id"]
+    save("fifo-parent-precondition", precondition)
+    demand(len(waits) == 1, "exact native P1 send lacks one saved parent waiting event")
+    request = native_wait_request(waits[0], row["agent_id"], sender, receipt)
+    save("fifo-parent-receipt", {"tool_event_id": first["event_id"], "waiting_event_id": waits[0]["event_id"],
+                                 "request_id": request, "message_id": receipt["message_id"]})
+    demand(row["state"] == "active" and row.get("running_turn_id"),
+           "inconclusive: child finished before the U1/P1 running-turn FIFO witness")
     active(row)
     user, parent = sender_pair(row["waiting_messages"], TEXT["u1"], TEXT["p1"], identity("lead"))
     demand(row["running_turn_id"] == load("fifo-before")["turn"], "child turn changed before second sender queued")
@@ -596,7 +646,7 @@ def fifo_done():
 
 
 def parent_started():
-    one_call("agent_send", "QUEUE-P2-")
+    settled_lead_send("p2", "QUEUE-P2-")
     row = agent("child")
     active(row)
     demand(row["attempt"] > load("fifo-done")["attempt"], "same task child did not reopen")
@@ -607,7 +657,7 @@ def parent_started():
 
 
 def first_parent_queued():
-    first = one_call("agent_send", "QUEUE-P3-")
+    first = settled_lead_send("p3", "QUEUE-P3-")
     initial = native_send_result(first, False)
     row = agent("child")
     active(row)
@@ -630,8 +680,8 @@ def first_parent_queued():
 
 
 def first_parent():
-    first = one_call("agent_send", "QUEUE-P3-")
-    second = one_call("agent_send", "QUEUE-P3B-")
+    first = settled_lead_send("p3", "QUEUE-P3-")
+    second = settled_lead_send("p3b", "QUEUE-P3B-")
     initial, replacement = replacement_result(first, second)
     prior = load("first-parent-initial")
     demand(prior["tool_event_id"] == first["event_id"] and prior["native_result"] == initial,

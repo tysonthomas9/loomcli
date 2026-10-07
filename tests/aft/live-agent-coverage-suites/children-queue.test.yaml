@@ -101,8 +101,10 @@ tests:
       - press: Enter
       - wait:
           fn: >-
-            !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
-            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')).some(x=>x.textContent.includes('QUEUE-P1-${RUN_ID}'))
+            (() => { const rows=Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li'));
+              const sent=rows.findLastIndex(x=>x.dataset.kind==='user' && x.textContent.includes('QUEUE-P1-${RUN_ID}'));
+              return !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
+                sent>=0 && rows.slice(sent+1).some(x=>x.dataset.kind==='agent' && x.textContent.trim()); })()
         budget: 120000
         intent: Show the Lead's actual native-tool turn has settled
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" fifo-parent'
@@ -184,8 +186,10 @@ tests:
       - press: Enter
       - wait:
           fn: >-
-            !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
-            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')).some(x=>x.textContent.includes('QUEUE-P2-${RUN_ID}'))
+            (() => { const rows=Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li'));
+              const sent=rows.findLastIndex(x=>x.dataset.kind==='user' && x.textContent.includes('QUEUE-P2-${RUN_ID}'));
+              return !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
+                sent>=0 && rows.slice(sent+1).some(x=>x.dataset.kind==='agent' && x.textContent.trim()); })()
         budget: 120000
         intent: Show the Lead's second native-tool turn settled
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" parent-started'
@@ -198,8 +202,10 @@ tests:
       - press: Enter
       - wait:
           fn: >-
-            !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
-            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')).some(x=>x.textContent.includes('QUEUE-P3-${RUN_ID}'))
+            (() => { const rows=Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li'));
+              const sent=rows.findLastIndex(x=>x.dataset.kind==='user' && x.textContent.includes('QUEUE-P3-${RUN_ID}'));
+              return !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
+                sent>=0 && rows.slice(sent+1).some(x=>x.dataset.kind==='agent' && x.textContent.trim()); })()
         budget: 120000
         intent: Show the Lead's first parent-slot send completed
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" first-parent-queued'
@@ -219,8 +225,10 @@ tests:
       - press: Enter
       - wait:
           fn: >-
-            !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
-            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')).some(x=>x.textContent.includes('QUEUE-P3B-${RUN_ID}'))
+            (() => { const rows=Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li'));
+              const sent=rows.findLastIndex(x=>x.dataset.kind==='user' && x.textContent.includes('QUEUE-P3B-${RUN_ID}'));
+              return !!document.querySelector('section[aria-label="Agent chat"] header [data-state=idle]') &&
+                sent>=0 && rows.slice(sent+1).some(x=>x.dataset.kind==='agent' && x.textContent.trim()); })()
         budget: 120000
         intent: Show the Lead's replacement tool turn settled
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-children-queue.py" first-parent'
