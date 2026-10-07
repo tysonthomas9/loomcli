@@ -710,6 +710,16 @@ def pair(lead_label, first_label, second_label):
     assert all(len(rows) == 1 and rows[0]["payload"]["outcome"] == "completed" for rows in records)
     busy_end = [e for e in ev if e["kind"] == "agent.turn_completed" and
                 e.get("turn_id") == busy_at["lead_turn"]]
+    save("pair-chronology", {"lead": lead["agent_id"], "lead_turn": busy_at["lead_turn"],
+                             "busy_start_seq": busy_at["last_lead_seq"],
+                             "busy_end": [{"event_id": e["event_id"], "seq": e["seq"]} for e in busy_end],
+                             "child_records": [{"child": child, "events": [{"event_id": e["event_id"],
+                                 "seq": e["seq"], "turn_id": e.get("turn_id"),
+                                 "outcome": e["payload"].get("outcome")} for e in rows]}
+                                 for child, rows in zip(ids, records)],
+                             "deliveries": [{"event_id": e["event_id"], "seq": e["seq"],
+                                 "completions": e["payload"].get("completions")} for e in ev
+                                 if e["kind"] == "message.delivered" and e["payload"].get("completions")]})
     assert len(busy_end) == 1, "saved busy Lead turn did not complete"
     assert all(busy_at["last_lead_seq"] < rows[0]["seq"] < busy_end[0]["seq"]
                for rows in records), "children did not both finish while the Lead was busy"
@@ -756,6 +766,29 @@ def sidebar_order_ok(shot, a, b, stage):
         assert shot["ids"].index(a) < shot["ids"].index(b), "initial Lead order differs"
     if stage in ("after", "reload"):
         assert shot["ids"].index(b) < shot["ids"].index(a), "keyboard drag did not reorder saved Leads"
+
+
+def sidebar_focus(label):
+    saved = load(label)
+    live = agent(saved["agent_id"])
+    assert live["agent_id"] == saved["agent_id"] and live["name"] == saved["name"]
+    route = f"/ws/{quote(WS, safe='')}/chat/{quote(saved['agent_id'], safe='')}"
+    shot = browser_json("""JSON.stringify((() => {
+      const id=%s, name=%s, route=%s;
+      const nav=document.querySelector('nav[aria-label=Agents]');
+      const links=Array.from(nav?.querySelectorAll('[data-testid=sortable-agent-row] > a[href]') || []);
+      const matches=links.filter(a=>a.getAttribute('href')===route);
+      const row=matches[0]?.closest('[data-testid=sortable-agent-row]');
+      const handles=Array.from(row?.querySelectorAll('[aria-label]') || [])
+        .filter(h=>h.getAttribute('aria-label')==='Drag to reorder '+name);
+      const handle=handles[0];
+      handle?.focus();
+      return {path:location.pathname,id,name,linkCount:matches.length,handleCount:handles.length,
+        focused:document.activeElement===handle};
+    })())""" % (json.dumps(saved["agent_id"]), json.dumps(saved["name"]), json.dumps(route)))
+    save("sidebar-keyboard-focus", shot)
+    assert shot == {"path": route, "id": saved["agent_id"], "name": saved["name"],
+                    "linkCount": 1, "handleCount": 1, "focused": True}, "saved Lead drag handle missing or unfocused"
 
 
 def sidebar_order(first_label, second_label, stage):
