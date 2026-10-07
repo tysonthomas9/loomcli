@@ -84,7 +84,41 @@ class QueueOracleTests(unittest.TestCase):
         self.assertIsNone(queue.started_create_role({**truncated, "payload": {"itemKind": "tool", "tool": {
             "name": "execute", "input": "{'query':'agent_create'"}}}))
 
+    def test_failed_create_tools_end_the_saved_group(self):
+        inputs = (("loom.agent_create", json.dumps({"name": queue.CHILD_NAME})),
+                  ("execute", json.dumps({"code": "await tools.loom.agent_create({name:'kid'})"})),
+                  ("execute", "{'namespace':'loom', 'query':'agent_create'"))
+        for name, raw in inputs:
+            event = {"kind": "item.completed", "event_id": "failed", "payload": {"itemKind": "tool",
+                     "tool": {"name": name, "input": raw, "failed": True}}}
+            with self.subTest(name=name, raw=raw):
+                self.assertIsNone(queue.started_create_role(event))
+                self.assertTrue(queue.saved_chat_item(event))
+        good = {"kind": "item.completed", "event_id": "create", "payload": {"itemKind": "tool",
+                "tool": {"name": "loom.agent_create", "input": json.dumps({"name": queue.CHILD_NAME})}}}
+        marker = {"kind": "child.created", "event_id": "created", "payload": {"child": "agt_child"}}
+        with self.assertRaisesRegex(AssertionError, "exact native agent_create did not belong"):
+            queue.started_group([good, event, marker], "agt_child", "create")
+
+    def test_saved_chat_projection_boundaries_match_visible_turn_and_hidden_completion(self):
+        good = {"kind": "item.completed", "event_id": "create", "payload": {"itemKind": "tool",
+                "tool": {"name": "loom.agent_create", "input": json.dumps({"name": queue.CHILD_NAME})}}}
+        marker = {"kind": "child.created", "event_id": "created", "payload": {"child": "agt_child"}}
+        hidden = {"kind": "message.delivered", "event_id": "hidden", "payload": {
+            "sender": "agent:agt_child", "completions": [{"child": "agt_child", "attempt": 0}], "message": ""}}
+        self.assertFalse(queue.saved_chat_item(hidden))
+        self.assertEqual(queue.started_group([good, hidden, marker], "agt_child", "create")["entries"],
+                         [{"event_id": "create", "role": "create"}])
+        failed_turn = {"kind": "agent.turn_completed", "event_id": "failed-turn", "payload": {"stopReason": "error"}}
+        self.assertTrue(queue.saved_chat_item(failed_turn))
+        with self.assertRaisesRegex(AssertionError, "exact native agent_create did not belong"):
+            queue.started_group([good, failed_turn, marker], "agt_child", "create")
+        self.assertFalse(queue.saved_chat_item({**failed_turn, "payload": {"stopReason": "completed"}}))
+
     def test_started_ui_scopes_expanded_rows_to_exact_marker_siblings(self):
+        search = {"kind": "item.completed", "event_id": "search", "seq": 0,
+                  "payload": {"itemKind": "tool", "tool": {"name": "execute", "input": json.dumps({
+                      "code": "return await tools.loom.search({namespace:'loom',query:'agent_create'})"})}}}
         create = {"kind": "item.completed", "event_id": "create", "seq": 1,
                   "payload": {"itemKind": "tool", "tool": {"name": "loom.agent_create",
                       "input": json.dumps({"name": queue.CHILD_NAME})}}}
@@ -99,17 +133,46 @@ class QueueOracleTests(unittest.TestCase):
                     "expandedRows": [], "callText": "", "color": None}
         with patch.dict(os.environ, {"AFT_WS": "LOCALMODE"}), \
              patch.object(queue, "identity", side_effect=lambda label: "agt_lead" if label == "lead" else "agt_child"), \
-             patch.object(queue, "events", return_value=[create, marker]), \
+             patch.object(queue, "events", return_value=[search, create, marker]), \
              patch.object(queue, "browser", side_effect=inspect_browser), patch.object(queue, "save"), \
              self.assertRaisesRegex(AssertionError, "Started child name/count/link mismatch"):
             queue.lead_ui("collapsed")
         self.assertEqual(len(scripts), 1)
         self.assertIn("nextElementSibling", scripts[0])
         self.assertIn("[data-testid=tool-call][data-in-group=true]", scripts[0])
+        self.assertIn("span[class*=heading]", scripts[0])
         self.assertNotIn("querySelectorAll('[data-testid=bridge-call]')", scripts[0])
         parsed = subprocess.run(["node", "--input-type=module", "-e", "new Function('return '+process.argv[1])", scripts[0]],
                                 capture_output=True, text=True)
         self.assertEqual(parsed.returncode, 0, parsed.stderr)
+        common = Path(subprocess.check_output(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                              cwd=Path(__file__).resolve().parents[3], text=True).strip())
+        jsdom = common.parent / "internal/webui/frontend/node_modules/jsdom/lib/api.js"
+        self.assertTrue(jsdom.is_file(), f"installed frontend JSDOM needed for DOM oracle: {jsdom}")
+        dom_code = """import {pathToFileURL} from 'node:url';
+const {JSDOM}=await import(pathToFileURL(process.argv[2]).href);
+globalThis.document=new JSDOM(process.argv[3]).window.document;
+console.log(JSON.stringify(eval(process.argv[4])));"""
+        marker_html = """<li data-kind="started"><div data-testid="started-marker">
+          <a href="/ws/LOCALMODE/chat/agt_child">child</a><button aria-expanded="true">2 tool calls</button>
+          </div></li>"""
+        def row(label, in_group="true"):
+            return f"""<li data-kind="work"><div data-testid="tool-call" data-in-group="{in_group}" data-status="completed">
+              <div><span data-icon="other" aria-hidden="true">⚙</span><span class="heading_abc">{label}</span>
+              <span class="chevron_abc" aria-hidden="true">⌄</span></div></div></li>"""
+        def evaluated(extra=""):
+            html = "<ul data-testid='chat-transcript'>" + marker_html + row("Ran code") + row("Started child") + extra + "</ul>"
+            result = subprocess.run(["node", "--input-type=module", "-", str(jsdom), html, scripts[0]],
+                                    input=dom_code, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)
+        group = {"entries": [{"event_id": "search", "role": "code"}, {"event_id": "create", "role": "create"}]}
+        positive = evaluated(row("Unrelated", "false"))
+        self.assertEqual([r["label"] for r in positive["expandedRows"]], ["Ran code", "Started child"])
+        queue.started_group_ui_ok(positive, group, "expanded")
+        for extra in (row("Started foreign"), row("Ran code")):
+            with self.subTest(extra=extra), self.assertRaisesRegex(AssertionError, "expanded Started rows differ"):
+                queue.started_group_ui_ok(evaluated(extra), group, "expanded")
 
     def test_parsed_child_prompts_use_only_present_fixture_paths(self):
         fixture = Path(__file__).resolve().parents[2] / "fixtures/slack-clone"
