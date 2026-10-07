@@ -25,14 +25,29 @@ function owned(row, parent, recorded, expected) {
     parent.created_by_kind === 'user' && parent.parent_agent_id === null && parent.root_agent_id === null
 }
 
-function serviceRegistration(reg, info) {
+function soleServicePid(proc = fs) {
+  const pids = proc.readdirSync('/proc').filter((name) => /^\d+$/.test(name)).map((name) => {
+    try {
+      const args = proc.readFileSync(`/proc/${name}/cmdline`).toString().split('\0').filter(Boolean)
+      const at = args.indexOf('serve')
+      return at > 0 && /(?:^|\/)opencode$/.test(args[at - 1]) &&
+        args[at + 1] === '--service' && at + 2 === args.length ? Number(name) : null
+    } catch { return null }
+  }).filter((pid) => pid !== null)
+  return pids.length === 1 && pids[0] > 1 ? pids[0] : null
+}
+
+function serviceRegistration(reg, pid) {
   let base
   try { base = new URL(reg?.url) } catch { return null }
   if (base.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(base.hostname) ||
-      base.username || base.password || base.pathname !== '/' || !Number.isInteger(reg.pid) ||
-      reg.pid < 1 || typeof reg.password !== 'string' || !reg.password || info?.pid !== reg.pid) return null
+      !base.port || base.pathname !== '/' || base.search || base.hash || base.username || base.password ||
+      !Number.isInteger(pid) || pid < 2 || reg.pid !== pid ||
+      typeof reg.password !== 'string' || !reg.password) return null
   return base
 }
+
+const serviceInfoOwned = (info, pid) => Number.isInteger(pid) && info?.pid === pid
 
 function sessionOwned(session, expected) {
   return session?.data?.id === expected.native &&
@@ -142,17 +157,14 @@ async function main() {
       name: `aft-child-${letter}-${run}`, parentName: `aft-child-lead-${run}`}
     if (!owned(row, lead, registered, expected)) return fail('foreign-child-or-native-ref')
     receipt.registry_requested_model = row.model
+    const pid = soleServicePid()
+    if (!pid) return fail('service-process-ambiguous-or-absent')
     let reg
     try { reg = JSON.parse(fs.readFileSync(path.join(process.env.LOOM_CONFIG_DIR,
       'agents-opencode/state/opencode/service.json'), 'utf8')) }
     catch { return fail('service-registration-unavailable') }
-    let base
-    try { base = new URL(reg.url) }
-    catch { return fail('service-registration-invalid') }
-    if (base.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(base.hostname) ||
-        base.username || base.password || base.pathname !== '/' || !Number.isInteger(reg.pid) ||
-        reg.pid < 1 || typeof reg.password !== 'string' || !reg.password)
-      return fail('service-registration-invalid')
+    const base = serviceRegistration(reg, pid)
+    if (!base) return fail('service-registration-invalid')
     const auth = 'Basic ' + Buffer.from('opencode:' + reg.password).toString('base64')
     const get = async (route, max = 65536) => {
       const response = await fetch(new URL(route, base),
@@ -162,7 +174,7 @@ async function main() {
     let info, session
     try {
       info = await get('/api/info')
-      if (!serviceRegistration(reg, info)) return fail('service-process-identity-mismatch')
+      if (!serviceInfoOwned(info, pid)) return fail('service-process-identity-mismatch')
       session = await get('/api/session/' + encodeURIComponent(native))
     } catch { return fail('owned-service-or-session-unavailable') }
     if (!sessionOwned(session, {agent, native, worktree: row.worktree_path}))
@@ -187,5 +199,6 @@ async function main() {
   } catch { fail('native-diagnostic-unavailable') }
 }
 
-module.exports = {owned, serviceRegistration, sessionOwned, model, parseSse, projectLog}
+module.exports = {owned, soleServicePid, serviceRegistration, serviceInfoOwned,
+  sessionOwned, model, parseSse, projectLog}
 if (/^agt_[A-Za-z0-9]+$/.test(process.argv[1] ?? '')) main()
