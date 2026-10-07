@@ -50,7 +50,7 @@ tests:
                 !/\{\s*"(name|brief|agent_id)"/.test(m.textContent || ''); })()
         intent: Screenshot the real Started header without raw bridge JSON (CL4)
       - run: >-
-          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind repeat repeat-lead "cov-child-repeat-${RUN_ID}"
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind repeat "cov-child-repeat-${RUN_ID}" repeat-lead
         intent: Prove the child was created by the Lead tool with one parent and distinct worktree
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_ui repeat-lead repeat
@@ -207,10 +207,10 @@ tests:
                 document.querySelectorAll('[data-testid=started-marker]').length>=1; })()
         intent: Screenshot both actual Started child names
       - run: >-
-          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind pair-a pair-lead "cov-child-pair-a-${RUN_ID}"
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind pair-a "cov-child-pair-a-${RUN_ID}" pair-lead
         intent: Prove pair child A was made by the Lead's native Loom tool
       - run: >-
-          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind pair-b pair-lead "cov-child-pair-b-${RUN_ID}"
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind pair-b "cov-child-pair-b-${RUN_ID}" pair-lead
         intent: Prove pair child B was made by the Lead's native Loom tool
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_ui pair-lead pair-a pair-b
@@ -347,7 +347,7 @@ tests:
             (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('cov-child-sidebar-task-${RUN_ID}')
         intent: Screenshot the nested working task child
       - run: >-
-          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind sidebar-task sidebar-b "cov-child-sidebar-task-${RUN_ID}"
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" bind sidebar-task "cov-child-sidebar-task-${RUN_ID}" sidebar-b
         intent: Bind the sidebar task child to its real Lead and saved Agent API ID
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_ui sidebar-b sidebar-task
