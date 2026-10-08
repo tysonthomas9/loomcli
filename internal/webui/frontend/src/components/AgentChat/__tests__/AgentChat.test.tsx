@@ -791,6 +791,46 @@ describe("AgentChat", () => {
     }
   });
 
+  it("keeps the first painted frame of a synced 900-character delta to two words", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => {
+      frames.push(frame);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    try {
+      const { container } = await mount(agent());
+      const stream = api.streams[0];
+      await act(async () => stream.opts.onResync?.());
+      const firstChunk = "word ".repeat(180);
+      act(() =>
+        stream.opts.onNotice?.({
+          ...ev("delta", {
+            itemId: "m1",
+            itemKind: "message",
+            text: firstChunk,
+          }),
+          seq: 0,
+        }),
+      );
+      const row = container.querySelector('li[data-kind="agent"]');
+      expect(row).toHaveAttribute("data-enter");
+      const markdown = row?.querySelector('[data-testid="chat-markdown"]');
+      expect(markdown).not.toBeNull();
+      const words = () =>
+        markdown?.textContent?.trim().split(/\s+/).filter(Boolean).length ?? 0;
+      expect(words()).toBe(0);
+      const scheduled = frames.splice(0);
+      expect(scheduled.length).toBeGreaterThan(0);
+      act(() => scheduled.forEach((frame) => frame(1000 / 60)));
+      expect(words()).toBeGreaterThan(0);
+      expect(words()).toBeLessThanOrEqual(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("shows preexisting unsynced midstream text immediately", async () => {
     const { container } = await mount(agent());
     const firstChunk = Array.from({ length: 15 }, (_, i) => `word${i}`).join(
