@@ -368,6 +368,15 @@
   padding: 2px 4px;
 }
 
+/* Reply actions stay discoverable at the end of even the longest response. */
+.agentMessage > .messageActions {
+  position: static;
+  width: max-content;
+  margin-top: 4px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* The waiting message: a user bubble that has not been delivered yet. */
 .waiting {
   display: flex;

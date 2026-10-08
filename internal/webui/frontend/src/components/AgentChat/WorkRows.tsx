@@ -125,6 +125,9 @@ export function WorkEntryRow({
           {heading}
         </span>
         {preview && <span className={styles.preview}>{preview}</span>}
+        {!tool && !text.trim() && (
+          <span className={styles.preview}>No reasoning text available</span>
+        )}
         {status === "running" && (
           <span className={styles.status}>Running…</span>
         )}
