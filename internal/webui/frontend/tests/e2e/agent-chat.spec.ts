@@ -1791,10 +1791,12 @@ test("streaming reveals smoothly with no layout shift and the end kept in view",
 
 test("streamed wide table keeps columns and controls stable until completion", async ({
   page,
+  baseURL,
 }, testInfo) => {
   test.setTimeout(60_000);
+  if (!baseURL) throw new Error("wide-table test requires a frontend baseURL");
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://localhost:3000",
+    origin: new URL(baseURL).origin,
   });
   const history = Array.from({ length: 30 }, (_, i) =>
     ev("item.completed", { itemKind: "message", text: `Earlier reply ${i}.` }),
