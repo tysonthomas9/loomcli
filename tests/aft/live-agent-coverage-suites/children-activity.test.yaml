@@ -40,7 +40,9 @@ tests:
             list the installed Loom tools. Do not call any tool or HTTP for this
             inventory, and do not infer names from this request. Then use Loom
             agent_create to delegate one task child named cov-child-repeat-${RUN_ID}.
-            Brief it to inspect README.md and package.json in this repository, create only
+            Brief it to inspect README.md, BACKLOG.md, package.json, server.js,
+            app.js, and app.test.js in its assigned worktree, then run
+            `node --test app.test.js` once there before creating only
             aft-child-fixtures/${RUN_ID}/first.txt with the words first complete,
             git add and commit that file on its assigned branch, and report its
             result. Do not push. When its task_completed notice reaches you,

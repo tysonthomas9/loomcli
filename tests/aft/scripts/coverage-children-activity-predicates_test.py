@@ -59,6 +59,24 @@ console.log(JSON.stringify(steps.filter(s=>s.fill?.label==='Message').map(s=>s.f
     return next(prompt for prompt in json.loads(output) if "valid post" in prompt)
 
 
+def parsed_first_child_prompt():
+    tests = Path(__file__).resolve().parents[1]
+    loader = Path(os.environ.get("AFT_DIR", "/Users/tyson/codebase/code-agents/testing-app")) / "dist/runner.js"
+    code = """import {pathToFileURL} from 'node:url';
+const [loader,file]=process.argv.slice(2);
+const {loadSuite}=await import(pathToFileURL(loader).href);
+const suite=loadSuite(file);
+console.log(JSON.stringify(suite.tests.map(t=>({name:t.name,steps:t.steps}))));"""
+    env = {**os.environ, "AFT_BASE_URL": "http://127.0.0.1:1", "AFT_REAL_MODEL": "offline",
+           "AFT_NATIVE_MODEL_PROBE": "/bin/true", "AFT_SELECT_AGENT_MODEL": "/bin/true"}
+    rows = json.loads(subprocess.check_output(["node", "--input-type=module", "-", str(loader),
+                      str(tests / "live-agent-coverage-suites/children-activity.test.yaml")],
+                      input=code, env=env, text=True))
+    assert len(rows) == 3
+    return [step["fill"]["value"] for step in rows[0]["steps"] if isinstance(step, dict) and
+            isinstance(step.get("fill"), dict) and step["fill"].get("label") == "Message"][0]
+
+
 def parsed_commands():
     commands = []
     for run in parsed_runs():
@@ -135,6 +153,206 @@ class ChildProofPredicates(unittest.TestCase):
                         self.assertEqual(module.load(label)["agent_id"], child_id)
                         with self.assertRaises((FileNotFoundError, AssertionError)):
                             module.bind(label, parent_label, name)
+
+    def test_first_child_prompt_runs_finite_seeded_fixture_test_before_same_commit(self):
+        prompt = parsed_first_child_prompt()
+        self.assertIn("README.md, BACKLOG.md, package.json, server.js, app.js, and app.test.js", prompt)
+        self.assertEqual(prompt.count("node --test app.test.js"), 1)
+        self.assertLess(prompt.index("node --test app.test.js"), prompt.index("first.txt"))
+        self.assertIn(f"aft-child-fixtures/{module.RUN}/first.txt with the words first complete", prompt)
+        self.assertIn("git add and commit that file on its assigned branch", prompt)
+        self.assertIn("Do not push", prompt)
+
+    def test_mobile_missing_finished_child_saves_safe_lifecycle_and_refuses(self):
+        lead = {"agent_id": "agt_lead"}
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "cov-child-repeat-" + module.RUN,
+                 "worktree_path": "/owned/child"}
+        active = {**child, "state": "active", "attempt": 0, "running_turn_id": "turn-first"}
+        finished = {**child, "state": "finished", "attempt": 0, "running_turn_id": None}
+        created = event("child.created", 1, "child.created:" + self.a, {"child": self.a})
+        created["agent_id"] = "agt_lead"
+        receipt = event("item.completed", 3, "item:first", {"itemKind": "tool", "itemId": "tool-first",
+                        "tool": {"name": "execute", "input": "private tool input"}}, "turn-first")
+        receipt["agent_id"] = self.a
+        saved, browser_calls = {}, []
+        def browser(*args):
+            browser_calls.append(args)
+            if args[0] == "click":
+                raise subprocess.CalledProcessError(1, args)
+            return ""
+        with patch.object(module, "load", side_effect=lambda label: lead if label == "repeat-lead" else
+                          {"child": self.a, "event_id": "item:first", "turn_id": "turn-first"}
+                          if label == "activity" else child), \
+             patch.object(module, "agent", side_effect=[active, finished]), \
+             patch.object(module, "events", side_effect=lambda aid: [created] if aid == "agt_lead" else [receipt]), \
+             patch.object(module, "browser", side_effect=browser), \
+             patch.object(module, "browser_json", side_effect=[{"value": "light"},
+                          {"value": "", "path": "/ws/LOCALMODE/chat/agt_lead", "width": 390,
+                           "height": 844, "theme": "light", "tray_present": False,
+                           "header_expanded": None, "row_ids": [], "cards": [{"attempt": "0",
+                           "outcome": "completed", "delivery": "delivered"}]}]), \
+             patch.object(module, "save", side_effect=lambda name, data: saved.update({name: data})), \
+             self.assertRaisesRegex(AssertionError, "running child tray missing"):
+            module.mobile("repeat", "repeat-lead", "390", "light")
+        diagnostic = saved["mobile-lifecycle-390-light"]
+        self.assertEqual((diagnostic["child_id"], diagnostic["parent_id"], diagnostic["api_state"]),
+                         (self.a, "agt_lead", "finished"))
+        self.assertEqual(diagnostic["dom"]["cards"][0]["outcome"], "completed")
+        self.assertEqual(diagnostic["child_events"]["events"][0]["event_id"], "item:first")
+        self.assertEqual(diagnostic["parent_events"]["events"][0]["event_id"], "child.created:" + self.a)
+        self.assertNotIn("private tool input", json.dumps(diagnostic))
+        self.assertFalse(any(call[0] == "click" for call in browser_calls))
+
+    def test_mobile_lifecycle_dom_probe_compiles_and_bounds_card_metadata(self):
+        child = {"agent_id": self.a, "name": "cov-child-repeat-" + module.RUN}
+        scripts = []
+        with patch.object(module, "browser_json", side_effect=lambda script: scripts.append(script) or {}):
+            module.mobile_dom_lifecycle(child)
+        self.assertIn(json.dumps(self.a), scripts[0])
+        self.assertIn("cards.slice(0,10)", scripts[0])
+        self.assertNotIn("tool.input", scripts[0])
+        check = subprocess.run(["node", "--input-type=module", "-e",
+                                "new Function('return '+process.argv[1])", scripts[0]],
+                               capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, check.stderr)
+
+    def test_mobile_opens_valid_collapsed_running_tray_before_row_check(self):
+        lead = {"agent_id": "agt_lead"}
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "cov-child-repeat-" + module.RUN,
+                 "worktree_path": "/owned/child"}
+        active = {**child, "state": "active", "attempt": 0, "running_turn_id": "turn-first"}
+        created = event("child.created", 1, "created", {"child": self.a})
+        receipt = event("item.completed", 3, "item:first", {"itemKind": "tool"}, "turn-first")
+        created["agent_id"], receipt["agent_id"] = "agt_lead", self.a
+        collapsed = {"tray_present": True, "tray_open": "false", "header_expanded": "false",
+                     "exact_child_row_count": 0, "child_running": False}
+        expanded = {**collapsed, "tray_open": "true", "header_expanded": "true",
+                    "exact_child_row_count": 1, "child_running": True}
+        geometry = {"width": 390, "height": 844, "theme": "light", "navPosition": "fixed",
+                    "trayOpen": True, "childId": self.a, "headerExpanded": True,
+                    "rowIds": [self.a], "rowCount": 1, "visibleRowCount": 1,
+                    "childWhole": True, "childRunning": True,
+                    "headerHit": {"hit": True}, "childLinkHit": {"hit": True},
+                    "partialRows": 0, "hiddenRows": 0, "moreCount": 0,
+                    "horizontalOverflow": 0, "maxControlBottom": 600,
+                    "composerTop": 610, "composerBottom": 770, "navTop": 780,
+                    "headerColors": ["4"]}
+        calls, saved = [], {}
+        def load(label):
+            if label == "repeat-lead": return lead
+            if label == "activity": return {"child": self.a, "event_id": "item:first", "turn_id": "turn-first"}
+            if label == f"color-{self.a}": return {"value": "4"}
+            return child
+        with patch.object(module, "load", side_effect=load), \
+             patch.object(module, "agent", return_value=active), \
+             patch.object(module, "events", side_effect=lambda aid: [created] if aid == "agt_lead" else [receipt]), \
+             patch.object(module, "browser", side_effect=lambda *args: calls.append(args) or ""), \
+             patch.object(module, "browser_json", side_effect=[{"value": "light"}, collapsed, expanded, geometry]), \
+             patch.object(module, "save", side_effect=lambda name, data: saved.update({name: data})):
+            module.mobile("repeat", "repeat-lead", "390", "light")
+        self.assertEqual([call[0] for call in calls], ["set", "wait", "click", "wait", "screenshot"])
+        self.assertEqual(calls[2][1], "[data-testid=agent-tray] button[aria-expanded=false]")
+        self.assertEqual(saved["mobile-tray-390-light"]["geometry"], geometry)
+        self.assertNotIn("mobile-lifecycle-390-light", saved)
+
+    def test_mobile_collapsed_child_finishing_after_open_saves_diagnostic_and_refuses(self):
+        lead = {"agent_id": "agt_lead"}
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "cov-child-repeat-" + module.RUN,
+                 "worktree_path": "/owned/child"}
+        active = {**child, "state": "active", "attempt": 0, "running_turn_id": "turn-first"}
+        finished = {**active, "state": "finished", "running_turn_id": None}
+        created = event("child.created", 1, "created", {"child": self.a})
+        receipt = event("item.completed", 3, "item:first", {"itemKind": "tool"}, "turn-first")
+        created["agent_id"], receipt["agent_id"] = "agt_lead", self.a
+        collapsed = {"tray_present": True, "tray_open": "false", "header_expanded": "false",
+                     "exact_child_row_count": 0, "child_running": False}
+        expanded = {**collapsed, "tray_open": "true", "header_expanded": "true",
+                    "exact_child_row_count": 1, "child_running": True}
+        calls, saved = [], {}
+        def load(label):
+            if label == "repeat-lead": return lead
+            if label == "activity": return {"child": self.a, "event_id": "item:first", "turn_id": "turn-first"}
+            return child
+        with patch.object(module, "load", side_effect=load), \
+             patch.object(module, "agent", side_effect=[active, finished, finished]), \
+             patch.object(module, "events", side_effect=lambda aid: [created] if aid == "agt_lead" else [receipt]), \
+             patch.object(module, "browser", side_effect=lambda *args: calls.append(args) or ""), \
+             patch.object(module, "browser_json", side_effect=[{"value": "light"}, collapsed, expanded]), \
+             patch.object(module, "save", side_effect=lambda name, data: saved.update({name: data})), \
+             self.assertRaisesRegex(AssertionError, "child finished before mobile geometry"):
+            module.mobile("repeat", "repeat-lead", "390", "light")
+        self.assertTrue(any(call[0] == "click" for call in calls))
+        self.assertFalse(any(call[0] == "screenshot" for call in calls))
+        self.assertEqual(saved["mobile-lifecycle-390-light"]["api_state"], "finished")
+
+    def test_mobile_finished_api_refuses_even_if_stale_tray_remains(self):
+        lead = {"agent_id": "agt_lead"}
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "cov-child-repeat-" + module.RUN,
+                 "worktree_path": "/owned/child", "state": "finished", "attempt": 0,
+                 "running_turn_id": None}
+        created = event("child.created", 1, "created", {"child": self.a})
+        receipt = event("item.completed", 3, "item:first", {"itemKind": "tool"}, "turn-first")
+        created["agent_id"], receipt["agent_id"] = "agt_lead", self.a
+        saved, calls = {}, []
+        with patch.object(module, "load", side_effect=lambda label: lead if label == "repeat-lead" else
+                          {"child": self.a, "event_id": "item:first", "turn_id": "turn-first"}
+                          if label == "activity" else child), \
+             patch.object(module, "agent", return_value=child), \
+             patch.object(module, "events", side_effect=lambda aid: [created] if aid == "agt_lead" else [receipt]), \
+             patch.object(module, "browser", side_effect=lambda *args: calls.append(args) or ""), \
+             patch.object(module, "browser_json", side_effect=[{"value": "light"},
+                          {"path": "/ws/LOCALMODE/chat/agt_lead", "width": 390, "height": 844,
+                           "theme": "light", "tray_present": True, "tray_open": "false",
+                           "header_expanded": "false", "row_count": 0, "row_ids": [],
+                           "exact_child_row_count": 0, "child_running": False,
+                           "card_count": 0, "cards": []}]), \
+             patch.object(module, "save", side_effect=lambda name, data: saved.update({name: data})), \
+             self.assertRaisesRegex(AssertionError, "child finished"):
+            module.mobile("repeat", "repeat-lead", "390", "light")
+        self.assertEqual(saved["mobile-lifecycle-390-light"]["api_state"], "finished")
+        self.assertFalse(any(call[0] == "click" for call in calls))
+
+    def test_mobile_lifecycle_event_receipt_is_bounded_and_excludes_tool_io(self):
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "state": "finished",
+                 "attempt": 0, "running_turn_id": None}
+        lead = {"agent_id": "agt_lead"}
+        history = [event("item.completed", seq, f"item:{seq}", {"itemKind": "tool",
+                   "tool": {"input": "private tool input", "output": "private tool output"}}, "turn-first")
+                   for seq in range(1, 51)]
+        for row in history:
+            row["agent_id"] = self.a
+        saved = {}
+        with patch.object(module, "agent", return_value=child), \
+             patch.object(module, "events", side_effect=lambda aid: history if aid == self.a else []), \
+             patch.object(module, "save", side_effect=lambda name, data: saved.update({name: data})):
+            module.mobile_lifecycle_diagnostic(child, lead, child, 390, "light",
+                                               {"path": "/ws/LOCALMODE/chat/agt_lead", "tray_present": False})
+        receipt = saved["mobile-lifecycle-390-light"]
+        self.assertEqual((receipt["child_events"]["count"], receipt["child_events"]["omitted"],
+                          len(receipt["child_events"]["events"])), (50, 10, 40))
+        self.assertEqual(receipt["child_events"]["events"][0]["seq"], 11)
+        self.assertNotIn("private tool", json.dumps(receipt))
+
+    def test_mobile_rejects_foreign_child_and_wrong_saved_turn(self):
+        lead = {"agent_id": "agt_lead"}
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "cov-child-repeat-" + module.RUN,
+                 "worktree_path": "/owned/child"}
+        activity = {"child": self.a, "event_id": "item:first", "turn_id": "turn-first"}
+        with patch.object(module, "load", side_effect=lambda label: lead if label == "repeat-lead" else
+                          activity if label == "activity" else child), \
+             patch.object(module, "agent", return_value={**child, "parent_agent_id": "agt_foreign",
+                                                       "state": "active", "running_turn_id": "turn-first"}), \
+             self.assertRaises(AssertionError):
+            module.mobile("repeat", "repeat-lead", "390", "light")
+        wrong = event("item.completed", 3, "item:first", {"itemKind": "tool"}, "turn-other")
+        wrong["agent_id"] = self.a
+        created = event("child.created", 1, "child.created:" + self.a, {"child": self.a})
+        with patch.object(module, "load", side_effect=lambda label: lead if label == "repeat-lead" else
+                          activity if label == "activity" else child), \
+             patch.object(module, "agent", return_value={**child, "state": "active", "running_turn_id": "turn-first"}), \
+             patch.object(module, "events", side_effect=lambda aid: [created] if aid == "agt_lead" else [wrong]), \
+             self.assertRaisesRegex(AssertionError, "saved current-turn activity receipt"):
+            module.mobile("repeat", "repeat-lead", "390", "light")
 
     def run_pair(self):
         with patch.object(module, "load", side_effect=lambda label: self.labels[label]), \
@@ -439,7 +657,7 @@ class ChildProofPredicates(unittest.TestCase):
         good = {"width": 390, "height": 844, "theme": "dark", "navPosition": "fixed",
                 "trayOpen": True, "childId": self.a, "headerExpanded": True,
                 "rowIds": [self.a], "rowCount": 1, "visibleRowCount": 1,
-                "childWhole": True,
+                "childWhole": True, "childRunning": True,
                 "headerHit": {"x": 180, "y": 480, "hit": True, "target": "SPAN"},
                 "childLinkHit": {"x": 310, "y": 540, "hit": True, "target": "A"},
                 "partialRows": 0, "hiddenRows": 0, "moreCount": 0,
@@ -452,6 +670,7 @@ class ChildProofPredicates(unittest.TestCase):
                                 ({"composerBottom": 790}, "mobile navigation"),
                                 ({"hiddenRows": 1}, "More count"),
                                 ({"childWhole": False}, "exact saved child row"),
+                                ({"childRunning": False}, "exact saved child row is not running"),
                                 ({"headerHit": {"x": 180, "y": 480, "hit": False, "target": "DIV"}}, "tray header"),
                                 ({"childLinkHit": {"x": 310, "y": 540, "hit": False, "target": "DIV"}}, "child Open link")]:
             with self.subTest(change=change), self.assertRaisesRegex(AssertionError, message):
