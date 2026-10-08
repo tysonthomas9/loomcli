@@ -21,7 +21,7 @@ TEXT = {
     "u1": f"QUEUE-U1-{RUN}: after the current task, name its entry point.",
     "p1": f"QUEUE-P1-{RUN}: after the current task, name its test command.",
     "u2": f"QUEUE-U2-{RUN}: after the current task, name its entry point and one handler.",
-    "p2": f"QUEUE-P2-{RUN}: inspect README.md, BACKLOG.md, package.json, server.js, app.js, and app.test.js; trace valid POST, invalid POST, and GET /api/channels/general/messages with file citations; run node --test once; do not edit files.",
+    "p2": f"QUEUE-P2-{RUN}: read README.md, BACKLOG.md ticket 5, package.json, server.js, app.js, and app.test.js; implement GET /api/search?q= to return messages across channels whose text contains q case-insensitively; add app.test.js tests for cross-channel case-insensitive matches and no match; run node --test once; git add only app.js and app.test.js and commit those files on your assigned child branch; do not push, open a PR, or edit unrelated files.",
     "p3": f"QUEUE-P3-{RUN}: after the current task, name the slot ordering rule.",
     "p3b": f"QUEUE-P3B-{RUN}: after the current task, name the slot ordering rule you observed; also cite app.js for how fixture messages are appended.",
     "u3": f"QUEUE-U3-{RUN}: interrupt the current task; first explain how a user message reaches a saved receipt, then name the slot ordering rule.",
@@ -248,6 +248,94 @@ def native_send_result(event, expected_replaced):
     demand(isinstance(result.get("message_id"), str) and result["message_id"], "native send message_id missing")
     demand(result.get("state") == "waiting", "native send did not preserve a waiting slot")
     return result
+
+
+def replacement_tool_diagnostic(event, lead_id):
+    """Project only bounded receipt fields; never persist native tool text."""
+    result = {"event_id": event.get("event_id"), "turn_id": event.get("turn_id"),
+              "owner": "owned" if event.get("agent_id") == lead_id else "foreign"}
+    if result["owner"] != "owned" or event.get("kind") != "item.completed" or \
+            (event.get("payload") or {}).get("itemKind") != "tool":
+        result["category"] = "invalid-event"
+        return result
+    tool = (event["payload"].get("tool") or {})
+    result["failed"] = tool.get("failed") is True
+    output = tool.get("output")
+    if not isinstance(output, str) or not output.strip():
+        result["category"] = "missing-output"
+        return result
+    result["output_bytes"] = len(output.encode())
+    result["output_sha256"] = hashlib.sha256(output.encode()).hexdigest()
+    try:
+        parsed = json.loads(output)
+        if isinstance(parsed, str):
+            parsed = json.loads(parsed)
+    except (ValueError, TypeError):
+        result["category"] = "invalid-json"
+        return result
+    if not isinstance(parsed, dict):
+        result["category"] = "non-object"
+        return result
+    result["category"] = "object"
+    result["replaced"] = parsed.get("replaced") if isinstance(parsed.get("replaced"), bool) else None
+    result["state"] = parsed.get("state") if parsed.get("state") in ("waiting", "handed") else "other"
+    message_id = parsed.get("message_id")
+    result["message_id"] = message_id if isinstance(message_id, str) and \
+        re.fullmatch(r"msg_[0-9a-f]{26}", message_id) else None
+    return result
+
+
+def replacement_precheck(first, second):
+    """Retain safe second-send and owned child chronology before strict checks."""
+    lead_id, child_id = identity("lead"), identity("child")
+    proof = {"lead_agent_id": lead_id, "child_agent_id": child_id,
+             "first_tool_event_id": first.get("event_id"),
+             "second_tool": replacement_tool_diagnostic(second, lead_id),
+             "child": {"owner": "unavailable"}, "events": {"category": "unavailable"}}
+    save("first-parent-replacement-precheck", proof)
+    try:
+        row = agent("child")
+        if row.get("agent_id") == child_id:
+            waiting = row.get("waiting_messages") or []
+            proof["child"] = {"owner": "owned", "state": row.get("state") if row.get("state") in
+                              ("active", "finished", "archived", "attention") else "other",
+                              "attempt": row.get("attempt") if type(row.get("attempt")) is int else None,
+                              "running_turn_id": row.get("running_turn_id") if isinstance(row.get("running_turn_id"), str) else None,
+                              "waiting_count": len(waiting), "waiting": [{
+                                  "sender": slot.get("sender") if slot.get("sender") == f"agent:{lead_id}" else "other",
+                                  "since": slot.get("since") if isinstance(slot.get("since"), str) and
+                                      re.fullmatch(r"[0-9T:.Z+-]{10,40}", slot["since"]) else None,
+                                  "marker": next((key for key in ("p3", "p3b") if slot.get("text") == TEXT[key]), "other"),
+                              } for slot in waiting[:4]]}
+        else:
+            proof["child"] = {"owner": "foreign"}
+    except Exception:
+        proof["child"] = {"owner": "unavailable"}
+    save("first-parent-replacement-precheck", proof)
+    try:
+        child_events, lead_events = events("child"), events("lead")
+        if any(e.get("agent_id") != child_id for e in child_events) or \
+                any(e.get("agent_id") != lead_id for e in lead_events):
+            proof["events"] = {"category": "foreign"}
+            save("first-parent-replacement-precheck", proof)
+            return
+        p2 = next((e["seq"] for e in child_events if e["kind"] == "message.delivered" and
+                   e["payload"].get("text") == TEXT["p2"]), 0)
+        def project(rows, kinds, minimum):
+            return [{"event_id": e["event_id"], "seq": e["seq"], "kind": e["kind"],
+                     "turn_id": e.get("turn_id") or None,
+                     "sender": "parent" if f"agent:{lead_id}" in
+                         (e.get("payload", {}).get("reason"), e.get("payload", {}).get("sender")) else "other",
+                     "attempt": e.get("payload", {}).get("attempt") if type(e.get("payload", {}).get("attempt")) is int else None,
+                     "marker": next((key for key in ("p2", "p3", "p3b") if
+                                     e.get("payload", {}).get("text") == TEXT[key]), None)}
+                    for e in rows if e["kind"] in kinds and e["seq"] >= minimum][-30:]
+        proof["events"] = {"category": "owned", "child": project(child_events,
+                           ("message.waiting", "message.delivered", "agent.turn_completed"), p2),
+                           "lead": project(lead_events, ("task_completed",), 0)}
+    except Exception:
+        proof["events"] = {"category": "unavailable"}
+    save("first-parent-replacement-precheck", proof)
 
 
 def replacement_result(first, second):
@@ -728,6 +816,7 @@ def first_parent_queued():
 def first_parent():
     first = settled_lead_send("p3", "QUEUE-P3-")
     second = settled_lead_send("p3b", "QUEUE-P3B-")
+    replacement_precheck(first, second)
     initial, replacement = replacement_result(first, second)
     receipt = {"stage": "parsed_native; waiting linkage pending",
                "tool_event_ids": [first["event_id"], second["event_id"]],
@@ -737,6 +826,7 @@ def first_parent():
     demand(prior["tool_event_id"] == first["event_id"] and prior["native_result"] == initial,
            "initial native result changed before replacement")
     row = agent("child")
+    demand(row["agent_id"] == identity("child"), "foreign child state")
     active(row)
     demand(row["running_turn_id"] == prior["turn"] == load("parent-started")["turn"], "parent slot moved to a different child turn")
     slot = row["waiting_messages"]

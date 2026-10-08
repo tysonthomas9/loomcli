@@ -19,6 +19,11 @@ os.environ.setdefault("AFT_API_URL", "http://127.0.0.1:1")
 _work = tempfile.TemporaryDirectory(prefix="child-inventory-")
 atexit.register(_work.cleanup)
 os.environ.setdefault("AFT_WORK_DIR", _work.name)
+os.environ.setdefault("AFT_TESTS_DIR", str(Path(__file__).resolve().parents[1]))
+os.environ.setdefault("AFT_NATIVE_SESSION_PROBE", str(Path(__file__).with_name("agent-flows-native-session.sh")))
+os.environ.setdefault("AFT_AGENT_FLOW_REPO", "source-repo")
+os.environ.setdefault("AFT_REAL_BACKEND", "opencode")
+os.environ.setdefault("AFT_REAL_MODEL", "openai/gpt-5.5")
 spec = importlib.util.spec_from_file_location("child_activity", Path(__file__).with_name("coverage-children-activity.py"))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -34,9 +39,15 @@ def row(kind, seq, event_id, payload, turn_id=""):
 def fixture():
     native, turn = "ses_owned", "turn_first"
     child_name = f"cov-child-repeat-{module.RUN}"
-    lead = {"agent_id": "agt_lead", "harness_session_id": native, "harness_session_root": ""}
+    lead = {"agent_id": "agt_lead", "name": f"cov-child-repeat-lead-{module.RUN}",
+            "repo": "source-repo", "harness": "opencode", "worktree_path": "/owned/lead",
+            "preset": "lead", "parent_agent_id": None, "model": "openai/gpt-5.5"}
     child = {"agent_id": "agt_child", "name": child_name,
-             "parent_agent_id": "agt_lead", "created_by_id": "agt_lead"}
+             "parent_agent_id": "agt_lead", "created_by_id": "agt_lead",
+             "root_agent_id": "agt_lead", "repo": "source-repo", "harness": "opencode",
+             "worktree_path": "/owned/child", "preset": "task", "created_by_kind": "agent",
+             "base_ref": "main"}
+    lead["branch"] = "main"
     history = [
         row("turn.started", 1, f"turn.started::{native}:{turn}", {"session": native}, turn),
         row("item.completed", 3, f"item.completed::{native}:msg_inv/tool/call_1",
@@ -50,13 +61,14 @@ def fixture():
                       f"return await tools.loom.agent_create({{name:'{child_name}',brief:'work'}})"}),
                       "output": "created"}}, turn),
     ]
-    return lead, child, history
+    return lead, child, history, {"agent_id": lead["agent_id"], "harness": "opencode",
+                                  "native_id": native, "native_root": ""}
 
 
 class NativeInventory(unittest.TestCase):
     def test_exact_owned_native_result_and_saved_wrapper(self):
-        lead, child, history = fixture()
-        proof = module.inventory_result(lead, child, history)
+        lead, child, history, native = fixture()
+        proof = module.inventory_result(lead, child, history, native)
         self.assertEqual(proof["installed_names"], NAMES)
         self.assertEqual(proof["event_id"], history[1]["event_id"])
         self.assertEqual(proof["native_session_id"], "ses_owned")
@@ -65,18 +77,21 @@ class NativeInventory(unittest.TestCase):
         with patch.object(module, "load", side_effect=lambda label: {"agent_id": lead["agent_id"]}
                           if label == "repeat-lead" else {"agent_id": child["agent_id"]}), \
              patch.object(module, "agent", side_effect=lambda aid: lead if aid == lead["agent_id"] else child), \
-             patch.object(module, "events", return_value=history), patch.object(module, "save") as saved:
+             patch.object(module, "events", return_value=history), \
+             patch.object(module.subprocess, "check_output", return_value=json.dumps(native)) as probe, \
+             patch.object(module, "save") as saved:
             module.inventory("repeat-lead", "repeat")
             saved.assert_called_once_with("installed-loom-tools", proof)
+            self.assertEqual(probe.call_args.args[0][-1], "agt_lead")
 
     def test_rejects_missing_foreign_failed_echo_and_wrong_output(self):
-        lead, child, original = fixture()
+        lead, child, original, native = fixture()
 
         def reject(edit):
             history = copy.deepcopy(original)
             edit(history)
             with self.assertRaises(AssertionError):
-                module.inventory_result(lead, child, history)
+                module.inventory_result(lead, child, history, native)
 
         reject(lambda h: h.pop(1))
         reject(lambda h: h.__setitem__(1, row("item.completed", 2, "echo", {"itemKind": "message",
@@ -96,6 +111,28 @@ class NativeInventory(unittest.TestCase):
         reject(lambda h: h[2]["payload"].update(child="agt_foreign"))
         reject(lambda h: h[2].update(event_id="child.created:agt_foreign"))
         reject(lambda h: h.append(copy.deepcopy(h[1])))
+
+    def test_native_probe_identity_is_independent_of_saved_events(self):
+        lead, child, history, native = fixture()
+        for change in ({"agent_id": "agt_foreign"}, {"harness": "claude"},
+                       {"native_id": "ses_foreign"}, {"native_root": "/foreign"}):
+            with self.subTest(change=change), self.assertRaises(AssertionError):
+                module.inventory_result(lead, child, history, {**native, **change})
+
+    def test_runtime_seam_rejects_foreign_probe_and_helper_path(self):
+        lead, child, history, native = fixture()
+        with patch.object(module, "load", side_effect=lambda label: {"agent_id": lead["agent_id"]}
+                          if label == "repeat-lead" else {"agent_id": child["agent_id"]}), \
+             patch.object(module, "agent", side_effect=lambda aid: lead if aid == lead["agent_id"] else child), \
+             patch.object(module, "events", return_value=history), patch.object(module, "save"):
+            with patch.object(module.subprocess, "check_output", return_value=json.dumps({**native, "agent_id": "agt_foreign"})), \
+                 self.assertRaisesRegex(AssertionError, "native identity"):
+                module.inventory("repeat-lead", "repeat")
+            with patch.dict(os.environ, {"AFT_NATIVE_SESSION_PROBE": "/foreign/probe"}), \
+                 patch.object(module.subprocess, "check_output") as probe, \
+                 self.assertRaisesRegex(AssertionError, "probe path mismatch"):
+                module.inventory("repeat-lead", "repeat")
+            probe.assert_not_called()
 
     def test_parsed_suite_keeps_three_cases_and_no_prompt_answer(self):
         tests = Path(__file__).resolve().parents[1]

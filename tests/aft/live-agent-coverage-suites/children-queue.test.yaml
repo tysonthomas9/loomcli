@@ -181,7 +181,7 @@ tests:
         intent: Return to the Lead after exact-ID E1 navigation
       - run: |
           id="$(cat "$AFT_WORK_DIR/coverage-children-queue/child.id")"
-          agent-browser --session "$AFT_SESSION" fill 'textarea[aria-label=Message]' "Use Loom agent_send once to your existing finished child $id with exactly this text: QUEUE-P2-${RUN_ID}: inspect README.md, BACKLOG.md, package.json, server.js, app.js, and app.test.js; trace valid POST, invalid POST, and GET /api/channels/general/messages with file citations; run node --test once; do not edit files. Do not create another child, interrupt, or call agent_get."
+          agent-browser --session "$AFT_SESSION" fill 'textarea[aria-label=Message]' "Use Loom agent_send once to your existing finished child $id with exactly this text: QUEUE-P2-${RUN_ID}: read README.md, BACKLOG.md ticket 5, package.json, server.js, app.js, and app.test.js; implement GET /api/search?q= to return messages across channels whose text contains q case-insensitively; add app.test.js tests for cross-channel case-insensitive matches and no match; run node --test once; git add only app.js and app.test.js and commit those files on your assigned child branch; do not push, open a PR, or edit unrelated files. Do not create another child, interrupt, or call agent_get."
         intent: Ask the Lead to reopen the same finished child through native agent_send
       - press: Enter
       - wait:
