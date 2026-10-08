@@ -2144,7 +2144,7 @@ test("state pill fits every Agent state without widening the history warning", a
   expect(warningSize.scrollWidth).toBe(warningSize.clientWidth);
 });
 
-test("reply copy actions stay visible below close-spaced messages (UI6)", async ({
+test("reply copy actions appear on hover below close-spaced messages (UI6)", async ({
   page,
 }) => {
   const at = "2026-10-04T20:15:00Z";
@@ -2177,7 +2177,7 @@ test("reply copy actions stay visible below close-spaced messages (UI6)", async 
   test.info().annotations.push({ type: "gap", description: `${gap}px` });
   console.log(`UI6 gap between one-line agent messages: ${gap}px`);
   expect(gap).toBeLessThan(16);
-  // Reply actions are visible below the content, with the time; hover moves nothing.
+  // Reply actions appear below the content on hover or focus, without moving it.
   const time = await page.evaluate(
     (t) =>
       new Date(t).toLocaleTimeString([], {
@@ -2190,8 +2190,10 @@ test("reply copy actions stay visible below close-spaced messages (UI6)", async 
   const rows = transcript(page).locator("li");
   const agentRow = rows.filter({ hasText: "api-reviewer completed" });
   const pill = agentRow.getByTestId("message-actions");
-  await expect(pill).toHaveCSS("opacity", "1");
+  await page.mouse.move(0, 0);
+  await expect(pill).toHaveCSS("opacity", "0");
   await agentRow.hover();
+  await expect(pill).toHaveCSS("opacity", "1");
   await expect(pill).toBeVisible();
   await expect(pill).toHaveText(time);
   await expect(
@@ -2203,6 +2205,12 @@ test("reply copy actions stay visible below close-spaced messages (UI6)", async 
   const content = (await md.nth(0).boundingBox())!;
   expect(p.y).toBeGreaterThanOrEqual(content.y + content.height);
   expect(p.y + p.height).toBeLessThanOrEqual(before.y + before.height);
+  await page.mouse.move(0, 0);
+  await expect(pill).toHaveCSS("opacity", "0");
+  await pill.getByRole("button", { name: "Copy message" }).focus();
+  await expect(pill).toHaveCSS("opacity", "1");
+  expect(await box(0)).toEqual(before);
+  await pill.getByRole("button", { name: "Copy message" }).blur();
   const userRow = rows.filter({ hasText: "Run the reviewers" });
   for (const theme of ["light", "dark"]) {
     await page.evaluate((t) => {
