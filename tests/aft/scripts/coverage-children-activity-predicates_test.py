@@ -385,9 +385,47 @@ class ChildProofPredicates(unittest.TestCase):
         module.assert_started_snapshot(good, [self.a, self.b], ["pair-a", "pair-b"], 1)
         module.assert_started_snapshot({**good, "toolCount": 2}, [self.a, self.b], ["pair-a", "pair-b"], 2)
         for change in ({"ids": [self.a, self.a]}, {"names": ["pair-a", "wrong"]},
+                       {"ids": [self.a, self.b, "foreign"]}, {"names": ["pair-a", "pair-a"]},
+                       {"names": ["pair-b", "pair-a"]}, {"colors": ["1"]},
                        {"toolCount": 3}, {"rawCode": True}):
             with self.subTest(change=change), self.assertRaises(AssertionError):
                 module.assert_started_snapshot({**good, **change}, [self.a, self.b], ["pair-a", "pair-b"], 1)
+
+    def test_started_binds_reversed_sibling_colors_by_exact_id(self):
+        lead = {"agent_id": "agt_lead"}
+        children = [{"agent_id": self.a, "name": "pair-a"}, {"agent_id": self.b, "name": "pair-b"}]
+        shot = {"markerCount": 1, "ids": [self.b, self.a], "names": ["pair-b", "pair-a"],
+                "colors": ["4", "7"], "toolCount": 1, "rawCode": False}
+        history = [event("child.created", 1, "a", {"child": self.a}),
+                   event("child.created", 2, "b", {"child": self.b})]
+        saved = {}
+        with patch.object(module, "load", side_effect=lambda label: lead if label == "pair-lead" else
+                          children[0] if label == "pair-a" else children[1]), \
+             patch.object(module, "events", return_value=history), \
+             patch.object(module, "browser_json", return_value=shot), \
+             patch.object(module, "native_create_tool_count", return_value=1), \
+             patch.object(module, "browser"), \
+             patch.object(module, "save", side_effect=lambda name, value: saved.update({name: value})):
+            module.started_ui("pair-lead", "pair-a", "pair-b")
+        self.assertEqual(saved[f"color-{self.a}"]["value"], "7")
+        self.assertEqual(saved[f"color-{self.b}"]["value"], "4")
+
+    def test_started_rejects_changed_color_for_exact_child(self):
+        lead = {"agent_id": "agt_lead"}
+        child = {"agent_id": self.a, "name": "pair-a"}
+        shot = {"markerCount": 1, "ids": [self.a], "names": ["pair-a"],
+                "colors": ["7"], "toolCount": 1, "rawCode": False}
+        history = [event("child.created", 1, "a", {"child": self.a})]
+        with tempfile.TemporaryDirectory(prefix="started-color-") as temp:
+            (Path(temp) / f"color-{self.a}.json").write_text('{"value":"4"}')
+            with patch.object(module, "OUT", Path(temp)), \
+                 patch.object(module, "load", side_effect=lambda label: lead if label == "pair-lead" else
+                              child if label == "pair-a" else {"value": "4"}), \
+                 patch.object(module, "events", return_value=history), \
+                 patch.object(module, "browser_json", return_value=shot), \
+                 patch.object(module, "native_create_tool_count", return_value=1), \
+                 self.assertRaises(AssertionError):
+                module.started_ui("pair-lead", "pair-a")
 
     def test_one_child_can_have_two_saved_native_tool_entries(self):
         shot = {"markerCount": 1, "ids": [self.a], "names": ["pair-a"],

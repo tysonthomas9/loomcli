@@ -97,12 +97,22 @@ def bind(label, name, parent_label=""):
     print(row["agent_id"])
 
 
-def inventory_result(lead, child, history):
+def native_session(lead):
+    helper = Path(os.environ["AFT_TESTS_DIR"]) / "scripts/agent-flows-native-session.sh"
+    assert os.environ["AFT_NATIVE_SESSION_PROBE"] == str(helper), "native identity probe path mismatch"
+    return json.loads(subprocess.check_output(["bash", str(helper), lead["agent_id"]], text=True))
+
+
+def inventory_result(lead, child, history, native):
     """Require Code Mode's own namespace enumeration, not a model's narration."""
     lead_id = lead["agent_id"]
+    owned(lead, lead["name"])
+    owned(child, child["name"], lead)
     assert child["parent_agent_id"] == lead_id and child["created_by_id"] == lead_id
-    native_id = lead.get("harness_session_id")
-    native_root = lead.get("harness_session_root")
+    assert native.get("agent_id") == lead_id and native.get("harness") == lead["harness"] == "opencode", \
+        "native identity does not match public Lead"
+    native_id = native.get("native_id")
+    native_root = native.get("native_root")
     assert isinstance(native_id, str) and native_id and isinstance(native_root, str)
 
     def native_tool(event):
@@ -175,7 +185,7 @@ def inventory_result(lead, child, history):
 def inventory(lead_label, child_label):
     lead = agent(load(lead_label)["agent_id"])
     child = agent(load(child_label)["agent_id"])
-    proof = inventory_result(lead, child, events(lead["agent_id"]))
+    proof = inventory_result(lead, child, events(lead["agent_id"]), native_session(lead))
     save("installed-loom-tools", proof)
 
 
@@ -390,8 +400,11 @@ def native_create_tool_count(history):
 
 def assert_started_snapshot(snapshot, ids, names, native_count):
     assert not snapshot.get("missing") and snapshot["markerCount"] >= 1
-    assert sorted(snapshot["ids"]) == sorted(ids), "Started chips must match exact saved child IDs once"
-    assert sorted(snapshot["names"]) == sorted(names), "Started chips must show exact full child names"
+    assert len(ids) == len(names) == len(snapshot["ids"]) == len(snapshot["names"]) == len(snapshot["colors"]), \
+        "Started child ID/name/color counts differ"
+    assert len(set(ids)) == len(ids) and len(set(snapshot["ids"])) == len(ids), "Started child IDs repeated"
+    assert dict(zip(snapshot["ids"], snapshot["names"])) == dict(zip(ids, names)), \
+        "Started chips must pair exact saved child IDs and full names"
     assert native_count >= 1, "no saved native create tool entries for the children"
     assert snapshot["toolCount"] == native_count, "Started tool count differs from saved native tool entries"
     assert snapshot["rawCode"] is False, "collapsed Started marker leaked raw bridge input"
@@ -419,7 +432,9 @@ def started_ui(lead_label, *child_labels):
     })())""")
     tool_count = native_create_tool_count(history)
     assert_started_snapshot(shot, ids, [kid["name"] for kid in kids], tool_count)
-    for kid, color in zip(kids, shot["colors"]):
+    colors_by_id = dict(zip(shot["ids"], shot["colors"]))
+    for kid in kids:
+        color = colors_by_id[kid["agent_id"]]
         previous = OUT / f"color-{kid['agent_id']}.json"
         if previous.exists():
             assert load(f"color-{kid['agent_id']}")["value"] == color

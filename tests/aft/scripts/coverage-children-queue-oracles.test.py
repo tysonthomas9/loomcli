@@ -58,6 +58,25 @@ console.log(JSON.stringify(suite.tests.flatMap(t=>t.steps).filter(s=>s.wait?.fn)
 
 
 class QueueOracleTests(unittest.TestCase):
+    def test_replacement_tool_diagnostic_allowlists_result_fields(self):
+        tool = {"agent_id": "agt_lead", "kind": "item.completed", "event_id": "owned-tool", "turn_id": "turn-two",
+                "payload": {"itemKind": "tool", "tool": {"input": "PRIVATE-INPUT", "output": json.dumps({
+                    "replaced": False, "state": "waiting", "message_id": "msg_" + "a" * 26,
+                    "credential": "PRIVATE-OUTPUT"})}}}
+        safe = queue.replacement_tool_diagnostic(tool, "agt_lead")
+        self.assertEqual((safe["category"], safe["replaced"], safe["state"]), ("object", False, "waiting"))
+        self.assertEqual(safe["message_id"], "msg_" + "a" * 26)
+        self.assertNotIn("PRIVATE", json.dumps(safe))
+        foreign = queue.replacement_tool_diagnostic({**tool, "agent_id": "agt_foreign"}, "agt_lead")
+        self.assertEqual((foreign["owner"], foreign["category"]), ("foreign", "invalid-event"))
+        self.assertNotIn("replaced", foreign)
+        missing = queue.replacement_tool_diagnostic({**tool, "payload": {"itemKind": "tool", "tool": {}}}, "agt_lead")
+        self.assertEqual(missing["category"], "missing-output")
+        wrong_type = queue.replacement_tool_diagnostic({**tool, "payload": {"itemKind": "tool", "tool": {
+            "output": json.dumps(["PRIVATE-OUTPUT"])}}}, "agt_lead")
+        self.assertEqual(wrong_type["category"], "non-object")
+        self.assertNotIn("PRIVATE", json.dumps(wrong_type))
+
     def test_bind_child_preserves_create_call_diagnostics_without_changing_one_call(self):
         lead = {"agent_id": "agt_lead", "branch": "main", "repo": "fixture", "worktree_path": "/lead",
                 "state": "active", "running_turn_id": "lead-turn"}
@@ -131,7 +150,7 @@ class QueueOracleTests(unittest.TestCase):
                     "state": "waiting", "replaced": replaced}
         native = [result(requests[0], False), result(requests[1], True)]
         calls = [
-            {"kind": "item.completed", "event_id": f"tool-{i}", "turn_id": f"lead-turn-{i}",
+            {"agent_id": lead, "kind": "item.completed", "event_id": f"tool-{i}", "turn_id": f"lead-turn-{i}",
              "payload": {"itemKind": "tool", "tool": {"output": json.dumps(native[i])}}}
             for i in range(2)
         ]
@@ -143,14 +162,22 @@ class QueueOracleTests(unittest.TestCase):
         p2 = {"agent_id": child, "kind": "message.delivered", "seq": 1,
               "event_id": "p2-delivered", "turn_id": turn,
               "payload": {"text": queue.TEXT["p2"], "sender": sender, "inputKey": "p2-input"}}
-        stage = {"replacement": False, "finished": False}
+        stage = {"replacement": False, "finished": False, "foreign": False}
         def row(_label):
             slot = {"sender": sender, "text": queue.TEXT["p3b" if stage["replacement"] else "p3"], "since": "fifo-place"}
-            return {"agent_id": child, "state": "finished" if stage["finished"] else "active",
+            return {"agent_id": "agt_foreign" if stage["foreign"] else child,
+                    "state": "finished" if stage["finished"] else "active",
                     "running_turn_id": None if stage["finished"] else turn,
                     "attempt": 1, "waiting_messages": [slot]}
-        def child_events(_label):
-            return [p2, waits[0], *([waits[1]] if stage["replacement"] else [])]
+        def child_events(label):
+            if label == "lead":
+                return [{"agent_id": lead, "kind": "task_completed", "seq": 4,
+                         "event_id": "task_completed:agt_child:0", "turn_id": "",
+                         "payload": {"child": child, "attempt": 0}}]
+            return [p2, waits[0], *([waits[1]] if stage["replacement"] else []),
+                    {"agent_id": child, "kind": "message.delivered", "seq": 100,
+                     "event_id": "unrelated-delivery", "turn_id": turn,
+                     "payload": {"text": "PRIVATE-EVENT-BODY", "sender": "user:other"}}]
         def browser(expression):
             if expression == "location.pathname":
                 return "/ws/LOCALMODE/chat/agt_child"
@@ -176,6 +203,32 @@ class QueueOracleTests(unittest.TestCase):
                 self.assertEqual(receipt["waiting_event_ids"], [w["event_id"] for w in waits])
                 self.assertEqual(receipt["native_results"], native)
                 self.assertEqual(receipt["stage"], "saved waiting linkage verified")
+                accepted_proof = queue.load("first-parent-proof")
+                original_output = calls[1]["payload"]["tool"]["output"]
+                calls[1]["payload"]["tool"]["output"] = json.dumps({**native[1], "replaced": False})
+                with self.assertRaisesRegex(AssertionError, "native send replaced result is not True"):
+                    queue.first_parent()
+                precheck = queue.load("first-parent-replacement-precheck")
+                self.assertEqual(precheck["second_tool"]["replaced"], False)
+                self.assertEqual(precheck["child"]["running_turn_id"], turn)
+                self.assertEqual(precheck["child"]["waiting"][0]["marker"], "p3b")
+                self.assertEqual(precheck["events"]["category"], "owned")
+                self.assertNotIn("PRIVATE-EVENT-BODY", json.dumps(precheck))
+                self.assertEqual(queue.load("first-parent-proof"), accepted_proof)
+                calls[1]["payload"]["tool"]["output"] = "PRIVATE-TOOL-OUTPUT malformed"
+                with self.assertRaisesRegex(AssertionError, "native send result is not JSON"):
+                    queue.first_parent()
+                precheck = queue.load("first-parent-replacement-precheck")
+                self.assertEqual(precheck["second_tool"]["category"], "invalid-json")
+                self.assertNotIn("PRIVATE-TOOL-OUTPUT", json.dumps(precheck))
+                calls[1]["payload"]["tool"]["output"] = original_output
+                stage["foreign"] = True
+                with self.assertRaisesRegex(AssertionError, "foreign child state"):
+                    queue.first_parent()
+                precheck = queue.load("first-parent-replacement-precheck")
+                self.assertEqual(precheck["child"]["owner"], "foreign")
+                self.assertNotIn(queue.TEXT["p3b"], json.dumps(precheck))
+                stage["foreign"] = False
                 queue.save("first-parent-initial", {**proof, "tool_event_id": "wrong-tool"})
                 with self.assertRaisesRegex(AssertionError, "initial native result changed"):
                     queue.first_parent()
@@ -395,6 +448,10 @@ console.log(JSON.stringify(eval(process.argv[4])));"""
         fixture = Path(__file__).resolve().parents[2] / "fixtures/slack-clone"
         names = ("README.md", "BACKLOG.md", "package.json", "server.js", "app.js", "app.test.js")
         self.assertTrue(all((fixture / name).is_file() for name in names))
+        backlog = (fixture / "BACKLOG.md").read_text()
+        self.assertIn("## 5. Search messages", backlog)
+        self.assertIn("GET /api/search?q=", backlog)
+        self.assertIn("case-insensitive", backlog)
         self.assertEqual(json.loads((fixture / "package.json").read_text())["scripts"]["test"], "node --test")
         dockerfile = (Path(__file__).resolve().parents[3] / "test/local-mode/Dockerfile").read_text()
         self.assertIn("FROM local-mode AS agents\nCOPY --from=docker.io/library/node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node", dockerfile)
@@ -406,6 +463,10 @@ console.log(JSON.stringify(eval(process.argv[4])));"""
         self.assertTrue(all(name in initial and name in p2 for name in names))
         self.assertIn("node --test once", initial)
         self.assertIn(queue.TEXT["p2"].replace(queue.RUN, "${RUN_ID}"), p2)
+        for required in ("BACKLOG.md ticket 5", "GET /api/search?q=", "cross-channel case-insensitive matches",
+                         "no match", "run node --test once", "git add only app.js and app.test.js",
+                         "assigned child branch", "do not push, open a PR, or edit unrelated files"):
+            self.assertIn(required, p2)
         self.assertIn(queue.TEXT["p3b"].replace(queue.RUN, "${RUN_ID}"), p3b)
         self.assertIn(queue.TEXT["p1"].replace(queue.RUN, "${RUN_ID}"), p1)
         for required in ("return JSON.stringify of the actual agent_send result", "replaced", "message_id", "state", "Do not call agent_get"):
