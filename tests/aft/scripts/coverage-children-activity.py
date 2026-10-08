@@ -2,12 +2,14 @@
 """Read-only oracles for run-owned real child activity journeys."""
 
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 from urllib.parse import quote, urlsplit
 from urllib.request import urlopen
 
@@ -292,18 +294,33 @@ def repeat_ready(lead_label, child_label):
     assert load("first")["child"] == child["agent_id"]
 
 
+def js_truncate(value, limit):
+    """Match the tray's UTF-16 slice and ellipsis limit."""
+    units = value.encode("utf-16-le", "surrogatepass")
+    return value if len(units) // 2 <= limit else \
+        units[:(limit - 1) * 2].decode("utf-16-le", "surrogatepass") + "…"
+
+
+def reasoning_first_line(text):
+    """Mirror AgentChat timelineRows.firstLine for the saved reasoning title."""
+    line = re.sub(r"^#{1,6}\s+", "", text.strip().split("\n", 1)[0])
+    while True:
+        plain = re.sub(r"(\*\*|__|\*|_|`)(.+?)\1", r"\2", line)
+        if plain == line:
+            break
+        line = plain
+    return js_truncate(line.strip(), 120)
+
+
 def step_prefix(event):
     payload = event["payload"]
     if event["kind"] != "item.completed":
         return None
     if payload.get("itemKind") == "reasoning":
-        line = (payload.get("text") or "").strip().split("\n")[0].strip()
-        # The product strips Markdown here. Only compare the plain first-line
-        # subset, so an unsupported rendering cannot claim a match.
-        if not line or re.search(r"[`*_#]", line):
+        line = reasoning_first_line(payload.get("text") or "")
+        if not line:
             return None
-        label = f"💭 Thinking · {line}"
-        return f"{label[:59]}…" if len(label) > 60 else label
+        return js_truncate(f"💭 Thinking · {line}", 60)
     if payload.get("itemKind") != "tool":
         return None
     name = (payload.get("tool") or {}).get("name", "").strip()
@@ -950,6 +967,46 @@ def reactivation_event(history, child_id, after_seq, result):
     return matches[0]
 
 
+def reactivation_event_diagnostic(history, child_id, after_seq, captured, live):
+    """Save bounded identities and hashes, never native text or tool arguments."""
+    def digest(value):
+        return hashlib.sha256(value.encode("utf-8", "surrogatepass")).hexdigest()
+
+    def identity(value):
+        return value if isinstance(value, str) and len(value) <= 160 and \
+            re.fullmatch(r"[A-Za-z0-9_:/.-]+", value) else "<invalid>"
+
+    candidates = [e for e in history if e.get("agent_id") == child_id and
+                  isinstance(e.get("seq"), int) and e["seq"] > after_seq and
+                  e.get("kind") in ("turn.started", "tool.started", "item.completed")]
+    rows = []
+    for event in candidates[-40:]:
+        payload = event.get("payload") or {}
+        raw = payload.get("text") if payload.get("itemKind") == "reasoning" else None
+        raw_line = raw.strip().split("\n", 1)[0] if isinstance(raw, str) else ""
+        prefix = step_prefix(event)
+        rows.append({"agent_id": identity(event.get("agent_id")), "seq": event["seq"],
+                     "event_id": identity(event.get("event_id")),
+                     "turn_id": identity(event.get("turn_id")), "kind": event["kind"],
+                     "item_id": identity(payload.get("itemId")),
+                     "item_kind": payload.get("itemKind") if payload.get("itemKind") in
+                     ("reasoning", "tool", "message") else "other",
+                     "formatting": [flag for flag, present in (
+                         ("heading", bool(re.match(r"^#{1,6}\s+", raw_line))),
+                         ("strong", "**" in raw_line or "__" in raw_line),
+                         ("emphasis", "*" in raw_line or "_" in raw_line),
+                         ("code", "`" in raw_line)) if present],
+                     "raw_first_line_sha256": digest(raw_line) if raw_line else None,
+                     "normalized_prefix_sha256": digest(prefix) if prefix else None})
+    return {"child_id": child_id, "baseline_seq": after_seq,
+            "captured_at_ms": captured["capturedAt"], "read_at_ms": int(time.time() * 1000),
+            "api_state": live["state"], "api_attempt": live["attempt"],
+            "api_running_turn_id": live.get("running_turn_id"),
+            "visible_sha256": digest(captured["result"]),
+            "candidate_count": len(candidates), "omitted_count": max(0, len(candidates) - len(rows)),
+            "events": rows}
+
+
 def reactivation_checkpoint(lead_label, child_label):
     lead, child = load(lead_label), load(child_label)
     assert child["parent_agent_id"] == lead["agent_id"]
@@ -970,7 +1027,10 @@ def reactivation_checkpoint(lead_label, child_label):
     assert live["parent_agent_id"] == lead["agent_id"] and live["state"] in ("active", "waiting", "finished")
     baseline = load("reactivation-armed")
     assert baseline["child"] == child_id and baseline["parent"] == lead["agent_id"]
-    step = reactivation_event(events(child_id), child_id, baseline["last_seq"], captured["result"])
+    history = events(child_id)
+    save("reactivation-event-diagnostic",
+         reactivation_event_diagnostic(history, child_id, baseline["last_seq"], captured, live))
+    step = reactivation_event(history, child_id, baseline["last_seq"], captured["result"])
     browser("screenshot", str(OUT / f"reactivation-checkpoint-{child_label}.png"))
     save("reactivation-checkpoint", {"stage": "running", "api_state": live["state"],
                                      "api_attempt_at_capture_read": live["attempt"], "ui": shot,
