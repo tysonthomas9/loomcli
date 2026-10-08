@@ -233,6 +233,84 @@ class ChildProofPredicates(unittest.TestCase):
             with self.subTest(rows=rows, result=result), self.assertRaises(AssertionError):
                 module.reactivation_event(rows, self.a, 10, result)
 
+    def test_reactivation_event_uses_product_reasoning_first_line(self):
+        started = event("turn.started", 11, "second-start", turn_id="turn-two")
+        started["agent_id"] = self.a
+        for raw, shown in (("**Planning file creation and commits**", "Planning file creation and commits"),
+                           ("## Planning file creation and commits", "Planning file creation and commits"),
+                           ("`Planning file creation and commits`", "Planning file creation and commits"),
+                           ("Planning file creation and commits", "Planning file creation and commits"),
+                           ("**Planning** _file_ `creation`", "Planning file creation")):
+            step = event("item.completed", 12, "reason", {"itemKind": "reasoning", "itemId": "reason-2",
+                         "text": raw + "\nprivate later line"}, "turn-two")
+            step["agent_id"] = self.a
+            with self.subTest(raw=raw):
+                self.assertEqual(module.reactivation_event([started, step], self.a, 10,
+                                 f"💭 Thinking · {shown} · 0:01")["event_id"], "reason")
+                with self.assertRaises(AssertionError):
+                    module.reactivation_event([started, step], self.a, 10, "💭 Thinking · unrelated · 0:01")
+                for altered in ({**step, "agent_id": self.b}, {**step, "turn_id": "turn-old"},
+                                {**step, "seq": 10}):
+                    with self.assertRaises(AssertionError):
+                        module.reactivation_event([started, altered], self.a, 10,
+                                                  f"💭 Thinking · {shown} · 0:01")
+
+    def test_reactivation_failure_saves_bounded_identity_diagnostic_without_text(self):
+        child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "cov-child-repeat-" + module.RUN}
+        capture = {"path": "/ws/LOCALMODE/chat/agt_lead", "rowId": self.a, "linkId": self.a,
+                   "rowVisible": True, "running": True, "nested": True, "exactLinkCount": 1,
+                   "childName": child["name"], "attemptChip": "attempt 2", "logo": True,
+                   "dot": "working", "color": "3", "result": "💭 Thinking · unmatched · 0:01",
+                   "elapsed": "0m 02s", "capturedAt": 123}
+        started = event("turn.started", 11, "second-start", turn_id="turn-two")
+        step = event("item.completed", 12, "reason", {"itemKind": "reasoning", "itemId": "reason-2",
+                     "text": "**secret reasoning title**\nprivate later line"}, "turn-two")
+        started["agent_id"] = step["agent_id"] = self.a
+        saved = {}
+        with patch.object(module, "load", side_effect=lambda label: {"agent_id": "agt_lead"} if label == "repeat-lead" else
+                          {"child": self.a, "parent": "agt_lead", "last_seq": 10} if label == "reactivation-armed" else
+                          {"value": "3"} if label == f"color-{self.a}" else child), \
+             patch.object(module, "agent", return_value={**child, "attempt": 1, "state": "active",
+                                                        "running_turn_id": "turn-two"}), \
+             patch.object(module, "events", return_value=[started, step]), \
+             patch.object(module, "browser"), \
+             patch.object(module, "browser_json", return_value={"capture": capture, "cardAttempts": ["0"]}), \
+             patch.object(module, "save", side_effect=lambda name, data: saved.update({name: data})), \
+             self.assertRaises(AssertionError):
+            module.reactivation_checkpoint("repeat-lead", "repeat")
+        diagnostic = saved["reactivation-event-diagnostic"]
+        self.assertEqual(diagnostic["child_id"], self.a)
+        self.assertEqual(diagnostic["api_running_turn_id"], "turn-two")
+        self.assertEqual(diagnostic["captured_at_ms"], 123)
+        self.assertEqual(diagnostic["events"][-1]["item_id"], "reason-2")
+        self.assertIn("strong", diagnostic["events"][-1]["formatting"])
+        self.assertNotIn("secret reasoning title", json.dumps(diagnostic))
+        self.assertNotIn("private later line", json.dumps(diagnostic))
+
+    def test_reactivation_diagnostic_caps_events_and_never_saves_tool_io(self):
+        history = []
+        for seq in range(11, 61):
+            row = event("item.completed", seq, f"item:{seq}",
+                        {"itemKind": "tool", "itemId": f"item-{seq}",
+                         "tool": {"name": "execute", "input": "private tool input",
+                                  "output": "private tool output"}}, "turn-two")
+            row["agent_id"] = self.a
+            history.append(row)
+        capture = {"capturedAt": 123, "result": "▸ Ran code · 0:01"}
+        live = {"state": "active", "attempt": 1, "running_turn_id": "turn-two"}
+        diagnostic = module.reactivation_event_diagnostic(history, self.a, 10, capture, live)
+        self.assertEqual((diagnostic["candidate_count"], diagnostic["omitted_count"], len(diagnostic["events"])),
+                         (50, 10, 40))
+        self.assertEqual(diagnostic["events"][0]["seq"], 21)
+        self.assertNotIn("private tool", json.dumps(diagnostic))
+
+    def test_product_reasoning_limit_counts_utf16_units(self):
+        raw = "A" * 110
+        rendered = module.step_prefix(event("item.completed", 12, "reason",
+                             {"itemKind": "reasoning", "text": raw}, "turn-two"))
+        self.assertEqual(len(rendered.encode("utf-16-le")) // 2, 60)
+        self.assertTrue(rendered.endswith("…"))
+
     def test_reactivation_opens_real_collapsed_tray_only_during_saved_second_turn(self):
         lead = {"agent_id": "agt_lead", "name": "lead"}
         child = {"agent_id": self.a, "parent_agent_id": "agt_lead", "name": "repeat"}
