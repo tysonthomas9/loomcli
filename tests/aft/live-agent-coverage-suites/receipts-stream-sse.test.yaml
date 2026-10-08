@@ -56,7 +56,7 @@ tests:
       - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" claim other && "$AFT_SELECT_AGENT_MODEL"'
         intent: "Bind the independent UI-created Lead and selected real model"
-      - fill: { label: Message, value: "OTHER_AGENT-${RUN_ID}: read README.md and give its exact filename in one sentence." }
+      - fill: { label: Message, value: "OTHER_AGENT-${RUN_ID} is only a test marker, not an agent name. In this existing chat, use your own built-in read tool to read README.md and give its exact filename in one sentence. Do not create or delegate to another agent." }
         intent: "Create a real foreign-agent event oracle"
       - press: Enter
       - wait:
