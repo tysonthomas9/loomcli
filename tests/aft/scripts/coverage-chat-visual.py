@@ -4,6 +4,7 @@
 import base64
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -1114,21 +1115,52 @@ def mobile_switcher(width):
     write(f"input-switcher-{width}.json", rows)
 
 
+def motion_prime():
+    path = f"/ws/{WS}/agents"
+    source = (Path(required("AFT_TESTS_DIR")) / "scripts/coverage-chat-visual-arrivals.js").read_text()
+    script = source.replace("__WS_JSON__", json.dumps(WS)).replace("__RUN_JSON__", json.dumps(RUN)) \
+                   .replace("__PATH_JSON__", json.dumps(path)) \
+                   .replace("__CHAT_PREFIX_JSON__", json.dumps(f"/ws/{WS}/chat/"))
+    result = evaluate(script)
+    assert result == {"version": 1, "workspace": WS, "run": RUN, "path": path}, \
+        "arrival observer was not installed on the owned Agents page"
+
+
 MOTION_JS = r"""(() => {
   if (window.__aftChatVisual) throw Error('visual probe already armed');
   window.__aftChatVisualLive=null;
-  const p = {start:Date.now(), frames:[], samples:[], shifts:[], maxMs:180000,
+  const observer=window.__aftChatVisualArrival;
+  if(!observer)throw Error('owned arrival observer missing');
+  const startClock=observer.markFrame();
+  const p = {start:startClock.at,startClock, frames:[], ticks:[], tickMeta:[], signals:[], samples:[], shifts:[], maxMs:180000,
     marker:__MARKER__,
-    stopped:false, lastText:'', sawCaret:false, sawWorking:false};
+    stopped:false, lastText:'', lastVisibleText:'', lastContentText:'', sawCaret:false, sawWorking:false, sawStop:false};
   const root=document.querySelector('section[aria-label="Agent chat"]');
   if(!root)throw Error('real Agent Chat root missing before send');
   const transcript = () => document.querySelector('[data-testid=chat-transcript]');
-  const state = () => { const t=transcript(); const a=[...(t?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);
-    const text=a?.querySelector('[data-testid=chat-markdown]')?.textContent||'';
+  const replyContent = md => { if(!md)return '';
+    const blocks=new Set(['DIV','P','PRE','UL','OL','LI','BLOCKQUOTE','SECTION','H1','H2','H3','H4','H5','H6']);
+    const shown=node=>{if(node.nodeType===3)return node.nodeValue||'';
+      if(node.nodeType!==1)return '';const el=node;
+      if(el.hasAttribute('data-chat-renderer-chrome')||['SCRIPT','STYLE','SVG','INPUT'].includes(el.tagName))return '';
+      if(el.tagName==='BR')return '\n';
+      if(el.tagName==='TABLE')return [...el.querySelectorAll('tr')].map(shown).join('\n');
+      if(el.tagName==='TR')return [...el.children].filter(c=>c.tagName==='TH'||c.tagName==='TD').map(shown).join('\t');
+      const children=[...el.childNodes].map(shown);
+      const separated=el.getAttribute('role')==='toolbar';
+      const body=children.join(separated?'\n':'');
+      return blocks.has(el.tagName)?`\n${body}\n`:body;};
+    return shown(md).trim().replace(/\n{3,}/g,'\n\n');};
+  p.replyContent=replyContent;
+  const state = (clock={at:Date.now()}) => { const t=transcript(); const a=[...(t?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);
+    const md=a?.querySelector('[data-testid=chat-markdown]');
+    const text=md?.textContent||'', visibleText=md?.innerText||'', contentText=replyContent(md);
+    const streaming=md?.getAttribute('data-streaming')==='true';
     const caret=!!a?.querySelector('[data-streaming-caret]');
     const working=!!t?.querySelector('[data-testid=working-row]');
     const gap=t?Math.max(0,t.scrollHeight-t.scrollTop-t.clientHeight):null;
-    return {at:Date.now(),text,caret,working,gap,stop:!!document.querySelector('form button[title="Stop the running turn"]')}; };
+    return {...clock,text,visibleText,contentText,streaming,caret,working,gap,stop:!!document.querySelector('form button[title="Stop the running turn"]')}; };
+  p.captureState=()=>state(observer.markFrame());
   const captureLive=() => {if(p.stopped||window.__aftChatVisualLive)return;
     const tool=root.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running]');
     const working=root.querySelector('[data-testid=working-row]');
@@ -1141,23 +1173,28 @@ MOTION_JS = r"""(() => {
     p.liveObserver?.disconnect(); };
   p.liveObserver=new MutationObserver(captureLive);
   p.liveObserver.observe(root,{subtree:true,childList:true,attributes:true,characterData:true});
-  const frame=() => { if(p.stopped)return; captureLive(); const s=state();
-    if(s.text!==p.lastText) {const before=p.lastText.trim().split(/\s+/).filter(Boolean).length;
-      const after=s.text.trim().split(/\s+/).filter(Boolean).length;
+  const frame=(rafAt) => { if(p.stopped)return; captureLive(); const s=state(observer.markFrame());
+    const tickIndex=p.ticks.length; p.ticks.push(s.at);
+    p.tickMeta.push({at:s.at,mono:s.mono,phase:s.phase,rafAt,tickIndex});
+    p.signals.push({at:s.at,mono:s.mono,phase:s.phase,tickIndex,
+      caret:s.caret,working:s.working,stop:s.stop});
+    if(s.text!==p.lastText||s.visibleText!==p.lastVisibleText||s.contentText!==p.lastContentText) {const before=p.lastContentText.trim().split(/\s+/).filter(Boolean).length;
+      const after=s.contentText.trim().split(/\s+/).filter(Boolean).length;
       const marker=s.text.includes(p.marker);
-      p.frames.push({at:s.at,chars:s.text.length,words:after,addedWords:Math.max(0,after-before),
-        marker,...(marker?{text:s.text}:{})}); p.lastText=s.text;}
-    p.sawCaret ||= s.caret; p.sawWorking ||= s.working;
+      p.frames.push({at:s.at,mono:s.mono,phase:s.phase,tickIndex,
+        chars:s.text.length,visibleChars:s.visibleText.length,contentChars:s.contentText.length,words:after,addedWords:Math.max(0,after-before),
+        marker,text:s.text,visibleText:s.visibleText,contentText:s.contentText,streaming:s.streaming}); p.lastText=s.text;p.lastVisibleText=s.visibleText;p.lastContentText=s.contentText;}
+    p.sawCaret ||= s.caret; p.sawWorking ||= s.working; p.sawStop ||= s.stop;
     if(Date.now()-p.start>p.maxMs) {p.stopped=true;p.liveObserver.disconnect();return;} requestAnimationFrame(frame); };
   p.timer=setInterval(()=>{ if(p.stopped){clearInterval(p.timer);return;}
     const s=state(); p.samples.push({at:s.at,chars:s.text.length,caret:s.caret,working:s.working,gap:s.gap,stop:s.stop});
   },100);
   const rect=r=>r?{x:r.x,y:r.y,width:r.width,height:r.height}:null;
-  try { p.observer=new PerformanceObserver(list=>{ for(const e of list.getEntries())
-    if(!e.hadRecentInput) p.shifts.push({at:Date.now(),value:e.value,
+  p.recordShift=e=>{ if(!e.hadRecentInput) p.shifts.push({at:Date.now(),value:e.value,
       sources:(e.sources||[]).slice(0,4).map(s=>({tag:s.node?.tagName||null,
         testid:s.node?.closest?.('[data-testid]')?.getAttribute('data-testid')||null,
-        previous:rect(s.previousRect),current:rect(s.currentRect)}))}); });
+        previous:rect(s.previousRect),current:rect(s.currentRect)}))}); };
+  try { p.observer=new PerformanceObserver(list=>list.getEntries().forEach(p.recordShift));
     p.observer.observe({type:'layout-shift', buffered:false}); }
   catch(e) {p.observerError=String(e);}
   window.__aftChatVisual=p; requestAnimationFrame(frame); return 'armed';
@@ -1165,7 +1202,99 @@ MOTION_JS = r"""(() => {
 
 
 def motion_start():
+    current("render")
+    aid = agent_id("render")
+    browser("wait", "--fn", "(() => {const p=window.__aftChatVisualArrival;return !!p&&p.ready(" +
+            json.dumps(aid) + ");})()")
+    bound = evaluate("(() => window.__aftChatVisualArrival.bind(" + json.dumps(aid) + "," +
+                     json.dumps(f"/ws/{WS}/chat/{aid}") + "))()")
+    assert bound == {"version": 1, "workspace": WS, "run": RUN, "agentId": aid,
+                     "route": f"/ws/{WS}/chat/{aid}", "sourceCount": bound.get("sourceCount")}, \
+        "arrival observer did not bind the owned Chat stream"
+    assert isinstance(bound["sourceCount"], int) and bound["sourceCount"] >= 1
     assert evaluate(MOTION_JS.replace("__MARKER__", json.dumps(f"VISUAL_END_{RUN}"))) == "armed"
+    browser("wait", "--fn", "(() => {const p=window.__aftChatVisual;return !!p&&!p.stopped&&" +
+            "location.pathname===" + json.dumps(f"/ws/{WS}/chat/{aid}") +
+            "&&p.ticks.length>=6&&p.frames.length===0;})()")
+    ready = evaluate("(() => {const p=window.__aftChatVisual;return {route:location.pathname," +
+                     "start:p?.start,startClock:p?.startClock,ticks:p?.ticks.slice(0,6)," +
+                     "tickMeta:p?.tickMeta.slice(0,6),frames:p?.frames.length," +
+                     "signals:p?.signals.slice(0,6),stopped:p?.stopped};})()")
+    assert_motion_ready(ready, aid)
+    write("render-motion-ready.json", {"route": ready["route"], "agent_id": aid,
+                                      "startClock": ready["startClock"], "ticks": ready["ticks"],
+                                      "tickMeta": ready["tickMeta"]})
+
+
+def assert_motion_ready(ready, aid):
+    ticks = ready.get("ticks")
+    meta = ready.get("tickMeta")
+    start_clock = ready.get("startClock")
+    assert ready.get("route") == f"/ws/{WS}/chat/{aid}" and \
+        type(ready.get("start")) is int and \
+        isinstance(start_clock, dict) and start_clock.get("at") == ready["start"] and \
+        isinstance(start_clock.get("mono"), (int, float)) and \
+        type(start_clock.get("phase")) is int and \
+        isinstance(ticks, list) and len(ticks) == 6 and \
+        all(type(tick) is int for tick in ticks) and \
+        ticks[0] >= ready["start"] and \
+        all(right >= left for left, right in zip(ticks, ticks[1:])) and \
+        isinstance(meta, list) and len(meta) == 6 and \
+        all(type(row.get("tickIndex")) is int and row["tickIndex"] == i and
+            row.get("at") == ticks[i] and isinstance(row.get("mono"), (int, float)) and
+            type(row.get("phase")) is int and row["phase"] > start_clock["phase"] and
+            isinstance(row.get("rafAt"), (int, float)) and row["rafAt"] <= row["mono"] + 1
+            for i, row in enumerate(meta)) and \
+        all(right["mono"] > left["mono"] and right["phase"] > left["phase"] and
+            right["rafAt"] > left["rafAt"] for left, right in zip(meta, meta[1:])) and \
+        ready.get("frames") == 0 and ready.get("stopped") is False and \
+        isinstance(ready.get("signals"), list) and len(ready["signals"]) == 6 and \
+        [signal.get("at") for signal in ready["signals"]] == ticks and \
+        all(signal.get("mono") == meta[i]["mono"] and
+            signal.get("phase") == meta[i]["phase"] and
+            signal.get("tickIndex") == i for i, signal in enumerate(ready["signals"])) and \
+        all(signal.get("caret") is False and signal.get("working") is False and
+            signal.get("stop") is False for signal in ready["signals"]), \
+        "motion probe lacks six owned pre-send sampled frame intervals"
+
+
+def self_test_motion_ready():
+    from copy import deepcopy
+    aid = "agt_owned"
+    ticks = [100 + step * 9 for step in range(6)]
+    ready = {"route": f"/ws/{WS}/chat/{aid}", "start": 99,
+             "startClock": {"at": 99, "mono": 99.0, "phase": 1},
+             "ticks": ticks, "frames": 0, "stopped": False,
+             "tickMeta": [{"at": tick, "mono": float(tick), "phase": i + 2,
+                           "rafAt": float(tick - 1), "tickIndex": i}
+                          for i, tick in enumerate(ticks)],
+             "signals": [{"at": tick, "mono": float(tick), "phase": i + 2,
+                          "tickIndex": i, "caret": False, "working": False, "stop": False}
+                         for i, tick in enumerate(ticks)]}
+    assert_motion_ready(ready, aid)
+    same_wall = deepcopy(ready)
+    same_wall["ticks"][2] = same_wall["ticks"][1]
+    same_wall["tickMeta"][2]["at"] = same_wall["ticks"][1]
+    same_wall["signals"][2]["at"] = same_wall["ticks"][1]
+    assert_motion_ready(same_wall, aid)
+    def rejects(change):
+        candidate = deepcopy(ready)
+        change(candidate)
+        try:
+            assert_motion_ready(candidate, aid)
+        except AssertionError as exc:
+            assert "six owned pre-send" in str(exc), exc
+        else:
+            raise AssertionError("foreign or incomplete pre-send cadence passed")
+    rejects(lambda r: r.update(route="/ws/FOREIGN/chat/agt_owned"))
+    rejects(lambda r: r.update(ticks=r["ticks"][:5]))
+    rejects(lambda r: r["tickMeta"][2].update(mono=r["tickMeta"][1]["mono"]))
+    rejects(lambda r: r["ticks"].__setitem__(2, r["ticks"][1] - 1))
+    rejects(lambda r: r.update(frames=1))
+    rejects(lambda r: r["signals"][0].update(working=True))
+    rejects(lambda r: r["tickMeta"][0].update(tickIndex=1))
+    rejects(lambda r: r["tickMeta"][0].update(mono=0.0))
+    rejects(lambda r: r.update(stopped=True))
 
 
 def final_text_frame(answer, frames, final_text, marker):
@@ -1236,15 +1365,6 @@ def load_motion_capture(case):
 def motion_capture(case):
     assert case == "render", case
     current(case)
-    probe = evaluate("""(() => { const p=window.__aftChatVisual; if(!p)throw Error('motion probe missing');
-      p.stopped=true; clearInterval(p.timer); p.observer?.disconnect(); p.liveObserver?.disconnect();
-      const c=document.querySelector('[data-testid=chat-transcript]');
-      const a=[...(c?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);
-      const finalText=a?.querySelector('[data-testid=chat-markdown]')?.textContent||'';
-      return {route:location.pathname,start:p.start,frames:p.frames,finalText,samples:p.samples,shifts:p.shifts,
-        caretGone:!!c && !c.querySelector('[data-streaming-caret], [data-testid=working-row]'),
-        sawCaret:p.sawCaret,sawWorking:p.sawWorking,observerError:p.observerError||null}; })()""")
-    assert probe["route"] == f"/ws/{WS}/chat/{agent_id(case)}", "motion capture changed Chat route"
     evs = events(case)
     delivered = [e for e in evs if e["kind"] == "message.delivered" and f"VISUAL_RENDER_{RUN}" in e["payload"].get("text", "")]
     assert len(delivered) == 1, delivered
@@ -1252,6 +1372,54 @@ def motion_capture(case):
     assert len(end) == 1, end
     replies = [e for e in evs if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "message" and delivered[0]["seq"] < e["seq"] < end[0]["seq"]]
     assert replies, "real turn saved no assistant message"
+    reply_items = [e["payload"]["itemId"] for e in replies]
+    assert all(isinstance(item, str) and item for item in reply_items) and \
+        len(reply_items) == len(set(reply_items)), "saved reply item IDs are missing or duplicated"
+    owned_turn = replies[-1]["turn_id"]
+    assert all(e["turn_id"] == owned_turn for e in replies), "saved reply items cross native turns"
+    browser("wait", "--fn", "(() => {const p=window.__aftChatVisual," +
+            "r=window.__aftChatVisualArrival?.snapshot()," +
+            "a=r?.arrivals?.filter(x=>x.agentId===" + json.dumps(agent_id(case)) +
+            "&&x.turnId===" + json.dumps(owned_turn) +
+            "&&" + json.dumps(reply_items) + ".includes(x.itemId));" +
+            "return !!p&&!p.stopped&&r?.error===null&&a?.length>0&&" +
+            "p.tickMeta.at(-1)?.mono>=Math.max(...a.map(x=>x.mono))+300;})()")
+    probe = evaluate("""(() => { const p=window.__aftChatVisual; if(!p)throw Error('motion probe missing');
+      const observer=window.__aftChatVisualArrival;
+      const before=observer?.snapshot();
+      const own=before?.arrivals?.filter(a=>a.agentId===__AID__&&a.turnId===__TURN__&&__ITEMS__.includes(a.itemId));
+      if(!own?.length||before.error!==null||p.tickMeta.at(-1)?.mono<Math.max(...own.map(a=>a.mono))+300)
+        throw Error('owned arrival horizon changed before freeze');
+      const finalSignal=p.captureState();
+      p.signals.push({at:finalSignal.at,mono:finalSignal.mono,phase:finalSignal.phase,tickIndex:null,
+        caret:finalSignal.caret,
+        working:finalSignal.working,stop:finalSignal.stop});
+      p.stopped=true; clearInterval(p.timer); p.observer?.takeRecords().forEach(p.recordShift);
+      p.observer?.disconnect(); p.liveObserver?.disconnect();
+      const arrival=observer.snapshot();
+      const arrivalClosed=observer.close();
+      if(arrival.error!==null||arrival.arrivals.length!==before.arrivals.length||
+         arrival.completions.length!==before.completions.length||
+         arrivalClosed.error!==null||arrivalClosed.arrivalCount!==arrival.arrivals.length||
+         arrivalClosed.completionCount!==arrival.completions.length||
+         arrivalClosed.phase!==arrival.phase)
+        throw Error('owned arrival changed across frozen observer close');
+      const c=document.querySelector('[data-testid=chat-transcript]');
+      const a=[...(c?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);
+      const finalText=a?.querySelector('[data-testid=chat-markdown]')?.textContent||'';
+      const finalVisibleText=a?.querySelector('[data-testid=chat-markdown]')?.innerText||'';
+      const finalContentText=p.replyContent(a?.querySelector('[data-testid=chat-markdown]'));
+      return {route:location.pathname,start:p.start,startClock:p.startClock,
+        frames:p.frames,ticks:p.ticks,tickMeta:p.tickMeta,signals:p.signals,
+        finalText,finalVisibleText,finalContentText,samples:p.samples,shifts:p.shifts,
+        arrival,arrivalClosed,
+        caretGone:!!c && !c.querySelector('[data-streaming-caret], [data-testid=working-row]'),
+        sawCaret:p.sawCaret,sawWorking:p.sawWorking,sawStop:p.sawStop,
+        observerError:p.observerError||null}; })()"""
+                     .replace("__AID__", json.dumps(agent_id(case)))
+                     .replace("__TURN__", json.dumps(owned_turn))
+                     .replace("__ITEMS__", json.dumps(reply_items)))
+    assert probe["route"] == f"/ws/{WS}/chat/{agent_id(case)}", "motion capture changed Chat route"
     answer = "\n".join(e["payload"].get("text", "") for e in replies)
     snapshot = {"version": 1, "case": case, "ws": WS, "run": RUN,
                 "agent_id": agent_id(case), "route": probe["route"], "probe": probe,
@@ -1281,6 +1449,608 @@ def motion_capture(case):
     })
 
 
+def assert_arrival_receipts(snapshot):
+    probe = snapshot["probe"]
+    receipt = probe.get("arrival")
+    aid = snapshot["agent_id"]
+    route = snapshot["route"]
+    assert isinstance(receipt, dict) and receipt.get("version") == 1 and \
+        receipt.get("workspace") == WS and receipt.get("run") == RUN and \
+        receipt.get("bound", {}).get("agentId") == aid and \
+        receipt["bound"].get("route") == route and \
+        receipt["bound"].get("at", 0) <= probe["start"] and \
+        probe.get("arrivalClosed", {}).get("closed") is True, \
+        "missing or foreign pre-navigation EventSource telemetry"
+    assert receipt.get("error") is None, "owned EventSource telemetry reported an error"
+    all_sources = receipt.get("sources")
+    assert isinstance(all_sources, list) and all_sources and len(all_sources) <= 20 and \
+        len({s.get("id") for s in all_sources}) == len(all_sources), "missing or ambiguous owned EventSource"
+    sources = [s for s in all_sources if s.get("agents") == [aid]]
+    assert sources, "owned Chat EventSource was not constructed"
+    source_ids = set()
+    for source in sources:
+        assert isinstance(source.get("at"), int) and \
+            source["at"] <= probe["frames"][-1]["at"], "foreign or late EventSource source"
+        source_ids.add(source["id"])
+    assert any(source["at"] <= receipt["bound"]["at"] for source in sources), \
+        "arrival observer did not see the pre-send EventSource"
+    arrivals = receipt.get("arrivals")
+    completions = receipt.get("completions")
+    assert isinstance(arrivals, list) and arrivals and len(arrivals) <= 5000 and \
+        isinstance(completions, list) and len(completions) <= 100, \
+        "missing or unbounded real stream receipts"
+    reply_ids = {e["payload"].get("itemId") for e in snapshot["replies"]}
+    assert None not in reply_ids and len(reply_ids) == len(snapshot["replies"]), \
+        "saved assistant items lack unique IDs for arrival matching"
+    turn_id = snapshot["turn_completed"]["turn_id"]
+    previous = receipt["bound"]["at"]
+    for arrival in arrivals:
+        assert arrival.get("sourceId") in source_ids and arrival.get("agentId") == aid and \
+            arrival.get("turnId") == turn_id and arrival.get("itemId") in reply_ids and \
+            isinstance(arrival.get("text"), str) and isinstance(arrival.get("at"), int) and \
+            previous <= arrival["at"], "foreign, missing, or reordered message arrival"
+        previous = arrival["at"]
+    for reply in snapshot["replies"]:
+        raw = "".join(a["text"] for a in arrivals if a["itemId"] == reply["payload"]["itemId"])
+        assert raw and reply["payload"]["text"].startswith(raw), \
+            "actual delta bytes do not match the saved assistant item"
+    saved = {e["event_id"]: e for e in [*snapshot["replies"], snapshot["turn_completed"]]}
+    observed_ids = set()
+    previous = receipt["bound"]["at"]
+    for completion in completions:
+        event_id = completion.get("eventId")
+        event = saved.get(event_id)
+        assert completion.get("sourceId") in source_ids and completion.get("agentId") == aid and \
+            completion.get("turnId") == turn_id and event is not None and \
+            completion.get("kind") == event["kind"] and completion.get("seq") == event["seq"] and \
+            completion.get("itemId") == (event.get("payload") or {}).get("itemId") and \
+            isinstance(completion.get("at"), int) and completion["at"] >= previous and \
+            event_id not in observed_ids, "foreign, missing, or duplicate completion receipt"
+        observed_ids.add(event_id)
+        previous = completion["at"]
+    assert observed_ids == set(saved), "saved completion lacked a matching live EventSource receipt"
+    by_item = {c["itemId"]: c for c in completions if c["kind"] == "item.completed"}
+    assert all(a["itemId"] in by_item and a["phase"] < by_item[a["itemId"]]["phase"]
+               for a in arrivals), "assistant delta arrived after its saved item completion"
+    return arrivals, completions
+
+
+def js_utf16_length(text):
+    """Match JavaScript DOM text.length, including non-BMP characters."""
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def assert_clock_ledger(snapshot):
+    """Bind every observed event and rendered frame to one monotonic page clock."""
+    probe = snapshot["probe"]
+    receipt = probe["arrival"]
+    ticks = probe.get("ticks")
+    meta = probe.get("tickMeta")
+    signals = probe.get("signals")
+    start = probe.get("startClock")
+    closed = probe.get("arrivalClosed")
+    assert isinstance(ticks, list) and 5 <= len(ticks) <= 20000 and \
+        isinstance(meta, list) and len(meta) == len(ticks) and \
+        isinstance(signals, list) and len(signals) == len(ticks) + 1 and \
+        isinstance(start, dict) and start.get("at") == probe.get("start") and \
+        isinstance(closed, dict) and closed.get("closed") is True and \
+        closed.get("arrivalCount") == len(receipt["arrivals"]) and \
+        closed.get("completionCount") == len(receipt["completions"]) and \
+        closed.get("phase") == receipt.get("phase") and \
+        closed.get("error") is None and receipt.get("error") is None, \
+        "frozen EventSource counts or measured frame clock changed"
+    rows = [*receipt["sources"], receipt["bound"], start,
+            *receipt["arrivals"], *receipt["completions"], *meta, signals[-1]]
+    assert len(rows) == receipt["phase"] and \
+        all(isinstance(row, dict) and type(row.get("at")) is int and
+            type(row.get("phase")) is int and row["phase"] > 0 and
+            isinstance(row.get("mono"), (int, float)) and
+            math.isfinite(row["mono"]) for row in rows), \
+        "monotonic EventSource/frame phase ledger is missing"
+    ordered = sorted(rows, key=lambda row: row["phase"])
+    assert [row["phase"] for row in ordered] == list(range(1, len(rows) + 1)) and \
+        all(right["mono"] >= left["mono"] and right["at"] >= left["at"]
+            for left, right in zip(ordered, ordered[1:])) and \
+        all(abs((row["at"] - start["at"]) - (row["mono"] - start["mono"])) <= 3
+            for row in rows), \
+        "monotonic EventSource/frame clock jumped or has a missing phase"
+    assert all(type(row.get("tickIndex")) is int and row["tickIndex"] == i and
+               row["at"] == ticks[i] and
+               isinstance(row.get("rafAt"), (int, float)) and
+               math.isfinite(row["rafAt"]) and row["rafAt"] <= row["mono"] + 1 and
+               signals[i].get("at") == row["at"] and
+               signals[i].get("mono") == row["mono"] and
+               signals[i].get("phase") == row["phase"] and
+               signals[i].get("tickIndex") == i for i, row in enumerate(meta)) and \
+        all(right["rafAt"] > left["rafAt"] for left, right in zip(meta, meta[1:])) and \
+        signals[-1].get("tickIndex") is None and signals[-1].get("phase") > meta[-1]["phase"], \
+        "animation-frame index, signal, or native frame timestamp changed"
+    previous = -1
+    for frame in probe["frames"]:
+        index = frame.get("tickIndex")
+        assert type(index) is int and previous < index < len(meta) and \
+            all(frame.get(key) == meta[index][key] for key in ("at", "mono", "phase")), \
+            "rendered frame is not bound to its measured animation tick"
+        previous = index
+    reply_ids = {reply["payload"]["itemId"] for reply in snapshot["replies"]}
+    owned = [arrival for arrival in receipt["arrivals"]
+             if arrival.get("agentId") == snapshot["agent_id"] and
+             arrival.get("turnId") == snapshot["turn_completed"]["turn_id"] and
+             arrival.get("itemId") in reply_ids]
+    assert owned and {arrival["itemId"] for arrival in owned} == reply_ids and \
+        meta[-1]["mono"] >= max(arrival["mono"] for arrival in owned) + 300, \
+        "frozen observer lacks the full owned arrival deadline horizon"
+    return meta
+
+
+def run_markdown_projection(answer, texts, deltas):
+    frontend = Path(required("AFT_TESTS_DIR")).resolve().parents[1] / "internal/webui/frontend"
+    helper = Path(required("AFT_TESTS_DIR")) / "scripts/coverage-chat-visual-markdown.mjs"
+    assert frontend.is_dir() and helper.is_file(), "exact ChatMarkdown source projection is unavailable"
+    payload = {"answer": answer,
+               "frames": [frame if isinstance(frame, dict) else
+                          {"text": frame, "streaming": True} for frame in texts],
+               "arrivals": deltas}
+    process = subprocess.run(["node", str(helper), str(frontend)],
+                             input=json.dumps(payload, ensure_ascii=False), text=True,
+                             capture_output=True, timeout=120, check=False)
+    assert process.returncode == 0, \
+        "exact ChatMarkdown source projection failed; Markdown pacing is unverified"
+    try:
+        return json.loads(process.stdout)
+    except ValueError as exc:
+        raise AssertionError("exact ChatMarkdown projection returned invalid JSON") from exc
+
+
+def source_projection(snapshot):
+    """Bind raw source offsets and visible words to exact ChatMarkdown rendering."""
+    answer = snapshot["replies"][-1]["payload"]["text"]
+    frames = snapshot["probe"]["frames"]
+    arrivals, _ = assert_arrival_receipts(snapshot)
+    item_id = snapshot["replies"][-1]["payload"]["itemId"]
+    deltas = [a["text"] for a in arrivals if a["itemId"] == item_id]
+    assert answer and js_utf16_length(answer) <= 8000, \
+        "motion answer exceeds the unexpanded ChatMarkdown source limit"
+    texts = [frame["text"] for frame in frames]
+    plain = not re.search(r"[\n\r`*_~|#<>\[\]\\!]", answer) and \
+        all(answer.startswith(text) for text in texts) and \
+        snapshot["probe"]["finalText"] == answer
+    if plain:
+        cumulative, previous, projected = "", "", []
+        for delta in deltas:
+            cumulative += delta
+            assert answer.startswith(cumulative), "arrival is not a saved source prefix"
+            projected.append({"sourceUtf16": js_utf16_length(cumulative),
+                              "visibleChanged": cumulative != previous,
+                              "contentChanged": cumulative != previous,
+                              "requiredMinSourceUtf16": js_utf16_length(cumulative),
+                              "projectedUtf16": js_utf16_length(cumulative),
+                              "projectedWords": len(cumulative.split())})
+            previous = cumulative
+        result = {"version": 1, "terminal": answer, "terminalVisible": answer,
+                  "terminalContent": answer,
+                  "frames": [{"minSourceUtf16": js_utf16_length(text),
+                              "maxSourceUtf16": js_utf16_length(text),
+                              "visible": text, "content": text,
+                              "visibleWords": len(text.split()),
+                              "contentWords": len(text.split())} for text in texts],
+                  "arrivals": projected, "sourceUtf16": js_utf16_length(answer),
+                  "identity": {"mode": "plain-source-byte-exact"}}
+    else:
+        result = run_markdown_projection(answer, frames, deltas)
+        frontend = Path(required("AFT_TESTS_DIR")).resolve().parents[1] / "internal/webui/frontend"
+        identity = result.get("identity")
+        assert isinstance(identity, dict) and \
+            identity.get("chatMarkdownSha256") == hashlib.sha256((
+                frontend / "src/components/AgentChat/ChatMarkdown.tsx").read_bytes()).hexdigest() and \
+            identity.get("longTextSha256") == hashlib.sha256((
+                frontend / "src/components/AgentChat/LongText.tsx").read_bytes()).hexdigest() and \
+            identity.get("codeHighlightSha256") == hashlib.sha256((
+                frontend / "src/components/AgentChat/codeHighlight.ts").read_bytes()).hexdigest() and \
+            identity.get("messageCopySha256") == hashlib.sha256((
+                frontend / "src/components/AgentChat/MessageCopyButton.tsx").read_bytes()).hexdigest() and \
+            identity.get("cssSha256") == hashlib.sha256((
+                frontend / "src/components/AgentChat/ChatMarkdown.module.css").read_bytes()).hexdigest() and \
+            identity.get("lockSha256") == hashlib.sha256((
+                frontend / "package-lock.json").read_bytes()).hexdigest() and \
+            isinstance(identity.get("dependencies"), dict) and \
+            all(identity["dependencies"].get(name) for name in (
+                "react", "react-dom", "react-markdown", "remark-gfm",
+                "rehype-sanitize", "esbuild", "jsdom")), \
+            "ChatMarkdown source or installed dependency identity changed"
+    assert result.get("version") == 1 and result.get("sourceUtf16") == js_utf16_length(answer) and \
+        len(result.get("frames", [])) == len(frames) and \
+        len(result.get("arrivals", [])) == len(deltas) and \
+        all(type(frame.get("streaming")) is bool and isinstance(row, dict) and
+            isinstance(row.get("minSourceUtf16"), int) and
+            isinstance(row.get("maxSourceUtf16"), int) and
+            isinstance(row.get("visible"), str) and
+            type(row.get("visibleWords")) is int and
+            isinstance(row.get("content"), str) and
+            type(row.get("contentWords")) is int and
+            0 <= row["minSourceUtf16"] <= row["maxSourceUtf16"] <= js_utf16_length(answer)
+            for frame, row in zip(frames, result["frames"])) and \
+        all(isinstance(frame.get("visibleText"), str) and isinstance(frame.get("contentText"), str) and
+            frame["visibleText"].split() == row["visible"].split() and
+            frame["contentText"].split() == row["content"].split() and
+            frame.get("words") == row["contentWords"] == len(row["content"].split()) and
+            row["visibleWords"] == len(row["visible"].split())
+            for frame, row in zip(frames, result["frames"])) and \
+        all(isinstance(row, dict) and type(row.get("visibleChanged")) is bool and
+            type(row.get("contentChanged")) is bool and
+            isinstance(row.get("sourceUtf16"), int) and
+            isinstance(row.get("requiredMinSourceUtf16"), int) and
+            isinstance(row.get("projectedWords"), int) and
+            0 <= row["requiredMinSourceUtf16"] <= row["sourceUtf16"] <= js_utf16_length(answer)
+            for row in result["arrivals"]), \
+        "rendered frame has no exact source-backed ChatMarkdown projection"
+    positions = [row["minSourceUtf16"] for row in result["frames"]]
+    assert positions == sorted(positions), \
+        "rendered Markdown source projection moved backward during the live turn"
+    assert result["terminal"] == snapshot["probe"]["finalText"], \
+        "final rendered ChatMarkdown text differs from the exact saved answer projection"
+    assert isinstance(snapshot["probe"].get("finalVisibleText"), str) and \
+        result["terminalVisible"].split() == snapshot["probe"]["finalVisibleText"].split(), \
+        "final visible ChatMarkdown words differ from the exact saved source projection"
+    assert isinstance(snapshot["probe"].get("finalContentText"), str) and \
+        result["terminalContent"].split() == snapshot["probe"]["finalContentText"].split(), \
+        "final reply content differs from the exact saved source projection"
+    return result
+
+
+def self_test_markdown_projection():
+    from unittest.mock import patch
+
+    source = ("Start.\n\n| file | test |\n| --- | --- |\n| README.md | npm test |\n\n"
+              "```json\n{\"test\":\"npm test\"}\n```\n\nEnd VISUAL_END_TEST")
+    table = "Start.\nfiletestREADME.mdnpm testExpandCopy as MarkdownCopy as CSV"
+    code = table + 'jsonWrapCopy{"test":"npm test"}'
+    terminal = code + "End VISUAL_END_TEST"
+    frames = ["Start.", table, code, terminal]
+    cuts = [8, 33, 40, 64, 97, len(source)]
+    deltas = [source[left:right] for left, right in zip([0, *cuts[:-1]], cuts)]
+    result = run_markdown_projection(source, frames, deltas)
+    assert result["version"] == 1 and result["terminal"] == terminal, result
+    assert result["identity"]["chatMarkdownSha256"] == hashlib.sha256((
+        Path(required("AFT_TESTS_DIR")).resolve().parents[1] /
+        "internal/webui/frontend/src/components/AgentChat/ChatMarkdown.tsx").read_bytes()).hexdigest()
+    assert [(r["minSourceUtf16"], r["maxSourceUtf16"]) for r in result["frames"]] == [
+        (6, 8), (60, 64), (91, 97), (len(source), len(source))], result
+    assert result["frames"][1]["visibleWords"] == 6 and \
+        "Expand" not in result["frames"][1]["visible"], \
+        "hidden streaming table controls were counted as visible words"
+    assert result["frames"][2]["contentWords"] == 8 and \
+        "json" not in result["frames"][2]["content"] and \
+        "Wrap" not in result["frames"][2]["content"] and \
+        "Copy" not in result["frames"][2]["content"], \
+        "renderer-owned code header or actions counted as reply content"
+    header_only = run_markdown_projection("```json\n", [], ["```json\n"])
+    assert header_only["terminalVisible"].split() == ["json", "Wrap", "Copy"] and \
+        header_only["terminalContent"] == "" and \
+        header_only["arrivals"][0]["contentChanged"] is False and \
+        header_only["arrivals"][0]["projectedWords"] == 0, \
+        "code header mount created reply words without reply content"
+    table_rewrite = [
+        "a b c d e f g h i\n\n| Name | Result |\n",
+        "| --- | --- |\n| One | Passed |",
+    ]
+    rewritten = run_markdown_projection("".join(table_rewrite), [], table_rewrite)
+    assert [row["projectedWords"] for row in rewritten["arrivals"]] == [14, 13] and \
+        rewritten["arrivals"][0]["requiredMinSourceUtf16"] < \
+        rewritten["arrivals"][1]["requiredMinSourceUtf16"], \
+        "real table parsing no longer retracts visible reply words"
+    assert "Copy as CSV" in result["terminalVisible"], \
+        "completed table controls vanished from visible projection"
+    assert result["arrivals"][2]["visibleChanged"] is False and \
+        result["arrivals"][2]["contentChanged"] is False, \
+        "invisible GFM delimiter bytes were misclassified as newly rendered text"
+    assert result["arrivals"][-1]["sourceUtf16"] == len(source)
+    assert result["arrivals"][0]["requiredMinSourceUtf16"] == 6, \
+        "trailing invisible syntax made a visible source prefix unmeasurable"
+    rich = (source + "\n\n- first **bold** item\n- second item\n\n"
+            '<img src=x onerror="window.pwned=1"> and 😀.')
+    rich_result = run_markdown_projection(rich, [], [rich])
+    assert rich_result["sourceUtf16"] == js_utf16_length(rich) == len(rich) + 1
+    assert "first bold item" in rich_result["terminal"] and \
+        '<img src=x onerror="window.pwned=1">' in rich_result["terminal"] and \
+        "😀." in rich_result["terminal"], \
+        "the real GFM/list/raw-HTML/emoji component projection changed"
+    try:
+        run_markdown_projection(source + "x" * 8001, [], [])
+    except AssertionError as exc:
+        assert "source projection failed" in str(exc), exc
+    else:
+        raise AssertionError("unexpanded 8000-character source limit was ignored")
+    arrivals = [{"at": at, "sourceId": 1, "itemId": "m1", "text": delta}
+                for at, delta in zip((9, 19, 21, 29, 39, 49), deltas)]
+    capture = {"replies": [{"payload": {"itemId": "m1", "text": source}}],
+               "probe": {"frames": [{"at": at, "text": text, "streaming": True,
+                                      "visibleText": row["visible"],
+                                      "contentText": row["content"],
+                                      "words": row["contentWords"]}
+                                    for at, text, row in zip((10, 30, 40, 50), frames,
+                                                             result["frames"])]}}
+    for phase, row in enumerate(sorted([*arrivals, *capture["probe"]["frames"]],
+                                       key=lambda entry: entry["at"]), 1):
+        row.update(phase=phase, mono=float(row["at"]))
+    with patch.object(sys.modules[__name__], "assert_arrival_receipts", return_value=(arrivals, [])):
+        captured = {**capture, "probe": {**capture["probe"], "finalText": terminal,
+                                          "finalVisibleText": result["terminalVisible"],
+                                          "finalContentText": result["terminalContent"]}}
+        assert source_projection(captured)["identity"] == result["identity"]
+        backwards = {**captured, "probe": {**captured["probe"],
+            "frames": [captured["probe"]["frames"][1], captured["probe"]["frames"][0],
+                       *captured["probe"]["frames"][2:]]}}
+        try:
+            source_projection(backwards)
+        except AssertionError as exc:
+            assert "moved backward" in str(exc), exc
+        else:
+            raise AssertionError("nonmonotonic rendered source projection was accepted")
+        changed = {**result, "identity": {**result["identity"], "chatMarkdownSha256": "foreign"}}
+        with patch.object(sys.modules[__name__], "run_markdown_projection", return_value=changed):
+            try:
+                source_projection(captured)
+            except AssertionError as exc:
+                assert "identity changed" in str(exc), exc
+            else:
+                raise AssertionError("foreign Markdown source identity was accepted")
+        changed_css = {**result, "identity": {**result["identity"], "cssSha256": "foreign"}}
+        with patch.object(sys.modules[__name__], "run_markdown_projection", return_value=changed_css):
+            try:
+                source_projection(captured)
+            except AssertionError as exc:
+                assert "identity changed" in str(exc), exc
+            else:
+                raise AssertionError("foreign renderer CSS identity was accepted")
+        hidden_control = json.loads(json.dumps(captured))
+        hidden_control["probe"]["frames"][1]["visibleText"] += " Expand Copy as CSV"
+        try:
+            source_projection(hidden_control)
+        except AssertionError as exc:
+            assert "source-backed" in str(exc), exc
+        else:
+            raise AssertionError("hidden streaming controls were credited as visible")
+        mismatched_terminal = {**captured, "probe": {**captured["probe"], "finalText": "foreign"}}
+        try:
+            source_projection(mismatched_terminal)
+        except AssertionError as exc:
+            assert "final rendered ChatMarkdown text differs" in str(exc), exc
+        else:
+            raise AssertionError("mutated final DOM text was accepted")
+        mismatched_visible = {**captured, "probe": {**captured["probe"],
+            "finalVisibleText": "foreign"}}
+        try:
+            source_projection(mismatched_visible)
+        except AssertionError as exc:
+            assert "final visible ChatMarkdown words differ" in str(exc), exc
+        else:
+            raise AssertionError("mutated completed visible words were accepted")
+        mismatched_content = {**captured, "probe": {**captured["probe"],
+            "finalContentText": "foreign"}}
+        try:
+            source_projection(mismatched_content)
+        except AssertionError as exc:
+            assert "final reply content differs" in str(exc), exc
+        else:
+            raise AssertionError("mutated completed reply content was accepted")
+        deadlines = assert_arrival_deadlines(capture, result)
+        assert len(deadlines) == len(arrivals) and \
+            deadlines[2]["status"] == "no-new-reply-content" and \
+            all(proof["lag_ms"] <= 300 for proof in deadlines if "lag_ms" in proof), deadlines
+        try:
+            assert_arrival_deadlines(capture, {**result, "arrivals": []})
+        except AssertionError as exc:
+            assert "no real visible arrival deadline" in str(exc), exc
+        else:
+            raise AssertionError("missing arrival projection was accepted")
+        delayed = json.loads(json.dumps(capture))
+        delayed["probe"]["frames"][1]["at"] = 320
+        delayed["probe"]["frames"][2]["at"] = 330
+        delayed["probe"]["frames"][3]["at"] = 340
+        for frame in delayed["probe"]["frames"][1:]:
+            frame["mono"] = float(frame["at"])
+        try:
+            assert_arrival_deadlines(delayed, result)
+        except AssertionError as exc:
+            assert "300ms catch-up deadline" in str(exc), exc
+        else:
+            raise AssertionError("late GFM table arrival was accepted")
+    mismatched = run_markdown_projection(source, ["foreign"], deltas)
+    assert mismatched["frames"] == [None], "unrelated DOM text gained a source projection"
+    try:
+        run_markdown_projection(source, frames, ["foreign", *deltas[1:]])
+    except AssertionError as exc:
+        assert "source projection failed" in str(exc), exc
+    else:
+        raise AssertionError("foreign arrival was accepted as saved Markdown source")
+    frontend = Path(required("AFT_TESTS_DIR")).resolve().parents[1] / "internal/webui/frontend"
+    ambiguous = subprocess.run(
+        ["node", str(Path(required("AFT_TESTS_DIR")) /
+                     "scripts/coverage-chat-visual-markdown.mjs"), str(frontend)],
+        input=json.dumps({"answer": "hello[](url)", "frames": [],
+                          "arrivals": ["hello[](", "url)"]}),
+        text=True, capture_output=True, timeout=120, check=False)
+    assert ambiguous.returncode != 0 and \
+        "ambiguous-visible-arrival-projection" in ambiguous.stderr, \
+        "ambiguous Markdown prefix was credited with an earlier source position"
+
+
+def assert_frame_pacing(snapshot, projection=None):
+    probe = snapshot["probe"]
+    frames = probe["frames"]
+    arrivals, completions = assert_arrival_receipts(snapshot)
+    ticks = assert_clock_ledger(snapshot)
+    reply = snapshot["replies"][-1]
+    item_id = reply["payload"]["itemId"]
+    item_arrivals = [a for a in arrivals if a["itemId"] == item_id]
+    assert item_arrivals, "visible assistant item has no real delta arrival"
+    final_completion = next(c for c in completions if c["eventId"] == reply["event_id"])
+    projection = projection or source_projection(snapshot)
+    exceptions = []
+    previous_words = 0
+    first_live_reply_seen = False
+    for index, frame in enumerate(frames):
+        text = frame.get("text")
+        visible_text = frame.get("visibleText")
+        content_text = frame.get("contentText")
+        assert isinstance(text, str) and isinstance(visible_text, str) and isinstance(content_text, str) and \
+            frame.get("chars") == js_utf16_length(text) and \
+            frame.get("visibleChars") == js_utf16_length(visible_text) and \
+            frame.get("contentChars") == js_utf16_length(content_text) and \
+            frame.get("words") == len(content_text.split()) and frame.get("addedWords") == \
+            max(0, frame["words"] - previous_words), \
+            f"rendered frame bytes, words, or cadence changed at frame {index}"
+        previous_words = frame["words"]
+        count = frame["addedWords"]
+        if frame.get("streaming") is True and frame["words"] > 0 and not first_live_reply_seen:
+            first_live_reply_seen = True
+            assert count <= 2, \
+                "first live reply-content frame exceeded two words without a catch-up exception"
+        if count <= 2:
+            continue
+        if index == len(frames) - 1 and frame.get("streaming") is False and \
+           frame.get("marker") and \
+           text == probe["finalText"] and final_completion["phase"] < frame["phase"] and \
+           final_completion["mono"] <= frame["mono"] and \
+           frame["mono"] - final_completion["mono"] <= 300:
+            exceptions.append({"kind": "saved-completion-flush", "frame": index,
+                               "added_words": count, "event_id": reply["event_id"],
+                               "completion_lag_ms": frame["at"] - final_completion["at"]})
+            continue
+        assert index > 0, "first live frame exceeded two words without a catch-up exception"
+        earlier = [a for a in item_arrivals if a["phase"] < frame["phase"] and
+                   a["mono"] <= frame["mono"]]
+        assert earlier, "large frame has no matching real arrival"
+        raw_source_utf16 = js_utf16_length("".join(a["text"] for a in earlier))
+        assert projection["frames"][index]["minSourceUtf16"] <= raw_source_utf16, \
+            "large frame lacks exact source-backed arrival projection"
+        previous_visible = frames[index - 1]["words"]
+        previous_source = max(
+            (row["minSourceUtf16"] for row in projection["frames"][:index]), default=0)
+        projected_arrivals = projection["arrivals"][:len(earlier)]
+        assert len(projected_arrivals) == len(earlier), \
+            "large frame lacks exact source-backed arrival projection"
+        recent_ticks = ticks[:frame["tickIndex"] + 1][-12:]
+        intervals = [b["mono"] - a["mono"] for a, b in zip(recent_ticks, recent_ticks[1:])
+                     if b["mono"] > a["mono"]]
+        assert len(intervals) >= 5, "large frame lacks measured refresh cadence"
+        min_interval = min(intervals)
+        pending = []
+        for arrival, row in zip(earlier, projected_arrivals):
+            if not row["contentChanged"] or \
+               row["requiredMinSourceUtf16"] <= previous_source or \
+               row["projectedWords"] <= previous_visible:
+                continue
+            assert row["requiredMinSourceUtf16"] <= raw_source_utf16, \
+                "large frame lacks exact source-backed arrival projection"
+            deadline = arrival["mono"] + 300
+            assert ticks[-1]["mono"] >= deadline, \
+                "large frame lacks a complete measured arrival-deadline horizon"
+            future_ticks = [tick for tick in ticks[frame["tickIndex"] + 1:]
+                            if tick["mono"] <= deadline]
+            required = row["projectedWords"] - previous_visible - 2 * len(future_ticks)
+            pending.append((required, arrival, row["projectedWords"], deadline,
+                            len(future_ticks)))
+        assert pending, "large frame has no unrevealed arrival backlog"
+        required_now, pressure, target_words, deadline, future_tick_count = max(
+            pending, key=lambda entry: entry[0])
+        assert required_now > 2 and count <= required_now, \
+            "large frame was unnecessary for the measured arrival backlog and 300ms deadline"
+        assert any(f["mono"] <= deadline and f["words"] >= target_words for f in frames[index:]), \
+            "large frame did not actually meet the pending arrival deadline"
+        exceptions.append({"kind": "measured-backlog-catch-up", "frame": index,
+                           "added_words": count, "arrival_at": pressure["at"],
+                           "deadline": pressure["at"] + 300,
+                           "deadline_mono": deadline,
+                           "backlog_words": projected_arrivals[-1]["projectedWords"] - previous_visible,
+                           "required_now": required_now, "cadence_ms": min_interval,
+                           "future_ticks": future_tick_count})
+    return exceptions
+
+
+def assert_arrival_deadlines(snapshot, projection=None):
+    """Every visible source-backed delta prefix must reach the DOM within 300ms."""
+    arrivals, _ = assert_arrival_receipts(snapshot)
+    reply = snapshot["replies"][-1]
+    item_id = reply["payload"]["itemId"]
+    frames = snapshot["probe"]["frames"]
+    projection = projection or source_projection(snapshot)
+    proofs = []
+    item_arrivals = [a for a in arrivals if a["itemId"] == item_id]
+    for arrival, projected in zip(item_arrivals, projection["arrivals"]):
+        if not projected["contentChanged"]:
+            proofs.append({"source_id": arrival["sourceId"], "item_id": item_id,
+                           "arrival_at": arrival["at"], "source_utf16": projected["sourceUtf16"],
+                           "status": "no-new-reply-content"})
+            continue
+        rendered = next(((frame, mapped) for frame, mapped in zip(frames, projection["frames"])
+                         if frame["phase"] > arrival["phase"] and
+                         frame["mono"] >= arrival["mono"] and
+                         mapped["minSourceUtf16"] >= projected["requiredMinSourceUtf16"]), None)
+        assert rendered is not None, \
+            "arrival lacks exact source-backed DOM projection; Markdown pacing is unverified"
+        deadline = arrival["mono"] + 300
+        assert rendered[0]["mono"] <= deadline, \
+            "arrival text rendered after its 300ms catch-up deadline"
+        proofs.append({"source_id": arrival["sourceId"], "item_id": item_id,
+                       "arrival_at": arrival["at"], "deadline": arrival["at"] + 300,
+                       "deadline_mono": deadline,
+                       "rendered_at": rendered[0]["at"], "lag_ms": rendered[0]["at"] - arrival["at"],
+                       "lag_mono_ms": rendered[0]["mono"] - arrival["mono"],
+                       "source_utf16": projected["sourceUtf16"],
+                       "required_min_source_utf16": projected["requiredMinSourceUtf16"],
+                       "rendered_min_source_utf16": rendered[1]["minSourceUtf16"]})
+    assert any("rendered_at" in proof for proof in proofs), \
+        "no real visible arrival deadline was measurable"
+    return proofs
+
+
+def assert_terminal_exit(snapshot):
+    from datetime import datetime
+
+    probe = snapshot["probe"]
+    signals = probe.get("signals")
+    ticks = probe.get("ticks")
+    assert isinstance(signals, list) and isinstance(ticks, list) and \
+        len(signals) == len(ticks) + 1 and 5 <= len(signals) <= 20001, \
+        "missing or unbounded sampled terminal controls"
+    assert all(isinstance(s, dict) and isinstance(s.get("at"), int) and \
+               all(type(s.get(key)) is bool for key in ("caret", "working", "stop"))
+               for s in signals) and \
+        [s["at"] for s in signals[:-1]] == ticks and \
+        signals[-1]["at"] >= ticks[-1], \
+        "terminal controls were not sampled on the measured frames"
+    assert all(not signals[-1][key] for key in ("caret", "working", "stop")), \
+        "caret, Working, or Stop remains at the final checkpoint"
+    exits = {}
+    mono_exits = {}
+    for key in ("caret", "working", "stop"):
+        active = [index for index, signal in enumerate(signals) if signal[key]]
+        assert active, f"{key} was not sampled during the live turn"
+        last_active = active[-1]
+        assert last_active + 1 < len(signals) and not signals[last_active + 1][key], \
+            f"{key} exit was not sampled"
+        exits[key] = signals[last_active + 1]["at"]
+        mono_exits[key] = signals[last_active + 1]["mono"]
+    exit_at = max(exits.values())
+    exit_mono = max(mono_exits.values())
+    _, completions = assert_arrival_receipts(snapshot)
+    turn_id = snapshot["turn_completed"]["event_id"]
+    live = next(c for c in completions if c["eventId"] == turn_id)
+    try:
+        saved_at = int(datetime.fromisoformat(
+            snapshot["turn_completed"]["created_at"].replace("Z", "+00:00")
+        ).timestamp() * 1000)
+    except (KeyError, AttributeError, ValueError) as exc:
+        raise AssertionError("saved terminal receipt lacks a timestamp") from exc
+    assert exit_at - saved_at <= 300 and exit_mono - live["mono"] <= 300, \
+        "caret, Working, or Stop exited more than 300ms after saved/live terminal receipt"
+    return {"exit_at": exit_at, "signal_exits": exits, "saved_at": saved_at,
+            "live_at": live["at"], "lag_from_saved_ms": exit_at - saved_at,
+            "lag_from_live_ms": exit_mono - live["mono"], "event_id": turn_id}
+
+
 def assert_motion_capture(snapshot):
     probe = snapshot["probe"]
     delivered = snapshot["delivered"]
@@ -1301,9 +2071,13 @@ def assert_motion_capture(snapshot):
     word_count = len(answer.split())
     assert word_count >= 300, f"model supplied only {word_count} words; 300-word motion criterion unverified"
     assert probe["observerError"] is None, probe["observerError"]
-    assert probe["sawCaret"] and probe["sawWorking"], "streaming caret/working row were not observed"
+    assert probe["sawCaret"] and probe["sawWorking"] and probe["sawStop"], \
+        "streaming caret/working row/Stop were not observed"
     assert len(frames) > 3 and len(set(f["chars"] for f in frames)) > 3, "no measured real text progression"
-    assert max(f["addedWords"] for f in frames) <= 2, "visible block exceeded two words in a rendered frame"
+    projection = source_projection(snapshot)
+    exceptions = assert_frame_pacing(snapshot, projection)
+    deadlines = assert_arrival_deadlines(snapshot, projection)
+    terminal_exit = assert_terminal_exit(snapshot)
     assert sum(s["value"] for s in probe["shifts"]) == 0, "non-input layout shift during streaming"
     assert probe["samples"] and all(s["gap"] == 0 for s in probe["samples"] if s["stop"]), "live follow lost the bottom"
     marker_frame = final_text_frame(answer, frames, probe["finalText"], marker)
@@ -1315,17 +2089,71 @@ def assert_motion_capture(snapshot):
     turn_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000
     lag_ms = final_text_lag(marker_frame, turn_ms)
     assert probe["caretGone"], "caret or working row remained after turn"
-    return marker_frame, turn_ms, lag_ms
+    return marker_frame, turn_ms, lag_ms, exceptions, terminal_exit, deadlines, projection["identity"]
 
 
 def motion_assert(case):
     assert case == "render", case
     snapshot = load_motion_capture(case)
-    marker_frame, turn_ms, lag_ms = assert_motion_capture(snapshot)
+    marker_frame, turn_ms, lag_ms, exceptions, terminal_exit, deadlines, identity = assert_motion_capture(snapshot)
     write("render-motion.json", {"probe": snapshot["probe"], "turn_completed": snapshot["turn_completed"],
                                  "answer": snapshot["answer"], "final_frame": marker_frame,
-                                 "turn_ms": turn_ms, "lag_ms": lag_ms,
+                                 "turn_ms": turn_ms, "lag_ms": lag_ms, "frame_exceptions": exceptions,
+                                 "terminal_exit": terminal_exit, "arrival_deadlines": deadlines,
+                                 "projection_identity": identity,
                                  "capture_sha256": motion_digest(snapshot)})
+
+
+def clockify_motion_fixture(candidate, *, extend_horizon=True):
+    """Add an explicit simulated page clock to offline fixtures only."""
+    p = candidate["probe"]
+    for index, frame in enumerate(p.get("frames", [])):
+        frame.setdefault("visibleText", frame.get("text"))
+        frame.setdefault("contentText", frame.get("text"))
+        frame.setdefault("streaming", index < len(p["frames"]) - 1)
+        if isinstance(frame.get("visibleText"), str):
+            frame.setdefault("visibleChars", js_utf16_length(frame["visibleText"]))
+        if isinstance(frame.get("contentText"), str):
+            frame.setdefault("contentChars", js_utf16_length(frame["contentText"]))
+    p.setdefault("finalVisibleText", p.get("finalText"))
+    p.setdefault("finalContentText", p.get("finalText"))
+    r = p.get("arrival")
+    if not isinstance(r, dict) or len(p.get("signals", [])) != len(p.get("ticks", [])) + 1:
+        return candidate
+    if extend_horizon and r.get("arrivals"):
+        last = max(arrival["at"] for arrival in r["arrivals"]) + 301
+        terminal = p["signals"].pop()
+        while p["ticks"][-1] < last:
+            tick = p["ticks"][-1] + 16
+            p["ticks"].append(tick)
+            active = tick < terminal["at"]
+            p["signals"].append({"at": tick, "caret": active,
+                                 "working": active, "stop": active})
+        terminal["at"] = max(terminal["at"], p["ticks"][-1] + 1)
+        p["signals"].append(terminal)
+    p["startClock"] = {"at": p["start"]}
+    p["tickMeta"] = [{"at": at, "tickIndex": i, "rafAt": at - p["start"] - 0.25}
+                     for i, at in enumerate(p["ticks"])]
+    rows = [*r["sources"], r["bound"], p["startClock"],
+            *r["arrivals"], *r["completions"], *p["tickMeta"], p["signals"][-1]]
+    base = min(row["at"] for row in rows)
+    for phase, row in enumerate(sorted(rows, key=lambda row: row["at"]), 1):
+        row["phase"] = phase
+        row["mono"] = float(row["at"] - base)
+    r["phase"] = len(rows)
+    for i, meta in enumerate(p["tickMeta"]):
+        p["signals"][i].update(at=meta["at"], phase=meta["phase"], mono=meta["mono"],
+                                tickIndex=i)
+    p["signals"][-1].update(tickIndex=None)
+    for frame in p["frames"]:
+        matches = [meta for meta in p["tickMeta"] if meta["at"] == frame["at"]]
+        if len(matches) == 1:
+            frame.update(phase=matches[0]["phase"], mono=matches[0]["mono"],
+                         tickIndex=matches[0]["tickIndex"])
+    p["arrivalClosed"].setdefault("completionCount", len(r["completions"]))
+    p["arrivalClosed"]["phase"] = r["phase"]
+    p["arrivalClosed"].setdefault("error", None)
+    return candidate
 
 
 def self_test_motion_assert():
@@ -1335,35 +2163,59 @@ def self_test_motion_assert():
     from unittest.mock import patch
 
     end_at = "2026-10-07T00:00:00Z"
-    end_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000
+    end_ms = int(datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000)
     marker = f"VISUAL_END_{RUN}"
     words = ["word"] * 299 + [marker]
     answer = " ".join(words)
     frames = [{"at": end_ms - 40 - (len(words) - i) * 16,
                "chars": len(" ".join(words[:i])), "words": i,
                "addedWords": 1, "marker": i == len(words),
-               **({"text": answer} if i == len(words) else {})}
+               "text": " ".join(words[:i])}
               for i in range(1, len(words) + 1)]
     route = f"/ws/{WS}/chat/agt_test"
+    bound_at = frames[0]["at"] - 17
+    arrivals = [{"at": frame["at"] - 1, "sourceId": 1, "agentId": "agt_test",
+                 "turnId": "t1", "itemId": "m1", "text": (" " if i else "") + words[i]}
+                for i, frame in enumerate(frames)]
+    completions = [{"at": frames[-1]["at"] - 1, "sourceId": 1, "agentId": "agt_test",
+                    "turnId": "t1", "kind": "item.completed", "seq": 2,
+                    "eventId": "reply", "itemId": "m1"},
+                   {"at": end_ms, "sourceId": 1, "agentId": "agt_test",
+                    "turnId": "t1", "kind": "agent.turn_completed", "seq": 3,
+                    "eventId": "completed", "itemId": None}]
     probe = {"route": route, "start": frames[0]["at"] - 16,
-             "frames": frames, "finalText": answer,
+             "frames": frames, "ticks": [frame["at"] for frame in frames],
+             "signals": [{"at": frame["at"], "caret": True, "working": True, "stop": True}
+                         for frame in frames] +
+                        [{"at": end_ms + 10, "caret": False, "working": False, "stop": False}],
+             "finalText": answer,
+             "arrival": {"version": 1, "workspace": WS, "run": RUN,
+                         "bound": {"agentId": "agt_test", "route": route, "at": bound_at},
+                         "sources": [{"id": 1, "at": bound_at - 10, "agents": ["agt_test"]}],
+                         "arrivals": arrivals, "completions": completions, "error": None},
+             "arrivalClosed": {"closed": True, "arrivalCount": len(arrivals)},
              "samples": [{"stop": True, "gap": 0}], "shifts": [],
-             "sawCaret": True, "sawWorking": True,
+             "sawCaret": True, "sawWorking": True, "sawStop": True,
              "observerError": None, "caretGone": True}
     reply = {"kind": "item.completed", "event_id": "reply", "seq": 2,
-             "payload": {"itemKind": "message", "text": answer}}
+             "turn_id": "t1", "payload": {"itemId": "m1", "itemKind": "message", "text": answer}}
     snapshot = {"version": 1, "case": "render", "ws": WS, "run": RUN,
                 "agent_id": "agt_test", "route": route, "probe": probe,
                 "delivered": {"kind": "message.delivered", "event_id": "delivered", "seq": 1,
                               "payload": {"text": f"VISUAL_RENDER_{RUN}"}},
                 "turn_completed": {"kind": "agent.turn_completed", "event_id": "completed",
-                                   "seq": 3, "created_at": end_at},
+                                   "seq": 3, "turn_id": "t1", "created_at": end_at, "payload": {}},
                 "replies": [reply], "answer": answer}
+    clockify_motion_fixture(snapshot)
     assert assert_motion_capture(snapshot)[2] == -40
+    steady_deadlines = assert_arrival_deadlines(snapshot)
+    assert len(steady_deadlines) == 300 and all(p["lag_ms"] == 1 for p in steady_deadlines)
 
-    def rejects(change, expected):
+    def rejects(change, expected, *, reclock=True):
         candidate = deepcopy(snapshot)
         change(candidate)
+        if reclock:
+            clockify_motion_fixture(candidate)
         try:
             with patch.object(sys.modules[__name__], "load_motion_capture", return_value=candidate), \
                  patch.object(sys.modules[__name__], "write", side_effect=AssertionError("wrote a pass artifact")):
@@ -1378,23 +2230,353 @@ def self_test_motion_assert():
         candidate["answer"] = candidate["replies"][0]["payload"]["text"] = text
 
     rejects(short, "300-word")  # The real provider's 234-word short answer must fail.
-    rejects(lambda c: c["probe"]["frames"][0].update(addedWords=17), "visible block")
+    rejects(lambda c: c["probe"]["frames"][0].update(addedWords=17), "frame bytes")
+    def ordinary_three_reply_words(candidate):
+        p = candidate["probe"]
+        arrival = p["arrival"]["arrivals"]
+        arrival[5]["text"] += arrival[6]["text"] + arrival[7]["text"]
+        del arrival[6:8]
+        p["arrivalClosed"]["arrivalCount"] = len(arrival)
+        for index in (5, 6, 7):
+            frame = p["frames"][index]
+            frame["text"] = frame["visibleText"] = frame["contentText"] = " ".join(words[:8])
+            frame["chars"] = frame["visibleChars"] = frame["contentChars"] = len(frame["text"])
+            frame["words"] = 8
+            frame["addedWords"] = 3 if index == 5 else 0
+    rejects(ordinary_three_reply_words, "large frame was unnecessary")
     rejects(lambda c: c["probe"]["shifts"].append({"value": 0.012443148334330491}), "layout shift")
     rejects(lambda c: c["probe"].update(observerError="observer failed"), "observer failed")
     rejects(lambda c: c["probe"].update(sawCaret=False), "streaming caret/working")
+    rejects(lambda c: c["probe"].update(sawStop=False), "streaming caret/working")
     rejects(lambda c: c["probe"].update(sawWorking=False), "streaming caret/working")
     rejects(lambda c: c["probe"].update(frames=c["probe"]["frames"][:3]), "no measured real text")
     rejects(lambda c: [f.update(chars=1) for f in c["probe"]["frames"]], "no measured real text")
     rejects(lambda c: c["probe"].update(samples=[]), "live follow")
     rejects(lambda c: c["probe"]["samples"][0].update(gap=1), "live follow")
     rejects(lambda c: c["probe"]["frames"][0].update(marker=True), "before later rendered text")
-    rejects(lambda c: c["probe"]["frames"][-1].update(text="changed"), "last measured frame")
-    rejects(lambda c: c["probe"]["frames"][-1].update(at=end_ms + 301), "final text lagged")
+    rejects(lambda c: c["probe"]["frames"][-1].update(text=answer[:-1] + "X"),
+            "rendered frame has no exact source-backed")
+    def late_final_text(candidate):
+        p = candidate["probe"]
+        p["frames"][-1]["at"] = end_ms + 301
+        p["ticks"][-1] = end_ms + 301
+        p["signals"][-3].update(caret=False, working=False, stop=False)
+        p["signals"][-2].update(at=end_ms + 301, caret=False, working=False, stop=False)
+        p["signals"][-1]["at"] = end_ms + 302
+
+    rejects(late_final_text, "arrival text rendered after its 300ms catch-up deadline")
     rejects(lambda c: c["probe"].update(caretGone=False), "caret or working row remained")
-    rejects(lambda c: c["turn_completed"].update(created_at=""), "lacks a saved timestamp")
+    rejects(lambda c: c["probe"].update(signals=[]), "frozen EventSource counts or measured frame clock")
+    rejects(lambda c: ([s.update(caret=True, working=True, stop=True)
+                        for s in c["probe"]["signals"][:-1]],
+                       c["probe"]["signals"][-1].update(at=end_ms + 301)),
+            "exited more than 300ms")
+    rejects(lambda c: c["probe"]["signals"][-1].update(working=True),
+            "remains at the final checkpoint")
+    rejects(lambda c: [s.update(stop=False) for s in c["probe"]["signals"]],
+            "stop was not sampled")
+    rejects(lambda c: c["probe"]["arrival"]["completions"][-1].update(eventId="foreign"),
+            "foreign, missing, or duplicate completion")
+    rejects(lambda c: c["turn_completed"].update(created_at=""), "lacks a timestamp")
     rejects(lambda c: c["delivered"]["payload"].update(text="foreign"), "not the real rendering")
     rejects(lambda c: c.update(answer="changed"), "differs from saved assistant")
     rejects(lambda c: c["replies"][0].update(seq=4), "outside the turn")
+    rejects(lambda c: c["probe"].update(arrival=None), "missing or foreign pre-navigation")
+    rejects(lambda c: c["probe"]["arrival"].update(workspace="FOREIGN"), "missing or foreign pre-navigation")
+    rejects(lambda c: c["probe"]["arrival"]["arrivals"][0].update(sourceId=99), "foreign, missing")
+    rejects(lambda c: c["probe"]["arrival"]["arrivals"][0].update(text="foreign"), "actual delta bytes")
+    rejects(lambda c: c["probe"]["arrival"]["completions"].pop(0), "saved completion lacked")
+    rejects(lambda c: c["probe"].update(arrivalClosed={"closed": False}), "missing or foreign pre-navigation")
+    rejects(lambda c: c["probe"]["arrivalClosed"].update(arrivalCount=999),
+            "frozen EventSource counts", reclock=False)
+    rejects(lambda c: c["probe"]["frames"][2].update(tickIndex=1),
+            "rendered frame is not bound", reclock=False)
+    rejects(lambda c: c["probe"]["signals"][2].update(tickIndex=99),
+            "animation-frame index", reclock=False)
+    rejects(lambda c: c["probe"]["arrival"]["arrivals"][2].update(mono=999999.0),
+            "clock jumped", reclock=False)
+    rejects(lambda c: c["probe"]["tickMeta"][2].update(phase=1),
+            "missing phase", reclock=False)
+    rejects(lambda c: c["probe"]["frames"][0].pop("visibleText"),
+            "rendered frame has no exact source-backed", reclock=False)
+    rejects(lambda c: c["probe"]["frames"][0].update(visibleText="foreign"),
+            "rendered frame has no exact source-backed", reclock=False)
+    rejects(lambda c: c["probe"]["frames"][0].update(visibleChars=999),
+            "rendered frame bytes, words", reclock=False)
+    rejects(lambda c: c["probe"]["frames"][0].pop("streaming"),
+            "source projection failed", reclock=False)
+
+    ordinary_short_horizon = deepcopy(snapshot)
+    last_arrival_at = ordinary_short_horizon["probe"]["arrival"]["arrivals"][-1]["at"]
+    ordinary_short_horizon["probe"]["ticks"] = [
+        tick for tick in ordinary_short_horizon["probe"]["ticks"]
+        if tick < last_arrival_at + 300]
+    ordinary_short_horizon["probe"]["signals"] = [
+        *ordinary_short_horizon["probe"]["signals"][:len(ordinary_short_horizon["probe"]["ticks"])],
+        ordinary_short_horizon["probe"]["signals"][-1]]
+    clockify_motion_fixture(ordinary_short_horizon, extend_horizon=False)
+    try:
+        assert_frame_pacing(ordinary_short_horizon)
+    except AssertionError as exc:
+        assert "full owned arrival deadline horizon" in str(exc), exc
+    else:
+        raise AssertionError("ordinary two-word pacing accepted a truncated arrival horizon")
+
+    late_plain = deepcopy(snapshot)
+    late_arrivals = late_plain["probe"]["arrival"]["arrivals"]
+    late_arrivals[0]["text"] = " ".join(words[:22])
+    del late_arrivals[1:22]
+    late_plain["probe"]["arrivalClosed"]["arrivalCount"] = len(late_arrivals)
+    assert max(frame["addedWords"] for frame in late_plain["probe"]["frames"]) == 1
+    rejects(lambda c: c.update(probe=deepcopy(late_plain["probe"])),
+            "arrival text rendered after its 300ms catch-up deadline")
+
+    markdown = deepcopy(snapshot)
+    markdown["probe"]["arrival"]["arrivals"][0]["text"] = "**word**"
+    markdown["replies"][0]["payload"]["text"] = "**word**" + answer[len("word"):]
+    markdown["answer"] = markdown["replies"][0]["payload"]["text"]
+    clockify_motion_fixture(markdown)
+    assert assert_motion_capture(markdown)[2] == -40, \
+        "source-backed bold Markdown was rejected despite identical measured DOM text"
+    rejects(lambda c: c.update(probe=deepcopy(markdown["probe"]),
+                               replies=deepcopy(markdown["replies"]),
+                               answer=markdown["answer"]) or
+            c["probe"]["frames"][0].update(text="foreign"),
+            "source-backed")
+
+    def first_packet(candidate, count):
+        amounts = [count] + [1] * (len(words) - count)
+        first_at = end_ms - 40 - (len(amounts) - 1) * 16
+        totals = []
+        running = 0
+        for amount in amounts:
+            running += amount
+            totals.append(running)
+        new_frames = [{"at": first_at + i * 16, "chars": len(" ".join(words[:total])),
+                       "words": total, "addedWords": amount, "marker": total == len(words),
+                       "text": " ".join(words[:total])}
+                      for i, (amount, total) in enumerate(zip(amounts, totals))]
+        first = new_frames[0]["at"]
+        new_arrivals = [{"at": frame["at"] - 1, "sourceId": 1, "agentId": "agt_test",
+                         "turnId": "t1", "itemId": "m1",
+                         "text": (" " if i else "") + " ".join(words[total - amount:total])}
+                        for i, (frame, amount, total) in enumerate(zip(new_frames, amounts, totals))]
+        p = candidate["probe"]
+        p["frames"] = new_frames
+        p["ticks"] = [f["at"] for f in new_frames]
+        p["signals"] = ([{"at": f["at"], "caret": True, "working": True, "stop": True}
+                         for f in new_frames] +
+                        [{"at": end_ms + 10, "caret": False, "working": False, "stop": False}])
+        p["start"] = first - 16
+        p["arrival"]["bound"]["at"] = first - 17
+        p["arrival"]["sources"][0]["at"] = first - 27
+        p["arrival"]["arrivals"] = new_arrivals
+        p["arrival"]["completions"][0]["at"] = new_frames[-1]["at"] - 1
+        p["arrivalClosed"]["arrivalCount"] = len(new_arrivals)
+
+    for amount in (15, 17):
+        rejects(lambda c, n=amount: first_packet(c, n),
+                "first live reply-content frame exceeded two words")
+
+    burst = deepcopy(snapshot)
+    # One actual 20-word packet arrives before the first visible word. At the
+    # measured 16ms cadence, four words at tick 15 are necessary to render all
+    # 20 by the packet's 300ms deadline; a burst at tick 11 is unnecessary.
+    tick_count = 299
+    first_at = end_ms - 40 - (tick_count - 1) * 16
+    ticks = [first_at + i * 16 for i in range(tick_count)]
+    plan = [(i, i + 1) for i in range(10)] + [(15, 14), (16, 16), (17, 18), (18, 20)] + \
+           [(i + 19, i + 21) for i in range(280)]
+    burst_frames = []
+    prior = 0
+    for tick_index, total in plan:
+        burst_frames.append({"at": ticks[tick_index], "chars": len(" ".join(words[:total])),
+                             "words": total, "addedWords": total - prior,
+                             "marker": total == len(words), "text": " ".join(words[:total])})
+        prior = total
+    burst_arrivals = [{"at": ticks[0] - 1, "sourceId": 1, "agentId": "agt_test",
+                       "turnId": "t1", "itemId": "m1", "text": " ".join(words[:20])}]
+    burst_arrivals += [{"at": ticks[i + 19] - 1, "sourceId": 1, "agentId": "agt_test",
+                        "turnId": "t1", "itemId": "m1", "text": " " + words[i + 20]}
+                       for i in range(280)]
+    p = burst["probe"]
+    p["frames"] = burst_frames
+    p["ticks"] = ticks
+    p["signals"] = ([{"at": at, "caret": True, "working": True, "stop": True}
+                     for at in ticks] +
+                    [{"at": end_ms + 10, "caret": False, "working": False, "stop": False}])
+    p["start"] = first_at - 16
+    p["arrival"]["bound"]["at"] = first_at - 17
+    p["arrival"]["sources"][0]["at"] = first_at - 27
+    p["arrival"]["arrivals"] = burst_arrivals
+    p["arrival"]["completions"][0]["at"] = burst_frames[-1]["at"] - 1
+    p["arrivalClosed"]["arrivalCount"] = len(burst_arrivals)
+    clockify_motion_fixture(burst)
+    permitted = assert_motion_capture(burst)[3]
+    assert permitted == [{"kind": "measured-backlog-catch-up", "frame": 10,
+                          "added_words": 4, "arrival_at": ticks[0] - 1,
+                          "deadline": ticks[0] + 299,
+                          "deadline_mono": burst_arrivals[0]["mono"] + 300,
+                          "backlog_words": 10,
+                          "required_now": 4, "cadence_ms": 16,
+                          "future_ticks": 3}], permitted
+    # Two real prefixes may share a deadline. Budgeting only the oldest 12
+    # words would allow at most 12 by that deadline, despite the already
+    # arrived 20-word prefix. The second prefix supplies the necessary bound.
+    overlapping = deepcopy(burst)
+    overlap_arrivals = overlapping["probe"]["arrival"]["arrivals"]
+    first_packet_arrival = overlap_arrivals[0]
+    first_packet_arrival["text"] = " ".join(words[:12])
+    overlap_arrivals.insert(1, {**first_packet_arrival, "text": " " + " ".join(words[12:20])})
+    overlapping["probe"]["arrivalClosed"]["arrivalCount"] = len(overlap_arrivals)
+    clockify_motion_fixture(overlapping)
+    joint = assert_motion_capture(overlapping)[3]
+    assert len(joint) == 1 and joint[0]["frame"] == 10 and \
+        joint[0]["arrival_at"] == overlap_arrivals[1]["at"] and \
+        joint[0]["required_now"] == 4 and joint[0]["future_ticks"] == 3, joint
+    assert 12 - 10 - 2 * 3 <= 2, "the older prefix alone no longer distinguishes this fixture"
+    assert len(assert_arrival_deadlines(overlapping)) == len(overlap_arrivals)
+
+    chrome_only = deepcopy(overlapping)
+    for frame in chrome_only["probe"]["frames"][:10]:
+        frame.update(text="", visibleText="", contentText="", chars=0,
+                     visibleChars=0, contentChars=0, words=0, addedWords=0)
+    chrome = chrome_only["probe"]["frames"][0]
+    chrome.update(text="jsonWrapCopy", visibleText="json\nWrap\nCopy",
+                  chars=len("jsonWrapCopy"), visibleChars=len("json\nWrap\nCopy"))
+    chrome_only["probe"]["frames"][10]["addedWords"] = 14
+    try:
+        assert_frame_pacing(chrome_only, source_projection(overlapping))
+    except AssertionError as exc:
+        assert "first live reply-content frame exceeded two words" in str(exc), exc
+    else:
+        raise AssertionError("renderer chrome hid an oversized first reply-content frame")
+
+    retracted = source_projection(overlapping)
+    retracted["frames"][0]["minSourceUtf16"] = \
+        retracted["arrivals"][1]["requiredMinSourceUtf16"]
+    try:
+        assert_frame_pacing(overlapping, retracted)
+    except AssertionError as exc:
+        assert "no unrevealed arrival backlog" in str(exc), exc
+    else:
+        raise AssertionError("an already-proven source prefix regained catch-up credit")
+
+    staggered = deepcopy(overlapping)
+    staggered_arrivals = staggered["probe"]["arrival"]["arrivals"]
+    staggered_arrivals[0]["at"] -= 9
+    clockify_motion_fixture(staggered)
+    competing = assert_motion_capture(staggered)[3]
+    assert len(competing) == 1 and competing[0]["arrival_at"] == \
+        staggered_arrivals[1]["at"] and competing[0]["required_now"] == 4, competing
+
+    rejects(lambda c: c.update(probe=deepcopy(overlapping["probe"])) or
+            c["probe"]["arrival"]["arrivals"][1].update(at=ticks[10] + 1),
+            "large frame was unnecessary")
+    rejects(lambda c: c.update(probe=deepcopy(overlapping["probe"])) or
+            c["probe"]["arrival"]["arrivals"][1].update(agentId="foreign"),
+            "foreign")
+    rejects(lambda c: c.update(probe=deepcopy(overlapping["probe"])) or
+            [c["probe"]["frames"][j].update(at=ticks[11 + j - 10]) for j in range(10, 14)],
+            "large frame was unnecessary")
+    incomplete = deepcopy(overlapping)
+    incomplete["probe"]["frames"] = incomplete["probe"]["frames"][:14]
+    incomplete["probe"]["ticks"] = ticks[:19]
+    incomplete["probe"]["signals"] = [*incomplete["probe"]["signals"][:19],
+                                        incomplete["probe"]["signals"][-1]]
+    clockify_motion_fixture(incomplete, extend_horizon=False)
+    try:
+        assert_frame_pacing(incomplete)
+    except AssertionError as exc:
+        assert "full owned arrival deadline horizon" in str(exc), exc
+    else:
+        raise AssertionError("truncated future-cadence window was accepted")
+    burst_deadlines = assert_arrival_deadlines(burst)
+    assert burst_deadlines[0]["lag_ms"] == 18 * 16 + 1 and \
+        all(p["lag_ms"] <= 300 for p in burst_deadlines)
+    rejects(lambda c: c.update(probe=deepcopy(burst["probe"])) or
+            [c["probe"]["frames"][j].update(at=ticks[11 + j - 10]) for j in range(10, 14)],
+            "large frame was unnecessary")
+    rejects(lambda c: c.update(probe=deepcopy(burst["probe"])) or
+            (c["probe"]["arrival"]["arrivals"][0].update(at=ticks[0] - 51),
+             c["probe"]["arrival"]["bound"].update(at=ticks[0] - 61),
+             c["probe"]["arrival"]["sources"][0].update(at=ticks[0] - 71)),
+            "pending arrival deadline")
+
+    flushed = deepcopy(snapshot)
+    flushed["probe"]["frames"] = [*flushed["probe"]["frames"][:290],
+                                   {**flushed["probe"]["frames"][-1], "addedWords": 10}]
+    clockify_motion_fixture(flushed)
+    assert assert_motion_capture(flushed)[3][0]["kind"] == "saved-completion-flush"
+    first_completed = {"replies": [{"payload": {"itemId": "m1"}, "event_id": "reply"}],
+                       "probe": {"finalText": answer, "frames": [
+                           {"text": answer, "visibleText": answer, "contentText": answer,
+                            "chars": js_utf16_length(answer),
+                            "visibleChars": js_utf16_length(answer),
+                            "contentChars": js_utf16_length(answer),
+                            "words": 300, "addedWords": 300, "streaming": False,
+                            "marker": True, "at": 20, "mono": 20.0,
+                            "phase": 10, "tickIndex": 1}]}}
+    first_arrival = [{"itemId": "m1", "text": answer, "at": 0,
+                      "mono": 0.0, "phase": 2}]
+    first_receipt = {"eventId": "reply", "at": 10, "mono": 10.0, "phase": 5}
+    first_projection = {"frames": [{"minSourceUtf16": js_utf16_length(answer)}],
+                        "arrivals": []}
+
+    def check_first_completed(candidate, receipt):
+        with patch.object(sys.modules[__name__], "assert_arrival_receipts",
+                          return_value=(first_arrival, [receipt] if receipt else [])), \
+             patch.object(sys.modules[__name__], "assert_clock_ledger",
+                          return_value=[{"mono": float(i)} for i in range(0, 401, 10)]):
+            return assert_frame_pacing(candidate, first_projection)
+
+    assert check_first_completed(first_completed, first_receipt)[0]["kind"] == \
+        "saved-completion-flush"
+    for change, receipt in [
+        (lambda c: c["probe"]["frames"][0].update(streaming=True), first_receipt),
+        (lambda c: c["probe"]["frames"][0].update(at=311, mono=311.0), first_receipt),
+        (lambda c: c["probe"]["frames"][0].update(marker=False), first_receipt),
+        (lambda c: None, {**first_receipt, "eventId": "foreign"}),
+        (lambda c: None, None),
+    ]:
+        candidate = deepcopy(first_completed)
+        change(candidate)
+        try:
+            check_first_completed(candidate, receipt)
+        except (AssertionError, StopIteration):
+            pass
+        else:
+            raise AssertionError("unmatched, late, or live first-frame flush was accepted")
+    rejects(lambda c: c.update(probe=deepcopy(flushed["probe"])) or
+            (c["probe"]["frames"][-1].update(at=end_ms + 301),
+             c["probe"]["ticks"].__setitem__(-1, end_ms + 301),
+             c["probe"]["signals"][-2].update(at=end_ms + 301),
+             c["probe"]["signals"][-1].update(at=end_ms + 302)),
+            "pending arrival deadline")
+
+    emoji = deepcopy(snapshot)
+    emoji_words = ["😀"] * 299 + [marker]
+    emoji_answer = " ".join(emoji_words)
+    emoji["answer"] = emoji["replies"][0]["payload"]["text"] = emoji_answer
+    emoji["probe"]["finalText"] = emoji_answer
+    for index, frame in enumerate(emoji["probe"]["frames"]):
+        frame["text"] = " ".join(emoji_words[:index + 1])
+        frame["chars"] = js_utf16_length(frame["text"])
+        frame["visibleText"] = frame["text"]
+        frame["visibleChars"] = frame["chars"]
+        frame["contentText"] = frame["text"]
+        frame["contentChars"] = frame["chars"]
+        emoji["probe"]["arrival"]["arrivals"][index]["text"] = \
+            (" " if index else "") + emoji_words[index]
+    emoji["probe"]["finalVisibleText"] = emoji_answer
+    emoji["probe"]["finalContentText"] = emoji_answer
+    clockify_motion_fixture(emoji)
+    assert js_utf16_length("A😀") == 3 and assert_motion_capture(emoji)[2] == -40
+    rejects(lambda c: c.update(probe=deepcopy(emoji["probe"]),
+                               answer=emoji_answer,
+                               replies=deepcopy(emoji["replies"])) or
+            c["probe"]["frames"][0].update(chars=1),
+            "rendered frame bytes, words, or cadence changed")
 
     with TemporaryDirectory() as folder, patch.dict(globals(), WORK=Path(folder)):
         (WORK / "render.id").write_text("agt_test\n")
@@ -1957,20 +3139,33 @@ def self_test_final_visual_assert():
     from unittest.mock import patch
 
     end_at = "2026-10-07T00:00:00Z"
-    end_ms = datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000
+    end_ms = int(datetime.fromisoformat(end_at.replace("Z", "+00:00")).timestamp() * 1000)
     marker = f"VISUAL_END_{RUN}"
     answer = " ".join(["word"] * 299 + [marker])
     words = answer.split()
     frames = [{"at": end_ms - 40 - (len(words) - i) * 16,
                "chars": len(" ".join(words[:i])), "words": i,
                "addedWords": 1, "marker": i == len(words),
-               **({"text": answer} if i == len(words) else {})}
+               "text": " ".join(words[:i])}
               for i in range(1, len(words) + 1)]
     route = f"/ws/{WS}/chat/agt_test"
+    bound_at = frames[0]["at"] - 17
+    arrival = {"version": 1, "workspace": WS, "run": RUN,
+               "bound": {"agentId": "agt_test", "route": route, "at": bound_at},
+               "sources": [{"id": 1, "at": bound_at - 10, "agents": ["agt_test"]}],
+               "arrivals": [{"at": frame["at"] - 1, "sourceId": 1, "agentId": "agt_test",
+                             "turnId": "t1", "itemId": "m1", "text": (" " if i else "") + words[i]}
+                            for i, frame in enumerate(frames)],
+               "completions": [{"at": frames[-1]["at"] - 1, "sourceId": 1,
+                                "agentId": "agt_test", "turnId": "t1", "kind": "item.completed",
+                                "seq": 3, "eventId": "reply", "itemId": "m1"},
+                               {"at": end_ms, "sourceId": 1, "agentId": "agt_test",
+                                "turnId": "t1", "kind": "agent.turn_completed",
+                                "seq": 4, "eventId": "completed", "itemId": None}], "error": None}
     delivered = {"kind": "message.delivered", "event_id": "delivered", "seq": 1,
                  "payload": {"text": f"VISUAL_RENDER_{RUN}"}}
     end = {"kind": "agent.turn_completed", "event_id": "completed", "seq": 4,
-           "created_at": end_at}
+           "turn_id": "t1", "created_at": end_at, "payload": {}}
     text = "## **First** line\nFull second line"
     reasoning = {"kind": "item.completed", "event_id": "reasoning-1", "seq": 2,
                  "payload": {"itemKind": "reasoning", "text": text}}
@@ -1980,17 +3175,23 @@ def self_test_final_visual_assert():
     motion = {"version": 1, "case": "render", "ws": WS, "run": RUN,
               "agent_id": "agt_test", "route": route,
               "probe": {"route": route, "start": frames[0]["at"] - 16, "frames": frames,
+                        "ticks": [frame["at"] for frame in frames], "arrival": arrival,
+                        "signals": [{"at": frame["at"], "caret": True, "working": True, "stop": True}
+                                    for frame in frames] +
+                                   [{"at": end_ms + 10, "caret": False, "working": False, "stop": False}],
+                        "arrivalClosed": {"closed": True, "arrivalCount": len(arrival["arrivals"])},
                         "finalText": answer, "samples": [{"stop": True, "gap": 0}], "shifts": [],
-                        "sawCaret": True, "sawWorking": True, "observerError": None,
+                        "sawCaret": True, "sawWorking": True, "sawStop": True, "observerError": None,
                         "caretGone": True},
               "delivered": delivered, "turn_completed": end,
               "replies": [{"kind": "item.completed", "event_id": "reply", "seq": 3,
-                           "payload": {"itemKind": "message", "text": answer}}],
+                           "turn_id": "t1", "payload": {"itemId": "m1", "itemKind": "message", "text": answer}}],
               "answer": answer}
     base = {"version": 1, "validation": "pending", "case": "render", "ws": WS,
             "run": RUN, "agent_id": "agt_test", "route": route,
             "delivered": delivered, "turn_completed": end, "items": [reasoning],
             "collapsed": [collapsed], "expanded": [expanded]}
+    clockify_motion_fixture(motion)
     assert assert_motion_capture(motion)[2] == -40
 
     def trial(change=None, expected_motion="passed", expected_reasoning="passed", tamper=None):

@@ -26,6 +26,8 @@ tests:
           fn: >-
             Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === '+ Add agent')
         intent: "Wait for New Agent"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" motion-prime'
+        intent: "Passively observe the future owned Chat EventSource before UI navigation, without sending an event"
       - click: { role: button, name: "+ Add agent", exact: true }
         intent: "Open the New Agent form"
       - click: { testid: create-agent-template-lead }
