@@ -61,7 +61,6 @@ vi.mock("@/api/agentsv1", () => ({
 }));
 
 import { AgentChat, daysLeftText } from "../AgentChat";
-import { LONG_TEXT_LIMIT } from "../LongText";
 
 function agent(over: Partial<Agent> = {}): Agent {
   return {
@@ -430,13 +429,18 @@ describe("AgentChat", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("cuts a very long message until the user expands it", async () => {
+  it("shows the full long reply without requiring expansion", async () => {
     await mount(agent());
-    const long = "x".repeat(LONG_TEXT_LIMIT + 10);
-    deliver(ev("item.completed", { itemKind: "message", text: long }));
-    expect(screen.queryByText(long)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Show all/ }));
+    const long = "x".repeat(17000);
+    deliver(
+      ev("item.completed", {
+        itemKind: "message",
+        text: `${long}\n\n**End of reply**`,
+      }),
+    );
     expect(screen.getByText(long)).toBeInTheDocument();
+    expect(screen.getByText("End of reply").tagName).toBe("STRONG");
+    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
   });
 
   it("renders the same fixture for opencode, codex and claude except the label", async () => {

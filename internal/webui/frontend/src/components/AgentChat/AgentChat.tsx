@@ -37,7 +37,7 @@ import {
   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
   ComposerModelControls,
 } from "./ComposerModelControls";
-import { LONG_TEXT_LIMIT, LongText } from "./LongText";
+import { LongText } from "./LongText";
 import {
   clockTime,
   MessageActions,
@@ -761,10 +761,7 @@ function Row({
   }
 }
 
-/**
- * An agent message as markdown, cut like LongText until the user expands
- * it, with a copy button once it is complete.
- */
+/** An agent message as full markdown, with a copy button once it is complete. */
 function AgentMessage({
   text,
   streaming,
@@ -778,21 +775,14 @@ function AgentMessage({
   newlyLive: boolean;
   arrivals?: readonly { end: number; at: number }[] | undefined;
 }) {
-  const [all, setAll] = useState(false);
   const smooth = useSmoothText(text, streaming, newlyLive, arrivals);
-  const cut = !all && smooth.text.length > LONG_TEXT_LIMIT;
   return (
     <div className={page.agentMessage}>
       <ChatMarkdown
-        text={cut ? smooth.text.slice(0, LONG_TEXT_LIMIT) + "…" : smooth.text}
+        text={smooth.text}
         streaming={streaming}
         fresh={smooth.fresh}
       />
-      {cut && (
-        <button className={styles.showAll} onClick={() => setAll(true)}>
-          Show all ({text.length.toLocaleString()} characters)
-        </button>
-      )}
       {!streaming && text.trim() && <MessageActions text={text} at={at} />}
     </div>
   );

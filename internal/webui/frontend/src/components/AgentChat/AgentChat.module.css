@@ -7,20 +7,3 @@
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-
-.showAll {
-  display: block;
-  margin-top: 4px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  font: inherit;
-  font-size: 12px;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.showAll:hover {
-  color: var(--color-text-primary);
-}
