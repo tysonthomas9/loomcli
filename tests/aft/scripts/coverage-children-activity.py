@@ -750,6 +750,7 @@ def mobile_geometry_ok(geometry, child_id, width, theme):
     assert geometry["theme"] == theme and geometry["navPosition"] == "fixed"
     assert geometry["trayOpen"] and geometry["childId"] == child_id
     assert geometry["headerExpanded"] and geometry["rowIds"].count(child_id) == 1
+    assert geometry["childRunning"], "exact saved child row is not running"
     assert geometry["rowCount"] > 0 and geometry["visibleRowCount"] > 0
     assert geometry["childWhole"], "exact saved child row is not wholly visible"
     assert geometry["partialRows"] == 0, "a visible child row is clipped"
@@ -759,6 +760,57 @@ def mobile_geometry_ok(geometry, child_id, width, theme):
     assert geometry["composerBottom"] <= geometry["navTop"] + 1, "composer overlaps fixed mobile navigation"
     assert geometry["headerHit"]["hit"], "tray header is hidden or occluded"
     assert geometry["childLinkHit"]["hit"], "exact child Open link is hidden or occluded"
+
+
+def mobile_dom_lifecycle(child):
+    return browser_json("""JSON.stringify((() => {
+      const id=%s, name=%s;
+      const tray=document.querySelector('[data-testid=agent-tray]');
+      const header=tray?.querySelector('button[aria-expanded]');
+      const rows=[...document.querySelectorAll('[data-testid=agent-tray] [data-tray-row]')];
+      const child=rows.find(r=>r.dataset.trayRow===id);
+      const cards=[...document.querySelectorAll('[data-testid=completion-record]')]
+        .filter(c=>c.textContent?.includes(name));
+      return {path:location.pathname,width:innerWidth,height:innerHeight,
+        theme:document.documentElement.dataset.theme,tray_present:!!tray,
+        tray_open:tray?.dataset.open??null,header_expanded:header?.getAttribute('aria-expanded')??null,
+        row_count:rows.length,row_ids:rows.slice(0,20).map(r=>r.dataset.trayRow||''),
+        exact_child_row_count:rows.filter(r=>r.dataset.trayRow===id).length,
+        child_running:!!child?.querySelector('[data-status=running]'),
+        card_count:cards.length,cards:cards.slice(0,10).map(c=>({
+          attempt:c.dataset.attempt||'',outcome:c.dataset.outcome||'',delivery:c.dataset.delivery||''}))};
+    })())""" % (json.dumps(child["agent_id"]), json.dumps(child["name"])))
+
+
+def mobile_lifecycle_diagnostic(child, lead, initial, width, theme, dom):
+    """Capture a missing running tray without transcript or native tool content."""
+    def identity(value):
+        return value if isinstance(value, str) and len(value) <= 160 and \
+            re.fullmatch(r"[A-Za-z0-9_:/.-]+", value) else "<invalid>"
+
+    def summary(agent_id):
+        history = [e for e in events(agent_id) if e.get("agent_id") == agent_id]
+        return {"count": len(history), "omitted": max(0, len(history) - 40),
+                "events": [{"event_id": identity(e.get("event_id")),
+                            "seq": e.get("seq") if isinstance(e.get("seq"), int) else None,
+                            "kind": identity(e.get("kind")), "turn_id": identity(e.get("turn_id"))}
+                           for e in history[-40:]]}
+
+    current = agent(child["agent_id"])
+    receipt = {"run_id": RUN, "child_id": child["agent_id"], "parent_id": lead["agent_id"],
+               "requested_width": width, "requested_theme": theme,
+               "captured_at_ms": int(time.time() * 1000),
+               "initial_api_state": initial["state"], "initial_api_attempt": initial["attempt"],
+               "initial_api_running_turn_id": initial.get("running_turn_id"),
+               "api_agent_id": current.get("agent_id"), "api_parent_id": current.get("parent_agent_id"),
+               "api_state": current["state"], "api_attempt": current["attempt"],
+               "api_running_turn_id": current.get("running_turn_id"),
+               "dom": {key: dom.get(key) for key in (
+                   "path", "width", "height", "theme", "tray_present", "tray_open", "header_expanded",
+                   "row_count", "row_ids", "exact_child_row_count", "child_running",
+                   "card_count", "cards")},
+               "child_events": summary(child["agent_id"]), "parent_events": summary(lead["agent_id"])}
+    save(f"mobile-lifecycle-{width}-{theme}", receipt)
 
 
 def mobile(child_label, lead_label, width, theme):
@@ -779,16 +831,42 @@ def mobile(child_label, lead_label, width, theme):
     receipts = [e for e in events(child_id) if e["event_id"] == activity_proof["event_id"] and
                 e["turn_id"] == activity_proof["turn_id"]]
     assert len(receipts) == 1, "mobile row has no saved current-turn activity receipt"
-    assert live["running_turn_id"] or live["state"] == "finished"
     browser("set", "viewport", str(width), "844")
     current_theme = browser_json("JSON.stringify({value:document.documentElement.dataset.theme})")["value"]
     if current_theme != theme:
         browser("click", f'button[aria-label="Switch to {theme} mode"]')
     browser("wait", "--fn", f'document.documentElement.dataset.theme === {json.dumps(theme)}')
-    open_state = browser_json("JSON.stringify({value:document.querySelector('[data-testid=agent-tray]')?.dataset.open || ''})")["value"]
-    if open_state != "true":
-        browser("click", "[data-testid=agent-tray] button[aria-expanded=false]")
-    browser("wait", "--fn", "(() => { const id=" + json.dumps(child_id) + "; return !!document.querySelector('[data-testid=agent-tray][data-open=true] [data-tray-row=\"' + id + '\"]'); })()")
+    dom = mobile_dom_lifecycle(child)
+    if live["state"] != "active" or not live["running_turn_id"] or not dom["tray_present"]:
+        mobile_lifecycle_diagnostic(child, lead, live, width, theme, dom)
+        raise AssertionError("running child tray missing or child finished before mobile capture")
+    if dom["tray_open"] == "false":
+        if dom["header_expanded"] != "false":
+            mobile_lifecycle_diagnostic(child, lead, live, width, theme, dom)
+            raise AssertionError("running child tray has no collapsed header")
+        try:
+            browser("click", "[data-testid=agent-tray] button[aria-expanded=false]")
+        except subprocess.CalledProcessError as exc:
+            mobile_lifecycle_diagnostic(child, lead, live, width, theme, mobile_dom_lifecycle(child))
+            raise AssertionError("running child tray disappeared before mobile click") from exc
+    elif dom["tray_open"] != "true" or dom["header_expanded"] != "true":
+        mobile_lifecycle_diagnostic(child, lead, live, width, theme, dom)
+        raise AssertionError("running child tray has no expanded header")
+    try:
+        browser("wait", "--fn", "(() => { const id=" + json.dumps(child_id) + "; return !!document.querySelector('[data-testid=agent-tray][data-open=true] [data-tray-row=\"' + id + '\"]'); })()")
+    except subprocess.CalledProcessError as exc:
+        mobile_lifecycle_diagnostic(child, lead, live, width, theme, mobile_dom_lifecycle(child))
+        raise AssertionError("exact running child row disappeared before mobile geometry") from exc
+    dom = mobile_dom_lifecycle(child)
+    current = agent(child_id)
+    if current["agent_id"] != child_id or current["name"] != child["name"] or \
+            current["parent_agent_id"] != lead["agent_id"] or \
+            current["worktree_path"] != child["worktree_path"] or \
+            current["state"] != "active" or current["running_turn_id"] != live["running_turn_id"] or \
+            dom["tray_open"] != "true" or dom["header_expanded"] != "true" or \
+            dom["exact_child_row_count"] != 1 or not dom["child_running"]:
+        mobile_lifecycle_diagnostic(child, lead, live, width, theme, dom)
+        raise AssertionError("exact running child row missing or child finished before mobile geometry")
     geometry = browser_json("""JSON.stringify((() => {
       const id = %s;
       const tray = document.querySelector('[data-testid=agent-tray]');
@@ -802,6 +880,7 @@ def mobile(child_label, lead_label, width, theme):
       const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);
       const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));
       const child = rows.find(row => row.dataset.trayRow === id);
+      const childRunning = !!child?.querySelector('[data-status=running]');
       const childBox = child && box(child);
       const childWhole = !!childBox && childBox.left >= clip.left-1 && childBox.right <= clip.right+1 &&
         childBox.top >= clip.top-1 && childBox.bottom <= clip.bottom+1;
@@ -823,7 +902,7 @@ def mobile(child_label, lead_label, width, theme):
         childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',
         headerColors:Array.from(header.querySelectorAll('[data-agent-color]')).map(x=>x.dataset.agentColor),
         rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,
-        childWhole,headerHit,childLinkHit,
+        childWhole,childRunning,headerHit,childLinkHit,
         partialRows:partial.length,hiddenRows:hidden.length,moreCount,
         horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,
           tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,
@@ -832,6 +911,9 @@ def mobile(child_label, lead_label, width, theme):
         composerTop:composerBox.top,composerBottom:composerBox.bottom,navTop:navBox.top,
         tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};
     })())""" % json.dumps(child_id))
+    if geometry.get("missing") or not geometry.get("childRunning"):
+        mobile_lifecycle_diagnostic(child, lead, live, width, theme, mobile_dom_lifecycle(child))
+        raise AssertionError("exact running child row missing or child finished during mobile geometry")
     mobile_geometry_ok(geometry, child_id, width, theme)
     assert load(f"color-{child_id}")["value"] in geometry["headerColors"], "tray avatar changed child color"
     shot = OUT / f"mobile-tray-{width}-{theme}.png"
