@@ -37,9 +37,8 @@ const sha256 = (path) =>
 if (sha256(sourceFile) !== "cbf6aad87f1f4f4e2160679732a886d2248f6b60b07aee9d7c48c5395600522f" ||
     sha256(cssFile) !== "8fc71740bb4e2e99b526105279f286544e1e27c4fb81b4eb1fc9c051573bda4b")
   throw Error("unverified-visible-renderer-source");
-const limit = /^export const LONG_TEXT_LIMIT = 8000;$/m;
-if (!limit.test(readFileSync(limitFile, "utf8")))
-  throw Error("unrecognized-long-text-limit");
+if (!readFileSync(limitFile, "utf8").includes("{text}</div>"))
+  throw Error("unrecognized-full-text-rendering");
 const lock = JSON.parse(readFileSync(lockFile, "utf8"));
 const css = readFileSync(cssFile, "utf8");
 if (!/\.markdown\[data-streaming="true"\]\s+\.tableActions\s*\{\s*visibility:\s*hidden;\s*\}/.test(css))

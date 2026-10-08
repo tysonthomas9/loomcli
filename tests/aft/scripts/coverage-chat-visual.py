@@ -1610,7 +1610,7 @@ def source_projection(snapshot):
     item_id = snapshot["replies"][-1]["payload"]["itemId"]
     deltas = [a["text"] for a in arrivals if a["itemId"] == item_id]
     assert answer and js_utf16_length(answer) <= 8000, \
-        "motion answer exceeds the unexpanded ChatMarkdown source limit"
+        "motion answer exceeds the bounded projection fixture budget"
     texts = [frame["text"] for frame in frames]
     plain = not re.search(r"[\n\r`*_~|#<>\[\]\\!]", answer) and \
         all(answer.startswith(text) for text in texts) and \
@@ -1760,7 +1760,7 @@ def self_test_markdown_projection():
     except AssertionError as exc:
         assert "source projection failed" in str(exc), exc
     else:
-        raise AssertionError("unexpanded 8000-character source limit was ignored")
+        raise AssertionError("bounded projection fixture budget was ignored")
     arrivals = [{"at": at, "sourceId": 1, "itemId": "m1", "text": delta}
                 for at, delta in zip((9, 19, 21, 29, 39, 49), deltas)]
     capture = {"replies": [{"payload": {"itemId": "m1", "text": source}}],
@@ -3876,7 +3876,7 @@ def input_check(stage):
     delivered = [e for e in evs if e["kind"] == "message.delivered" and
                  e.get("agent_id") == diagnostic["agent_id"] and e["payload"].get("text") == source]
     assert len(delivered) == 1, "long literal text was not delivered exactly once through Chat"
-    assert len(source) > 8000, "source did not cross the LongText Show all threshold"
+    assert len(source) > 8000, "source did not cross the former 8000-character display threshold"
     dom = evaluate("""(() => { const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].at(-1);
       const b=r?.querySelector('[class*=userBody]'); const t=b?.firstElementChild;
       return {text:t?.textContent||'', collapsed:b?.dataset.userMessageCollapsed,
@@ -3889,10 +3889,7 @@ def input_check(stage):
     if stage == "collapsed":
         assert dom["collapsed"] == "true" and dom["showFull"], dom
         assert source[:200] in dom["text"] and len(dom["text"]) < len(source), dom
-    elif stage == "expanded":
-        assert dom["collapsed"] == "false" and dom["showAll"], dom
-        assert source[:8000] in dom["text"] and len(dom["text"]) < len(source), dom
-    elif stage in ("all", "reloaded"):
+    elif stage in ("expanded", "all", "reloaded"):
         assert dom["collapsed"] == "false" and dom["text"] == source and not dom["showAll"], dom
     else:
         raise ValueError(stage)

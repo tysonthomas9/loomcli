@@ -212,9 +212,7 @@ tests:
       - click: { role: button, name: "Show full message", exact: true }
         intent: "Expand the user bubble through the UI"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" input-check expanded'
-        intent: "Confirm the bubble exposes the Show all control without truncating saved source"
-      - click: { selector: "[data-testid=chat-transcript] li[data-kind=user] button[class*='showAll']" }
-        intent: "Reveal the entire long message through the UI"
+        intent: "Confirm the expanded bubble shows every saved character without a second reveal control"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" input-check all && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot input all'
         intent: "Compare every displayed character with the real persisted text"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" layout'
