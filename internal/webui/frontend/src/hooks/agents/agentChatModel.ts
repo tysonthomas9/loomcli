@@ -57,6 +57,7 @@ export type ChatItem =
       kind: "agent";
       text: string;
       streaming?: boolean;
+      arrivals?: readonly DeltaArrival[];
       at?: string;
     }
   | { key: string; kind: "reasoning"; text: string; streaming?: boolean }
@@ -182,8 +183,16 @@ function itemFor(
 }
 
 /** An item in progress: a message's or reasoning's text so far, or a tool call that started. */
+export interface DeltaArrival {
+  /** UTF-16 prefix length after this genuine native delta. */
+  end: number;
+  /** The local monotonic clock at the stream callback, before React batches it. */
+  at: number;
+}
+
 export type LiveItem =
-  | { kind: "message" | "reasoning"; text: string }
+  | { kind: "message"; text: string; arrivals?: readonly DeltaArrival[] }
+  | { kind: "reasoning"; text: string }
   | { kind: "tool"; tool: ToolCall };
 
 /** Live items per item id, built from notices until the item completes. */
@@ -193,7 +202,11 @@ export type Streaming = ReadonlyMap<string, LiveItem>;
  * Adds one notice: a delta appends its text to its message or reasoning, a
  * tool.started adds its tool call; other notices change nothing.
  */
-export function addDelta(streaming: Streaming, notice: AgentEvent): Streaming {
+export function addDelta(
+  streaming: Streaming,
+  notice: AgentEvent,
+  observedAt?: number,
+): Streaming {
   const p = payload(notice);
   if (!p.itemId) return streaming;
   let item: LiveItem;
@@ -203,7 +216,24 @@ export function addDelta(streaming: Streaming, notice: AgentEvent): Streaming {
     const kind = p.itemKind === "reasoning" ? "reasoning" : "message";
     const was = streaming.get(p.itemId);
     const text = was && was.kind !== "tool" ? was.text : "";
-    item = { kind, text: text + (p.text ?? "") };
+    const appended = p.text ?? "";
+    if (kind === "message") {
+      const arrivals = was?.kind === "message" ? was.arrivals : undefined;
+      item = {
+        kind,
+        text: text + appended,
+        ...(appended && observedAt !== undefined && Number.isFinite(observedAt)
+          ? {
+              arrivals: [
+                ...(arrivals ?? []),
+                { end: text.length + appended.length, at: observedAt },
+              ],
+            }
+          : arrivals
+            ? { arrivals }
+            : {}),
+      };
+    } else item = { kind, text: text + appended };
   } else {
     return streaming;
   }
@@ -304,7 +334,14 @@ export function chatItems(
       items.push({ key, kind: "tool", tool: live.tool, status: "running" });
     else if (live.kind === "reasoning")
       items.push({ key, kind: "reasoning", text: live.text, streaming: true });
-    else items.push({ key, kind: "agent", text: live.text, streaming: true });
+    else
+      items.push({
+        key,
+        kind: "agent",
+        text: live.text,
+        streaming: true,
+        ...(live.arrivals ? { arrivals: live.arrivals } : {}),
+      });
   }
   return items;
 }

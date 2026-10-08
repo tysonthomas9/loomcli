@@ -18,6 +18,29 @@ function ev(kind: string, payload: object = {}): AgentEvent {
 }
 
 describe("chatModel", () => {
+  it("retains both actual delta boundaries when updates are batched", () => {
+    let s = addDelta(
+      new Map(),
+      ev("delta", { itemId: "m", itemKind: "message", text: "one " }),
+      100,
+    );
+    s = addDelta(
+      s,
+      ev("delta", { itemId: "m", itemKind: "message", text: "two" }),
+      125,
+    );
+    expect(chatItems([], s)).toEqual([
+      expect.objectContaining({
+        key: "live:m",
+        text: "one two",
+        arrivals: [
+          { end: 4, at: 100 },
+          { end: 7, at: 125 },
+        ],
+      }),
+    ]);
+  });
+
   it("skips a completed turn and marks a cancelled one", () => {
     const items = chatItems(
       [

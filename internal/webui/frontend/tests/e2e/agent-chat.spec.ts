@@ -4,6 +4,12 @@
  */
 import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import type { ServerResponse } from "node:http";
+import { resolve } from "node:path";
 
 const BASE = "**/api/workspaces/w1";
 // DF1_SHOTS=<dir> also saves the UI6 screenshots, as agent-tray.spec does.
@@ -254,6 +260,1340 @@ test("live deltas stream and settle into one completed item", async ({
   await expect(
     transcript(page).getByText("Hello", { exact: true }),
   ).toHaveCount(0);
+});
+
+test("first reply words stay paced after a syntax-only code fence", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const m = mock({ agent: agent({ state: "active", running_turn_id: "t1" }) });
+  await open(page, m);
+  const code = transcript(page)
+    .getByTestId("chat-codeblock")
+    .locator("pre code");
+  await push(
+    page,
+    m,
+    ev("delta", { itemId: "m1", itemKind: "message", text: "```text\n" }, true),
+  );
+  await expect(code).toHaveCount(1);
+  await expect(code).toHaveText("");
+  await expect(transcript(page).getByTestId("chat-markdown")).toHaveAttribute(
+    "data-streaming",
+    "true",
+  );
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __syntaxFrames: { at: number; raw: string; words: number }[];
+      __syntaxSampling: boolean;
+    };
+    w.__syntaxFrames = [];
+    w.__syntaxSampling = true;
+    let last = "";
+    const sample = (at: number) => {
+      if (!w.__syntaxSampling) return;
+      const md = document.querySelector(
+        "[data-testid=chat-transcript] li[data-kind=agent] [data-testid=chat-markdown]",
+      );
+      const raw = md?.textContent ?? "";
+      const body =
+        md?.querySelector("[data-testid=chat-codeblock] pre code")
+          ?.textContent ?? "";
+      if (raw !== last) {
+        w.__syntaxFrames.push({
+          at,
+          raw,
+          words: body.trim().split(/\s+/).filter(Boolean).length,
+        });
+        last = raw;
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await push(
+    page,
+    m,
+    ev(
+      "delta",
+      { itemId: "m1", itemKind: "message", text: "word ".repeat(180) },
+      true,
+    ),
+  );
+  await page.waitForFunction(() =>
+    (
+      window as unknown as { __syntaxFrames: { words: number }[] }
+    ).__syntaxFrames.some((frame) => frame.words > 0),
+  );
+  const frames = await page.evaluate(() => {
+    const w = window as unknown as {
+      __syntaxFrames: { at: number; raw: string; words: number }[];
+      __syntaxSampling: boolean;
+    };
+    w.__syntaxSampling = false;
+    return w.__syntaxFrames;
+  });
+  const first = frames.find((frame) => frame.words > 0);
+  expect(first).toBeDefined();
+  writeFileSync(
+    test.info().outputPath("syntax-first-reply-frame.json"),
+    JSON.stringify({
+      firstWords: first!.words,
+      firstRawLength: first!.raw.length,
+      frames: frames.map((frame) => ({
+        at: frame.at,
+        rawLength: frame.raw.length,
+        words: frame.words,
+      })),
+    }),
+  );
+  expect(first!.words).toBeLessThanOrEqual(2);
+});
+
+test("pre-navigation observer measures the actual AgentChat EventSource", async ({
+  page,
+}) => {
+  const visualHelper = readFileSync(
+    resolve(
+      process.cwd(),
+      "../../../tests/aft/scripts/coverage-chat-visual.py",
+    ),
+    "utf8",
+  );
+  const motionSource = visualHelper.match(/MOTION_JS = r"""([\s\S]*?)"""/)?.[1];
+  expect(motionSource).toBeTruthy();
+  const source = readFileSync(
+    resolve(
+      process.cwd(),
+      "../../../tests/aft/scripts/coverage-chat-visual-arrivals.js",
+    ),
+    "utf8",
+  )
+    .replace("__WS_JSON__", JSON.stringify("w1"))
+    .replace("__RUN_JSON__", JSON.stringify("mock"))
+    .replace("__PATH_JSON__", JSON.stringify("/test/agent-chat"))
+    .replace("__CHAT_PREFIX_JSON__", JSON.stringify("/test/agent-chat"));
+  await page.addInitScript({ content: source });
+  const m = mock({ agent: agent({ state: "active", running_turn_id: "t1" }) });
+  await page.route("**/api/config", (r) => json(r, { mode: "open" }));
+  await page.route(`${BASE}/events/token`, (r) => r.fulfill({ status: 404 }));
+  await page.route(`${BASE}/v1/agents/a1/events*`, (r) =>
+    json(r, { events: m.events, snapshot_seq: seq, next: seq, more: false }),
+  );
+  await page.route(`${BASE}/v1/agents/a1`, (r) => json(r, m.agent));
+  const text = "Observed arrival comes through a real browser EventSource.";
+  const delta = ev("delta", { itemId: "m1", itemKind: "message", text }, true);
+  const completed = ev("item.completed", {
+    itemId: "m1",
+    itemKind: "message",
+    text,
+  });
+  const turn = ev("agent.turn_completed", {});
+  let stream: ServerResponse | undefined;
+  const server = createServer((request, response) => {
+    if (request.url !== "/events") {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      "access-control-allow-origin": "*",
+    });
+    response.flushHeaders();
+    stream = response;
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw Error("owned SSE port missing");
+    await page.route(`${BASE}/v1/events*`, (route) =>
+      route.continue({ url: `http://127.0.0.1:${address.port}/events` }),
+    );
+    await page.goto("/test/agent-chat");
+    await page.waitForFunction(() =>
+      (
+        window as unknown as {
+          __aftChatVisualArrival?: { ready(id: string): boolean };
+        }
+      ).__aftChatVisualArrival?.ready("a1"),
+    );
+    const bound = await page.evaluate(() =>
+      (
+        window as unknown as {
+          __aftChatVisualArrival: {
+            bind(id: string, route: string): { agentId: string; route: string };
+          };
+        }
+      ).__aftChatVisualArrival.bind("a1", "/test/agent-chat"),
+    );
+    expect(bound).toMatchObject({ agentId: "a1", route: "/test/agent-chat" });
+    expect(
+      await page.evaluate(
+        motionSource!.replace("__MARKER__", JSON.stringify("EventSource.")),
+      ),
+    ).toBe("armed");
+    await expect.poll(() => !!stream).toBe(true);
+    stream!.write(`event: event\ndata: ${JSON.stringify(delta)}\n\n`);
+    await expect(transcript(page).getByTestId("chat-markdown")).toContainText(
+      text,
+    );
+    await page.waitForFunction(() => {
+      const probe = (
+        window as unknown as {
+          __aftChatVisual: {
+            signals: { caret: boolean; working: boolean; stop: boolean }[];
+          };
+        }
+      ).__aftChatVisual;
+      return probe.signals.some((s) => s.caret && s.working && s.stop);
+    });
+    m.events.push(completed, turn);
+    m.agent = agent();
+    turn.created_at = new Date().toISOString();
+    stream!.write(
+      [completed, turn]
+        .map((event) => `event: event\ndata: ${JSON.stringify(event)}\n\n`)
+        .join(""),
+    );
+    await expect(transcript(page).getByTestId("chat-markdown")).toContainText(
+      text,
+    );
+    await expect(
+      transcript(page).locator("[data-streaming-caret]"),
+    ).toHaveCount(0);
+    await expect(transcript(page).getByTestId("working-row")).toHaveCount(0);
+    await expect(
+      page.locator('form button[title="Stop the running turn"]'),
+    ).toHaveCount(0);
+    await page.waitForFunction(() => {
+      const p = (
+        window as unknown as {
+          __aftChatVisual: { ticks: number[] };
+        }
+      ).__aftChatVisual;
+      const receipt = (
+        window as unknown as {
+          __aftChatVisualArrival: {
+            snapshot(): { arrivals: { at: number }[] };
+          };
+        }
+      ).__aftChatVisualArrival.snapshot();
+      const last = receipt.arrivals.at(-1);
+      return !!last && (p.ticks.at(-1) ?? 0) >= last.at + 300;
+    });
+    const telemetry = await page.evaluate(() => {
+      const probe = (
+        window as unknown as {
+          __aftChatVisual: {
+            start: number;
+            ticks: number[];
+            stopped: boolean;
+            timer: number;
+            observer?: PerformanceObserver;
+            liveObserver: MutationObserver;
+            signals: {
+              at: number;
+              caret: boolean;
+              working: boolean;
+              stop: boolean;
+            }[];
+            frames: { at: number; text: string }[];
+            captureState(): {
+              at: number;
+              caret: boolean;
+              working: boolean;
+              stop: boolean;
+            };
+          };
+        }
+      ).__aftChatVisual;
+      const final = probe.captureState();
+      probe.signals.push({
+        at: final.at,
+        caret: final.caret,
+        working: final.working,
+        stop: final.stop,
+      });
+      probe.stopped = true;
+      clearInterval(probe.timer);
+      probe.observer?.disconnect();
+      probe.liveObserver.disconnect();
+      const observer = (
+        window as unknown as {
+          __aftChatVisualArrival: {
+            snapshot(): {
+              arrivals: {
+                agentId: string;
+                turnId: string;
+                itemId: string;
+                text: string;
+                at: number;
+              }[];
+              completions: { eventId: string; at: number }[];
+              error: string | null;
+            };
+            close(): { closed: boolean };
+          };
+        }
+      ).__aftChatVisualArrival;
+      return {
+        receipt: observer.snapshot(),
+        closed: observer.close(),
+        signals: probe.signals,
+        frames: probe.frames,
+      };
+    });
+    expect(telemetry.receipt.error).toBeNull();
+    expect(telemetry.receipt.arrivals).toMatchObject([
+      { agentId: "a1", turnId: "t1", itemId: "m1", text },
+    ]);
+    expect(telemetry.receipt.completions.map((c) => c.eventId)).toEqual([
+      completed.event_id,
+      turn.event_id,
+    ]);
+    expect(telemetry.receipt.arrivals[0].at).toBeLessThanOrEqual(
+      telemetry.receipt.completions[0].at,
+    );
+    const renderedDelta = telemetry.frames.find(
+      (frame) =>
+        frame.at >= telemetry.receipt.arrivals[0].at &&
+        frame.text.startsWith(text),
+    );
+    expect(renderedDelta).toBeTruthy();
+    const deltaLag = renderedDelta!.at - telemetry.receipt.arrivals[0].at;
+    expect(deltaLag).toBeLessThanOrEqual(300);
+    const exits = (["caret", "working", "stop"] as const).map((key) => {
+      const lastActive = telemetry.signals.findLastIndex(
+        (signal) => signal[key],
+      );
+      expect(lastActive).toBeGreaterThanOrEqual(0);
+      const exit = telemetry.signals[lastActive + 1];
+      expect(exit?.[key]).toBe(false);
+      return exit.at;
+    });
+    const liveTurn = telemetry.receipt.completions.find(
+      (completion) => completion.eventId === turn.event_id,
+    );
+    expect(liveTurn).toBeTruthy();
+    const terminalExit = Math.max(...exits);
+    const lagFromLive = terminalExit - liveTurn!.at;
+    const lagFromSaved = terminalExit - Date.parse(turn.created_at);
+    await test.info().attach("mocked-terminal-exit.json", {
+      body: JSON.stringify({
+        exitAt: terminalExit,
+        liveAt: liveTurn!.at,
+        savedAt: Date.parse(turn.created_at),
+        lagFromLive,
+        lagFromSaved,
+        deltaLag,
+        signalCount: telemetry.signals.length,
+      }),
+      contentType: "application/json",
+    });
+    console.log("mocked terminal exit", {
+      lagFromLive,
+      lagFromSaved,
+      deltaLag,
+      perControlLagFromLive: exits.map((at) => at - liveTurn!.at),
+      signalCount: telemetry.signals.length,
+    });
+    expect(lagFromLive).toBeLessThanOrEqual(300);
+    expect(lagFromSaved).toBeLessThanOrEqual(300);
+    expect(telemetry.signals.at(-1)).toMatchObject({
+      caret: false,
+      working: false,
+      stop: false,
+    });
+    expect(telemetry.closed.closed).toBe(true);
+  } finally {
+    stream?.end();
+    await page.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+async function runNativePacket(
+  page: Page,
+  packet: { name: string; text: string },
+) {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  if (packet.name === "36-word") {
+    // Model a 60 Hz display using pairs of actual Chromium animation frames.
+    // The component, native SSE, and passive probe still run in the browser.
+    await page.addInitScript(() => {
+      const nativeFrame = window.requestAnimationFrame.bind(window);
+      const nativeCancel = window.cancelAnimationFrame.bind(window);
+      const pending = new Map<number, number>();
+      let nextId = 0;
+      window.requestAnimationFrame = (callback) => {
+        const id = ++nextId;
+        const first = nativeFrame(() => {
+          if (!pending.has(id)) return;
+          const second = nativeFrame((at) => {
+            pending.delete(id);
+            callback(at);
+          });
+          pending.set(id, second);
+        });
+        pending.set(id, first);
+        return id;
+      };
+      window.cancelAnimationFrame = (id) => {
+        const nativeId = pending.get(id);
+        if (nativeId !== undefined) nativeCancel(nativeId);
+        pending.delete(id);
+      };
+    });
+  }
+  const m = mock({
+    agent: agent({ state: "active", running_turn_id: "t1" }),
+  });
+  const arrivalSource = readFileSync(
+    resolve(
+      process.cwd(),
+      "../../../tests/aft/scripts/coverage-chat-visual-arrivals.js",
+    ),
+    "utf8",
+  )
+    .replace("__WS_JSON__", JSON.stringify("w1"))
+    .replace("__RUN_JSON__", JSON.stringify("mock-first"))
+    .replace("__PATH_JSON__", JSON.stringify("/test/agent-chat"))
+    .replace("__CHAT_PREFIX_JSON__", JSON.stringify("/test/agent-chat"));
+  await page.addInitScript({ content: arrivalSource });
+  const motionSource = readFileSync(
+    resolve(
+      process.cwd(),
+      "../../../tests/aft/scripts/coverage-chat-visual.py",
+    ),
+    "utf8",
+  ).match(/MOTION_JS = r"""([\s\S]*?)"""/)?.[1];
+  expect(motionSource).toBeTruthy();
+  await page.route("**/api/config", (r) => json(r, { mode: "open" }));
+  await page.route(`${BASE}/events/token`, (r) => r.fulfill({ status: 404 }));
+  await page.route(`${BASE}/v1/agents/a1/events*`, (r) =>
+    json(r, { events: m.events, snapshot_seq: seq, next: seq, more: false }),
+  );
+  await page.route(`${BASE}/v1/agents/a1`, (r) => json(r, m.agent));
+  let stream: ServerResponse | undefined;
+  const server = createServer((request, response) => {
+    if (request.url !== "/events") return void response.writeHead(404).end();
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+    });
+    response.flushHeaders();
+    stream = response;
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw Error("owned SSE port missing");
+    await page.route(`${BASE}/v1/events*`, (route) =>
+      route.continue({ url: `http://127.0.0.1:${address.port}/events` }),
+    );
+    await page.goto("/test/agent-chat");
+    await expect.poll(() => !!stream).toBe(true);
+    await page.waitForFunction(() =>
+      (
+        window as unknown as {
+          __aftChatVisualArrival?: { ready(id: string): boolean };
+        }
+      ).__aftChatVisualArrival?.ready("a1"),
+    );
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __aftChatVisualArrival: { bind(id: string, path: string): unknown };
+        }
+      ).__aftChatVisualArrival.bind("a1", "/test/agent-chat"),
+    );
+    expect(
+      await page.evaluate(
+        motionSource!.replace("__MARKER__", JSON.stringify("never-terminal")),
+      ),
+    ).toBe("armed");
+    await page.waitForFunction(() => {
+      const p = (
+        window as unknown as {
+          __aftChatVisual?: { ticks: number[]; frames: unknown[] };
+        }
+      ).__aftChatVisual;
+      return (
+        location.pathname === "/test/agent-chat" &&
+        !!p &&
+        p.ticks.length >= 6 &&
+        p.frames.length === 0
+      );
+    });
+    const first = packet.text;
+    const delta = ev(
+      "delta",
+      { itemId: "m1", itemKind: "message", text: first },
+      true,
+    );
+    stream!.write(`event: event\ndata: ${JSON.stringify(delta)}\n\n`);
+    await page.waitForFunction(
+      () =>
+        !!(window as unknown as { __aftChatVisual?: { frames: unknown[] } })
+          .__aftChatVisual?.frames.length,
+    );
+    const measured = await page.evaluate(() => {
+      const p = (
+        window as unknown as {
+          __aftChatVisual: { frames: { text: string; words: number }[] };
+        }
+      ).__aftChatVisual;
+      return {
+        first: p.frames[0],
+        reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+      };
+    });
+    await test.info().attach("mocked-first-900-frame.json", {
+      body: JSON.stringify(measured),
+      contentType: "application/json",
+    });
+    expect(measured.reducedMotion).toBe(false);
+    expect(measured.first.words).toBeGreaterThan(0);
+    expect(measured.first.words).toBeLessThanOrEqual(2);
+    await page.waitForFunction(
+      (expected) =>
+        (
+          window as unknown as {
+            __aftChatVisual: { frames: { text: string }[] };
+          }
+        ).__aftChatVisual.frames.some(
+          (frame) => frame.text.trim() === expected,
+        ),
+      first.trim(),
+    );
+    const lag = await page.evaluate(() => {
+      const p = (
+        window as unknown as {
+          __aftChatVisual: { frames: { at: number; text: string }[] };
+        }
+      ).__aftChatVisual;
+      const receipt = (
+        window as unknown as {
+          __aftChatVisualArrival: {
+            snapshot(): {
+              arrivals: { at: number; text: string }[];
+              error: string | null;
+            };
+          };
+        }
+      ).__aftChatVisualArrival.snapshot();
+      if (receipt.error || receipt.arrivals.length !== 1)
+        throw Error("foreign native arrival receipt");
+      const frame = p.frames.find(
+        (candidate) =>
+          candidate.text.trim() === receipt.arrivals[0].text.trim(),
+      );
+      if (!frame) throw Error("full native arrival was not rendered");
+      return {
+        ms: frame.at - receipt.arrivals[0].at,
+        arrivalAt: receipt.arrivals[0].at,
+        frames: p.frames.length,
+        first: p.frames[0],
+        frameSeries: p.frames.map((item) => ({
+          at: item.at,
+          words: item.text.trim().split(/\s+/).filter(Boolean).length,
+        })),
+        last: p.frames
+          .slice(-6)
+          .map((item) => ({ at: item.at, chars: item.text.length })),
+      };
+    });
+    await test.info().attach("mocked-first-900-catchup.json", {
+      body: JSON.stringify(lag),
+      contentType: "application/json",
+    });
+    writeFileSync(
+      test.info().outputPath("mocked-first-900-catchup.json"),
+      JSON.stringify(lag),
+    );
+    console.log("mocked first-packet catch-up", {
+      ms: lag.ms,
+      frames: lag.frames,
+      firstWords: lag.first.words,
+    });
+    expect.soft(lag.ms).toBeLessThanOrEqual(300);
+    const completed = ev("item.completed", {
+      itemId: "m1",
+      itemKind: "message",
+      text: first,
+    });
+    const turn = ev("agent.turn_completed", {});
+    m.events.push(completed, turn);
+    m.agent = agent();
+    stream!.write(
+      [completed, turn]
+        .map((event) => `event: event\ndata: ${JSON.stringify(event)}\n\n`)
+        .join(""),
+    );
+    await expect(
+      transcript(page).locator("[data-streaming-caret]"),
+    ).toHaveCount(0);
+    await expect(transcript(page).getByTestId("working-row")).toHaveCount(0);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await page.waitForFunction(() => {
+      const own = (
+        window as unknown as {
+          __aftChatVisualArrival: {
+            snapshot(): {
+              error: string | null;
+              arrivals: {
+                mono: number;
+                agentId: string;
+                turnId: string;
+                itemId: string;
+              }[];
+            };
+          };
+        }
+      ).__aftChatVisualArrival.snapshot();
+      const p = (
+        window as unknown as {
+          __aftChatVisual: { tickMeta: { mono: number }[] };
+        }
+      ).__aftChatVisual;
+      const arrival = own.arrivals
+        .filter(
+          (a) => a.agentId === "a1" && a.turnId === "t1" && a.itemId === "m1",
+        )
+        .at(-1);
+      return (
+        own.error === null &&
+        !!arrival &&
+        (p.tickMeta.at(-1)?.mono ?? 0) >= arrival.mono + 300
+      );
+    });
+    const oracleInput = await page.evaluate(() => {
+      const p = (
+        window as unknown as {
+          __aftChatVisual: {
+            start: number;
+            startClock: unknown;
+            frames: {
+              at: number;
+              text: string;
+              chars: number;
+              words: number;
+              addedWords: number;
+              marker: boolean;
+            }[];
+            ticks: number[];
+            tickMeta: {
+              at: number;
+              mono: number;
+              phase: number;
+              tickIndex: number;
+            }[];
+            signals: {
+              at: number;
+              mono: number;
+              phase: number;
+              tickIndex: number | null;
+              caret: boolean;
+              working: boolean;
+              stop: boolean;
+            }[];
+            captureState(): {
+              at: number;
+              mono: number;
+              phase: number;
+              caret: boolean;
+              working: boolean;
+              stop: boolean;
+            };
+            replyContent(node: Element | null): string;
+            stopped: boolean;
+            timer: number;
+            liveObserver: MutationObserver;
+            observer?: PerformanceObserver;
+          };
+        }
+      ).__aftChatVisual;
+      const last = p.captureState();
+      p.signals.push({ ...last, tickIndex: null });
+      p.stopped = true;
+      clearInterval(p.timer);
+      p.liveObserver.disconnect();
+      p.observer?.disconnect();
+      const receipt = (
+        window as unknown as {
+          __aftChatVisualArrival: {
+            snapshot(): {
+              arrivals: { at: number; text: string }[];
+              completions: { at: number; eventId: string }[];
+              error: string | null;
+              version: number;
+              workspace: string;
+              run: string;
+              bound: unknown;
+              sources: unknown[];
+            };
+            close(): { closed: boolean };
+          };
+        }
+      ).__aftChatVisualArrival;
+      const observed = receipt.snapshot();
+      const closed = receipt.close();
+      return {
+        start: p.start,
+        startClock: p.startClock,
+        route: location.pathname,
+        frames: p.frames,
+        ticks: p.ticks,
+        tickMeta: p.tickMeta,
+        signals: p.signals,
+        finalVisibleText:
+          document.querySelector<HTMLElement>(
+            "[data-testid=chat-transcript] li[data-kind=agent] [data-testid=chat-markdown]",
+          )?.innerText ?? "",
+        finalContentText: p.replyContent(
+          document.querySelector(
+            "[data-testid=chat-transcript] li[data-kind=agent] [data-testid=chat-markdown]",
+          ),
+        ),
+        receipt: observed,
+        closed,
+      };
+    });
+    expect(oracleInput.receipt.error).toBeNull();
+    expect(oracleInput.closed.closed).toBe(true);
+    expect(oracleInput.receipt.arrivals.map((item) => item.text)).toEqual([
+      first,
+    ]);
+    expect(oracleInput.receipt.completions.map((item) => item.eventId)).toEqual(
+      [completed.event_id, turn.event_id],
+    );
+    await test.info().attach("mocked-first-900-native-oracle-input.json", {
+      body: JSON.stringify(oracleInput),
+      contentType: "application/json",
+    });
+    writeFileSync(
+      test.info().outputPath("mocked-first-900-native-oracle-input.json"),
+      JSON.stringify(oracleInput),
+    );
+    const pacingOracle = String.raw`
+import importlib.util, json, sys
+path = sys.argv[1]
+spec = importlib.util.spec_from_file_location('visual_browser_oracle', path)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+data = json.load(sys.stdin)
+snapshot = {'agent_id': 'a1', 'route': data['route'],
+          'probe': {'start': data['start'], 'startClock': data['startClock'],
+                    'frames': data['frames'], 'ticks': data['ticks'],
+                    'tickMeta': data['tickMeta'], 'signals': data['signals'],
+                    'finalText': data['frames'][-1]['text'],
+                    'finalVisibleText': data['finalVisibleText'],
+                    'finalContentText': data['finalContentText'],
+                    'arrival': data['receipt'], 'arrivalClosed': data['closed']},
+          'replies': [data['reply']], 'turn_completed': data['turn']}
+projection = module.source_projection(snapshot)
+print(json.dumps({'exceptions': module.assert_frame_pacing(snapshot, projection),
+                  'deadlines': module.assert_arrival_deadlines(snapshot, projection),
+                  'identity': projection['identity']}))
+`;
+    const proof = JSON.parse(
+      execFileSync(
+        "python3",
+        [
+          "-c",
+          pacingOracle,
+          resolve(
+            process.cwd(),
+            "../../../tests/aft/scripts/coverage-chat-visual.py",
+          ),
+        ],
+        {
+          input: JSON.stringify({
+            ...oracleInput,
+            reply: completed,
+            turn,
+          }),
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            AFT_WORK_DIR: process.cwd(),
+            AFT_WS: "w1",
+            RUN_ID: "mock-first",
+            AFT_API_URL: "http://127.0.0.1:1",
+            AFT_TESTS_DIR: resolve(process.cwd(), "../../../tests/aft"),
+          },
+        },
+      ),
+    ) as {
+      exceptions: { kind: string; frame: number }[];
+      deadlines: { lag_mono_ms?: number }[];
+      identity: { mode: string };
+    };
+    const { exceptions } = proof;
+    if (packet.name === "900-character")
+      expect(exceptions.length).toBeGreaterThan(0);
+    expect(
+      exceptions.every((proof) => proof.kind === "measured-backlog-catch-up"),
+    ).toBe(true);
+    expect(proof.deadlines.length).toBe(1);
+    expect(proof.deadlines[0].lag_mono_ms).toBeLessThanOrEqual(300);
+    await test.info().attach("mocked-first-900-aft-pacing.json", {
+      body: JSON.stringify(proof),
+      contentType: "application/json",
+    });
+  } finally {
+    stream?.end();
+    await page.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test("a native 900-character first delta reveals at most two words at the sampled DOM checkpoint", ({
+  page,
+}) =>
+  runNativePacket(page, { name: "900-character", text: "word ".repeat(180) }));
+
+test("a native 36-word first delta reveals at most two words at the sampled DOM checkpoint", ({
+  page,
+}) =>
+  runNativePacket(page, {
+    name: "36-word",
+    text: "word ".repeat(35) + "word",
+  }));
+
+test("actual streamed Markdown DOM matches source-component projection", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const m = mock({ agent: agent({ state: "active", running_turn_id: "t1" }) });
+  const arrivalSource = readFileSync(
+    resolve(
+      process.cwd(),
+      "../../../tests/aft/scripts/coverage-chat-visual-arrivals.js",
+    ),
+    "utf8",
+  )
+    .replace("__WS_JSON__", JSON.stringify("w1"))
+    .replace("__RUN_JSON__", JSON.stringify("mock-markdown"))
+    .replace("__PATH_JSON__", JSON.stringify("/test/agent-chat"))
+    .replace("__CHAT_PREFIX_JSON__", JSON.stringify("/test/agent-chat"));
+  await page.addInitScript({ content: arrivalSource });
+  const motionSource = readFileSync(
+    resolve(
+      process.cwd(),
+      "../../../tests/aft/scripts/coverage-chat-visual.py",
+    ),
+    "utf8",
+  ).match(/MOTION_JS = r"""([\s\S]*?)"""/)?.[1];
+  expect(motionSource).toBeTruthy();
+  await page.route("**/api/config", (r) => json(r, { mode: "open" }));
+  await page.route(`${BASE}/events/token`, (r) => r.fulfill({ status: 404 }));
+  await page.route(`${BASE}/v1/agents/a1/events*`, (r) =>
+    json(r, { events: m.events, snapshot_seq: seq, next: seq, more: false }),
+  );
+  await page.route(`${BASE}/v1/agents/a1`, (r) => json(r, m.agent));
+  let stream: ServerResponse | undefined;
+  const server = createServer((request, response) => {
+    if (request.url !== "/events") return void response.writeHead(404).end();
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+    });
+    response.flushHeaders();
+    stream = response;
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw Error("owned SSE port missing");
+    await page.route(`${BASE}/v1/events*`, (route) =>
+      route.continue({ url: `http://127.0.0.1:${address.port}/events` }),
+    );
+    await page.goto("/test/agent-chat");
+    await expect.poll(() => !!stream).toBe(true);
+    await page.waitForFunction(() =>
+      (
+        window as unknown as {
+          __aftChatVisualArrival?: { ready(id: string): boolean };
+        }
+      ).__aftChatVisualArrival?.ready("a1"),
+    );
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __aftChatVisualArrival: { bind(id: string, path: string): unknown };
+        }
+      ).__aftChatVisualArrival.bind("a1", "/test/agent-chat"),
+    );
+    expect(
+      await page.evaluate(
+        motionSource!.replace("__MARKER__", JSON.stringify("VISUAL_END_TEST")),
+      ),
+    ).toBe("armed");
+    await page.waitForFunction(() => {
+      const p = (
+        window as unknown as {
+          __aftChatVisual?: { ticks: number[]; frames: unknown[] };
+        }
+      ).__aftChatVisual;
+      return (
+        location.pathname === "/test/agent-chat" &&
+        !!p &&
+        p.ticks.length >= 6 &&
+        p.frames.length === 0
+      );
+    });
+    const deltas = [
+      "Intro.\n\n",
+      "| file | test |\n| --- | --- |\n| README.md | npm test |\n\n",
+      '```json\n{"test":"npm test"}\n```\n\n',
+      "- first **bold** item\n- second item\n\n",
+      '<img src=x onerror="window.pwned=1"> and 😀. ' +
+        "source-backed example ".repeat(45),
+      "source-backed example ".repeat(45) + "VISUAL_END_TEST",
+    ];
+    const answer = deltas.join("");
+    for (const [index, deltaText] of deltas.entries()) {
+      stream!.write(
+        `event: event\ndata: ${JSON.stringify(
+          ev(
+            "delta",
+            {
+              itemId: "m1",
+              itemKind: "message",
+              text: deltaText,
+            },
+            true,
+          ),
+        )}\n\n`,
+      );
+      const expected = [
+        "Intro.",
+        "README.md",
+        '"test":"npm test"',
+        "second item",
+        "source-backed example",
+        "VISUAL_END_TEST",
+      ][index];
+      if (index === 4) continue; // Two real SSE deltas before the next DOM read.
+      await expect(transcript(page).getByTestId("chat-markdown")).toContainText(
+        expected,
+      );
+    }
+    const completed = ev("item.completed", {
+      itemId: "m1",
+      itemKind: "message",
+      text: answer,
+    });
+    const turn = ev("agent.turn_completed", {});
+    m.events.push(completed, turn);
+    m.agent = agent();
+    stream!.write(
+      [completed, turn]
+        .map((event) => `event: event\ndata: ${JSON.stringify(event)}\n\n`)
+        .join(""),
+    );
+    await expect(
+      transcript(page).locator("[data-streaming-caret]"),
+    ).toHaveCount(0);
+    await expect(transcript(page).getByTestId("working-row")).toHaveCount(0);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await page.waitForFunction(() => {
+      const own = (
+        window as unknown as {
+          __aftChatVisualArrival: {
+            snapshot(): {
+              error: string | null;
+              arrivals: {
+                mono: number;
+                agentId: string;
+                turnId: string;
+                itemId: string;
+              }[];
+            };
+          };
+        }
+      ).__aftChatVisualArrival.snapshot();
+      const p = (
+        window as unknown as {
+          __aftChatVisual: { tickMeta: { mono: number }[] };
+        }
+      ).__aftChatVisual;
+      const arrival = own.arrivals
+        .filter(
+          (a) => a.agentId === "a1" && a.turnId === "t1" && a.itemId === "m1",
+        )
+        .at(-1);
+      return (
+        own.error === null &&
+        !!arrival &&
+        (p.tickMeta.at(-1)?.mono ?? 0) >= arrival.mono + 300
+      );
+    });
+    const captured = await page.evaluate(() => {
+      const p = (
+        window as unknown as {
+          __aftChatVisual: {
+            start: number;
+            startClock: unknown;
+            ticks: number[];
+            tickMeta: {
+              at: number;
+              mono: number;
+              phase: number;
+              tickIndex: number;
+            }[];
+            signals: {
+              at: number;
+              mono: number;
+              phase: number;
+              tickIndex: number | null;
+              caret: boolean;
+              working: boolean;
+              stop: boolean;
+            }[];
+            captureState(): {
+              at: number;
+              mono: number;
+              phase: number;
+              caret: boolean;
+              working: boolean;
+              stop: boolean;
+            };
+            replyContent(node: Element | null): string;
+            stopped: boolean;
+            timer: number;
+            liveObserver: MutationObserver;
+            frames: {
+              at: number;
+              phase: number;
+              text: string;
+              visibleText: string;
+              contentText: string;
+              streaming: boolean;
+              words: number;
+            }[];
+            observer?: PerformanceObserver;
+          };
+        }
+      ).__aftChatVisual;
+      const last = p.captureState();
+      p.signals.push({ ...last, tickIndex: null });
+      p.stopped = true;
+      clearInterval(p.timer);
+      p.liveObserver.disconnect();
+      p.observer?.disconnect();
+      const observer = (
+        window as unknown as {
+          __aftChatVisualArrival: {
+            snapshot(): {
+              arrivals: { at: number; phase: number; text: string }[];
+              error: string | null;
+            };
+            close(): { closed: boolean };
+          };
+        }
+      ).__aftChatVisualArrival;
+      const receipt = observer.snapshot();
+      const closed = observer.close();
+      return {
+        start: p.start,
+        startClock: p.startClock,
+        ticks: p.ticks,
+        tickMeta: p.tickMeta,
+        signals: p.signals,
+        route: location.pathname,
+        frames: p.frames,
+        receipt,
+        closed,
+        terminal: document.querySelector(
+          "[data-testid=chat-transcript] li[data-kind=agent] [data-testid=chat-markdown]",
+        )?.textContent,
+        terminalVisible: document.querySelector<HTMLElement>(
+          "[data-testid=chat-transcript] li[data-kind=agent] [data-testid=chat-markdown]",
+        )?.innerText,
+        terminalContent: p.replyContent(
+          document.querySelector(
+            "[data-testid=chat-transcript] li[data-kind=agent] [data-testid=chat-markdown]",
+          ),
+        ),
+      };
+    });
+    expect(captured.receipt.error).toBeNull();
+    expect(captured.receipt.arrivals.map((arrival) => arrival.text)).toEqual(
+      deltas,
+    );
+    expect(captured.receipt.arrivals[4].phase).toBeLessThan(
+      captured.receipt.arrivals[5].phase,
+    );
+    expect(
+      captured.frames.some(
+        (frame) =>
+          frame.phase > captured.receipt.arrivals[4].phase &&
+          frame.phase < captured.receipt.arrivals[5].phase,
+      ),
+    ).toBe(false);
+    expect(captured.closed.closed).toBe(true);
+    expect(captured.frames.length).toBeGreaterThan(5);
+    const helper = resolve(
+      process.cwd(),
+      "../../../tests/aft/scripts/coverage-chat-visual-markdown.mjs",
+    );
+    const projected = JSON.parse(
+      execFileSync(process.execPath, [helper, process.cwd()], {
+        input: JSON.stringify({
+          answer,
+          frames: captured.frames.map((frame) => ({
+            text: frame.text,
+            streaming: frame.streaming,
+          })),
+          arrivals: deltas,
+        }),
+        encoding: "utf8",
+        timeout: 120000,
+      }),
+    ) as {
+      terminal: string;
+      terminalVisible: string;
+      terminalContent: string;
+      frames: ({
+        minSourceUtf16: number;
+        maxSourceUtf16: number;
+        visible: string;
+        visibleWords: number;
+        content: string;
+        contentWords: number;
+      } | null)[];
+      arrivals: {
+        requiredMinSourceUtf16: number;
+        visibleChanged: boolean;
+        contentChanged: boolean;
+        projectedWords: number;
+      }[];
+      identity: {
+        chatMarkdownSha256: string;
+        cssSha256: string;
+        lockSha256: string;
+      };
+    };
+    expect(projected.identity.chatMarkdownSha256).toBe(
+      createHash("sha256")
+        .update(
+          readFileSync(
+            resolve(process.cwd(), "src/components/AgentChat/ChatMarkdown.tsx"),
+          ),
+        )
+        .digest("hex"),
+    );
+    expect(projected.identity.lockSha256).toBe(
+      createHash("sha256")
+        .update(readFileSync(resolve(process.cwd(), "package-lock.json")))
+        .digest("hex"),
+    );
+    expect(projected.terminal).toBe(captured.terminal);
+    expect(projected.terminalVisible.trim().split(/\s+/)).toEqual(
+      captured.terminalVisible?.trim().split(/\s+/),
+    );
+    expect(projected.terminalContent.trim().split(/\s+/)).toEqual(
+      captured.terminalContent?.trim().split(/\s+/),
+    );
+    expect(projected.frames.every((frame) => frame !== null)).toBe(true);
+    const counted = await page.evaluate(
+      async (prefixes) => {
+        const source = "/src/components/AgentChat/ChatMarkdown.tsx";
+        const renderer = await import(/* @vite-ignore */ source);
+        return prefixes.map(
+          (prefix) => renderer.countReplyWords(prefix) as number,
+        );
+      },
+      projected.frames.map((frame) => answer.slice(0, frame!.minSourceUtf16)),
+    );
+    for (const [index, frame] of captured.frames.entries()) {
+      expect(projected.frames[index]!.visible.trim().split(/\s+/)).toEqual(
+        frame.visibleText.trim().split(/\s+/),
+      );
+      expect(projected.frames[index]!.visibleWords).toBe(
+        frame.visibleText.trim().split(/\s+/).filter(Boolean).length,
+      );
+      expect(projected.frames[index]!.content.trim().split(/\s+/)).toEqual(
+        frame.contentText.trim().split(/\s+/),
+      );
+      expect(projected.frames[index]!.contentWords).toBe(frame.words);
+      expect(counted[index]).toBe(frame.words);
+    }
+    const codeHeaderFrame = captured.frames.find((frame) =>
+      frame.visibleText.includes("json\nWrap\nCopy"),
+    );
+    expect(codeHeaderFrame).toBeDefined();
+    expect(codeHeaderFrame!.contentText).not.toContain("Wrap");
+    expect(codeHeaderFrame!.contentText).not.toContain("Copy");
+    const sourcePositions = projected.frames.map(
+      (frame) => frame!.minSourceUtf16,
+    );
+    expect(sourcePositions).toEqual([...sourcePositions].sort((a, b) => a - b));
+    expect(projected.arrivals).toHaveLength(deltas.length);
+    writeFileSync(
+      test.info().outputPath("mocked-visible-renderer-parity.json"),
+      JSON.stringify({
+        source: "ChatMarkdown.tsx + ChatMarkdown.module.css",
+        rendererSha256: projected.identity.chatMarkdownSha256,
+        cssSha256: projected.identity.cssSha256,
+        streamingFrames: captured.frames.filter((frame) => frame.streaming)
+          .length,
+        completedFrames: captured.frames.filter((frame) => !frame.streaming)
+          .length,
+        terminalVisibleWords: captured.terminalVisible?.trim().split(/\s+/)
+          .length,
+        rawTerminalTextEqual: projected.terminal === captured.terminal,
+        visibleTokensEqual: true,
+      }),
+    );
+    writeFileSync(
+      test.info().outputPath("mocked-markdown-native-oracle-input.json"),
+      JSON.stringify({
+        capture: captured,
+        projection: projected,
+        reply: completed,
+        turn,
+      }),
+    );
+    const deadlines = captured.receipt.arrivals.map((arrival, index) => {
+      if (!projected.arrivals[index].contentChanged) return null;
+      const match = captured.frames.findIndex(
+        (frame, frameIndex) =>
+          frame.at >= arrival.at &&
+          (projected.frames[frameIndex]?.minSourceUtf16 ?? -1) >=
+            projected.arrivals[index].requiredMinSourceUtf16,
+      );
+      expect(match).toBeGreaterThanOrEqual(0);
+      const lag = captured.frames[match].at - arrival.at;
+      expect.soft(lag).toBeLessThanOrEqual(300);
+      return lag;
+    });
+    const terminal = captured.terminal ?? "";
+    expect(terminal).toContain("ExpandCopy as MarkdownCopy as CSV");
+    expect(terminal).toContain('jsonWrapCopy{"test":"npm test"}');
+    expect(terminal).toContain("first bold item");
+    expect(terminal).toContain('<img src=x onerror="window.pwned=1">');
+    expect(terminal).toContain("😀. source-backed example");
+    expect(terminal).toContain("VISUAL_END_TEST");
+    expect(
+      await page.evaluate(() => (window as { pwned?: number }).pwned),
+    ).toBeUndefined();
+    expect(await transcript(page).locator("img, script").count()).toBe(0);
+    await test.info().attach("mocked-markdown-projection.json", {
+      body: JSON.stringify({
+        frameCount: captured.frames.length,
+        identity: projected.identity,
+        arrivals: captured.receipt.arrivals.map((arrival, index) => ({
+          at: arrival.at,
+          visibleChanged: projected.arrivals[index].visibleChanged,
+          contentChanged: projected.arrivals[index].contentChanged,
+          min: projected.arrivals[index].requiredMinSourceUtf16,
+          lagMs: deadlines[index],
+        })),
+        terminalLength: terminal.length,
+      }),
+      contentType: "application/json",
+    });
+    const pacing = JSON.parse(
+      execFileSync(
+        "python3",
+        [
+          "-c",
+          String.raw`
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('visual_markdown_oracle', sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+data = json.load(sys.stdin)
+snapshot = {'agent_id': 'a1', 'route': data['capture']['route'],
+            'probe': {'start': data['capture']['start'],
+                      'startClock': data['capture']['startClock'],
+                      'ticks': data['capture']['ticks'],
+                      'tickMeta': data['capture']['tickMeta'],
+                      'signals': data['capture']['signals'],
+                      'frames': data['capture']['frames'],
+                      'finalText': data['capture']['frames'][-1]['text'],
+                      'finalVisibleText': data['capture']['terminalVisible'],
+                      'finalContentText': data['capture']['terminalContent'],
+                      'arrival': data['capture']['receipt'],
+                      'arrivalClosed': data['capture']['closed']},
+            'replies': [data['reply']], 'turn_completed': data['turn']}
+print(json.dumps({'exceptions': module.assert_frame_pacing(snapshot, data['projection']),
+                  'deadlines': module.assert_arrival_deadlines(snapshot, data['projection'])}))
+`,
+          resolve(
+            process.cwd(),
+            "../../../tests/aft/scripts/coverage-chat-visual.py",
+          ),
+        ],
+        {
+          input: JSON.stringify({
+            capture: captured,
+            projection: projected,
+            reply: completed,
+            turn,
+          }),
+          encoding: "utf8",
+          timeout: 20_000,
+          env: {
+            ...process.env,
+            AFT_WORK_DIR: process.cwd(),
+            AFT_WS: "w1",
+            RUN_ID: "mock-markdown",
+            AFT_API_URL: "http://127.0.0.1:1",
+          },
+        },
+      ),
+    ) as {
+      exceptions: { kind: string; frame: number }[];
+      deadlines: { lag_mono_ms?: number }[];
+    };
+    expect(pacing.deadlines.length).toBe(deltas.length);
+    expect(
+      pacing.deadlines.every(
+        (deadline) =>
+          deadline.lag_mono_ms === undefined || deadline.lag_mono_ms <= 300,
+      ),
+    ).toBe(true);
+    await test.info().attach("mocked-markdown-aft-pacing.json", {
+      body: JSON.stringify(pacing),
+      contentType: "application/json",
+    });
+  } finally {
+    stream?.end();
+    await page.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test("an approval resolves once and the card leaves", async ({ page }) => {

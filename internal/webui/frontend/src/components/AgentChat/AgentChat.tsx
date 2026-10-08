@@ -770,14 +770,16 @@ function AgentMessage({
   streaming,
   at,
   newlyLive,
+  arrivals,
 }: {
   text: string;
   streaming: boolean;
   at?: string | undefined;
   newlyLive: boolean;
+  arrivals?: readonly { end: number; at: number }[] | undefined;
 }) {
   const [all, setAll] = useState(false);
-  const smooth = useSmoothText(text, streaming, newlyLive);
+  const smooth = useSmoothText(text, streaming, newlyLive, arrivals);
   const cut = !all && smooth.text.length > LONG_TEXT_LIMIT;
   return (
     <div className={page.agentMessage}>
@@ -849,6 +851,7 @@ function Item({
           streaming={!!item.streaming}
           at={item.at}
           newlyLive={newlyLive}
+          arrivals={item.arrivals}
         />
       );
     case "user":
