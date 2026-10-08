@@ -2418,3 +2418,100 @@ test.describe("in a locale with a long time format", () => {
     }
   });
 });
+
+test("Thinking and Started disclosures stay compact and keyboard accessible", async ({
+  page,
+}, testInfo) => {
+  const reasoning =
+    "Planning agent implementation workflow\nInspect the repository, then implement and verify the requested change.";
+  const childName = "channel-topic-slice-with-a-long-mobile-name";
+  await open(
+    page,
+    mock({
+      events: [
+        ev("item.completed", { itemKind: "reasoning", text: reasoning }),
+        ev("child.created", { child: "k1", name: childName }),
+        ev("item.completed", {
+          itemKind: "tool",
+          tool: {
+            name: "execute",
+            input: JSON.stringify({
+              code: "return await tools.loom.agent_create({brief:'implement channel topics'})",
+            }),
+          },
+        }),
+        ev("item.completed", {
+          itemKind: "message",
+          text: "I’m continuing with channel topics, including persistent storage, API support, UI integration, and tests.",
+        }),
+      ],
+    }),
+  );
+  const thinking = page.getByTestId("reasoning").getByRole("button");
+  const started = page.getByTestId("started-marker");
+  const calls = started.getByRole("button", { name: /1 tool call/ });
+  for (const width of [800, 390]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.goto(`/test/agent-chat?w=${width}`);
+    for (const theme of ["light", "dark"]) {
+      await page.evaluate((value) => {
+        document.documentElement.dataset.theme = value;
+      }, theme);
+      await expect(thinking).toHaveAttribute("aria-expanded", "false");
+      const childLink = started.getByRole("link", { name: childName });
+      await expect
+        .poll(() =>
+          childLink.evaluate(
+            (el) =>
+              getComputedStyle(el).color ===
+              getComputedStyle(el.closest('[data-testid="chat-transcript"]')!)
+                .color,
+          ),
+        )
+        .toBe(true);
+      await calls.evaluate((el) => el.blur());
+      await page.mouse.move(0, 0);
+      const geometry = await thinking.evaluate((el) => {
+        const q = el.getBoundingClientRect();
+        const icon = el.lastElementChild!.getBoundingClientRect();
+        return {
+          width: q.width,
+          parent: el.parentElement!.getBoundingClientRect().width,
+          chevronGap: q.right - icon.right,
+        };
+      });
+      expect(geometry.width).toBeLessThanOrEqual(geometry.parent);
+      expect(geometry.chevronGap).toBeLessThanOrEqual(12);
+      if (width === 800) expect(geometry.width).toBeLessThan(geometry.parent);
+      await expect(
+        started.getByRole("link", { name: childName }),
+      ).toHaveAttribute("href", "/ws/w1/chat/k1");
+      expect(
+        await transcript(page).evaluate(
+          (el) => el.scrollWidth - el.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(0);
+      const bounds = await started.boundingBox();
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      await page.screenshot({
+        path: testInfo.outputPath(`activity-${width}-${theme}.png`),
+      });
+      await thinking.focus();
+      await page.keyboard.press("Enter");
+      await expect(thinking).toHaveAttribute("aria-expanded", "true");
+      await expect(page.getByTestId("reasoning").locator("pre")).toHaveText(
+        reasoning,
+      );
+      await page.keyboard.press("Space");
+      await expect(thinking).toHaveAttribute("aria-expanded", "false");
+      await calls.focus();
+      await page.keyboard.press("Enter");
+      await expect(calls).toHaveAttribute("aria-expanded", "true");
+      await expect(page.getByTestId("tool-call")).toContainText(
+        "Started an agent",
+      );
+      await page.keyboard.press("Enter");
+      await expect(calls).toHaveAttribute("aria-expanded", "false");
+    }
+  }
+});

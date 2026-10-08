@@ -310,8 +310,10 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
-  padding: 0 4px;
+  gap: 6px 8px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 3px 4px;
   color: var(--color-text-muted);
   font-size: 0.8125rem;
 }
@@ -333,29 +335,48 @@
 .childChip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px 4px 6px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
   color: var(--color-text-primary);
-  font-weight: 600;
+  font-weight: 500;
+  overflow-wrap: anywhere;
   text-decoration: none;
 }
 
 .childChip:hover {
-  text-decoration: underline;
+  background: var(--color-bg-hover);
+  border-color: var(--color-border);
+}
+
+.childChip:focus-visible,
+.calls:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 /* The Started marker's folded agent_create calls: "2 tool calls ›". */
 .calls {
   margin-left: 2px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-secondary);
   font: inherit;
-  font-size: 0.71875rem;
+  font-size: 12px;
   cursor: pointer;
 }
 
 .calls:hover {
+  background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 

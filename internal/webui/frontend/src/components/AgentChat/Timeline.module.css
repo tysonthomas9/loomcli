@@ -207,3 +207,34 @@
 .bridgeFailed {
   color: var(--color-danger);
 }
+
+/* Reasoning is a compact disclosure, not a full-width toolbar. */
+.entry[data-testid="reasoning"] .entryRow {
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 3px 8px 3px 2px;
+  gap: 8px;
+  background: var(--color-bg-secondary);
+}
+
+.entry[data-testid="reasoning"] .heading {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.entry[data-testid="reasoning"] .preview {
+  max-width: 28rem;
+  color: var(--color-text-secondary);
+}
+
+.entry[data-testid="reasoning"] .chevron {
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.entry[data-testid="reasoning"] .entryRow[data-expandable="true"]:hover {
+  background: var(--color-bg-hover);
+}
