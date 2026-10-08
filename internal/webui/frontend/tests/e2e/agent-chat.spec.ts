@@ -2144,7 +2144,7 @@ test("state pill fits every Agent state without widening the history warning", a
   expect(warningSize.scrollWidth).toBe(warningSize.clientWidth);
 });
 
-test("one agent's one-line messages sit close, and the hover pill takes no space (UI6)", async ({
+test("reply copy actions stay visible below close-spaced messages (UI6)", async ({
   page,
 }) => {
   const at = "2026-10-04T20:15:00Z";
@@ -2171,12 +2171,13 @@ test("one agent's one-line messages sit close, and the hover pill takes no space
   );
   const md = transcript(page).getByTestId("chat-markdown");
   await expect(md).toHaveCount(3);
-  const box = async (i: number) => (await md.nth(i).boundingBox())!;
+  const box = async (i: number) =>
+    (await md.nth(i).locator("..").boundingBox())!;
   const gap = (await box(1)).y - ((await box(0)).y + (await box(0)).height);
   test.info().annotations.push({ type: "gap", description: `${gap}px` });
   console.log(`UI6 gap between one-line agent messages: ${gap}px`);
   expect(gap).toBeLessThan(16);
-  // The pill shows on hover, with the time, and moves nothing.
+  // Reply actions are visible below the content, with the time; hover moves nothing.
   const time = await page.evaluate(
     (t) =>
       new Date(t).toLocaleTimeString([], {
@@ -2185,20 +2186,23 @@ test("one agent's one-line messages sit close, and the hover pill takes no space
       }),
     at,
   );
-  const before = await box(1);
+  const before = await box(0);
   const rows = transcript(page).locator("li");
   const agentRow = rows.filter({ hasText: "api-reviewer completed" });
-  await agentRow.hover();
   const pill = agentRow.getByTestId("message-actions");
+  await expect(pill).toHaveCSS("opacity", "1");
+  await agentRow.hover();
   await expect(pill).toBeVisible();
   await expect(pill).toHaveText(time);
   await expect(
     pill.getByRole("button", { name: "Copy message" }),
   ).toBeVisible();
-  expect(await box(1)).toEqual(before);
-  // It stays on its own message, clear of the next one.
+  expect(await box(0)).toEqual(before);
+  // It follows its own content, within the reply and clear of the next one.
   const p = (await pill.boundingBox())!;
-  expect(p.y + p.height).toBeLessThanOrEqual(before.y);
+  const content = (await md.nth(0).boundingBox())!;
+  expect(p.y).toBeGreaterThanOrEqual(content.y + content.height);
+  expect(p.y + p.height).toBeLessThanOrEqual(before.y + before.height);
   const userRow = rows.filter({ hasText: "Run the reviewers" });
   for (const theme of ["light", "dark"]) {
     await page.evaluate((t) => {

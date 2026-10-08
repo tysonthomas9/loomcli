@@ -429,6 +429,30 @@ describe("AgentChat", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("explains an empty saved reasoning event instead of offering an empty toggle", async () => {
+    await mount(agent());
+    deliver(ev("item.completed", { itemKind: "reasoning" }));
+    const row = screen.getByTestId("reasoning");
+    expect(row).toHaveTextContent("No reasoning text available");
+    expect(within(row).queryByRole("button")).toBeNull();
+  });
+
+  it("expands reasoning text when the saved event supplies it", async () => {
+    await mount(agent());
+    deliver(
+      ev("item.completed", {
+        itemKind: "reasoning",
+        text: "Plan the answer\nCheck the requested format.",
+      }),
+    );
+    const row = screen.getByTestId("reasoning");
+    fireEvent.click(within(row).getByRole("button"));
+    expect(
+      within(row).getByText(/Check the requested format/),
+    ).toBeInTheDocument();
+    expect(row).not.toHaveTextContent("No reasoning text available");
+  });
+
   it("shows the full long reply without requiring expansion", async () => {
     await mount(agent());
     const long = "x".repeat(17000);

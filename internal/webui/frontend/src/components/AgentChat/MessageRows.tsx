@@ -34,8 +34,8 @@ export function clockTime(at: string | undefined): string {
 }
 
 /**
- * Every message's hover pill (UI6): its time, copy, and that role's own
- * actions, laid over the message so it takes no space.
+ * A message's time, copy, and that role's own actions. Replies show these
+ * below their content; user messages reveal them beside the bubble on hover.
  */
 export function MessageActions({
   text,
