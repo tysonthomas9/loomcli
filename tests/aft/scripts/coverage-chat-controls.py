@@ -569,12 +569,16 @@ def main():
                "resolved": resolved, "ask-terminal": ask_terminal, "malformed": malformed, "custom": custom,
                "unknown": unknown, "recover": recover, "approval-effect": approval_effect,
                "question-answers": question_answers, "lost": lost, "roster": roster,
-               "history": history, "respond-receipt": respond_receipt,
+               "history": history, "ask-history": ask_history, "respond-receipt": respond_receipt,
                "modal-backends": modal_backends}
     if command == "check-model" and len(args) == 3:
         actions[command](args[0], args[1], args[2] == "effort")
     elif command == "custom":
         actions[command](args[0], args[1] == "present")
+    elif command == "ask-history":
+        assert len(args) == 3 or (len(args) == 4 and args[3] == "compare"), \
+            "ask-history usage: case stage opened,resolved,lost [compare]"
+        actions[command](*args[:3], compare=len(args) == 4)
     else:
         actions[command](*args)
 
