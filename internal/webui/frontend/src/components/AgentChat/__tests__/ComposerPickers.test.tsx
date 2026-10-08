@@ -210,6 +210,32 @@ describe("composer model and effort pickers (UI2)", () => {
     expect(api.getAgent).toHaveBeenCalledTimes(2);
   });
 
+  it("saves the displayed catalog default when a new agent explicitly picks it", async () => {
+    await mount(agent({ model: null }));
+    expect(modelButton()).toHaveAccessibleName("Model: GPT-5.5");
+    fireEvent.click(modelButton());
+    const dialog = screen.getByRole("dialog", { name: "Choose a model" });
+    fireEvent.click(
+      dialog.querySelector('li[role="option"][title="openai/gpt-5.5"]')!,
+    );
+    expect(api.updateAgent).toHaveBeenCalledWith(
+      "w1",
+      "a1",
+      { model: "openai/gpt-5.5" },
+      expect.stringMatching(/^req-/),
+    );
+  });
+
+  it("keeps an already saved model selection as a no-op", async () => {
+    await mount(agent({ model: "openai/gpt-5.5" }));
+    fireEvent.click(modelButton());
+    const dialog = screen.getByRole("dialog", { name: "Choose a model" });
+    fireEvent.click(
+      dialog.querySelector('li[role="option"][title="openai/gpt-5.5"]')!,
+    );
+    expect(api.updateAgent).not.toHaveBeenCalled();
+  });
+
   it("searches across providers and selects the highlighted model with Enter", async () => {
     await mount(agent());
     fireEvent.click(modelButton());

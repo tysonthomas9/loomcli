@@ -83,7 +83,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             onRemoveCustom={props.onRemoveCustom}
             onSelect={(id) => {
               setOpen(false);
-              if (id !== props.model?.id) props.onModelChange(id);
+              if (id !== props.modelId) props.onModelChange(id);
             }}
           />
         </div>

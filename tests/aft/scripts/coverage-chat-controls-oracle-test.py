@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -144,6 +145,31 @@ class OracleTest(unittest.TestCase):
              patch.object(module, "aid", return_value="agt_a"):
             with self.assertRaisesRegex(AssertionError, "full saved ask"):
                 module.ask_history("approval", "once", "1,0,0", True)
+
+    def test_ask_history_cli_dispatch_snapshot_compare_and_bad_mode(self):
+        original = {"event_id": "ask.opened::ses:per_1", "seq": 1,
+                    "kind": "ask.opened", "turn_id": "turn_1",
+                    "payload": {"askId": "per_1", "text": "owned command"}}
+        prefix = ["coverage-chat-controls.py", "ask-history", "approval", "once", "1,0,0"]
+        with patch.object(module, "events", return_value=[original]), \
+             patch.object(module, "aid", return_value="agt_owned"), \
+             patch.object(sys, "argv", prefix):
+            module.main()
+        self.assertEqual(module.saved("approval-once-ask-history.json"), {
+            "agent_id": "agt_owned", "events": [original], "expected_counts": [1, 0, 0]})
+        with patch.object(module, "events", return_value=[original]), \
+             patch.object(module, "aid", return_value="agt_owned"), \
+             patch.object(sys, "argv", [*prefix, "compare"]):
+            module.main()
+        changed = {**original, "payload": {"askId": "per_1", "text": "changed command"}}
+        with patch.object(module, "events", return_value=[changed]), \
+             patch.object(module, "aid", return_value="agt_owned"), \
+             patch.object(sys, "argv", [*prefix, "compare"]):
+            with self.assertRaisesRegex(AssertionError, "full saved ask"):
+                module.main()
+        with patch.object(sys, "argv", [*prefix, "skip"]):
+            with self.assertRaisesRegex(AssertionError, "ask-history usage"):
+                module.main()
 
     def test_modal_refuses_default_outside_wired_harnesses(self):
         for result in ({"options": ["opencode"], "selected": "codex"},
