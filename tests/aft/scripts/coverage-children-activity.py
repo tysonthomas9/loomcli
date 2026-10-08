@@ -2,6 +2,7 @@
 """Read-only oracles for run-owned real child activity journeys."""
 
 import base64
+import importlib.util
 import hashlib
 import json
 import os
@@ -20,6 +21,10 @@ ROOT = f"{os.environ['AFT_API_URL'].rstrip('/')}/api/workspaces/{quote(WS)}/v1/a
 OUT = Path(os.environ["AFT_WORK_DIR"]) / "coverage-children-activity"
 OUT.mkdir(parents=True, exist_ok=True)
 
+
+_disclosure_spec = importlib.util.spec_from_file_location("chat_disclosures", Path(__file__).with_name("coverage-chat-disclosures.py"))
+disclosures = importlib.util.module_from_spec(_disclosure_spec)
+_disclosure_spec.loader.exec_module(disclosures)
 
 def get(url):
     with urlopen(url, timeout=15) as response:
@@ -459,6 +464,52 @@ def started_ui(lead_label, *child_labels):
             save(f"color-{kid['agent_id']}", {"value": color})
     browser("screenshot", str(OUT / f"started-{lead_label}.png"))
     save(f"started-{lead_label}", {"created_ids": created_ids, "native_tool_entries": tool_count, "ui": shot})
+
+
+def started_disclosures(lead_label, *child_labels):
+    lead = load(lead_label)
+    kids = [load(label) for label in child_labels]
+    ids = [kid["agent_id"] for kid in kids]
+    # Run only after the existing completed-turn proofs, never prolong the running-child window.
+    current = agent(lead["agent_id"])
+    assert current["state"] in ("idle", "finished") and not current.get("running_turn_id"), \
+        "Started layout requires a settled owned Lead"
+    history = events(lead["agent_id"])
+    assert sorted(e["payload"].get("child") for e in history if e["kind"] == "child.created") == sorted(ids)
+    original = browser_json("JSON.stringify({width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme})")
+    captures = []
+    try:
+        for width in (800, 390):
+            browser("set", "viewport", str(width), "844")
+            for theme in ("light", "dark"):
+                if browser_json("JSON.stringify(document.documentElement.dataset.theme)") != theme:
+                    browser("click", f'button[aria-label="Switch to {theme} mode"]')
+                browser("wait", "--fn", f'document.documentElement.dataset.theme === {json.dumps(theme)}')
+                browser("wait", "--fn", """(() => {const c=document.querySelector('[data-testid=chat-transcript]');
+                  const links=[...(c?.querySelectorAll('[data-testid=started-marker] a[href]')||[])];
+                  return !!c&&links.length>0&&links.every(a=>getComputedStyle(a).color===getComputedStyle(c).color);})()""")
+                snapshot = browser_json("JSON.stringify(" + disclosures.STARTED_LAYOUT + ")")
+                disclosures.assert_started_layout(snapshot, WS, lead["agent_id"], ids)
+                captures.append({"width": width, "theme": theme, "ui": snapshot})
+                browser("screenshot", str(OUT / f"started-disclosures-{lead_label}-{width}-{theme}.png"))
+        count = browser_json("JSON.stringify(document.querySelectorAll('[data-testid=started-marker] button[aria-expanded]').length)")
+        assert count > 0, "Started tool disclosure missing"
+        for index in range(count):
+            script = f"document.querySelectorAll('[data-testid=started-marker] button[aria-expanded]')[{index}]"
+            before = browser_json(f"JSON.stringify({script}.getAttribute('aria-expanded'))")
+            browser_json(f"JSON.stringify((()=>{{const b={script};b.focus();return document.activeElement===b;}})())")
+            browser("press", "Enter")
+            after = "false" if before == "true" else "true"
+            browser("wait", "--fn", f"{script}.getAttribute('aria-expanded') === {json.dumps(after)}")
+            browser("press", "Enter")
+            browser("wait", "--fn", f"{script}.getAttribute('aria-expanded') === {json.dumps(before)}")
+        assert events(lead["agent_id"]) == history, "saved Lead events changed during disclosure checks"
+        save(f"started-disclosures-{lead_label}", {"created_ids": ids, "captures": captures,
+            "keyboard_round_trips": count, "saved_event_ids": [e["event_id"] for e in history]})
+    finally:
+        browser("set", "viewport", str(original["width"]), str(original["height"]))
+        if browser_json("JSON.stringify(document.documentElement.dataset.theme)") != original["theme"]:
+            browser("click", f'button[aria-label="Switch to {original["theme"]} mode"]')
 
 
 def expanded_bridge(lead_label):

@@ -28,23 +28,37 @@ const copyFile = resolve(
   frontend,
   "src/components/AgentChat/MessageCopyButton.tsx",
 );
-const cssFile = resolve(frontend, "src/components/AgentChat/ChatMarkdown.module.css");
+const cssFile = resolve(
+  frontend,
+  "src/components/AgentChat/ChatMarkdown.module.css",
+);
 const lockFile = resolve(frontend, "package-lock.json");
 const sha256 = (path) =>
   createHash("sha256").update(readFileSync(path)).digest("hex");
 // The visible-text traversal is verified against these exact renderer and CSS
 // bytes in Chromium. A change needs new browser parity evidence before credit.
-if (sha256(sourceFile) !== "cbf6aad87f1f4f4e2160679732a886d2248f6b60b07aee9d7c48c5395600522f" ||
-    sha256(cssFile) !== "8fc71740bb4e2e99b526105279f286544e1e27c4fb81b4eb1fc9c051573bda4b")
+if (
+  sha256(sourceFile) !==
+    "cbf6aad87f1f4f4e2160679732a886d2248f6b60b07aee9d7c48c5395600522f" ||
+  sha256(cssFile) !==
+    "8fc71740bb4e2e99b526105279f286544e1e27c4fb81b4eb1fc9c051573bda4b"
+)
   throw Error("unverified-visible-renderer-source");
 if (!readFileSync(limitFile, "utf8").includes("{text}</div>"))
   throw Error("unrecognized-full-text-rendering");
 const lock = JSON.parse(readFileSync(lockFile, "utf8"));
 const css = readFileSync(cssFile, "utf8");
-if (!/\.markdown\[data-streaming="true"\]\s+\.tableActions\s*\{\s*visibility:\s*hidden;\s*\}/.test(css))
+if (
+  !/\.markdown\[data-streaming="true"\]\s+\.tableActions\s*\{\s*visibility:\s*hidden;\s*\}/.test(
+    css,
+  )
+)
   throw Error("unrecognized-streaming-actions-visibility");
 const cssNames = Object.fromEntries(
-  [...css.matchAll(/\.([A-Za-z][A-Za-z0-9_-]*)/g)].map((match) => [match[1], match[1]]),
+  [...css.matchAll(/\.([A-Za-z][A-Za-z0-9_-]*)/g)].map((match) => [
+    match[1],
+    match[1],
+  ]),
 );
 const dependencies = {};
 for (const name of [
@@ -70,16 +84,21 @@ const require = createRequire(resolve(frontend, "package.json"));
 const esbuild = require("esbuild");
 const { JSDOM } = require("jsdom");
 const input = JSON.parse(readFileSync(0, "utf8"));
+const terminalOnly = input.mode === "terminal-full";
+if (input.mode !== undefined && !terminalOnly)
+  throw Error("invalid-projection-mode");
 if (
   typeof input.answer !== "string" ||
   !input.answer ||
-  input.answer.length > 8000 ||
+  input.answer.length > (terminalOnly ? 128000 : 8000) ||
   !Array.isArray(input.frames) ||
   input.frames.length > 20000 ||
   !Array.isArray(input.arrivals) ||
   input.arrivals.length > 5000 ||
-  !input.frames.every((frame) => typeof frame?.text === "string" &&
-    typeof frame.streaming === "boolean") ||
+  !input.frames.every(
+    (frame) =>
+      typeof frame?.text === "string" && typeof frame.streaming === "boolean",
+  ) ||
   !input.arrivals.every((text) => typeof text === "string")
 )
   throw Error("invalid-projection-input");
@@ -130,8 +149,20 @@ function project(source, streaming) {
   )
     throw Error("missing-component-projection");
   const boundaries = new Set([
-    "DIV", "P", "PRE", "UL", "OL", "LI", "BLOCKQUOTE", "SECTION",
-    "H1", "H2", "H3", "H4", "H5", "H6",
+    "DIV",
+    "P",
+    "PRE",
+    "UL",
+    "OL",
+    "LI",
+    "BLOCKQUOTE",
+    "SECTION",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
   ]);
   function shown(node, replyOnly = false) {
     if (node.nodeType === 3) return node.nodeValue ?? "";
@@ -142,20 +173,45 @@ function project(source, streaming) {
     if (["SCRIPT", "STYLE", "SVG", "INPUT"].includes(el.tagName)) return "";
     if (el.tagName === "BR") return "\n";
     if (el.tagName === "TABLE")
-      return [...el.querySelectorAll("tr")].map((row) => shown(row, replyOnly)).join("\n");
+      return [...el.querySelectorAll("tr")]
+        .map((row) => shown(row, replyOnly))
+        .join("\n");
     if (el.tagName === "TR")
-      return [...el.children].filter((child) => ["TH", "TD"].includes(child.tagName))
-        .map((cell) => shown(cell, replyOnly)).join("\t");
+      return [...el.children]
+        .filter((child) => ["TH", "TD"].includes(child.tagName))
+        .map((cell) => shown(cell, replyOnly))
+        .join("\t");
     const children = [...el.childNodes].map((child) => shown(child, replyOnly));
-    const separated = el.classList.contains(cssNames.toolbar) ||
+    const separated =
+      el.classList.contains(cssNames.toolbar) ||
       el.classList.contains(cssNames.codeblockHeader) ||
       el.classList.contains(cssNames.tableActions);
     const body = children.join(separated ? "\n" : "");
     return boundaries.has(el.tagName) ? `\n${body}\n` : body;
   }
   const normalize = (value) => value.trim().replace(/\n{3,}/g, "\n\n");
-  return { raw: markdown.textContent, visible: normalize(shown(markdown)),
-    content: normalize(shown(markdown, true)) };
+  return {
+    raw: markdown.textContent,
+    visible: normalize(shown(markdown)),
+    content: normalize(shown(markdown, true)),
+  };
+}
+
+if (terminalOnly) {
+  if (input.frames.length || input.arrivals.length)
+    throw Error("terminal-mode-has-motion-evidence");
+  const terminal = project(input.answer, false);
+  process.stdout.write(
+    JSON.stringify({
+      version: 1,
+      mode: "terminal-full",
+      sourceUtf16: input.answer.length,
+      terminal: terminal.raw,
+      chatMarkdownSha256: sha256(sourceFile),
+      cssSha256: sha256(cssFile),
+    }) + "\n",
+  );
+  process.exit(0);
 }
 
 const positions = new Map();
@@ -206,20 +262,29 @@ const terminal = project(input.answer, false);
 const frames = input.frames.map((frame) => {
   if (!frame.streaming) {
     if (frame.text !== terminal.raw) return null;
-    return { minSourceUtf16: input.answer.length, maxSourceUtf16: input.answer.length,
+    return {
+      minSourceUtf16: input.answer.length,
+      maxSourceUtf16: input.answer.length,
       visibleWords: terminal.visible.trim().split(/\s+/).filter(Boolean).length,
-      visible: terminal.visible, content: terminal.content,
-      contentWords: terminal.content.trim().split(/\s+/).filter(Boolean).length };
+      visible: terminal.visible,
+      content: terminal.content,
+      contentWords: terminal.content.trim().split(/\s+/).filter(Boolean).length,
+    };
   }
   const range = positions.get(frame.text);
   if (!range) return null;
   const first = project(input.answer.slice(0, range[0]), true);
   const last = project(input.answer.slice(0, range[1]), true);
-  if (first.visible !== last.visible || first.content !== last.content) return null;
-  return { minSourceUtf16: range[0], maxSourceUtf16: range[1],
+  if (first.visible !== last.visible || first.content !== last.content)
+    return null;
+  return {
+    minSourceUtf16: range[0],
+    maxSourceUtf16: range[1],
     visibleWords: first.visible.trim().split(/\s+/).filter(Boolean).length,
-    visible: first.visible, content: first.content,
-    contentWords: first.content.trim().split(/\s+/).filter(Boolean).length };
+    visible: first.visible,
+    content: first.content,
+    contentWords: first.content.trim().split(/\s+/).filter(Boolean).length,
+  };
 });
 process.stdout.write(
   JSON.stringify({

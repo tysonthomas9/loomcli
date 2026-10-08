@@ -190,6 +190,10 @@ tests:
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" repeated repeat-lead repeat
         intent: Recheck exact completion and delivery keys after reload
 
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_disclosures repeat-lead repeat
+        intent: Check exact child chips and separate tool-count controls at 800 and 390px in both themes, with real keyboard expansion and unchanged saved history after the Lead settles
+
   # OR4c visible handover. Internal crash/transaction races remain Go gates.
   - name: two task children finish while the Lead works and both facts reach one handover
     intent: Two actual task children finish while their real Lead has an active turn; the saved completion keys share one later handover and one combined Lead reply
@@ -332,6 +336,10 @@ tests:
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_ui pair-lead pair-a pair-b
         intent: Recheck both Started child links and badges after reload
+
+      - run: >-
+          python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" started_disclosures pair-lead pair-a pair-b
+        intent: Check both exact child chips, compact mobile wrapping and keyboard tool-count disclosure after the completed pair proof
 
   # SB2/SB4/SB5/RAIL1. Independent Agent API daemon workers have no UI
   # creation path at this pinned source; the mixed Background proof is pending.

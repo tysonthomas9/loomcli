@@ -2,6 +2,7 @@
 """Read-only saved-event and browser oracles for the real chat visual journeys."""
 
 import base64
+import importlib.util
 import hashlib
 import json
 import math
@@ -30,6 +31,10 @@ WS = required("AFT_WS")
 RUN = required("RUN_ID")
 API = required("AFT_API_URL").rstrip("/")
 PREFIX = f"/api/workspaces/{urllib.parse.quote(WS, safe='')}/v1/agents"
+_disclosure_spec = importlib.util.spec_from_file_location("chat_disclosures", Path(__file__).with_name("coverage-chat-disclosures.py"))
+disclosures = importlib.util.module_from_spec(_disclosure_spec)
+_disclosure_spec.loader.exec_module(disclosures)
+
 NAMES = {case: f"aft-{RUN}-cov-visual-{case}" for case in ("render", "input")}
 MOBILE_WS_NAMES = [f"aft-{RUN}-visual-ws-{index}" for index in range(1, 4)]
 
@@ -1583,7 +1588,7 @@ def assert_clock_ledger(snapshot):
     return meta
 
 
-def run_markdown_projection(answer, texts, deltas):
+def run_markdown_projection(answer, texts, deltas, terminal_only=False):
     frontend = Path(required("AFT_TESTS_DIR")).resolve().parents[1] / "internal/webui/frontend"
     helper = Path(required("AFT_TESTS_DIR")) / "scripts/coverage-chat-visual-markdown.mjs"
     assert frontend.is_dir() and helper.is_file(), "exact ChatMarkdown source projection is unavailable"
@@ -1591,6 +1596,8 @@ def run_markdown_projection(answer, texts, deltas):
                "frames": [frame if isinstance(frame, dict) else
                           {"text": frame, "streaming": True} for frame in texts],
                "arrivals": deltas}
+    if terminal_only:
+        payload["mode"] = "terminal-full"
     process = subprocess.run(["node", str(helper), str(frontend)],
                              input=json.dumps(payload, ensure_ascii=False), text=True,
                              capture_output=True, timeout=120, check=False)
@@ -2835,6 +2842,7 @@ RENDER_DOM = r"""(() => { const c=document.querySelector('[data-testid=chat-tran
   const a=[...(c?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);
   const table=a?.querySelector('table');
   return {answer:a?.querySelector('[data-testid=chat-markdown]')?.textContent||'',
+    showAll:!![...(a?.querySelectorAll('button')||[])].find(b=>b.textContent.startsWith('Show all')),
     table:table?[...table.querySelectorAll('tr')].map(r=>[...r.querySelectorAll('th,td')].map(x=>x.textContent.trim())):[],
     code:[...(a?.querySelectorAll('[data-testid=chat-codeblock]')||[])].map(x=>({language:x.dataset.language,
       text:x.querySelector('code')?.textContent||'', tokenSpans:x.querySelectorAll('code span').length})),
@@ -2875,6 +2883,14 @@ def render_check():
     assert any("README.md" in (e["payload"].get("tool") or {}).get("input", "") for e in tools), "saved completed tool did not match repo read"
     expand_work()
     dom = evaluate(RENDER_DOM)
+    saved_reply = [e for e in between if e["kind"] == "item.completed" and
+                   e["payload"].get("itemKind") == "message"][-1]
+    full_source = saved_reply["payload"]["text"]
+    full_reply = run_markdown_projection(full_source, [], [], terminal_only=True)
+    disclosures.assert_full_reply(full_source, dom, full_reply)
+    write("render-full-reply.json", {"saved_event_id": saved_reply["event_id"],
+        "source_utf16": js_utf16_length(full_source), "crosses_former_limit": js_utf16_length(full_source) > 8000,
+        "projection": full_reply, "dom": {"answer": dom["answer"], "showAll": dom["showAll"]}})
     assert dom["groups"] >= 1 and len(dom["tools"]) >= 3, "grouped real tool rows missing from Chat"
     assert dom["table"] and any("README.md" in row and "npm test" in " ".join(row) for row in dom["table"]), dom["table"]
     assert any(c["language"] == "json" and package_line in c["text"] and c["tokenSpans"] > 0 for c in dom["code"]), dom["code"]
@@ -2925,12 +2941,17 @@ def reasoning_preview(text):
     return line if len(line) <= 120 else line[:119] + "…"
 
 
-REASONING_DOM = r"""(() => [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]
-  .map(x => { const toggle=x.querySelector('[role=button]');
+REASONING_DOM = r"""(() => {
+  const rect=x=>{if(!x)return null;const r=x.getBoundingClientRect();
+    return {x:r.x,y:r.y,width:r.width,height:r.height};};
+  return [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]
+  .map(x => { const toggle=x.querySelector('[role=button]'), row=x.firstElementChild;
     return {heading:x.querySelector('[class*=heading]')?.textContent||'',
       preview:x.querySelector('[class*=preview]')?.textContent||'',
       expanded:toggle?.getAttribute('aria-expanded')??null,
-      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null}; }))()"""
+      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null,
+      geometry:{row:rect(row),parent:rect(x),chevron:rect(row?.querySelector('[class*=chevron]')),
+        tabIndex:toggle?.tabIndex??null}}; });})()"""
 
 
 def assert_reasoning_rows(saved, rows, expanded):
@@ -2997,9 +3018,14 @@ def reasoning_capture(stage):
     else:
         raise AssertionError("too many collapsed work groups")
     collapsed = evaluate(REASONING_DOM)
+    disclosures.assert_thinking_presentation(reasoning_items, collapsed, False)
     shot("render", f"thinking-{stage}-preview")
     expand_work()
     expanded = evaluate(REASONING_DOM)
+    disclosures.assert_thinking_presentation(reasoning_items, expanded, True)
+    write(f"render-reasoning-{stage}-presentation.json", {
+        "criterion": "saved-text disclosure or explicit nonexpandable empty state; compact row with nearby chevron",
+        "items": reasoning_receipt_diagnostic(reasoning_items), "collapsed": collapsed, "expanded": expanded})
     shot("render", f"thinking-{stage}-expanded")
     current("render")
     final_delivered, final_end, final_between = turn_events("render", "VISUAL_RENDER")
@@ -3017,6 +3043,43 @@ def reasoning_capture(stage):
         "validation": "pending", "capture_sha256": motion_digest(snapshot),
         "delivered_event_id": delivered["event_id"], "turn_event_id": end["event_id"],
         **reasoning_receipt_diagnostic(reasoning_items)})
+
+
+def reasoning_presentation_grid():
+    current("render")
+    delivered, end, between = turn_events("render", "VISUAL_RENDER")
+    items = [e for e in between if e["kind"] == "item.completed" and e["payload"].get("itemKind") == "reasoning"]
+    assert items, "BLOCKED: no actual saved reasoning item to test disclosure presentation"
+    original = evaluate("({width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme})")
+    captures = []
+    selector = '[data-testid=chat-transcript] [data-testid=reasoning] [role=button][aria-expanded=true]'
+    try:
+        for width in (800, 390):
+            browser("set", "viewport", str(width), "844")
+            for theme in ("light", "dark"):
+                if evaluate("document.documentElement.dataset.theme") != theme:
+                    browser("click", f'button[aria-label="Switch to {theme} mode"]')
+                browser("wait", "--fn", f'document.documentElement.dataset.theme === {json.dumps(theme)}')
+                expand_work()
+                expanded = evaluate(REASONING_DOM)
+                disclosures.assert_thinking_presentation(items, expanded, True)
+                # Real key presses close each available body; empty rows have no toggle.
+                count = evaluate(f"document.querySelectorAll({json.dumps(selector)}).length")
+                for _ in range(count):
+                    assert evaluate(f"(() => {{const b=document.querySelector({json.dumps(selector)});b.focus();return document.activeElement===b;}})()")
+                    browser("press", "Enter")
+                collapsed = evaluate(REASONING_DOM)
+                disclosures.assert_thinking_presentation(items, collapsed, False)
+                captures.append({"width": width, "theme": theme, "collapsed": collapsed,
+                                 "expanded": expanded, "keyboard_closed": count})
+                shot("render", f"thinking-disclosure-{width}-{theme}")
+        assert turn_events("render", "VISUAL_RENDER") == (delivered, end, between), "saved reasoning changed during presentation checks"
+        write("render-reasoning-presentation-grid.json", {"saved_event_ids": [e["event_id"] for e in items],
+            "captures": captures, "evidence": "presentation only; original reasoning-text and motion criteria remain separate"})
+    finally:
+        browser("set", "viewport", str(original["width"]), str(original["height"]))
+        if evaluate("document.documentElement.dataset.theme") != original["theme"]:
+            browser("click", f'button[aria-label="Switch to {original["theme"]} mode"]')
 
 
 def assert_reasoning_captures(before, after):
@@ -3712,6 +3775,11 @@ def clipboard_check(kind):
 
 def copy_message():
     current("render")
+    assert evaluate("""(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);
+      const b=r?.querySelector('[data-testid=message-actions] button[aria-label="Copy message"]');
+      if(!b)throw Error('reply copy missing');b.focus();b.scrollIntoView({block:'center'});return document.activeElement===b;})()""")
+    browser("wait", "--fn", """(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);
+      const p=r?.querySelector('[data-testid=message-actions]');return !!p&&getComputedStyle(p).opacity==='1';})()""")
     browser("find", "last", "[data-testid=chat-transcript] li[data-kind=agent] [data-testid=message-actions] button[aria-label='Copy message']", "click")
 
 
@@ -3753,30 +3821,55 @@ def live_check():
     write("render-live.json", {"delivered": delivered[0], **live})
 
 
+REPLY_ACTIONS_DOM = r"""(() => {
+  const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);
+  const p=r?.querySelector('[data-testid=message-actions]'), b=p?.querySelector('button[aria-label="Copy message"]');
+  const m=r?.querySelector('[data-testid=chat-markdown]');
+  const rect=x=>{if(!x)return null;const q=x.getBoundingClientRect();return {x:q.x,y:q.y,width:q.width,height:q.height};};
+  return {path:location.pathname,text:m?.textContent||'',copy:!!b,time:p?.textContent||'',
+    opacity:p&&getComputedStyle(p).opacity,pointerEvents:p&&getComputedStyle(p).pointerEvents,
+    hovered:r?.matches(':hover')??false,focused:p?.contains(document.activeElement)??false,
+    row:rect(r),pill:rect(p),button:rect(b),markdown:rect(m),viewportHeight:innerHeight};})()"""
+
+
 def agent_hover():
     current("render")
     results = []
     for theme in ("light", "dark"):
         if evaluate("document.documentElement.dataset.theme") != theme:
             browser("click", 'button[aria-label="Switch to ' + theme + ' mode"]')
-        browser("scrollintoview", "[data-testid=chat-transcript] li[data-kind=agent]")
-        before = evaluate("""(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);
-          const q=r.getBoundingClientRect();return {x:q.x,y:q.y,width:q.width,height:q.height};})()""")
-        browser("find", "last", "[data-testid=chat-transcript] li[data-kind=agent]", "hover")
-        observed = evaluate("""(() => {const rows=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')];
-          const r=rows.at(-1), p=r.querySelector('[data-testid=message-actions]'), b=p?.querySelector('button[aria-label="Copy message"]');
-          const q=r.getBoundingClientRect(), z=p?.getBoundingClientRect();
-          return {theme:document.documentElement.dataset.theme, row:{x:q.x,y:q.y,width:q.width,height:q.height},
-            pill:!!p,copy:!!b,time:p?.textContent||'',opacity:p&&getComputedStyle(p).opacity,
-            pillHeight:z?.height,adjacent:(()=>{const a=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind]')];
-              return a.flatMap((x,i)=>x.dataset.kind==='agent'&&a[i+1]?.dataset.kind==='agent'
-                ? [a[i+1].getBoundingClientRect().top-x.getBoundingClientRect().bottom] : []);})()};})()""")
-        assert observed["theme"] == theme and observed["pill"] and observed["copy"], observed
-        assert observed["opacity"] != "0" and observed["time"].strip(), observed
-        assert observed["pillHeight"] > 0 and observed["row"] == before, "hover pill moved its message row"
-        assert all(gap < 42 for gap in observed["adjacent"]), "adjacent agent messages retained the old 42px gap"
-        results.append(observed)
+        evaluate("""(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);
+          const p=r?.querySelector('[data-testid=message-actions]');if(!p)throw Error('reply footer missing');
+          document.activeElement?.blur();p.scrollIntoView({block:'center'});return true;})()""")
+        browser("hover", "form")
+        wait_hidden = """(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);
+          const p=r?.querySelector('[data-testid=message-actions]');return !!p&&!r.matches(':hover')&&
+            !p.contains(document.activeElement)&&getComputedStyle(p).opacity==='0';})()"""
+        browser("wait", "--fn", wait_hidden)
+        stages = {"rest": evaluate(REPLY_ACTIONS_DOM)}
+        # Move over the observed footer's owning reply, including very long answers.
+        pill = stages["rest"]["pill"]
+        browser("mouse", "move", str(pill["x"] + pill["width"] / 2), str(pill["y"] + pill["height"] / 2))
+        wait_visible = """(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);
+          const p=r?.querySelector('[data-testid=message-actions]');return !!p&&getComputedStyle(p).opacity==='1';})()"""
+        browser("wait", "--fn", wait_visible)
+        stages["hover"] = evaluate(REPLY_ACTIONS_DOM)
         shot("render", f"agent-hover-{theme}")
+        browser("hover", "form")
+        browser("wait", "--fn", wait_hidden)
+        stages["leave"] = evaluate(REPLY_ACTIONS_DOM)
+        evaluate("""(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);
+          const b=r?.querySelector('[data-testid=message-actions] button[aria-label="Copy message"]');
+          if(!b)throw Error('reply copy missing');b.focus();return document.activeElement===b;})()""")
+        browser("wait", "--fn", wait_visible)
+        stages["focus"] = evaluate(REPLY_ACTIONS_DOM)
+        disclosures.assert_reply_actions(stages)
+        assert evaluate("document.documentElement.dataset.theme") == theme
+        gaps = evaluate("""(() => {const a=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind]')];
+          return a.flatMap((x,i)=>x.dataset.kind==='agent'&&a[i+1]?.dataset.kind==='agent'
+            ? [a[i+1].getBoundingClientRect().top-x.getBoundingClientRect().bottom] : []);})()""")
+        assert all(gap < 42 for gap in gaps), "adjacent agent messages retained the old 42px gap"
+        results.append({"theme": theme, "stages": stages, "adjacent": gaps})
     write("render-agent-hover.json", results)
     if not any(item["adjacent"] for item in results):
         write("agent-spacing-blocked.json", {"status": "blocked", "prerequisite": "two consecutive saved assistant message items from one real author; this one-answer turn supplied only one"})

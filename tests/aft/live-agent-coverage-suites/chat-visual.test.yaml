@@ -88,13 +88,13 @@ tests:
         budget: 30000
         intent: "Wait for completed JSON code highlighting before reading its token spans"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-capture before-reload'
-        intent: "Freeze actual saved reasoning EventIDs and raw text, including null, with collapsed and genuinely expanded Thinking DOM before reload; validation remains pending"
+        intent: "Freeze actual saved reasoning EventIDs and raw text, including null, with compact Thinking disclosures and an explicit nonexpandable empty-text explanation; available text expands exactly; original reasoning validation remains pending"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" render-check'
         intent: "Expand through UI clicks and compare table, highlighted code and all tool bodies with actual saved events"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render expanded'
         intent: "Capture the expanded real tool input, output and failure"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" agent-hover'
-        intent: "Measure the completed agent message hover pill without layout shift and capture light and dark states"
+        intent: "Require copy and time hidden at rest, visible on reply hover or keyboard focus, below the full reply and onscreen without shifting layout; capture both themes"
       - click: { selector: "[data-testid=chat-transcript] [data-testid=chat-codeblock][data-language=json] button[aria-label='Copy code']" }
         intent: "Copy the rendered code through its UI action"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" clipboard-check code'
@@ -121,6 +121,8 @@ tests:
         intent: "Freeze actual saved reasoning and collapsed/expanded Thinking DOM after reload without treating absent or null text as a pass"
       - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" render-reload-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render reloaded'
         intent: "Compare exact saved event IDs and rendered tool/table/code after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-presentation-grid'
+        intent: "Check compact Thinking disclosures at 800 and 390px in both themes; expand saved text and close via keyboard, or show the nonexpandable empty-text explanation; keep the original reasoning-text requirement separate"
       - run: 'agent-browser --session "$AFT_SESSION" set media light reduced-motion'
         intent: "Switch this owned browser session to reduced motion for a separate real turn"
       - wait:
