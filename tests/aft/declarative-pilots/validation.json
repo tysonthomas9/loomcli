@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "4d0d3197d5006a83075dc606491d658fa4398cc7c8c8accb5d4cc3780b271c8a"
+        "sha256": "2116d2631282bf09f025e733ef080f1f332663c51da4d928d383c2e4ddb3878c"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -934,10 +934,10 @@
       "reviewedPredicateMappings": 20,
       "fullPreservationAccepted": 0,
       "helperInventory": 1072,
-      "conservativeReachableCandidates": 467,
+      "conservativeReachableCandidates": 466,
       "helperSelftestOrNegativeRecords": 213,
-      "unrelatedBranchesOrCases": 392,
-      "exactReachablePredicateDenominator": "Stop40/Files24/Child125 frozen subsets selected (including2 conditional child entries); remaining Child33+6 external guards, other pilots and67 extra source guard/selection/actor groups/imports are uncovered."
+      "unrelatedBranchesOrCases": 393,
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child163 selected frozen subsets (6 conditional child entries); other pilots and76 extra source guard/selection/actor groups/imports remain uncovered. Full historical index unavailable; no complete denominator/preservation claim."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -1836,5 +1836,25 @@
     },
     "preservationAcceptance": false,
     "runtimeAcceptance": false
+  },
+  "childReactivationSelectedBranchReview": {
+    "at": "2026-10-09T12:02:26.416540+00:00",
+    "newInventoryDirect": 28,
+    "newInventoryConditional": 4,
+    "excludedStagePredicate": 1,
+    "sourceGroupExtensionsUncovered": 9,
+    "remainingChildUnresolvedPythonPredicates": 0,
+    "externalRefGuardsUnresolved": 6,
+    "newYamlOrPreservationCredit": false
+  },
+  "childRefGuardSelectedBranchReview": {
+    "at": "2026-10-09T12:04:40.703258+00:00",
+    "selectedExternalGuards": 6,
+    "frozenHelperByteMatch": true,
+    "sourceArgumentsRead": true,
+    "negativeAdmissionObligationsRetained": true,
+    "remainingChildInventoryBranchUnresolved": 0,
+    "importedOwnershipClosure": "unresolved and required",
+    "newYamlOrPreservationCredit": false
   }
 }
