@@ -6,6 +6,7 @@ import { EventPage, Id, Json, ObservationError, requireFact, type Event, type Re
 export const SavedEventsInput = z.object({
   agent: z.object({ fixtureLeaseId: Id, workspaceId: Id, agentId: Id }).strict(),
   after: z.number().int().nonnegative(), pageSize: z.number().int().min(1).max(500),
+  snapshotSeq: z.number().int().nonnegative().optional(),
   maxPages: z.number().int().min(1).max(1000), maxRecords: z.number().int().min(1).max(100000),
   kinds: z.array(Id).max(100), probeHandle: Id.nullable().optional(),
 }).strict();
@@ -21,9 +22,11 @@ export async function collectSavedEvents(
   input: z.infer<typeof SavedEventsInput>, read: ReadTransport, signal: AbortSignal, probe?: SyntheticProbe, secrets: readonly string[] = [],
 ): Promise<z.infer<typeof SavedEventsOutput>> {
   requireFact(!input.probeHandle || probe?.handle === input.probeHandle, 'ownership-mismatch', 'Saved-event synthetic probe is not bound');
+  requireFact(input.snapshotSeq === undefined || input.snapshotSeq >= input.after,
+    'identity-mismatch', 'Saved event cursor exceeds its captured snapshot');
   const events: Event[] = [];
   let cursor = input.after;
-  let boundary: number | undefined;
+  let boundary: number | undefined = input.snapshotSeq;
   const ids = new Set<string>();
   for (let n = 0; n < input.maxPages; n++) {
     signal.throwIfAborted();
