@@ -28,6 +28,7 @@ import { registerLoomAdapter } from '../composition.js';
 import { createTerminalDetachProviders, productionTerminalMetadataAccess } from './terminal-providers.js';
 import { TerminalDetachEffects } from './effects.js';
 import type { Json } from '../protocol.js';
+import { FixtureWorkersId, FixtureWorkersOutput } from '../fixture-workers.js';
 
 const hash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
 async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; onRoot?: (root: string) => void; terminal?: 'default' | 'factory-probe'; worker?: 'default' | 'factory-probe' } = {}) {
@@ -267,7 +268,7 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     workerRequests,
     recreateWorkerActor() { actors.get('E2E-WS')![0]!.createdAt = '2026-10-09T02:00:00Z'; },
     workerResponse(status: number, exits = true) { workerStatus = status; workerExits = exits; },
-    async registerWorker() {
+    async registerWorker(publicTarget = false) {
       assert.ok(options.worker); const daemon = driver.processesById.get('daemon')!;
       const worktree = path.join(driver.runtimeRoot, 'runtime', 'registered-worker-worktree'); await fs.mkdir(worktree);
       workerCommonDirs.set(worktree, path.join(managed.get('E2E-WS')!.source, '.git'));
@@ -282,8 +283,23 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
       workerKernels.set(1700, { alive: true, identity: { pid: 1700, generation: 'injected-worker-kernel-generation', executable: config.loomBinary,
         argvSha256: hash([config.loomBinary, 'task', worktree, '--auto', '--daemon-mode', '--backend', 'codex'].join('\0') + '\0'),
         parentPid: daemon.pid, configurationRoot: driver.configurationRoot, state: 'running' } });
-      // This is a private concrete driver observation used by the unit harness,
-      // not the missing public YAML generation producer or a launched worker.
+      if (publicTarget) {
+        const observed = await invoke(FixtureWorkersId, { leaseId });
+        assert.equal(observed.availability, 'observed', JSON.stringify(observed.error));
+        const value = FixtureWorkersOutput.parse(observed.data);
+        assert.equal(value.fixtureLeaseId, leaseId);
+        assert.equal(value.coverage, 'registered-builtin-running-workers');
+        const serve = driver.processesById.get('serve')!;
+        assert.deepEqual(value.serve, { id: 'serve', pid: serve.pid, generation: serve.generation, state: 'running' });
+        assert.equal(value.workers.length, 1);
+        const target = value.workers[0]!;
+        const { id, ...facts } = target;
+        assert.ok(id);
+        assert.deepEqual(facts, { generation: 'injected-worker-kernel-generation',
+          kind: 'worker', identityKind: 'legacy-agent-name', workspaceId: 'E2E-WS', agentId: 'worker', sessionName: null });
+        return target;
+      }
+      // Private observation remains useful for direct binding negative tests.
       return (await driver.refreshOwnedProductProcesses(new AbortController().signal))[0]!;
     },
     installWorkerFetch() {
@@ -324,10 +340,10 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     async cleanup() { await fs.rm(root, { recursive: true, force: true }); } };
 }
 
-test('default runtime worker stop preserves empty wire and kernel exit separately from HTTP 200 or 202', async t => {
+test('public worker generation feeds the default stop actor with empty wire and independent kernel exit for HTTP 200 or 202', async t => {
   for (const status of [200, 202]) {
     const r = await setup(t, { worker: 'default' }), wire = r.installWorkerFetch();
-    const target = await r.registerWorker(); r.workerResponse(status);
+    const target = await r.registerWorker(true); r.workerResponse(status);
     const result = await r.invoke('loom.runtime.stimulate', { leaseId: r.leaseId, targetId: target.id,
       operation: 'worker-stop', expectedGeneration: target.generation });
     assert.equal(result.availability, 'observed', JSON.stringify({ error: result.error, requests: r.workerRequests.length }));
@@ -344,6 +360,17 @@ test('default runtime worker stop preserves empty wire and kernel exit separatel
     assert.equal('daemonLog' in data, false); assert.equal('stoppedRow' in data, false);
     wire.restore();
   }
+});
+
+test('public worker target rejects a stale requested generation before its stop effect', async t => {
+  const r = await setup(t, { worker: 'default' }), wire = r.installWorkerFetch();
+  const target = await r.registerWorker(true);
+  const result = await r.invoke('loom.runtime.stimulate', { leaseId: r.leaseId, targetId: target.id,
+    operation: 'worker-stop', expectedGeneration: `${target.generation}-stale` });
+  assert.equal(result.availability, 'error'); assert.equal(result.data, undefined);
+  assert.equal(wire.length, 0); assert.equal(r.workerRequests.length, 0);
+  assert.equal(r.stops.length, 0); assert.equal(r.launches.length, 0);
+  wire.restore();
 });
 
 test('worker stop rejects stale, foreign or recreated actor identities before its fixed HTTP effect', async t => {
