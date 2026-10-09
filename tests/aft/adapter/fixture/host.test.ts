@@ -58,6 +58,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     model: profile === 'legacy-deterministic' ? 'aft/m' : profile === 'legacy-real-cursor' ? 'backend-default' : 'openai/real-model', maxCases: 10, caseCount: 1, selectionSha256: 'd'.repeat(64), leaseDurationMs: 10000 };
   const starts: { id: string; command: HostCommand; readiness: string }[] = []; const runs: HostCommand[] = []; const stopped: string[] = [];
   let failService = ''; let failStop = ''; let spawnFails = false; let port = 4100; let count = 0; let failHttp = false;
+  let daemonOutput={stdout:'',stderr:'',stdoutComplete:true,stderrComplete:true},onOutput:(()=>void)|undefined;
   const handles = new Map<string, OwnedProcess>();
   let cliOutput='',headOutput:string|undefined;let onCliAwait:((phase:'ready'|'completion')=>Promise<void>)|undefined;const commonDirectories=new Map<string,string>();
   let onRun:((command:HostCommand)=>Promise<void>)|undefined;
@@ -87,7 +88,8 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
       starts.push({ id, command, readiness }); let alive = true;
       const handle: OwnedProcess = { pid: ++count + 40, generation: generation ?? `generation-${count}`, executable: command.executable, argv: command.argv,
         state: () => alive ? 'running' : 'exited', async ready() { if(registeredServices&&id==='serve'){const dir=path.join(command.env.LOOM_CONFIG_DIR!,'fleet-db');await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'runtime.json'),JSON.stringify({pid:999,url:'http://127.0.0.1:6001',started_at:'2026-10-09T00:00:00Z'}));if(nativeService){const dir=path.join(command.env.LOOM_CONFIG_DIR!,'agents-opencode/state/opencode');await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'service.json'),JSON.stringify({pid:1001,url:'http://127.0.0.1:7001',password:'private-fixture-password'}));}} if (id === failService) throw new Error('Bearer private-ready-token'); },
-        async stop() { if (id === failStop) throw new Error('secret=private-stop-token'); alive = false; stopped.push(id); } };
+        async stop() { if (id === failStop) throw new Error('secret=private-stop-token'); alive = false; stopped.push(id); },
+        output(){onOutput?.();return {...daemonOutput,closed:!alive};} };
       handles.set(id, handle); return handle;
     },
   };
@@ -108,7 +110,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     return { status: 200, body: data?{success:true,data}:{} };
   };
   const registeredRunning=new Map<number,boolean>();let failRegisteredStop=false;const registeredStops:string[]=[],captures:number[]=[],abandoned:number[]=[];
-  const registrationOverrides=new Map<number,Partial<RegisteredIdentity>>();let onCapture:((pid:number)=>Promise<void>)|undefined,onExit:((pid:number)=>Promise<void>)|undefined;
+  const registrationOverrides=new Map<number,Partial<RegisteredIdentity>>();let onCapture:((pid:number)=>Promise<void>)|undefined,onExit:((pid:number)=>Promise<void>)|undefined,onRegisteredInspect:((pid:number)=>Promise<void>)|undefined;
   const registeredPort={async capture(pid:number){
     const parent=[...handles.entries()].find(([name,handle])=>['serve','daemon'].includes(name)&&handle.pid===pid)?.[1];
     assert.ok([999,1001,1002].includes(pid)||parent||registrationOverrides.has(pid));captures.push(pid);registeredRunning.set(pid,true);
@@ -118,7 +120,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
       parentPid:handles.get('serve')!.pid,configurationRoot:driver.configurationRoot,
       fixtureRunId:parent?starts.find(start=>start.command.argv===parent.argv)!.command.env.RUN_ID:undefined,state:'running',...registrationOverrides.get(pid)};
     await onCapture?.(pid);
-    return {identity,async inspect(){return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,
+    return {identity,async inspect(){await onRegisteredInspect?.(pid);return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,
       state:registeredRunning.get(pid)&&(!parent||parent.state()==='running')?'running' as const:'exited' as const,...registrationOverrides.get(pid)};},
       async terminateGracefully(){assert.ok([1001,1002].includes(pid));registeredRunning.set(pid,false);registeredStops.push('opencode-term');},
       async awaitExit(){await onExit?.(pid);assert.equal(registeredRunning.get(pid),false);},
@@ -133,6 +135,8 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     registeredStops,captures,abandoned,failRegisteredCleanup(value:boolean){failRegisteredStop=value;},
     registration(pid:number,values:Partial<RegisteredIdentity>){registrationOverrides.set(pid,values);},onCapture(callback:(pid:number)=>Promise<void>){onCapture=callback;},
     exitRegistered(pid:number){registeredRunning.set(pid,false);},onExit(callback:(pid:number)=>Promise<void>){onExit=callback;},stopStatus(value:number){stopStatus=value;},
+    daemonOutput(value:typeof daemonOutput){daemonOutput=value;},onOutput(callback:()=>void){onOutput=callback;},
+    onRegisteredInspect(callback:(pid:number)=>Promise<void>){onRegisteredInspect=callback;},
     request: { runId: 'test-run', profile, loomRevision: { ...revision }, fleetRevision: { ...revision }, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
     onHttp(callback:(method:string,relative:string)=>Promise<void>){onHttp=callback;},
     overrideResponse(callback:(relative:string)=>unknown){responseOverride=callback;},
@@ -323,6 +327,38 @@ test('registered worker stop rejects changed serve or parent identity and cancel
   if(changed==='parent')r.registration(r.daemon.pid,{generation:`actual-parent-${r.daemon.pid}`});
   r.onHttp(async()=>{});assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
  }finally{await r.cleanup();}}
+});
+
+test('owned daemon output exposes actual private bytes and completeness under the retained parent',async()=>{
+ const r=await setupBoundWorker();try{
+  await r.driver.refreshOwnedProductProcesses(r.signal);
+  const logs={stdout:'actual daemon startup\n',stderr:'agent stopped via control socket worktree=nova\n',stdoutComplete:true,stderrComplete:false};
+  r.daemonOutput(logs);assert.deepEqual(await r.driver.readOwnedDaemonOutput(r.daemon.generation,r.signal),
+   {id:'daemon',generation:r.daemon.generation,...logs,closed:false});
+  await assert.rejects(r.driver.readOwnedDaemonOutput('foreign',r.signal));
+  r.onOutput(()=>r.registration(r.daemon.pid,{generation:'foreign-kernel'}));
+  await assert.rejects(r.driver.readOwnedDaemonOutput(r.daemon.generation,r.signal));
+  r.onOutput(()=>{});r.registration(r.daemon.pid,{generation:`actual-parent-${r.daemon.pid}`});
+  assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+ }finally{await r.cleanup();}
+});
+
+test('owned daemon output reserves the exact parent while inspection is deferred',async()=>{
+ const r=await setupBoundWorker();let enter!:()=>void,leave!:()=>void;let pending:ReturnType<HostFixtureDriver['readOwnedDaemonOutput']>|undefined;
+ try{
+  await r.driver.refreshOwnedProductProcesses(r.signal);
+  const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{leave=resolve;});
+  r.onRegisteredInspect(async pid=>{if(pid===r.daemon.pid){enter();await gate;}});
+  pending=r.driver.readOwnedDaemonOutput(r.daemon.generation,r.signal);await entered;
+  const captures=r.captures.length,runs=r.runs.length,forces=r.registeredStops.length;
+  await assert.rejects(r.driver.prepareObserve(r.signal));await assert.rejects(r.driver.prepareCleanup(r.signal));
+  await assert.rejects(r.driver.runtimeIdentity(r.signal));await assert.rejects(r.driver.refreshOwnedProductProcesses(r.signal));
+  await assert.rejects(r.driver.launchOwnedCli(['usage'],{},'',true,r.signal));
+  await assert.rejects(r.driver.stopOwnedProcess('daemon',r.daemon.generation,r.signal));
+  assert.equal(r.captures.length,captures);assert.equal(r.runs.length,runs);assert.equal(r.registeredStops.length,forces);
+  leave();assert.equal((await pending).generation,r.daemon.generation);r.onRegisteredInspect(async()=>{});
+  assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+ }finally{leave?.();await pending?.catch(()=>{});await r.cleanup();}
 });
 
 test('Host worker discovery serializes mutation, parent stop and cleanup across deferred kernel capture',async()=>{
