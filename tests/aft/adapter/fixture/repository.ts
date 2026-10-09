@@ -8,17 +8,23 @@ import type { RegisteredBuild } from './production.js';
 
 const check=(value:unknown)=>{if(!value)throw new FixtureError('identity-mismatch');};
 const hash=(bytes:Uint8Array)=>createHash('sha256').update(bytes).digest('hex');
-export type RepositoryFixture='empty-legacy'|'slack-clone';
+export type RepositoryFixture='empty-legacy'|'slack-clone'|'empty-main'|'main-readme';
 /** Launcher-only coordinates. Operation input cannot select a path, binary,
  * command or source module. The enclosing runtime root is already enrolled. */
 export interface RepositoryCoordinates {
  runtimeRoot:string;destination:string;source:RegisteredBuild;gitBinary:string;toolPath:string;
+ /** Trusted startup data, never an executable, arbitrary file or command. */
+ readme?:string;githubReadOrigin?:true;
 }
-/** Preserves scripts/seed-slack-clone.sh and zz-agent-flow setup Git semantics.
+/** Preserves seed-slack-clone.sh, zz-agent-flow and Agent API setup Git semantics.
  * This creates source files, not a product workspace or an actor registration. */
 export async function seedOwnedRepository(kind:RepositoryFixture,coordinates:RepositoryCoordinates,
  processes:Pick<HostProcesses,'run'>,signal:AbortSignal,files:typeof fs=fs){
- signal.throwIfAborted();check(kind==='empty-legacy'||kind==='slack-clone');
+ signal.throwIfAborted();check(['empty-legacy','slack-clone','empty-main','main-readme'].includes(kind));
+ const {readme,githubReadOrigin}=coordinates;
+ check(kind==='main-readme'?typeof readme==='string'&&Buffer.byteLength(readme)>1&&Buffer.byteLength(readme)<=2048&&
+  readme.endsWith('\n')&&!readme.slice(0,-1).includes('\n')&&!readme.includes('\0'):readme===undefined);
+ check(githubReadOrigin===undefined||(githubReadOrigin===true&&kind==='empty-main'));
  const {runtimeRoot,destination,source,gitBinary,toolPath}=coordinates;
  check(path.isAbsolute(runtimeRoot)&&path.isAbsolute(destination)&&path.isAbsolute(gitBinary)&&
   destination.startsWith(runtimeRoot+path.sep)&&await files.realpath(runtimeRoot)===runtimeRoot);
@@ -50,6 +56,7 @@ export async function seedOwnedRepository(kind:RepositoryFixture,coordinates:Rep
   const after=await files.lstat(root);check(rootStat.dev===after.dev&&rootStat.ino===after.ino&&!after.isSymbolicLink());
   copied=copied.filter(entry=>entry.relative!=='data.json');
  }
+ if(kind==='main-readme')copied=[{relative:'README.md',bytes:Buffer.from(readme!),mode:0o600}];
  signal.throwIfAborted();const afterParent=await files.lstat(parent);
  check(before.dev===afterParent.dev&&before.ino===afterParent.ino&&!afterParent.isSymbolicLink());
  // Exclusive mkdir prevents reuse or removal of any pre-existing resource.
@@ -63,9 +70,15 @@ export async function seedOwnedRepository(kind:RepositoryFixture,coordinates:Rep
   await processes.run({executable:gitBinary,argv,cwd:destination,env:{PATH:toolPath,HOME:path.join(runtimeRoot,'home'),GIT_CONFIG_NOSYSTEM:'1'}},signal);
   const after=await files.lstat(destination);check(after.dev===stamp.dev&&after.ino===stamp.ino&&!after.isSymbolicLink());
  };
- await run(kind==='slack-clone'?['init','-q','-b','main']:['init','-q']);
+ await run(kind!=='empty-legacy'?['init','-q','-b','main']:['init','-q']);
  if(kind==='slack-clone')await run(['add','-A']);
+ if(kind==='main-readme')await run(['add','README.md']);
+ const author=['-c','user.email=e2e@x','-c','user.name=e2e'];
  await run(kind==='slack-clone'?['-c','user.name=Loom Fixture','-c','user.email=fixture@loom.invalid','commit','-q','-m','Initial Slack clone']:
-  ['-c','user.email=e2e@x','-c','user.name=e2e','commit','--allow-empty','-m','init','-q']);
+  kind==='empty-legacy'?[...author,'commit','--allow-empty','-m','init','-q']:
+  [...author,'commit','-q',...(kind==='empty-main'?['--allow-empty']:[]),'-m','init']);
+ // Original github_read-unavailable setup adds this fixed origin locally;
+ // no fetch, auth discovery or external request belongs to source seeding.
+ if(githubReadOrigin)await run(['remote','add','origin','https://github.com/loom-e2e/agv1-ghread.git']);
  return {path:destination,device:stamp.dev,inode:stamp.ino};
 }

@@ -37,6 +37,61 @@ test('legacy empty source keeps original default branch and empty commit, withou
   assert.deepEqual(r.commands.map(c=>c.argv),[['init','-q'],['-c','user.email=e2e@x','-c','user.name=e2e','commit','--allow-empty','-m','init','-q']]);
  }finally{await r.cleanup();}
 });
+
+test('Agent API main sources preserve supplied launch-token README bytes and fixed Git metadata',async()=>{
+ const r=await setup();try{
+  const readme='agents-v1 children original-launch-token\n';
+  const receipt=await seedOwnedRepository('main-readme',{...r.coordinates,readme},r.processes,signal);
+  assert.equal(await fs.readFile(path.join(receipt.path,'README.md'),'utf8'),readme);
+  assert.deepEqual(await fs.readdir(receipt.path),['README.md']);
+  assert.deepEqual(r.commands.map(c=>c.argv),[['init','-q','-b','main'],['add','README.md'],
+   ['-c','user.email=e2e@x','-c','user.name=e2e','commit','-q','-m','init']]);
+ }finally{await r.cleanup();}
+});
+
+test('two main repositories retain independent owned roots and their distinct original source bytes',async()=>{
+ const r=await setup();try{
+  const receipts=[];
+  for(const name of ['agv1-par-alpha','agv1-par-beta']){
+   const receipt=await seedOwnedRepository('main-readme',{...r.coordinates,destination:path.join(r.coordinates.runtimeRoot,name),readme:`${name} actual-run-token\n`},r.processes,signal);
+   receipts.push(receipt);assert.equal(await fs.readFile(path.join(receipt.path,'README.md'),'utf8'),`${name} actual-run-token\n`);
+  }
+  assert.notEqual(receipts[0]!.path,receipts[1]!.path);assert.notEqual(receipts[0]!.inode,receipts[1]!.inode);
+  assert.deepEqual(r.commands.filter(c=>c.argv[0]==='init').map(c=>c.cwd),receipts.map(receipt=>receipt.path));
+ }finally{await r.cleanup();}
+});
+
+test('empty main and GitHub-reader source contracts create no README and accept only the fixed local origin',async()=>{
+ for(const githubReadOrigin of [undefined,true] as const){const r=await setup();try{
+  const receipt=await seedOwnedRepository('empty-main',{...r.coordinates,githubReadOrigin},r.processes,signal);
+  assert.deepEqual(await fs.readdir(receipt.path),[]);
+  assert.deepEqual(r.commands.map(c=>c.argv),[['init','-q','-b','main'],
+   ['-c','user.email=e2e@x','-c','user.name=e2e','commit','-q','--allow-empty','-m','init'],
+   ...(githubReadOrigin?[['remote','add','origin','https://github.com/loom-e2e/agv1-ghread.git']]:[])]);
+ }finally{await r.cleanup();}}
+});
+
+test('invalid main startup data refuses before filesystem creation or any Git command',async()=>{
+ const r=await setup();try{
+  for(const readme of [undefined,'','missing newline','two\nlines\n','nul\0\n','x'.repeat(2049)+'\n']){
+   await assert.rejects(seedOwnedRepository('main-readme',{...r.coordinates,readme},r.processes,signal));
+  }
+  await assert.rejects(seedOwnedRepository('empty-main',{...r.coordinates,readme:'extra\n'},r.processes,signal));
+  await assert.rejects(seedOwnedRepository('main-readme',{...r.coordinates,readme:'readme\n',githubReadOrigin:true},r.processes,signal));
+  assert.equal(r.commands.length,0);await assert.rejects(fs.stat(r.coordinates.destination));
+ }finally{await r.cleanup();}
+});
+
+test('failed main Git initialization retains its exact owned partial source for enclosing fixture cleanup',async()=>{
+ const r=await setup();try{
+  let attempts=0;
+  await assert.rejects(seedOwnedRepository('main-readme',{...r.coordinates,readme:'agents-v1 ui retained-token\n'},
+   {async run(){attempts++;throw new Error('injected failed Git initialization');}},signal));
+  assert.equal(attempts,1);
+  assert.equal(await fs.readFile(path.join(r.coordinates.destination,'README.md'),'utf8'),'agents-v1 ui retained-token\n');
+  await assert.rejects(seedOwnedRepository('empty-main',r.coordinates,r.processes,signal));assert.equal(r.commands.length,0);
+ }finally{await r.cleanup();}
+});
 test('missing, extra, changed and symlink source files refuse before creating a repository or running Git',async()=>{
  for(const change of ['missing','extra','changed','symlink'] as const){const r=await setup();try{
   const filename=path.join(r.fixture,'app.js');
