@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
-import { HostFixtureDriver, legacyProfiles, type HostConfig, type Http } from './host.js';
+import { HostFixtureDriver, readHttp, legacyProfiles, type HostConfig, type Http } from './host.js';
 import { FixtureLifecycle, FixtureError, type FixturePlan } from './lifecycle.js';
 import { LaunchNotStarted, type HostProcesses, type HostCommand, type OwnedProcess } from './process.js';
 import { type RegisteredBuild, verifyManifest } from './production.js';
@@ -243,12 +243,23 @@ test('registered worker stop preserves the empty-body API actor and separately o
   const starts=r.starts.length,forces=r.registeredStops.length;
   const stopped=await r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,r.signal);
   assert.deepEqual(stopped,{response:{status,body:{success:true}},transition:{beforeGeneration:fact.generation,afterGeneration:null,affectedIds:[fact.id],complete:true}});
-  assert.deepEqual(r.requests.filter(value=>value.relative.endsWith('/stop')),[{method:'POST',relative:'/api/workspaces/E2E-WS/agents/nova/stop',body:null}]);
+  assert.deepEqual(r.requests.filter(value=>value.relative.endsWith('/stop')),[{method:'POST',relative:'/api/workspaces/E2E-WS/agents/nova/stop',body:undefined}]);
   assert.equal(r.starts.length,starts);assert.equal(r.registeredStops.length,forces);assert.equal(r.daemon.state(),'running');
   await assert.rejects(r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,r.signal));
   assert.equal(r.requests.filter(value=>value.relative.endsWith('/stop')).length,1);
   assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
  }finally{await r.cleanup();}}
+});
+
+test('fixed HTTP transport emits an empty worker POST body without JSON null or JSON headers',async()=>{
+ const original=globalThis.fetch,requests:RequestInit[]=[];
+ globalThis.fetch=async(_input,init)=>{requests.push(init!);return new Response('{"success":true}',{status:200});};
+ try{
+  await readHttp('http://127.0.0.1:4100','POST','/api/workspaces/E2E-WS/agents/nova/stop',undefined,new AbortController().signal);
+  assert.equal(requests[0]!.body,undefined);assert.equal(requests[0]!.headers,undefined);
+  await readHttp('http://127.0.0.1:4100','POST','/api/workspaces',{name:'owned'},new AbortController().signal);
+  assert.equal(requests[1]!.body,'{"name":"owned"}');assert.deepEqual(requests[1]!.headers,{'content-type':'application/json'});
+ }finally{globalThis.fetch=original;}
 });
 
 test('registered worker stop denies foreign IDs, generations, actor incarnation and registration before POST',async()=>{
