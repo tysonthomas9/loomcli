@@ -22,11 +22,15 @@ import { materializeRenderer } from '../fixture/renderer-fixtures.test.js';
 import type { RegisteredProcessPort } from '../fixture/descendants.js';
 import { ObservationError } from '../protocol.js';
 import { HostWorkspaceRecords } from '../fixture/workspace-records.js';
-import { appendCreatedWorkspaces, requireOwnedWorkspace } from '../workspaces.js';
+import { appendCreatedWorkspaces, requireOwnedWorkspace, enrollOwnedLegacyAgent } from '../workspaces.js';
 import { fixtureOwnerIdentity } from '../authority.js';
+import { registerLoomAdapter } from '../composition.js';
+import { createTerminalDetachProviders, productionTerminalMetadataAccess } from './terminal-providers.js';
+import { TerminalDetachEffects } from './effects.js';
+import type { Json } from '../protocol.js';
 
 const hash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
-async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; onRoot?: (root: string) => void } = {}) {
+async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; onRoot?: (root: string) => void; terminal?: 'default' | 'factory-probe' } = {}) {
   const created = await fs.mkdtemp(fileURLToPath(new URL('.seed-test-host-', import.meta.url)));
   t.after(async () => { await fs.rm(created, { recursive: true, force: true }); });
   const root = await fs.realpath(created); options.onRoot?.(root);
@@ -70,6 +74,8 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
   const managed = new Map<string, { source: string; path: string; repo: string; repositories: Repo[] }>();
   const actors = new Map<string, { name: string; repos: string[]; repo_groups: string[]; createdAt?: string; updatedAt?: string; parent?: string }[]>();
   let taskLaunch: (() => void) | undefined;
+  let tabBodies: Json[] = [{ data: [] }], tabReads = 0, deleteStatus = 204;
+  const tabRequests: { method: string; route: string }[] = [];
   const worktrees = new Map<string, string>();
   let seedHead = revision.commit, seedExit = 0;
   const handles: OwnedProcess[] = [];
@@ -131,6 +137,11 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     },
   };
   const http: Http = async (_origin, method, route, body) => {
+    if (route.includes('/terminal/tabs')) {
+      tabRequests.push({ method, route });
+      if (method === 'DELETE') return { status: deleteStatus, body: null };
+      return { status: 200, body: structuredClone(tabBodies[Math.min(tabReads++, tabBodies.length - 1)]!) };
+    }
     if (route.startsWith('/__')) {
       fixtureRequests.push({ method, route, body });
       const github = _origin.endsWith(':4304');
@@ -188,11 +199,27 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
   const legacyPin = calculateImplementationPin(adapterRoot, ['legacy/providers.ts','legacy/host-access.ts','legacy/cli-plan.ts'], 'legacy/providers.ts', 'createLegacyProviders');
   const registry = new CapabilityRegistry(); let factories = 0;
   const fixtureOptions = { ...productionFixtureOptions(pin, pin.sha256, [plan], config, config), driver: () => driver };
-  for (const provider of createFixtureProviders(fixtureOptions)) registry.register(provider);
-  for (const provider of createLegacyProviders(legacyPin, legacyPin.sha256, (context, fixture) => {
-    factories++; return productionLegacyAccess(fixture, getFixtureEvidenceStore(context, fixture.leaseId));
-  },
-    { taskExecution: options.liveClaude ? 'live-provider' : 'deterministic' })) registry.register(provider);
+  if (options.terminal === 'default') {
+    // Exercise the actual public composition and its production default factory.
+    // This unit pin is not the final emitted implementation closure receipt.
+    const compositionPin = calculateImplementationPin(adapterRoot,
+      ['composition.ts', 'legacy/terminal-providers.ts', 'legacy/terminal-metadata.ts', 'legacy/effects.ts', 'fixture/providers.ts'],
+      'composition.ts', 'createLoomProviders');
+    registerLoomAdapter(registry, { implementation: compositionPin, fixtures: fixtureOptions });
+  } else {
+    for (const provider of createFixtureProviders(fixtureOptions)) registry.register(provider);
+    for (const provider of createLegacyProviders(legacyPin, legacyPin.sha256, (context, fixture) => {
+      factories++; return productionLegacyAccess(fixture, getFixtureEvidenceStore(context, fixture.leaseId));
+    },
+      { taskExecution: options.liveClaude ? 'live-provider' : 'deterministic' })) registry.register(provider);
+    if (options.terminal === 'factory-probe') {
+      const terminalPin = calculateImplementationPin(adapterRoot,
+        ['legacy/terminal-providers.ts', 'legacy/terminal-metadata.ts', 'legacy/effects.ts'],
+        'legacy/terminal-providers.ts', 'createTerminalDetachProviders');
+      for (const provider of createTerminalDetachProviders(terminalPin, terminalPin.sha256,
+        (context, fixture) => { factories++; return productionTerminalMetadataAccess(context, fixture); })) registry.register(provider);
+    }
+  }
   const context = createCapabilityContext({ file: 'injected-host.yaml', line: 1 }, registry); Object.assign(context, { runId: 'binding-run' });
   const invoke = (id: string, input: unknown) => registry.invoke({ id, version: 1, input: {} }, input, context);
   // YAML/JSON wire values have distinct revision objects, not shared JS references.
@@ -213,6 +240,8 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     await fs.mkdir(worktree, { recursive: true }); worktrees.set(workspaceId, worktree);
   }
   return { root, driver, fixture, evidenceStore: getFixtureEvidenceStore(context, leaseId), leaseId, invoke, launches, stops, factories: () => factories,
+    tabRequests,
+    tabResponses(bodies: Json[], status = 204) { tabBodies = bodies; tabReads = 0; deleteStatus = status; },
     repoName: (workspaceId = 'E2E-WS') => managed.get(workspaceId)!.repositories[0]!.name,
     onTaskLaunch(callback: () => void) { taskLaunch = callback; },
     changeStoreGeneration(value: string) { storeGeneration = value; },
@@ -567,6 +596,121 @@ test('canonical registry denies missing process effect before actual host factor
     { 'loom.cli.role': { evidenceClass: 'deterministic', effects: ['read-api','read-filesystem'] } });
   const result = await r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId: 'E2E-WS', operation: 'list', name: null });
   assert.equal(result.availability, 'unsupported'); assert.equal(r.factories(), 0); assert.equal(r.launches.length, 0);
+});
+
+function terminalTestGrant(fixture: OwnedFixture, effects: readonly string[] = TerminalDetachEffects) {
+  // An explicit injected owner grant exercises canonical admission. It is not
+  // evidence that the production fixture's grant builder supplies this route.
+  fixture.operationAuthority = createFixtureOperationAuthority(fixtureOwnerIdentity(fixture), {
+    'loom.runtime.detachTerminal': { evidenceClass: 'deterministic', effects: [...effects] as (typeof TerminalDetachEffects)[number][] },
+  });
+}
+async function observedServeGeneration(r: Awaited<ReturnType<typeof setup>>) {
+  const observed = await r.invoke('loom.fixture.observe', { leaseId: r.leaseId });
+  assert.equal(observed.availability, 'observed');
+  const services = (observed.data as { services: { id: string; generation: string; state: string }[] }).services;
+  const serve = services.filter(service => service.id === 'serve');
+  assert.equal(serve.length, 1); assert.equal(serve[0]!.state, 'running');
+  return serve[0]!.generation;
+}
+
+test('default composition detaches every owned terminal metadata target with an observed serve generation', async t => {
+  const r = await setup(t, { terminal: 'default' }); terminalTestGrant(r.fixture);
+  const generation = await observedServeGeneration(r);
+  const initial = { data: [{ session_name: 'first', agent_id: 'worker' }, { session_name: 'foreign', agent_id: 'other' },
+    { session_name: 'second', agent_id: 'worker' }] };
+  r.tabResponses([initial, initial, { data: [] }]);
+  const result = await r.invoke('loom.runtime.detachTerminal', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker',
+    expectedServeGeneration: generation });
+  assert.equal(result.availability, 'observed', JSON.stringify(result.error));
+  const data = result.data as { capturedSessions: string[]; remainingSessions: string[]; deletions: { sessionName: string; status: number }[]; serve: { generation: string } };
+  assert.deepEqual(data.capturedSessions, ['first', 'second']); assert.deepEqual(data.remainingSessions, []);
+  assert.deepEqual(data.deletions, [{ sessionName: 'first', status: 204, outcome: 'http-success' },
+    { sessionName: 'second', status: 204, outcome: 'http-success' }]);
+  assert.equal(data.serve.generation, generation);
+  assert.deepEqual(r.tabRequests, [
+    { method: 'GET', route: '/api/workspaces/E2E-WS/terminal/tabs' }, { method: 'GET', route: '/api/workspaces/E2E-WS/terminal/tabs' },
+    { method: 'DELETE', route: '/api/workspaces/E2E-WS/terminal/tabs/first' }, { method: 'DELETE', route: '/api/workspaces/E2E-WS/terminal/tabs/second' },
+    { method: 'GET', route: '/api/workspaces/E2E-WS/terminal/tabs' }]);
+  assert.equal('afterGeneration' in data, false); assert.equal(r.launches.length, 0);
+});
+
+test('terminal stale generation is rejected before the production access factory or tab transport', async t => {
+  const r = await setup(t, { terminal: 'factory-probe' }); terminalTestGrant(r.fixture);
+  const generation = await observedServeGeneration(r);
+  const result = await r.invoke('loom.runtime.detachTerminal', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker',
+    expectedServeGeneration: generation + '-stale' });
+  assert.equal(result.availability, 'error'); assert.equal(r.factories(), 0);
+  assert.deepEqual(r.tabRequests, []); assert.equal(r.launches.length, 0);
+});
+
+test('default terminal provider requires a final reachable read even with no matching tabs', async t => {
+  const r = await setup(t, { terminal: 'default' }); terminalTestGrant(r.fixture);
+  const generation = await observedServeGeneration(r); r.tabResponses([[], { data: [] }, []]);
+  const result = await r.invoke('loom.runtime.detachTerminal', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker',
+    expectedServeGeneration: generation });
+  assert.equal(result.availability, 'observed', JSON.stringify(result.error));
+  assert.deepEqual((result.data as { remainingSessions: string[] }).remainingSessions, []);
+  assert.equal(r.tabRequests.length, 3); assert.ok(r.tabRequests.every(request => request.method === 'GET'));
+});
+
+test('terminal admission denies missing grant, missing effects and foreign identities before the production factory', async t => {
+  const r = await setup(t, { terminal: 'factory-probe' });
+  const generation = await observedServeGeneration(r);
+  const input = { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker', expectedServeGeneration: generation };
+  assert.equal((await r.invoke('loom.runtime.detachTerminal', input)).availability, 'unsupported');
+  for (const effect of TerminalDetachEffects) {
+    terminalTestGrant(r.fixture, TerminalDetachEffects.filter(value => value !== effect));
+    assert.equal((await r.invoke('loom.runtime.detachTerminal', input)).availability, 'unsupported', effect);
+  }
+  terminalTestGrant(r.fixture);
+  for (const patch of [{ leaseId: 'foreign' }, { workspaceId: 'foreign' }, { agentName: 'foreign' }])
+    assert.equal((await r.invoke('loom.runtime.detachTerminal', { ...input, ...patch })).availability, 'error');
+  r.fixture.operationAuthority = createFixtureOperationAuthority(fixtureOwnerIdentity(r.fixture), {
+    'loom.runtime.detachTerminal': { evidenceClass: 'live-provider', effects: [...TerminalDetachEffects] },
+  });
+  assert.equal((await r.invoke('loom.runtime.detachTerminal', input)).availability, 'error');
+  assert.equal(r.factories(), 0); assert.deepEqual(r.tabRequests, []); assert.equal(r.launches.length, 0);
+});
+
+test('terminal enrollment rejects a recreated or removed same-name actor before access creation', async t => {
+  for (const mutation of ['recreated', 'removed'] as const) {
+    const r = await setup(t, { terminal: 'factory-probe' }); terminalTestGrant(r.fixture);
+    const topology = await r.addMultiWorkspace(), generation = await observedServeGeneration(r);
+    // Retain the initial actual private observation before testing replacement;
+    // workspace membership alone does not attest an earlier actor incarnation.
+    await enrollOwnedLegacyAgent(r.fixture, 'OWNED-MULTI', 'worker', new AbortController().signal, r.evidenceStore);
+    if (mutation === 'recreated') topology.actors[0]!.createdAt = '2026-10-09T01:00:00Z';
+    else topology.actors.splice(0, 1);
+    const result = await r.invoke('loom.runtime.detachTerminal', { leaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentName: 'worker',
+      expectedServeGeneration: generation });
+    assert.equal(result.availability, 'error', mutation); assert.equal(r.factories(), 0, mutation);
+    assert.deepEqual(r.tabRequests, []); assert.equal(r.launches.length, 0);
+  }
+});
+
+test('default terminal transport preserves failed DELETE and remaining metadata without an exit claim', async t => {
+  const r = await setup(t, { terminal: 'default' }); terminalTestGrant(r.fixture);
+  const generation = await observedServeGeneration(r), row = { session_name: 'still-there', agent_id: 'worker' };
+  r.tabResponses([{ data: [row] }], 503);
+  const result = await r.invoke('loom.runtime.detachTerminal', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker',
+    expectedServeGeneration: generation });
+  assert.equal(result.availability, 'observed', JSON.stringify(result.error));
+  const data = result.data as { deletions: unknown[]; remainingSessions: string[] };
+  assert.deepEqual(data.deletions, [{ sessionName: 'still-there', status: 503, outcome: 'http-failure' }]);
+  assert.deepEqual(data.remainingSessions, ['still-there']); assert.equal('afterGeneration' in data, false);
+  assert.equal(r.tabRequests.filter(request => request.method === 'DELETE').length, 1);
+});
+
+test('malformed final terminal metadata cannot satisfy an absence observation after a DELETE', async t => {
+  const r = await setup(t, { terminal: 'default' }); terminalTestGrant(r.fixture);
+  const generation = await observedServeGeneration(r), initial = { data: [{ session_name: 'one', agent_id: 'worker' }] };
+  r.tabResponses([initial, initial, { unexpected: true }]);
+  const result = await r.invoke('loom.runtime.detachTerminal', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker',
+    expectedServeGeneration: generation });
+  assert.equal(result.availability, 'error');
+  assert.equal(r.tabRequests.filter(request => request.method === 'DELETE').length, 1);
+  assert.equal(result.data, undefined);
 });
 
 test('real execution grant cannot reuse the deterministic task descriptor or start host discovery', async t => {
