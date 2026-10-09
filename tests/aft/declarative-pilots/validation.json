@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "f7e7655413bf5587ede2dcb4901fc57008fff31dc0c7428cc42b8e18100c8c81"
+        "sha256": "548d149ca4142d3d71566b7d428b63ff89afad6df17f61e976e28070f7c51f2b"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -941,10 +941,10 @@
       "reviewedPredicateMappings": 20,
       "fullPreservationAccepted": 0,
       "helperInventory": 1072,
-      "conservativeReachableCandidates": 493,
+      "conservativeReachableCandidates": 500,
       "helperSelftestOrNegativeRecords": 213,
-      "unrelatedBranchesOrCases": 366,
-      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35 selected extracted obligations;Visual boundary57+pacing46+render41+reasoning39(includes22 recovered callbackguards).ALL newlyreviewedvisualrecords uncovered.121 supplemental sourcegroups+remaining34Python/14external/dynamic/imported/provisioning unresolved.493conservativecandidates isnotfinalpreservationdenominator;fullhistoricalindex unavailable."
+      "unrelatedBranchesOrCases": 359,
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35;Visual boundary57+pacing46+render41+reasoning39+suitehook7. Allnewsourceguardsuncovered,125supplementalsourcegroups;remainingdynamic/imported/34Python14external/provisioning plusfreshplanabsence unproven.500conservativecandidates notfinalpreservationdenominator;originalfullindex unavailable."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -2587,5 +2587,22 @@
     },
     "verifiedNow": "Actual core HEAD/tree/dependency and receipt SHAdeb58ff4 verified read-only; no combined tests rerun by pilot. Parent accepted421TS/12Python+type/build/lint. Nativeb1c4/terminal8afb scoped approval confirmed by parent; actual runtime factories/Host/producers remain open.",
     "evidenceBoundary": "Deterministic maintained consumer acceptance only; no geometry wholehead/fullmotion/actual browser/provider/campaign acceptance. Frozen prior receipts remain unchanged."
+  },
+  "visualSuiteHookSelectedBranchReview": {
+    "at": "2026-10-09T13:34:00.532168+00:00",
+    "git56bbHelperAndSuiteHashesMatch": true,
+    "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+    "sourceSuiteSha256": "273eb7ea6e2e2bd82042b880c6a15eb4f9d1b1b718d984de2e2c52b9ce1d6ceb",
+    "recovered7": {
+      "direct": 4,
+      "conditional": 3
+    },
+    "excludedSecondCasePlan11": "Source-only freshselectedtests0 branch;actualplanabsence unproven,fulloriginalsuiteguards remain obligations.",
+    "sourceGroupsUncovered": 4,
+    "sourceTeardownMismatch": "Files exactcancel:true/actualRUN-agentid/15s/409only was alreadymapped;Visual ownreasoncancelled/sourcecasekey differs,neitherfixture.release norprocessdeathproof.",
+    "conservativeCandidates": 500,
+    "allFiveYamlAndPriorAdmissionBytesUnchanged": true,
+    "preservationAccepted": false,
+    "runtime": 0
   }
 }

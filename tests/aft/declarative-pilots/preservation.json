@@ -29653,7 +29653,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -29662,10 +29662,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 120,
                 "sourceFunction": "preflight",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Existing loom.fixture.acquire/release YAML and successful owned-resource cleanup facts do not establish exact original source preflight or archive behavior. No cleanup port invoked.",
+                "missingObservation": "Actual source-compatible owning fixture identity/repo/harness/README prerequisites and captured render AgentRef/session archive outcomes with exact source RUN_ID idempotency and safe historical identity before mutation. No released:true substitute."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup"
+                ],
+                "sourceReason": "Suite setup explicitly invokes preflight before selected tests0,even though absent from testbody directcall list.",
+                "recoveredSuiteHook": true,
+                "acceptance": "Source hook classification only; exacttypedoperation/predicate remains unresolved."
+              }
             },
             {
               "source": {
@@ -29678,7 +29690,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -29687,10 +29699,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 122,
                 "sourceFunction": "preflight",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Existing loom.fixture.acquire/release YAML and successful owned-resource cleanup facts do not establish exact original source preflight or archive behavior. No cleanup port invoked.",
+                "missingObservation": "Actual source-compatible owning fixture identity/repo/harness/README prerequisites and captured render AgentRef/session archive outcomes with exact source RUN_ID idempotency and safe historical identity before mutation. No released:true substitute."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup"
+                ],
+                "sourceReason": "Suite setup explicitly invokes preflight before selected tests0,even though absent from testbody directcall list.",
+                "recoveredSuiteHook": true,
+                "acceptance": "Source hook classification only; exacttypedoperation/predicate remains unresolved."
+              }
             },
             {
               "source": {
@@ -29703,7 +29727,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -29712,10 +29736,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 125,
                 "sourceFunction": "preflight",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Existing loom.fixture.acquire/release YAML and successful owned-resource cleanup facts do not establish exact original source preflight or archive behavior. No cleanup port invoked.",
+                "missingObservation": "Actual source-compatible owning fixture identity/repo/harness/README prerequisites and captured render AgentRef/session archive outcomes with exact source RUN_ID idempotency and safe historical identity before mutation. No released:true substitute."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup"
+                ],
+                "sourceReason": "Suite setup explicitly invokes preflight before selected tests0,even though absent from testbody directcall list.",
+                "recoveredSuiteHook": true,
+                "acceptance": "Source hook classification only; exacttypedoperation/predicate remains unresolved."
+              }
             },
             {
               "source": {
@@ -29728,7 +29764,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -29737,10 +29773,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 128,
                 "sourceFunction": "preflight",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Existing loom.fixture.acquire/release YAML and successful owned-resource cleanup facts do not establish exact original source preflight or archive behavior. No cleanup port invoked.",
+                "missingObservation": "Actual source-compatible owning fixture identity/repo/harness/README prerequisites and captured render AgentRef/session archive outcomes with exact source RUN_ID idempotency and safe historical identity before mutation. No released:true substitute."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup"
+                ],
+                "sourceReason": "Suite setup explicitly invokes preflight before selected tests0,even though absent from testbody directcall list.",
+                "recoveredSuiteHook": true,
+                "acceptance": "Source hook classification only; exacttypedoperation/predicate remains unresolved."
+              }
             },
             {
               "source": {
@@ -37240,7 +37288,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37252,7 +37300,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -37265,7 +37325,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37277,7 +37337,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -37290,7 +37362,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37302,7 +37374,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -37315,7 +37399,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37327,7 +37411,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -37340,7 +37436,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37352,7 +37448,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -37365,7 +37473,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37377,7 +37485,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -40011,7 +40131,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -40020,10 +40140,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4238,
                 "sourceFunction": "cleanup_agents",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Existing loom.fixture.acquire/release YAML and successful owned-resource cleanup facts do not establish exact original source preflight or archive behavior. No cleanup port invoked.",
+                "missingObservation": "Actual source-compatible owning fixture identity/repo/harness/README prerequisites and captured render AgentRef/session archive outcomes with exact source RUN_ID idempotency and safe historical identity before mutation. No released:true substitute."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite teardown explicitly invokes cleanup->cleanup_agents. Actual saved render.id existence is conditional after failures; when present, ALL exact captured ID/name/repo/Lead/user/no-parent predicates run before original archive. input.id belongs unselectedtests1 and must not be invented.",
+                "recoveredSuiteHook": true,
+                "acceptance": "Source hook classification only; exacttypedoperation/predicate remains unresolved."
+              }
             },
             {
               "source": {
@@ -40036,7 +40168,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -40045,10 +40177,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4239,
                 "sourceFunction": "cleanup_agents",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Existing loom.fixture.acquire/release YAML and successful owned-resource cleanup facts do not establish exact original source preflight or archive behavior. No cleanup port invoked.",
+                "missingObservation": "Actual source-compatible owning fixture identity/repo/harness/README prerequisites and captured render AgentRef/session archive outcomes with exact source RUN_ID idempotency and safe historical identity before mutation. No released:true substitute."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite teardown explicitly invokes cleanup->cleanup_agents. Actual saved render.id existence is conditional after failures; when present, ALL exact captured ID/name/repo/Lead/user/no-parent predicates run before original archive. input.id belongs unselectedtests1 and must not be invented.",
+                "recoveredSuiteHook": true,
+                "acceptance": "Source hook classification only; exacttypedoperation/predicate remains unresolved."
+              }
             },
             {
               "source": {
@@ -40061,7 +40205,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -40070,10 +40214,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4240,
                 "sourceFunction": "cleanup_agents",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Existing loom.fixture.acquire/release YAML and successful owned-resource cleanup facts do not establish exact original source preflight or archive behavior. No cleanup port invoked.",
+                "missingObservation": "Actual source-compatible owning fixture identity/repo/harness/README prerequisites and captured render AgentRef/session archive outcomes with exact source RUN_ID idempotency and safe historical identity before mutation. No released:true substitute."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite teardown explicitly invokes cleanup->cleanup_agents. Actual saved render.id existence is conditional after failures; when present, ALL exact captured ID/name/repo/Lead/user/no-parent predicates run before original archive. input.id belongs unselectedtests1 and must not be invented.",
+                "recoveredSuiteHook": true,
+                "acceptance": "Source hook classification only; exacttypedoperation/predicate remains unresolved."
+              }
             },
             {
               "source": {
@@ -40086,7 +40242,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -40098,7 +40254,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -40111,7 +40279,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -40123,7 +40291,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -40136,7 +40316,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -40148,7 +40328,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -40161,7 +40353,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -40173,7 +40365,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -41333,7 +41537,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -41345,7 +41549,19 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedSuiteHookCallerPaths": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded-selected-fresh-case-branch",
+                "suiteHookCallerPaths": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+                ],
+                "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release.",
+                "condition": "Exact original mobile-workspace-plan.json absent in fresh selectedtests0 namespace. If fullsuite/input planexists these predicates run;no selected-case creation/deletion inferred.",
+                "acceptance": "Source-only exclusion,not proof actualabsence or completeoriginalcampaign."
+              }
             },
             {
               "source": {
@@ -48476,6 +48692,290 @@
           }
         ],
         "acceptance": "Recovered source obligation changesconservativecandidate count,not preservationcredit. Otherdynamic/imported/clipboard/identityclosure unresolved."
+      },
+      "suiteHookSelectedBranchReview": {
+        "at": "2026-10-09T13:34:00.532168+00:00",
+        "scope": "Original selectedtests0 suite setup/teardown only; no testbody translation or cleanup effects",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "sourceSuiteSha256": "273eb7ea6e2e2bd82042b880c6a15eb4f9d1b1b718d984de2e2c52b9ce1d6ceb",
+        "sourceSuiteHookLines": {
+          "setup": [
+            8,
+            10
+          ],
+          "teardown": [
+            11,
+            13
+          ]
+        },
+        "frozenBytesMatch": true,
+        "recoveredInventoryPredicates": [
+          {
+            "function": "preflight",
+            "line": 120,
+            "endLine": 120,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup",
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite setup explicitly invokes preflight before selected tests0,even though absent from testbody directcall list."
+          },
+          {
+            "function": "preflight",
+            "line": 122,
+            "endLine": 122,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup",
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite setup explicitly invokes preflight before selected tests0,even though absent from testbody directcall list."
+          },
+          {
+            "function": "preflight",
+            "line": 125,
+            "endLine": 125,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup",
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite setup explicitly invokes preflight before selected tests0,even though absent from testbody directcall list."
+          },
+          {
+            "function": "preflight",
+            "line": 128,
+            "endLine": 128,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup",
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite setup explicitly invokes preflight before selected tests0,even though absent from testbody directcall list."
+          },
+          {
+            "function": "cleanup_agents",
+            "line": 4238,
+            "endLine": 4238,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "conditional": true,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite teardown explicitly invokes cleanup->cleanup_agents. Actual saved render.id existence is conditional after failures; when present, ALL exact captured ID/name/repo/Lead/user/no-parent predicates run before original archive. input.id belongs unselectedtests1 and must not be invented."
+          },
+          {
+            "function": "cleanup_agents",
+            "line": 4239,
+            "endLine": 4239,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "conditional": true,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite teardown explicitly invokes cleanup->cleanup_agents. Actual saved render.id existence is conditional after failures; when present, ALL exact captured ID/name/repo/Lead/user/no-parent predicates run before original archive. input.id belongs unselectedtests1 and must not be invented."
+          },
+          {
+            "function": "cleanup_agents",
+            "line": 4240,
+            "endLine": 4240,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "conditional": true,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite teardown explicitly invokes cleanup->cleanup_agents. Actual saved render.id existence is conditional after failures; when present, ALL exact captured ID/name/repo/Lead/user/no-parent predicates run before original archive. input.id belongs unselectedtests1 and must not be invented."
+          }
+        ],
+        "direct": 4,
+        "conditional": 3,
+        "recoveredCount": 7,
+        "secondCaseRosterPredicatesExcluded": [
+          {
+            "function": "owned_workspace_targets",
+            "line": 4248,
+            "endLine": 4248,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "owned_workspace_targets",
+            "line": 4249,
+            "endLine": 4249,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "owned_workspace_targets",
+            "line": 4250,
+            "endLine": 4250,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "owned_workspace_targets",
+            "line": 4254,
+            "endLine": 4254,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "cleanup_mobile_workspaces",
+            "line": 4346,
+            "endLine": 4346,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "cleanup_mobile_workspaces",
+            "line": 4368,
+            "endLine": 4369,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "owned_workspace_targets",
+            "line": 4258,
+            "endLine": 4258,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "cleanup_mobile_workspaces",
+            "line": 4361,
+            "endLine": 4361,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "cleanup_mobile_workspaces",
+            "line": 4363,
+            "endLine": 4363,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "cleanup_mobile_workspaces",
+            "line": 4365,
+            "endLine": 4365,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          },
+          {
+            "function": "owned_workspace_targets",
+            "line": 4260,
+            "endLine": 4260,
+            "suiteHookCallerPath": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown",
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "sourceReason": "Suite cleanup always calls cleanup_mobile_workspaces in finally,which returns before these predicates if its exact plan is absent. The plan producer create_mobile_roster955-979 is invoked only original tests1 (suite243),not selected tests0. Therefore these11guard predicates are excluded for a fresh selected-case evidence namespace; they remain original fullsuite/secondcase obligations. Actual fresh/absent plan and no imported stale/sharedcase artifact must still be proven; absence is not inferred from fixture release."
+          }
+        ],
+        "secondCaseExcludedCount": 11,
+        "additionalSourceGroups": [
+          {
+            "id": "visual-suite-preflight-actual-source-prerequisites",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 119,
+              "end": 128,
+              "text": "def preflight():\n    assert required(\"AFT_REAL_BACKEND\") == \"opencode\"\n    repo = required(\"AFT_AGENT_FLOW_REPO\")\n    assert Path(repo).is_absolute() and Path(repo).name == \"source-repo\", repo\n    workspace = request(f\"/api/workspaces/{urllib.parse.quote(WS, safe='')}\")\n    source = [r for r in (workspace.get(\"data\") or workspace)[\"repos\"] if r.get(\"name\") == \"source-repo\"]\n    assert len(source) == 1 and source[0][\"path\"] == repo, source\n    request(f\"/api/workspaces/{urllib.parse.quote(WS, safe='')}/v1/harnesses/opencode\")\n    fixture = Path(required(\"AFT_TESTS_DIR\")).parent / \"fixtures/slack-clone/README.md\"\n    assert \"- `npm test` runs the tests.\" in fixture.read_text(), fixture"
+            },
+            "suiteHookCallerPaths": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/setup"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "selected-suite-hook-outside-test-body-translation",
+              "required": "Actual AFT_REAL_BACKEND opencode,absolute source-repo path;actual owningworkspace repos filtered name source-repo EXACTone andsamepath;actual harness GET completes;sourcefixtureREADME includes exact npmtest sentence. All happen before case.",
+              "canonicalAttempt": "Actual typed fixture acquire/release or future fixed ownedarchive port must preserve source semantics; no API/OS/provider/runtime work executed.",
+              "missingObservation": "Canonical revision/digest literal or selected model name alone does not prove original actual registration/repo/harness/README facts. No source suite setup execution/expected-provider stub."
+            },
+            "bounds": {
+              "httpTimeoutMs": 15000
+            }
+          },
+          {
+            "id": "visual-suite-owned-render-archive-identity",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 4232,
+              "end": 4242,
+              "text": "def cleanup_agents():\n    for case, expected in NAMES.items():\n        if not (WORK / f\"{case}.id\").exists():\n            continue\n        owned = json.loads((WORK / f\"{case}-identity.json\").read_text())\n        a = request(f\"{PREFIX}/{agent_id(case)}\")\n        assert a[\"agent_id\"] == owned[\"agent_id\"] and a[\"name\"] in (expected, expected + \"-renamed\"), a\n        assert a[\"repo\"] == owned[\"repo\"] == required(\"AFT_AGENT_FLOW_REPO\"), a\n        assert a[\"preset\"] == \"lead\" and a[\"created_by_kind\"] == \"user\" and a[\"parent_agent_id\"] is None, a\n        if not a.get(\"archived_at\"):\n            request(f\"{PREFIX}/{a['agent_id']}/archive\", \"POST\", {\"reason\": \"cancelled\"}, f\"cov-visual-{RUN}-{case}-archive\")"
+            },
+            "suiteHookCallerPaths": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "selected-suite-hook-outside-test-body-translation",
+              "required": "For each actual recorded case.id:load original capturedidentity then actualGETexactagent;IDequalscapture,nameeitheroriginal or-original-renamed,repoequalscapture+sourceAFT_AGENT_FLOW_REPO,presetlead,createdbyuser,parentNULL. If actual archived_at truthy skiparchive; otherwise POST reasoncancelled,exact source cov-visual-RUN-case-archive Idempotency-Key;onlyoriginal HTTP/status/error handling. Source render no descendant assumption;input ID not invented.",
+              "canonicalAttempt": "Actual typed fixture acquire/release or future fixed ownedarchive port must preserve source semantics; no API/OS/provider/runtime work executed.",
+              "missingObservation": "Safe typed archive producer/API outcome preserving actual identity and sourcecase+RUN receipt must exist;processdeath/fixture release cannotprovearchive. Saved IDabsence branch remains observednamespace requirement."
+            },
+            "bounds": {
+              "httpTimeoutMs": 15000
+            }
+          },
+          {
+            "id": "visual-suite-cleanup-finally-even-archive-failure",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 4372,
+              "end": 4376,
+              "text": "def cleanup():\n    try:\n        cleanup_agents()\n    finally:\n        cleanup_mobile_workspaces()"
+            },
+            "suiteHookCallerPaths": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "selected-suite-hook-outside-test-body-translation",
+              "required": "cleanup_agents executes first;cleanup_mobile_workspaces executes in finally even if archive/read/identityfails. Both original failures propagate as original semantics;do not suppress errors beyond actual helper.",
+              "canonicalAttempt": "Actual typed fixture acquire/release or future fixed ownedarchive port must preserve source semantics; no API/OS/provider/runtime work executed.",
+              "missingObservation": "Managed always-cleanup hook must retain exact attempt ordering/actualobservedfailures and still run second cleanup;neither teardown-success boolean nor empty resource ledger is sourceproof."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-selected-case-no-secondcase-roster-adoption",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 4341,
+              "end": 4369,
+              "text": "def cleanup_mobile_workspaces():\n    plan_path = WORK / \"mobile-workspace-plan.json\"\n    if not plan_path.exists():\n        return\n    plan = json.loads(plan_path.read_text())\n    assert all(name in MOBILE_WS_NAMES for name in plan[\"planned_names\"]), plan\n    active_path = f\"/api/workspaces/{urllib.parse.quote(WS, safe='')}\"\n    roster = workspace_data(active_path)[\"workspaces\"]\n    created_path = WORK / \"mobile-workspace-created.json\"\n    created = json.loads(created_path.read_text()) if created_path.exists() else []\n    try:\n        targets = owned_workspace_targets(plan, created, roster)\n    except AssertionError as exc:\n        write(\"mobile-workspace-leftover.json\", {\"status\": \"blocked\", \"reason\": str(exc),\n              \"planned_names\": plan[\"planned_names\"], \"created\": created,\n              \"roster\": [{\"id\": row[\"id\"], \"name\": row[\"name\"]} for row in roster]})\n        raise\n    removed = []\n    for row in targets:\n        actual = workspace_data(f\"/api/workspaces/{urllib.parse.quote(row['id'], safe='')}\")\n        assert actual[\"id\"] == row[\"id\"] and actual[\"name\"] == row[\"name\"] and actual[\"repos\"] == [], actual\n        response = request(f\"/api/workspaces/{urllib.parse.quote(row['id'], safe='')}\", \"DELETE\", expected_status=200)\n        assert response[\"success\"], response\n        remaining = workspace_data(active_path)[\"workspaces\"]\n        assert not any(w[\"id\"] == row[\"id\"] for w in remaining), remaining\n        removed.append(row)\n        write(\"mobile-workspace-cleanup.json\", removed)\n    assert all(any(row[\"id\"] == original[\"id\"] and row[\"name\"] == original[\"name\"] for row in workspace_data(active_path)[\"workspaces\"])\n               for original in plan[\"baseline\"]), \"baseline workspace roster changed during owned cleanup\""
+            },
+            "suiteHookCallerPaths": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#/teardown"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "selected-suite-hook-outside-test-body-translation",
+              "required": "Original cleanup returns if mobile-workspace-plan missing. Its only productionwriter create_mobile_roster955-979 is called only unselectedtests1/source243. Fresh selectedtests0 does not create workspaceplan or extra workspaceactors. If planpresent fullsuiteconditionalbranch has11 guards:allowlistednames/savedCreateIDs/no baseline/current adoption/no same-nameforeign/uniqueness/unchangednames,actualemptyrepo detail,successful200DELETE/disappearance/baselinepreservation.",
+              "canonicalAttempt": "Actual typed fixture acquire/release or future fixed ownedarchive port must preserve source semantics; no API/OS/provider/runtime work executed.",
+              "missingObservation": "Actual same-owning evidence namespace/fresh absence needed;no inaccessible/unavailable==absent or foreign/stale artifactadoption. Fullsuite/input guards not waived or counted asselectedruntime,existing migrationowner retains them."
+            },
+            "bounds": {
+              "httpTimeoutMs": 15000,
+              "sourceProducer": {
+                "helperLines": [
+                  955,
+                  979
+                ],
+                "suitePath": [
+                  "tests",
+                  1
+                ],
+                "suiteLine": 243
+              }
+            }
+          }
+        ],
+        "acceptance": "7 formerlyunrelated sourceguards recovered;4newuncovered sourcegroups.11 secondcase planbranchguards excludedONLY fresh selectednamespace,actualabsence not proven. Genericfixture.release never counts sourcearchive cleanup."
       }
     },
     {
@@ -54066,17 +54566,17 @@
     "originalSteps": 207,
     "helperInventoryEntries": 1072,
     "classificationCounts": {
-      "selected-invocation-predicate-reachable": 399,
-      "unrelated-to-static-selected-call-closure": 352,
+      "selected-invocation-predicate-reachable": 403,
+      "unrelated-to-static-selected-call-closure": 334,
       "helper-selftest-negative-requirement": 213,
-      "excluded-static-selected-invocation-branch": 10,
-      "selected-invocation-predicate-conditionally-reachable": 46,
+      "excluded-static-selected-invocation-branch": 21,
+      "selected-invocation-predicate-conditionally-reachable": 49,
       "selected-function-reachable-branch-unresolved": 34,
       "selected-external-helper-branch-unresolved": 14,
       "unrelated-external-helper-case": 4
     },
-    "reachableCandidatePredicates": 493,
-    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit. Visual pacing/projection/arrival deadlines/control exit32 Python and14 external Markdown guards narrowed (26 direct,20 conditional),including actual terminal projection23/36 and nonplain46;9 supplemental source groups preserve all-candidate pressure/first-tie/first-rendered/every-arrival/last-control-exit semantics. Other visual/imported branches still unresolved. Visual41 running/native tool/fullreply/render/reload/reduced/expansion guards narrowed33direct8conditional;10 exact sourceactor/payload/centering/history/window groups uncovered. RemainingvisualPython51/external14+ownershipimports unreconciled; geometryfc unreviewed/unconsumed. Actual final_visual_assert callback reasoning_assert recovers22formerlyunrelated frozen guards;39reasoning/presentation guards narrowed32direct7conditional,6supplemental source groups uncovered. Conservativecandidate count493 replaces471;previousstaticclosure wasincomplete,notfullpredicateproof. Remaining34Python/14external branches plusdynamic/imported/provisioning unresolved.",
+    "reachableCandidatePredicates": 500,
+    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit. Visual pacing/projection/arrival deadlines/control exit32 Python and14 external Markdown guards narrowed (26 direct,20 conditional),including actual terminal projection23/36 and nonplain46;9 supplemental source groups preserve all-candidate pressure/first-tie/first-rendered/every-arrival/last-control-exit semantics. Other visual/imported branches still unresolved. Visual41 running/native tool/fullreply/render/reload/reduced/expansion guards narrowed33direct8conditional;10 exact sourceactor/payload/centering/history/window groups uncovered. RemainingvisualPython51/external14+ownershipimports unreconciled; geometryfc unreviewed/unconsumed. Actual final_visual_assert callback reasoning_assert recovers22formerlyunrelated frozen guards;39reasoning/presentation guards narrowed32direct7conditional,6supplemental source groups uncovered. Conservativecandidate count493 replaces471;previousstaticclosure wasincomplete,notfullpredicateproof. Remaining34Python/14external branches plusdynamic/imported/provisioning unresolved. Selectedvisualsuitepreflight/cleanup hook source recovers7formerlyunrelated guards4direct3conditional.11originalsecondcase rostercleanup predicates excludedonlyforfresh selectedtests0 namespace;sourceplanwriteris unselectedtests1,actualabsenceunproven.500conservativecandidates replaces493;fullsuite/dynamic/import/provisioning closure remainsunreconciled.4supplementalhookgroups uncovered(total125).",
     "reviewedAuthoredUnvalidatedPredicates": 20,
     "partiallyMappedRepeatedPredicates": 3,
     "fullPreservationAcceptance": false,
@@ -54087,7 +54587,8 @@
     "additionalUninventoriedSseSourceGroups": 10,
     "additionalUninventoriedVisualMotionSourceGroups": 19,
     "additionalUninventoriedVisualRenderSourceGroups": 10,
-    "additionalUninventoriedVisualReasoningSourceGroups": 6
+    "additionalUninventoriedVisualReasoningSourceGroups": 6,
+    "additionalUninventoriedVisualSuiteHookSourceGroups": 4
   },
   "dependencies": {
     "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
