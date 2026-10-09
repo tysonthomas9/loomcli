@@ -7,7 +7,8 @@ import { FixtureError, type Artifact, type FixtureDriver, type FixturePlan, type
 import { reservePort, type PortReservation } from './process.js';
 import type { ContainerRead } from './container-read.js';
 import { readHttp, type Http } from './host.js';
-import { Json } from '../protocol.js';
+import { Json, redact } from '../protocol.js';
+import { redactionFacts } from '../redaction.js';
 import { prepareRenderer, type PreparedRenderer } from './renderer.js';
 import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
 import type { FixtureAuthorityOwner } from '../authority.js';
@@ -91,7 +92,7 @@ export async function verifyManifest(manifest: FileManifest, expected: string): 
   }
   check(hash(entries.map(entry => `${entry.sha256}  ${entry.relativePath}\n`).join('')) === expected, 'source-mismatch');
 }
-interface ObjectRecord { id: string; kind: 'container' | 'volume' | 'network'; generation: string; service: string; pid: number; state: string; healthy?: boolean; workVolume?: string }
+interface ObjectRecord { id: string; kind: 'container' | 'volume' | 'network'; generation: string; service: string; pid: number; state: string; startedAt?:string; healthy?: boolean; workVolume?: string }
 const SERVICES = ['redis', 'fleet-db', 'loom-local', 'ui-local'];
 const CLOUD_SERVICES = ['redis', 'fleet-auth-seed', 'fleet-db', 'loom-serve', 'worker', 'stub-upstream'];
 
@@ -107,6 +108,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   private readonly locks = new Map<string, string>();
   private objects: ObjectRecord[] = [];
   private operationActive=false;
+  private readonly restartAttempts=new Set<string>();
   private async withContainerOperation<T>(operation:()=>Promise<T>):Promise<T>{
     check(!this.operationActive,'identity-mismatch');this.operationActive=true;
     try{return await operation();}finally{this.operationActive=false;}
@@ -384,7 +386,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
         records.push({ id: kind === 'volume' ? value.Name : value.Id ?? value.ID, kind, service,
           generation: kind === 'container' ? `${value.Id}:${value.State?.StartedAt}` : `${value.Name ?? value.Id ?? value.ID}:${value.CreatedAt ?? value.Created}`,
           pid: kind === 'container' ? value.State?.Pid ?? 0 : 0, state: kind === 'container' ? value.State?.Status ?? 'unknown' : 'allocated',
-          ...(kind === 'container' ? { healthy: value.State?.Health?.Status === 'healthy' } : {}), ...(workVolume ? { workVolume } : {}) });
+          ...(kind === 'container' ? {startedAt:value.State?.StartedAt, healthy: value.State?.Health?.Status === 'healthy' } : {}), ...(workVolume ? { workVolume } : {}) });
       }
     }
     check(new Set(records.map(record => `${record.kind}:${record.id}`)).size === records.length);
@@ -455,12 +457,76 @@ export class ComposeFixtureDriver implements FixtureDriver {
       await this.verifyContainer(container,signal);return response;
     });
   }
+  /** Fixed selected SSE actor. This restarts serve and colocated OpenCode;
+   * it is unrelated to the native registered-service SIGTERM actor. */
+  async restartOwnedServe(expectedContainerId:string,expectedGeneration:string,signal:AbortSignal){
+    signal.throwIfAborted();check(this.profile==='agents-real-opencode','unsupported-capability');
+    return this.withContainerOperation(async()=>{
+      check(this.plan,'identity-mismatch');
+      await verifyManifest(this.config.loom.source,this.plan!.loomRevision.sourceManifestSha256);
+      await verifyManifest(this.config.loom.build,this.plan!.loomRevision.buildManifestSha256);
+      const before=await this.ownedContainer(signal,expectedGeneration);
+      check(before.id===expectedContainerId&&Number.isInteger(before.pid)&&before.pid>0&&typeof before.startedAt==='string'&&before.startedAt.length>0,'identity-mismatch');
+      const attempt=JSON.stringify([before.id,before.generation]);check(!this.restartAttempts.has(attempt),'identity-mismatch');
+      const retained=this.objects.map(object=>({...object}));
+      const beforeTop=await this.command('podman',['--connection',this.config.connection,'top',before.id,'pid','comm'],signal);
+      const intent=await this.artifact('observe',{operation:'compose-restart-intent',leaseId:this.leaseId,project:this.project,
+        scope:'loom-local-plus-OpenCode',before:{containerId:before.id,initPid:before.pid,startedAt:before.startedAt,generation:before.generation},
+        processListing:{value:redact(beforeTop,this.fixtureSecrets),redaction:redactionFacts(beforeTop,this.fixtureSecrets)}});
+      const adopt=async(abort:AbortSignal,expectedTarget?:ObjectRecord)=>{
+        abort.throwIfAborted();const records=await this.inventory(abort);abort.throwIfAborted();check(records.length===retained.length);
+        for(const record of records){
+          const previous=retained.find(value=>value.id===record.id&&value.kind===record.kind);
+          check(previous&&previous.service===record.service,'identity-mismatch');
+          if(record.id!==before.id)check(record.generation===previous!.generation&&record.pid===previous!.pid,'identity-mismatch');
+          else {check(record.kind==='container'&&record.service==='loom-local'&&typeof record.startedAt==='string'&&record.startedAt.length>0,'identity-mismatch');
+            if(expectedTarget)check(record.generation===expectedTarget.generation&&record.pid===expectedTarget.pid,'identity-mismatch');}
+        }
+        // Exact retained container identity, labels, image, ports and namespace
+        // are still checked by inventory. No new container or project adoption.
+        this.objects=records;return records.find(value=>value.id===before.id)!;
+      };
+      await this.verifyContainer(before,signal);signal.throwIfAborted();this.restartAttempts.add(attempt);
+      let after:ObjectRecord|undefined;
+      try{
+        const bounded=AbortSignal.any([signal,AbortSignal.timeout(180000)]);
+        await this.command('podman',[...this.composeArgs(),'restart','loom-local'],bounded);
+        after=await adopt(bounded);
+        check(after.state==='running'&&Number.isInteger(after.pid)&&after.pid>0&&after.pid!==before.pid&&after.startedAt!==before.startedAt,'identity-mismatch');
+        // The frozen container healthcheck includes the readiness marker and
+        // /api/config. Await its explicit signal; never poll or sleep here.
+        await this.command('podman',['--connection',this.config.connection,'wait','--condition=healthy','--condition=unhealthy','--condition=exited',after.id],bounded);
+        await this.verifyContainer(after,bounded);
+        check(this.objects.find(value=>value.id===after!.id)?.healthy,'observation-failed');
+        await this.http(`http://127.0.0.1:${this.ports[1]}`,'/api/config',bounded);
+        await this.verifyContainer(after,bounded);
+        const afterTop=await this.command('podman',['--connection',this.config.connection,'top',after.id,'pid','comm'],bounded);
+        await this.verifyContainer(after,bounded);
+        const fact={scope:'loom-local-plus-OpenCode' as const,
+          before:{containerId:before.id,initPid:before.pid,startedAt:before.startedAt,generation:before.generation},
+          after:{containerId:after.id,initPid:after.pid,startedAt:after.startedAt!,generation:after.generation},
+          readiness:{path:'/api/config' as const,complete:true as const}};
+        const receipt=await this.artifact('observe',{operation:'compose-restarted',intent,fact,
+          processListing:{value:redact(afterTop,this.fixtureSecrets),redaction:redactionFacts(afterTop,this.fixtureSecrets)}});return {...fact,receipt};
+      }catch{
+        // Failed or cancelled dispatch may still have restarted this exact
+        // owned container. Refresh only that recorded identity for cleanup;
+        // never retry the mutation or replace the resource roster wholesale.
+        let cleanupIdentityRetained=false;
+        try{after=await adopt(AbortSignal.timeout(15000),after);cleanupIdentityRetained=true;}catch{/* retain prior known authority */}
+        const receipt=await this.artifact('failure',{operation:'compose-restart-uncertain',intent,cleanupIdentityRetained,
+          ...(after?{after:{containerId:after.id,initPid:after.pid,startedAt:after.startedAt,generation:after.generation}}:{})});
+        throw new FixtureError('observation-failed',receipt);
+      }
+    });
+  }
   async inspect(resource: Resource): Promise<Inventory> {
     if (resource.kind === 'ports') return { complete: true, owned: resource.generation === this.leaseId && this.ports.length > 0, services: [] };
     if (resource.kind === 'compose') {
       check(resource.id === this.project && resource.generation === this.leaseId);
       const records = await this.inventory();
-      if (this.objects.length) check(records.every(record => this.objects.some(owned => owned.kind === record.kind && owned.id === record.id && owned.generation === record.generation)) &&
+      if (this.objects.length) check(records.every(record => this.objects.some(owned => owned.kind === record.kind && owned.id === record.id && owned.generation === record.generation&&
+        (owned.pid===record.pid||record.kind==='container'&&record.state==='exited'&&record.pid===0))) &&
         this.objects.every(owned => records.some(record => record.id === owned.id && record.kind === owned.kind)));
       if (this.objects.length) this.objects = records;
       return { complete: true, owned: true, services: records.filter(record => record.kind === 'container').map(record => ({
