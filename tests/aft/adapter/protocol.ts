@@ -45,12 +45,16 @@ export type ServiceRegistration = z.infer<typeof ServiceRegistration>;
 export interface ProcessIdentity {
   pid: number; generation: string; executable: string; argv: string[];
 }
+export const AgentHistory = z.object({agentId:Id,workspaceId:Id,repo:Id,revision:z.number().int().nonnegative(),
+  deletedAt:Id.nullable(),historyPurgedAt:Id.nullable(),savedEventCount:z.number().int().nonnegative()}).strict();
+export type AgentHistory = z.infer<typeof AgentHistory>;
 export interface NativeAccess {
   registration(): Promise<ServiceRegistration>;
   process(): Promise<ProcessIdentity>;
   pinnedExecutable: string;
   sessions(agentId: string): Promise<NativeRef[]>;
   agent(agentId: string): Promise<AgentRow>;
+  history?(agentId: string): Promise<AgentHistory>;
   read: ReadTransport;
   log?(nativeSessionId: string, signal: AbortSignal): Promise<string>;
 }

@@ -1,7 +1,9 @@
 import { getRegisteredResource, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
 import type { z } from 'zod';
 import type { FilesystemInput, FilesystemOutput } from './filesystem.js';
+import type { GitLifecycleInput, GitLifecycleOutput } from './git-lifecycle.js';
 import type { GitInput, GitOutput } from './git.js';
+import { requireOwnedWorkspace, validateOwnedWorkspaceRoster, type OwnedWorkspaceRoster, type WorkspaceAgentFact } from './workspaces.js';
 import type { OwnedRendererTarget } from './renderer-target.js';
 import type { SyntheticProbe } from './synthetic-probe.js';
 import type { EvidenceClass } from '@tysonthomas9/aft/types';
@@ -17,6 +19,7 @@ export interface OwnedAgent {
   row: AgentRow;
   commonDir: string;
   native?: NativeAccess;
+  gitLifecycle?: (input: z.infer<typeof GitLifecycleInput>, signal: AbortSignal) => Promise<z.infer<typeof GitLifecycleOutput>>;
   gitObserve?: (input: z.infer<typeof GitInput>, signal: AbortSignal) => Promise<z.infer<typeof GitOutput>>;
 }
 /** Private fixture state is never serialized into suite bindings or receipts. */
@@ -37,9 +40,11 @@ export interface OwnedFixture {
   syntheticProbe?: SyntheticProbe;
   rendererTarget?: OwnedRendererTarget;
   operationAuthority?: FixtureOperationAuthority;
+  ownedWorkspaces?: OwnedWorkspaceRoster;
+  readWorkspaceAgent?: (workspaceId:string,agentId:string,signal:AbortSignal)=>Promise<WorkspaceAgentFact>;
   readApi: ReadTransport;
   readFiles: ReadTransport;
-  resolveAgent(agentId: string, signal: AbortSignal): Promise<OwnedAgent>;
+  resolveAgent(agentId: string, signal: AbortSignal, workspaceId?: string): Promise<OwnedAgent>;
   verify(signal: AbortSignal): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -49,6 +54,7 @@ export function putFixture(context: CapabilityContext, fixture: OwnedFixture): v
   requireFact(fixture.runId === context.runId && fixture.suiteId === context.suiteId && fixture.scope === context.scope &&
     (fixture.scope === 'suite' || fixture.caseId === context.caseId) && fixture.leaseId && !context.resources.has(resourceKey(fixture.leaseId)),
     'ownership-mismatch', 'Fixture ownership is invalid or duplicated');
+  validateOwnedWorkspaceRoster(fixture);
   if (fixture.operationAuthority) validateFixtureOperationAuthority(fixture.operationAuthority,fixture);
   bindEvidenceStore(context, fixture.leaseId);
   context.resources.set(resourceKey(fixture.leaseId), fixture);
@@ -81,15 +87,15 @@ export async function getFixture(context: CapabilityContext, leaseId: string): P
 }
 export async function getAgent(context: CapabilityContext, ref: AgentRef): Promise<{ fixture: OwnedFixture; agent: OwnedAgent }> {
   const fixture = await getFixture(context, ref.fixtureLeaseId);
-  requireFact(fixture.workspaceId === ref.workspaceId, 'ownership-mismatch', 'Foreign agent workspace');
+  const workspace = requireOwnedWorkspace(fixture,ref.workspaceId,ref.agentId);
   const agent = fixture.agents.get(ref.agentId);
   requireFact(agent && agent.row.agent_id === ref.agentId && agent.row.workspace_id === ref.workspaceId &&
-    agent.row.repo === fixture.repo, 'ownership-mismatch', 'Agent is not bound to the owned fixture');
+    agent.row.repo === workspace.repo && (!workspace.commonDir || agent.commonDir===workspace.commonDir), 'ownership-mismatch', 'Agent is not bound to the owned fixture');
   const parentId = agent.row.parent_agent_id;
   if (parentId !== null) {
     const parent = fixture.agents.get(parentId);
     requireFact(parent && agent.row.created_by_kind === 'agent' && agent.row.created_by_id === parentId &&
-      parent.row.repo === fixture.repo && parent.row.workspace_id === fixture.workspaceId &&
+      parent.row.repo === workspace.repo && parent.row.workspace_id === ref.workspaceId &&
       agent.row.root_agent_id === (parent.row.root_agent_id ?? parentId), 'identity-mismatch', 'Agent parent/root ownership is invalid');
   } else requireFact(agent.row.root_agent_id === null && agent.row.created_by_kind === 'user', 'identity-mismatch', 'Root agent ownership is invalid');
   return { fixture, agent };
