@@ -9,7 +9,7 @@ import { ObservationResultSchema } from '@tysonthomas9/aft/types';
 import { putFixture, disposeFixtures, type OwnedFixture } from '../ownership.js';
 import { createLegacyProviders, RoleOutput } from './providers.js';
 import type { LegacyAccess, LegacyLease } from './operations.js';
-import { createFixtureOperationAuthority } from '../authority.js';
+import { createFixtureOperationAuthority, fixtureOwnerIdentity } from '../authority.js';
 import { LegacyOperationEffects } from './providers.js';
 import { testLegacyRoster } from './test-roster.js';
 
@@ -145,7 +145,10 @@ test('registry authorizes operation classes and external effects before factorie
   const fixture: OwnedFixture = { leaseId: lease.id, runId: lease.runId, suiteId: context.suiteId, scope: context.scope, caseId: context.caseId,
     workspaceId: 'WS', repo: '/injected/work', profile: 'legacy-real-codex', expiresAtUtcMs: Number.MAX_SAFE_INTEGER, evidenceClass: 'real-native',
     roots: new Map(), agents: new Map(), secrets: [], readApi: unused, readFiles: unused, resolveAgent: unused, verify: async () => {}, dispose: async () => {} };
-  fixture.readWorkspaceLegacyAgent = unused;
+  fixture.readWorkspaceLegacyAgent = async (workspaceId, name) => ({ kind: 'legacy-agent-enrolled', identityKind: 'legacy-agent-name',
+    ...fixtureOwnerIdentity(fixture), workspaceId, name, repo: fixture.repo, commonDir: `${fixture.repo}/.git`,
+    storeId: 'injected-legacy-store', storeGeneration: 'injected-store-generation', parentName: null,
+    createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:01:00Z' });
   fixture.ownedWorkspaces = await testLegacyRoster(fixture, evidenceStore, [{ workspaceId: 'WS', repo: fixture.repo, agentIds: ['worker'] }]);
   putFixture(context, fixture);
   const task = { leaseId: lease.id, workspaceId: 'WS', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null };
@@ -219,10 +222,10 @@ test('legacy names are scoped by retained workspace kind and dynamic enrollment 
     readWorkspaceAgent: async () => { nativeReads++; throw new Error('Legacy name must never use native ID reader'); }, verify: async () => {}, dispose: async () => {} };
   const owner = { leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId, scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile };
   fixture.operationAuthority = createFixtureOperationAuthority(owner, { 'loom.cli.usage': { evidenceClass: 'deterministic', effects: [...LegacyOperationEffects['loom.cli.usage']] } });
-  fixture.ownedWorkspaces = await testLegacyRoster(fixture, store, ['WS','OTHER'].map(workspaceId => ({ workspaceId, repo: '/injected/repo', agentIds: ['worker'] })));
   fixture.readWorkspaceLegacyAgent = async (workspaceId, name) => ({ kind: 'legacy-agent-enrolled', identityKind: 'legacy-agent-name', ...owner,
     workspaceId, name, repo: '/injected/repo', commonDir: '/injected/repo/.git', storeId: 'injected-legacy-store', storeGeneration: 'injected-store-generation',
     parentName: name === 'worker' ? null : name === 'cycle' ? 'cycle' : 'worker', createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:01:00Z' });
+  fixture.ownedWorkspaces = await testLegacyRoster(fixture, store, ['WS','OTHER'].map(workspaceId => ({ workspaceId, repo: '/injected/repo', agentIds: ['worker'] })));
   putFixture(context, fixture);
   const invoke = (workspaceId: string, agentId: string) => registry.invoke({ id: 'loom.cli.usage', version: 1, input: {} },
     { agent: { fixtureLeaseId: lease.id, workspaceId, agentId } }, context);
@@ -235,8 +238,8 @@ test('legacy names are scoped by retained workspace kind and dynamic enrollment 
   const initial = fixture.ownedWorkspaces![0]!.creationReceipt;
   const child = await invoke('WS','child'); assert.equal(child.availability, 'observed'); assert.equal(nativeReads, 0);
   assert.equal(fixture.ownedWorkspaces![0]!.creationReceipt.id, initial.id, 'Dynamic enrollment preserves original creation bytes');
-  assert.equal(fixture.ownedWorkspaces![0]!.enrollmentReceipts.length, 1);
-  const receipt = JSON.parse(await readFile(await store.resolve(fixture.ownedWorkspaces![0]!.enrollmentReceipts[0]!.id), 'utf8'));
+  assert.equal(fixture.ownedWorkspaces![0]!.enrollmentReceipts.length, 2);
+  const receipt = JSON.parse(await readFile(await store.resolve(fixture.ownedWorkspaces![0]!.enrollmentReceipts[1]!.id), 'utf8'));
   assert.equal(receipt.identityKind, 'legacy-agent-name'); assert.equal(receipt.name, 'child'); assert.equal(receipt.parentName, 'worker');
   assert.equal(factories, 1); assert.equal(effects, 3);
 });

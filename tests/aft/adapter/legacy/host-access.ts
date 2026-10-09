@@ -234,8 +234,9 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
         const result = await driver.launchOwnedCli(plan.argv, plan.envOverrides, plan.stdin, plan.waitForExit, signal);
         const registered = await driver.inspectOwnedProcess(result.id, result.generation, signal);
         requireOwned(registered.pid === result.pid);
-        if (observedActor) requireOwned(isDeepStrictEqual(observedActor,
-          await driver.readWorkspaceLegacyAgent(fixtureOwnerIdentity(fixture), workspaceId, actor!, signal)));
+        // Creation identity and current lineage are canonical retained facts.
+        // Mutable updatedAt/model/assignments are not an actor incarnation.
+        if (observedActor) await enrollOwnedLegacyAgent(fixture, workspaceId, actor!, signal, evidenceStore);
         if (seed) seed.state = result.completion.complete && result.completion.exitCode === 0 ? 'completed' : 'uncertain';
         return { processId: result.id, generation: result.generation, ...result.completion };
       } catch (error) { if (seed) seed.state = 'uncertain'; throw error; }

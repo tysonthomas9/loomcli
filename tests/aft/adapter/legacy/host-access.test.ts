@@ -68,7 +68,8 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
   const fixtureRequests: { method: string; route: string; body: unknown }[] = [];
   type Repo = { name: string; path: string; source_repo_id: string; groups: string[]; source: string };
   const managed = new Map<string, { source: string; path: string; repo: string; repositories: Repo[] }>();
-  const actors = new Map<string, { name: string; repos: string[]; repo_groups: string[] }[]>();
+  const actors = new Map<string, { name: string; repos: string[]; repo_groups: string[]; createdAt?: string; updatedAt?: string; parent?: string }[]>();
+  let taskLaunch: (() => void) | undefined;
   const worktrees = new Map<string, string>();
   let seedHead = revision.commit, seedExit = 0;
   const handles: OwnedProcess[] = [];
@@ -102,7 +103,7 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
       return handle;
     },
     launch(command, stdin, generation) {
-      launches.push(command); if (failLaunch === 'proven') throw new LaunchNotStarted();
+      launches.push(command); if (command.argv[4] === 'task') taskLaunch?.(); if (failLaunch === 'proven') throw new LaunchNotStarted();
       if (failLaunch === 'uncertain') throw new Error('Injected uncertain launch failure');
       let alive = true;
       return { pid: ++count + 100, generation, executable: command.executable, argv: command.argv,
@@ -156,8 +157,8 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
       data: { id: workspaceId, path: managed.get(workspaceId!)?.path ?? repo,
         repos: managed.get(workspaceId!)!.repositories.map(repo => ({ name: repo.name, path: repo.path, source_repo_id: repo.source_repo_id, groups: repo.groups })) } } };
     if (route.endsWith('/agents')) return { status: 200, body: { success: true, total: actors.get(workspaceId!)!.length + (badAgents ? 1 : 0),
-      data: actors.get(workspaceId!)!.map(actor => ({ ...actor, workspace_key: workspaceId, role_name: 'task', parent: '',
-        created_at: '2026-10-09T00:00:00Z', updated_at: '2026-10-09T00:00:00Z' })) } };
+      data: actors.get(workspaceId!)!.map(actor => ({ ...actor, workspace_key: workspaceId, role_name: 'task', parent: actor.parent ?? '',
+        created_at: actor.createdAt ?? '2026-10-09T00:00:00Z', updated_at: actor.updatedAt ?? '2026-10-09T00:00:00Z' })) } };
     if (route.endsWith('/issues?limit=1000')) return { status: 200, body: { success: true, data: [{ id: 'issue' }] } };
     return { status: 200, body: {} };
   };
@@ -212,6 +213,7 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
   }
   return { root, driver, fixture, evidenceStore: getFixtureEvidenceStore(context, leaseId), leaseId, invoke, launches, stops, factories: () => factories,
     repoName: (workspaceId = 'E2E-WS') => managed.get(workspaceId)!.repositories[0]!.name,
+    onTaskLaunch(callback: () => void) { taskLaunch = callback; },
     changeStoreGeneration(value: string) { storeGeneration = value; },
     async addMultiWorkspace() {
       const signal = new AbortController().signal, sourceRepos = ['alpha', 'beta'].map(name => path.join(driver.runtimeRoot, 'runtime', 'source-repos', name));
@@ -731,4 +733,59 @@ test('retained baseline generation reaches the host dispatch and rejects a repla
   assert.equal(retained, before);
   assert.notEqual(r.driver.processesById.get('fake-model')!.generation, before);
   assert.equal(r.fixtureRequests.filter(row => row.method === 'POST').length, 0);
+});
+
+
+test('current-enrollment actual Host rejects a recreated name before discovery or task launch', async t => {
+  const r = await setup(t), topology = await r.addMultiWorkspace();
+  const task = () => r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null, repoName: 'beta' });
+  assert.equal((await task()).availability, 'observed');
+  const before = r.launches.length;
+  topology.actors.find(actor => actor.name === 'worker')!.createdAt = '2026-10-09T00:01:00Z';
+  assert.equal((await task()).availability, 'error'); assert.equal(r.launches.length, before);
+  assert.equal((await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentId: 'worker' } })).availability, 'error');
+  assert.equal(r.launches.length, before);
+});
+
+test('current-enrollment actual Host rejects changed current parent lineage before CLI effects', async t => {
+  const r = await setup(t), topology = await r.addMultiWorkspace();
+  const task = () => r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null, repoName: 'beta' });
+  assert.equal((await task()).availability, 'observed');
+  const before = r.launches.length;
+  topology.actors.find(actor => actor.name === 'worker')!.parent = 'foreign-parent';
+  assert.equal((await task()).availability, 'error'); assert.equal(r.launches.length, before);
+});
+
+test('current-enrollment actual Host allows updatedAt during a task and current assignment narrowing', async t => {
+  const r = await setup(t), topology = await r.addMultiWorkspace();
+  const actor = topology.actors.find(actor => actor.name === 'worker')!;
+  const task = () => r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null, repoName: 'beta' });
+  assert.equal((await task()).availability, 'observed');
+  actor.repos = ['beta']; actor.updatedAt = '2026-10-09T00:01:00Z';
+  assert.equal((await task()).availability, 'observed');
+  let applied = 0; r.onTaskLaunch(() => { applied++; actor.updatedAt = '2026-10-09T00:02:00Z'; });
+  const result = await task(); assert.equal(applied, 1); assert.equal(result.availability, 'observed', JSON.stringify(result));
+  assert.deepEqual(r.launches.at(-1)!.argv, ['--workspace', 'OWNED-MULTI', '--backend', 'codex', 'task', 'worker']);
+});
+
+test('current-enrollment actual Host rejects a removed actor before discovery and usage', async t => {
+  const r = await setup(t), topology = await r.addMultiWorkspace();
+  const task = () => r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null, repoName: 'beta' });
+  assert.equal((await task()).availability, 'observed');
+  const before = r.launches.length;
+  topology.actors.splice(topology.actors.findIndex(actor => actor.name === 'worker'), 1);
+  assert.equal((await task()).availability, 'error'); assert.equal(r.launches.length, before);
+  assert.equal((await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentId: 'worker' } })).availability, 'error');
+  assert.equal(r.launches.length, before);
+});
+
+test('current-enrollment actual Host rejects a recreated ancestor before child task effects', async t => {
+  const r = await setup(t), topology = await r.addMultiWorkspace();
+  const task = (agentName: string) => r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentName, backend: 'codex', mode: 'once', issueId: null, repoName: 'beta' });
+  assert.equal((await task('worker')).availability, 'observed');
+  topology.actors.push({ name: 'child', repos: ['beta'], repo_groups: [], parent: 'worker' });
+  assert.equal((await task('child')).availability, 'observed');
+  const before = r.launches.length;
+  topology.actors.find(actor => actor.name === 'worker')!.createdAt = '2026-10-09T00:01:00Z';
+  assert.equal((await task('child')).availability, 'error'); assert.equal(r.launches.length, before);
 });
