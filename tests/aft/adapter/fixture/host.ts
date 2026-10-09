@@ -49,6 +49,13 @@ export class HostFixtureDriver implements FixtureDriver {
   get processesById(): ReadonlyMap<string, OwnedProcess> { return this.handles; }
   get configurationRoot() { return path.join(this.workspaceRoot, '.loom-config'); }
   get cliRegistration() { return { binary: this.config.loomBinary, cwd: this.workspaceRoot, env: this.env() }; }
+  async fakeModelOrigin(signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted(); check(this.profile === 'legacy-deterministic', 'unsupported-capability');
+    const handle = this.handles.get('fake-model');
+    check(handle && handle.pid > 0 && handle.state() === 'running', 'ownership-mismatch');
+    await this.inspectOwnedProcess('fake-model', handle!.generation, signal);
+    return `http://127.0.0.1:${this.ports[2]}`;
+  }
   enrollCleanup(cleanup: () => Promise<void>) { check(this.record); this.cleanups.push(cleanup); }
   private async drainCleanups() {
     while (this.cleanups.length) { await this.cleanups[this.cleanups.length - 1]!(); this.cleanups.pop(); }

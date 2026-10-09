@@ -222,3 +222,10 @@ test('only deterministic bounded seed-worktree receives test support, unrelated 
 test('HTTP mutation refuses a stopped owned service before using its saved port',async()=>{
  const r=await setup('legacy-deterministic');try{const a=await r.lifecycle.acquire(r.request,new AbortController().signal);const h=r.driver.processesById.get('serve')!;await r.driver.stopOwnedProcess('serve',h.generation,new AbortController().signal);await assert.rejects(r.driver.requestOwnedHttp('api','POST','/api/workspaces',{},new AbortController().signal));assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);}finally{await r.cleanup();}
 });
+test('fake-model origin is resolved from its current owned service and refused after stop',async()=>{
+ const r=await setup('legacy-deterministic');try{const a=await r.lifecycle.acquire(r.request,new AbortController().signal);
+ assert.match(await r.driver.fakeModelOrigin(new AbortController().signal),/^http:\/\/127\.0\.0\.1:\d+$/);
+ const h=r.driver.processesById.get('fake-model')!;await r.driver.stopOwnedProcess('fake-model',h.generation,new AbortController().signal);
+ await assert.rejects(r.driver.fakeModelOrigin(new AbortController().signal));assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);
+ }finally{await r.cleanup();}
+});
