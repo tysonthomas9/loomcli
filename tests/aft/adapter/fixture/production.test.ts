@@ -38,7 +38,7 @@ async function setup(profile = 'agents-real-opencode') {
   if(a.includes('image')) return JSON.stringify([{Id:image}]);
   if(a.includes('compose')) { if(a.includes('up')) {up=true;if(change==='fail-up')throw new Error('Bearer private-up-token');} if(a.includes('down')) {if(change==='fail-down')throw new Error('secret=private-down-token');up=false;}return ''; }
   if(a.includes('logs'))return change==='embedded'?'embedded fleet-db started':'opened cloud fleet-db client';
-  if(a.includes('exec'))return JSON.stringify({sourceRepo:'/work/source-repos/aft-repo'});
+  if(a.includes('exec'))return a.at(-1)?.includes('controlled-codex-preflight') ? JSON.stringify({ready:true,cleaned:change!=='probe-leak',complete:change!=='probe-incomplete'}) : JSON.stringify({sourceRepo:'/work/source-repos/aft-repo'});
   if(a.includes('ps')) return up?services.map(s=>`container-${s}`).join('\n'):'';
   if(a.includes('ls')) return up?(a.includes('volume')?'volume-owned':'network-owned'):'';
   if(a.includes('inspect')) {
@@ -91,6 +91,6 @@ test('distinct ModeCloud profile preserves supplemental overlay and named work-v
  const raw=JSON.stringify(a);assert.ok(r.driver.fixtureSecrets.every(secret=>!raw.includes(secret)));assert.equal((await r.lifecycle.observe(a.lease.id,'run')).services.length,6);assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
  }finally{await r.cleanup();}
 });
-for(const issue of ['hostbind','writable-auth','embedded','unhealthy'])test(`ModeCloud ${issue} cannot become an available fixture`,async()=>{
+for(const issue of ['hostbind','writable-auth','embedded','unhealthy','probe-leak','probe-incomplete'])test(`ModeCloud ${issue} cannot become an available fixture`,async()=>{
  const r=await setup('legacy-real-codex-podman');r.mutate(issue);try{await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal));}finally{await r.cleanup();}
 });

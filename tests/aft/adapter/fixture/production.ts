@@ -380,6 +380,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
     check(logs.includes('opened cloud fleet-db client') && !logs.includes('embedded fleet-db started'), 'identity-mismatch');
     const apiOrigin = `http://127.0.0.1:${this.ports[0]}`;
     await this.read(apiOrigin, '/api/health', signal);
+    const probe = await this.nativeRead({ operation: 'controlled-codex-preflight' }, signal) as { ready?: boolean; cleaned?: boolean; complete?: boolean };
+    check(probe.ready === true && probe.cleaned === true && probe.complete === true, 'observation-failed');
     const seed = await this.nativeRead({ operation: 'seed-modecloud-repo' }, signal) as { sourceRepo: string };
     check(seed.sourceRepo === '/work/source-repos/aft-repo', 'identity-mismatch');
     const created = await this.requestOwnedHttp('api', 'POST', '/api/workspaces', { name: 'e2e-ws', type: 'empty', path: '/work/workspaces/E2E-WS', repos: [seed.sourceRepo] }, signal);

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, readFile, writeFile, unlink, realpath, mkdir, rmdir } from 'node:fs/promises';
+import { lstat, readFile, writeFile, unlink, realpath, mkdir, rmdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -7,12 +7,15 @@ import { createNativeHostAccess } from '../native-host.js';
 import { ContainerObservationRequest, readContainerObservation } from '../container-observations.js';
 import { Id, Json, requireFact } from '../protocol.js';
 import { readHttp } from './host.js';
+import { nodeProcesses, reservePort } from './process.js';
+import { initializeCodex } from './codex-probe.js';
 
 // This is a fixed internal wire protocol. Its CLI is installed by the attested
 // adapter build; neither executable paths nor SQL/JS/commands are accepted.
 export const ContainerReadRequest = z.discriminatedUnion('operation', [
   ...ContainerObservationRequest.options,
   z.object({ operation: z.literal('seed-modecloud-repo') }).strict(),
+  z.object({ operation: z.literal('controlled-codex-preflight') }).strict(),
   z.object({ operation: z.literal('fixture-http'), method: z.enum(['GET', 'POST', 'PATCH', 'DELETE']),
     relativePath: z.string().regex(/^\/__(script|reset|requests)(\?|$)/), body: Json }).strict(),
   z.object({ operation: z.literal('configuration-read'), target: z.enum(['opencode', 'emu-scenarios']) }).strict(),
@@ -28,6 +31,23 @@ export type ContainerRead = z.infer<typeof ContainerReadRequest>;
 export async function readContainer(input: unknown) {
   const request = ContainerReadRequest.parse(input);
   const cloud = process.env.AFT_FIXTURE_MODE === 'modecloud';
+  if (request.operation === 'controlled-codex-preflight') {
+    requireFact(cloud && await realpath('/work') === '/work', 'ownership-mismatch', 'Preflight requires the owned work volume');
+    const cwd = await mkdtemp('/work/aft-codex-preflight-');
+    const reservation = await reservePort(); await reservation.release();
+    const endpoint = `ws://127.0.0.1:${reservation.port}`, signal = AbortSignal.timeout(15000);
+    const child = nodeProcesses.start({ executable: await realpath('/usr/local/bin/codex'), argv: ['app-server', '--listen', endpoint], cwd,
+      env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: '/home/node', CODEX_HOME: '/home/node/.codex-rw' } }, 'readyz:');
+    try {
+      await child.ready(signal);
+      requireFact(child.state() === 'running' && (await readHttp(`http://127.0.0.1:${reservation.port}`, 'GET', '/readyz', null, signal)).status === 200,
+        'observation-failed', 'Controlled Codex readiness failed');
+      await initializeCodex(endpoint, signal);
+    } finally { await child.stop(); }
+    requireFact(child.state() === 'exited', 'ownership-mismatch', 'Controlled Codex cleanup is incomplete');
+    // Keep run-owned diagnostic paths until the containing volume is released.
+    return { ready: true, cleaned: true, complete: true };
+  }
   if (request.operation === 'seed-modecloud-repo') {
     requireFact(cloud && await realpath('/work') === '/work', 'ownership-mismatch', 'ModeCloud work volume is not owned');
     const sourceRepo = '/work/source-repos/aft-repo'; await mkdir(sourceRepo, { recursive: true });
