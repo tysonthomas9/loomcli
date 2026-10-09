@@ -458,7 +458,9 @@ export class ComposeFixtureDriver implements FixtureDriver {
     });
   }
   /** Fixed selected SSE actor. This restarts serve and colocated OpenCode;
-   * it is unrelated to the native registered-service SIGTERM actor. */
+   * it is unrelated to the native registered-service SIGTERM actor.
+   * A new container ID is currently denied even if it has matching labels:
+   * this is a stronger ownership restriction than the original helper. */
   async restartOwnedServe(expectedContainerId:string,expectedGeneration:string,signal:AbortSignal){
     signal.throwIfAborted();check(this.profile==='agents-real-opencode','unsupported-capability');
     return this.withContainerOperation(async()=>{
@@ -472,6 +474,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
       const beforeTop=await this.command('podman',['--connection',this.config.connection,'top',before.id,'pid','comm'],signal);
       const intent=await this.artifact('observe',{operation:'compose-restart-intent',leaseId:this.leaseId,project:this.project,
         scope:'loom-local-plus-OpenCode',before:{containerId:before.id,initPid:before.pid,startedAt:before.startedAt,generation:before.generation},
+        additionalRestrictions:{containerReplacement:'same-container-id-only',readiness:'healthy-container-and-successful-api-config',dispatchTimeoutMs:60000},
         processListing:{value:redact(beforeTop,this.fixtureSecrets),redaction:redactionFacts(beforeTop,this.fixtureSecrets)}});
       const adopt=async(abort:AbortSignal,expectedTarget?:ObjectRecord)=>{
         abort.throwIfAborted();const records=await this.inventory(abort);abort.throwIfAborted();check(records.length===retained.length);
@@ -489,8 +492,12 @@ export class ComposeFixtureDriver implements FixtureDriver {
       await this.verifyContainer(before,signal);signal.throwIfAborted();this.restartAttempts.add(attempt);
       let after:ObjectRecord|undefined;
       try{
+        // A separate fixed dispatch guard is a safety bound, not part of the
+        // frozen helper's post-restart readiness window.
+        const dispatch=AbortSignal.any([signal,AbortSignal.timeout(60000)]);
+        await this.command('podman',[...this.composeArgs(),'restart','loom-local'],dispatch);
+        dispatch.throwIfAborted();
         const bounded=AbortSignal.any([signal,AbortSignal.timeout(180000)]);
-        await this.command('podman',[...this.composeArgs(),'restart','loom-local'],bounded);
         after=await adopt(bounded);
         check(after.state==='running'&&Number.isInteger(after.pid)&&after.pid>0&&after.pid!==before.pid&&after.startedAt!==before.startedAt,'identity-mismatch');
         // The frozen container healthcheck includes the readiness marker and
@@ -498,7 +505,10 @@ export class ComposeFixtureDriver implements FixtureDriver {
         await this.command('podman',['--connection',this.config.connection,'wait','--condition=healthy','--condition=unhealthy','--condition=exited',after.id],bounded);
         await this.verifyContainer(after,bounded);
         check(this.objects.find(value=>value.id===after!.id)?.healthy,'observation-failed');
-        await this.http(`http://127.0.0.1:${this.ports[1]}`,'/api/config',bounded);
+        const request=AbortSignal.any([bounded,AbortSignal.timeout(3000)]);
+        request.throwIfAborted();
+        await this.http(`http://127.0.0.1:${this.ports[1]}`,'/api/config',request);
+        request.throwIfAborted();
         await this.verifyContainer(after,bounded);
         const afterTop=await this.command('podman',['--connection',this.config.connection,'top',after.id,'pid','comm'],bounded);
         await this.verifyContainer(after,bounded);
