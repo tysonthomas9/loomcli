@@ -42,3 +42,9 @@ test('fixed model protocol cannot parse script, reset or fixture mutations',()=>
    assert.equal(ContainerReadRequest.safeParse({operation:'fixture-http',method,relativePath,body:{}}).success,false);
  assert.ok(ContainerReadRequest.safeParse({operation:'fixture-http',method:'GET',relativePath:'/__requests',body:null}).success);
 });
+
+test('runtime identity is a closed read with no supplied token or root override',()=>{
+ assert.ok(ContainerReadRequest.safeParse({operation:'runtime-identity'}).success);
+ for(const extra of [{runId:'guessed'},{leaseId:'foreign'},{root:'/host/tmp'},{command:'true'}])
+  assert.equal(ContainerReadRequest.safeParse({operation:'runtime-identity',...extra}).success,false);
+});

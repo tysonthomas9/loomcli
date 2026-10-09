@@ -36,7 +36,7 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
   };
   const options: FixtureProviderOptions = { implementation: pin, implementationSha256: pin.sha256, plans: [plan],
     driver() { driverCalls++; return driver; }, evidenceAfterFailure: async () => store,
-    async bind() { if (bindFails) throw new Error("Bearer private-bind-token"); const stat = await lstat(evidenceRoot); return { evidenceClass: 'deterministic', evidenceStore: store,
+    async bind() { if (bindFails) throw new Error("Bearer private-bind-token"); const stat = await lstat(evidenceRoot); return { fixtureRunId:'af12345678',evidenceClass: 'deterministic', evidenceStore: store,
       roots: new Map([['runtime', { path: evidenceRoot, device: stat.dev, inode: stat.ino }]]), secrets: [],
       readApi: async () => ({ status: 200, body: {} }), readFiles: async () => ({ status: 200, body: {} }),
       resolveAgent: async () => { throw new Error('No test agent'); } }; },
@@ -57,6 +57,8 @@ test('fixture operations use the canonical store and retained output receipt wit
   const fixture = await getFixture(r.context, id);
   assert.equal(fixture.leaseId, id); assert.equal(r.context.resources.get(`${fixturesKey}:${id}`), fixture);
   assert.equal(JSON.stringify(result).includes('ownerToken'), false);
+  assert.equal((result.data as {fixtureRunId:string}).fixtureRunId,'af12345678');
+  assert.notEqual((result.data as {fixtureRunId:string}).fixtureRunId,r.context.runId);
   assert.equal((result.data as { syntheticProbeHandle: string }).syntheticProbeHandle, fixture.syntheticProbe?.handle);
   assert.equal(JSON.stringify(result).includes(fixture.syntheticProbe!.value), false);
   const retained = await r.store.resolve(result.provenance.artifacts[0]!.id);
@@ -67,7 +69,7 @@ test('fixture operations use the canonical store and retained output receipt wit
 });
 test('unknown executable/code/module parameters fail before acquiring a driver', async t => {
   const r = await setup(t);
-  for (const field of ['command', 'modulePath', 'code', 'leaseId', 'browser']) await assert.rejects(r.invoke('loom.fixture.acquire', { ...r.input, [field]: 'unsafe' }));
+  for (const field of ['command', 'modulePath', 'code', 'leaseId', 'browser','fixtureRunId']) await assert.rejects(r.invoke('loom.fixture.acquire', { ...r.input, [field]: 'unsafe' }));
   assert.equal(r.driverCalls, 0);
 });
 test('wrong run, source, model and selection identity never allocate a driver', async t => {

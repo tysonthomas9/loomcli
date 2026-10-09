@@ -24,6 +24,7 @@ export const ContainerReadRequest = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('agent-history'), agentId: Id }).strict(),
   z.object({ operation: z.literal('sessions'), agentId: Id }).strict(),
   z.object({ operation: z.literal('registration') }).strict(),
+  z.object({ operation: z.literal('runtime-identity') }).strict(),
   z.object({ operation: z.literal('process') }).strict(),
   z.object({ operation: z.literal('read'), route: Id }).strict(),
   z.object({ operation: z.literal('git-common-dir'), agentId: Id }).strict(),
@@ -45,6 +46,13 @@ export async function attestContainerTemporaryRoot(namespace:string|undefined,le
 }
 export async function readContainer(input: unknown) {
   const request = ContainerReadRequest.parse(input);
+  if(request.operation==='runtime-identity'){
+    const before=await attestContainerTemporaryRoot(process.env.AFT_FIXTURE_NAMESPACE,process.env.AFT_FIXTURE_LEASE_ID);
+    const runId=z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).parse(process.env.RUN_ID),leaseId=Id.parse(process.env.AFT_FIXTURE_LEASE_ID);
+    const after=await attestContainerTemporaryRoot(process.env.AFT_FIXTURE_NAMESPACE,process.env.AFT_FIXTURE_LEASE_ID);
+    requireFact(before.device===after.device&&before.inode===after.inode,'identity-mismatch','Container namespace changed');
+    return {runId,leaseId};
+  }
   const cloud = process.env.AFT_FIXTURE_MODE === 'modecloud';
   if (request.operation === 'controlled-codex-preflight') {
     requireFact(cloud && await realpath('/work') === '/work', 'ownership-mismatch', 'Preflight requires the owned work volume');

@@ -28,8 +28,8 @@ export const AcquireInput = z.object({ runId: Id, profile: Profiles, loomRevisio
 export const LeaseInput = z.object({ leaseId: Id }).strict();
 const Lease = z.object({ id: Id, runId: Id, resourceManifestSha256: Digest, source: Revision, engine: Revision, adapter: Revision, expiresAt: Id }).strict();
 export const AcquireOutput = z.object({ lease: Lease, apiOrigin: Id, filesOrigin: Id, workspaceId: Id, repo: Id,
-  browserLeaseId: Id, ownershipArtifact: ArtifactRefSchema, syntheticProbeHandle: Id, syntheticProbeRunId: Id }).strict();
-const ProvisionedOutput = AcquireOutput.omit({ syntheticProbeHandle: true, syntheticProbeRunId: true });
+  browserLeaseId: Id, ownershipArtifact: ArtifactRefSchema, syntheticProbeHandle: Id, syntheticProbeRunId: Id,fixtureRunId:Id.optional() }).strict();
+const ProvisionedOutput = AcquireOutput.omit({ syntheticProbeHandle: true, syntheticProbeRunId: true,fixtureRunId:true });
 export const ReleaseOutput = z.object({ released: z.boolean(), remainingOwnedResources: z.array(Id), receipt: ArtifactRefSchema }).strict();
 export const ObserveOutput = z.object({ owned: z.boolean(), sourceMatches: z.boolean(), services: z.array(z.object({
   id: Id, pid: z.number().int().nonnegative(), generation: Id, state: Id }).strict()), inventory: ArtifactRefSchema }).strict();
@@ -52,6 +52,7 @@ export interface FixtureProviderOptions {
     evidenceStore: EvidenceStore;
     rendererTarget?: OwnedFixture['rendererTarget'];
     operationAuthority?: OwnedFixture['operationAuthority'];
+    fixtureRunId?:string;
   }>;
   evidenceAfterFailure(driver: FixtureDriver): Promise<EvidenceStore>;
 }
@@ -100,7 +101,7 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
         }
         try {
           const binding = await options.bind(driver!, acquired, input, context);
-          const { evidenceStore, ...transport } = binding;
+          const { evidenceStore,fixtureRunId, ...transport } = binding;
           if (!context.resources.has(evidenceKey)) putEvidenceStore(context, evidenceStore);
           const fixture: OwnedFixture = { leaseId: acquired.lease.id, runId: context.runId, caseId: context.caseId,
             suiteId: context.suiteId, scope: context.scope, profile: input.profile,
@@ -115,7 +116,7 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
           };
           privateFixtures.set(fixture, { manager, driver: driver! });
           putFixture(context, fixture);
-          return { value: { ...acquired, syntheticProbeHandle: fixture.syntheticProbe!.handle, syntheticProbeRunId: fixture.syntheticProbe!.runId }, evidenceClass: fixture.evidenceClass,
+          return { value: { ...acquired,...(fixtureRunId?{fixtureRunId}:{}), syntheticProbeHandle: fixture.syntheticProbe!.handle, syntheticProbeRunId: fixture.syntheticProbe!.runId }, evidenceClass: fixture.evidenceClass,
             identity: { fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId } };
         } catch (error) {
           const released = await manager.release(acquired.lease.id, input.runId);
@@ -232,7 +233,7 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
       }
       const route=driver.executionRouting,operationAuthority=driver.createOperationAuthority({leaseId:acquired.lease.id,runId:context.runId,suiteId:context.suiteId,scope:context.scope,caseId:context.caseId,profile:input.profile});
       const rendererTarget=await bindRenderer(isCompose?compose.loom:host.loom,acquired.lease.id,await driver.rendererRuntimeTarget(context.signal),path.join(runtimeRoot,'evidence'),roots);
-      return { evidenceClass: route.evidenceClass, roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget, operationAuthority,
+      return { ...(isCompose?await driver.runtimeIdentity(context.signal):{}),evidenceClass: route.evidenceClass, roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget, operationAuthority,
         evidenceStore: await createEvidenceStore(path.join(runtimeRoot, 'evidence')),
         readApi: fixedRead(acquired.apiOrigin), readFiles: fixedRead(acquired.filesOrigin), resolveAgent };
     },
