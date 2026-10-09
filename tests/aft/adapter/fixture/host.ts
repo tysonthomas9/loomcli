@@ -13,6 +13,7 @@ import {OwnedDescendants,createRegisteredProcessPort,readRegisteredHostServices,
 import { StartupBaselines, type BaselineTarget } from './baseline.js';
 import { HostWorkspaceRecords } from './workspace-records.js';
 import { seedOwnedRepository } from './repository.js';
+import { RegisteredBuiltinWorkers, type OwnedWorkerFact } from './workers.js';
 import type { EvidenceStore } from '../evidence.js';
 import { fixtureOwnerIdentity } from '../authority.js';
 import { z } from 'zod';
@@ -56,6 +57,7 @@ export class HostFixtureDriver implements FixtureDriver {
   private workspaceOwner?:Readonly<FixtureAuthorityOwner>;
   private workspaceEvidence?:EvidenceStore;
   private workspaceFixture?:OwnedFixture;
+  private workerRegistrations?:RegisteredBuiltinWorkers;
   private runtimeRemoved=false;
   private readonly activeOperations = new Set<string>();
   private async withServiceOperation<T>(id:string,operation:()=>Promise<T>):Promise<T>{
@@ -63,6 +65,7 @@ export class HostFixtureDriver implements FixtureDriver {
     this.activeOperations.add(id);
     try{return await operation();}finally{this.activeOperations.delete(id);}
   }
+  private requireWorkerRegistrationIdle(){check(!this.activeOperations.has('worker-registration'),'identity-mismatch');}
   private requireHandle(id:string,generation:string){
     const handle=this.handles.get(id);check(handle&&handle.generation===generation,'identity-mismatch');return handle!;
   }
@@ -137,6 +140,40 @@ export class HostFixtureDriver implements FixtureDriver {
     check(owner.leaseId===this.leaseId&&owner.profile===this.profile&&this.workspaceRecords,'unsupported-capability');
     check(this.workspaceOwner&&JSON.stringify(this.workspaceOwner)===JSON.stringify(fixtureOwnerIdentity(owner)));
     return this.workspaceRecords!.legacyAgent(owner,workspaceId,name,signal);
+  }
+  /** Returns only concretely registered builtin workers. Native harness and
+   * terminal metadata are separate contracts; this is not their absence proof. */
+  async refreshOwnedProductProcesses(signal:AbortSignal):Promise<readonly OwnedWorkerFact[]>{
+    signal.throwIfAborted();
+    check(this.workspaceFixture&&this.workspaceOwner&&this.workspaceEvidence&&this.workspaceRecords&&this.descendants,'unsupported-capability');
+    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
+    const daemon=this.handles.get('daemon');check(daemon?.state()==='running','unsupported-capability');
+    return this.withServiceOperation('worker-registration',async()=>{
+      if(!this.workerRegistrations){
+        const root=this.stamps.get(this.root),config=this.stamps.get(this.configurationRoot);check(root&&config);
+        this.workerRegistrations=new RegisteredBuiltinWorkers({runtimeRoot:{path:this.root,device:root!.dev,inode:root!.ino},
+          configurationRoot:{path:this.configurationRoot,device:config!.dev,inode:config!.ino},workspaceId:this.workspaceFixture!.workspaceId,
+          daemonCwd:this.workspaceRoot,loomExecutable:this.config.loomBinary},{
+          parent:async abort=>{
+            const parents=await this.registeredParents(abort),record=this.parentHandles.get('daemon');check(record);
+            const current=this.handles.get('daemon');check(current&&current.state()==='running'&&record!.handle===current);
+            const parent=parents.find(value=>value.id===record!.id);check(parent);
+            return {id:parent!.id,identity:await this.descendants!.inspect(parent!.id,parent!.generation)};
+          },verifyParent:async(parent,abort)=>{
+            await this.verifyRegisteredParents([{id:parent.id,pid:parent.identity.pid,generation:parent.identity.generation}],abort);
+          },verifyActor:async(name,worktree,abort)=>{
+            const fixture=this.workspaceFixture!;
+            requireOwnedWorkspaceRecord(fixture,fixture.workspaceId,'legacy-agent-name');
+            await enrollOwnedLegacyAgent(fixture,fixture.workspaceId,name,abort,this.workspaceEvidence!);
+            const before=await this.files.lstat(worktree),common=await this.ownedCommonDir(worktree,abort);
+            const source=await this.workspaceRecords!.legacyPhysicalSource(this.workspaceOwner!,fixture.workspaceId,name,common,abort);
+            const owned=requireOwnedWorkspace(fixture,fixture.workspaceId,name,'legacy-agent-name',source.repoName);
+            check(owned.repo===source.repo&&owned.commonDir===common);
+            const after=await this.files.lstat(worktree);check(!after.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino);
+          },nextId:()=>this.uuid()},this.descendants!,this.files);
+      }
+      return this.workerRegistrations.refresh(signal);
+    });
   }
   async resolveLegacyWorktree(workspaceId:string,agentName:string,signal:AbortSignal,repoName?:string):Promise<{complete:true;workspaceId:string;agentName:string;root:OwnedRoot;branch:string;commonDir:string}>{
     check(this.workspaceOwner&&this.workspaceRecords,'unsupported-capability');
@@ -266,7 +303,10 @@ export class HostFixtureDriver implements FixtureDriver {
     }
   }
   async prepareObserve(signal:AbortSignal){return this.withServiceOperation('registered-services',()=>this.observeRegisteredServices(signal));}
-  async prepareCleanup(signal:AbortSignal){await this.drainCleanups();await this.prepareObserve(signal);}
+  async prepareCleanup(signal:AbortSignal){
+    this.requireWorkerRegistrationIdle();
+    return this.withServiceOperation('cleanup-preparation',async()=>{await this.drainCleanups();await this.prepareObserve(signal);});
+  }
   async inspectOwnedProcess(id: string, generation: string, signal: AbortSignal) {
     signal.throwIfAborted();if(this.descendants?.has(id)){const identity=await this.descendants.inspect(id,generation);return {id,generation:identity.generation,pid:identity.pid,state:identity.state};}
     const handle = this.handles.get(id);
@@ -275,7 +315,7 @@ export class HostFixtureDriver implements FixtureDriver {
   }
   async launchOwnedCli(argv: readonly string[], envOverrides: Readonly<Record<string, string>>, stdin: string,
     waitForExit: boolean, signal: AbortSignal): Promise<{ id: string; generation: string; pid: number; completion: CliCompletion }> {
-    signal.throwIfAborted(); check(this.record && this.processes.launch, 'unsupported-capability');
+    signal.throwIfAborted();this.requireWorkerRegistrationIdle(); check(this.record && this.processes.launch, 'unsupported-capability');
     check(argv.length > 0 && argv.length <= 128 && argv.every(arg => typeof arg === 'string' && arg.length <= 1024 * 1024 && !arg.includes('\0')));
     const seed = argv.length === 12 && argv[0] === 'daemon' && argv[1] === 'seed-worktree' && argv[2] === '--workspace' &&
       argv[4] === '--agent' && argv[6] === '--file' && argv[8] === '--content' && argv[9] === '-' && argv[10] === '--message' && this.profile === 'legacy-deterministic';
@@ -308,10 +348,12 @@ export class HostFixtureDriver implements FixtureDriver {
     return {beforeGeneration:generation,afterGeneration:null,affectedIds:[id],complete:true as const};
   }
   async stopOwnedProcess(id: string, generation: string, signal: AbortSignal) {
+    this.requireWorkerRegistrationIdle();
     const stop=()=>this.stopCapturedProcess(id,generation,signal);
     return this.withServiceOperation(id,()=>this.descendants?.has(id)||id==='serve'||id==='daemon'?this.withServiceOperation('registered-services',stop):stop());
   }
   async terminateRegisteredNativeService(id:string,generation:string,signal:AbortSignal){
+    this.requireWorkerRegistrationIdle();
     check(id===this.serviceIds.get('registered-opencode-service')&&this.descendants?.has(id),'unsupported-capability');
     return this.withServiceOperation('registered-services',async()=>{
       signal.throwIfAborted();await this.observeRegisteredServices(signal);check(id===this.serviceIds.get('registered-opencode-service')&&(await this.descendants!.inspect(id,generation)).state==='running');signal.throwIfAborted();
@@ -322,6 +364,7 @@ export class HostFixtureDriver implements FixtureDriver {
     });
   }
   async restartOwnedProcess(id: string, generation: string, signal: AbortSignal) {
+    this.requireWorkerRegistrationIdle();
     const restart=async()=>{
       const saved=this.commands.get(id);check(saved&&this.record,'unsupported-capability');
       const handle=this.requireHandle(id,generation);
@@ -336,6 +379,7 @@ export class HostFixtureDriver implements FixtureDriver {
   }
   async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relative: string, body: unknown, signal: AbortSignal, expectedGeneration?:string) {
     signal.throwIfAborted(); check(this.ports.length === 5);
+    if(method!=='GET')this.requireWorkerRegistrationIdle();
     check(target === 'api' ? relative.startsWith('/api/') : /^\/__(script|reset|fixture|state|requests)(\?|$)/.test(relative));
     check(target !== 'fake-model' || this.profile === 'legacy-deterministic', 'unsupported-capability');
     check(target !== 'fake-github' || this.config.fakeGitHub, 'unsupported-capability');
@@ -565,6 +609,8 @@ export class HostFixtureDriver implements FixtureDriver {
     return { complete: true, owned: true, services: [] };
   }
   async remove(resource: Resource) {
+    this.requireWorkerRegistrationIdle();
+    return this.withServiceOperation('cleanup-resource',async()=>{
     await this.inspect(resource);
     await this.drainCleanups();
     if (resource.kind === 'process') { if (!this.unspawned.has(resource.id)) await this.stopOwnedProcess(resource.id,resource.generation,new AbortController().signal); return; }
@@ -574,6 +620,7 @@ export class HostFixtureDriver implements FixtureDriver {
     const runtime = path.join(this.root, 'runtime'); const stamp = this.stamps.get(runtime); const stat = await this.files.lstat(runtime);
     check(stamp && !stat.isSymbolicLink() && stat.dev === stamp.dev && stat.ino === stamp.ino);
     await this.files.rm(runtime, { recursive: true });this.runtimeRemoved=true;
+    });
   }
   async artifact(kind: 'acquire' | 'release' | 'observe' | 'failure', value: unknown): Promise<Artifact> {
     const directory = path.join(this.root, 'evidence'); const stamp = this.stamps.get(directory); const stat = await this.files.lstat(directory);
