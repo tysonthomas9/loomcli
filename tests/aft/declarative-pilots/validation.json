@@ -1731,10 +1731,10 @@
     "at": "2026-10-09T11:58:39.971614+00:00",
     "verification": "Parent independently verified receipts, actual per-version file pins/public environments and unchanged wrappers. Pilot rehashed three receipt bytes and unchanged Stop YAML, but did not execute loader or adopt candidate.",
     "basis": "NEW selection e34d and public env snapshots; NOT historical inventory405554/env5b473 recovery.",
-    "candidateCodeRelationship": "Engine reports committed9a1d7cf5 after unapproved969. Diagnostic package was performance WIP; exact source/package/installed equivalence to committed head remains engine review work. No code acceptance inferred.",
+    "candidateCodeRelationship": "Independent exact9a review now verifies191 source files/114 emitted/rebuilt package bytes and actual2362-member per-version closure/new public env comparison. Parent accepts performance delta only; whole9a remains unapproved. See reviewedPerformanceDelta receipt.",
     "baselineEngine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
     "baselineAdapter": "f3776276f88c31c5a89d6787ae824012ebb0be02",
-    "candidateStatus": "UNAPPROVED WIP; maintained c71 unchanged, two969 reviewer P1 defects open.",
+    "candidateStatus": "Performance-only delta reviewed/accepted; WHOLE9a/969 NOT APPROVED, maintainedc71 unchanged, two969 reviewer P1 defects open.",
     "receipts": [
       {
         "path": "/private/tmp/aft-interface-a43468f0/verification-diagnostic-20261009T1140/baseline-minimal.json",
@@ -1835,7 +1835,8 @@
       "sse-cursor": "unknown on this WIP/new environment"
     },
     "preservationAcceptance": false,
-    "runtimeAcceptance": false
+    "runtimeAcceptance": false,
+    "candidateCodeRelationshipAtInitialReceipt": "Engine reports committed9a1d7cf5 after unapproved969. Diagnostic package was performance WIP; exact source/package/installed equivalence to committed head remains engine review work. No code acceptance inferred."
   },
   "childReactivationSelectedBranchReview": {
     "at": "2026-10-09T12:02:26.416540+00:00",
@@ -1856,5 +1857,105 @@
     "remainingChildInventoryBranchUnresolved": 0,
     "importedOwnershipClosure": "unresolved and required",
     "newYamlOrPreservationCredit": false
+  },
+  "reviewedPerformanceDelta": {
+    "at": "2026-10-09T12:07:21.238442+00:00",
+    "receiptPath": "/private/tmp/aft-engine-review-747947b4.aCMw7TwK/performance-9a-review-receipt.json",
+    "receiptSha256": "339ec86b11e6591d16e916dbce3bb7281521ff11fe5a67daa04423e2ff63814b",
+    "parentDecision": "ACCEPTED scoped performance-only delta9a1d7cf5; whole candidate still NOT APPROVED due two inherited969 P1 defects.",
+    "pilotVerification": "Rehashed/read exact independent review receipt; did not rerun loader, adopt pin, rebuild engine or execute runtime.",
+    "independentReview": {
+      "head": "9a1d7cf55d3d4e86841ee897742afb2081e6609f",
+      "tree": "fac80b13338e99f96c97c27611d570b6ef7a5fd1",
+      "parent": "969e892c904f6dd47a8f5ebff84c11b66db940bd",
+      "maintainedBaseline": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+      "performanceDelta": "VERIFIED: all assigned performance-only acceptance criteria pass",
+      "overallVerdict": "NOT APPROVED: two inherited969P1 blockers remain",
+      "confidence": "High",
+      "newDefects": [],
+      "tests": {
+        "focused": {
+          "tests": 75,
+          "pass": 75
+        },
+        "independent": {
+          "tests": 15,
+          "pass": 15
+        },
+        "typecheck": "PASS",
+        "build": "PASS via npm ci prepare",
+        "diffCheck": "PASS",
+        "fullUnit": "not rerun; parent requested full combined gate once corrected final head supplied",
+        "sourcePackageRebuilt": {
+          "head": "9a1d7cf55d3d4e86841ee897742afb2081e6609f",
+          "tree": "fac80b13338e99f96c97c27611d570b6ef7a5fd1",
+          "source": 191,
+          "emitted": 114,
+          "errors": [],
+          "package": "05e29a2f57a29cf4d5452cc18875edef257219b6a1874979206763b11801983f",
+          "receipt": "32399b658cd208462fca2e5086c4fd9580741c6e86698fe50831ca082b1d9493"
+        }
+      },
+      "comparison": {
+        "indexMembers": 28,
+        "indexHashErrors": [],
+        "selection": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+        "versions": {
+          "baseline": {
+            "files": 2362,
+            "bytes": 8887167,
+            "missing": [],
+            "mismatches": [],
+            "computedPin": "be64b7ac1cd616a8e984ed947425105a1c5299833c715c43124b96ca9a6fc173",
+            "recordedPin": "be64b7ac1cd616a8e984ed947425105a1c5299833c715c43124b96ca9a6fc173",
+            "computedEnv": "37209e50a44c99f42124998cfc0d9d8ca21837ec1fec2dc6644d2e2bff85816b",
+            "recordedEnv": "37209e50a44c99f42124998cfc0d9d8ca21837ec1fec2dc6644d2e2bff85816b",
+            "selectionSame": true,
+            "manifestFieldsMatch": true,
+            "envDigestConvention": "sha256(JSON.stringify(Object.entries(env).sort()))"
+          },
+          "candidate": {
+            "files": 2362,
+            "bytes": 8887026,
+            "missing": [],
+            "mismatches": [],
+            "computedPin": "8bb3dd3185c59129a0eece179795eb57fc5a68fd082b1942ac296127be531ac2",
+            "recordedPin": "8bb3dd3185c59129a0eece179795eb57fc5a68fd082b1942ac296127be531ac2",
+            "computedEnv": "49a2b38f62ff8fbdc38f082203d41b5c68fd184edb39fb31a92d49a3941853be",
+            "recordedEnv": "49a2b38f62ff8fbdc38f082203d41b5c68fd184edb39fb31a92d49a3941853be",
+            "selectionSame": true,
+            "manifestFieldsMatch": true,
+            "envDigestConvention": "sha256(JSON.stringify(Object.entries(env).sort()))"
+          }
+        }
+      },
+      "artifacts": {
+        "perf-9a1d7cf5/review-performance.ts": "cef6e0a04765a22cafe7e9fc37b6d0e4cc3bc863ad361eb7228546b7a2bee969",
+        "9a-focused.log": "1508717b5598611cae6f17e97467c279da06ec5f486aa389c6f1b30bcf4110bc",
+        "9a-independent.log": "997e3812cc0e9ffd9927c58aaeb8b2e684dd5cf1ba30fdbb39d77f0e0004f2c6",
+        "9a-typecheck.log": "860275f6829ef297de1ccacc738c042060db5d009a1d9768303724cfe3a99cb5",
+        "9a-install.log": "7de5146d832c1919fd2adda45193a58252951f374e95a055d5230c1faa0e3274",
+        "9a-package-verification.json": "b5b51af1bda75203f09fa3f5181c399dd4ce29e60ab3547e591d90dca6a2d4c6",
+        "9a-comparison-verification.json": "505509dd07ac0c01838a8e08331cbd0c6c1e98129389a88dcb2ad5e11ee60e05"
+      },
+      "limits": {
+        "costlyBaselineNotRerun": true,
+        "historicalEnvRecovered": false,
+        "coreMotionConsumer": false,
+        "realBrowser": false,
+        "trackedSourceEdits": false,
+        "runtimeStack": false,
+        "PRChanges": false
+      }
+    },
+    "noBroaderCredit": [
+      "journal authority and capacity",
+      "resolved small-input node/byte bounds",
+      "core motion consumer",
+      "source predicate preservation",
+      "actual browser/backend/provider/runtime"
+    ],
+    "maintainedEngine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+    "pilotOutcomes": "Only WIP/new-env raw Stop admission completed; remaining four outcomes unknown; all five skipped/runtime0/preservation unverified."
   }
 }
