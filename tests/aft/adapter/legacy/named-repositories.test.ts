@@ -58,19 +58,22 @@ test('legacy workspace and usage actors preserve named topology without choosing
       { repoName: 'alpha', sourceRepoId: 'source-alpha', repo: '/owned/alpha', commonDir: '/owned/alpha/.git', groups: ['frontend'] },
       { repoName: 'beta', sourceRepoId: 'source-beta', repo: '/owned/beta', commonDir: '/owned/beta/.git', groups: ['backend'] },
     ], agentSources: [{ agentId: 'all', repoNames: ['alpha', 'beta'] }, { agentId: 'beta-only', repoNames: ['beta'] }] };
-  const creationReceipt = await store.retain(JSON.stringify({ kind: 'workspace-created', ...owner, ...topology }));
-  fixture.ownedWorkspaces = await createOwnedWorkspaceRoster(owner, [{ ...topology, creationReceipt }], store);
+  const creationReceipt = await store.retain(JSON.stringify({ kind: 'workspace-created', ...owner, ...topology, agentIds: [], agentSources: [] }));
   let childGroups: string[] = [];
   fixture.readWorkspaceLegacyAgent = async (workspaceId, name) => {
     assert.equal(workspaceId, 'WS');
-    if (name !== 'all' && name !== 'child') throw new ObservationError('ownership-mismatch', 'Private actor is absent');
+    if (name !== 'all' && name !== 'beta-only' && name !== 'child') throw new ObservationError('ownership-mismatch', 'Private actor is absent');
     const repo = name === 'all' ? null : '/owned/beta';
     return { kind: 'legacy-agent-enrolled', identityKind: 'legacy-agent-name',
       ...owner, workspaceId, name, repo, commonDir: repo === null ? null : `${repo}/.git`, storeId: 'owned-store',
-      storeGeneration: 'captured-store-generation', parentName: name === 'all' ? null : 'all',
+      storeGeneration: 'captured-store-generation', parentName: name === 'child' ? 'all' : null,
       createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:01:00Z',
       assignedRepos: name === 'all' || childGroups.length ? [] : ['beta'], assignedRepoGroups: name === 'all' ? [] : childGroups };
   };
+  const enrollmentReceipts = [];
+  for (const name of topology.agentIds) enrollmentReceipts.push(await store.retain(JSON.stringify(
+    await fixture.readWorkspaceLegacyAgent('WS', name, new AbortController().signal))));
+  fixture.ownedWorkspaces = await createOwnedWorkspaceRoster(owner, [{ ...topology, creationReceipt, enrollmentReceipts }], store);
   putFixture(context, fixture);
   const invoke = (id: string, input: unknown) => registry.invoke({ id, version: 1, input: {} }, input, context);
   const usage = (name: string, workspaceId = 'WS') => invoke('loom.cli.usage', {
