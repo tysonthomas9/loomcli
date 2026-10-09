@@ -19,6 +19,7 @@ test('frozen source runtime copy differs in exactly the authentic creator comman
   assert.equal(before.length, after.length);
   assert.deepEqual(before.map((value, index) => value === after[index] ? null : index).filter(value => value !== null), [126]);
   assert.equal(before[126], result.change.original); assert.equal(after[126], result.change.replacement);
+  assert.equal(result.change.replacement, '    node /opt/aft/dist/fixture/native-creator-wrapper.js "$WORKSPACE" "$SOURCE_REPO" "$WORKSPACE_ROOT"');
   const reverted = Buffer.from(result.bytes.toString('utf8').replace(result.change.replacement, result.change.original));
   assert.deepEqual(reverted, source); assert.equal(hash(result.bytes), result.adaptedSha256);
   assert.equal(result.activation, 'unsupported-until-retained-creator-handoff');

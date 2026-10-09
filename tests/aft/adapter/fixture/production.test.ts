@@ -172,6 +172,7 @@ test('owned container observations validate the same container generation after 
  r.onExec(async()=>r.mutate('stale'));
  await assert.rejects(r.driver.nativeRead({operation:'agent-history',agentId:'agt_owned'},signal));
  assert.equal(r.calls.filter(c=>c.args.includes('exec')).length,before+1);
+ assert.ok(r.calls.filter(c=>c.args.includes('exec')).every(c=>c.args.includes('/opt/aft/dist/fixture/container-read.js')));
  r.mutate('');r.onExec(async()=>{});assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
  }finally{await r.cleanup();}
 });
@@ -230,6 +231,7 @@ test('selected SSE actor restarts only owned loom-local and observes changed PID
   const before=(await r.lifecycle.observe(a.lease.id,'run')).services.find(value=>value.id==='container-loom-local')!;
   const waitsBefore=r.calls.filter(call=>call.args.includes('wait')).length;
   const fact=await r.driver.restartOwnedServe(before.id,before.generation,signal);
+  assert.ok(r.calls.filter(call=>call.args.includes('exec')).every(call=>call.args.includes('/opt/aft/dist/fixture/container-read.js')));
   assert.deepEqual(fact.before,{containerId:before.id,initPid:123,startedAt:'generation',generation:before.generation});
   assert.deepEqual(fact.after,{containerId:before.id,initPid:456,startedAt:'restarted',generation:'container-loom-local:restarted'});
   assert.deepEqual(fact.readiness,{path:'/api/config',status:200,complete:true,attempts:1,elapsedMs:0,windowMs:180000,requestTimeoutMs:3000});assert.equal(fact.scope,'loom-local-plus-OpenCode');

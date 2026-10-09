@@ -12,7 +12,7 @@ export const NativeCreatorEntrypointSource = Object.freeze({
 const original = '    loom workspace create "$WORKSPACE" --repos "$SOURCE_REPO" --path "$WORKSPACE_ROOT" --branch localmode';
 // Fixed fixture-owned module on the existing /opt/aft build mount. No caller
 // command, executable, module path, shell fragment or scenario selects it.
-const replacement = '    node /opt/aft/fixture/native-creator-wrapper.js "$WORKSPACE" "$SOURCE_REPO" "$WORKSPACE_ROOT"';
+const replacement = '    node /opt/aft/dist/fixture/native-creator-wrapper.js "$WORKSPACE" "$SOURCE_REPO" "$WORKSPACE_ROOT"';
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 /** Prepare ONLY a byte-auditable one-call runtime copy. It changes no source

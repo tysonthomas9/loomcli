@@ -551,7 +551,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
     return this.withContainerOperation(async()=>{
       const container=await this.ownedContainer(signal);
       const response=JSON.parse(await this.command('podman',['--connection',this.config.connection,'exec',container.id,
-        'node','/opt/aft/fixture/container-read.js',JSON.stringify(request)],signal));
+        'node','/opt/aft/dist/fixture/container-read.js',JSON.stringify(request)],signal));
       await this.verifyContainer(container,signal);return response;
     });
   }
@@ -572,7 +572,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
       const retained=this.objects.map(object=>({...object}));
       const requireRuntime=async(container:ObjectRecord,abort:AbortSignal)=>{
         const actual=JSON.parse(await this.command('podman',['--connection',this.config.connection,'exec',container.id,
-          'node','/opt/aft/fixture/container-read.js',JSON.stringify({operation:'runtime-identity'})],abort));
+          'node','/opt/aft/dist/fixture/container-read.js',JSON.stringify({operation:'runtime-identity'})],abort));
         check(actual?.runId===this.provisionedRunId&&actual?.leaseId===this.leaseId,'identity-mismatch');
       };
       await requireRuntime(before,signal);await this.verifyContainer(before,signal);
