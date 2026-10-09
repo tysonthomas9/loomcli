@@ -76,7 +76,10 @@ export function createLegacyProviders(implementation: ImplementationPin, impleme
         if (!record?.agentIds.includes(actor)) throw new ObservationError('ownership-mismatch', 'Legacy actor is absent from retained enrollment');
         if (method === 'task') {
           const repoName = TaskInput.parse(input).repoName;
-          if (repoName !== null) requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name', repoName);
+          // Older single-source creation receipts have no named topology.
+          // Their concrete CLI boundary still checks the source-backed name;
+          // named topology can additionally reject affinity before the factory.
+          if (repoName !== null && record.repositories) requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name', repoName);
         }
         if (method === 'seedWorktree') requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name');
       }
