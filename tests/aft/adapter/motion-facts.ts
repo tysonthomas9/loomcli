@@ -20,7 +20,7 @@ export interface MotionPacing { wordsPerTick: number; deadlineMs: number; cadenc
 export interface MotionFactsInput {
   complete: boolean; clock: Clock; ticks: readonly MotionTick[]; frames: readonly MotionFrame[];
   arrivals: readonly MotionArrival[]; completion: MotionCompletion; projection: MotionProjection;
-  pacing: MotionPacing; maxRelationships: number;
+  savedAnswer: string; pacing: MotionPacing; maxRelationships: number;
 }
 function ordered(time: Time, prior: Time): boolean { return time.phase > prior.phase && time.monoMs >= prior.monoMs; }
 function sameTime(a: Time, b: Time): boolean { return a.clockId === b.clockId && a.phase === b.phase && a.monoMs === b.monoMs && a.utcMs === b.utcMs; }
@@ -62,22 +62,26 @@ export function deriveMotionFacts(input: MotionFactsInput) {
     'incomplete-pages', 'Motion RAF history is duplicate, gapped or unordered');
   });
   const ids = new Set<string>();
-  let sourceUtf16 = 0;
+  text(input.savedAnswer);
+  const savedSourceUtf16 = input.savedAnswer.length;
+  let observedDeltaUtf16 = 0;
   requireFact(input.projection.arrivals.length === input.arrivals.length && input.projection.frames.length === input.frames.length,
     'incomplete-pages', 'Motion projection does not cover its entire history');
   input.arrivals.forEach((arrival, index) => {
     observe(arrival.time);
     const projected = input.projection.arrivals[index]!;
     text(arrival.delta);
-    sourceUtf16 += arrival.delta.length;
+    observedDeltaUtf16 += arrival.delta.length;
     const id = `${arrival.sourceId}\u0000${arrival.sampleIndex}`;
     requireFact(arrival.index === index && natural(arrival.sampleIndex) && arrival.sourceId.length > 0 &&
       arrival.itemId === input.completion.itemId && typeof arrival.delta === 'string' && !ids.has(id) &&
-      (index === 0 || ordered(arrival.time, input.arrivals[index - 1]!.time)) && projected.sourceUtf16 === sourceUtf16,
+      (index === 0 || ordered(arrival.time, input.arrivals[index - 1]!.time)) && projected.sourceUtf16 === observedDeltaUtf16,
     'identity-mismatch', 'Motion arrival identity, order or source projection differs');
     ids.add(id);
   });
-  requireFact(sourceUtf16 === input.projection.sourceUtf16, 'incomplete-pages', 'Motion source prefix coverage is incomplete');
+  requireFact(input.savedAnswer.startsWith(input.arrivals.map(arrival => arrival.delta).join('')) &&
+    savedSourceUtf16 === input.projection.sourceUtf16,
+    'identity-mismatch', 'Motion arrivals are not a prefix of their saved source');
   observe(input.completion.time);
   requireFact(input.completion.eventId.length > 0 && natural(input.completion.sampleIndex) &&
     earlier(input.arrivals.at(-1)!.time, input.completion.time), 'identity-mismatch', 'Motion completion precedes its arrivals');
@@ -92,7 +96,7 @@ export function deriveMotionFacts(input: MotionFactsInput) {
       frame.text.length <= 128000 && frame.visibleText.length <= 128000 && frame.contentText.length <= 128000 &&
       typeof frame.streaming === 'boolean' && typeof frame.marker === 'boolean' &&
       mapped.minSourceUtf16 <= mapped.maxSourceUtf16 &&
-      mapped.maxSourceUtf16 <= sourceUtf16 && (index === 0 || (ordered(frame.time, input.frames[index - 1]!.time) && frame.sampleIndex > input.frames[index - 1]!.sampleIndex)),
+      mapped.maxSourceUtf16 <= savedSourceUtf16 && (index === 0 || (ordered(frame.time, input.frames[index - 1]!.time) && frame.sampleIndex > input.frames[index - 1]!.sampleIndex)),
     'identity-mismatch', 'Motion frame identity, content or mapping differs');
     if (frame.tickIndex !== null) {
       const tick = input.ticks[frame.tickIndex];
@@ -165,6 +169,6 @@ export function deriveMotionFacts(input: MotionFactsInput) {
   return { evidenceClass: 'deterministic' as const, clock, pacing: { ...input.pacing }, ticks,
     frames: frameFacts, arrivals, completion: { ...input.completion }, horizon,
     firstLiveFrameIndex: frames.find(frame => frame.streaming && frame.words > 0)?.index ?? null,
-    sourceUtf16, relationshipsExamined: relationships };
+    observedDeltaUtf16, savedSourceUtf16, relationshipsExamined: relationships };
 }
 export type MotionFacts = ReturnType<typeof deriveMotionFacts>;

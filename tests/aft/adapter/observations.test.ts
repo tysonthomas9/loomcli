@@ -25,6 +25,24 @@ test('saved event pages pin snapshot and retain exact identity/order', async () 
   }, signal);
   assert.deepEqual(observed.events.map(e => e.eventId), ['event_1', 'event_2', 'event_3']); assert.match(calls[1]!, /snapshot=3/);
 });
+test('saved event reread pins the captured snapshot from its first request', async () => {
+  const calls: string[] = [];
+  const observed = await collectSavedEvents({ ...eventsInput, snapshotSeq: 2 }, async route => {
+    calls.push(route); return { status: 200, body: { events: [event(1),event(2)], snapshot_seq:2,next:2,more:false } };
+  },signal);
+  assert.equal(observed.snapshotSeq, 2);
+  assert.deepEqual(observed.events.map(row => row.payload), [{itemId:'item_1',text:'answer 1'},{itemId:'item_2',text:'answer 2'}]);
+  assert.match(calls[0]!, /snapshot=2/);
+  for (const body of [
+    {events:[event(1),event(2)],snapshot_seq:3,next:2,more:false},
+    {events:[event(1),event(3)],snapshot_seq:2,next:3,more:false},
+    {events:[event(1)],snapshot_seq:2,next:1,more:false},
+  ]) await assert.rejects(collectSavedEvents({...eventsInput,snapshotSeq:2},async()=>({status:200,body}),signal));
+  let reads = 0;
+  await assert.rejects(collectSavedEvents({...eventsInput,after:3,snapshotSeq:2},async()=>{reads++;return {status:410,body:{}};},signal));
+  assert.equal(reads,0);
+  await assert.rejects(collectSavedEvents({...eventsInput,snapshotSeq:2},async()=>({status:410,body:{}}),signal));
+});
 for (const [name, page] of Object.entries({
   foreign: { events: [{ ...event(1), agent_id: 'foreign' }], snapshot_seq: 1, next: 1, more: false },
   duplicate: { events: [event(1), { ...event(2), event_id: 'event_1' }], snapshot_seq: 2, next: 2, more: false },
