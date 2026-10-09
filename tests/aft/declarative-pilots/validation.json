@@ -296,6 +296,36 @@
     "engineEmittedFilesCompared": 102,
     "engineEmittedMismatches": 0,
     "provisioning": "Task-owned adapter emitted copy of approved77ba plus task-owned development preview package/dependencies; no accepted pin or source change.",
-    "scope": "Unchanged raw YAML loader/registry diagnostic only; all five rejected before fixture effects. Does not supersede accepted e8 receipt or establish any preservation/runtime acceptance."
+    "scope": "Unchanged raw YAML loader/registry diagnostic only; all five rejected before fixture effects. Does not supersede accepted e8 receipt or establish any preservation/runtime acceptance.",
+    "observationBoundsReview": [
+      {
+        "status": "confirmed-source-bound-gap",
+        "frozenHelper": "tests/aft/scripts/coverage-chat-visual.py",
+        "sourceLine": 1537,
+        "requiredPredicate": "5 <= len(ticks) <= 20000",
+        "canonicalAttempt": "Preview ObserveSchema dom arm maxSamples",
+        "missingObservation": "Preview maxSamples caps at10000; cannot retain original allowed20000-tick horizon. No truncated or sampler-only substitute accepted."
+      },
+      {
+        "status": "pending-workload-budget-proof",
+        "frozenHelper": "tests/aft/scripts/coverage-chat-visual.py",
+        "sourceLine": 1537,
+        "requiredEvidence": "Complete original RAF ticks and changed-frame content through observed freeze, no overflow/gaps",
+        "canonicalAttempt": "Preview dom RAF retains full synchronous trees per sample, maxBytes <=4000000",
+        "missingObservation": "No source-workload receipt yet proves this representation retains original allowable horizon under its byte bound. Potential overflow is an unresolved representation/budget gap, not a proven live failure."
+      },
+      {
+        "status": "authored-predicate-pending",
+        "frozenHelper": "tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "sourceLines": [
+          27,
+          37,
+          52
+        ],
+        "requiredPredicate": "sources <=20, completions <=100, arrivals <=5000, plus no observer error",
+        "canonicalAttempt": "Preview stream maxSources20 and raw frames/lifecycle with maxSamples<=10000",
+        "missingObservation": "Source-bound counts and complete frame/source/lifecycle accounting still need actual canonical raw-ledger mapping and YAML predicates; combined raw maxSamples alone earns no predicate credit."
+      }
+    ]
   }
 }
