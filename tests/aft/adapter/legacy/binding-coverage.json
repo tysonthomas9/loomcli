@@ -62,7 +62,8 @@
     "seed-resolution": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "actual product-resolved legacy agent worktree + selected repo; native-v1 IDs cannot replace legacy names",
-      "status": "missing; path validation/seed argv implemented independently"
+      "status": "Approved a495 actual diagnose/root/commonDir/branch/HEAD reads consumed. Existing single-repository legacy worktrees bind path validation, fixed daemon seed-worktree argv/stdin/LOOM_TESTSUPPORT=1 and exact HEAD through the production host/public registry. Physical root is checked before launch and after commit observation; symlink/hardlink/escape and root replacement negatives deny the seed actor or success fact. Failed/uncertain seed targets cannot replay. Fixture-only receipt keeps actorActivity:false. Not-ready/missing worktree creation path, named multirepo selection and Compose seeding remain unbound; no actual CLI/Git/backend proof.",
+      "checkpoint": "a4956ead44ade093f3642f73ef44bc4908bd1115"
     },
     "workspace-fixture": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
