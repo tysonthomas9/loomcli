@@ -7595,7 +7595,7 @@
         "evidence": "browser actions + rendered DOM + production public Files readbacks; GF1 alone does not prove paid reply",
         "deadlines": "Campaign default30000ms plus every original helper timeout; no new sleep",
         "screenshots": "all53 original named step checkpoints; editor unsaved/saved/Changes/diff and each reload preserved",
-        "teardown_pending": "Final-body immediate archive authored; coherent reviewed callback/fullchain/runtime pending. Failed-case archive is unobserved; coordinator-approved owned Compose release deviation.",
+        "teardown_pending": "Successful-body finalarchive admits and passes deterministic typed callback/public-runner checks. Actual paired runtime unverified; failed-case archive remains explicitly absent under option3.",
         "redirect_deviation": "Source urllib follows3xx; narrowed declarative transport denies3xx. Unproved branch; any paired-run3xx is a finding.",
         "cleanup_deviations": [
           {
@@ -8338,6 +8338,15 @@
         ],
         "runtimeExecuted": 0,
         "preservationAccepted": false
+      },
+      "archiveValidation": {
+        "rawSha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c",
+        "receiptPath": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/final-validation-receipt.json",
+        "receiptSha256": "36030491bed2b54bf4e4013b33a48130828d11965cf04602839ec5e3f45d3a35",
+        "rawAdmission": "ADMITTED all233 including finalarchive; effects0/runtime0",
+        "deterministicPublicChecks": "20production transport controls +3 exactfinalcap runFiles expected outcomes matched",
+        "runtime": "unrun/skipped",
+        "failurePath": "archive unobserved; coordinator-approved owned Compose release deviation"
       }
     },
     {

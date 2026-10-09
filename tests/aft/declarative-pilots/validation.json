@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "566a39e063b6d99d6f9458a365d9f807046fd4873f8e2812908b2292b9d519e6"
+        "sha256": "4d3e1b8660625b790a8439da4e60190f30a9126e67e0817514358f39dda44a2a"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -932,7 +932,7 @@
       "f377PilotChecksObtained": true,
       "f377Note": "Historical c71/f377 source-shaped timeout profile retained separately. New parent-approved584 source-built isolated f377 raw admission completes all5 unchanged files with no effects/runtime. No maintained root pin or preservation claim.",
       "maintainedEngine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
-      "gf1CurrentRawStatus": "Current233step GF1 raw 4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c includes final archive; exact canonical admission pending reviewed flat callback/count correction. Prior acc397 admission immutable; skiptrue/runtime0."
+      "gf1CurrentRawStatus": "Current4d47 GF1 all233 ADMITTED on exactcoherent1e+corrected6a;20callbackcontrols+3runFiles outcomes matched. Skiptrue/source-map helper gaps/runtime unverified; global engine session-close failure unwaived."
     },
     "sourceMapping": {
       "originalSteps": 207,
@@ -5638,5 +5638,288 @@
     ],
     "receiptPath": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/red-green-receipt.json",
     "receiptSha256": "1ba36d0b754cd616fdd9af06b2f26a6ba9c5911a9eac6806ce20e524c599bd85"
+  },
+  "gf1FinalCoherentValidation": {
+    "at": "2026-10-09T22:01:42.165936+00:00",
+    "taskId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
+    "sourcePilotHead": "64db49306731da6e85a38456a41d77fce343022c",
+    "rawSha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c",
+    "rawUnchanged": true,
+    "bodySteps": 233,
+    "originalCheckpoints": 53,
+    "adapterSource": "1e43197e47e1005561769226a52c1bcd3ed72050",
+    "adapterTree": "1d931de98eaf48ccc4502a49fb85c8e6147ac23b",
+    "engineHead": "6a82d623ae5074332e2187ff4db81e2f31628eb3",
+    "engineTree": "6c72dd1e8e0c9d579aedb91de62c31a785fdef36",
+    "engineTarSha256": "c0d90793eaff66647980b8158db9054cad023553109f7e5e4dc0857033c854b5",
+    "engineScope": "count correction approved; global session-close failure not waived; no maintained pin adoption",
+    "coordinates": {
+      "depth": "raw loader and adapter public runner",
+      "realness": "deterministic",
+      "provisioning": "task-owned clean coherent snapshot; injected process/HTTP ports and controlled real files",
+      "polarity": "positive and negative",
+      "target": "GF1 only; no original complete UI journey executed"
+    },
+    "installedEngineBytes": {
+      "buildFiles": 116,
+      "installedPackageFiles": 149
+    },
+    "rawAdmission": {
+      "purpose": "Approved coherent1e callback + isolated corrected6a final4d raw admission only; no source/runtime parity",
+      "engineHead": "6a82d623ae5074332e2187ff4db81e2f31628eb3",
+      "adapterSource": "1e43197e47e1005561769226a52c1bcd3ed72050",
+      "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter",
+      "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+      "canonicalModuleResolutionVerified": true,
+      "selectionSha256": "271133f0d687705b020893029079325836ba029971881b76ed32079a08784059",
+      "envFileSha256": "a65990e557ceed39509ecdfed46701496a019ceab84b42a14f4ff95de0365638",
+      "envSha256": "88883ae132673ce6274b7cb4a9896d6367ef51d236e4eec203b6a83f879e764c",
+      "pinSha256": "94e560e598315f403adfcab95d7ad9706bc5489d3ea309c688fbb262e108a7d1",
+      "manifestFiles": 2441,
+      "uniqueManifestBytes": 9838940,
+      "providers": 28,
+      "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/files-save-reload.test.yaml",
+      "rawSha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c",
+      "rawBytes": 71572,
+      "verifyCalls": 243,
+      "verifyReads": 2441,
+      "verifyBytes": 9838940,
+      "verifyMs": 1264.6417509999937,
+      "elapsedMs": 1411.9508749999995,
+      "effects": 0,
+      "runtimeStarted": 0,
+      "status": "ADMITTED canonical unchanged raw suite",
+      "guardMs": 60000,
+      "loadedSuites": 1,
+      "cases": [
+        {
+          "name": "GF1 UI editor Save updates this Agent API checkout and survives every tab reload",
+          "skipped": true,
+          "declaredSteps": 233
+        }
+      ],
+      "rawUnchangedAfter": true
+    },
+    "productionTransportControls": {
+      "selected": 20,
+      "passed": 20,
+      "actualBuiltModules": true,
+      "covers": "default public LOCALMODE acquisition without native bind; statuses204/200/409/301/500; foreign identity/name beforePOST; each missing effect before access; stale namespace; independentGET/POST15s expiry/no redispatch",
+      "firstGeneratedRunnerControls": "initial3setup failures due harness omitted RunOptions.runId; preserved, not credited as adapter failure"
+    },
+    "authoredFinalCapabilityRunFiles": {
+      "selected": 3,
+      "expectedOutcomesMatched": 3,
+      "sourceFinalCapabilityUnchanged": true,
+      "204": "actual case passed, oneGET/onePOST, literalcancel:true/exactkey/noJSON, separate15s deadlines, suite release down1",
+      "409": "actual case passed/conflict ignored, oneGET/onePOST, samewire/deadlines, suite release down1",
+      "bodyFailure": "actual case failed at injected assertion, archive step skipped, noGET/noPOST, suite teardown passed/down1; deviation proof only",
+      "reportingErratum": "initial harness selected result.tests[0] setup hook. Positive actual case rows verified from unchanged returned results without rerun; failed-body check corrected and replayed alone. Original records preserved.",
+      "observerBoundary": "No browser driver used; CLI double rejects DOM eval and optional rendered-testid observer warns. These controls provide no rendered DOM/observer evidence. Previous JSDOM editor/operator controls are separate."
+    },
+    "currentCanonicalClosure": {
+      "providers": 28,
+      "files": 2441,
+      "bytes": 9838940,
+      "pinSha256": "94e560e598315f403adfcab95d7ad9706bc5489d3ea309c688fbb262e108a7d1",
+      "allActualBytesRecheckedAfterControls": true
+    },
+    "setupDiagnostic": "First wrapper invocation lacked Node experimental import-meta parent resolution; failed before loader. Absolute paths and the documented Node flag restored existing module-identity checks; no check/registry/schema bypass. Initial log preserved.",
+    "deviations": [
+      "failed-body original archive absent; fixture.release/owned Compose down only (parent option3)",
+      "stronger workspace/repo/harness/ownedorigin/container cleanup guard and closed bounds",
+      "urllib3xx follow vs fixed3xxdeny; any paired3xx finding"
+    ],
+    "remaining": [
+      "Opus source-map review includes unresolved nested helper fresh-identity/scoped GET repetitions and Files-lens branch proof",
+      "runner-owned actual stack/browser/profile provisioning and parent-authorized identical-build original/declarative paired GF1 run",
+      "engine global session-close failure remains explicit; these focused checks do not waive it"
+    ],
+    "allFiveOriginalPilotCasesRemainSkipped": true,
+    "originalPilotRuntimeExecuted": false,
+    "realBrowserBackendPodmanProviderLaunches": 0,
+    "artifacts": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/diagnostic-owned.json",
+        "sha256": "11f6c76b8f5fcd693d807ac651c3c28e38b365874fae3ffe63ed3d74673be3c9",
+        "bytes": 516
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/diagnostic-selection.json",
+        "sha256": "271133f0d687705b020893029079325836ba029971881b76ed32079a08784059",
+        "bytes": 411
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/public-env-basis.json",
+        "sha256": "2f40cf85c7f1649f21ee913c9be9565b4202dd9e867f93b41b4ea9721f05964e",
+        "bytes": 1244
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/public-env-absolute.json",
+        "sha256": "a65990e557ceed39509ecdfed46701496a019ceab84b42a14f4ff95de0365638",
+        "bytes": 451164
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/construct-public-env.mjs",
+        "sha256": "1e2f78078974e4fc7761738b19e7da00526161aa6313fdb87e79ed930c615f46",
+        "bytes": 1723
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/raw-compatibility.mjs",
+        "sha256": "9461555f8969f73bb968e57421b1f95e2c5bd0c084d9df66d13adb80aae482c5",
+        "bytes": 4158
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/installed-byte-receipt.json",
+        "sha256": "a2ca95aceebae5befd3159e6226c805ad7484de3edcde813f48482b4a289b556",
+        "bytes": 300
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/raw-admission-receipt.json",
+        "sha256": "75b5bf972547c6f453d028860d4dc9b407bed1436c0a1c736874b732188d779f",
+        "bytes": 1683
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/install.log",
+        "sha256": "b1dcb44806d425dec75916fbbe021dcef9c55bd812b690b223ac9d8bd6137285",
+        "bytes": 163
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/projections-install.log",
+        "sha256": "62fb6437e8d0f52e554db19bbb5bb0478da325b97ceea81403c9d718ea4b304d",
+        "bytes": 142
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/build.log",
+        "sha256": "b5644a9bcf54fb717ff2d7b31c12159c4da5d6424ddb28a18cc286f5199c7226",
+        "bytes": 51
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/env-absolute-construction.log",
+        "sha256": "ef25c6074e793532d1715805e277a94f8c9c75f15fa0d0aa43b067c319576a14",
+        "bytes": 460
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/raw-admission-absolute.log",
+        "sha256": "a41371192311aa2b96ffd64f2104e986fc5713bb1b062ac35683b427a44c8265",
+        "bytes": 169
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/raw-admission.log",
+        "sha256": "460523cd9e25f30dfc86651e4a38df4cc86126fb41d6a099a4160c80c6bacdfc",
+        "bytes": 1069
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/final-public-tests.log",
+        "sha256": "60a477603143a5a4bae071b9f19d596050a6bf19f5bde1f97779d8f2be1da392",
+        "bytes": 5729
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/final-public-runfiles-fixed.log",
+        "sha256": "21176b515e03a40bd9639117e317256c389743ce979bfd267da7212e6777309d",
+        "bytes": 2491
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/final-public-body-failure-corrected.log",
+        "sha256": "4410d6ea5400f863ac54c6d8581e8dcbc2071bde2c85317e89b280a2b23ef0ff",
+        "bytes": 736
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/package.json",
+        "sha256": "55789d36663071b9fb03e3fc6aa8477af11c8991323dca8c1f00d85cc4f8b794",
+        "bytes": 964
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/package-lock.json",
+        "sha256": "43f23b9381494a75df96f19a982976357cfa3845f15a3ba9aa00acb84843ead9",
+        "bytes": 174821
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/build-final-public.mjs",
+        "sha256": "4a1a36269f1f656e244cfc99d491b21ff93ce227263b0f099fbbad0096e685ba",
+        "bytes": 6499
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public-production.test.mjs",
+        "sha256": "db259331ea9e5e1e741ee545d3a4fc28372703c21517ed848ebf611e052a093f",
+        "bytes": 76707
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/positive-reporting-erratum.json",
+        "sha256": "d8296395b2fe6fc8b7aa8fea512546e9666d49f937a9b549f701c3b431e75aa8",
+        "bytes": 2557
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/setup-run-id-red/build-final-public.mjs",
+        "sha256": "0aa2677527608f13f8489659f0b73f62319b07021b2bb84fe2f8f9eb0fed7b02",
+        "bytes": 6204
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/setup-run-id-red/log.txt",
+        "sha256": "60a477603143a5a4bae071b9f19d596050a6bf19f5bde1f97779d8f2be1da392",
+        "bytes": 5729
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/report-row-red/build-final-public.mjs",
+        "sha256": "01e058825735a13a59d356177a197bf5024a04337170e96eb9d619e9e17dc26b",
+        "bytes": 6435
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/report-row-red/log.txt",
+        "sha256": "21176b515e03a40bd9639117e317256c389743ce979bfd267da7212e6777309d",
+        "bytes": 2491
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public/204.test.yaml",
+        "sha256": "1110a010376979d1ac40d2aef3f1c664c26f491d8e707a656288deaf8be46df4",
+        "bytes": 2801
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public/204-receipt.json",
+        "sha256": "6b5197540becf98448d767b3ea9d524f90e9288b502b59713341f285fea527f6",
+        "bytes": 21636
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public/204-observed-result.json",
+        "sha256": "e22ad1925daee036ac56730afcadbe1d5e86210d812d1fb3b13172489df5e2e5",
+        "bytes": 56522
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public/409.test.yaml",
+        "sha256": "cdb41364eb707a1b6d60c205e01d0290bc9d6bd7ac90d084a2bdcceb0bce2f20",
+        "bytes": 2801
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public/409-receipt.json",
+        "sha256": "d0c56184407da5802280e7cffdb467f6646d96c794efbadb74416502f042d1ae",
+        "bytes": 21637
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public/409-observed-result.json",
+        "sha256": "6bdc54d8ddf162c3e50b3dddaa7402350ca2139941c03d7f13bf1d6cfe5f1aba",
+        "bytes": 56523
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public/body-failure.test.yaml",
+        "sha256": "da7d8854d70d62b1dd433aff7c54c012918e515a3e9b6a369220534dc46c3e57",
+        "bytes": 2916
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public/body-failure-receipt.json",
+        "sha256": "a3d0f66855bf5d1e9ba372447ea96f4073dcf86b0c4273ba2ab15c606cf075c0",
+        "bytes": 20269
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/.diagnostic/final-public/body-failure-observed-result.json",
+        "sha256": "3c6e4cd546ef03147c6994023dd2c8b464651a74cab520de30e6eef628cda773",
+        "bytes": 46051
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/final-pin-byte-receipt.json",
+        "sha256": "262662c2c6141a68ea3718b7dfa5863f674c97ace9c23e58e36f2b08878a7a6e"
+      }
+    ],
+    "receiptPath": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/final-validation-receipt.json",
+    "receiptSha256": "36030491bed2b54bf4e4013b33a48130828d11965cf04602839ec5e3f45d3a35"
   }
 }
