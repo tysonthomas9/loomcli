@@ -191,6 +191,7 @@ test('native registration captures only validated owned facts and rejects change
     process:async()=>({pid:42,generation:'generation',executable:'/owned/opencode',argv:['/owned/opencode','serve','--service']}),
     agent:async()=>row,sessions:async()=>refs,read:async()=>({status:200,body:{pid:42}})};
   const request = {agent:input.agent,maxRegistrations:10};
+  assert.deepEqual(h.registry.get('loom.native.registration',1).effects,['read-native']);
   await assert.rejects(h.invoke('loom.native.registration',{...request,expectedGeneration:'guessed'}));
   assert.equal((await h.invoke('loom.native.registration',{...request,agent:{...input.agent,fixtureLeaseId:'foreign'}})).availability,'error');
   assert.equal(registrations,0);

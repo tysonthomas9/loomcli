@@ -58,7 +58,7 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     evidenceClasses: ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const };
   const common = { implementation, implementationSha256: implementation.sha256, ...read, evidenceClasses: [...read.evidenceClasses] };
   return [
-    defineOperation({...common,id:'loom.native.registration',inputSchema:NativeRegistrationInput,outputSchema:NativeRegistrationOutput,
+    defineOperation({...common,id:'loom.native.registration',effects:['read-native'],inputSchema:NativeRegistrationInput,outputSchema:NativeRegistrationOutput,
       async run(input,context) {
         const {fixture,agent} = await getAgent(context,input.agent);
         requireFact(agent.native,'unsupported-capability','Owned native transport is missing');
