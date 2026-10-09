@@ -100,13 +100,14 @@
     "engine-final": {
       "owner": "agent-a43468f0-1931-41df-92fc-9a50f0dfc1d5",
       "request": "accepted final engine context/cleanup/retry/stream contract",
-      "status": "Focused checks consume unmodified accepted e8eee6bb package SHA614e539333db04cf917ad177be8981fb77cc59d48d1c6310cc265864e9e8a78e."
+      "status": "Scoped deterministic checks consume unchanged accepted c71e785f65e5e0c53128feab8765e40a47bbc672 package SHA f90710c9244cae11136d43bd7e583f0e24fe21c1c8eca40d1d3b945df9a31a55. Later journal/budget/CDP semantics are not consumed or credited."
     },
     "owned-workspaces": {
       "owner": "agent-0f30e493-e8b6-4f7c-bb49-c320a3725a17",
       "fixtureOwner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "Canonical owned fixture workspace records plus actual creation receipts for E2E-WS-AGENT/nova and E2E-AGV1-*; discovery never grants ownership",
-      "status": "Consumes approved b6 actual host creation roster/private legacy store reads. Managed legacy binding compares retained repo/commonDir/storeId/storeGeneration against actual private creation facts using the existing canonical evidence store before CLI effects; launch source/config checkout stays distinct. Actual Host + production bind + canonical registry role/usage and all backend/mode positives with two workspaces, unrelated repo/association and replaced store negatives pass deterministically. Additional/native/multirepo creation and actor associations remain required; no live creation proof."
+      "status": "Consumes approved b6/a495/661+253 actual private host creation/store/commonDir and named repository facts, plus canonical ea106+52 nullable physical source and membership helper. Actual Host + production bind + canonical registry role/usage preserve unselected multi-repository membership and same names in separate workspaces. Task selectors use actual named path/ID/groups and reread current assignments before and after launch, narrowing against retained source authority; null keeps original empty LOOM_SOURCE_REPOS all-assigned semantics. Reordered topology is accepted; foreign actor/workspace/selector, reassigned groups/source and replaced store deny CLI effects. Same-name recreation/changed parent requires a canonical retained-enrollment identity helper from core before full actor-identity acceptance. Native/source-specific factories and Compose ownership remain open; deterministic injection/physical-file evidence only.",
+      "checkpoint": "66107c1114b143e7af70438404fb218de43250ee WITH 2530fdd7995477710a84818cf86dcfa1202dd147; root ea1068c517d1c1d1cb65a917310e27358a025dfe + 52f0512b3a00b94a59d4c7cdbc97f342ef229277"
     },
     "operation-routing": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
