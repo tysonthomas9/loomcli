@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "zod": [
+        "./node_modules/zod/index.js"
+      ],
+      "@tysonthomas9/aft/types": [
+        "./node_modules/@tysonthomas9/aft/dist/types.js"
+      ],
+      "@tysonthomas9/aft/capabilities": [
+        "./node_modules/@tysonthomas9/aft/dist/capabilities.js"
+      ]
+    }
+  }
+}

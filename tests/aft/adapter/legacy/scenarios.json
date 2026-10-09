@@ -1,0 +1,1269 @@
+{
+  "loomBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+  "inventoryIndexSha256": "4055541f111c878152782d94840d2466e1744e59e795b9e5376e15a5e9e35640",
+  "evidenceClass": "static source-grounded fixture protocol data; no actor/runtime proof",
+  "entries": [
+    {
+      "id": "fake-model-e31296792340e32b",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-KIDS-A2"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1/steps/6"
+      ]
+    },
+    {
+      "id": "fake-model-7469feee76d64297",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "PAR-ONE-REPLY"
+          },
+          {
+            "text": "PAR-TWO-REPLY"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/4/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-c847a6fd8bce451b",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "PAR-REOPEN-ONE"
+          },
+          {
+            "text": "PAR-REOPEN-TWO"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/6/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-d71b43a482d216cf",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "PAR-SWITCH-ONE"
+          },
+          {
+            "text": "PAR-SWITCH-TWO"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/7/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-9eb610f9e3804ed6",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "bash": "sleep 120"
+          },
+          {
+            "text": "PAR-STOP-AFTER"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/8/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-058796d15129c2d7",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-REPLY-ONE"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-ec40b5a4348e1862",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-REPLY-AFTER-RESTART"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0/steps/8"
+      ]
+    },
+    {
+      "id": "fake-model-a2d7dec06518da5e",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-MODAL-REPLY"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/1/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-72337b7875831996",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "bash": "sleep 120"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/2/steps/1",
+        "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-12ae9c651f7e895f",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "return await tools.loom.agent_list({})"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-BRIDGE-REPLY"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/4/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-ff1bc09f82ac358f",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-EFFORT-REPLY"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/9/steps/3"
+      ]
+    },
+    {
+      "id": "fake-model-98e8f08e4ed44fda",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-UI2-REPLY"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/10/steps/14"
+      ]
+    },
+    {
+      "id": "fake-model-514226effcc33a90",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-BEFORE-ARCHIVE"
+          },
+          {
+            "text": "AGV1-AFTER-UNARCHIVE"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/0/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-54cdd6a283ca43aa",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-BEFORE-EXPIRY"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/1/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-8473f01c0d4ae1a6",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-RESUME-BEFORE"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-b47666158369ce17",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-RESUME-AFTER"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0/steps/5"
+      ]
+    },
+    {
+      "id": "fake-model-9acd22b7da2b40fc",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-RESUME-CONTINUED"
+          },
+          {
+            "text": "AGV1-RESUME-PENDING"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1/steps/8"
+      ]
+    },
+    {
+      "id": "fake-model-35af60643195fb77",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "bash": "sleep 20"
+          },
+          {
+            "text": "AGV1-SERVE-CONTINUED"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/2/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-165c42410e463d4b",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-SERVE-PENDING"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/2/steps/1"
+      ]
+    },
+    {
+      "id": "scripted-backend-3ff9a4ad939cd300",
+      "fixtureId": "scripted-backend",
+      "payload": {
+        "tools": [
+          {
+            "id": "call_ui_ls",
+            "name": "shell",
+            "input": {
+              "command": "ls"
+            },
+            "output": "README.md"
+          },
+          {
+            "id": "call_ui_read",
+            "name": "read",
+            "input": {
+              "filePath": "missing-ui.txt"
+            },
+            "output": "",
+            "fail": "File not found: missing-ui.txt"
+          }
+        ],
+        "text": "AGV1-UI-TOOLS"
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/5/steps/0"
+      ]
+    },
+    {
+      "id": "scripted-backend-7d2016684b7bf3ee",
+      "fixtureId": "scripted-backend",
+      "payload": {
+        "reasoning": "AGV1-UI-THINKING weigh the options",
+        "text": "AGV1-UI-THOUGHT"
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-reset",
+      "fixtureId": "fake-model",
+      "payload": {},
+      "sources": [
+        "tests/aft/fixtures/fake-model/server.mjs"
+      ],
+      "reset": true
+    },
+    {
+      "id": "fake-github-reset",
+      "fixtureId": "fake-github",
+      "payload": {},
+      "sources": [
+        "tests/aft/fixtures/fake-github/server.mjs"
+      ],
+      "reset": true
+    },
+    {
+      "id": "scripted-backend-reset",
+      "fixtureId": "scripted-backend",
+      "payload": {},
+      "sources": [
+        "tests/aft/fixtures/../../internal/harnessemu/emu.go"
+      ],
+      "reset": true
+    },
+    {
+      "id": "fake-model-9e0075f2af10ebb0",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-UI-EFFORT-ONE"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-57c6d1082a5d999e",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-UI-EFFORT-TWO"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2/steps/5"
+      ]
+    },
+    {
+      "id": "fake-model-1be8855da509058b",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "Files:\n\n| Name | Lines |\n| --- | ---: |\n| README.md | 1 |\n\n```go\nfunc main() {\n\treturn\n}\n```\n\nAGV1-UI-MD"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/4/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-c3524025903c6605",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "Files:\n\n| Name | Lines |\n| --- | ---: |\n| README.md | 1 |\n\n```go\nfunc main() {\n\treturn\n}\n```\n\nAGV1-UI-COPY"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/7/steps/0"
+      ]
+    },
+    {
+      "id": "fake-github-review-widget",
+      "fixtureId": "fake-github",
+      "parameters": [
+        "headSha",
+        "baseSha"
+      ],
+      "payload": {
+        "pr": {
+          "number": 7,
+          "state": "open",
+          "title": "Trim leading character",
+          "draft": false,
+          "merged_at": null,
+          "user": {
+            "login": "octocat"
+          },
+          "updated_at": "2026-01-01T00:00:00Z",
+          "head": {
+            "sha": "$headSha",
+            "ref": "feature/auth"
+          },
+          "base": {
+            "sha": "$baseSha",
+            "ref": "main"
+          }
+        },
+        "files": [
+          {
+            "filename": "widget.go",
+            "status": "modified",
+            "additions": 1,
+            "deletions": 1,
+            "patch": "@@ -1,5 +1,5 @@\n package widget\n \n func ParseName(s string) string {\n-\treturn s\n+\treturn s[1:]\n }"
+          }
+        ]
+      },
+      "sources": [
+        "tests/aft/live-pr-review-suites/lp-pr-review.test.yaml:91-104"
+      ]
+    },
+    {
+      "id": "scripted-backend-a27dc18bbec0bd65",
+      "fixtureId": "scripted-backend",
+      "payload": [
+        {
+          "tools": [
+            {
+              "id": "call_ui3_read",
+              "name": "read",
+              "input": {
+                "filePath": "missing-ui3.txt"
+              },
+              "output": "",
+              "fail": "File not found: missing-ui3.txt"
+            },
+            {
+              "id": "call_ui3_ls",
+              "name": "shell",
+              "input": {
+                "command": "ls"
+              },
+              "output": "README.md"
+            }
+          ],
+          "text": "Files:\n\n| Name | Lines |\n| --- | ---: |\n| README.md | 1 |\n\n```go\nfunc main() {\n\treturn\n}\n```\n\nAGV1-UI3-REPLY"
+        },
+        {
+          "reasoning": "AGV1-UI3-THINKING weigh the files",
+          "text": "AGV1-UI3-DONE"
+        }
+      ],
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-97dba493a1eba94d",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "tool_calls": [
+              {
+                "name": "read",
+                "arguments": {
+                  "filePath": "missing-ui3.txt"
+                }
+              },
+              {
+                "name": "shell",
+                "arguments": {
+                  "command": "ls"
+                }
+              }
+            ]
+          },
+          {
+            "text": "Files:\n\n| Name | Lines |\n| --- | ---: |\n| README.md | 1 |\n\n```go\nfunc main() {\n\treturn\n}\n```\n\nAGV1-UI3-REPLY"
+          },
+          {
+            "text": "AGV1-UI3-DONE"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8/steps/1"
+      ]
+    },
+    {
+      "id": "scripted-backend-a3e8df600adb9f2c",
+      "fixtureId": "scripted-backend",
+      "payload": [
+        {
+          "tools": [
+            {
+              "id": "call_ui4_bash",
+              "name": "shell",
+              "input": {
+                "command": "echo AGV1-UI4-RAN"
+              },
+              "output": "AGV1-UI4-RAN",
+              "permission": {
+                "action": "bash",
+                "resources": [
+                  "echo AGV1-UI4-RAN"
+                ],
+                "save": [
+                  "echo *"
+                ]
+              }
+            }
+          ],
+          "text": "AGV1-UI4-AFTER"
+        },
+        {
+          "fail": "AGV1-UI4-FAIL the model refused the request"
+        }
+      ],
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/11/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-7ca7612599c8f225",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "bash": "echo AGV1-UI4-RAN"
+          },
+          {
+            "text": "AGV1-UI4-AFTER"
+          },
+          {
+            "error": "AGV1-UI4-FAIL the model refused the request"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/11/steps/1"
+      ]
+    },
+    {
+      "id": "scripted-backend-3f4cf55682f7ac7f",
+      "fixtureId": "scripted-backend",
+      "payload": [
+        {
+          "tools": [
+            {
+              "id": "call_ui4_q",
+              "name": "question",
+              "input": {
+                "questions": [
+                  {
+                    "header": "Color",
+                    "question": "AGV1-UI4 which color?",
+                    "options": [
+                      {
+                        "label": "Blue",
+                        "description": "calm"
+                      },
+                      {
+                        "label": "Red",
+                        "description": "loud"
+                      }
+                    ]
+                  },
+                  {
+                    "header": "Size",
+                    "question": "AGV1-UI4 which size?",
+                    "options": [
+                      {
+                        "label": "Small",
+                        "description": "fits"
+                      },
+                      {
+                        "label": "Large",
+                        "description": "roomy"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "output": "",
+              "questions": [
+                {
+                  "header": "Color",
+                  "question": "AGV1-UI4 which color?",
+                  "options": [
+                    {
+                      "label": "Blue",
+                      "description": "calm"
+                    },
+                    {
+                      "label": "Red",
+                      "description": "loud"
+                    }
+                  ]
+                },
+                {
+                  "header": "Size",
+                  "question": "AGV1-UI4 which size?",
+                  "options": [
+                    {
+                      "label": "Small",
+                      "description": "fits"
+                    },
+                    {
+                      "label": "Large",
+                      "description": "roomy"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "text": "AGV1-UI4-ANSWERED"
+        }
+      ],
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-b0b6a626d17cb752",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "tool_calls": [
+              {
+                "name": "question",
+                "arguments": {
+                  "questions": [
+                    {
+                      "header": "Color",
+                      "question": "AGV1-UI4 which color?",
+                      "options": [
+                        {
+                          "label": "Blue",
+                          "description": "calm"
+                        },
+                        {
+                          "label": "Red",
+                          "description": "loud"
+                        }
+                      ]
+                    },
+                    {
+                      "header": "Size",
+                      "question": "AGV1-UI4 which size?",
+                      "options": [
+                        {
+                          "label": "Small",
+                          "description": "fits"
+                        },
+                        {
+                          "label": "Large",
+                          "description": "roomy"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-UI4-ANSWERED"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12/steps/1"
+      ]
+    },
+    {
+      "id": "scripted-backend-6e3ad96ba0dd2ab9",
+      "fixtureId": "scripted-backend",
+      "payload": [
+        {
+          "tools": [
+            {
+              "id": "call_oc1_bash",
+              "name": "shell",
+              "input": {
+                "command": "echo AGV1-OC1-NEVER-RAN"
+              },
+              "output": "AGV1-OC1-NEVER-RAN",
+              "permission": {
+                "action": "bash",
+                "resources": [
+                  "echo AGV1-OC1-NEVER-RAN"
+                ],
+                "save": [
+                  "echo *"
+                ]
+              }
+            }
+          ],
+          "text": "AGV1-OC1-NEVER-SAID"
+        },
+        {
+          "text": "AGV1-OC1-NEXT"
+        },
+        {
+          "text": "AGV1-OC1-SUSPENDED",
+          "suspend": true
+        }
+      ],
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-dba7d35600981eed",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "bash": "echo AGV1-OC1-NEVER-RAN"
+          },
+          {
+            "text": "AGV1-OC1-NEXT"
+          },
+          {
+            "bash": "sleep 120"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13/steps/1"
+      ]
+    },
+    {
+      "id": "scripted-backend-7763a8792b5ee738",
+      "fixtureId": "scripted-backend",
+      "payload": [
+        {
+          "tools": [
+            {
+              "id": "call_sa1_sub",
+              "name": "subagent",
+              "input": {
+                "agent": "general",
+                "description": "AGV1-SA1 helper",
+                "prompt": "say hi"
+              },
+              "output": "AGV1-SA1-CHILD"
+            }
+          ],
+          "text": "AGV1-SA1-AFTER"
+        }
+      ],
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-098e1d5166438680",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "tool_calls": [
+              {
+                "name": "subagent",
+                "arguments": {
+                  "agent": "general",
+                  "description": "AGV1-SA1 helper",
+                  "prompt": "say hi"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-SA1-AFTER"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-24846d131947ec5d",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "next": "prompt",
+            "text": "AGV1-CL2-ACK a is done; waiting for b."
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3/steps/6"
+      ]
+    },
+    {
+      "id": "fake-model-bb9dab0869ea6943",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "next": "prompt",
+            "text": "AGV1-CL2-SUMMARY a and b are both done."
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3/steps/8"
+      ]
+    },
+    {
+      "id": "fake-model-f96e31cbcdad021b",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "return await tools.loom.github_read({\"op\": \"repo_view\"})"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-GH-DONE"
+          },
+          {
+            "text": "AGV1-GH-AFTER"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/6/steps/1"
+      ]
+    },
+    {
+      "id": "scripted-backend-36bb16b1d10e461d",
+      "fixtureId": "scripted-backend",
+      "payload": [
+        {
+          "text": "w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 AGV1-SERVE-CONTINUED",
+          "delay_ms": 1000
+        }
+      ],
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/2/steps/1"
+      ]
+    },
+    {
+      "id": "fake-model-093d4a3e46c9c10f",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "tool_calls": [
+              {
+                "name": "shell",
+                "arguments": {
+                  "command": "ls"
+                }
+              },
+              {
+                "name": "read",
+                "arguments": {
+                  "filePath": "missing-ui.txt"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-UI-TOOLS"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/5/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-2eb7e07c69e5d413",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "text": "AGV1-UI-THOUGHT"
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6/steps/0"
+      ]
+    },
+    {
+      "id": "fake-model-d414159ce7e8819b",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "$agentCreate"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-KIDS-ONE"
+          },
+          {
+            "text": "AGV1-KIDS-ONE"
+          }
+        ]
+      },
+      "parameters": [
+        "agentName"
+      ],
+      "agentPrefixes": {
+        "agentName": "agv1-kid-"
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/0/steps/0",
+        "tests/aft/suites/agents-v1-children.test.yaml#setup"
+      ]
+    },
+    {
+      "id": "fake-model-f13aa2f970797b8c",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "$agentCreate"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-KIDS-A1"
+          },
+          {
+            "text": "AGV1-KIDS-A1"
+          }
+        ]
+      },
+      "parameters": [
+        "agentName"
+      ],
+      "agentPrefixes": {
+        "agentName": "agv1-kid2-"
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1/steps/1",
+        "tests/aft/suites/agents-v1-children.test.yaml#setup"
+      ]
+    },
+    {
+      "id": "fake-model-2253814a6bbba6ba",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "next": "prompt",
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "$agentCreate"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-TRAY-STARTED-A",
+            "next": "tool"
+          },
+          {
+            "tool_calls": [
+              {
+                "name": "df1_hold"
+              }
+            ],
+            "next": "prompt"
+          }
+        ]
+      },
+      "parameters": [
+        "agentName"
+      ],
+      "agentPrefixes": {
+        "agentName": "agv1-tray-a-"
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2/steps/1",
+        "tests/aft/suites/agents-v1-children.test.yaml#setup"
+      ]
+    },
+    {
+      "id": "fake-model-88ba74da857be641",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "next": "prompt",
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "$agentCreate"
+                }
+              }
+            ]
+          },
+          {
+            "tool_calls": [
+              {
+                "name": "df1_hold"
+              }
+            ],
+            "next": "tool"
+          },
+          {
+            "text": "AGV1-TRAY-B-DONE",
+            "next": "prompt"
+          }
+        ]
+      },
+      "parameters": [
+        "agentName"
+      ],
+      "agentPrefixes": {
+        "agentName": "agv1-tray-b-"
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2/steps/6",
+        "tests/aft/suites/agents-v1-children.test.yaml#setup"
+      ]
+    },
+    {
+      "id": "fake-model-7b3f8c4568d4814b",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "next": "prompt",
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "$agentCreate"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-SIDE-STARTED-A",
+            "next": "tool"
+          },
+          {
+            "tool_calls": [
+              {
+                "name": "df1_hold"
+              }
+            ],
+            "next": "prompt"
+          }
+        ]
+      },
+      "parameters": [
+        "agentName"
+      ],
+      "agentPrefixes": {
+        "agentName": "agv1-side-a-"
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4/steps/1",
+        "tests/aft/suites/agents-v1-children.test.yaml#setup"
+      ]
+    },
+    {
+      "id": "fake-model-06e54031289009ca",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "next": "prompt",
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "$agentCreate"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-SIDE-STARTED-B",
+            "next": "tool"
+          },
+          {
+            "tool_calls": [
+              {
+                "name": "df1_hold"
+              }
+            ],
+            "next": "prompt"
+          }
+        ]
+      },
+      "parameters": [
+        "agentName"
+      ],
+      "agentPrefixes": {
+        "agentName": "agv1-side-b-"
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4/steps/6",
+        "tests/aft/suites/agents-v1-children.test.yaml#setup"
+      ]
+    },
+    {
+      "id": "fake-model-a988ffd2f9e784d3",
+      "fixtureId": "fake-model",
+      "payload": {
+        "steps": [
+          {
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "$agentCreate"
+                }
+              }
+            ]
+          },
+          {
+            "text": "AGV1-KIDS-TABS"
+          },
+          {
+            "text": "AGV1-KIDS-TABS"
+          }
+        ]
+      },
+      "parameters": [
+        "agentName"
+      ],
+      "agentPrefixes": {
+        "agentName": "agv1-kid3-"
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/5/steps/1",
+        "tests/aft/suites/agents-v1-children.test.yaml#setup"
+      ]
+    },
+    {
+      "id": "fake-model-two-owned-children",
+      "fixtureId": "fake-model",
+      "parameters": [
+        "agentName",
+        "secondAgentName"
+      ],
+      "agentPrefixes": {
+        "agentName": "agv1-cl2-a-",
+        "secondAgentName": "agv1-cl2-b-"
+      },
+      "payload": {
+        "steps": [
+          {
+            "next": "prompt",
+            "tool_calls": [
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "$agentCreate"
+                }
+              },
+              {
+                "name": "execute",
+                "arguments": {
+                  "code": "$secondAgentCreate"
+                }
+              }
+            ]
+          },
+          {
+            "next": "tool",
+            "text": "AGV1-CL2-STARTED"
+          },
+          {
+            "next": "prompt",
+            "tool_calls": [
+              {
+                "name": "df1_hold"
+              }
+            ]
+          },
+          {
+            "next": "prompt",
+            "tool_calls": [
+              {
+                "name": "df1_hold"
+              }
+            ]
+          }
+        ]
+      },
+      "sources": [
+        "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3/steps/1"
+      ]
+    }
+  ]
+}

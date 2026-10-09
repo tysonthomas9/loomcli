@@ -1,0 +1,2265 @@
+{
+  "loomBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+  "inventoryIndexSha256": "4055541f111c878152782d94840d2466e1744e59e795b9e5376e15a5e9e35640",
+  "callers": [
+    {
+      "id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml#tests/3/steps/0",
+      "case_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml#tests/3",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml",
+        "path": [
+          "tests",
+          3,
+          "steps",
+          0
+        ],
+        "line": 222,
+        "column": 9,
+        "end_line": 224
+      },
+      "authored": {
+        "run": ": \"${AFT_RESTART_SERVE:?owned restart helper required}\"; python3 \"$AFT_TESTS_DIR/scripts/coverage-chat-controls.py\" create restart pr-review-interactive target",
+        "intent": "Require the runner-owned restart helper and create an owned production ask-policy actor"
+      },
+      "expected_contract": "Require the runner-owned restart helper and create an owned production ask-policy actor",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml#tests/3/steps/7",
+      "case_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml#tests/3",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml",
+        "path": [
+          "tests",
+          3,
+          "steps",
+          7
+        ],
+        "line": 237,
+        "column": 9,
+        "end_line": 239
+      },
+      "authored": {
+        "run": "\"$AFT_RESTART_SERVE\"",
+        "intent": "Restart only this run's owned loom-local and OpenCode service while the ask is pending"
+      },
+      "expected_contract": "Restart only this run's owned loom-local and OpenCode service while the ask is pending",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-models.test.yaml#tests/1/steps/1",
+      "case_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-models.test.yaml#tests/1",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-models.test.yaml",
+        "path": [
+          "tests",
+          1,
+          "steps",
+          1
+        ],
+        "line": 177,
+        "column": 9,
+        "end_line": 179
+      },
+      "authored": {
+        "run": ": \"${AFT_RESTART_SERVE:?owned restart helper required}\"; \"$AFT_RESTART_SERVE\"",
+        "intent": "Restart only this run's owned loom-local service, including its OpenCode process"
+      },
+      "expected_contract": "Restart only this run's owned loom-local service, including its OpenCode process",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml#tests/0/steps/0",
+      "case_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          0
+        ],
+        "line": 17,
+        "column": 9,
+        "end_line": 19
+      },
+      "authored": {
+        "run": "test -x \"$AFT_RESTART_SERVE\" && test -x \"$AFT_SELECT_AGENT_MODEL\" && test -x \"$AFT_TESTS_DIR/scripts/coverage-receipts-stream-native.sh\" && test -n \"$AFT_REAL_MODEL\"",
+        "intent": "Confirm this run owns its whole-service restart and the real model and native probe are available"
+      },
+      "expected_contract": "Confirm this run owns its whole-service restart and the real model and native probe are available",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml#tests/0/steps/6",
+      "case_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          6
+        ],
+        "line": 35,
+        "column": 9,
+        "end_line": 37
+      },
+      "authored": {
+        "run": "python3 \"$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py\" capture create before && python3 \"$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py\" delivered create before \"CREATE_FIRST-${RUN_ID}: use a tool to read README.md and name its documented test command with a file citation.\" && python3 \"$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py\" native-count create before && \"$AFT_RESTART_SERVE\"",
+        "intent": "Save exact first-message EventID/native InputKey and one native user input, then restart only the run-owned loom-local service"
+      },
+      "expected_contract": "Save exact first-message EventID/native InputKey and one native user input, then restart only the run-owned loom-local service",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/0",
+      "case_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          0
+        ],
+        "line": 16,
+        "column": 9,
+        "end_line": 18
+      },
+      "authored": {
+        "run": "test -x \"$AFT_RESTART_SERVE\" && test -x \"$AFT_SELECT_AGENT_MODEL\"",
+        "intent": "Confirm this run owns the serve restart and real-model selector"
+      },
+      "expected_contract": "Confirm this run owns the serve restart and real-model selector",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+      "case_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          26
+        ],
+        "line": 70,
+        "column": 9,
+        "end_line": 72
+      },
+      "authored": {
+        "run": "python3 \"$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py\" capture other first && \"$AFT_RESTART_SERVE\"",
+        "intent": "Save the foreign Agent's EventIDs, then restart only the run-owned loom-local service"
+      },
+      "expected_contract": "Save the foreign Agent's EventIDs, then restart only the run-owned loom-local service",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml#tests/0/steps/0",
+      "case_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          0
+        ],
+        "line": 18,
+        "column": 9,
+        "end_line": 20
+      },
+      "authored": {
+        "run": "test -x \"$AFT_RESTART_SERVE\" && test -x \"$AFT_SELECT_AGENT_MODEL\"",
+        "intent": "Check the runner's owned restart and real-model controls before paid work"
+      },
+      "expected_contract": "Check the runner's owned restart and real-model controls before paid work",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml#tests/0/steps/34",
+      "case_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          34
+        ],
+        "line": 108,
+        "column": 9,
+        "end_line": 110
+      },
+      "authored": {
+        "run": "python3 \"$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py\" capture waiting final-waiting && python3 \"$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py\" waiting waiting final-waiting \"RS_D-${RUN_ID}: after your current inspection, name the repository entry point exactly once.\" && \"$AFT_RESTART_SERVE\"",
+        "intent": "Save D's exact slot/EventIDs and restart only this owned loom-local service and its OpenCode process"
+      },
+      "expected_contract": "Save D's exact slot/EventIDs and restart only this owned loom-local service and its OpenCode process",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml#tests/0/steps/0",
+      "case_id": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          0
+        ],
+        "line": 23,
+        "column": 9,
+        "end_line": 29
+      },
+      "authored": {
+        "run": "set -eu\n: \"${AFT_RESTART_SERVE:?owned serve restart helper required}\"\n: \"${AFT_NATIVE_SESSION_PROBE:?owned in-container native ID probe required}\"\n[ -x \"$AFT_RESTART_SERVE\" ] && [ -x \"$AFT_NATIVE_SESSION_PROBE\" ]\n",
+        "intent": "Confirm this run owns the serve restart and has a read-only native-session probe before paid work"
+      },
+      "expected_contract": "Confirm this run owns the serve restart and has a read-only native-session probe before paid work",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml#tests/0/steps/21",
+      "case_id": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          21
+        ],
+        "line": 74,
+        "column": 9,
+        "end_line": 78
+      },
+      "authored": {
+        "run": "python3 \"$AFT_TESTS_DIR/scripts/live-recovery-evidence.py\" capture restart waiting native\n\"$AFT_RESTART_SERVE\"\n",
+        "intent": "Save the waiting receipt and restart only this run's owned serve service"
+      },
+      "expected_contract": "Save the waiting receipt and restart only this run's owned serve service",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-interactive-suites/li-custom-prompt.test.yaml#tests/0/steps/21",
+      "case_id": "campaign:tests/aft/live-interactive-suites/li-custom-prompt.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-interactive-suites/li-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          21
+        ],
+        "line": 268,
+        "column": 9,
+        "end_line": 271
+      },
+      "authored": {
+        "run": "\"$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh\" \"live-cust-${RUN_ID:-local}\" E2E-WS-LIVE",
+        "intent": "An operator closes the live terminal and proves no paid process is left attached"
+      },
+      "expected_contract": "An operator closes the live terminal and proves no paid process is left attached",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-interactive-suites/ll-lead-assignment.test.yaml#tests/0/steps/19",
+      "case_id": "campaign:tests/aft/live-interactive-suites/ll-lead-assignment.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-interactive-suites/ll-lead-assignment.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          19
+        ],
+        "line": 239,
+        "column": 9,
+        "end_line": 242
+      },
+      "authored": {
+        "run": "\"$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh\" \"live-lead-${RUN_ID:-local}\" E2E-WS-LEADLIVE",
+        "intent": "An operator closes the live Lead terminal and proves no paid process is left attached"
+      },
+      "expected_contract": "An operator closes the live Lead terminal and proves no paid process is left attached",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-pr-review-suites/lp-pr-review.test.yaml#tests/0/steps/19",
+      "case_id": "campaign:tests/aft/live-pr-review-suites/lp-pr-review.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-pr-review-suites/lp-pr-review.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          19
+        ],
+        "line": 495,
+        "column": 9,
+        "end_line": 505
+      },
+      "authored": {
+        "run": "set -e\nname=\"$(cat \"$AFT_WORK_DIR/lp1-agent.name\" 2>/dev/null || true)\"\nif [[ -z \"$name\" ]]; then\n  echo \"could not resolve the reviewer agent name; refusing to report clean cleanup\" >&2\n  curl -sf \"$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE/agents\" >&2 || true\n  exit 1\nfi\n\"$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh\" \"$name\" E2E-WS-PRLIVE\n",
+        "intent": "An operator closes the reviewer and proves no paid process is left attached"
+      },
+      "expected_contract": "An operator closes the reviewer and proves no paid process is left attached",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml#tests/0/steps/40",
+      "case_id": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          40
+        ],
+        "line": 519,
+        "column": 9,
+        "end_line": 526
+      },
+      "authored": {
+        "run": "\"$AFT_TESTS_DIR/scripts/live-stop-worker.sh\" \"lw-task-${RUN_ID:-local}\" E2E-WS",
+        "intent": "The operator stops the live worker and the real daemon proves it drained"
+      },
+      "expected_contract": "The operator stops the live worker and the real daemon proves it drained",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml#tests/1/steps/33",
+      "case_id": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml#tests/1",
+      "source": {
+        "file_id": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml",
+        "path": [
+          "tests",
+          1,
+          "steps",
+          33
+        ],
+        "line": 825,
+        "column": 9,
+        "end_line": 828
+      },
+      "authored": {
+        "run": "\"$AFT_TESTS_DIR/scripts/live-stop-worker.sh\" \"lw-plan-${RUN_ID:-local}\" E2E-WS",
+        "intent": "The operator stops the live Planner and the real daemon proves it drained"
+      },
+      "expected_contract": "The operator stops the live Planner and the real daemon proves it drained",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1/steps/6",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          1,
+          "steps",
+          6
+        ],
+        "line": 150,
+        "column": 9,
+        "end_line": 167
+      },
+      "authored": {
+        "run": "set -e\nlead=\"$(cat \"$AFT_WORK_DIR/kidsLeadId\")\" api=\"$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents\"\n# The lead takes attempt 1's record in a turn of its own; wait it out.\nfor i in $(seq 1 120); do\n  curl -sf \"$api/$lead\" | python3 -c 'import json,sys; a=json.load(sys.stdin)\nsys.exit(0 if a[\"state\"] == \"idle\" and not a.get(\"running_turn_id\") and not a.get(\"waiting_messages\") else 1)' && break\n  sleep 0.5\ndone\nkid=\"$(curl -sf \"$api?parent=$lead\" | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"agents\"][0][\"agent_id\"])')\"\necho \"$kid\" > \"$AFT_WORK_DIR/kidsKidId\"\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-KIDS-A2\"}]}' >/dev/null\ncurl -sf -X POST \"$api/$kid/messages\" -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key: agv1-kids-again-${RUN_ID:-local}\" -d '{\"text\":\"once more\"}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-KIDS/chat/$lead\"\n",
+        "intent": "Send the finished child a second attempt and reload the lead's chat while that attempt runs"
+      },
+      "expected_contract": "Send the finished child a second attempt and reload the lead's chat while that attempt runs",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          3,
+          "steps",
+          1
+        ],
+        "line": 327,
+        "column": 9,
+        "end_line": 342
+      },
+      "authored": {
+        "run": "set -e\n# The lead creates both children in one step, one execute call each\n# (the emulator runs one Code Mode call per execute); each child\n# holds its turn (a tool the emulator does not run waits until\n# interrupted).\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 -c 'import json,sys\nmk = lambda n: {\"name\": \"execute\", \"arguments\": {\"code\": \"return await tools.loom.agent_create(%s)\" % json.dumps({\"name\": n, \"brief\": \"do the task\"})}}\nhold = {\"next\": \"prompt\", \"tool_calls\": [{\"name\": \"df1_hold\"}]}\nprint(json.dumps({\"steps\": [{\"next\": \"prompt\", \"tool_calls\": [mk(sys.argv[1]), mk(sys.argv[2])]},\n  {\"next\": \"tool\", \"text\": \"AGV1-CL2-STARTED\"}, hold, hold]}))' \"agv1-cl2-a-${RUN_ID:-local}\" \"agv1-cl2-b-${RUN_ID:-local}\" |\n  curl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" -d @- >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-KIDS/chat/$(cat \"$AFT_WORK_DIR/cl2LeadId\")\"\n",
+        "intent": "Script the lead's two agent_create calls and two working children, and open the lead's chat"
+      },
+      "expected_contract": "Script the lead's two agent_create calls and two working children, and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3/steps/6",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          3,
+          "steps",
+          6
+        ],
+        "line": 355,
+        "column": 9,
+        "end_line": 389
+      },
+      "authored": {
+        "run": "set -e\nlead=\"$(cat \"$AFT_WORK_DIR/cl2LeadId\")\" api=\"$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents\"\nkid() { curl -sf \"$api?parent=$lead\" | python3 -c 'import json,sys; print([a[\"agent_id\"] for a in json.load(sys.stdin)[\"agents\"] if a[\"name\"] == sys.argv[1]][0])' \"$1\"; }\nkid \"agv1-cl2-a-${RUN_ID:-local}\" > \"$AFT_WORK_DIR/cl2A\"; kid \"agv1-cl2-b-${RUN_ID:-local}\" > \"$AFT_WORK_DIR/cl2B\"\n# cl2-notice <child id> <child name> <want>: run once, after the\n# Lead's reply shows (it follows the model request): exactly one\n# lead prompt ends with the child's notice, which has its fields,\n# and the lead never called agent_get.\ncat > \"$AFT_WORK_DIR/cl2-notice\" <<'SH'\n#!/bin/sh\nset -e\ncurl -sf \"$AFT_FAKE_MODEL_URL/__requests\" > \"$AFT_WORK_DIR/cl2-requests.json\"\npython3 - \"$1\" \"$2\" \"$3\" \"$AFT_WORK_DIR/cl2-requests.json\" <<'PY'\nimport json, sys\nchild, name, want, path = sys.argv[1:5]\nreqs = [r[\"messages\"] for r in json.load(open(path))[\"requests\"]\n        if any(\"start two workers\" in json.dumps(m.get(\"content\")) for m in r.get(\"messages\", []))]\nprompts = [m[-1] for m in reqs if m and m[-1].get(\"role\") == \"user\" and \"task_completed:%s:\" % child in json.dumps(m[-1].get(\"content\"))]\nassert len(prompts) == 1, \"the lead was prompted %d times with %s's notice\" % (len(prompts), child)\ntext = prompts[0][\"content\"] if isinstance(prompts[0][\"content\"], str) else json.dumps(prompts[0][\"content\"])\nfor part in ['child=\"%s\"' % name, \"outcome=\", \"branch=\", want, \"no agent_get needed\"]:\n    assert part in text, \"notice lacks %r: %s\" % (part, text)\ncalls = [json.dumps(y.get(\"tool_calls\") or []) for m in reqs for y in m if y.get(\"role\") == \"assistant\"]\nassert not any(\"agent_get\" in c for c in calls), \"the lead called agent_get\"\nPY\nSH\nchmod +x \"$AFT_WORK_DIR/cl2-notice\"\n# The lead answers the first notice with one short line.\nprintf '{\"steps\":[{\"next\":\"prompt\",\"text\":\"AGV1-CL2-ACK a is done; waiting for b.\"}]}' |\n  curl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" -d @- >/dev/null\ncurl -sf -X POST \"$api/$(cat \"$AFT_WORK_DIR/cl2A\")/messages\" -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key: agv1-cl2-stop-a-${RUN_ID:-local}\" -d '{\"text\":\"\",\"delivery\":\"interrupt\"}' >/dev/null\n",
+        "intent": "The operator's API client stops the first child, and the Lead's model is scripted to answer its notice with one short line"
+      },
+      "expected_contract": "The operator's API client stops the first child, and the Lead's model is scripted to answer its notice with one short line",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3/steps/8",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          3,
+          "steps",
+          8
+        ],
+        "line": 394,
+        "column": 9,
+        "end_line": 404
+      },
+      "authored": {
+        "run": "set -e\nlead=\"$(cat \"$AFT_WORK_DIR/cl2LeadId\")\" api=\"$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS/v1/agents\"\n\"$AFT_WORK_DIR/cl2-notice\" \"$(cat \"$AFT_WORK_DIR/cl2A\")\" \"agv1-cl2-a-${RUN_ID:-local}\" \"still_running=1\"\ngrep -q '1 other child still running' \"$AFT_WORK_DIR/cl2-requests.json\"\nprintf '{\"steps\":[{\"next\":\"prompt\",\"text\":\"AGV1-CL2-SUMMARY a and b are both done.\"}]}' |\n  curl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" -d @- >/dev/null\ncurl -sf -X POST \"$api/$(cat \"$AFT_WORK_DIR/cl2B\")/messages\" -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key: agv1-cl2-stop-b-${RUN_ID:-local}\" -d '{\"text\":\"\",\"delivery\":\"interrupt\"}' >/dev/null\n",
+        "intent": "Check the Lead's model got one notice for the first child naming it, still_running=1 and no need for agent_get; then the operator's API client stops the second child"
+      },
+      "expected_contract": "Check the Lead's model got one notice for the first child naming it, still_running=1 and no need for agent_get; then the operator's API client stops the second child",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/4/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/4",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+        "path": [
+          "tests",
+          4,
+          "steps",
+          0
+        ],
+        "line": 272,
+        "column": 9,
+        "end_line": 291
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/par-lead\" \"par-one-${RUN_ID:-local}\" parOneId\n\"$AFT_WORK_DIR/par-lead\" \"par-two-${RUN_ID:-local}\" parTwoId\napi=\"$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents\"\ncurl -sf \"$api/$(cat \"$AFT_WORK_DIR/parOneId\")\" > \"$AFT_WORK_DIR/par-one.json\"\ncurl -sf \"$api/$(cat \"$AFT_WORK_DIR/parTwoId\")\" > \"$AFT_WORK_DIR/par-two.json\"\npython3 - \"$AFT_WORK_DIR/par-one.json\" \"$AFT_WORK_DIR/par-two.json\" <<'PY'\nimport json, os, sys\na, b = (json.load(open(p)) for p in sys.argv[1:3])\nassert a[\"preset\"] == b[\"preset\"] == \"lead\", (a, b)\nassert a[\"worktree_path\"] != b[\"worktree_path\"] and a[\"branch\"] != b[\"branch\"], (a, b)\nassert os.path.isdir(a[\"worktree_path\"]) and os.path.isdir(b[\"worktree_path\"]), (a, b)\nPY\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"PAR-ONE-REPLY\"},{\"text\":\"PAR-TWO-REPLY\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat \"$AFT_WORK_DIR/parOneId\")\"\n",
+        "intent": "Create two leads, check they have separate worktrees and branches, script a reply for each, and open the first"
+      },
+      "expected_contract": "Create two leads, check they have separate worktrees and branches, script a reply for each, and open the first",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/6/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/6",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+        "path": [
+          "tests",
+          6,
+          "steps",
+          0
+        ],
+        "line": 359,
+        "column": 9,
+        "end_line": 367
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/par-lead\" \"par-reopen-${RUN_ID:-local}\" parReopenId\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"PAR-REOPEN-ONE\"},{\"text\":\"PAR-REOPEN-TWO\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat \"$AFT_WORK_DIR/parReopenId\")\"\n",
+        "intent": "Create an OpenCode lead, script two replies and open its chat"
+      },
+      "expected_contract": "Create an OpenCode lead, script two replies and open its chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/7/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/7",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+        "path": [
+          "tests",
+          7,
+          "steps",
+          0
+        ],
+        "line": 416,
+        "column": 9,
+        "end_line": 424
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/par-lead\" \"par-switch-${RUN_ID:-local}\" parSwitchId\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"PAR-SWITCH-ONE\"},{\"text\":\"PAR-SWITCH-TWO\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat \"$AFT_WORK_DIR/parSwitchId\")\"\n",
+        "intent": "Create an OpenCode lead, script two replies and open its chat"
+      },
+      "expected_contract": "Create an OpenCode lead, script two replies and open its chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/8/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/8",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+        "path": [
+          "tests",
+          8,
+          "steps",
+          0
+        ],
+        "line": 465,
+        "column": 9,
+        "end_line": 473
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/par-lead\" \"par-stop-${RUN_ID:-local}\" parStopId\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"bash\":\"sleep 120\"},{\"text\":\"PAR-STOP-AFTER\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat \"$AFT_WORK_DIR/parStopId\")\"\n",
+        "intent": "Create an OpenCode lead, script a long first turn then a reply, and open its chat"
+      },
+      "expected_contract": "Create an OpenCode lead, script a long first turn then a reply, and open its chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          1
+        ],
+        "line": 46,
+        "column": 9,
+        "end_line": 52
+      },
+      "authored": {
+        "run": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-REPLY-ONE\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$(cat \"$AFT_WORK_DIR/agv1CanaryId\")\"\n",
+        "intent": "Script the fake model's next reply and open the lead's chat"
+      },
+      "expected_contract": "Script the fake model's next reply and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0/steps/8",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          8
+        ],
+        "line": 69,
+        "column": 9,
+        "end_line": 79
+      },
+      "authored": {
+        "run": "set -e\npid=\"$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"pid\"])' \"$AFT_OPENCODE_SERVICE\")\"\necho \"$pid\" > \"$AFT_WORK_DIR/agv1-opencode-pid\"\nkill \"$pid\"\nfor i in $(seq 1 40); do kill -0 \"$pid\" 2>/dev/null || break; sleep 0.25; done\n! kill -0 \"$pid\" 2>/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-REPLY-AFTER-RESTART\"}]}' >/dev/null\n",
+        "intent": "Kill the OpenCode service Loom started, then script the next reply"
+      },
+      "expected_contract": "Kill the OpenCode service Loom started, then script the next reply",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure",
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/1/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/1",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          1,
+          "steps",
+          0
+        ],
+        "line": 96,
+        "column": 9,
+        "end_line": 100
+      },
+      "authored": {
+        "run": "curl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-MODAL-REPLY\"}]}' >/dev/null\n",
+        "intent": "Script the fake model's next reply"
+      },
+      "expected_contract": "Script the fake model's next reply",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/2/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/2",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          2,
+          "steps",
+          1
+        ],
+        "line": 142,
+        "column": 9,
+        "end_line": 148
+      },
+      "authored": {
+        "run": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"bash\":\"sleep 120\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$(cat \"$AFT_WORK_DIR/agv1BusyId\")\"\n",
+        "intent": "Script a shell call that keeps the next turn running and open the lead's chat"
+      },
+      "expected_contract": "Script a shell call that keeps the next turn running and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/4/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/4",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          4,
+          "steps",
+          1
+        ],
+        "line": 262,
+        "column": 9,
+        "end_line": 269
+      },
+      "authored": {
+        "run": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"tool_calls\":[{\"name\":\"execute\",\"arguments\":{\"code\":\"return await tools.loom.agent_list({})\"}}]},{\"text\":\"AGV1-BRIDGE-REPLY\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$(cat \"$AFT_WORK_DIR/agv1BridgeId\")\"\n",
+        "intent": "Script a Code Mode call of loom.agent_list and the reply after it, and open the lead's chat"
+      },
+      "expected_contract": "Script a Code Mode call of loom.agent_list and the reply after it, and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/6/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/6",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          6,
+          "steps",
+          1
+        ],
+        "line": 370,
+        "column": 9,
+        "end_line": 378
+      },
+      "authored": {
+        "run": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 -c 'import json; code=\"return await tools.loom.github_read({\\\"op\\\": \\\"repo_view\\\"})\"\nprint(json.dumps({\"steps\": [{\"tool_calls\": [{\"name\": \"execute\", \"arguments\": {\"code\": code}}]}, {\"text\": \"AGV1-GH-DONE\"}, {\"text\": \"AGV1-GH-AFTER\"}]}))' |\n  curl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" -d @- >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-GHREAD/chat/$(cat \"$AFT_WORK_DIR/agv1GhReadId\")\"\n",
+        "intent": "Script the lead's github_read call and the replies after it, and open the lead's chat"
+      },
+      "expected_contract": "Script the lead's github_read call and the replies after it, and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          8,
+          "steps",
+          1
+        ],
+        "line": 449,
+        "column": 9,
+        "end_line": 477
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/agv1Ui3Id\")\"\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 - \"$id\" \"${AFT_EMU_SCENARIOS:-}\" \"$AFT_FAKE_MODEL_URL\" <<'PY'\nimport json, sys, urllib.request\nagent, scenarios, model = sys.argv[1:4]\nreply = (\"Files:\\n\\n| Name | Lines |\\n| --- | ---: |\\n| README.md | 1 |\\n\\n\"\n         \"```go\\nfunc main() {\\n\\treturn\\n}\\n```\\n\\nAGV1-UI3-REPLY\")\nif scenarios:\n    # The emulator runs no tools itself: the turn's calls and their results are scripted.\n    # The failed read comes first, so a group shows a failure that is not its last call.\n    turn = {\"tools\": [\n        {\"id\": \"call_ui3_read\", \"name\": \"read\", \"input\": {\"filePath\": \"missing-ui3.txt\"},\n         \"output\": \"\", \"fail\": \"File not found: missing-ui3.txt\"},\n        {\"id\": \"call_ui3_ls\", \"name\": \"shell\", \"input\": {\"command\": \"ls\"}, \"output\": \"README.md\"}], \"text\": reply}\n    think = {\"reasoning\": \"AGV1-UI3-THINKING weigh the files\", \"text\": \"AGV1-UI3-DONE\"}\n    json.dump({agent: [turn, think]}, open(scenarios, \"w\"))\nelse:\n    steps = [{\"tool_calls\": [{\"name\": \"read\", \"arguments\": {\"filePath\": \"missing-ui3.txt\"}},\n                             {\"name\": \"shell\", \"arguments\": {\"command\": \"ls\"}}]},\n             {\"text\": reply}, {\"text\": \"AGV1-UI3-DONE\"}]\n    req = urllib.request.Request(model + \"/__script\", data=json.dumps({\"steps\": steps}).encode(),\n                                 headers={\"Content-Type\": \"application/json\"})\n    urllib.request.urlopen(req).read()\nPY\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id\"\n",
+        "intent": "Script a turn that reads a missing file, runs ls and replies with a table and Go code, then a turn that reasons, and open the lead's chat"
+      },
+      "expected_contract": "Script a turn that reads a missing file, runs ls and replies with a table and Go code, then a turn that reasons, and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8/steps/23",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          8,
+          "steps",
+          23
+        ],
+        "line": 549,
+        "column": 9,
+        "end_line": 567
+      },
+      "authored": {
+        "run": "set -e\nif [ -z \"${AFT_EMU_SCENARIOS:-}\" ]; then\n  echo \"real tier: the fake model emits no reasoning; the Thinking row is checked on the emulator tier\"\n  exit 0\nfi\nab() { agent-browser --session \"$AFT_SESSION\" \"$@\"; }\nrow='[data-testid=reasoning] [role=button]'\npreview=\"$(ab eval \"document.querySelector('$row')?.textContent || ''\")\"\necho \"reasoning row: $preview\"\ncase \"$preview\" in *Thinking*AGV1-UI3-THINKING*) ;; *) echo \"no Thinking row with the reasoning preview\" >&2; exit 1 ;; esac\n# The row can sit under the composer; click it where it shows.\nab eval \"document.querySelector('$row').scrollIntoView({ block: 'center' })\" >/dev/null\nab click \"$row\" >/dev/null\nbody=\"$(ab eval \"document.querySelector('[data-testid=reasoning] pre')?.textContent || ''\")\"\necho \"reasoning body: $body\"\ncase \"$body\" in *\"AGV1-UI3-THINKING weigh the files\"*) ;; *) echo \"the Thinking row did not expand to the reasoning\" >&2; exit 1 ;; esac\n",
+        "intent": "On the emulator, the turn's reasoning shows as a Thinking row that expands to the reasoning text"
+      },
+      "expected_contract": "On the emulator, the turn's reasoning shows as a Thinking row that expands to the reasoning text",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/9/steps/3",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/9",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          9,
+          "steps",
+          3
+        ],
+        "line": 615,
+        "column": 9,
+        "end_line": 626
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/agv1EffortId\")\"\ncurl -sf -X PATCH \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id\" -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key: agv1-effort-high-${RUN_ID:-local}\" -d '{\"effort\":\"high\"}' > \"$AFT_WORK_DIR/agv1-effort.json\"\ngrep -q '\\\\\"Options\\\\\":\\[{\\\\\"ID\\\\\":\\\\\"effort\\\\\",\\\\\"Value\\\\\":\\\\\"high\\\\\"}\\]' \"$AFT_WORK_DIR/agv1-effort.json\"\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-EFFORT-REPLY\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id\"\n",
+        "intent": "Set the lead's effort to high, script the next reply and open the lead's chat"
+      },
+      "expected_contract": "Set the lead's effort to high, script the next reply and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/10/steps/14",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/10",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          10,
+          "steps",
+          14
+        ],
+        "line": 709,
+        "column": 9,
+        "end_line": 715
+      },
+      "authored": {
+        "run": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-UI2-REPLY\"}]}' >/dev/null\n",
+        "intent": "Script the next reply"
+      },
+      "expected_contract": "Script the next reply",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/11/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/11",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          11,
+          "steps",
+          1
+        ],
+        "line": 746,
+        "column": 9,
+        "end_line": 771
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/agv1Ui4OkId\")\"\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 - \"$id\" \"${AFT_EMU_SCENARIOS:-}\" \"$AFT_FAKE_MODEL_URL\" <<'PY'\nimport json, sys, urllib.request\nagent, scenarios, model = sys.argv[1:4]\ncmd = \"echo AGV1-UI4-RAN\"\nfail = \"AGV1-UI4-FAIL the model refused the request\"\nif scenarios:\n    # The emulator asks the scripted permission as OpenCode's bash \"ask\" rule does.\n    turns = [{\"tools\": [{\"id\": \"call_ui4_bash\", \"name\": \"shell\", \"input\": {\"command\": cmd},\n                         \"output\": \"AGV1-UI4-RAN\",\n                         \"permission\": {\"action\": \"bash\", \"resources\": [cmd], \"save\": [\"echo *\"]}}],\n              \"text\": \"AGV1-UI4-AFTER\"},\n             {\"fail\": fail}]\n    json.dump({agent: turns}, open(scenarios, \"w\"))\nelse:\n    steps = [{\"bash\": cmd}, {\"text\": \"AGV1-UI4-AFTER\"}, {\"error\": fail}]\n    req = urllib.request.Request(model + \"/__script\", data=json.dumps({\"steps\": steps}).encode(),\n                                 headers={\"Content-Type\": \"application/json\"})\n    urllib.request.urlopen(req).read()\nPY\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id\"\n",
+        "intent": "Script a turn that runs a shell command, then a turn the model refuses, and open the agent's chat"
+      },
+      "expected_contract": "Script a turn that runs a shell command, then a turn the model refuses, and open the agent's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          12,
+          "steps",
+          1
+        ],
+        "line": 826,
+        "column": 9,
+        "end_line": 850
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/agv1Ui4QId\")\"\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 - \"$id\" \"${AFT_EMU_SCENARIOS:-}\" \"$AFT_FAKE_MODEL_URL\" <<'PY'\nimport json, sys, urllib.request\nagent, scenarios, model = sys.argv[1:4]\nqs = [{\"header\": \"Color\", \"question\": \"AGV1-UI4 which color?\",\n       \"options\": [{\"label\": \"Blue\", \"description\": \"calm\"}, {\"label\": \"Red\", \"description\": \"loud\"}]},\n      {\"header\": \"Size\", \"question\": \"AGV1-UI4 which size?\",\n       \"options\": [{\"label\": \"Small\", \"description\": \"fits\"}, {\"label\": \"Large\", \"description\": \"roomy\"}]}]\nif scenarios:\n    turn = {\"tools\": [{\"id\": \"call_ui4_q\", \"name\": \"question\", \"input\": {\"questions\": qs},\n                       \"output\": \"\", \"questions\": qs}], \"text\": \"AGV1-UI4-ANSWERED\"}\n    json.dump({agent: [turn]}, open(scenarios, \"w\"))\nelse:\n    steps = [{\"tool_calls\": [{\"name\": \"question\", \"arguments\": {\"questions\": qs}}]},\n             {\"text\": \"AGV1-UI4-ANSWERED\"}]\n    req = urllib.request.Request(model + \"/__script\", data=json.dumps({\"steps\": steps}).encode(),\n                                 headers={\"Content-Type\": \"application/json\"})\n    urllib.request.urlopen(req).read()\nPY\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id\"\n",
+        "intent": "Script a turn that asks two questions with OpenCode's question tool and open the lead's chat"
+      },
+      "expected_contract": "Script a turn that asks two questions with OpenCode's question tool and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12/steps/11",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          12,
+          "steps",
+          11
+        ],
+        "line": 875,
+        "column": 9,
+        "end_line": 891
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/agv1Ui4QId\")\"\nif [ -n \"${AFT_EMU_SCENARIOS:-}\" ]; then\n  curl -sf \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id/events?limit=500\" > \"$AFT_WORK_DIR/agv1-ui4q.json\"\nelse\n  curl -sf \"$AFT_FAKE_MODEL_URL/__requests\" > \"$AFT_WORK_DIR/agv1-ui4q.json\"\nfi\npython3 - \"$AFT_WORK_DIR/agv1-ui4q.json\" <<'PY'\nimport json, sys\nbody = json.dumps(json.load(open(sys.argv[1])))\nassert \"AGV1-UI4-CUSTOM medium\" in body, \"the custom answer never reached the lead\"\nassert \"Blue\" in body, \"the picked option never reached the lead\"\nPY\n",
+        "intent": "Check that both answers reached the lead"
+      },
+      "expected_contract": "Check that both answers reached the lead",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          13,
+          "steps",
+          1
+        ],
+        "line": 903,
+        "column": 9,
+        "end_line": 930
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/agv1Oc1Id\")\"\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 - \"$id\" \"${AFT_EMU_SCENARIOS:-}\" \"$AFT_FAKE_MODEL_URL\" <<'PY'\nimport json, sys, urllib.request\nagent, scenarios, model = sys.argv[1:4]\ncmd = \"echo AGV1-OC1-NEVER-RAN\"\nif scenarios:\n    # A reject plays as OpenCode b30c4d0's does; the third turn then\n    # ends the same way with no reject, so Loom sees no end and only\n    # Stop can end it.\n    turns = [{\"tools\": [{\"id\": \"call_oc1_bash\", \"name\": \"shell\", \"input\": {\"command\": cmd},\n                         \"output\": \"AGV1-OC1-NEVER-RAN\",\n                         \"permission\": {\"action\": \"bash\", \"resources\": [cmd], \"save\": [\"echo *\"]}}],\n              \"text\": \"AGV1-OC1-NEVER-SAID\"},\n             {\"text\": \"AGV1-OC1-NEXT\"},\n             {\"text\": \"AGV1-OC1-SUSPENDED\", \"suspend\": True}]\n    json.dump({agent: turns}, open(scenarios, \"w\"))\nelse:\n    steps = [{\"bash\": cmd}, {\"text\": \"AGV1-OC1-NEXT\"}, {\"bash\": \"sleep 120\"}]\n    req = urllib.request.Request(model + \"/__script\", data=json.dumps({\"steps\": steps}).encode(),\n                                 headers={\"Content-Type\": \"application/json\"})\n    urllib.request.urlopen(req).read()\nPY\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id\"\n",
+        "intent": "Script a turn that asks to run a shell command, a plain reply, and a third turn that stays busy, and open the agent's chat"
+      },
+      "expected_contract": "Script a turn that asks to run a shell command, a plain reply, and a third turn that stays busy, and open the agent's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13/steps/15",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          13,
+          "steps",
+          15
+        ],
+        "line": 974,
+        "column": 9,
+        "end_line": 984
+      },
+      "authored": {
+        "run": "set -e\n[ -n \"${AFT_EMU_SCENARIOS:-}\" ] || exit 0\nid=\"$(cat \"$AFT_WORK_DIR/agv1Oc1Id\")\"\nfor _ in $(seq 1 120); do\n  if curl -sf \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id/events?limit=500\" | grep -q 'AGV1-OC1-SUSPENDED'; then exit 0; fi\n  sleep 0.5\ndone\necho \"the third turn never streamed its text\" >&2; exit 1\n",
+        "intent": "On the emulator, wait until the third turn streamed its text and its execution ended with no end Loom can see"
+      },
+      "expected_contract": "On the emulator, wait until the third turn streamed its text and its execution ended with no end Loom can see",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          14,
+          "steps",
+          1
+        ],
+        "line": 1014,
+        "column": 9,
+        "end_line": 1035
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/agv1Sa1Id\")\"\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 - \"$id\" \"${AFT_EMU_SCENARIOS:-}\" \"$AFT_FAKE_MODEL_URL\" <<'PY'\nimport json, sys, urllib.request\nagent, scenarios, model = sys.argv[1:4]\ncall = {\"agent\": \"general\", \"description\": \"AGV1-SA1 helper\", \"prompt\": \"say hi\"}\nif scenarios:\n    # The emulator's subagent tool asserts the session's rules as OpenCode's does.\n    turns = [{\"tools\": [{\"id\": \"call_sa1_sub\", \"name\": \"subagent\", \"input\": call, \"output\": \"AGV1-SA1-CHILD\"}],\n              \"text\": \"AGV1-SA1-AFTER\"}]\n    json.dump({agent: turns}, open(scenarios, \"w\"))\nelse:\n    steps = [{\"tool_calls\": [{\"name\": \"subagent\", \"arguments\": call}]}, {\"text\": \"AGV1-SA1-AFTER\"}]\n    req = urllib.request.Request(model + \"/__script\", data=json.dumps({\"steps\": steps}).encode(),\n                                 headers={\"Content-Type\": \"application/json\"})\n    urllib.request.urlopen(req).read()\nPY\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id\"\n",
+        "intent": "Script a turn that calls OpenCode's subagent tool, then replies, and open the lead's chat"
+      },
+      "expected_contract": "Script a turn that calls OpenCode's subagent tool, then replies, and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14/steps/6",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+        "path": [
+          "tests",
+          14,
+          "steps",
+          6
+        ],
+        "line": 1046,
+        "column": 9,
+        "end_line": 1060
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/agv1Sa1Id\")\"\ncurl -sf \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id/events?limit=500\" > \"$AFT_WORK_DIR/agv1-sa1.json\"\npython3 - \"$AFT_WORK_DIR/agv1-sa1.json\" \"${AFT_EMU_SCENARIOS:-}\" <<'PY'\nimport json, sys\nbody = json.load(open(sys.argv[1]))\ntext = json.dumps(body)\nassert \"harness.subagent.started\" not in text, \"the lead started a harness subagent\"\nassert \"AGV1-SA1-CHILD\" not in text, \"the subagent call ran\"\nif sys.argv[2]:\n    assert \"Subagent denied: general\" in text, \"the subagent call was not denied\"\nPY\n",
+        "intent": "Check that the lead's events have no harness subagent start and the call was denied"
+      },
+      "expected_contract": "Check that the lead's events have no harness subagent start and the call was denied",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/0/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          1
+        ],
+        "line": 35,
+        "column": 9,
+        "end_line": 41
+      },
+      "authored": {
+        "run": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-BEFORE-ARCHIVE\"},{\"text\":\"AGV1-AFTER-UNARCHIVE\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LIFE/chat/$(cat \"$AFT_WORK_DIR/agv1ArchiveId\")\"\n",
+        "intent": "Script two replies and open the lead's chat"
+      },
+      "expected_contract": "Script two replies and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/1/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/1",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml",
+        "path": [
+          "tests",
+          1,
+          "steps",
+          1
+        ],
+        "line": 120,
+        "column": 9,
+        "end_line": 126
+      },
+      "authored": {
+        "run": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-BEFORE-EXPIRY\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-LIFE/chat/$(cat \"$AFT_WORK_DIR/agv1ExpiryId\")\"\n",
+        "intent": "Script one reply and open the lead's chat"
+      },
+      "expected_contract": "Script one reply and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/2/steps/2",
+      "case_id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/2",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml",
+        "path": [
+          "tests",
+          2,
+          "steps",
+          2
+        ],
+        "line": 193,
+        "column": 9,
+        "end_line": 205
+      },
+      "authored": {
+        "run": "set -e\n# A real outage, through OpenCode's own registration: an older\n# service (pid 1 is always alive) is registered in AFT's sandbox,\n# which Loom refuses and never replaces (R22), and the AFT service\n# is stopped. Loom's native delete then fails.\nsvc=\"$AFT_OPENCODE_SERVICE\"\ncp \"$svc\" \"$AFT_WORK_DIR/agv1-opencode-service.json\"\npid=\"$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"pid\"])' \"$svc\")\"\nprintf '{\"id\":\"aft-old\",\"version\":\"1.0.0\",\"url\":\"http://127.0.0.1:9\",\"pid\":1,\"password\":\"x\"}' > \"$svc\"\nkill \"$pid\"\n",
+        "intent": "Make OpenCode unavailable by registering an older service Loom refuses and stopping the AFT service"
+      },
+      "expected_contract": "Make OpenCode unavailable by registering an older service Loom refuses and stopping the AFT service",
+      "budget": null,
+      "capabilities": [
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          1
+        ],
+        "line": 39,
+        "column": 9,
+        "end_line": 45
+      },
+      "authored": {
+        "run": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-RESUME-BEFORE\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-RESUME/chat/$(cat \"$AFT_WORK_DIR/agv1ResumeIdleId\")\"\n",
+        "intent": "Script the first reply and open the agent's chat"
+      },
+      "expected_contract": "Script the first reply and open the agent's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0/steps/5",
+      "case_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          5
+        ],
+        "line": 53,
+        "column": 9,
+        "end_line": 63
+      },
+      "authored": {
+        "run": "set -e\npid=\"$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"pid\"])' \"$AFT_OPENCODE_SERVICE\")\"\necho \"$pid\" > \"$AFT_WORK_DIR/agv1-resume-idle-pid\"\nkill \"$pid\"\nfor i in $(seq 1 40); do kill -0 \"$pid\" 2>/dev/null || break; sleep 0.25; done\n! kill -0 \"$pid\" 2>/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-RESUME-AFTER\"}]}' >/dev/null\n",
+        "intent": "Stop the OpenCode server Loom started, as the idle restart does, and script the next reply"
+      },
+      "expected_contract": "Stop the OpenCode server Loom started, as the idle restart does, and script the next reply",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure",
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+        "path": [
+          "tests",
+          1,
+          "steps",
+          1
+        ],
+        "line": 114,
+        "column": 9,
+        "end_line": 121
+      },
+      "authored": {
+        "run": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"bash\":\"sleep 120\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-RESUME/chat/$(cat \"$AFT_WORK_DIR/agv1ResumeWaitId\")\"\n",
+        "intent": "Script a long shell call and open the worker's chat"
+      },
+      "expected_contract": "Script a long shell call and open the worker's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1/steps/8",
+      "case_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+        "path": [
+          "tests",
+          1,
+          "steps",
+          8
+        ],
+        "line": 135,
+        "column": 9,
+        "end_line": 144
+      },
+      "authored": {
+        "run": "set -e\npid=\"$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"pid\"])' \"$AFT_OPENCODE_SERVICE\")\"\nkill \"$pid\"\nfor i in $(seq 1 40); do kill -0 \"$pid\" 2>/dev/null || break; sleep 0.25; done\n! kill -0 \"$pid\" 2>/dev/null\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-RESUME-CONTINUED\"},{\"text\":\"AGV1-RESUME-PENDING\"}]}' >/dev/null\n",
+        "intent": "Stop the OpenCode server mid-turn, then script the recovered turn's reply and the waiting message's reply"
+      },
+      "expected_contract": "Stop the OpenCode server mid-turn, then script the recovered turn's reply and the waiting message's reply",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure",
+        "loom.runtime.stimulate"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/2/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/2",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+        "path": [
+          "tests",
+          2,
+          "steps",
+          1
+        ],
+        "line": 189,
+        "column": 9,
+        "end_line": 204
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/agv1ServeId\")\"\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\nif [ -n \"${AFT_EMU_SCENARIOS:-}\" ]; then\n  # The emulator runs no shell: a slowly streamed scripted turn keeps it busy instead.\n  printf '{\"%s\":[{\"text\":\"w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 AGV1-SERVE-CONTINUED\",\"delay_ms\":1000}]}' \"$id\" > \"$AFT_EMU_SCENARIOS\"\nelse\n  curl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n    -d '{\"steps\":[{\"bash\":\"sleep 20\"},{\"text\":\"AGV1-SERVE-CONTINUED\"}]}' >/dev/null\nfi\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" \\\n  -d '{\"steps\":[{\"text\":\"AGV1-SERVE-PENDING\"}]}' >/dev/null\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-RESUME/chat/$id\"\n",
+        "intent": "Script a turn that keeps running for about 15 to 20 seconds, then the waiting message's reply, and open the worker's chat"
+      },
+      "expected_contract": "Script a turn that keeps running for about 15 to 20 seconds, then the waiting message's reply, and open the worker's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+        "path": [
+          "tests",
+          2,
+          "steps",
+          0
+        ],
+        "line": 215,
+        "column": 9,
+        "end_line": 222
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/ui-lead\" \"agv1-ui-effort-${RUN_ID:-local}\" uiEffortId\nid=\"$(cat \"$AFT_WORK_DIR/uiEffortId\")\"\n\"$AFT_WORK_DIR/ui-turn\" \"$id\" '{\"text\":\"AGV1-UI-EFFORT-ONE\"}'\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id\"\n",
+        "intent": "Create an OpenCode lead, script its first reply and open its chat"
+      },
+      "expected_contract": "Create an OpenCode lead, script its first reply and open its chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2/steps/5",
+      "case_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+        "path": [
+          "tests",
+          2,
+          "steps",
+          5
+        ],
+        "line": 234,
+        "column": 9,
+        "end_line": 248
+      },
+      "authored": {
+        "run": "set -e\nid=\"$(cat \"$AFT_WORK_DIR/uiEffortId\")\"\ncurl -sf \"$AFT_FAKE_MODEL_URL/__requests\" > \"$AFT_WORK_DIR/ui-effort-1.json\"\npython3 - \"$AFT_WORK_DIR/ui-effort-1.json\" <<'PY'\nimport json, sys\nturn = [r for r in json.load(open(sys.argv[1]))[\"requests\"] if \"ui effort first\" in json.dumps(r)]\nassert turn, \"the first message never reached the model\"\nassert '\"reasoning_effort\": \"high\"' not in json.dumps(turn[-1]), turn[-1]\nPY\ncurl -sf -X PATCH \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/v1/agents/$id\" -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key: agv1-ui-effort-high-${RUN_ID:-local}\" -d '{\"effort\":\"high\"}' >/dev/null\n\"$AFT_WORK_DIR/ui-turn\" \"$id\" '{\"text\":\"AGV1-UI-EFFORT-TWO\"}'\n",
+        "intent": "Check the first turn did not run at high, then set effort high through PATCH and script the next reply"
+      },
+      "expected_contract": "Check the first turn did not run at high, then set effort high through PATCH and script the next reply",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/4/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/4",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+        "path": [
+          "tests",
+          4,
+          "steps",
+          0
+        ],
+        "line": 326,
+        "column": 9,
+        "end_line": 333
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/ui-lead\" \"agv1-ui-md-${RUN_ID:-local}\" uiMdId\nid=\"$(cat \"$AFT_WORK_DIR/uiMdId\")\"\n\"$AFT_WORK_DIR/ui-turn\" \"$id\" '{\"text\":\"Files:\\n\\n| Name | Lines |\\n| --- | ---: |\\n| README.md | 1 |\\n\\n```go\\nfunc main() {\\n\\treturn\\n}\\n```\\n\\nAGV1-UI-MD\"}'\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id\"\n",
+        "intent": "Create an OpenCode lead, script a reply with a table and Go code, and open its chat"
+      },
+      "expected_contract": "Create an OpenCode lead, script a reply with a table and Go code, and open its chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/5/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/5",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+        "path": [
+          "tests",
+          5,
+          "steps",
+          0
+        ],
+        "line": 358,
+        "column": 9,
+        "end_line": 365
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/ui-lead\" \"agv1-ui-tools-${RUN_ID:-local}\" uiToolsId\nid=\"$(cat \"$AFT_WORK_DIR/uiToolsId\")\"\n\"$AFT_WORK_DIR/ui-turn\" \"$id\" '{\"tools\":[{\"id\":\"call_ui_ls\",\"name\":\"shell\",\"input\":{\"command\":\"ls\"},\"output\":\"README.md\"},{\"id\":\"call_ui_read\",\"name\":\"read\",\"input\":{\"filePath\":\"missing-ui.txt\"},\"output\":\"\",\"fail\":\"File not found: missing-ui.txt\"}],\"text\":\"AGV1-UI-TOOLS\"}'\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id\"\n",
+        "intent": "Create an OpenCode lead, script a turn that runs ls and reads a missing file, and open its chat"
+      },
+      "expected_contract": "Create an OpenCode lead, script a turn that runs ls and reads a missing file, and open its chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+        "path": [
+          "tests",
+          6,
+          "steps",
+          0
+        ],
+        "line": 402,
+        "column": 9,
+        "end_line": 409
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/ui-lead\" \"agv1-ui-think-${RUN_ID:-local}\" uiThinkId\nid=\"$(cat \"$AFT_WORK_DIR/uiThinkId\")\"\n\"$AFT_WORK_DIR/ui-turn\" \"$id\" '{\"reasoning\":\"AGV1-UI-THINKING weigh the options\",\"text\":\"AGV1-UI-THOUGHT\"}'\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id\"\n",
+        "intent": "Create an OpenCode lead, script a turn that reasons before replying, and open its chat"
+      },
+      "expected_contract": "Create an OpenCode lead, script a turn that reasons before replying, and open its chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6/steps/5",
+      "case_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+        "path": [
+          "tests",
+          6,
+          "steps",
+          5
+        ],
+        "line": 420,
+        "column": 9,
+        "end_line": 449
+      },
+      "authored": {
+        "run": "set -e\nif [ -z \"${AFT_EMU_SCENARIOS:-}\" ]; then\n  echo \"real tier: the fake model emits no reasoning; the Thinking row is checked on the emulator tier\"\n  exit 0\nfi\nab() { agent-browser --session \"$AFT_SESSION\" \"$@\"; }\nrow='[data-testid=reasoning] [role=button]'\ncheck() {\n  preview=\"$(ab eval \"document.querySelector('$row')?.textContent || ''\")\"\n  echo \"reasoning row: $preview\"\n  case \"$preview\" in *Thinking*AGV1-UI-THINKING*) ;; *) echo \"no Thinking row with the reasoning preview\" >&2; exit 1 ;; esac\n  # The row can sit under the composer; click it where it shows.\n  ab eval \"document.querySelector('$row').scrollIntoView({ block: 'center' })\" >/dev/null\n  ab click \"$row\" >/dev/null\n  body=\"$(ab eval \"document.querySelector('[data-testid=reasoning] pre')?.textContent || ''\")\"\n  echo \"reasoning body: $body\"\n  case \"$body\" in *\"AGV1-UI-THINKING weigh the options\"*) ;; *) echo \"the Thinking row did not expand\" >&2; exit 1 ;; esac\n}\ncheck\nab reload >/dev/null\nfor i in $(seq 1 30); do\n  [ \"$(ab eval \"!!document.querySelector('$row')\")\" = true ] && break\n  sleep 0.5\ndone\ncheck\n",
+        "intent": "On the emulator, the reasoning shows as a Thinking row that expands to the full text, before and after a reload"
+      },
+      "expected_contract": "On the emulator, the reasoning shows as a Thinking row that expands to the full text, before and after a reload",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/7/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/7",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+        "path": [
+          "tests",
+          7,
+          "steps",
+          0
+        ],
+        "line": 452,
+        "column": 9,
+        "end_line": 459
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/ui-lead\" \"agv1-ui-copy-${RUN_ID:-local}\" uiCopyId\nid=\"$(cat \"$AFT_WORK_DIR/uiCopyId\")\"\n\"$AFT_WORK_DIR/ui-turn\" \"$id\" '{\"text\":\"Files:\\n\\n| Name | Lines |\\n| --- | ---: |\\n| README.md | 1 |\\n\\n```go\\nfunc main() {\\n\\treturn\\n}\\n```\\n\\nAGV1-UI-COPY\"}'\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-UI/chat/$id\"\n",
+        "intent": "Create an OpenCode lead, script a reply with a table and Go code, and open its chat"
+      },
+      "expected_contract": "Create an OpenCode lead, script a reply with a table and Go code, and open its chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-agent-flow.test.yaml#tests/2/steps/0",
+      "case_id": "campaign:tests/aft/suites/zz-agent-flow.test.yaml#tests/2",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-agent-flow.test.yaml",
+        "path": [
+          "tests",
+          2,
+          "steps",
+          0
+        ],
+        "line": 203,
+        "column": 9,
+        "end_line": 206
+      },
+      "authored": {
+        "run": "file=\"aft-diff-${RUN_ID:-local}.txt\"; printf '%s\\n' \"AFT-DIFF-MARKER ${RUN_ID:-local}\" | LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" daemon seed-worktree --workspace E2E-WS-AGENT --agent nova --file \"$file\" --content - --message \"aft diff ${RUN_ID:-local}\"; printf '%s\\n' \"$file\" > \"$AFT_WORK_DIR/agent-diff-file.name\"",
+        "intent": "The local runtime seeds nova's worktree with one changed file"
+      },
+      "expected_contract": "The local runtime seeds nova's worktree with one changed file",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.seedWorktree"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/0/steps/12",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          12
+        ],
+        "line": 144,
+        "column": 9,
+        "end_line": 162
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nname=\"cust-$run\"\nprompt=\"You are a release-notes reviewer. AFT-PROMPT-MARKER-$run\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show \"$name\" --json > \"$AFT_WORK_DIR/d1-role.json\"\npython3 - \"$AFT_WORK_DIR/d1-role.json\" \"$prompt\" <<'PY'\nimport json, sys\nr = json.load(open(sys.argv[1]))\nwant = sys.argv[2]\nassert r.get(\"kind\") == \"interactive\", r\nassert r.get(\"prompt\") == want, r\nassert not r.get(\"prompt_file\"), r\nassert r.get(\"description\") == \"Interactive terminal agent\", r\nPY\n",
+        "intent": "An operator's CLI readback confirms the role stores exactly the prompt text"
+      },
+      "expected_contract": "An operator's CLI readback confirms the role stores exactly the prompt text",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/3/steps/11",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/3",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          3,
+          "steps",
+          11
+        ],
+        "line": 240,
+        "column": 9,
+        "end_line": 255
+      },
+      "authored": {
+        "run": "set -e\nname=\"cust-multi-${RUN_ID:-local}\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show \"$name\" --json > \"$AFT_WORK_DIR/cus-d4-role.json\"\npython3 - \"$AFT_WORK_DIR/cus-d4-role.json\" \"$AFT_WORK_DIR/cus-d4.prompt\" <<'PY'\nimport json, sys\nr = json.load(open(sys.argv[1]))\ngot = r.get(\"prompt\", \"\")\nwant = open(sys.argv[2], encoding=\"utf-8\").read()\nassert got == want, (len(got), len(want), got[-40:], want[-40:])\nassert len(got.encode(\"utf-8\")) == len(open(sys.argv[2], \"rb\").read()), (len(got.encode(\"utf-8\")), len(open(sys.argv[2], \"rb\").read()))\nPY\n",
+        "intent": "An operator's CLI readback confirms multiline prompt bytes match the fixture"
+      },
+      "expected_contract": "An operator's CLI readback confirms multiline prompt bytes match the fixture",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/4/steps/11",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/4",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          4,
+          "steps",
+          11
+        ],
+        "line": 287,
+        "column": 9,
+        "end_line": 302
+      },
+      "authored": {
+        "run": "set -e\nname=\"cust-tmpl-${RUN_ID:-local}\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show \"$name\" --json > \"$AFT_WORK_DIR/cus-d5-role.json\"\npython3 - \"$AFT_WORK_DIR/cus-d5-role.json\" \"$AFT_WORK_DIR/cus-d5.prompt\" <<'PY'\nimport json, sys\nr = json.load(open(sys.argv[1]))\ngot = r.get(\"prompt\", \"\")\nwant = open(sys.argv[2], encoding=\"utf-8\").read()\nassert got == want, (got, want)\nassert \"{{ .AgentName }}\" in got and \"{{.Role}}\" in got and \"{{ if .SafetyBlock }}\" in got, got\nPY\n",
+        "intent": "An operator's CLI readback confirms template-looking text stayed literal in storage"
+      },
+      "expected_contract": "An operator's CLI readback confirms template-looking text stayed literal in storage",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/7/steps/11",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/7",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          7,
+          "steps",
+          11
+        ],
+        "line": 488,
+        "column": 9,
+        "end_line": 504
+      },
+      "authored": {
+        "run": "set -e\nname=\"cust-long-${RUN_ID:-local}\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show \"$name\" --json > \"$AFT_WORK_DIR/cus-d7a-role.json\"\npython3 - \"$AFT_WORK_DIR/cus-d7a-role.json\" \"$AFT_WORK_DIR/cus-d7a.prompt\" <<'PY'\nimport json, sys\ngot = json.load(open(sys.argv[1])).get(\"prompt\", \"\")\nwant = open(sys.argv[2], \"rb\").read()\ngbytes = got.encode(\"utf-8\")\nassert len(gbytes) == 32768, len(gbytes)\nassert gbytes[:64] == want[:64], (gbytes[:64], want[:64])\nassert gbytes[-64:] == want[-64:], (gbytes[-64:], want[-64:])\nPY\n",
+        "intent": "An operator's CLI readback confirms the 32KB prompt length and edge bytes"
+      },
+      "expected_contract": "An operator's CLI readback confirms the 32KB prompt length and edge bytes",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/11/steps/13",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/11",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          11,
+          "steps",
+          13
+        ],
+        "line": 651,
+        "column": 9,
+        "end_line": 663
+      },
+      "authored": {
+        "run": "set -e\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show orchestrator --json > \"$AFT_WORK_DIR/d8d-role.json\"\npython3 - \"$AFT_WORK_DIR/d8d-role.json\" \"${RUN_ID:-local}\" <<'PY'\nimport json, sys\nr = json.load(open(sys.argv[1]))\nwant = \"AFT-D8D-\" + sys.argv[2]\nassert r.get(\"kind\") == \"interactive\", r\nassert r.get(\"prompt\") == want, r\nassert r.get(\"description\") == \"Lead/orchestrator interactive\", r\nPY\n",
+        "intent": "An operator's CLI readback confirms the orchestrator role prompt and legacy description"
+      },
+      "expected_contract": "An operator's CLI readback confirms the orchestrator role prompt and legacy description",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/12/steps/9",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/12",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          12,
+          "steps",
+          9
+        ],
+        "line": 713,
+        "column": 9,
+        "end_line": 729
+      },
+      "authored": {
+        "run": "set -e\nname=\"cust-trim-${RUN_ID:-local}\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show \"$name\" --json > \"$AFT_WORK_DIR/d9-role.json\"\npython3 - \"$AFT_WORK_DIR/d9-role.json\" \"${RUN_ID:-local}\" <<'PY'\nimport json, sys\np = json.load(open(sys.argv[1])).get(\"prompt\", \"\")\nrun = sys.argv[2]\nassert p.startswith(\"AFT-TRIM-START-\" + run), repr(p[:40])\nassert p.endswith(\"AFT-TRIM-END\"), repr(p[-40:])\nassert \"\\n\\n    indented line kept\\n\\n\" in p, repr(p)\nassert not p.startswith(\"\\n\") and not p.endswith(\"\\n\") and not p.endswith(\" \"), repr(p[-10:])\nPY\n",
+        "intent": "An operator's CLI readback confirms whole-string trimming and preserved interior whitespace"
+      },
+      "expected_contract": "An operator's CLI readback confirms whole-string trimming and preserved interior whitespace",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/15/steps/5",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/15",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          15,
+          "steps",
+          5
+        ],
+        "line": 1006,
+        "column": 9,
+        "end_line": 1020
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nname=\"cust-$run\"\nwant=\"You are a release-notes reviewer. AFT-PROMPT-MARKER-$run\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show \"$name\" --json > \"$AFT_WORK_DIR/d12-role.json\"\npython3 - \"$AFT_WORK_DIR/d12-role.json\" \"$want\" <<'PY'\nimport json, sys\nr = json.load(open(sys.argv[1]))\nassert r.get(\"prompt\") == sys.argv[2], r\nPY\n",
+        "intent": "An operator's CLI readback confirms the ignored prompt patch left the role prompt unchanged"
+      },
+      "expected_contract": "An operator's CLI readback confirms the ignored prompt patch left the role prompt unchanged",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/16/steps/23",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/16",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          16,
+          "steps",
+          23
+        ],
+        "line": 1067,
+        "column": 9,
+        "end_line": 1085
+      },
+      "authored": {
+        "run": "set -e\nname=\"cust-recycle-${RUN_ID:-local}\"\ncurl -sf \"$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents\" > \"$AFT_WORK_DIR/d13-agents.json\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show \"$name\" --json > \"$AFT_WORK_DIR/d13-role.json\"\npython3 - \"$AFT_WORK_DIR/d13-agents.json\" \"$AFT_WORK_DIR/d13-role.json\" \"${RUN_ID:-local}\" <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1]))\ndata = d.get(\"data\", d)\nagents = data.get(\"agents\") if isinstance(data, dict) else data\nname = \"cust-recycle-\" + sys.argv[3]\nassert len([a for a in agents or [] if a.get(\"name\") == name]) == 1, agents\nr = json.load(open(sys.argv[2]))\nassert r.get(\"prompt\") == \"AFT-RECYCLE-P1-\" + sys.argv[3], r\nPY\n",
+        "intent": "An operator's readback confirms the recycled agent exists with the original role prompt unchanged"
+      },
+      "expected_contract": "An operator's readback confirms the recycled agent exists with the original role prompt unchanged",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/18/steps/19",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/18",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          18,
+          "steps",
+          19
+        ],
+        "line": 1142,
+        "column": 9,
+        "end_line": 1160
+      },
+      "authored": {
+        "run": "set -e\nname=\"cust-dup-${RUN_ID:-local}\"\ncurl -sf \"$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents\" > \"$AFT_WORK_DIR/d16-agents.json\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show \"$name\" --json > \"$AFT_WORK_DIR/d16-role.json\"\npython3 - \"$AFT_WORK_DIR/d16-agents.json\" \"$AFT_WORK_DIR/d16-role.json\" \"${RUN_ID:-local}\" <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1]))\ndata = d.get(\"data\", d)\nagents = data.get(\"agents\") if isinstance(data, dict) else data\nname = \"cust-dup-\" + sys.argv[3]\nassert len([a for a in agents or [] if a.get(\"name\") == name]) == 1, agents\nr = json.load(open(sys.argv[2]))\nassert r.get(\"prompt\") == \"AFT-DUP-\" + sys.argv[3], r\nPY\n",
+        "intent": "An operator's readback confirms only one duplicate-name agent exists and its prompt is unchanged"
+      },
+      "expected_contract": "An operator's readback confirms only one duplicate-name agent exists and its prompt is unchanged",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/19/steps/14",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/19",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          19,
+          "steps",
+          14
+        ],
+        "line": 1193,
+        "column": 9,
+        "end_line": 1231
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nname=\"custmix-$run\"\ncurl -sf \"$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/agents\" > \"$AFT_WORK_DIR/d17a-agents.json\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM role show \"$name\" --json > \"$AFT_WORK_DIR/d17a-role.json\"\npython3 - \"$AFT_WORK_DIR/d17a-agents.json\" \"$AFT_WORK_DIR/d17a-role.json\" \"$name\" <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1]))\ndata = d.get(\"data\", d)\nagents = data.get(\"agents\") if isinstance(data, dict) else data\nname = sys.argv[3]\nmatches = [a for a in agents or [] if a.get(\"name\") == name]\nassert len(matches) == 1, agents\nassert matches[0].get(\"role_name\") == name, matches[0]\nr = json.load(open(sys.argv[2]))\nassert r.get(\"name\") == name, r\nPY\n# budget: terminal-launch (120s) - API-created agent launch argv appears after terminal tab creation.\nfor i in $(seq 1 60); do\n  curl -sf \"$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs\" > \"$AFT_WORK_DIR/d17a-tabs.json\" &&\n  python3 - \"$AFT_WORK_DIR/d17a-tabs.json\" \"$name\" <<'PY' && exit 0\nimport json, sys\nd = json.load(open(sys.argv[1]))\nname = sys.argv[2]\ntabs = d.get(\"data\") or []\nmatches = [t for t in tabs if t.get(\"agent_id\") == name]\nassert matches, tabs\nassert matches[0].get(\"launch\", {}).get(\"env\", {}).get(\"LOOM_AGENT_ROLE\") == name, matches[0]\nPY\n  sleep 2\ndone\necho \"normalized custom agent terminal launch metadata never appeared\"\ncat \"$AFT_WORK_DIR/d17a-tabs.json\" 2>/dev/null || true\nexit 1\n",
+        "intent": "An operator polls terminal tabs until the normalized custom agent role env is persisted"
+      },
+      "expected_contract": "An operator polls terminal tabs until the normalized custom agent role env is persisted",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/21/steps/11",
+      "case_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/21",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+        "path": [
+          "tests",
+          21,
+          "steps",
+          11
+        ],
+        "line": 1292,
+        "column": 9,
+        "end_line": 1313
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nname=\"rev-$run\"\ncurl -sf \"$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-CTL/agents\" > \"$AFT_WORK_DIR/d19-agents.json\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM-CTL role show pr-review --json > \"$AFT_WORK_DIR/d19-role.json\"\npython3 - \"$AFT_WORK_DIR/d19-agents.json\" \"$AFT_WORK_DIR/d19-role.json\" \"$name\" <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1]))\ndata = d.get(\"data\", d)\nagents = data.get(\"agents\") if isinstance(data, dict) else data\nname = sys.argv[3]\nmatches = [a for a in agents or [] if a.get(\"name\") == name]\nassert len(matches) == 1, agents\nassert matches[0].get(\"role_name\") == \"pr-review\", matches[0]\nr = json.load(open(sys.argv[2]))\nassert r.get(\"kind\") == \"interactive\", r\nassert r.get(\"prompt_file\") == \"builtin:pr-review\", r\nassert not r.get(\"prompt\"), r\nPY\n",
+        "intent": "An operator's readback confirms the PR Review agent and built-in role prompt_file"
+      },
+      "expected_contract": "An operator's readback confirms the PR Review agent and built-in role prompt_file",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-lead-agent.test.yaml#tests/3/steps/9",
+      "case_id": "campaign:tests/aft/suites/zz-lead-agent.test.yaml#tests/3",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-lead-agent.test.yaml",
+        "path": [
+          "tests",
+          3,
+          "steps",
+          9
+        ],
+        "line": 268,
+        "column": 9,
+        "end_line": 283
+      },
+      "authored": {
+        "run": "set -e\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-LEAD role list --json > \"$AFT_WORK_DIR/lead-d1-roles.json\"\npython3 - \"$AFT_WORK_DIR/lead-d1-roles.json\" <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1]))\nroles = d if isinstance(d, list) else d.get(\"roles\", d.get(\"data\", []))\nmatches = [r for r in roles if r.get(\"name\") == \"lead\"]\nassert len(matches) == 1, roles\nr = matches[0]\nassert r.get(\"kind\") == \"interactive\", r\nassert not (r.get(\"prompt\") or \"\").strip(), r\nassert not (r.get(\"prompt_file\") or \"\").strip(), r\nPY\n",
+        "intent": "An operator's CLI readback confirms the auto-created lead role is interactive with no prompt override"
+      },
+      "expected_contract": "An operator's CLI readback confirms the auto-created lead role is interactive with no prompt override",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-lead-agent.test.yaml#tests/8/steps/9",
+      "case_id": "campaign:tests/aft/suites/zz-lead-agent.test.yaml#tests/8",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-lead-agent.test.yaml",
+        "path": [
+          "tests",
+          8,
+          "steps",
+          9
+        ],
+        "line": 504,
+        "column": 9,
+        "end_line": 518
+      },
+      "authored": {
+        "run": "set -e\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-LEAD role list --json > \"$AFT_WORK_DIR/lead-d6-roles.json\"\npython3 - \"$AFT_WORK_DIR/lead-d6-roles.json\" <<'PY'\nimport json, sys\nd = json.load(open(sys.argv[1]))\nroles = d if isinstance(d, list) else d.get(\"roles\", d.get(\"data\", []))\nmatches = [r for r in roles if r.get(\"name\") == \"lead\"]\nassert len(matches) == 1, roles\nassert matches[0].get(\"kind\") == \"interactive\", matches[0]\nPY\n",
+        "intent": "An operator's CLI readback confirms the second Lead reused the one interactive lead role"
+      },
+      "expected_contract": "An operator's CLI readback confirms the second Lead reused the one interactive lead role",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/6/steps/10",
+      "case_id": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/6",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-task-runner.test.yaml",
+        "path": [
+          "tests",
+          6,
+          "steps",
+          10
+        ],
+        "line": 568,
+        "column": 9,
+        "end_line": 581
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nname=\"idle-$run\"\nPATH=\"$AFT_TESTS_DIR/../../e2e/stubs:$PATH\" \\\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \\\nLOOM_SERVER_URL=\"$AFT_API_URL\" \\\nLOOM_WORKSPACE_ID=E2E-WS-TASK \\\n\"$AFT_LOOM_BIN\" --workspace E2E-WS-TASK --backend codex task \"$name\" \\\n  > \"$AFT_WORK_DIR/tsk-d10-task.out\" 2>&1\ngrep -F \"No tasks available for implementation.\" \"$AFT_WORK_DIR/tsk-d10-task.out\"\ngrep -F \"Tasks must be: open status, has design, no needs-revision label, not epics\" \"$AFT_WORK_DIR/tsk-d10-task.out\"\n",
+        "intent": "The local runtime starts the Task Runner in single-task mode and observes the no-work message"
+      },
+      "expected_contract": "The local runtime starts the Task Runner in single-task mode and observes the no-work message",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.task"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/7/steps/12",
+      "case_id": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/7",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-task-runner.test.yaml",
+        "path": [
+          "tests",
+          7,
+          "steps",
+          12
+        ],
+        "line": 685,
+        "column": 9,
+        "end_line": 699
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nname=\"scoped-$run\"\nrepo_b_source=\"$(cat \"$AFT_WORK_DIR/task-repo-b.source\")\"\nPATH=\"$AFT_TESTS_DIR/../../e2e/stubs:$PATH\" \\\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \\\nLOOM_SERVER_URL=\"$AFT_API_URL\" \\\nLOOM_WORKSPACE_ID=E2E-WS-TASK \\\nLOOM_SOURCE_REPOS=\"$repo_b_source\" \\\n\"$AFT_LOOM_BIN\" --workspace E2E-WS-TASK --backend codex task \"$name\" \\\n  > \"$AFT_WORK_DIR/tsk-d13-repo-b.out\" 2>&1\ngrep -F \"No tasks available for implementation.\" \"$AFT_WORK_DIR/tsk-d13-repo-b.out\"\n",
+        "intent": "The local runtime starts the repo-B-scoped Task Runner and verifies repo-A work is filtered out"
+      },
+      "expected_contract": "The local runtime starts the repo-B-scoped Task Runner and verifies repo-A work is filtered out",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.task"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/7/steps/13",
+      "case_id": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/7",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-task-runner.test.yaml",
+        "path": [
+          "tests",
+          7,
+          "steps",
+          13
+        ],
+        "line": 699,
+        "column": 9,
+        "end_line": 719
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nname=\"scoped-$run\"\nrepo_a_source=\"$(cat \"$AFT_WORK_DIR/task-repo-a.source\")\"\nPATH=\"$AFT_TESTS_DIR/../../e2e/stubs:$PATH\" \\\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \\\nLOOM_SERVER_URL=\"$AFT_API_URL\" \\\nLOOM_WORKSPACE_ID=E2E-WS-TASK \\\nLOOM_SOURCE_REPOS=\"$repo_a_source\" \\\n\"$AFT_LOOM_BIN\" --workspace E2E-WS-TASK --backend codex task \"$name\" \\\n  > \"$AFT_WORK_DIR/tsk-d13-repo-a.out\" 2>&1\ngrep -F \"Running IMPLEMENTATION agent in:\" \"$AFT_WORK_DIR/tsk-d13-repo-a.out\"\nif grep -F \"No tasks available for implementation.\" \"$AFT_WORK_DIR/tsk-d13-repo-a.out\"; then\n  echo \"repo A control unexpectedly reported no work\"\n  exit 1\nfi\n",
+        "intent": "The local runtime reruns with repo A scope and proves the same designed task passes the availability gate"
+      },
+      "expected_contract": "The local runtime reruns with repo A scope and proves the same designed task passes the availability gate",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.task"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/10/steps/3",
+      "case_id": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/10",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/zz-task-runner.test.yaml",
+        "path": [
+          "tests",
+          10,
+          "steps",
+          3
+        ],
+        "line": 852,
+        "column": 9,
+        "end_line": 867
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nname=\"finished-$run\"\ntask=\"$(cat \"$AFT_WORK_DIR/tsk20tIssueId\")\"\n# The exact run the daemon supervisor launches for an assigned task,\n# driven by the deterministic codex stub.\nPATH=\"$AFT_TESTS_DIR/../../e2e/stubs:$PATH\" \\\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \\\nLOOM_SERVER_URL=\"$AFT_API_URL\" \\\nLOOM_WORKSPACE_ID=E2E-WS-TASK \\\nLOOM_ASSIGNED_TASK_ID=\"$task\" \\\n\"$AFT_LOOM_BIN\" --workspace E2E-WS-TASK --backend codex task \"$name\" --auto --daemon-mode \\\n  > \"$AFT_WORK_DIR/tsk-20t-run.out\" 2>&1 || { cat \"$AFT_WORK_DIR/tsk-20t-run.out\"; exit 1; }\n",
+        "intent": "The local runtime runs the Task Runner's daemon-mode task run to completion"
+      },
+      "expected_contract": "The local runtime runs the Task Runner's daemon-mode task run to completion",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.task"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/0/steps/0",
+      "case_id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          0
+        ],
+        "line": 30,
+        "column": 9,
+        "end_line": 105
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\npython3 - \"$AFT_WORK_DIR\" \"$run\" <<'PY'\nimport json, pathlib, sys\nwork = pathlib.Path(sys.argv[1])\nrun = sys.argv[2]\ndef write_payload(stem, name, prompt_len):\n    payload = {\n        \"name\": name,\n        \"role_name\": name,\n        \"kind\": \"interactive\",\n        \"prompt\": \"x\" * prompt_len,\n        \"auto\": False,\n        \"backend\": \"codex\",\n    }\n    (work / f\"{stem}.json\").write_text(json.dumps(payload, separators=(\",\", \":\")), encoding=\"utf-8\")\nwrite_payload(\"d7b-max\", f\"surf-max-{run}\", 100000)\nwrite_payload(\"d7b-over\", f\"surf-over-{run}\", 100001)\nwrite_payload(\"d7b-huge\", f\"surf-huge-{run}\", 1100000)\nPY\npost_agent() {\n  stem=\"$1\"\n  curl -sS -o \"$AFT_WORK_DIR/${stem}.resp.json\" -w \"%{http_code}\" \\\n    -X POST \"$AFT_API_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents\" \\\n    -H \"Content-Type: application/json\" \\\n    --data-binary @\"$AFT_WORK_DIR/${stem}.json\"\n}\ncode=\"$(post_agent d7b-max)\"\npython3 - \"$code\" \"$AFT_WORK_DIR/d7b-max.resp.json\" \"surf-max-$run\" <<'PY'\nimport json, sys\ncode, path, name = sys.argv[1:4]\nbody = json.load(open(path))\nassert code == \"201\", (code, body)\nassert body.get(\"name\") == name, body\nassert body.get(\"role_name\") == name, body\nassert body.get(\"backend\") == \"codex\", body\nassert body.get(\"auto\", False) is False, body\nassert body.get(\"repos\") == [], body\nassert body.get(\"repo_groups\") == [], body\nassert body.get(\"cross_repo\", False) is False, body\nPY\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM-SURF role show \"surf-max-$run\" --json > \"$AFT_WORK_DIR/d7b-max-role.json\"\npython3 - \"$AFT_WORK_DIR/d7b-max-role.json\" <<'PY'\nimport json, sys\nr = json.load(open(sys.argv[1]))\nprompt = r.get(\"prompt\", \"\")\nassert len(prompt.encode(\"utf-8\")) == 100000, len(prompt.encode(\"utf-8\"))\nassert r.get(\"kind\") == \"interactive\", r\nPY\ncode=\"$(post_agent d7b-over)\"\ncurl -sf \"$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents\" > \"$AFT_WORK_DIR/d7b-agents.json\"\npython3 - \"$code\" \"$AFT_WORK_DIR/d7b-over.resp.json\" \"$AFT_WORK_DIR/d7b-agents.json\" \"surf-over-$run\" <<'PY'\nimport json, sys\ncode, resp_path, agents_path, name = sys.argv[1:5]\nbody = json.load(open(resp_path))\nassert code == \"400\", (code, body)\nassert \"role prompt must be at most 100000 bytes\" in body.get(\"error\", \"\"), body\nd = json.load(open(agents_path))\ndata = d.get(\"data\", d)\nagents = data.get(\"agents\") if isinstance(data, dict) else data\nassert isinstance(agents, list), d\nassert not [a for a in agents or [] if a.get(\"name\") == name], agents\nPY\ncode=\"$(post_agent d7b-huge)\"\npython3 - \"$code\" \"$AFT_WORK_DIR/d7b-huge.resp.json\" <<'PY'\nimport json, sys\ncode, path = sys.argv[1], sys.argv[2]\nbody = json.load(open(path))\nassert code == \"413\", (code, body)\nassert \"request body too large\" in body.get(\"error\", \"\"), body\nPY\n",
+        "intent": "An API client drives file-backed JSON payloads through curl and verifies accepted, validation-error, and payload-too-large outcomes"
+      },
+      "expected_contract": "An API client drives file-backed JSON payloads through curl and verifies accepted, validation-error, and payload-too-large outcomes",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/2/steps/1",
+      "case_id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/2",
+      "source": {
+        "file_id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml",
+        "path": [
+          "tests",
+          2,
+          "steps",
+          1
+        ],
+        "line": 162,
+        "column": 9,
+        "end_line": 192
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nname=\"surf-both-$run\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM-SURF role show \"$name\" --json > \"$AFT_WORK_DIR/d20-role.json\"\ncode=\"$(curl -sS -o \"$AFT_WORK_DIR/d20-session.json\" -w \"%{http_code}\" \\\n  -X POST \"$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents/$name/terminal/session\")\"\npython3 - \"$code\" \"$AFT_WORK_DIR/d20-role.json\" \"$AFT_WORK_DIR/d20-session.json\" \"$run\" \"$name\" <<'PY'\nimport json, sys\ncode, role_path, session_path, run, name = sys.argv[1:6]\nrole = json.load(open(role_path))\nassert role.get(\"prompt\") == \"AFT-INLINE-\" + run, role\nassert role.get(\"prompt_file\") == \"builtin:pr-review\", role\nbody = json.load(open(session_path))\nassert code == \"200\", (code, body)\ntab = body.get(\"data\") or {}\nassert tab.get(\"agent_id\") == name, tab\nassert tab.get(\"backend\") == \"claude\", tab\nlaunch = tab.get(\"launch\") or {}\nargv = launch.get(\"argv\") or []\ncmd = argv[1] if len(argv) > 1 else \"\"\nassert argv and argv[0] == \"-c\", argv\nassert \"'--backend' 'claude'\" in cmd, cmd\nassert cmd.endswith(\"'lead'\"), cmd\nassert \"--prompt\" not in cmd, cmd\nassert (launch.get(\"env\") or {}).get(\"LOOM_AGENT_ROLE\") == name, launch\nPY\n",
+        "intent": "An API client reads the stored role and synchronous launch metadata to prove prompt_file is stored but dead in the inline branch"
+      },
+      "expected_contract": "An API client reads the stored role and synchronous launch metadata to prove prompt_file is stored but dead in the inline branch",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/3/steps/2",
+      "case_id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/3",
+      "source": {
+        "file_id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml",
+        "path": [
+          "tests",
+          3,
+          "steps",
+          2
+        ],
+        "line": 219,
+        "column": 9,
+        "end_line": 244
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nfor name in \"surf-empty-$run\" \"surf-space-$run\"; do\n  LOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM-SURF role show \"$name\" --json > \"$AFT_WORK_DIR/s1-$name-role.json\"\n  code=\"$(curl -sS -o \"$AFT_WORK_DIR/s1-$name-session.json\" -w \"%{http_code}\" \\\n    -X POST \"$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-SURF/agents/$name/terminal/session\")\"\n  python3 - \"$code\" \"$AFT_WORK_DIR/s1-$name-role.json\" \"$AFT_WORK_DIR/s1-$name-session.json\" \"$name\" <<'PY'\nimport json, sys\ncode, role_path, session_path, name = sys.argv[1:5]\nrole = json.load(open(role_path))\nassert role.get(\"kind\") == \"interactive\", role\nassert role.get(\"prompt\", \"\") == \"\", role\nassert role.get(\"prompt_file\", \"\") == \"\", role\nbody = json.load(open(session_path))\nassert code == \"200\", (code, body)\ntab = body.get(\"data\") or {}\nassert tab.get(\"agent_id\") == name, tab\nassert tab.get(\"backend\") == \"claude\", tab\ncmd = ((tab.get(\"launch\") or {}).get(\"argv\") or [\"\", \"\"])[1]\nassert \"'--backend' 'claude'\" in cmd, cmd\nassert \"--prompt\" not in cmd, cmd\nPY\ndone\n",
+        "intent": "An API client reads each empty role and synchronous launch spec to verify no prompt_file flag is passed"
+      },
+      "expected_contract": "An API client reads each empty role and synchronous launch spec to verify no prompt_file flag is passed",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/5/steps/1",
+      "case_id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/5",
+      "source": {
+        "file_id": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml",
+        "path": [
+          "tests",
+          5,
+          "steps",
+          1
+        ],
+        "line": 344,
+        "column": 9,
+        "end_line": 356
+      },
+      "authored": {
+        "run": "set -e\nrun=\"${RUN_ID:-local}\"\nLOOM_CONFIG_DIR=\"$AFT_LOOM_CONFIG_DIR\" \"$AFT_LOOM_BIN\" --workspace E2E-WS-CUSTOM-POISON role show pr-review --json > \"$AFT_WORK_DIR/s3-role.json\"\npython3 - \"$AFT_WORK_DIR/s3-role.json\" \"$run\" <<'PY'\nimport json, sys\nr = json.load(open(sys.argv[1]))\nassert r.get(\"kind\") == \"interactive\", r\nassert r.get(\"prompt\") == \"AFT-POISON-\" + sys.argv[2], r\nassert r.get(\"prompt_file\", \"\") == \"\", r\nPY\n",
+        "intent": "An API client verifies the poison workspace pr-review role now stores inline prompt text and no prompt_file"
+      },
+      "expected_contract": "An API client verifies the poison workspace pr-review role now stores inline prompt text and no prompt_file",
+      "budget": null,
+      "capabilities": [
+        "loom.cli.role"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/0/steps/0",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/0",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          0
+        ],
+        "line": 53,
+        "column": 9,
+        "end_line": 55
+      },
+      "authored": {
+        "run": "\"$AFT_WORK_DIR/kids-script\" \"agv1-kid-${RUN_ID:-local}\" AGV1-KIDS-ONE",
+        "intent": "Script the lead's agent_create call and the replies after it"
+      },
+      "expected_contract": "Script the lead's agent_create call and the replies after it",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          1,
+          "steps",
+          1
+        ],
+        "line": 133,
+        "column": 9,
+        "end_line": 138
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/kids-script\" \"agv1-kid2-${RUN_ID:-local}\" AGV1-KIDS-A1\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-KIDS/chat/$(cat \"$AFT_WORK_DIR/kidsLeadId\")\"\n",
+        "intent": "Script the lead's agent_create call and open the lead's chat"
+      },
+      "expected_contract": "Script the lead's agent_create call and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          2,
+          "steps",
+          1
+        ],
+        "line": 226,
+        "column": 9,
+        "end_line": 233
+      },
+      "authored": {
+        "run": "set -e\n# The first child holds its turn (a tool the emulator does not run\n# waits until interrupted), so it keeps working.\n\"$AFT_WORK_DIR/tray-script\" \"agv1-tray-a-${RUN_ID:-local}\" '{\"text\":\"AGV1-TRAY-STARTED-A\"}' '{\"tool_calls\":[{\"name\":\"df1_hold\"}]}'\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-KIDS/chat/$(cat \"$AFT_WORK_DIR/trayLeadId\")\"\n",
+        "intent": "Script the first child, which keeps working, and open the lead's chat"
+      },
+      "expected_contract": "Script the first child, which keeps working, and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2/steps/6",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          2,
+          "steps",
+          6
+        ],
+        "line": 246,
+        "column": 9,
+        "end_line": 251
+      },
+      "authored": {
+        "run": "set -e\n# The lead's follow-up holds its turn; the second child finishes at once.\n\"$AFT_WORK_DIR/tray-script\" \"agv1-tray-b-${RUN_ID:-local}\" '{\"tool_calls\":[{\"name\":\"df1_hold\"}]}' '{\"text\":\"AGV1-TRAY-B-DONE\"}'\n",
+        "intent": "Script the second child, which finishes while the lead's turn is still running"
+      },
+      "expected_contract": "Script the second child, which finishes while the lead's turn is still running",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          4,
+          "steps",
+          1
+        ],
+        "line": 431,
+        "column": 9,
+        "end_line": 438
+      },
+      "authored": {
+        "run": "set -e\n# Both children hold their turn (a tool the emulator does not run\n# waits until interrupted), so they keep working until stopped.\n\"$AFT_WORK_DIR/tray-script\" \"agv1-side-a-${RUN_ID:-local}\" '{\"text\":\"AGV1-SIDE-STARTED-A\"}' '{\"tool_calls\":[{\"name\":\"df1_hold\"}]}'\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-KIDS/chat/$(cat \"$AFT_WORK_DIR/sideLeadId\")\"\n",
+        "intent": "Script the first child, which keeps working, and open the lead's chat"
+      },
+      "expected_contract": "Script the first child, which keeps working, and open the lead's chat",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4/steps/6",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          4,
+          "steps",
+          6
+        ],
+        "line": 449,
+        "column": 9,
+        "end_line": 453
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/tray-script\" \"agv1-side-b-${RUN_ID:-local}\" '{\"text\":\"AGV1-SIDE-STARTED-B\"}' '{\"tool_calls\":[{\"name\":\"df1_hold\"}]}'\n",
+        "intent": "Script the second child, which also keeps working"
+      },
+      "expected_contract": "Script the second child, which also keeps working",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    },
+    {
+      "id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/5/steps/1",
+      "case_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/5",
+      "source": {
+        "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+        "path": [
+          "tests",
+          5,
+          "steps",
+          1
+        ],
+        "line": 547,
+        "column": 9,
+        "end_line": 552
+      },
+      "authored": {
+        "run": "set -e\n\"$AFT_WORK_DIR/kids-script\" \"agv1-kid3-${RUN_ID:-local}\" AGV1-KIDS-TABS\nagent-browser --session \"$AFT_SESSION\" open \"$AFT_BASE_URL/ws/E2E-AGV1-KIDS/chat/$(cat \"$AFT_WORK_DIR/tabsLeadId\")\"\n",
+        "intent": "Script the lead's agent_create call and open the lead"
+      },
+      "expected_contract": "Script the lead's agent_create call and open the lead",
+      "budget": null,
+      "capabilities": [
+        "loom.fixture.configure"
+      ],
+      "status": "preserved-original-contract; declarative integration pending"
+    }
+  ],
+  "remainingCoverage": "Fixture protocol data specialized from pinned literals and bounded static AST decoding, including Python-built tool/ask/subagent variants and child creation. Browser/assertion migration and concrete launcher/lease transports remain parent-owned. No arbitrary payload capability.",
+  "configurationHooks": [
+    {
+      "file_id": "campaign:tests/aft/live-pr-review-suites/lp-pr-review.test.yaml",
+      "kind": "setup",
+      "original": "set -e\ncurl -s -X DELETE \"$AFT_BASE_URL/api/workspaces/E2E-WS-PRLIVE\" >/dev/null || true\n\n: \"${AFT_FAKE_GH_BASE:?fake-github fixture is not running \u2014 this suite must run under the prreview live tier}\"\n\ngh_bare=\"$AFT_WORK_DIR/prlive-gh.git\"\nrepo=\"$AFT_WORK_DIR/prlive-widgets\"\nrm -rf \"$gh_bare\" \"$repo\"\ngit init -q --bare \"$gh_bare\"\n\ngit init -q \"$repo\"\ngit -C \"$repo\" config user.name \"Loom AFT\"\ngit -C \"$repo\" config user.email \"aft@example.test\"\n# A small, obviously-wrong slice so the model has something concrete to find.\n# The assertion never depends on the model's wording \u2014 only on it naming this file.\nprintf 'package widget\\n\\nfunc ParseName(s string) string {\\n\\treturn s\\n}\\n' > \"$repo/widget.go\"\ngit -C \"$repo\" add widget.go\ngit -C \"$repo\" commit -qm \"add widget parser\"\ngit -C \"$repo\" branch -M main\ngit -C \"$repo\" remote add origin \"https://github.com/acme/widgets\"\ngit -C \"$repo\" push -q \"$gh_bare\" main\nbase_sha=\"$(git -C \"$repo\" rev-parse HEAD)\"\n\ngit -C \"$repo\" checkout -qb feature/auth\nprintf 'package widget\\n\\nfunc ParseName(s string) string {\\n\\treturn s[1:]\\n}\\n' > \"$repo/widget.go\"\ngit -C \"$repo\" commit -qam \"trim leading character\"\nhead_sha=\"$(git -C \"$repo\" rev-parse HEAD)\"\ngit -C \"$repo\" push -q \"$gh_bare\" feature/auth\ngit -C \"$repo\" checkout -q main\n# This is what makes the PR fetchable without GitHub.\ngit -C \"$gh_bare\" update-ref \"refs/pull/7/head\" \"$head_sha\"\n\n# Register while origin still says github.com (RemoteURL is captured here, once).\npython3 -c 'import json,sys; print(json.dumps({\"name\":sys.argv[1],\"type\":\"empty\",\"repos\":[sys.argv[2]]}))' \\\n  \"e2e-ws-prlive\" \"$repo\" > \"$AFT_WORK_DIR/prlive-workspace.json\"\ncurl -sf -X POST \"$AFT_BASE_URL/api/workspaces\" -H \"Content-Type: application/json\" \\\n  -d @\"$AFT_WORK_DIR/prlive-workspace.json\" > \"$AFT_WORK_DIR/prlive-workspace.resp.json\"\npython3 - \"$AFT_WORK_DIR/prlive-workspace.resp.json\" \"$AFT_WORK_DIR\" <<'PY'\nimport json, pathlib, sys\ndata = json.load(open(sys.argv[1])).get(\"data\") or {}\nwork = pathlib.Path(sys.argv[2])\nwork.joinpath(\"prlive-workspace.path\").write_text(data[\"path\"], encoding=\"utf-8\")\nrepos = data.get(\"repos\") or []\nassert repos, data\nwork.joinpath(\"prlive-repo.name\").write_text(repos[0][\"name\"], encoding=\"utf-8\")\nPY\n\n# Repoint AFTER registration so the fetch resolves locally while the stored\n# RemoteURL keeps saying github.com.\ngit -C \"$repo\" remote set-url origin \"file://$gh_bare\"\n\n# S2: install the fixture credential. Without it ensureConnectorAndGrants fails\n# before any HTTP call (seed.go:36-49) and every case here 503s.\ncurl -sf -X PATCH \"$AFT_BASE_URL/api/local/settings\" -H \"Content-Type: application/json\" \\\n  -d '{\"runtime_credentials\":{\"github\":{\"token\":\"aft-fixture-token\"}}}' >/dev/null\n\n# Point the fixture at the SHAs git actually produced. EnsureDetachedGitWorktreeAtPRHead\n# compares the fetched tip against the connector's head.sha and returns\n# PRHeadChangedError on mismatch (localworkspace.go:238-241), so the fixture's default\n# placeholder sha would fail every run with a misleading \"stale_subject\".\npython3 - \"$head_sha\" \"$base_sha\" > \"$AFT_WORK_DIR/prlive-fixture.json\" <<'PY'\nimport json, sys\nhead, base = sys.argv[1], sys.argv[2]\nprint(json.dumps({\n    \"pr\": {\n        \"number\": 7, \"state\": \"open\", \"title\": \"Trim leading character\",\n        \"draft\": False, \"merged_at\": None, \"user\": {\"login\": \"octocat\"},\n        \"updated_at\": \"2026-01-01T00:00:00Z\",\n        \"head\": {\"sha\": head, \"ref\": \"feature/auth\"},\n        \"base\": {\"sha\": base, \"ref\": \"main\"},\n    },\n    \"files\": [{\n        \"filename\": \"widget.go\", \"status\": \"modified\",\n        \"additions\": 1, \"deletions\": 1,\n        \"patch\": \"@@ -1,5 +1,5 @@\\n package widget\\n \\n func ParseName(s string) string {\\n-\\treturn s\\n+\\treturn s[1:]\\n }\",\n    }],\n}))\nPY\ncurl -sf -X POST \"$AFT_FAKE_GH_BASE/__fixture\" -H \"Content-Type: application/json\" \\\n  -d @\"$AFT_WORK_DIR/prlive-fixture.json\" >/dev/null\n# Reset the request log AFTER seeding so the read-only assertion only sees\n# requests the reviewer itself made.\ncurl -sf -X POST \"$AFT_FAKE_GH_BASE/__reset\" >/dev/null\ncurl -sf -X POST \"$AFT_FAKE_GH_BASE/__fixture\" -H \"Content-Type: application/json\" \\\n  -d @\"$AFT_WORK_DIR/prlive-fixture.json\" >/dev/null\n",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "kind": "setup",
+      "original": "set -e\ncurl -s -X DELETE \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-KIDS\" >/dev/null || true\nrepo=\"$AFT_WORK_DIR/agv1-kids-repo\"\nmkdir -p \"$repo\"\ngit -C \"$repo\" init -q -b main\necho \"agents-v1 children ${RUN_ID:-local}\" > \"$repo/README.md\"\ngit -C \"$repo\" add README.md\ngit -C \"$repo\" -c user.email=e2e@x -c user.name=e2e commit -q -m init\nprintf '{\"name\":\"e2e-agv1-kids\",\"type\":\"empty\",\"repos\":[\"%s\"]}' \"$repo\" |\n  curl -sf -X POST \"$AFT_BASE_URL/api/workspaces\" -H \"Content-Type: application/json\" -d @- >/dev/null\n# kids-script <child name> <child reply>: the lead's agent_create call, then\n# the reply both the lead and the child may take next.\ncat > \"$AFT_WORK_DIR/kids-script\" <<'SH'\n#!/bin/sh\nset -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 -c 'import json,sys; code=\"return await tools.loom.agent_create(%s)\" % json.dumps({\"name\": sys.argv[1], \"brief\": \"do the task\"})\nprint(json.dumps({\"steps\": [{\"tool_calls\": [{\"name\": \"execute\", \"arguments\": {\"code\": code}}]}, {\"text\": sys.argv[2]}, {\"text\": sys.argv[2]}]}))' \"$1\" \"$2\" |\n  curl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" -d @- >/dev/null\nSH\nchmod +x \"$AFT_WORK_DIR/kids-script\"\n# tray-script <child> <lead follow-up step> <child step>: the lead's\n# agent_create call, then one step for the lead's follow-up (its tool\n# result) and one for the child's first prompt, so the two never race.\ncat > \"$AFT_WORK_DIR/tray-script\" <<'SH'\n#!/bin/sh\nset -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 -c 'import json,sys\ncode = \"return await tools.loom.agent_create(%s)\" % json.dumps({\"name\": sys.argv[1], \"brief\": \"do the task\"})\nprint(json.dumps({\"steps\": [{\"next\": \"prompt\", \"tool_calls\": [{\"name\": \"execute\", \"arguments\": {\"code\": code}}]},\n  dict(json.loads(sys.argv[2]), next=\"tool\"), dict(json.loads(sys.argv[3]), next=\"prompt\")]}))' \"$1\" \"$2\" \"$3\" |\n  curl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" -d @- >/dev/null\nSH\nchmod +x \"$AFT_WORK_DIR/tray-script\"\n",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+      "kind": "setup",
+      "original": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -s -X DELETE \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR\" >/dev/null || true\nfor r in agv1-par-alpha agv1-par-beta; do\n  repo=\"$AFT_WORK_DIR/$r\"\n  mkdir -p \"$repo\"\n  git -C \"$repo\" init -q -b main\n  echo \"$r ${RUN_ID:-local}\" > \"$repo/README.md\"\n  git -C \"$repo\" add README.md\n  git -C \"$repo\" -c user.email=e2e@x -c user.name=e2e commit -q -m init\ndone\nprintf '{\"name\":\"e2e-agv1-par\",\"type\":\"empty\",\"repos\":[\"%s\",\"%s\"]}' \"$AFT_WORK_DIR/agv1-par-alpha\" \"$AFT_WORK_DIR/agv1-par-beta\" |\n  curl -sf -X POST \"$AFT_BASE_URL/api/workspaces\" -H \"Content-Type: application/json\" -d @- >/dev/null\n# par-lead <name> <saved var>: an OpenCode lead on agv1-par-alpha made\n# through the Agent API; its agent id goes to $AFT_WORK_DIR/<saved var>.\ncat > \"$AFT_WORK_DIR/par-lead\" <<'SH'\n#!/bin/sh\nset -e\nprintf '{\"preset\":\"lead\",\"name\":\"%s\",\"repo\":\"%s\",\"base_ref\":\"main\",\"overrides\":{\"harness\":\"opencode\"}}' \\\n  \"$1\" \"$AFT_WORK_DIR/agv1-par-alpha\" |\n  curl -sf -X POST \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents\" \\\n    -H \"Content-Type: application/json\" -H \"Idempotency-Key: $1\" -d @- |\n  python3 -c 'import json,sys; print(json.load(sys.stdin)[\"agent_id\"])' > \"$AFT_WORK_DIR/$2\"\nSH\nchmod +x \"$AFT_WORK_DIR/par-lead\"\n# par-kid <child name> <child reply>: the lead's agent_create call through\n# Code Mode's execute tool, then a reply both the lead and the child may\n# take next (they share the fake model's queue).\ncat > \"$AFT_WORK_DIR/par-kid\" <<'SH'\n#!/bin/sh\nset -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 -c 'import json,sys; code=\"return await tools.loom.agent_create(%s)\" % json.dumps({\"name\": sys.argv[1], \"brief\": \"do the task\"})\nprint(json.dumps({\"steps\": [{\"tool_calls\": [{\"name\": \"execute\", \"arguments\": {\"code\": code}}]}, {\"text\": sys.argv[2]}, {\"text\": sys.argv[2]}]}))' \"$1\" \"$2\" |\n  curl -sf -X POST \"$AFT_FAKE_MODEL_URL/__script\" -H \"Content-Type: application/json\" -d @- >/dev/null\nSH\nchmod +x \"$AFT_WORK_DIR/par-kid\"\n",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "kind": "setup",
+      "original": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -s -X DELETE \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD\" >/dev/null || true\nrepo=\"$AFT_WORK_DIR/agv1-lead-repo\"\nmkdir -p \"$repo\"\ngit -C \"$repo\" init -q -b main\necho \"agents-v1 lead ${RUN_ID:-local}\" > \"$repo/README.md\"\ngit -C \"$repo\" add README.md\ngit -C \"$repo\" -c user.email=e2e@x -c user.name=e2e commit -q -m init\nprintf '{\"name\":\"e2e-agv1-lead\",\"type\":\"empty\",\"repos\":[\"%s\"]}' \"$repo\" |\n  curl -sf -X POST \"$AFT_BASE_URL/api/workspaces\" -H \"Content-Type: application/json\" -d @- >/dev/null\ncurl -s -X DELETE \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO\" >/dev/null || true\nbad=\"$AFT_WORK_DIR/agv1-badrepo-repo\"\nmkdir -p \"$bad\"\ngit -C \"$bad\" init -q -b main\ngit -C \"$bad\" -c user.email=e2e@x -c user.name=e2e commit -q --allow-empty -m init\nprintf '{\"name\":\"e2e-agv1-badrepo\",\"type\":\"empty\",\"repos\":[\"%s\"]}' \"$bad\" |\n  curl -sf -X POST \"$AFT_BASE_URL/api/workspaces\" -H \"Content-Type: application/json\" -d @- >/dev/null\n",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml",
+      "kind": "setup",
+      "original": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -s -X DELETE \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE\" >/dev/null || true\nrepo=\"$AFT_WORK_DIR/agv1-life-repo\"\nmkdir -p \"$repo\"\ngit -C \"$repo\" init -q -b main\necho \"agents-v1 lifecycle ${RUN_ID:-local}\" > \"$repo/README.md\"\ngit -C \"$repo\" add README.md\ngit -C \"$repo\" -c user.email=e2e@x -c user.name=e2e commit -q -m init\nprintf '{\"name\":\"e2e-agv1-life\",\"type\":\"empty\",\"repos\":[\"%s\"]}' \"$repo\" |\n  curl -sf -X POST \"$AFT_BASE_URL/api/workspaces\" -H \"Content-Type: application/json\" -d @- >/dev/null\n",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+      "kind": "setup",
+      "original": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -s -X DELETE \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-RESUME\" >/dev/null || true\nrepo=\"$AFT_WORK_DIR/agv1-resume-repo\"\nmkdir -p \"$repo\"\ngit -C \"$repo\" init -q -b main\necho \"agents-v1 resume ${RUN_ID:-local}\" > \"$repo/README.md\"\ngit -C \"$repo\" add README.md\ngit -C \"$repo\" -c user.email=e2e@x -c user.name=e2e commit -q -m init\nprintf '{\"name\":\"e2e-agv1-resume\",\"type\":\"empty\",\"repos\":[\"%s\"]}' \"$repo\" |\n  curl -sf -X POST \"$AFT_BASE_URL/api/workspaces\" -H \"Content-Type: application/json\" -d @- >/dev/null\n",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+      "kind": "setup",
+      "original": "set -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\ncurl -s -X DELETE \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI\" >/dev/null || true\nrepo=\"$AFT_WORK_DIR/agv1-ui-repo\"\nmkdir -p \"$repo\"\ngit -C \"$repo\" init -q -b main\necho \"agents-v1 ui ${RUN_ID:-local}\" > \"$repo/README.md\"\ngit -C \"$repo\" add README.md\ngit -C \"$repo\" -c user.email=e2e@x -c user.name=e2e commit -q -m init\nprintf '{\"name\":\"e2e-agv1-ui\",\"type\":\"empty\",\"repos\":[\"%s\"]}' \"$repo\" |\n  curl -sf -X POST \"$AFT_BASE_URL/api/workspaces\" -H \"Content-Type: application/json\" -d @- >/dev/null\n# ui-lead <name> <saved var>: an OpenCode lead made through the Agent API;\n# its agent id goes to $AFT_WORK_DIR/<saved var>.\ncat > \"$AFT_WORK_DIR/ui-lead\" <<'SH'\n#!/bin/sh\nset -e\nprintf '{\"preset\":\"lead\",\"name\":\"%s\",\"repo\":\"%s\",\"base_ref\":\"main\",\"overrides\":{\"harness\":\"opencode\"}}' \\\n  \"$1\" \"$AFT_WORK_DIR/agv1-ui-repo\" |\n  curl -sf -X POST \"$AFT_BASE_URL/api/workspaces/E2E-AGV1-UI/v1/agents\" \\\n    -H \"Content-Type: application/json\" -H \"Idempotency-Key: $1\" -d @- |\n  python3 -c 'import json,sys; print(json.load(sys.stdin)[\"agent_id\"])' > \"$AFT_WORK_DIR/$2\"\nSH\nchmod +x \"$AFT_WORK_DIR/ui-lead\"\n# ui-turn <agent id> <turn JSON>: the agent's next turn. A turn with tools\n# or reasoning is, on the emulator, the agent's one scenario turn (the\n# emulator runs no tools and the fake model sends no reasoning); any other\n# turn's text comes from the fake model, which records the request.\ncat > \"$AFT_WORK_DIR/ui-turn\" <<'SH'\n#!/bin/sh\nset -e\ncurl -sf -X POST \"$AFT_FAKE_MODEL_URL/__reset\" >/dev/null\npython3 - \"$1\" \"$2\" \"${AFT_EMU_SCENARIOS:-}\" \"$AFT_FAKE_MODEL_URL\" <<'PY'\nimport json, os, sys, urllib.request\nagent, turn, scenarios, model = sys.argv[1], json.loads(sys.argv[2]), sys.argv[3], sys.argv[4]\nif scenarios and (turn.get(\"tools\") or turn.get(\"reasoning\")):\n    cur = json.load(open(scenarios)) if os.path.exists(scenarios) and os.path.getsize(scenarios) else {}\n    cur[agent] = [turn]\n    json.dump(cur, open(scenarios, \"w\"))\nelse:\n    steps = []\n    if turn.get(\"tools\"):\n        steps.append({\"tool_calls\": [{\"name\": t[\"name\"], \"arguments\": t[\"input\"]} for t in turn[\"tools\"]]})\n    steps.append({\"text\": turn[\"text\"]})\n    req = urllib.request.Request(model + \"/__script\", data=json.dumps({\"steps\": steps}).encode(),\n                                 headers={\"Content-Type\": \"application/json\"})\n    urllib.request.urlopen(req).read()\nPY\nSH\nchmod +x \"$AFT_WORK_DIR/ui-turn\"\n",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    }
+  ],
+  "interfaceDependency": "6d3d8f01112d47f0664bbd65f1163f1f1bbf51c8"
+}
