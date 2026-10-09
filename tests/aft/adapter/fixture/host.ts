@@ -13,6 +13,9 @@ import {OwnedDescendants,createRegisteredProcessPort,readRegisteredHostServices,
 import { StartupBaselines, type BaselineTarget } from './baseline.js';
 import { HostWorkspaceRecords } from './workspace-records.js';
 import type { EvidenceStore } from '../evidence.js';
+import { fixtureOwnerIdentity } from '../authority.js';
+import { z } from 'zod';
+import type { OwnedRoot } from '../ownership.js';
 
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -43,6 +46,7 @@ export class HostFixtureDriver implements FixtureDriver {
   private descendants?:OwnedDescendants;
   private readonly retainedServiceRegistrations=new Map<string,unknown>();
   private workspaceRecords?:HostWorkspaceRecords;
+  private workspaceOwner?:Readonly<FixtureAuthorityOwner>;
   private runtimeRemoved=false;
   private readonly activeOperations = new Set<string>();
   private async withServiceOperation<T>(id:string,operation:()=>Promise<T>):Promise<T>{
@@ -81,11 +85,45 @@ export class HostFixtureDriver implements FixtureDriver {
   createOperationAuthority(owner:FixtureAuthorityOwner) {check(this.plan);return fixtureOperationAuthority(owner,this.plan!);}
   async ownedWorkspaceRoster(owner:FixtureAuthorityOwner,store:EvidenceStore,signal:AbortSignal){
     check(owner.leaseId===this.leaseId&&owner.profile===this.profile&&this.workspaceRecords,'unsupported-capability');
-    return this.workspaceRecords!.roster(owner,store,signal);
+    check(!this.workspaceOwner||JSON.stringify(this.workspaceOwner)===JSON.stringify(fixtureOwnerIdentity(owner)));
+    const roster=await this.workspaceRecords!.roster(owner,store,signal);
+    this.workspaceOwner=Object.freeze(fixtureOwnerIdentity(owner));return roster;
   }
   async readWorkspaceLegacyAgent(owner:FixtureAuthorityOwner,workspaceId:string,name:string,signal:AbortSignal){
     check(owner.leaseId===this.leaseId&&owner.profile===this.profile&&this.workspaceRecords,'unsupported-capability');
+    check(this.workspaceOwner&&JSON.stringify(this.workspaceOwner)===JSON.stringify(fixtureOwnerIdentity(owner)));
     return this.workspaceRecords!.legacyAgent(owner,workspaceId,name,signal);
+  }
+  async resolveLegacyWorktree(workspaceId:string,agentName:string,signal:AbortSignal):Promise<{complete:true;workspaceId:string;agentName:string;root:OwnedRoot;branch:string;commonDir:string}>{
+    check(this.workspaceOwner&&this.workspaceRecords,'unsupported-capability');
+    const actor=await this.readWorkspaceLegacyAgent(this.workspaceOwner!,workspaceId,agentName,signal);
+    const workspace=await this.workspaceRecords!.workspace(workspaceId,signal);
+    const completion=(await this.launchOwnedCli(['workspace','ops','diagnose',workspaceId,'--json'],{},'',true,signal)).completion;
+    check(completion.complete&&completion.exitCode===0,'observation-failed');
+    const status=z.object({ok:z.boolean(),workspace:z.object({key:z.string()}).passthrough(),agents:z.array(z.object({
+      name:z.string(),worktree_path:z.string().optional(),worktree_ready:z.boolean()}).passthrough()).max(1000)}).passthrough().parse(JSON.parse(completion.stdout));
+    check(status.workspace.key===workspaceId);
+    const matches=status.agents.filter(agent=>agent.name===agentName);check(matches.length===1&&matches[0]!.worktree_ready&&matches[0]!.worktree_path);
+    const worktree=matches[0]!.worktree_path!,commonDir=await this.ownedCommonDir(worktree,signal);check(commonDir===workspace.commonDir);
+    const before=await this.files.lstat(worktree);
+    const branch=(await this.processes.run({executable:this.config.gitBinary,argv:['symbolic-ref','--quiet','--short','HEAD'],cwd:worktree,
+      env:{PATH:this.config.toolPath,HOME:path.join(this.root,'runtime','home'),GIT_CONFIG_NOSYSTEM:'1'}},signal)).trim();
+    check(branch.length>0&&!branch.includes('\n')&&!branch.includes('\0'));
+    await this.workspaceRecords!.workspace(workspaceId,signal);
+    check(JSON.stringify(await this.readWorkspaceLegacyAgent(this.workspaceOwner!,workspaceId,agentName,signal))===JSON.stringify(actor));
+    const after=await this.files.lstat(worktree);check(!after.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino);
+    return {complete:true,workspaceId,agentName,root:{path:worktree,device:after.dev,inode:after.ino},branch,commonDir};
+  }
+  async readLegacyWorktreeHead(workspaceId:string,agentName:string,signal:AbortSignal){
+    check(this.workspaceOwner&&this.workspaceRecords,'unsupported-capability');
+    const actor=await this.readWorkspaceLegacyAgent(this.workspaceOwner!,workspaceId,agentName,signal);
+    const resolved=await this.resolveLegacyWorktree(workspaceId,agentName,signal);
+    const head=(await this.processes.run({executable:this.config.gitBinary,argv:['rev-parse','HEAD'],cwd:resolved.root.path,
+      env:{PATH:this.config.toolPath,HOME:path.join(this.root,'runtime','home'),GIT_CONFIG_NOSYSTEM:'1'}},signal)).trim();
+    check(/^[a-f0-9]{40}$/.test(head));const after=await this.files.lstat(resolved.root.path);
+    check(!after.isSymbolicLink()&&after.dev===resolved.root.device&&after.ino===resolved.root.inode);
+    await this.workspaceRecords!.workspace(workspaceId,signal);
+    check(JSON.stringify(await this.readWorkspaceLegacyAgent(this.workspaceOwner!,workspaceId,agentName,signal))===JSON.stringify(actor));return head;
   }
   private async workspaceStoreIdentity(signal:AbortSignal){
     await this.prepareObserve(signal);check(this.descendants?.has('registered-fleet-db'),'unsupported-capability');
@@ -105,6 +143,7 @@ export class HostFixtureDriver implements FixtureDriver {
     check(commonDir===candidate&&commonDir.startsWith(path.join(this.root,'runtime')+path.sep));
     const stat=await this.files.lstat(commonDir),after=await this.files.lstat(repo);
     check(stat.isDirectory()&&!stat.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino&&!after.isSymbolicLink());
+    for(const [filename,stamp] of [[repo,after],[commonDir,stat]] as const){const old=this.stamps.get(filename);check(!old||old.dev===stamp.dev&&old.ino===stamp.ino);this.stamps.set(filename,{dev:stamp.dev,ino:stamp.ino});}
     return commonDir;
   }
   freshFixtureBaseline(target:BaselineTarget,signal:AbortSignal){return this.baselines.freshFixtureBaseline(target,signal);}

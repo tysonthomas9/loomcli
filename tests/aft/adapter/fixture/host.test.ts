@@ -57,11 +57,16 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
   const starts: { id: string; command: HostCommand; readiness: string }[] = []; const runs: HostCommand[] = []; const stopped: string[] = [];
   let failService = ''; let failStop = ''; let spawnFails = false; let port = 4100; let count = 0; let failHttp = false;
   const handles = new Map<string, OwnedProcess>();
+  let cliOutput='',headOutput:string|undefined;const commonDirectories=new Map<string,string>();
+  let onRun:((command:HostCommand)=>Promise<void>)|undefined;
   const processes: HostProcesses = {
     async run(command) {
       runs.push(command);
+      await onRun?.(command);
       if(command.argv[0]==='init'){await fs.mkdir(path.join(command.cwd,'.git'),{recursive:true});return '';}
-      if(command.argv[0]==='rev-parse'&&command.argv[1]==='--git-common-dir')return '.git';
+      if(command.argv[0]==='rev-parse'&&command.argv[1]==='--git-common-dir')return commonDirectories.get(command.cwd)??'.git';
+      if(command.argv[0]==='symbolic-ref')return 'actual-product-branch';
+      if(command.argv[0]==='rev-parse'&&command.argv[1]==='HEAD'&&headOutput!==undefined)return headOutput;
       if (command.argv[0] === 'rev-parse') return command.argv[1] === 'HEAD' ? revision.commit : revision.tree;
       if (command.argv[0] === 'ls-files') return sourceEntries.map(entry => entry.relativePath).join('\0') + '\0';
       return '';
@@ -71,7 +76,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
       runs.push(command); let alive = true;
       const handle = { pid: ++count + 100, generation, executable: command.executable, argv: command.argv,
         state: () => alive ? 'running' as const : 'exited' as const, async ready() {}, async stop() { alive = false; stopped.push('cli'); },
-        async completion() { alive = false; return { exitCode: 0, stdout: stdin || '{"owned":true}', stderr: '', complete: true }; } };
+        async completion() { alive = false; return { exitCode: 0, stdout: stdin || cliOutput || '{"owned":true}', stderr: '', complete: true }; } };
       handles.set('cli', handle); return handle;
     },
     start(command, readiness, generation) {
@@ -109,6 +114,8 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     request: { runId: 'test-run', profile, loomRevision: revision, fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
     onHttp(callback:(method:string,relative:string)=>Promise<void>){onHttp=callback;},
     overrideResponse(callback:(relative:string)=>unknown){responseOverride=callback;},
+    cliOutput(value:unknown){cliOutput=JSON.stringify(value);},commonDir(repo:string,value:string){commonDirectories.set(repo,value);},head(value:string){headOutput=value;},
+    onRun(callback:(command:HostCommand)=>Promise<void>){onRun=callback;},
     failSpawn() { spawnFails = true; }, failService(value: string) { failService = value; }, failStop(value: string) { failStop = value; }, failHttp() { failHttp = true; },
     async cleanup() { await fs.rm(root, { recursive: true }); } };
 }
@@ -155,14 +162,50 @@ test('canonical registry production binding retains both actual host workspaces 
   assert.equal((await registry.invoke({id:'loom.fixture.release',version:1,input:{}},{leaseId},context)).availability,'observed');
  }finally{await r.cleanup();}
 });
+test('production factory rejects missing store capture before host preflight, auth or allocation',async()=>{
+ const r=await setup('legacy-real-codex');try{
+  const root=path.dirname(path.dirname(new URL(import.meta.url).pathname));
+  const pin=calculateImplementationPin(root,['fixture/providers.ts'],'fixture/providers.ts','createFixtureProviders');
+  const options=productionFixtureOptions(pin,pin.sha256,[r.plan],r.config,r.config);
+  assert.throws(()=>options.driver('legacy-real-codex'));
+  assert.equal(r.runs.length,0);assert.equal(r.starts.length,0);assert.equal(r.driver.runtimeRoot,'');
+ }finally{await r.cleanup();}
+});
 test('host workspace ownership rejects replaced store before actor discovery',async()=>{
  const r=await setup('legacy-deterministic',true);try{
   const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
   const owner={leaseId:a.lease.id,runId:'test-run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:r.plan.profile};
+  await r.driver.ownedWorkspaceRoster(owner,await createEvidenceStore(path.join(r.driver.runtimeRoot,'evidence')),signal);
   const filename=path.join(r.driver.configurationRoot,'fleet-db/runtime.json'),original=await fs.readFile(filename,'utf8');
   await fs.writeFile(filename,original.replace('999','998'));const before=r.requests.length;
   await assert.rejects(r.driver.readWorkspaceLegacyAgent(owner,'E2E-WS','nova',signal));assert.equal(r.requests.length,before);
   await fs.writeFile(filename,original);await r.lifecycle.release(a.lease.id,r.request.runId);
+ }finally{await r.cleanup();}
+});
+test('legacy worktree reads use actual product resolution and exact source Git identity',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),owner={leaseId:a.lease.id,runId:'test-run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:r.plan.profile};
+  await r.driver.ownedWorkspaceRoster(owner,await createEvidenceStore(path.join(r.driver.runtimeRoot,'evidence')),signal);
+  r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,total:1,data:[{workspace_key:'E2E-WS',name:'nova',created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T00:01:00Z'}]}:undefined);
+  const worktree=path.join(r.driver.runtimeRoot,'runtime','actual-product-worktree');await fs.mkdir(worktree);
+  r.commonDir(worktree,path.join(r.driver.workspaceRoot,'.git'));
+  const status={ok:true,workspace:{key:'E2E-WS'},agents:[{name:'nova',worktree_path:worktree,worktree_ready:true}]};r.cliOutput(status);
+  const resolved=await r.driver.resolveLegacyWorktree('E2E-WS','nova',signal);
+  assert.equal(resolved.root.path,worktree);assert.equal(resolved.branch,'actual-product-branch');assert.equal(resolved.commonDir,path.join(r.driver.workspaceRoot,'.git'));
+  assert.deepEqual(r.runs.filter(value=>value.argv[0]==='workspace').at(-1)!.argv,['workspace','ops','diagnose','E2E-WS','--json']);
+  assert.equal(await r.driver.readLegacyWorktreeHead('E2E-WS','nova',signal),'a'.repeat(40));
+  r.head('partial');await assert.rejects(r.driver.readLegacyWorktreeHead('E2E-WS','nova',signal));r.head('a'.repeat(40));
+  for(const bad of [{...status,workspace:{key:'foreign'}},{...status,agents:[]},{...status,agents:[{...status.agents[0],worktree_ready:false}]},
+   {...status,agents:[status.agents[0],status.agents[0]]},{...status,agents:[{...status.agents[0],worktree_path:r.config.hostHome}]}]){
+   r.cliOutput(bad);await assert.rejects(r.driver.resolveLegacyWorktree('E2E-WS','nova',signal));
+  }
+  r.cliOutput(status);r.commonDir(worktree,path.join(r.driver.runtimeRoot,'runtime','e2e-workspace-2','.git'));
+  await assert.rejects(r.driver.resolveLegacyWorktree('E2E-WS','nova',signal));
+  r.commonDir(worktree,path.join(r.driver.workspaceRoot,'.git'));let replace=true;
+  r.onRun(async command=>{if(replace&&command.argv[0]==='symbolic-ref'){replace=false;await fs.rename(worktree,worktree+'-prior');await fs.mkdir(worktree);}});
+  await assert.rejects(r.driver.resolveLegacyWorktree('E2E-WS','nova',signal));
+  const before=r.runs.length;await assert.rejects(r.driver.resolveLegacyWorktree('foreign','nova',signal));assert.equal(r.runs.length,before);
+  await r.lifecycle.release(a.lease.id,r.request.runId);
  }finally{await r.cleanup();}
 });
 

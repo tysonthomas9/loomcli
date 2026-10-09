@@ -21,6 +21,14 @@ export interface WorkspaceRecordPorts {
 export class HostWorkspaceRecords {
  private readonly created=new Map<string,{workspaceId:string;repo:string;commonDir:string;store:WorkspaceStoreIdentity}>();
  constructor(private readonly ports:WorkspaceRecordPorts){}
+ async workspace(workspaceId:string,signal:AbortSignal){
+  const record=this.created.get(workspaceId);check(record);await this.requireStore(record!.store,signal);
+  const response=await this.ports.read(workspaceId,'workspace',signal);check(response.status===200);
+  const actual=Envelope.parse(response.body).data;
+  check(actual.id===workspaceId&&actual.repos.length===1&&actual.repos[0]!.path===record!.repo&&
+   await this.ports.commonDir(record!.repo,signal)===record!.commonDir);
+  await this.requireStore(record!.store,signal);return record!;
+ }
  private async requireStore(expected:WorkspaceStoreIdentity,signal:AbortSignal){
   signal.throwIfAborted();const actual=await this.ports.store(signal);
   check(actual.storeId===expected.storeId&&actual.storeGeneration===expected.storeGeneration);return actual;
@@ -51,7 +59,7 @@ export class HostWorkspaceRecords {
   return createOwnedWorkspaceRoster(owner,records,store);
  }
  async legacyAgent(owner:FixtureAuthorityOwner,workspaceId:string,name:string,signal:AbortSignal){
-  const record=this.created.get(workspaceId);check(record);await this.requireStore(record!.store,signal);
+  const record=await this.workspace(workspaceId,signal);
   const read=await this.ports.read(workspaceId,'legacy-agents',signal);check(read.status===200);
   const list=z.object({success:z.literal(true),data:z.array(Agent).max(1000),total:z.number().int().nonnegative()}).passthrough().parse(read.body);
   check(list.total===list.data.length&&list.data.every(row=>row.workspace_key===workspaceId));
