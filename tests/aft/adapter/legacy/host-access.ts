@@ -162,6 +162,16 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
           issues: issues.map(row => ({ workspaceId: record.workspaceId, id: row.id })) });
       }
       const serve = driver.processesById.get('serve'); requireOwned(serve);
+      // Only the runtime operation admits the fixed Git/kernel discovery
+      // effects. These are registered builtin targets, not a complete process
+      // inventory or evidence that omitted target kinds are absent.
+      const workers = operation === 'loom.runtime.stimulate' && driver.processesById.has('daemon')
+        ? await driver.refreshOwnedProductProcesses(signal) : [];
+      requireOwned(workers.length <= 1000 && new Set(workers.map(row => row.id)).size === workers.length);
+      for (const worker of workers) requireOwned(worker.identityKind === 'legacy-agent-name' &&
+        records!.some(record => record.workspaceId === worker.workspaceId) &&
+        metadata.some(record => record.agents.some(agent => agent.workspaceId === worker.workspaceId && agent.name === worker.agentId)));
+      await driver.inspectOwnedProcess('serve', serve!.generation, signal);
       const fixtures: string[] = fixture.profile === 'legacy-deterministic' ? ['provider-default'] : [];
       for (const target of ['fake-model', 'fake-github'] as const) {
         if (driver.processesById.has(target)) {
@@ -172,7 +182,9 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
         secrets: fixture.secrets, binary: cli.binary, cwd: cli.cwd, env: cli.env, workspaces: records!.map(row => row.workspaceId),
         agents: metadata.flatMap(row => row.agents), roles: metadata.flatMap(row => row.roles),
         issues: metadata.flatMap(row => row.issues), repos: metadata.flatMap(row => row.repos),
-        processes: [{ id: 'serve', kind: 'serve', generation: serve!.generation, workspaceId: null, agentName: null, sessionName: null }],
+        processes: [{ id: 'serve', kind: 'serve', generation: serve!.generation, workspaceId: null, agentName: null, sessionName: null },
+          ...workers.map(row => ({ id: row.id, kind: row.kind, generation: row.generation,
+            workspaceId: row.workspaceId, agentName: row.agentId, sessionName: row.sessionName, serveGeneration: serve!.generation }))],
         fixtures };
       return { ...structuredClone(cached), evidence };
     },
@@ -244,6 +256,19 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
     async registerProcess(id, result, signal) { await verify(id, signal); await driver.inspectOwnedProcess(result.processId, result.generation, signal); },
     async stimulate(id, process, operation, request, signal) {
       await verify(id, signal);
+      if (operation === 'worker-stop') {
+        getFixtureOperationAuthority(fixture, 'loom.runtime.stimulate', LegacyOperationEffects['loom.runtime.stimulate']);
+        requireOwned(cached && process.kind === 'worker' && process.workspaceId !== null && process.agentName !== null && process.serveGeneration);
+        const target = cached!.processes.filter(row => row.id === process.id);
+        requireOwned(target.length === 1 && isDeepStrictEqual(target[0], process));
+        requireOwned(request?.method === 'POST' && request.body === null && request.path ===
+          `/api/workspaces/${encodeURIComponent(process.workspaceId!)}/agents/${encodeURIComponent(process.agentName!)}/stop`);
+        const serves = cached!.processes.filter(row => row.id === 'serve' && row.kind === 'serve');
+        requireOwned(serves.length === 1 && serves[0]!.generation === process.serveGeneration);
+        await enrollOwnedLegacyAgent(fixture, process.workspaceId!, process.agentName!, signal, evidenceStore);
+        const stopped = await driver.stopRegisteredWorker(process.id, process.generation, process.serveGeneration!, signal);
+        return { transition: stopped.transition, response: HttpResponse.parse(stopped.response) };
+      }
       if (operation !== 'serve-restart' || process.id !== 'serve' || process.kind !== 'serve' || request !== null) return unsupported();
       getFixtureOperationAuthority(fixture, 'loom.runtime.stimulate', [...LegacyOperationEffects['loom.runtime.stimulate'], 'restart-owned-service']);
       const transition = await driver.restartOwnedProcess(process.id, process.generation, signal);
