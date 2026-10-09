@@ -1,0 +1,236 @@
+import { randomUUID, createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import { constants } from 'node:fs';
+import path from 'node:path';
+import { FixtureError, type Artifact, type FixtureDriver, type FixturePlan, type Inventory, type Resource } from './lifecycle.js';
+import { ComposeFixtureDriver, type ProductionConfig } from './production.js';
+import { nodeProcesses, reservePort, type PortReservation, type HostProcesses, type OwnedProcess, type HostCommand } from './process.js';
+
+const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
+const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
+export const legacyProfiles = ['legacy-deterministic', 'legacy-real-codex', 'legacy-real-claude', 'legacy-real-cursor', 'legacy-real-opencode'] as const;
+export interface HostConfig extends ProductionConfig {
+  loomBinary: string; fleetBinary: string; nodeBinary: string; gitBinary: string;
+  pinnedOpenCodeBinary: string;
+  // Paths and provider auth roots are pinned by the reviewed launcher, not YAML.
+  realBinaries: Partial<Record<'codex' | 'claude' | 'cursor' | 'opencode', { executable: string; sha256: string; authRoot: string }>>;
+  daemon: boolean; fakeGitHub: boolean; maxBudgetUsd: string;
+}
+export type Http = (origin: string, method: 'GET' | 'POST', relative: string, body: unknown, signal: AbortSignal) => Promise<{ status: number; body: unknown }>;
+export const readHttp: Http = async (origin, method, relative, body, signal) => {
+  check(relative.startsWith('/api/') && !relative.startsWith('//') && !relative.includes('\\'));
+  const response = await fetch(new URL(relative, origin), { method, signal, redirect: 'error',
+    ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+  const text = await response.text(); check(Buffer.byteLength(text) <= 4 * 1024 * 1024, 'observation-failed');
+  return { status: response.status, body: text ? JSON.parse(text) : null };
+};
+
+export class HostFixtureDriver implements FixtureDriver {
+  private root = '';
+  private profile = '';
+  private leaseId = '';
+  private readonly stamps = new Map<string, { dev: number; ino: number }>();
+  private readonly handles = new Map<string, OwnedProcess>();
+  private readonly commands = new Map<string, { command: HostCommand; readiness: string }>();
+  private sockets: PortReservation[] = [];
+  private ports: number[] = [];
+  private lock?: { path: string; contents: string };
+  private backend = '';
+  private plan?: FixturePlan;
+  private readonly config: HostConfig;
+  constructor(config: HostConfig, private readonly processes: HostProcesses = nodeProcesses,
+    private readonly files: typeof fs = fs, private readonly http: Http = readHttp,
+    private readonly uuid: () => string = randomUUID, private readonly reserve: () => Promise<PortReservation> = reservePort) { this.config = structuredClone(config); }
+  get runtimeRoot() { return this.root; }
+  get workspaceRoot() { return path.join(this.root, 'runtime', 'e2e-workspace'); }
+  get processesById(): ReadonlyMap<string, OwnedProcess> { return this.handles; }
+  private env(): Record<string, string> {
+    const c = this.config; const runtime = path.join(this.root, 'runtime');
+    const configRoot = path.join(this.workspaceRoot, '.loom-config');
+    const backendConfig = c.realBinaries[this.backend as keyof HostConfig['realBinaries']];
+    const real = this.profile !== 'legacy-deterministic';
+    const farm = real ? `stubs-real-${this.backend}` : 'stubs';
+    return { HOME: real ? c.hostHome : path.join(runtime, 'home'),
+      PATH: `${path.join(runtime, 'bin')}:${path.join(c.loom.source.root, 'e2e', farm)}:${c.toolPath}`,
+      LOOM_CONFIG_DIR: configRoot, LOOM_DISABLE_H2C: '1', LOOM_ISSUE_BACKEND: 'fleetdb', LOOM_FLEET_DB_ACTOR: 'loom-e2e',
+      FLEET_DB_BIN: c.fleetBinary, FLEET_RATE_LIMIT_ENABLED: 'false', FLEET_REDIS_POOL_SIZE: '200', FLEET_REDIS_MIN_IDLE_CONNS: '10',
+      LOOM_SDK_ROOT: path.join(c.loom.source.root, 'sdk'), LOOM_LEAD_CONTROLLED: '1',
+      LOOM_FRONTEND_DIR: path.join(c.loom.source.root, 'internal', 'webui', 'frontend', 'dist'),
+      LOOM_MAX_BUDGET_USD: c.maxBudgetUsd, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false',
+      GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
+      GIT_CONFIG_KEY_1: 'protocol.allow', GIT_CONFIG_VALUE_1: 'never',
+      GIT_CONFIG_KEY_2: 'protocol.file.allow', GIT_CONFIG_VALUE_2: 'always',
+      ...(real ? {
+        ...(this.backend === 'codex' ? { CODEX_HOME: backendConfig!.authRoot } : { CODEX_HOME: path.join(runtime, 'empty-auth', 'codex') }),
+        ...(this.backend === 'claude' ? { CLAUDE_CONFIG_DIR: backendConfig!.authRoot } : { CLAUDE_CONFIG_DIR: path.join(runtime, 'empty-auth', 'claude') }),
+      } : { OPENAI_API_KEY: 'stub-e2e', CODEX_HOME: path.join(runtime, 'empty-auth', 'codex'), CLAUDE_CONFIG_DIR: path.join(runtime, 'empty-auth', 'claude'),
+        LOOM_OPENCODE_BIN: c.pinnedOpenCodeBinary, OPENCODE_DISABLE_MODELS_FETCH: '1', LOOM_AGENT_HISTORY_RETENTION: '60s',
+        XDG_CONFIG_HOME: path.join(configRoot, 'agents-opencode', 'config'), XDG_DATA_HOME: path.join(configRoot, 'agents-opencode', 'data'),
+        XDG_STATE_HOME: path.join(configRoot, 'agents-opencode', 'state'), XDG_CACHE_HOME: path.join(configRoot, 'agents-opencode', 'cache') }),
+      ...(this.profile === 'legacy-real-opencode' ? { LOOM_OPENCODE_BIN: backendConfig!.executable } : {}),
+      ...(this.config.fakeGitHub ? { LOOM_CONNECTOR_GITHUB_BASE_URL: `http://127.0.0.1:${this.ports[4]}` } : {}),
+    };
+  }
+  async identity(plan: FixturePlan) {
+    const driver = new ComposeFixtureDriver(this.config, async request => this.processes.run({ executable: request.binary === 'git' ? this.config.gitBinary : request.binary,
+      argv: request.args, cwd: request.cwd, env: request.env }, request.signal));
+    return driver.identity(plan);
+  }
+  async preflight(plan: FixturePlan, signal: AbortSignal): Promise<void> {
+    check(legacyProfiles.includes(plan.profile as typeof legacyProfiles[number]), 'unsupported-capability');
+    this.plan = structuredClone(plan); this.profile = plan.profile;
+    this.backend = plan.profile.replace('legacy-real-', '');
+    check(this.profile === 'legacy-deterministic' ? plan.model === 'aft/m' : /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(plan.model) && !plan.model.startsWith('aft/'), 'identity-mismatch');
+    for (const directory of [this.config.tempParent, this.config.lockParent, this.config.hostHome]) {
+      check(await this.files.realpath(directory) === directory && (await this.files.lstat(directory)).isDirectory());
+    }
+    check(await this.identity(plan), 'source-mismatch');
+    for (const binary of [this.config.loomBinary, this.config.fleetBinary, this.config.nodeBinary, this.config.gitBinary]) {
+      check(path.isAbsolute(binary) && await this.files.realpath(binary) === binary && (await this.files.lstat(binary)).isFile(), 'source-mismatch');
+      await this.files.access(binary, constants.X_OK);
+      check([this.config.loom, this.config.fleet, this.config.engine, this.config.adapter].some(build =>
+        build.build.entries.some(entry => path.join(build.build.root, entry.relativePath) === binary)), 'source-mismatch');
+    }
+    const real = this.profile !== 'legacy-deterministic';
+    const farm = path.join(this.config.loom.source.root, 'e2e', real ? `stubs-real-${this.backend}` : 'stubs');
+    const selected = this.backend === 'cursor' ? 'cursor-agent' : this.backend;
+    const realConfig = this.config.realBinaries[this.backend as keyof HostConfig['realBinaries']];
+    for (const tool of ['codex', 'claude', 'cursor-agent', 'opencode', 'gemini', 'gh']) {
+      if (real && tool === selected) continue;
+      const filename = path.join(farm, tool); await this.files.access(filename, constants.X_OK);
+      check((await this.files.realpath(filename)).startsWith(farm + path.sep), 'identity-mismatch');
+    }
+    if (real) {
+      check(realConfig && path.isAbsolute(realConfig.executable) && await this.files.realpath(realConfig.executable) === realConfig.executable &&
+        !realConfig.executable.startsWith(path.join(this.config.loom.source.root, 'e2e', 'stubs')), 'identity-mismatch');
+      check(hash(await this.files.readFile(realConfig!.executable)) === realConfig!.sha256, 'source-mismatch');
+      check([this.config.loom, this.config.fleet, this.config.engine, this.config.adapter].some(build =>
+        build.build.entries.some(entry => path.join(build.build.root, entry.relativePath) === realConfig!.executable && entry.sha256 === realConfig!.sha256)), 'source-mismatch');
+      if (this.backend === 'codex' || this.backend === 'claude') {
+        const auth = path.join(realConfig!.authRoot, this.backend === 'codex' ? 'auth.json' : '.credentials.json');
+        check((await this.files.lstat(auth)).isFile() && !(await this.files.lstat(auth)).isSymbolicLink(), 'identity-mismatch');
+      }
+      if (this.backend === 'cursor') await this.processes.run({ executable: realConfig!.executable, argv: ['status'], cwd: this.config.loom.source.root,
+        env: { PATH: this.config.toolPath, HOME: this.config.hostHome } }, signal);
+    } else {
+      check(await this.files.realpath(this.config.pinnedOpenCodeBinary) === this.config.pinnedOpenCodeBinary, 'source-mismatch');
+      // Must be an attested output, not a merely present binary.
+      check(this.config.loom.build.entries.some(entry => path.join(this.config.loom.build.root, entry.relativePath) === this.config.pinnedOpenCodeBinary), 'source-mismatch');
+    }
+    const storage = await this.files.statfs(this.config.tempParent);
+    check(storage.bavail * storage.bsize >= this.config.minimumFreeBytes, 'observation-failed');
+  }
+  private async stamp(filename: string) {
+    const stat = await this.files.lstat(filename); check(!stat.isSymbolicLink());
+    this.stamps.set(filename, { dev: stat.dev, ino: stat.ino }); return `${stat.dev}:${stat.ino}`;
+  }
+  async allocate(leaseId: string, _runId: string, record: (resource: Resource) => void) {
+    this.leaseId = leaseId;
+    this.root = await this.files.mkdtemp(path.join(this.config.tempParent, 'loom-aft-host-'));
+    record({ id: this.root, kind: 'directory', generation: await this.stamp(this.root) });
+    await this.files.chmod(this.root, 0o700);
+    for (const relative of ['evidence', 'runtime', 'runtime/bin', 'runtime/home', 'runtime/empty-auth/codex', 'runtime/empty-auth/claude',
+      'runtime/e2e-workspace/.loom-config', 'runtime/e2e-workspace-2', 'runtime/e2e-workspace/.loom-config/agents-opencode/config/opencode']) {
+      const directory = path.join(this.root, relative); await this.files.mkdir(directory, { recursive: true, mode: 0o700 }); await this.stamp(directory);
+    }
+    if (this.profile !== 'legacy-deterministic') {
+      const filename = path.join(this.config.lockParent, `aft-live.${this.backend}.lock`);
+      const handle = await this.files.open(filename, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+      this.lock = { path: filename, contents: this.uuid() };
+      record({ id: filename, kind: 'lock', generation: await this.stamp(filename) });
+      try { await handle.writeFile(this.lock.contents); } finally { await handle.close(); }
+      const real = this.config.realBinaries[this.backend as keyof HostConfig['realBinaries']]!;
+      await this.files.symlink(real.executable, path.join(this.root, 'runtime', 'bin', this.backend === 'cursor' ? 'cursor-agent' : this.backend));
+    }
+    // API, frontend, fake-model, OpenCode service, and optional GitHub fixture.
+    for (let index = 0; index < 5; index++) {
+      const socket = await this.reserve(); this.sockets.push(socket); this.ports.push(socket.port);
+      if (index === 0) record({ id: `ports:${leaseId}`, kind: 'ports', generation: leaseId });
+    }
+  }
+  private async closeSockets() {
+    for (const socket of this.sockets) await socket.release();
+    this.sockets = [];
+  }
+  private async seed(repo: string, signal: AbortSignal) {
+    const command = (argv: string[]) => this.processes.run({ executable: this.config.gitBinary, argv, cwd: repo, env: { PATH: this.config.toolPath,
+      HOME: path.join(this.root, 'runtime', 'home'), GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' } }, signal);
+    await command(['init', '-q']);
+    await command(['-c', 'user.name=Loom E2E', '-c', 'user.email=loom-e2e@example.test', 'commit', '--allow-empty', '-m', 'e2e seed', '-q']);
+  }
+  private async start(id: string, command: HostCommand, readiness: string, record: (resource: Resource) => void, signal: AbortSignal) {
+    const handle = this.processes.start(command, readiness); this.handles.set(id, handle); this.commands.set(id, { command, readiness });
+    // Registration happens before awaiting readiness, including failed launches.
+    record({ id, kind: 'process', generation: handle.generation });
+    await handle.ready(signal); check(handle.pid > 0 && handle.state() === 'running', 'observation-failed');
+  }
+  async provision(_plan: FixturePlan, record: (resource: Resource) => void, signal: AbortSignal) {
+    await this.seed(this.workspaceRoot, signal);
+    const second = path.join(this.root, 'runtime', 'e2e-workspace-2'); await this.seed(second, signal);
+    if (this.profile === 'legacy-deterministic') {
+      const config = path.join(this.workspaceRoot, '.loom-config', 'agents-opencode', 'config', 'opencode');
+      await this.files.writeFile(path.join(config, 'service.json'), JSON.stringify({ port: this.ports[3] }), { flag: 'wx', mode: 0o600 });
+      await this.files.writeFile(path.join(config, 'opencode.json'), JSON.stringify({ provider: { aft: { name: 'AFT fake', npm: '@ai-sdk/openai-compatible',
+        options: { baseURL: `http://127.0.0.1:${this.ports[2]}/v1`, apiKey: 'x' }, models: { m: { name: 'M', limit: { context: 100000, output: 4000 } } } } }, model: 'aft/m' }), { flag: 'wx', mode: 0o600 });
+    }
+    await this.closeSockets();
+    if (this.profile === 'legacy-deterministic') await this.start('fake-model', { executable: this.config.nodeBinary,
+      argv: [path.join(this.config.loom.source.root, 'tests', 'aft', 'fixtures', 'fake-model', 'server.mjs')], cwd: this.root,
+      env: { PATH: this.config.toolPath, HOME: path.join(this.root, 'runtime', 'home'), FAKE_MODEL_PORT: String(this.ports[2]) } },
+    'fake-model listening', record, signal);
+    if (this.config.fakeGitHub) await this.start('fake-github', { executable: this.config.nodeBinary,
+      argv: [path.join(this.config.loom.source.root, 'tests', 'aft', 'fixtures', 'fake-github', 'server.mjs')], cwd: this.root,
+      env: { PATH: this.config.toolPath, HOME: path.join(this.root, 'runtime', 'home'), FAKE_GH_PORT: String(this.ports[4]) } },
+    'fake-github listening', record, signal);
+    const apiOrigin = `http://127.0.0.1:${this.ports[0]}`; const filesOrigin = `http://127.0.0.1:${this.ports[1]}`;
+    await this.start('serve', { executable: this.config.loomBinary,
+      argv: ['serve', '--bind', '127.0.0.1', '--port', String(this.ports[0]), '--frontend-url', filesOrigin, '--frontend-url', `http://localhost:${this.ports[1]}`],
+      cwd: this.workspaceRoot, env: this.env() }, `Server starting on 127.0.0.1:${this.ports[0]}`, record, signal);
+    check((await this.http(apiOrigin, 'GET', '/api/config', null, signal)).status === 200, 'observation-failed');
+    for (const [name, repo] of [['e2e-ws-2', second], ['e2e-ws', this.workspaceRoot]] as const) {
+      const created = await this.http(apiOrigin, 'POST', '/api/workspaces', { name, type: 'empty', repos: [repo] }, signal);
+      check(created.status === 200 || created.status === 201, 'identity-mismatch');
+    }
+    const workspaces = await this.http(apiOrigin, 'GET', '/api/workspaces/E2E-WS', null, signal);
+    const data = (workspaces.body as { data?: { id: string; repos: { path: string }[] } }).data;
+    check(workspaces.status === 200 && data?.id === 'E2E-WS' && data.repos.some(repo => repo.path === this.workspaceRoot), 'identity-mismatch');
+    const frontend = path.join(this.config.loom.source.root, 'internal', 'webui', 'frontend');
+    await this.start('frontend', { executable: this.config.nodeBinary,
+      argv: [path.join(frontend, 'node_modules', 'vite', 'bin', 'vite.js'), 'preview', '--port', String(this.ports[1]), '--strictPort', '--host', '127.0.0.1'],
+      cwd: frontend, env: { PATH: this.config.toolPath, HOME: path.join(this.root, 'runtime', 'home'), E2E_API_URL: apiOrigin } },
+    `http://127.0.0.1:${this.ports[1]}`, record, signal);
+    check((await this.http(filesOrigin, 'GET', '/api/config', null, signal)).status === 200, 'observation-failed');
+    if (this.config.daemon) await this.start('daemon', { executable: this.config.loomBinary, argv: ['daemon'], cwd: this.workspaceRoot,
+      env: { ...this.env(), LOOM_WORKSPACE: 'E2E-WS', LOOM_SERVER_URL: apiOrigin, LOOM_FLEET_DB_ACTOR: 'loom-aft-daemon' } },
+    'Loom Agent Supervisor', record, signal);
+    return { apiOrigin, filesOrigin, workspaceId: 'E2E-WS', repo: this.workspaceRoot };
+  }
+  async inspect(resource: Resource): Promise<Inventory> {
+    if (resource.kind === 'process') {
+      const handle = this.handles.get(resource.id); check(handle && handle.generation === resource.generation);
+      return { complete: true, owned: true, services: [{ id: resource.id, pid: handle!.pid, generation: handle!.generation, state: handle!.state() }] };
+    }
+    if (resource.kind === 'ports') return { complete: true, owned: resource.generation === this.leaseId && this.ports.length > 0, services: [] };
+    const stamp = this.stamps.get(resource.id); const stat = await this.files.lstat(resource.id);
+    check(stamp && !stat.isSymbolicLink() && stamp.dev === stat.dev && stamp.ino === stat.ino && resource.generation === `${stat.dev}:${stat.ino}`);
+    if (resource.kind === 'lock') check(resource.id === this.lock?.path && await this.files.readFile(resource.id, 'utf8') === this.lock.contents);
+    return { complete: true, owned: true, services: [] };
+  }
+  async remove(resource: Resource) {
+    await this.inspect(resource);
+    if (resource.kind === 'process') { await this.handles.get(resource.id)!.stop(); return; }
+    if (resource.kind === 'ports') { await this.closeSockets(); return; }
+    if (resource.kind === 'lock') { await this.files.unlink(resource.id); return; }
+    check([...this.handles.values()].every(handle => handle.state() === 'exited'));
+    const runtime = path.join(this.root, 'runtime'); const stamp = this.stamps.get(runtime); const stat = await this.files.lstat(runtime);
+    check(stamp && !stat.isSymbolicLink() && stat.dev === stamp.dev && stat.ino === stamp.ino);
+    await this.files.rm(runtime, { recursive: true });
+  }
+  async artifact(kind: 'acquire' | 'release' | 'observe' | 'failure', value: unknown): Promise<Artifact> {
+    const directory = path.join(this.root, 'evidence'); const stamp = this.stamps.get(directory); const stat = await this.files.lstat(directory);
+    check(stamp && !stat.isSymbolicLink() && stat.dev === stamp.dev && stat.ino === stamp.ino && await this.files.realpath(directory) === directory);
+    const bytes = Buffer.from(JSON.stringify({ kind, value })); const id = path.join(directory, `${kind}-${this.uuid()}.json`);
+    await this.files.writeFile(id, bytes, { mode: 0o600, flag: 'wx' });
+    return { id, bytes: bytes.length, sha256: hash(bytes), mediaType: 'application/json', redaction: 'sanitized' };
+  }
+}
