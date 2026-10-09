@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "213fd51d8b1be1887fc29fd250022caf9da8149799c5ee83d51e62dfbf5d5f8d"
+        "sha256": "c076cf962d6d30fb233e41c005b1b571c5d02d8b752edf890495799a5f3aeec2"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -937,7 +937,7 @@
       "conservativeReachableCandidates": 467,
       "helperSelftestOrNegativeRecords": 213,
       "unrelatedBranchesOrCases": 392,
-      "exactReachablePredicateDenominator": "Stop40/Files24 and Child32 binding/inventory/ref/teardown frozen subset individually selected; child remaining126+6external guards, other pilots and35 extra source guard groups/imports remain uncovered."
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child57 frozen subsets individually selected; remaining Child101+6external guards, other pilots and43 extra source guard/selection groups/imports remain uncovered."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -1601,5 +1601,16 @@
       "fallbackProof": "Three helper bytes equal committed preservation SHA and exact original56bb Git blobs; original index not recreated",
       "parentNotified": true
     }
+  },
+  "childCompletionSelectedBranchReview": {
+    "at": "2026-10-09T11:33:26.860612+00:00",
+    "frozenHelperByteMatch": true,
+    "selectedInventoryPredicatesNarrowed": 25,
+    "additionalSourceSelectionGroupsUncovered": 8,
+    "remainingChildUnresolvedPythonPredicates": 101,
+    "externalRefGuardsUnresolved": 6,
+    "globalConservativeReachableCandidates": 467,
+    "globalFrozenInventory": 1072,
+    "newYamlOrPreservationCredit": false
   }
 }
