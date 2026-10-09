@@ -344,7 +344,7 @@
       "assert native finish/error explicit facts; original truthy-completion first-record selection remains unresolved"
     ],
     "acceptedRawGate": "Actual latest raw bytes rejected for all5 by accepted e8+approved77ba registry beforeeffects; updated fact-leaf coherent core consumption/public runner still unvalidated.",
-    "developmentRawGate": "Prior phase2 raw receipt likewise historical for previous Stop bytes; no accepted engine pin change.",
+    "developmentRawGate": "Latest unchanged Stop and other four files rejected by committed unaccepted696 raw loader/registry; previous uncommitted phase2 receipt retained separately/historical.",
     "runtimeExecuted": 0,
     "individualStepSchemaCount": 683,
     "rawAttemptAt": "2026-10-09T09:29:06.112Z"
@@ -388,5 +388,72 @@
     "skippedSuiteCount": 5,
     "rawSuiteAcceptance": false,
     "currentStopBytesMatch": false
+  },
+  "committedDevelopment696Diagnostic": {
+    "status": "committed-development-candidate-unaccepted",
+    "engineHead": "696f8f12fb83c9dd1ecedb68208a69e7d6626331",
+    "at": "2026-10-09T09:32:23.839Z",
+    "enginePackageSha256": "07d22be5b4b2724a9ed35cfe14849d0b26cef106a39b167287d99508b66ad2a3",
+    "acceptedBaseline": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+    "adapterSource": "77ba247c0f85b86dd70c02651e2fed4b86127eb0",
+    "adapterImplementationSha256": "95c40afb9f6d8fb6c5254a66ae7fd05a47c398eb345d729eb547f96c5223357e",
+    "files": [
+      {
+        "file": "bare-stop.test.yaml",
+        "sha256": "b5cb1efdce6cff0bc0b46692542ac05f6e19de9bf6c56d16f555e7874897e467",
+        "status": "rejected-development-only",
+        "errors": [
+          "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"selectionSha256\"\n    ]\n  }\n]"
+        ]
+      },
+      {
+        "file": "child-repeat.test.yaml",
+        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112",
+        "status": "rejected-development-only",
+        "errors": [
+          "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"selectionSha256\"\n    ]\n  }\n]"
+        ]
+      },
+      {
+        "file": "files-save-reload.test.yaml",
+        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954",
+        "status": "rejected-development-only",
+        "errors": [
+          "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"selectionSha256\"\n    ]\n  }\n]"
+        ]
+      },
+      {
+        "file": "sse-cursor.test.yaml",
+        "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea",
+        "status": "rejected-development-only",
+        "errors": [
+          "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"selectionSha256\"\n    ]\n  }\n]"
+        ]
+      },
+      {
+        "file": "stream-render-clock.test.yaml",
+        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d",
+        "status": "rejected-development-only",
+        "errors": [
+          "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"sourceManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"buildManifestSha256\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"selectionSha256\"\n    ]\n  }\n]"
+        ]
+      }
+    ],
+    "effects": 0,
+    "runtimeExecuted": 0,
+    "acceptance": false,
+    "finishedAt": "2026-10-09T09:32:59.453Z",
+    "engineEmittedFilesCompared": 110,
+    "engineEmittedMismatches": 0,
+    "reviewState": "UNACCEPTED: parent review reports authority transplant, conflicting bind identity replacement, hook replacement and source frame omission; corrections pending.",
+    "scope": "Exact committed candidate raw loader/registry diagnostic, task-owned dependencies, actual unchanged YAML, approved baseline77ba emitted adapter; no source overlays/materialization, no new fact-leaf integration or runtime evidence.",
+    "acceptedRuntimePin": "e8eee6bb6d8d5d2c8e65bae36154732a74742212"
+  },
+  "coherentIntegrationCheck": {
+    "candidateCore": "0a184c105fdb66ec3ffde7758f8eb1b1d3721da6",
+    "native586Ancestor": true,
+    "fixture341Ancestor": false,
+    "method": "git merge-base --is-ancestor each approved leaf against core milestone",
+    "result": "Not used for new fact-leaf validation: requires coherent integrated SHA containing341 as well."
   }
 }
