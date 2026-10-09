@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdtemp, rm, readFile, readdir, lstat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
+import { CapabilityRegistry, createCapabilityContext, getRegisteredResource, calculateImplementationPin, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { createEvidenceStore, putEvidenceStore } from '../evidence.js';
 import { getFixture, fixturesKey, disposeFixtures } from '../ownership.js';
 import { createFixtureProviders, type FixtureProviderOptions } from './providers.js';
@@ -57,6 +57,8 @@ test('fixture operations use the canonical store and retained output receipt wit
   const fixture = await getFixture(r.context, id);
   assert.equal(fixture.leaseId, id); assert.equal(r.context.resources.get(`${fixturesKey}:${id}`), fixture);
   assert.equal(JSON.stringify(result).includes('ownerToken'), false);
+  assert.equal((result.data as { syntheticProbeHandle: string }).syntheticProbeHandle, fixture.syntheticProbe?.handle);
+  assert.equal(JSON.stringify(result).includes(fixture.syntheticProbe!.value), false);
   const retained = await r.store.resolve(result.provenance.artifacts[0]!.id);
   assert.deepEqual(JSON.parse(await readFile(retained, 'utf8')), result.data);
   const observed = await r.invoke('loom.fixture.observe', { leaseId: id }); assert.equal(observed.availability, 'observed');
@@ -76,10 +78,15 @@ test('wrong run, source, model and selection identity never allocate a driver', 
   assert.equal(r.driverCalls, 0);
 });
 test('suite fixture is shared only through declared handles and cannot be released by a child case', async t => {
-  const r = await setup(t); const suite = { ...r.context, scope: 'suite' as const };
+  const r = await setup(t); const suite = r.context; suite.scope = 'suite';
   const id = leaseId(await r.invoke('loom.fixture.acquire', r.input, suite));
-  const child = (handles: string[]) => ({ ...r.context, caseId: 'child', resources: new Map<string, unknown>(),
-    suite: { id: suite.suiteId, handles, getResource(key: string) { return suite.resources.get(key); } } });
+  const child = (handles: string[]) => {
+    const context = createCapabilityContext(r.context.source, r.registry, r.context.runId as `${string}-${string}-${string}-${string}-${string}`);
+    context.suiteId = suite.suiteId;
+    context.suite = { id: suite.suiteId, handles, getResource(key, handle) {
+      assert.ok(handles.includes(handle)); return getRegisteredResource(suite, key, handle);
+    } }; return context;
+  };
   const one = child([id]); assert.equal((await r.invoke('loom.fixture.observe', { leaseId: id }, one)).availability, 'observed');
   assert.equal((await r.invoke('loom.fixture.observe', { leaseId: id }, child([]))).availability, 'error');
   assert.equal((await r.invoke('loom.fixture.release', { leaseId: id }, one)).availability, 'error');
