@@ -5,6 +5,9 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { FixtureError, type Artifact, type FixtureDriver, type FixturePlan, type Inventory, type Resource, type Revision } from './lifecycle.js';
 import { reservePort, type PortReservation } from './process.js';
+import type { ContainerRead } from './container-read.js';
+import { readHttp, type Http } from './host.js';
+import { Json } from '../protocol.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
@@ -99,12 +102,28 @@ export class ComposeFixtureDriver implements FixtureDriver {
   private plan?: FixturePlan;
   private images = { loom: '', fleet: '' };
   private readonly config: ProductionConfig;
+  private readonly cleanups: (() => Promise<void>)[] = [];
   constructor(config: ProductionConfig, private readonly run: ProcessRunner = runProcess,
     private readonly files: typeof fs = fs, private readonly uuid: () => string = randomUUID,
     private readonly reserve: () => Promise<PortReservation> = reservePort,
-    private readonly http: ComposeRead = fetchRead) { this.config = structuredClone(config); }
+    private readonly http: ComposeRead = fetchRead, private readonly requestHttp: Http = readHttp) { this.config = structuredClone(config); }
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return '/root/.loom/workspaces/LOCALMODE'; }
+  enrollCleanup(cleanup: () => Promise<void>) { check(this.root); this.cleanups.push(cleanup); }
+  async readOwnedConfiguration(target: 'opencode' | 'emu-scenarios', signal: AbortSignal) {
+    return this.nativeRead({ operation: 'configuration-read', target }, signal) as Promise<{ bytes: string | null; complete: true }>;
+  }
+  async writeOwnedConfiguration(target: 'opencode' | 'emu-scenarios', bytes: string | null, signal: AbortSignal) {
+    check(bytes === null || Buffer.byteLength(bytes) <= 65536);
+    await this.nativeRead({ operation: 'configuration-write', target, bytes }, signal);
+  }
+  async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relativePath: string, body: unknown, signal: AbortSignal) {
+    signal.throwIfAborted(); check(this.ports.length === 3);
+    check(target !== 'fake-github', 'unsupported-capability');
+    if (target === 'fake-model') return this.nativeRead({ operation: 'fixture-http', method, relativePath, body: Json.parse(body) }, signal) as Promise<{ status: number; body: unknown }>;
+    check(relativePath.startsWith('/api/'));
+    return this.requestHttp(`http://127.0.0.1:${this.ports[1]}`, method, relativePath, body, signal);
+  }
   private env(): Record<string, string> {
     const c = this.config;
     return { PATH: c.toolPath, HOME: c.hostHome, CONTAINER_CONNECTION: c.connection,
@@ -291,8 +310,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
     check(relative.startsWith('/api/') && !relative.startsWith('//') && !relative.includes('\\'));
     return this.http(origin, relative, signal);
   }
-  async nativeRead(request: { operation: 'agent' | 'sessions' | 'registration' | 'process' | 'read' | 'git-common-dir';
-    agentId?: string; route?: string }, signal: AbortSignal): Promise<unknown> {
+  async nativeRead(request: ContainerRead, signal: AbortSignal): Promise<unknown> {
     await this.inspect({ id: this.project, kind: 'compose', generation: this.leaseId });
     signal.throwIfAborted();
     const container = this.objects.filter(object => object.kind === 'container' && object.service === 'loom-local');
@@ -318,6 +336,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   }
   async remove(resource: Resource): Promise<void> {
     await this.inspect(resource);
+    while (this.cleanups.length) { await this.cleanups[this.cleanups.length - 1]!(); this.cleanups.pop(); }
     if (resource.kind === 'compose') {
       await this.command('podman', [...this.composeArgs(), 'down', '-v', '--remove-orphans']);
       check((await this.inventory()).length === 0);

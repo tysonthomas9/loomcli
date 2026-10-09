@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import { FixtureError, type Artifact, type FixtureDriver, type FixturePlan, type Inventory, type Resource } from './lifecycle.js';
 import { ComposeFixtureDriver, type ProductionConfig } from './production.js';
-import { nodeProcesses, reservePort, type PortReservation, type HostProcesses, type OwnedProcess, type HostCommand } from './process.js';
+import { nodeProcesses, reservePort, type PortReservation, type HostProcesses, type OwnedProcess, type HostCommand, type CliCompletion } from './process.js';
 
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -16,11 +16,11 @@ export interface HostConfig extends ProductionConfig {
   realBinaries: Partial<Record<'codex' | 'claude' | 'cursor' | 'opencode', { executable: string; sha256: string; authRoot: string }>>;
   daemon: boolean; fakeGitHub: boolean; maxBudgetUsd: string;
 }
-export type Http = (origin: string, method: 'GET' | 'POST', relative: string, body: unknown, signal: AbortSignal) => Promise<{ status: number; body: unknown }>;
+export type Http = (origin: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', relative: string, body: unknown, signal: AbortSignal) => Promise<{ status: number; body: unknown }>;
 export const readHttp: Http = async (origin, method, relative, body, signal) => {
-  check(relative.startsWith('/api/') && !relative.startsWith('//') && !relative.includes('\\'));
+  check(relative.startsWith('/') && !relative.startsWith('//') && !relative.includes('\\') && !decodeURIComponent(relative).split(/[/?]/).includes('..'));
   const response = await fetch(new URL(relative, origin), { method, signal, redirect: 'error',
-    ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+    ...(method === 'POST' || method === 'PATCH' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
   const text = await response.text(); check(Buffer.byteLength(text) <= 4 * 1024 * 1024, 'observation-failed');
   return { status: response.status, body: text ? JSON.parse(text) : null };
 };
@@ -32,6 +32,8 @@ export class HostFixtureDriver implements FixtureDriver {
   private readonly stamps = new Map<string, { dev: number; ino: number }>();
   private readonly handles = new Map<string, OwnedProcess>();
   private readonly commands = new Map<string, { command: HostCommand; readiness: string }>();
+  private record?: (resource: Resource) => void;
+  private readonly cleanups: (() => Promise<void>)[] = [];
   private sockets: PortReservation[] = [];
   private ports: number[] = [];
   private lock?: { path: string; contents: string };
@@ -44,6 +46,52 @@ export class HostFixtureDriver implements FixtureDriver {
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return path.join(this.root, 'runtime', 'e2e-workspace'); }
   get processesById(): ReadonlyMap<string, OwnedProcess> { return this.handles; }
+  get configurationRoot() { return path.join(this.workspaceRoot, '.loom-config'); }
+  get cliRegistration() { return { binary: this.config.loomBinary, cwd: this.workspaceRoot, env: this.env() }; }
+  enrollCleanup(cleanup: () => Promise<void>) { check(this.record); this.cleanups.push(cleanup); }
+  private async drainCleanups() {
+    while (this.cleanups.length) { await this.cleanups[this.cleanups.length - 1]!(); this.cleanups.pop(); }
+  }
+  async inspectOwnedProcess(id: string, generation: string, signal: AbortSignal) {
+    signal.throwIfAborted(); const handle = this.handles.get(id);
+    check(handle && handle.generation === generation, 'identity-mismatch');
+    return { id, generation: handle!.generation, pid: handle!.pid, state: handle!.state() };
+  }
+  async launchOwnedCli(argv: readonly string[], envOverrides: Readonly<Record<string, string>>, stdin: string,
+    waitForExit: boolean, signal: AbortSignal): Promise<{ id: string; generation: string; pid: number; completion: CliCompletion }> {
+    signal.throwIfAborted(); check(this.record && this.processes.launch, 'unsupported-capability');
+    check(argv.length > 0 && argv.length <= 128 && argv.every(arg => typeof arg === 'string' && arg.length <= 1024 * 1024 && !arg.includes('\0')));
+    check(['--workspace', 'usage', 'agent', 'workspace', 'config'].includes(argv[0]!), 'unsupported-capability');
+    check(Object.keys(envOverrides).every(key => ['LOOM_WORKSPACE_ID', 'LOOM_ASSIGNED_TASK_ID', 'LOOM_SOURCE_REPOS'].includes(key)));
+    check(Buffer.byteLength(stdin) <= 1024 * 1024);
+    const id = `cli-${this.uuid()}`, generation = this.uuid();
+    const command = { executable: this.config.loomBinary, argv: [...argv], cwd: this.workspaceRoot, env: { ...this.env(), ...envOverrides } };
+    this.record!({ id, kind: 'process', generation });
+    const handle = this.processes.launch!(command, stdin, generation); this.handles.set(id, handle);
+    check(handle.generation === generation && handle.pid > 0); await handle.ready(signal);
+    const completion = waitForExit ? await handle.completion(signal) : { exitCode: null, stdout: '', stderr: '', complete: false };
+    return { id, generation, pid: handle.pid, completion };
+  }
+  async stopOwnedProcess(id: string, generation: string, signal: AbortSignal) {
+    await this.inspectOwnedProcess(id, generation, signal); await this.handles.get(id)!.stop();
+    check(this.handles.get(id)!.state() === 'exited');
+    return { beforeGeneration: generation, afterGeneration: null, affectedIds: [id], complete: true as const };
+  }
+  async restartOwnedProcess(id: string, generation: string, signal: AbortSignal) {
+    const saved = this.commands.get(id); check(saved && this.record, 'unsupported-capability');
+    await this.stopOwnedProcess(id, generation, signal);
+    await this.start(id, saved!.command, saved!.readiness, this.record!, signal);
+    const after = this.handles.get(id)!.generation; check(after !== generation, 'identity-mismatch');
+    return { beforeGeneration: generation, afterGeneration: after, affectedIds: [id], complete: true as const };
+  }
+  async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relative: string, body: unknown, signal: AbortSignal) {
+    signal.throwIfAborted(); check(this.ports.length === 5);
+    check(target === 'api' ? relative.startsWith('/api/') : /^\/__(script|reset|fixture|state|requests)(\?|$)/.test(relative));
+    check(target !== 'fake-model' || this.profile === 'legacy-deterministic', 'unsupported-capability');
+    check(target !== 'fake-github' || this.config.fakeGitHub, 'unsupported-capability');
+    const index = { api: 0, 'fake-model': 2, 'fake-github': 4 }[target];
+    return this.http(`http://127.0.0.1:${this.ports[index]}`, method, relative, body, signal);
+  }
   private env(): Record<string, string> {
     const c = this.config; const runtime = path.join(this.root, 'runtime');
     const configRoot = path.join(this.workspaceRoot, '.loom-config');
@@ -159,12 +207,13 @@ export class HostFixtureDriver implements FixtureDriver {
     await command(['-c', 'user.name=Loom E2E', '-c', 'user.email=loom-e2e@example.test', 'commit', '--allow-empty', '-m', 'e2e seed', '-q']);
   }
   private async start(id: string, command: HostCommand, readiness: string, record: (resource: Resource) => void, signal: AbortSignal) {
-    const handle = this.processes.start(command, readiness); this.handles.set(id, handle); this.commands.set(id, { command, readiness });
-    // Registration happens before awaiting readiness, including failed launches.
-    record({ id, kind: 'process', generation: handle.generation });
+    const generation = this.uuid(); record({ id, kind: 'process', generation });
+    const handle = this.processes.start(command, readiness, generation); this.handles.set(id, handle); this.commands.set(id, { command, readiness });
+    check(handle.generation === generation, 'identity-mismatch');
     await handle.ready(signal); check(handle.pid > 0 && handle.state() === 'running', 'observation-failed');
   }
   async provision(_plan: FixturePlan, record: (resource: Resource) => void, signal: AbortSignal) {
+    this.record = record;
     await this.seed(this.workspaceRoot, signal);
     const second = path.join(this.root, 'runtime', 'e2e-workspace-2'); await this.seed(second, signal);
     if (this.profile === 'legacy-deterministic') {
@@ -218,6 +267,7 @@ export class HostFixtureDriver implements FixtureDriver {
   }
   async remove(resource: Resource) {
     await this.inspect(resource);
+    await this.drainCleanups();
     if (resource.kind === 'process') { await this.handles.get(resource.id)!.stop(); return; }
     if (resource.kind === 'ports') { await this.closeSockets(); return; }
     if (resource.kind === 'lock') { await this.files.unlink(resource.id); return; }
