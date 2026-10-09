@@ -47,7 +47,7 @@ async function setup(profile: string) {
       { executable: realBinary, sha256: hash('real-binary'), authRoot }])), daemon: false, fakeGitHub: false, maxBudgetUsd: '5.00',
   };
   const plan: FixturePlan = { profile, loomRevision: revision, fleetRevision: revision, engineRevision: revision, adapterRevision: revision,
-    model: profile === 'legacy-deterministic' ? 'aft/m' : 'openai/real-model', maxCases: 10, caseCount: 1, selectionSha256: 'd'.repeat(64), leaseDurationMs: 10000 };
+    model: profile === 'legacy-deterministic' ? 'aft/m' : profile === 'legacy-real-cursor' ? 'backend-default' : 'openai/real-model', maxCases: 10, caseCount: 1, selectionSha256: 'd'.repeat(64), leaseDurationMs: 10000 };
   const starts: { id: string; command: HostCommand; readiness: string }[] = []; const runs: HostCommand[] = []; const stopped: string[] = [];
   let failService = ''; let failStop = ''; let spawnFails = false; let port = 4100; let count = 0; let failHttp = false;
   const handles = new Map<string, OwnedProcess>();
@@ -78,6 +78,8 @@ async function setup(profile: string) {
   };
   const http: Http = async (_origin, method, relative) => {
     if (failHttp) return { status: 503, body: { message: 'Bearer private-http-token' } };
+    if(relative==='/__requests')return {status:200,body:{requests:[],queued:0}};
+    if(relative==='/__reset')return {status:200,body:{ok:true}};
     if (method === 'POST') return { status: 201, body: {} };
     return { status: 200, body: relative.endsWith('/E2E-WS') ? { data: { id: 'E2E-WS', repos: [{ path: driver.workspaceRoot }] } } : {} };
   };
@@ -114,6 +116,27 @@ for (const profile of legacyProfiles) test(`${profile}: production host driver u
     assert.equal((await fs.readdir(path.join(r.driver.runtimeRoot, 'evidence'))).length, 3);
     await assert.rejects(fs.lstat(path.join(r.driver.runtimeRoot, 'runtime')), { code: 'ENOENT' });
   } finally { await r.cleanup(); }
+});
+test('Cursor backend-default omits ineffective model overrides and named-model selection fails before auth/startup',async()=>{
+ const r=await setup('legacy-real-cursor');try{
+ const acquired=await r.lifecycle.acquire(r.request,new AbortController().signal);
+ assert.deepEqual(r.driver.executionRouting.modelSelection,{kind:'backend-default'});
+ assert.equal('LOOM_AGENT_MODEL' in r.driver.cliRegistration.env,false);assert.equal('LOOM_OPENCODE_MODEL' in r.driver.cliRegistration.env,false);
+ await r.lifecycle.release(acquired.lease.id,r.request.runId);
+ const before=r.runs.length,starts=r.starts.length;
+ await assert.rejects(r.driver.preflight({...r.plan,model:'named-cursor-model'},new AbortController().signal),e=>e instanceof FixtureError&&e.code==='unsupported-capability');
+ assert.equal(r.runs.length,before);assert.equal(r.starts.length,starts);
+ }finally{await r.cleanup();}
+});
+test('host captures a retained startup baseline and refuses stale or stopped service restoration',async()=>{
+ const r=await setup('legacy-deterministic');try{
+ const acquired=await r.lifecycle.acquire(r.request,new AbortController().signal);const signal=new AbortController().signal;
+ const fact=await r.driver.freshFixtureBaseline('fake-model',signal);assert.equal(fact.generation,r.driver.processesById.get('fake-model')!.generation);
+ assert.deepEqual(await r.driver.resetFixtureBaseline('fake-model',fact.generation,signal),{status:200,body:{ok:true}});
+ await assert.rejects(r.driver.resetFixtureBaseline('fake-model','foreign-generation',signal));
+ await r.driver.stopOwnedProcess('fake-model',fact.generation,signal);await assert.rejects(r.driver.freshFixtureBaseline('fake-model',signal));
+ await r.lifecycle.release(acquired.lease.id,r.request.runId);
+ }finally{await r.cleanup();}
 });
 test('partial host startup stops exact launched handle and preserves safe failure evidence', async () => {
   const r = await setup('legacy-deterministic'); r.failService('serve');
@@ -165,7 +188,8 @@ test('failed readiness response remains unverified and triggers cleanup', async 
   const r = await setup('legacy-deterministic'); r.failHttp();
   try {
     await assert.rejects(r.lifecycle.acquire(r.request, new AbortController().signal));
-    assert.deepEqual(r.stopped, ['serve', 'fake-model']);
+    assert.deepEqual(r.stopped, ['fake-model']);
+    assert.deepEqual(r.starts.map(start=>start.id),['fake-model']);
   } finally { await r.cleanup(); }
 });
 
