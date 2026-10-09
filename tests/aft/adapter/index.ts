@@ -3,6 +3,7 @@ import type { CapabilityProvider, CapabilityRegistry, ImplementationPin } from '
 import type { ObservationResult } from '@tysonthomas9/aft/types';
 import { z } from 'zod';
 import { AgentRef, AgentRow, AgentHistory, Id, requireFact, redact, type AgentRow as Row } from './protocol.js';
+import { FixtureWorkerStateId,FixtureWorkerStateEffects,FixtureWorkerStateInput,FixtureWorkerStateOutput,observeFixtureWorkerState } from './fixture-worker-state.js';
 import { getFixtureEvidenceStore } from './evidence.js';
 import { retainSavedCapture } from './saved-capture.js';
 export { SavedCaptureInput, rereadSavedCapture } from './saved-capture.js';
@@ -33,6 +34,7 @@ export * from './composition.js';
 export * from './redaction.js';
 export * from './authority.js';
 export * from './fixture-workers.js';
+export * from './fixture-worker-state.js';
 export * from './git-lifecycle.js';
 export * from './workspaces.js';
 export { createLegacyProviders } from './legacy/providers.js';
@@ -69,6 +71,14 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     evidenceClasses: ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const };
   const common = { implementation, implementationSha256: implementation.sha256, ...read, evidenceClasses: [...read.evidenceClasses] };
   return [
+    defineOperation({...common,id:FixtureWorkerStateId,effects:[...FixtureWorkerStateEffects],retry:'never',
+      inputSchema:FixtureWorkerStateInput,outputSchema:FixtureWorkerStateOutput,
+      async run(input,context) {
+        const {fixture,grant,value}=await observeFixtureWorkerState(context,input);
+        return {value,identity:{...identity(fixture),workspaceId:input.workspaceId,agentId:input.agentName},
+          evidenceClass:grant.evidenceClass,secrets:fixture.secrets};
+      },
+    }),
     defineOperation({...common,id:FixtureWorkersId,effects:[...FixtureWorkersEffects],retry:'never',
       inputSchema:FixtureWorkersInput,outputSchema:FixtureWorkersOutput,
       async run(input,context) {
