@@ -68,7 +68,7 @@
     "operation-routing": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "Approved fixture executionRouting plus source-supported exact-model/backend-default variant. Direct task inherits model/env; daemon supervisor may override role model. Cursor account/backend default original source has no exact model predicate.",
-      "status": "Dependency1bb requires missing approved renderer prerequisiteea05; consumption aborted clean on three shared conflicts, awaiting exact fixture prerequisite. No copied routing or invented selected model."
+      "status": "Consumed exact approved renderer prerequisiteea05a41e and routing1bb88f unchanged. Concrete host validates executionRouting against canonical fixture and requestedbackend/code-owned model env beforetask launch. Shared Cursor backend-default variant and production legacy creation/read hooks still pending; no selected-model observation inferred."
     }
   },
   "operations": [

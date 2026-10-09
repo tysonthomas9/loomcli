@@ -39,7 +39,9 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
   let cached: LegacyLease | undefined;
   const identity = (id: string) => requireOwned(id === fixture.leaseId);
   const evidenceFor = (operation: LoomAuthorizedOperation) => {
-    const expected = operation === 'loom.cli.task' && fixture.profile.startsWith('legacy-real-') ? 'live-provider' : fixture.evidenceClass;
+    const route = driver.executionRouting;
+    requireOwned(route.profile === fixture.profile && route.evidenceClass === fixture.evidenceClass);
+    const expected = operation === 'loom.cli.task' && route.externalProvider ? 'live-provider' : route.evidenceClass;
     const grant = getFixtureOperationAuthority(fixture, operation, operation === 'loom.cli.task' && expected === 'live-provider'
       ? ['start-owned-process', 'external-provider'] : LegacyOperationEffects[operation]);
     if (grant.evidenceClass !== expected) throw new LegacyError('source-mismatch', 'Operation class differs from owned execution routing');
@@ -130,8 +132,14 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       const actor = operation === 'loom.cli.task' ? command.argv[5] : operation === 'loom.cli.usage' ? command.argv[4] :
         operation === 'loom.fixture.seedWorktree' ? command.argv[5] : undefined;
       requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name');
-      if (command.argv[4] === 'task' && fixture.profile.startsWith('legacy-real-') &&
-        (evidence !== 'live-provider' || command.argv[3] !== fixture.profile.slice('legacy-real-'.length))) return unsupported();
+      if (operation === 'loom.cli.task') {
+        const route = driver.executionRouting;
+        requireOwned(route.allowedTaskBackends.includes(command.argv[3]!));
+        if (route.evidenceClass !== 'deterministic' && (!route.externalProvider || evidence !== 'live-provider')) return unsupported();
+        // Direct task.go inherits these exact code-owned environment settings;
+        // supervisor role overrides belong to enrolled worker registrations.
+        requireOwned(command.env.LOOM_AGENT_MODEL === route.model && command.env.LOOM_OPENCODE_MODEL === route.model);
+      }
       const result = await driver.launchOwnedCli(plan.argv, plan.envOverrides, plan.stdin, plan.waitForExit, signal);
       const registered = await driver.inspectOwnedProcess(result.id, result.generation, signal);
       requireOwned(registered.pid === result.pid);
