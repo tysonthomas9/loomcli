@@ -14,6 +14,7 @@ import type { OwnedFixture } from '../ownership.js';
 import { getFixture } from '../ownership.js';
 import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin } from '@tysonthomas9/aft/capabilities';
 import { createFixtureProviders, productionFixtureOptions } from './providers.js';
+import type { RegisteredIdentity } from './descendants.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 async function setup(profile: string,registeredServices=false,nativeService=false) {
@@ -104,13 +105,29 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     const data=createdWorkspaces.get(relative.split('/').at(-1)!);
     return { status: 200, body: data?{success:true,data}:{} };
   };
-  const registeredRunning=new Map<number,boolean>();let failRegisteredStop=false;const registeredStops:string[]=[];
-  const registeredPort={async capture(pid:number){assert.ok([999,1001].includes(pid));registeredRunning.set(pid,true);const identity={pid,generation:pid===999?'actual-kernel-start':'actual-native-start',executable:pid===999?config.fleetBinary:config.pinnedOpenCodeBinary,argvSha256:'a'.repeat(64),parentPid:handles.get('serve')!.pid,configurationRoot:driver.configurationRoot,state:'running' as const};return {identity,async inspect(){return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,state:registeredRunning.get(pid)?'running' as const:'exited' as const};},async terminateGracefully(){assert.equal(pid,1001);registeredRunning.set(pid,false);registeredStops.push('opencode-term');},async stop(){if(!registeredRunning.get(pid))return;if(failRegisteredStop)throw new Error('private child cleanup');registeredRunning.set(pid,false);registeredStops.push(pid===999?'fleet':'opencode-force');},async abandon(){assert.fail('owned child');}};}};
+  const registeredRunning=new Map<number,boolean>();let failRegisteredStop=false;const registeredStops:string[]=[],captures:number[]=[],abandoned:number[]=[];
+  const registrationOverrides=new Map<number,Partial<RegisteredIdentity>>();let onCapture:((pid:number)=>Promise<void>)|undefined;
+  const registeredPort={async capture(pid:number){
+    const parent=[...handles.entries()].find(([name,handle])=>['serve','daemon'].includes(name)&&handle.pid===pid)?.[1];
+    assert.ok([999,1001,1002].includes(pid)||parent);captures.push(pid);registeredRunning.set(pid,true);
+    const identity:RegisteredIdentity={pid,generation:pid===999?'actual-kernel-start':pid===1001?'actual-native-start':pid===1002?'actual-native-successor':`actual-parent-${pid}`,
+      executable:pid===999?config.fleetBinary:parent?config.loomBinary:config.pinnedOpenCodeBinary,
+      argvSha256:parent?hash(Buffer.from([config.loomBinary,...parent.argv].join('\0')+'\0')):pid===1002?hash(Buffer.from([config.pinnedOpenCodeBinary,'serve','--service'].join('\0')+'\0')):'a'.repeat(64),
+      parentPid:handles.get('serve')!.pid,configurationRoot:driver.configurationRoot,state:'running',...registrationOverrides.get(pid)};
+    await onCapture?.(pid);
+    return {identity,async inspect(){return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,
+      state:registeredRunning.get(pid)&&(!parent||parent.state()==='running')?'running' as const:'exited' as const,...registrationOverrides.get(pid)};},
+      async terminateGracefully(){assert.ok([1001,1002].includes(pid));registeredRunning.set(pid,false);registeredStops.push('opencode-term');},
+      async stop(){if(!registeredRunning.get(pid)||parent?.state()==='exited')return;if(failRegisteredStop)throw new Error('private child cleanup');
+        registeredRunning.set(pid,false);if(parent)await parent.stop();registeredStops.push(pid===999?'fleet':parent?'parent-force':'opencode-force');},
+      async abandon(){abandoned.push(pid);}};
+  }};
   const protocols:string[]=[];
   const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, fs, http, () => `fixture-${++count}`, async () => ({ port: port++, async release() {} }),async endpoint=>{protocols.push(endpoint);if(failService==='codex-protocol')throw new Error('private probe failure');},registeredServices?registeredPort:undefined);
   const lifecycle = new FixtureLifecycle([plan], () => driver, () => 1000, () => 'opaque-fixture');
   return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle, protocols, requests,
-    registeredStops,failRegisteredCleanup(value:boolean){failRegisteredStop=value;},
+    registeredStops,captures,abandoned,failRegisteredCleanup(value:boolean){failRegisteredStop=value;},
+    registration(pid:number,values:Partial<RegisteredIdentity>){registrationOverrides.set(pid,values);},onCapture(callback:(pid:number)=>Promise<void>){onCapture=callback;},
     request: { runId: 'test-run', profile, loomRevision: revision, fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
     onHttp(callback:(method:string,relative:string)=>Promise<void>){onHttp=callback;},
     overrideResponse(callback:(relative:string)=>unknown){responseOverride=callback;},
@@ -515,5 +532,61 @@ test('host graceful native actor preserves exact registration and never force-ki
  assert.equal(r.starts.length,before);assert.deepEqual(r.registeredStops,['opencode-term']);
  await assert.rejects(r.driver.terminateRegisteredNativeService('registered-opencode-service','actual-native-start',signal));
  assert.equal((await r.lifecycle.release(a.lease.id,r.request.runId)).released,true);assert.equal(r.registeredStops.includes('opencode-force'),false);
+ }finally{await r.cleanup();}
+});
+
+test('product successor keeps the exited predecessor and a separately captured owned parent generation',async()=>{
+ const r=await setup('legacy-deterministic',true,true);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),starts=r.starts.length;
+  await r.driver.terminateRegisteredNativeService('registered-opencode-service','actual-native-start',signal);
+  await fs.writeFile(path.join(r.driver.configurationRoot,'agents-opencode/state/opencode/service.json'),
+    JSON.stringify({id:'actual-successor-registration',pid:1002,url:'http://127.0.0.1:7002',password:'private-successor-password'}));
+  const observed=await r.lifecycle.observe(a.lease.id,'test-run');
+  const predecessor=observed.services.find(row=>row.id==='registered-opencode-service')!,successor=observed.services.find(row=>row.generation==='actual-native-successor')!;
+  assert.equal(predecessor.state,'exited');assert.ok(successor.id.startsWith('registered-opencode-service:successor-'));assert.equal(successor.state,'running');
+  assert.ok(observed.services.some(row=>row.generation===`actual-parent-${r.handles.get('serve')!.pid}`));
+  assert.equal(r.starts.length,starts);assert.deepEqual(r.registeredStops,['opencode-term']);
+  await assert.rejects(r.driver.terminateRegisteredNativeService('registered-opencode-service','actual-native-start',signal));
+  r.failRegisteredCleanup(true);const failed=await r.lifecycle.release(a.lease.id,'test-run');assert.equal(failed.released,false);
+  assert.ok(failed.remainingOwnedResources.includes(successor.id));assert.ok(failed.remainingOwnedResources.includes(predecessor.id));
+  r.failRegisteredCleanup(false);assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);
+  assert.equal(r.registeredStops.filter(value=>value==='opencode-force').length,1);
+  for(const filename of await fs.readdir(path.join(r.driver.runtimeRoot,'evidence'))){const text=await fs.readFile(path.join(r.driver.runtimeRoot,'evidence',filename),'utf8');assert.equal(text.includes('private-successor-password'),false);}
+ }finally{await r.cleanup();}
+});
+
+test('unrequested, foreign-command, foreign-parent and reparented service replacements cannot grant cleanup authority',async()=>{
+ for(const change of ['unrequested','argv','parent','reparented'] as const){const r=await setup('legacy-deterministic',true,true);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),stopped=r.stopped.length;
+  if(change!=='unrequested')await r.driver.terminateRegisteredNativeService('registered-opencode-service','actual-native-start',signal);
+  if(change==='argv')r.registration(1002,{argvSha256:'f'.repeat(64)});
+  if(change==='parent')r.registration(1002,{parentPid:9876});
+  if(change==='reparented')r.onCapture(async pid=>{if(pid===1002)await r.handles.get('serve')!.stop();});
+  const file=path.join(r.driver.configurationRoot,'agents-opencode/state/opencode/service.json');
+  await fs.writeFile(file,JSON.stringify({pid:1002,url:'http://127.0.0.1:7002',password:'never-captured'}));
+  await assert.rejects(r.lifecycle.observe(a.lease.id,'test-run'));
+  if(change==='unrequested')assert.equal(r.captures.includes(1002),false);
+  if(change==='argv'||change==='parent')assert.deepEqual(r.abandoned,[1002]);
+  assert.equal(r.registeredStops.includes('opencode-force'),false);
+  const failed=await r.lifecycle.release(a.lease.id,'test-run');assert.equal(failed.released,false);
+  assert.equal(r.registeredStops.includes('opencode-force'),false);
+  assert.equal(r.stopped.length,stopped+(change==='reparented'?1:0));
+ }finally{await r.cleanup();}}
+});
+
+test('successor capture rejects changed parent kernel generation and serializes cleanup and parent restart',async()=>{
+ const r=await setup('legacy-deterministic',true,true);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  await r.driver.terminateRegisteredNativeService('registered-opencode-service','actual-native-start',signal);
+  const parent=r.handles.get('serve')!;let resumed!:()=>void,entered!:()=>void;
+  const waiting=new Promise<void>(resolve=>resumed=resolve),capturing=new Promise<void>(resolve=>entered=resolve);
+  r.onCapture(async pid=>{if(pid===1002){entered();await waiting;}});
+  await fs.writeFile(path.join(r.driver.configurationRoot,'agents-opencode/state/opencode/service.json'),JSON.stringify({pid:1002,url:'http://127.0.0.1:7002'}));
+  const observing=r.lifecycle.observe(a.lease.id,'test-run');await capturing;
+  await assert.rejects(r.driver.restartOwnedProcess('serve',parent.generation,signal));
+  await assert.rejects(r.driver.stopOwnedProcess('serve',parent.generation,signal));
+  await assert.rejects(r.lifecycle.release(a.lease.id,'test-run'));await assert.rejects(r.driver.prepareCleanup(signal));assert.equal(parent.state(),'running');
+  r.registration(parent.pid,{generation:'reused-parent-kernel-generation'});resumed();await assert.rejects(observing);
+  assert.equal(r.registeredStops.includes('opencode-force'),false);
  }finally{await r.cleanup();}
 });
