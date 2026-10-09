@@ -5,12 +5,12 @@ import type { LoomAuthorizedOperation } from '../authority.js';
 // launch their original CLI actor. Role discovery is lazy and absent from
 // configure/runtime; paid task discovery is covered by the task process effect.
 export const LegacyOperationEffects: Readonly<Record<LoomAuthorizedOperation, readonly CapabilityEffect[]>> = Object.freeze({
-  'loom.cli.role': Object.freeze(['read-api', 'start-owned-process'] as const),
-  'loom.cli.usage': Object.freeze(['read-api', 'start-owned-process'] as const),
-  'loom.cli.task': Object.freeze(['read-api', 'start-owned-process'] as const),
-  'loom.runtime.stimulate': Object.freeze(['read-api', 'stop-owned-process'] as const),
-  'loom.fixture.seedWorktree': Object.freeze(['read-api', 'write-fixture', 'start-owned-process'] as const),
-  'loom.fixture.configure': Object.freeze(['read-api', 'write-fixture'] as const),
+  'loom.cli.role': Object.freeze(['read-api', 'read-filesystem', 'start-owned-process'] as const),
+  'loom.cli.usage': Object.freeze(['read-api', 'read-filesystem', 'start-owned-process'] as const),
+  'loom.cli.task': Object.freeze(['read-api', 'read-filesystem', 'start-owned-process'] as const),
+  'loom.runtime.stimulate': Object.freeze(['read-api', 'read-filesystem', 'stop-owned-process'] as const),
+  'loom.fixture.seedWorktree': Object.freeze(['read-api', 'read-filesystem', 'write-fixture', 'start-owned-process'] as const),
+  'loom.fixture.configure': Object.freeze(['read-api', 'read-filesystem', 'write-fixture'] as const),
 });
 export interface LegacyProviderOptions { readonly taskExecution: 'deterministic' | 'live-provider' }
 export function legacyTaskEffects(options: LegacyProviderOptions): readonly CapabilityEffect[] {
