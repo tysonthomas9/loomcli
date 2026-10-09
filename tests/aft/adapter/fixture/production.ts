@@ -158,8 +158,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
       // Container identity alone cannot attest the separately restartable model
       // process. Until its product registration port is bound, retained model
       // generations must fail before any HTTP mutation.
-      check(!this.cloud&&expectedGeneration===undefined,'unsupported-capability');
-      return this.nativeRead({operation:'fixture-http',method,relativePath,body:Json.parse(body)},signal) as Promise<{status:number;body:unknown}>;
+      check(!this.cloud&&expectedGeneration===undefined&&method==='GET'&&/^\/__requests(\?|$)/.test(relativePath),'unsupported-capability');
+      return this.nativeRead({operation:'fixture-http',method:'GET',relativePath,body:Json.parse(body)},signal) as Promise<{status:number;body:unknown}>;
     }
     check(relativePath.startsWith('/api/'));
     return this.withContainerOperation(async()=>{
@@ -435,6 +435,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
     return this.http(origin, relative, signal);
   }
   async nativeRead(request: ContainerRead, signal: AbortSignal): Promise<unknown> {
+    check(request.operation!=='fixture-http'||request.method==='GET'&&/^\/__requests(\?|$)/.test(request.relativePath),'unsupported-capability');
     return this.withContainerOperation(async()=>{
       const container=await this.ownedContainer(signal);
       const response=JSON.parse(await this.command('podman',['--connection',this.config.connection,'exec',container.id,
