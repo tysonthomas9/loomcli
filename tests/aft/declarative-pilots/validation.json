@@ -871,7 +871,7 @@
     "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
   },
   "currentPublication": {
-    "at": "2026-10-09T15:32:45.645391+00:00",
+    "at": "2026-10-09T16:09:49.010772+00:00",
     "status": "in-progress reviewable draft; not preservation-complete",
     "taskNoteId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
     "branch": "codex/aft-declarative-pilots",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "ba78809a46ab92e05d29f067ef3b4f0491e64f46f8fceadd6db336a211180663"
+        "sha256": "6595e9757d4ed044732dcbedc9a5eb43c5785f4bf70123df2f09b2888b3eb262"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -4957,5 +4957,58 @@
       }
     ],
     "originalFullLoaderRetries": 0
+  },
+  "sseFailureOnlyDeadlineSourceReview": {
+    "review": {
+      "at": "2026-10-09T16:09:49.010772+00:00",
+      "scope": "Frozen selectedSSE source-readiness deadline clarification; candidate status not acceptance",
+      "source": {
+        "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "path": "tests/aft/scripts/agent-flows-restart-serve.sh",
+        "sha256": "eedce3f74c6ce6a11e4b760be9424e6baba61b51286de55054b92bf1c5fbedeb",
+        "lines": {
+          "start": 18,
+          "end": 23,
+          "text": "\"${compose[@]}\" restart loom-local\ndeadline=$((SECONDS + 180))\nuntil curl -fsS --max-time 3 \"$AFT_API_URL/api/config\" >/dev/null 2>&1; do\n  (( SECONDS < deadline )) || { echo 'loom-local did not become ready' >&2; exit 1; }\n  sleep 1\ndone"
+        }
+      },
+      "sourceSemantics": {
+        "deadlineUnit": "Bash integer-second SECONDS; sampled after compose restart returns",
+        "deadlineSeconds": 180,
+        "perRequestMaxMs": 3000,
+        "deadlineChecked": "Only after failed curl,then SECONDS<deadline determines whether retry is allowed",
+        "retryDelaySourceSeconds": 1,
+        "lateSuccess": "A subsequent bounded successful curl ends until without checking the deadline. Final retry delay and next successful request can cross the nominal180s boundary; strict elapsedMs<=180000 is not a source predicate.",
+        "successOracle": "Actual curl -f outcome; source does not require JSON parsing/additional healthy-container marker or body contents",
+        "authoredSleepAllowed": false,
+        "wholeCallerDeadline": "Existing default30000ms is not a verified original outer-run budget; keep original caller bound unresolved"
+      },
+      "receiptConstraintsRequired": [
+        "Retain actual dispatch/readiness start/attempt/outcome/elapsed and source failure-only clock observations",
+        "Public schema must permit valid success elapsedMs>windowMs; do not encode a fabricated readiness successboolean or change source retry order",
+        "Independent bounded3000ms request+abort/error facts and captured predecessor/successor cleanup authority remain required; never replay restart as readiness polling"
+      ],
+      "authorCandidate": {
+        "head": "eb2d420ec6106543d1dd9472d22c23582533ca83",
+        "tree": "2d80ff3181e836c63bc5ff6183196c25e431c617",
+        "reportedReceiptSha256": "016c40c37b2a4899aebe62f7b77fa65ae0b3f3c334d6c6934e3b616e3e68543d",
+        "evidence": "Owner report only; no pilot independentcandidate execution/receipt rehash",
+        "parentIndependentReview": "pending/not consumed",
+        "fullSourceActorAccepted": false
+      },
+      "canonicalPublicContract": "ID/schema/effects/grants/observabletarget producer pending core; current YAML old26 has no restart call",
+      "coverage": "unresolved",
+      "destination": [],
+      "runtime": 0,
+      "effects": 0,
+      "preservationAccepted": false,
+      "historicalErratum": "Supersedes prior shorthand readiness-within180s in requirements snapshots; old snapshots/receipts retained as historical. Exact source checks deadline only after failure,not on successful exit."
+    },
+    "receipt": "/private/tmp/loom-aft-pilot-validation-16e28787/sse-failure-only-deadline-20261009/source-deadline-receipt.json",
+    "sha256": "d167e9b381abadddb926244c526d171569f6ec516e946a679739246745db7c0c",
+    "evidenceClass": "Frozen-source static control-flow clarification; new privatecandidate reportedonly",
+    "newRawLoaderRun": false,
+    "effects": 0,
+    "runtime": 0
   }
 }

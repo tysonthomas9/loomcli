@@ -55193,7 +55193,8 @@
             "sourceReadinessMs": 180000,
             "sourceReadinessStarts": "after compose restart",
             "sourcePerConfigRequestMaxMs": 3000,
-            "coverage": "unresolved; do not claim translated whole-caller deadline preservation"
+            "coverage": "unresolved; do not claim translated whole-caller deadline preservation",
+            "sourceDeadlineCheck": "Failure-only integer SECONDS check after failed3s request; successful later attempt may finish beyond180000ms"
           }
         },
         {
@@ -59139,8 +59140,8 @@
             "destination": [],
             "gap": {
               "kind": "required-source-provisioning-and-effect-scope",
-              "required": "Original restart is exact owned loom-local container,therefore serve plus colocatedOpenCode; verify manifest/container before/after,actual old/new initPID+StartedAt distinct,public /api/config readiness within180s(eachrequest3s),retain process inventory/log. Native helper SIGTERM restart is a different unselected case. Replace source poll/sleep with genuine bounded signal,not authored sleep or arbitrary shell.",
-              "canonicalAttempt": "Fixture owner reports exact owned Compose restart authored/gating,not yet reviewed/consumed. Receipt requirements/source timing/stronger-policy distinctions recorded in restartReceiptRequirements. Current YAML has no restart call; native TERM/standalone serve alias not equivalent.",
+              "required": "Original restart is exact owned loom-local container,therefore serve plus colocatedOpenCode; verify manifest/container before/after,actual old/new initPID+StartedAt distinct,actual successful /api/config curl under source failure-only integer180s retry deadline(eachrequest3s); success may finish after180s,retain process inventory/log. Native helper SIGTERM restart is a different unselected case. Replace source poll/sleep with genuine bounded signal,not authored sleep or arbitrary shell.",
+              "canonicalAttempt": "Private source-timing candidate eb2d is owner-reported/reviewpending,not consumed; publictyped actor/target/effects/grants pending. See failureOnlyDeadlineSourceReview for exact source success-after-window semantics. Current YAML invokes no restart.",
               "missingObservation": "Exact container/generation restart producer and before/after identity/readiness evidence under same owned fixture,while preserving saved histories and primary UI reopen."
             }
           }
@@ -59245,6 +59246,51 @@
           "effects": 0,
           "runtime": 0,
           "preservationAccepted": false
+        },
+        "failureOnlyDeadlineSourceReview": {
+          "at": "2026-10-09T16:09:49.010772+00:00",
+          "scope": "Frozen selectedSSE source-readiness deadline clarification; candidate status not acceptance",
+          "source": {
+            "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "path": "tests/aft/scripts/agent-flows-restart-serve.sh",
+            "sha256": "eedce3f74c6ce6a11e4b760be9424e6baba61b51286de55054b92bf1c5fbedeb",
+            "lines": {
+              "start": 18,
+              "end": 23,
+              "text": "\"${compose[@]}\" restart loom-local\ndeadline=$((SECONDS + 180))\nuntil curl -fsS --max-time 3 \"$AFT_API_URL/api/config\" >/dev/null 2>&1; do\n  (( SECONDS < deadline )) || { echo 'loom-local did not become ready' >&2; exit 1; }\n  sleep 1\ndone"
+            }
+          },
+          "sourceSemantics": {
+            "deadlineUnit": "Bash integer-second SECONDS; sampled after compose restart returns",
+            "deadlineSeconds": 180,
+            "perRequestMaxMs": 3000,
+            "deadlineChecked": "Only after failed curl,then SECONDS<deadline determines whether retry is allowed",
+            "retryDelaySourceSeconds": 1,
+            "lateSuccess": "A subsequent bounded successful curl ends until without checking the deadline. Final retry delay and next successful request can cross the nominal180s boundary; strict elapsedMs<=180000 is not a source predicate.",
+            "successOracle": "Actual curl -f outcome; source does not require JSON parsing/additional healthy-container marker or body contents",
+            "authoredSleepAllowed": false,
+            "wholeCallerDeadline": "Existing default30000ms is not a verified original outer-run budget; keep original caller bound unresolved"
+          },
+          "receiptConstraintsRequired": [
+            "Retain actual dispatch/readiness start/attempt/outcome/elapsed and source failure-only clock observations",
+            "Public schema must permit valid success elapsedMs>windowMs; do not encode a fabricated readiness successboolean or change source retry order",
+            "Independent bounded3000ms request+abort/error facts and captured predecessor/successor cleanup authority remain required; never replay restart as readiness polling"
+          ],
+          "authorCandidate": {
+            "head": "eb2d420ec6106543d1dd9472d22c23582533ca83",
+            "tree": "2d80ff3181e836c63bc5ff6183196c25e431c617",
+            "reportedReceiptSha256": "016c40c37b2a4899aebe62f7b77fa65ae0b3f3c334d6c6934e3b616e3e68543d",
+            "evidence": "Owner report only; no pilot independentcandidate execution/receipt rehash",
+            "parentIndependentReview": "pending/not consumed",
+            "fullSourceActorAccepted": false
+          },
+          "canonicalPublicContract": "ID/schema/effects/grants/observabletarget producer pending core; current YAML old26 has no restart call",
+          "coverage": "unresolved",
+          "destination": [],
+          "runtime": 0,
+          "effects": 0,
+          "preservationAccepted": false,
+          "historicalErratum": "Supersedes prior shorthand readiness-within180s in requirements snapshots; old snapshots/receipts retained as historical. Exact source checks deadline only after failure,not on successful exit."
         }
       }
     }
