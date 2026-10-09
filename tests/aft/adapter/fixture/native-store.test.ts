@@ -71,7 +71,7 @@ test('retains a failed-close descriptor for exact cleanup retry',async()=>{
    }});
   }};
   const binding=await captureNativeStore(s.root,s.enroll,signal(),files);
-  await assert.rejects(binding.close(),/injected close failure/);await binding.verify(signal());
+  await assert.rejects(binding.close(),/injected close failure/);await assert.rejects(binding.verify(signal()));
   await s.cleanup[0]!();assert.equal(closes,2);await binding.close();assert.equal(closes,2);
   await assert.rejects(binding.verify(signal()));
  }finally{await s.remove();}
@@ -91,6 +91,34 @@ test('failed acquisition after open retains cleanup when the first close fails',
   await s.cleanup[0]!();assert.equal(closes,2);await s.cleanup[0]!();assert.equal(closes,2);
   assert.equal(await fs.readFile(s.filename,'utf8'),'physical test bytes');
  }finally{await s.remove();}
+});
+
+test('concurrent cleanup awaits a pending open and closes its late descriptor exactly once',async()=>{
+ const s=await setup();let entered!:()=>void,release!:()=>void,closes=0;try{
+  const ready=new Promise<void>(resolve=>{entered=resolve;}),blocked=new Promise<void>(resolve=>{release=resolve;});
+  const files={...fs,open:async(...args:Parameters<typeof fs.open>)=>{
+   const actual=await fs.open(...args);entered();await blocked;
+   return new Proxy(actual,{get(target,key){if(key==='close')return async()=>{closes++;await target.close();};
+    const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
+  }};
+  const acquire=assert.rejects(captureNativeStore(s.root,s.enroll,signal(),files));await ready;
+  const first=s.cleanup[0]!(),second=s.cleanup[0]!();release();await Promise.all([acquire,first,second]);
+  assert.equal(closes,1);await s.cleanup[0]!();assert.equal(closes,1);
+ }finally{release?.();await s.remove();}
+});
+
+test('a late descriptor close failure remains retryable after concurrent acquisition disposal',async()=>{
+ const s=await setup();let entered!:()=>void,release!:()=>void,closes=0;try{
+  const ready=new Promise<void>(resolve=>{entered=resolve;}),blocked=new Promise<void>(resolve=>{release=resolve;});
+  const files={...fs,open:async(...args:Parameters<typeof fs.open>)=>{
+   const actual=await fs.open(...args);entered();await blocked;
+   return new Proxy(actual,{get(target,key){if(key==='close')return async()=>{closes++;if(closes<=2)throw Error('injected concurrent close failure');await target.close();};
+    const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
+  }};
+  const acquire=assert.rejects(captureNativeStore(s.root,s.enroll,signal(),files));await ready;
+  const cleanup=assert.rejects(s.cleanup[0]!(),/concurrent close failure/);release();await Promise.all([acquire,cleanup]);
+  assert.equal(closes,2);await s.cleanup[0]!();assert.equal(closes,3);await s.cleanup[0]!();assert.equal(closes,3);
+ }finally{release?.();await s.remove();}
 });
 
 test('rejects missing and foreign roots before open, leaving pre-enrolled cleanup safe',async()=>{
