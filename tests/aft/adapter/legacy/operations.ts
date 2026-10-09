@@ -4,9 +4,9 @@ import { isAbsolute } from 'node:path';
 import { Id, Json, RelativePath, HttpResponse, redact } from '../protocol.js';
 import { FixtureId, FixtureParameters, ScenarioId, scenario } from './catalog.js';
 import { redactionFacts } from '../redaction.js';
-import type { LoomAuthorizedOperation } from '../authority.js';
+import type { LegacyOperationEffects } from './effects.js';
 
-export type LegacyAuthorizedOperation = Exclude<LoomAuthorizedOperation, 'loom.runtime.detachTerminal'>;
+export type LegacyAuthorizedOperation = keyof typeof LegacyOperationEffects;
 
 const Arg = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 export const LegacyEvidenceClasses = ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const satisfies readonly EvidenceClass[];
