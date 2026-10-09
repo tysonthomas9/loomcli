@@ -7,6 +7,7 @@ import { HostFixtureDriver, legacyProfiles, type HostConfig, type Http } from '.
 import { FixtureLifecycle, FixtureError, type FixturePlan } from './lifecycle.js';
 import { LaunchNotStarted, type HostProcesses, type HostCommand, type OwnedProcess } from './process.js';
 import { type RegisteredBuild, verifyManifest } from './production.js';
+import { materializeRenderer } from './renderer-fixtures.test.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 async function setup(profile: string) {
@@ -36,6 +37,7 @@ async function setup(profile: string) {
     sourceEntries.push({ relativePath: path.relative(source, path.join(farm, tool)), sha256: hash('stub') });
   }
   revision.sourceManifestSha256 = manifestHash(sourceEntries);
+  await materializeRenderer(registered);
   const config: HostConfig = {
     loom: registered, fleet: registered, engine: registered, adapter: registered,
     tempParent: root, lockParent: path.join(root, 'locks'), hostHome: path.join(root, 'home'), toolPath: '/attested/toolchain',
