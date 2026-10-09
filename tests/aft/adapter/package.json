@@ -9,17 +9,25 @@
   "scripts": {
     "test": "tsx --test *.test.ts */*.test.ts",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --outDir dist",
-    "lint": "eslint ."
+    "build": "node build.mjs",
+    "lint": "eslint .",
+    "setup:projections": "npm ci --prefix projections --ignore-scripts --no-audit --no-fund"
   },
   "dependencies": {
     "zod": "3.25.76"
   },
   "devDependencies": {
     "@types/node": "24.10.0",
-    "typescript": "5.9.3",
-    "tsx": "4.20.6",
+    "esbuild": "0.21.5",
     "eslint": "9.39.1",
+    "jsdom": "27.4.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-markdown": "9.1.0",
+    "rehype-sanitize": "6.0.0",
+    "remark-gfm": "4.0.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
     "typescript-eslint": "8.46.1"
   },
   "peerDependencies": {

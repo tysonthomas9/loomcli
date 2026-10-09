@@ -5,10 +5,10 @@ import { readdir, mkdtemp, realpath, rm, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createEvidenceStore, putEvidenceStore } from './evidence.js';
-import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin } from '@tysonthomas9/aft/capabilities';
+import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin, getRegisteredResource, revokeCapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { createCoreProviders } from './index.js';
 import { putFixture, getFixture, disposeFixtures, type OwnedFixture } from './ownership.js';
-import { AgentRow, type Json } from './protocol.js';
+import { AgentRow, type Json, type HttpResponse } from './protocol.js';
 
 async function setup(t: { after(fn: () => Promise<void>): void }) {
   const root = fileURLToPath(new URL('.', import.meta.url));
@@ -84,13 +84,15 @@ test('incomplete and unreadable events cannot become empty successful evidence',
 
 test('two child cases use only exported suite fixture handles; case cleanup cannot release them', async t => {
   const harness = await setup(t);
-  const suiteContext = { ...harness.context, scope: 'suite' as const, resources: new Map<string, unknown>() };
+  const suiteContext = createCapabilityContext(harness.context.source, harness.registry);
+  suiteContext.runId = harness.context.runId; suiteContext.caseId = 'suite-setup';
+  suiteContext.scope = 'suite'; suiteContext.suiteId = harness.context.suiteId;
   putEvidenceStore(suiteContext, harness.evidenceStore);
   const suiteFixture = { ...harness.fixture, scope: 'suite' as const, leaseId: 'suite-lease' };
   putFixture(suiteContext, suiteFixture);
   const child = (caseId: string, handles: string[]) => ({ ...harness.context, caseId, resources: new Map<string, unknown>(),
     suite: { id: suiteContext.suiteId, handles, getResource(key: string, handle: string) {
-      assert.equal(handle, 'suite-lease'); assert.ok(handles.includes(handle)); return suiteContext.resources.get(key);
+      assert.equal(handle, 'suite-lease'); assert.ok(handles.includes(handle)); return getRegisteredResource(suiteContext, key, handle);
     } } });
   const one = child('one', ['suite-lease']); const two = child('two', ['suite-lease']);
   assert.equal(await getFixture(one, 'suite-lease'), suiteFixture);
@@ -138,9 +140,9 @@ test('native model and deletion evidence rejects foreign/stale/duplicate proofs 
   assert.notEqual(schema.parse(models.data).records[0].model, 'expected-model');
   const stale = await harness.invoke('loom.native.observe', { ...nativeInput, expectedGeneration: 'stale' });
   assert.equal(stale.availability, 'error'); assert.equal(stale.data, undefined);
-  messages = { data: [{ id: 'msg_1', sessionID: 'foreign', type: 'assistant' }] };
+  messages = { data: [{ id: 'msg_1', sessionID: 'foreign', type: 'assistant', time: {} }] };
   assert.equal((await harness.invoke('loom.native.observe', nativeInput)).availability, 'error');
-  messages = { data: [{ id: 'msg_1', sessionID: 'ses_owned' }, { id: 'msg_1', sessionID: 'ses_owned' }] };
+  messages = { data: [{ id: 'msg_1', sessionID: 'ses_owned', type: 'assistant', time: {} }, { id: 'msg_1', sessionID: 'ses_owned', type: 'assistant', time: {} }] };
   assert.equal((await harness.invoke('loom.native.observe', nativeInput)).availability, 'error');
   status = 404; body = { _tag: 'SessionNotFoundError', sessionID: 'ses_owned', message: 'Session not found: ses_owned' };
   const absent = await harness.invoke('loom.native.observe', { ...nativeInput, view: 'presence' });
@@ -158,4 +160,73 @@ test('failed cleanup retains the exact owned fixture for a final retry after exp
   assert.equal(harness.context.resources.get('@loom/aft-adapter/fixtures/v1:lease'), harness.fixture);
   await disposeFixtures(harness.context); await disposeFixtures(harness.context);
   assert.equal(attempts, 2);
+});
+
+test('revoked canonical authority denies observations while exact owned cleanup remains available', async t => {
+  const harness = await setup(t); revokeCapabilityContext(harness.context);
+  const unavailable = await harness.invoke('loom.api.savedEvents', input);
+  assert.equal(unavailable.availability, 'error'); assert.equal(unavailable.data, undefined); assert.equal(harness.reads, 0);
+  await disposeFixtures(harness.context); assert.equal(harness.disposed, 1);
+});
+
+test('public native and saved-event probe facts expose actual leaks before sanitized bindings', async t => {
+  const { createSyntheticProbe } = await import('./synthetic-probe.js');
+  const harness = await setup(t); const fixture = harness.fixture; const agent = fixture.agents.get('agt_owned')!; const row = agent.row;
+  const probe = createSyntheticProbe(harness.context.runId, fixture.leaseId); fixture.syntheticProbe = probe;
+  let messageContent: Json[] = [{ type: 'tool', id: 'call_1', name: 'bash', state: { status: 'completed', input: { command: probe.value }, content: { text: probe.value } } }];
+  agent.native = { pinnedExecutable: '/owned/opencode',
+    registration: async () => ({ url: 'http://127.0.0.1:4123/', password: 'private-password', pid: 42, generation: 'gen_1', endpointId: 'endpoint_1' }),
+    process: async () => ({ pid: 42, generation: 'gen_1', executable: '/owned/opencode', argv: ['/owned/opencode', 'serve', '--service'] }),
+    sessions: async () => [{ agent_id: row.agent_id, harness: 'opencode', native_root: '', native_id: 'ses_owned' }], agent: async () => row,
+    read: async (route): Promise<HttpResponse> => ({ status: 200, body: route === '/api/info' ? { pid: 42 } : route.includes('/message?') ?
+      { data: [{ id: 'msg_1', sessionID: 'ses_owned', type: 'assistant', time: { completed: 1 }, content: messageContent }] } :
+      { data: { id: 'ses_owned', metadata: { agent_id: row.agent_id }, location: { directory: row.worktree_path } } } }) };
+  const nativeInput = { agent: input.agent, view: 'tools', nativeSessionId: 'ses_owned', nativeRoot: '', expectedGeneration: 'gen_1', maxMessages: 200, probeHandle: probe.handle };
+  const nativeSchema = harness.registry.get('loom.native.observe', 1).outputSchema;
+  const leaking = await harness.invoke('loom.native.observe', nativeInput);
+  assert.equal(leaking.availability, 'observed');
+  const facts = nativeSchema.parse(leaking.data).records[0];
+  assert.equal(facts.probe.inputOccurrences, 1); assert.equal(facts.probe.outputOccurrences, 1);
+  assert.ok(!JSON.stringify(leaking).includes(probe.value));
+  const artifact = await harness.evidenceStore.resolve(leaking.provenance.artifacts[0]!.id);
+  assert.ok(!(await readFile(artifact, 'utf8')).includes(probe.value));
+  const partial = await harness.invoke('loom.native.observe', { ...nativeInput, maxMessages: 1 });
+  assert.equal(partial.availability, 'incomplete'); assert.equal(partial.data, undefined);
+  messageContent = [{ type: 'tool', id: 'call_1', name: 'bash', state: { status: 'completed', input: { command: '[REDACTED]' }, content: {} } }];
+  const alreadyRedacted = await harness.invoke('loom.native.observe', nativeInput);
+  assert.equal(nativeSchema.parse(alreadyRedacted.data).records[0].probe.inputOccurrences, 0);
+  harness.setPayload({ itemId: 'item_1', output: probe.value });
+  const saved = await harness.invoke('loom.api.savedEvents', { ...input, probeHandle: probe.handle });
+  assert.equal(saved.availability, 'observed');
+  assert.equal(harness.registry.get('loom.api.savedEvents', 1).outputSchema.parse(saved.data).events[0].probe.payloadOccurrences, 1);
+  assert.ok(!JSON.stringify(saved).includes(probe.value));
+  const foreign = await harness.invoke('loom.api.savedEvents', { ...input, probeHandle: 'foreign-probe' });
+  assert.equal(foreign.availability, 'error'); assert.equal(foreign.data, undefined);
+  fixture.syntheticProbe = createSyntheticProbe('foreign-run', fixture.leaseId);
+  assert.equal((await harness.invoke('loom.api.savedEvents', { ...input, probeHandle: fixture.syntheticProbe.handle })).availability, 'error');
+});
+
+test('container filesystem and Git adapters reject wrong physical and agent identity through registry', async t => {
+  const { containerFilesystemObserver, containerGitObserver } = await import('./container-observations.js');
+  const harness = await setup(t); let foreign = false;
+  const stamp = { path: '/container/owned/source', device: 7, inode: 42 };
+  harness.fixture.roots.set('container-source', { ...stamp, remoteObserve: containerFilesystemObserver(async request => {
+    assert.equal(request.operation, 'filesystem-observe');
+    return { root: { ...stamp, inode: foreign ? 43 : 42 }, data: { entries: [
+      { relativePath: 'marker', exists: false, kind: 'missing', bytes: null, sha256: null, contentBase64: null }] } };
+  }, { kind: 'managed-repo' }, stamp) });
+  const fsInput = { leaseId: 'lease', rootId: 'container-source', relativePaths: ['marker'], view: 'presence', maxBytes: 100, maxEntries: 10 };
+  assert.equal((await harness.invoke('loom.filesystem.observe', fsInput)).availability, 'observed');
+  foreign = true; const fsForeign = await harness.invoke('loom.filesystem.observe', fsInput);
+  assert.equal(fsForeign.availability, 'error'); assert.equal(fsForeign.data, undefined);
+  const agent = harness.fixture.agents.get('agt_owned')!;
+  agent.gitObserve = containerGitObserver(async request => {
+    assert.equal(request.operation, 'git-observe');
+    return { head: 'a'.repeat(40), branch: agent.row.branch, worktree: foreign ? '/container/foreign' : agent.row.worktree_path,
+      commonDir: agent.commonDir, status: [], refs: [], diff: null, origin: null };
+  }, input.agent, { worktree: agent.row.worktree_path, commonDir: agent.commonDir, branch: agent.row.branch });
+  const gitInput = { agent: input.agent, view: 'status', paths: [], maxBytes: 1000 };
+  foreign = false; assert.equal((await harness.invoke('loom.git.observe', gitInput)).availability, 'observed');
+  foreign = true; const gitForeign = await harness.invoke('loom.git.observe', gitInput);
+  assert.equal(gitForeign.availability, 'error'); assert.equal(gitForeign.data, undefined);
 });
