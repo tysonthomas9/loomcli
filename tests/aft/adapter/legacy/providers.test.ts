@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { mkdtemp, rm, realpath, readFile } from 'node:fs/promises';
 import { createEvidenceStore, putEvidenceStore } from '../evidence.js';
-import { CapabilityRegistry, calculateImplementationPin, createCapabilityContext, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
+import { CapabilityRegistry, calculateImplementationPin, createCapabilityContext, getRegisteredResource,
+  revokeCapabilityContext, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { ObservationResultSchema } from '@tysonthomas9/aft/types';
 import { putFixture, disposeFixtures, type OwnedFixture } from '../ownership.js';
-import { createLegacyProviders } from './providers.js';
+import { createLegacyProviders, RoleOutput } from './providers.js';
 import type { LegacyAccess, LegacyLease } from './operations.js';
 
 test('all six legacy providers register strict contracts and return canonical envelopes', async t => {
@@ -43,6 +44,26 @@ test('all six legacy providers register strict contracts and return canonical en
   assert.equal(foreign.availability, 'error'); assert.equal(foreign.error?.code, 'ownership-mismatch'); assert.equal(foreign.data, undefined);
   await assert.rejects(invoke({ leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null, shell: 'echo' }));
   assert.equal(executed, 1);
+  const cloned = ObservationResultSchema.parse(await registry.invoke({ id: 'loom.cli.role', version: 1, input: {} },
+    { leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }, { ...context }));
+  assert.equal(cloned.availability, 'error'); assert.equal(cloned.error?.code, 'ownership-mismatch'); assert.equal(executed, 1);
+  lease.evidence = 'real-native';
+  const mismatch = ObservationResultSchema.parse(await invoke({ leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }));
+  assert.equal(mismatch.availability, 'error'); assert.equal(mismatch.error?.code, 'source-mismatch'); assert.equal(executed, 1);
+  // A second registered fixture tests metadata preservation only: its injected
+  // CLI result is not evidence of a real native actor.
+  const nativeContext = createCapabilityContext({ file: 'native-envelope.yaml', line: 1 }, registry);
+  Object.assign(nativeContext, { runId: 'run' }); putEvidenceStore(nativeContext, evidenceStore);
+  putFixture(nativeContext, { ...fixture, suiteId: nativeContext.suiteId, scope: nativeContext.scope,
+    caseId: nativeContext.caseId, evidenceClass: 'real-native' });
+  const native = ObservationResultSchema.parse(await registry.invoke({ id: 'loom.cli.role', version: 1, input: {} },
+    { leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }, nativeContext));
+  assert.equal(native.availability, 'observed'); assert.equal(native.provenance.evidenceClass, 'real-native');
+  assert.equal(RoleOutput.parse(native.data).receipt.evidence, 'real-native'); assert.equal(executed, 2);
+  lease.evidence = 'deterministic';
+  revokeCapabilityContext(context);
+  const revoked = ObservationResultSchema.parse(await invoke({ leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }));
+  assert.equal(revoked.availability, 'error'); assert.equal(revoked.error?.code, 'ownership-mismatch'); assert.equal(executed, 2);
 });
 
 test('suite fixture configuration keeps its original restoration across declared cases', async t => {
@@ -75,7 +96,7 @@ test('suite fixture configuration keeps its original restoration across declared
   const caseContext = (caseId: string, handles: string[]) => {
     const context = createCapabilityContext({ file: 'suite.yaml', line: 1 }, registry);
     Object.assign(context, { runId: suite.runId, suiteId: suite.suiteId, caseId,
-      suite: { id: suite.suiteId, handles, getResource: (key: string, handle: string) => handles.includes(handle) ? suite.resources.get(key) : undefined } });
+      suite: { id: suite.suiteId, handles, getResource: (key: string, handle: string) => handles.includes(handle) ? getRegisteredResource(suite, key, handle) : undefined } });
     return context;
   };
   const invoke = (context: CapabilityContext) => registry.invoke({ id: 'loom.fixture.configure', version: 1, input: {} }, input, context);
