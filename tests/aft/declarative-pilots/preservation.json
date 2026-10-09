@@ -19485,14 +19485,14 @@
               "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
-                "kind": "authoring-not-yet-translated",
+                "kind": "confirmed-canonical-observation-expressiveness-gap",
                 "required": "geometry['headerHit']['hit']",
                 "evidence": "'tray header is hidden or occluded'",
                 "sourceHelper": "tests/aft/scripts/coverage-children-activity.py",
                 "sourceLine": 812,
                 "sourceFunction": "mobile_geometry_ok",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted c71 CaptureSchema604-637 rect/style/visible and DomFieldSchema669-688 tree/attributes/text/count do not observe elementFromPoint center target and descendant equality; engine read-only feasibility confirms source937-946 is unsupported.",
+                "missingObservation": "Actual header/Open-link center point target identity/descendant hit in the SAME synchronous source921-964 layout snapshot,including actual viewport and scroll dimensions. Rectangles/visible/tree do not prove occlusion. Original assertion unchanged; no fallback or new operation."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
@@ -19524,14 +19524,14 @@
               "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
-                "kind": "authoring-not-yet-translated",
+                "kind": "confirmed-canonical-observation-expressiveness-gap",
                 "required": "geometry['childLinkHit']['hit']",
                 "evidence": "'exact child Open link is hidden or occluded'",
                 "sourceHelper": "tests/aft/scripts/coverage-children-activity.py",
                 "sourceLine": 813,
                 "sourceFunction": "mobile_geometry_ok",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted c71 CaptureSchema604-637 rect/style/visible and DomFieldSchema669-688 tree/attributes/text/count do not observe elementFromPoint center target and descendant equality; engine read-only feasibility confirms source937-946 is unsupported.",
+                "missingObservation": "Actual header/Open-link center point target identity/descendant hit in the SAME synchronous source921-964 layout snapshot,including actual viewport and scroll dimensions. Rectangles/visible/tree do not prove occlusion. Original assertion unchanged; no fallback or new operation."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
@@ -26163,9 +26163,9 @@
             "coverage": "unresolved",
             "destination": [],
             "gap": {
-              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "kind": "confirmed-canonical-observation-expressiveness-gap",
               "required": "One synchronous callback reads list/tray/composer/nav/all row rectangles,actual viewport/theme/nav position,header colors,scrollWidth/clientWidth/document scroll width. Whole/partial/hidden rows and horizontal overflow preserve exact1px tolerances; visible membership uses strict overlap. More count comes from actual first matching aria-hidden div. Center elementFromPoint hit for header and exact child Open link must be target equality or actual descendant,not mere visibility.",
-              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "canonicalAttempt": "Engine read-only source review confirms c71/584 current interface cannot capture one callback actual viewport+scroll dimensions+elementFromPoint equality/descendant facts. Accepted c71 remains maintained; no584 adoption/new schema authorized.",
               "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
             }
           },
@@ -26238,7 +26238,9 @@
           "engine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
           "source": "dist/types.js CaptureSchema604-637 / DomFieldSchema669-688",
           "missingSupportedObservation": "Atomic geometry with actual viewport/scroll metrics and elementFromPoint center hit has no admitted observation path demonstrated. Engine source-backed feasibility requested; no operation expansion authorized.",
-          "coverage": "unresolved"
+          "coverage": "unresolved",
+          "feasibilityDecision": "Engine owner source-backed read-only confirmation2026-10-09T12:09:21Z: existing c71/584 rect/style captures and atomic DOM fields cannot preserve one callback actual viewport/scroll dimensions/elementFromPoint target equality-or-descendant hits. No new schema or authorization inferred.",
+          "followupAuthorization": "Parent2026-10-09T12:16:17Z authorizes separate generic atomic geometry engine leaf after output accounting; pilot mapping stays uncovered until exact reviewed canonical contract and authored raw-suite proof. No pilot engine/schema edit."
         },
         "acceptance": "Source mapping only; no new YAML/preservation/runtime credit."
       },
@@ -45610,7 +45612,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45628,8 +45630,29 @@
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
-                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37",
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+                ],
+                "sourceReason": "Exact claimed IDs are read from retained label bindings for stream/other only,trimmed and matched against agt_ format before all API/replay/cleanup routes; never literal dynamic IDs.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45642,7 +45665,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45659,7 +45682,24 @@
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Every capture and both SSE calls reread public saved events in limit2 pages. First actual snapshot_seq pins all later pages; preserve ordered unique seqs,eventIDs and exact actual agent. Before13 SSE filters two kinds from seq0; after34 filters same kinds beyond last captured first event seq and also reads full other-agent history.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45672,7 +45712,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45689,7 +45729,24 @@
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Every capture and both SSE calls reread public saved events in limit2 pages. First actual snapshot_seq pins all later pages; preserve ordered unique seqs,eventIDs and exact actual agent. Before13 SSE filters two kinds from seq0; after34 filters same kinds beyond last captured first event seq and also reads full other-agent history.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45702,7 +45759,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45714,7 +45771,23 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+                ],
+                "sourceReason": "Suite setup actually calls preflight. Backend opencode,source-repo basename,real selector file,one workspace repository and exact canonical workspace-path/source-repo/environment identity are mandatory,not unrelated helper branches.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45727,7 +45800,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45739,7 +45812,23 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+                ],
+                "sourceReason": "Suite setup actually calls preflight. Backend opencode,source-repo basename,real selector file,one workspace repository and exact canonical workspace-path/source-repo/environment identity are mandatory,not unrelated helper branches.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45752,7 +45841,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45764,7 +45853,23 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+                ],
+                "sourceReason": "Suite setup actually calls preflight. Backend opencode,source-repo basename,real selector file,one workspace repository and exact canonical workspace-path/source-repo/environment identity are mandatory,not unrelated helper branches.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45777,7 +45882,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45789,7 +45894,23 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+                ],
+                "sourceReason": "Suite setup actually calls preflight. Backend opencode,source-repo basename,real selector file,one workspace repository and exact canonical workspace-path/source-repo/environment identity are mandatory,not unrelated helper branches.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45802,7 +45923,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45814,7 +45935,23 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+                ],
+                "sourceReason": "Suite setup actually calls preflight. Backend opencode,source-repo basename,real selector file,one workspace repository and exact canonical workspace-path/source-repo/environment identity are mandatory,not unrelated helper branches.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45827,7 +45964,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45839,7 +45976,23 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+                ],
+                "sourceReason": "Suite setup actually calls preflight. Backend opencode,source-repo basename,real selector file,one workspace repository and exact canonical workspace-path/source-repo/environment identity are mandatory,not unrelated helper branches.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45852,7 +46005,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45867,7 +46020,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
+                ],
+                "sourceReason": "Labels stream/other map actual UI Chat pathname to actual public row,name coverage-rs-label-RUN,user-created/no parent,exact source repo and opencode harness. No native helper probe/restart here.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45880,7 +46048,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45895,7 +46063,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
+                ],
+                "sourceReason": "Labels stream/other map actual UI Chat pathname to actual public row,name coverage-rs-label-RUN,user-created/no parent,exact source repo and opencode harness. No native helper probe/restart here.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45908,7 +46091,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45923,7 +46106,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
+                ],
+                "sourceReason": "Labels stream/other map actual UI Chat pathname to actual public row,name coverage-rs-label-RUN,user-created/no parent,exact source repo and opencode harness. No native helper probe/restart here.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -45936,7 +46134,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -45951,7 +46149,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
+                ],
+                "sourceReason": "Labels stream/other map actual UI Chat pathname to actual public row,name coverage-rs-label-RUN,user-created/no parent,exact source repo and opencode harness. No native helper probe/restart here.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -46314,7 +46527,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -46331,7 +46544,24 @@
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Fresh agent+complete pages and actual window.__coverageRsCalls||[]; selected case does not install observe,so empty calls are permitted and all(valid_ui_receipt) can be vacuous. Retain original predicate,do not claim observed UI request provenance from empty data.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -46344,7 +46574,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -46361,7 +46591,24 @@
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Fresh agent+complete pages and actual window.__coverageRsCalls||[]; selected case does not install observe,so empty calls are permitted and all(valid_ui_receipt) can be vacuous. Retain original predicate,do not claim observed UI request provenance from empty data.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -46574,7 +46821,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -46589,7 +46836,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Exact full STREAM_ONE/STREAM_TWO delivered text each occurs once; every delivered inputKey truthy/unique and waiting empty. No absent argument is passed in this case.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -46602,7 +46864,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -46617,7 +46879,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Exact full STREAM_ONE/STREAM_TWO delivered text each occurs once; every delivered inputKey truthy/unique and waiting empty. No absent argument is passed in this case.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -46630,7 +46907,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -46645,7 +46922,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Exact full STREAM_ONE/STREAM_TWO delivered text each occurs once; every delivered inputKey truthy/unique and waiting empty. No absent argument is passed in this case.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -46658,7 +46950,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -46673,7 +46965,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "First->second and second->reloaded same exact primary Agent ID and leading EVENT-ID list equal entire earlier captured event-ID list. This oracle compares prefix IDs,not every full payload across reload.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -46686,7 +46993,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -46701,7 +47008,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "First->second and second->reloaded same exact primary Agent ID and leading EVENT-ID list equal entire earlier captured event-ID list. This oracle compares prefix IDs,not every full payload across reload.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -46964,7 +47286,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -46979,7 +47301,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -46992,7 +47329,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47007,7 +47344,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47020,7 +47372,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47035,7 +47387,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47048,7 +47415,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47063,7 +47430,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47076,7 +47458,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47091,7 +47473,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47104,7 +47501,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47119,7 +47516,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47132,7 +47544,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47147,7 +47559,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47160,7 +47587,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47177,7 +47604,24 @@
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Every capture and both SSE calls reread public saved events in limit2 pages. First actual snapshot_seq pins all later pages; preserve ordered unique seqs,eventIDs and exact actual agent. Before13 SSE filters two kinds from seq0; after34 filters same kinds beyond last captured first event seq and also reads full other-agent history.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47190,7 +47634,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47207,7 +47651,24 @@
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Every capture and both SSE calls reread public saved events in limit2 pages. First actual snapshot_seq pins all later pages; preserve ordered unique seqs,eventIDs and exact actual agent. Before13 SSE filters two kinds from seq0; after34 filters same kinds beyond last captured first event seq and also reads full other-agent history.",
+                "condition": "Only a page with actual more=true must have nonempty events and next>prior after; terminal page does not execute this guard.",
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47445,7 +47906,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47460,7 +47921,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "excluded",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Exact full STREAM_ONE/STREAM_TWO delivered text each occurs once; every delivered inputKey truthy/unique and waiting empty. No absent argument is passed in this case.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47473,7 +47949,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47486,9 +47962,22 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47501,7 +47990,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47516,7 +48005,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47529,7 +48033,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47542,13 +48046,22 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
-                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
-                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22",
-                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
-                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
-                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+                ],
+                "sourceReason": "Selected body calls use GET; only source cleanup performs POST/archive expecting204. Response204 branch requires expected204 and empty bytes,otherwise rejects,including unrecognized204 on GET. MessagePOST/withdrawDELETE status branches belong other cases.",
+                "condition": "Only selected cleanup POST/archive sets expected204; all selected GET calls have expectedNone and do not execute line38.",
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47561,7 +48074,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47574,13 +48087,36 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
-                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
-              ]
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37",
+                "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+                ],
+                "sourceReason": "Selected body calls use GET; only source cleanup performs POST/archive expecting204. Response204 branch requires expected204 and empty bytes,otherwise rejects,including unrecognized204 on GET. MessagePOST/withdrawDELETE status branches belong other cases.",
+                "condition": "Line38 only when expected status is set: selected cleanup POST/archive. Line40 only if actual response status204; archive empty body required,unrecognized204 GET must fail.",
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47593,7 +48129,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47608,7 +48144,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             },
             {
               "source": {
@@ -47621,7 +48172,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -47636,7 +48187,22 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+                ],
+                "sourceReason": "Before13 starts after0 with no other-label; after34 starts from first capture LAST seq and requires nonempty other-agent event-ID oracle. Original query agents/after/types and Accept text/event-stream; raw replay selects positive seq frames and stops exactly at expected filtered snapshot count,then asserts frame cursor IDs,ordered eventIDs,FULL payload equality,foreign exclusion,allowed kind/exact agent and seq>0. Ordinary replay,no induced feed.gap.",
+                "condition": null,
+                "bounds": {
+                  "sourceBodyCallerMs": 30000,
+                  "httpRequestMs": 20000,
+                  "sseUrlopenTimeoutMs": 25000
+                },
+                "acceptance": "Source branch only; no new authored YAML/admission/runtime/preservation credit."
+              }
             }
           ]
         },
@@ -47761,6 +48327,660 @@
         "evidence": "real paid replies + saved public events + actual SSE; no induced-feed-gap credit",
         "deadlines": "original180000ms reply waits and helper stream/read deadlines",
         "screenshots": "all38 authored steps and primary/foreign/reopened histories"
+      },
+      "selectedBranchReview": {
+        "at": "2026-10-09T12:15:39.457709+00:00",
+        "frozenHelperByteMatch": true,
+        "scope": "Selected SSE body,actual setup and cleanup; other Create/waiting/native cases excluded.",
+        "inventoryPredicatesReviewed": [
+          {
+            "line": 56,
+            "function": "agent_id",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 86,
+            "function": "pages",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 87,
+            "function": "pages",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 100,
+            "function": "preflight",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": true
+          },
+          {
+            "line": 101,
+            "function": "preflight",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": true
+          },
+          {
+            "line": 102,
+            "function": "preflight",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": true
+          },
+          {
+            "line": 105,
+            "function": "preflight",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": true
+          },
+          {
+            "line": 106,
+            "function": "preflight",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": true
+          },
+          {
+            "line": 108,
+            "function": "preflight",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": true
+          },
+          {
+            "line": 114,
+            "function": "claim",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 118,
+            "function": "claim",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 119,
+            "function": "claim",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 120,
+            "function": "claim",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 244,
+            "function": "capture",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 245,
+            "function": "capture",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 351,
+            "function": "delivered",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 353,
+            "function": "delivered",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 356,
+            "function": "delivered",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 364,
+            "function": "prefix",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 366,
+            "function": "prefix",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 402,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 413,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 436,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 437,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 438,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 439,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 440,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 78,
+            "function": "pages",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 82,
+            "function": "pages",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 355,
+            "function": "delivered",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": true,
+            "recoveredSetup": false
+          },
+          {
+            "line": 406,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 421,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 38,
+            "function": "http",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+            ],
+            "conditional": true,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 40,
+            "function": "http",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#setup",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+            ],
+            "conditional": true,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 424,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          },
+          {
+            "line": 433,
+            "function": "sse",
+            "callers": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "conditional": false,
+            "excluded": false,
+            "recoveredSetup": false
+          }
+        ],
+        "direct": 32,
+        "conditional": 3,
+        "excludedAbsentBranch": 1,
+        "recoveredSetupPredicates": 6,
+        "additionalSourceGroups": [
+          {
+            "id": "sse-claimed-ui-identity",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-receipts-stream-evidence.py",
+            "sourceHelperSha256": "065178d9c5b4c77f80e3fb1ef7cd78eb63a62ff3c8a452617daeda8992a59dcd",
+            "sourceLines": {
+              "start": 111,
+              "end": 121,
+              "text": "def claim(label):\n    route = browser(\"location.pathname\")\n    match = re.fullmatch(rf\"/ws/{re.escape(WS)}/chat/(agt_[A-Za-z0-9_-]+)\", route)\n    assert match, \"UI did not open an Agent API chat\"\n    OUT.mkdir(parents=True, exist_ok=True)\n    (OUT / f\"{label}.id\").write_text(match[1] + \"\\n\")\n    a = agent(label)\n    assert a[\"name\"] == f\"coverage-rs-{label}-{RUN}\" and a[\"agent_id\"] == match[1]\n    assert a[\"created_by_kind\"] == \"user\" and a[\"parent_agent_id\"] is None\n    assert a[\"repo\"] == os.environ[\"AFT_AGENT_FLOW_REPO\"] and a[\"harness\"] == \"opencode\"\n    save(label, \"identity\", {\"agent_id\": a[\"agent_id\"], \"name\": a[\"name\"], \"repo\": a[\"repo\"], \"harness\": a[\"harness\"], \"actor\": \"production UI user; local stack open-mode user identity\"})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/22"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-or-protocol-outside-frozen-predicate-extraction",
+              "required": "Claim exact current /ws/WS/chat/agt_ path,actual UI-created stream/other rows and names/RUN,public user actor/no parent,source repo/opencode. Save actual ID and safe identity before real model selection; labels are not source authority.",
+              "canonicalAttempt": "Accepted c71 has bounded API paging and raw replay with query/token exchange/count/selected frames; exact original source composition and emitted public runner chain has not been authored/validated for this group. No missing primitive inferred merely from unimplemented authoring.",
+              "missingObservation": "Same actual saved identities/snapshot/cursor/public payloads,original actors and owned restart/cleanup must be bound and compared in YAML without expected-return stubs or scripts. Redaction-affected captures cannot prove raw payload equality."
+            }
+          },
+          {
+            "id": "sse-paging-source-query-and-boundary",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-receipts-stream-evidence.py",
+            "sourceHelperSha256": "065178d9c5b4c77f80e3fb1ef7cd78eb63a62ff3c8a452617daeda8992a59dcd",
+            "sourceLines": {
+              "start": 68,
+              "end": 87,
+              "text": "def pages(label, kinds=None):\n    result, after, boundary = [], 0, None\n    while True:\n        params = {\"after\": after, \"limit\": 2}\n        if boundary is not None:\n            params[\"snapshot\"] = boundary\n        if kinds:\n            params[\"kind\"] = \",\".join(kinds)\n        page = http(path(label) + \"/events?\" + urllib.parse.urlencode(params))\n        boundary = page[\"snapshot_seq\"] if boundary is None else boundary\n        assert page[\"snapshot_seq\"] == boundary, \"ListEvents snapshot changed during paging\"\n        result.extend(page[\"events\"])\n        if not page[\"more\"]:\n            break\n        assert page[\"next\"] > after and page[\"events\"], \"page cursor did not advance\"\n        after = page[\"next\"]\n    seqs = [e[\"seq\"] for e in result]\n    ids = [e[\"event_id\"] for e in result]\n    assert seqs == sorted(set(seqs)) and len(ids) == len(set(ids)), \"duplicate or unordered saved events\"\n    assert all(e[\"agent_id\"] == agent_id(label) for e in result), \"foreign saved event\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-or-protocol-outside-frozen-predicate-extraction",
+              "required": "Initial after0/limit2; optional kind list comma query; first actual snapshot_seq immutable across every subsequent page,after actual next only with more. Aggregate every saved event in original order,unique seq/eventIDs/exact agent. No silently truncated API list or new later snapshot completes old evidence.",
+              "canonicalAttempt": "Accepted c71 has bounded API paging and raw replay with query/token exchange/count/selected frames; exact original source composition and emitted public runner chain has not been authored/validated for this group. No missing primitive inferred merely from unimplemented authoring.",
+              "missingObservation": "Same actual saved identities/snapshot/cursor/public payloads,original actors and owned restart/cleanup must be bound and compared in YAML without expected-return stubs or scripts. Redaction-affected captures cannot prove raw payload equality."
+            }
+          },
+          {
+            "id": "sse-request-receipt-observer-limitation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-receipts-stream-evidence.py",
+            "sourceHelperSha256": "065178d9c5b4c77f80e3fb1ef7cd78eb63a62ff3c8a452617daeda8992a59dcd",
+            "sourceLines": {
+              "start": 225,
+              "end": 255,
+              "text": "def observe():\n    assert browser(OBSERVER) == \"installed\", \"browser request observer was not installed\"\n\n\ndef valid_ui_receipt(call, label):\n    if not call.get(\"key\") or not isinstance(call.get(\"result\"), dict):\n        return False\n    if call.get(\"method\") == \"POST\" and call.get(\"path\") == path(label) + \"/messages\":\n        result = call[\"result\"]\n        return call.get(\"status\") == 202 and bool(result.get(\"message_id\")) and isinstance(result.get(\"state\"), str)\n    if call.get(\"method\") == \"DELETE\" and call.get(\"path\") == path(label) + \"/messages/waiting\":\n        return call.get(\"status\") == 200 and call[\"result\"].get(\"result\") in (\n            \"withdrawn\", \"nothing_waiting\", \"already_handed\")\n    return False\n\n\ndef capture(label, stage):\n    a, evs = agent(label), pages(label)\n    calls = browser(\"window.__coverageRsCalls || []\")\n    assert isinstance(calls, list)\n    assert all(valid_ui_receipt(c, label) for c in calls), \"missing exact successful UI receipt\"\n    # Persist only the public fields needed for the oracle. Tool inputs and\n    # outputs can contain private data and have no role in these assertions.\n    safe_events = [{\"agent_id\": e[\"agent_id\"], \"seq\": e[\"seq\"], \"event_id\": e[\"event_id\"],\n                    \"kind\": e[\"kind\"], \"turn_id\": e[\"turn_id\"],\n                    \"payload\": {k: e[\"payload\"][k] for k in (\"text\", \"inputKey\", \"sender\") if k in e[\"payload\"]}\n                    if e[\"kind\"] == \"message.delivered\" else {}} for e in evs]\n    save(label, stage, {\"agent_id\": a[\"agent_id\"], \"state\": a[\"state\"], \"turn_id\": a[\"running_turn_id\"],\n                        \"waiting\": a[\"waiting_messages\"], \"events\": safe_events, \"ui_calls\": calls,\n                        \"actor\": \"production UI user; local stack open-mode user identity\", \"evidence\": \"real OpenCode plus public Agent API\"})\n"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/37"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-or-protocol-outside-frozen-predicate-extraction",
+              "required": "capture reads optional actual browser calls and validates every present call: nonempty key/dict result; exact POST messages202/message_id/stringstate OR exact DELETE waiting200/allowed result. Selected test never invokes observe so [] is valid but cannot establish request observation. Capture safe events retain identities/kind/turn; only delivered payload text/inputKey/sender retained,other payloads empty.",
+              "canonicalAttempt": "Accepted c71 has bounded API paging and raw replay with query/token exchange/count/selected frames; exact original source composition and emitted public runner chain has not been authored/validated for this group. No missing primitive inferred merely from unimplemented authoring.",
+              "missingObservation": "Same actual saved identities/snapshot/cursor/public payloads,original actors and owned restart/cleanup must be bound and compared in YAML without expected-return stubs or scripts. Redaction-affected captures cannot prove raw payload equality."
+            }
+          },
+          {
+            "id": "sse-delivered-source-selection",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-receipts-stream-evidence.py",
+            "sourceHelperSha256": "065178d9c5b4c77f80e3fb1ef7cd78eb63a62ff3c8a452617daeda8992a59dcd",
+            "sourceLines": {
+              "start": 347,
+              "end": 359,
+              "text": "def delivered(label, stage, text, absent=\"\"):\n    value = load(label, stage)\n    rows = [e for e in value[\"events\"] if e[\"kind\"] == \"message.delivered\"]\n    found = [e for e in rows if e[\"payload\"].get(\"text\") == text]\n    assert len(found) == 1, f\"expected one full persisted delivered text {text!r}\"\n    keys = [e[\"payload\"].get(\"inputKey\") for e in rows]\n    assert all(keys) and len(keys) == len(set(keys)), \"duplicate native input key in delivered history\"\n    if absent:\n        assert all(e[\"payload\"].get(\"text\") != x for x in absent.split(\"|\") for e in rows), \"superseded text delivered\"\n    assert not value[\"waiting\"], \"waiting slot was not consumed\"\n    save(label, stage + \"-delivery\", {\"event_id\": found[0][\"event_id\"], \"seq\": found[0][\"seq\"], \"text\": text,\n                                      \"native_input_key\": found[0][\"payload\"][\"inputKey\"],\n                                      \"all_delivered_ids\": [e[\"event_id\"] for e in rows]})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-or-protocol-outside-frozen-predicate-extraction",
+              "required": "Filter captured safe events by message.delivered; equality is exact complete requested user text,not substring/prefix. Input-key uniqueness is over ALL delivered rows,waiting mustempty. Persist matching eventID/seq/native inputKey/all-deliveredIDs; absent superseded-text check is unselected because no absent argument.",
+              "canonicalAttempt": "Accepted c71 has bounded API paging and raw replay with query/token exchange/count/selected frames; exact original source composition and emitted public runner chain has not been authored/validated for this group. No missing primitive inferred merely from unimplemented authoring.",
+              "missingObservation": "Same actual saved identities/snapshot/cursor/public payloads,original actors and owned restart/cleanup must be bound and compared in YAML without expected-return stubs or scripts. Redaction-affected captures cannot prove raw payload equality."
+            }
+          },
+          {
+            "id": "sse-cursor-selected-snapshot",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-receipts-stream-evidence.py",
+            "sourceHelperSha256": "065178d9c5b4c77f80e3fb1ef7cd78eb63a62ff3c8a452617daeda8992a59dcd",
+            "sourceLines": {
+              "start": 397,
+              "end": 406,
+              "text": "def sse(label, stage, types, after_stage=\"zero\", other_label=\"none\"):\n    \"\"\"Bounded cursor replay: compare exact filtered rows to paged ListEvents.\"\"\"\n    allowed = types.split(\",\")\n    after = 0 if after_stage == \"zero\" else load(label, after_stage)[\"events\"][-1][\"seq\"]\n    expected = [e for e in pages(label, allowed) if e[\"seq\"] > after]\n    assert expected, \"filtered saved-event oracle is empty\"\n    other_ids = set()\n    if other_label != \"none\":\n        other_ids = {e[\"event_id\"] for e in pages(other_label)}\n        assert other_ids, \"foreign-agent filter oracle is empty\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-or-protocol-outside-frozen-predicate-extraction",
+              "required": "Allowed types exactly message.delivered,agent.turn_completed. Before13 after0/noother; after34 uses last seq of ENTIRE first capture,not last filtered event; expected is fresh filtered pages strictlyseq>after. Foreign oracle after34 comes from nonempty full other-agent pages.",
+              "canonicalAttempt": "Accepted c71 has bounded API paging and raw replay with query/token exchange/count/selected frames; exact original source composition and emitted public runner chain has not been authored/validated for this group. No missing primitive inferred merely from unimplemented authoring.",
+              "missingObservation": "Same actual saved identities/snapshot/cursor/public payloads,original actors and owned restart/cleanup must be bound and compared in YAML without expected-return stubs or scripts. Redaction-affected captures cannot prove raw payload equality."
+            }
+          },
+          {
+            "id": "sse-private-token-query-and-header",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-receipts-stream-evidence.py",
+            "sourceHelperSha256": "065178d9c5b4c77f80e3fb1ef7cd78eb63a62ff3c8a452617daeda8992a59dcd",
+            "sourceLines": {
+              "start": 407,
+              "end": 421,
+              "text": "    try:\n        token_result = http(f\"/api/workspaces/{urllib.parse.quote(WS, safe='')}/events/token\")\n    except urllib.error.HTTPError as error:\n        if error.code != 404:\n            raise\n        token_result = {\"disabled\": True}\n    assert token_result.get(\"token\") or token_result.get(\"disabled\") is True, \"SSE token exchange failed\"\n    params = {\"agents\": agent_id(label), \"after\": f\"{agent_id(label)}:{after}\", \"types\": types}\n    if token_result.get(\"token\"):\n        params[\"token\"] = token_result[\"token\"]\n    query = urllib.parse.urlencode(params)\n    request = urllib.request.Request(BASE + ROOT + \"/events?\" + query, headers={\"Accept\": \"text/event-stream\"})\n    got, frame = [], {}\n    with urllib.request.urlopen(request, timeout=25) as response:\n        assert response.headers.get_content_type() == \"text/event-stream\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-or-protocol-outside-frozen-predicate-extraction",
+              "required": "Read /api/workspaces/WS/events/token; only404 may fall back disabled true,other HTTP errors propagate. Require token truthy OR disabled IS true. Actual GET API-origin /v1/events query agents=exactID,after=ID:seq,types=originalcomma list,token only ifreturned; Accept text/event-stream,parsed content type exact. No Last-Event-ID header in original request; secret token must stay private.",
+              "canonicalAttempt": "Accepted c71 has bounded API paging and raw replay with query/token exchange/count/selected frames; exact original source composition and emitted public runner chain has not been authored/validated for this group. No missing primitive inferred merely from unimplemented authoring.",
+              "missingObservation": "Same actual saved identities/snapshot/cursor/public payloads,original actors and owned restart/cleanup must be bound and compared in YAML without expected-return stubs or scripts. Redaction-affected captures cannot prove raw payload equality."
+            }
+          },
+          {
+            "id": "sse-raw-frame-collection-and-selected-count",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-receipts-stream-evidence.py",
+            "sourceHelperSha256": "065178d9c5b4c77f80e3fb1ef7cd78eb63a62ff3c8a452617daeda8992a59dcd",
+            "sourceLines": {
+              "start": 422,
+              "end": 435,
+              "text": "        while len(got) < len(expected):\n            line = response.readline().decode(\"utf-8\")\n            assert line, \"SSE ended before saved replay completed\"\n            line = line.rstrip(\"\\r\\n\")\n            if line.startswith(\"id:\"):\n                frame[\"id\"] = line[3:].strip()\n            elif line.startswith(\"data:\"):\n                frame[\"data\"] = json.loads(line[5:].strip())\n            elif not line and frame:\n                if frame.get(\"data\", {}).get(\"seq\", 0) > 0:\n                    event = frame[\"data\"]\n                    assert frame.get(\"id\") == f\"{event['agent_id']}:{event['seq']}\"\n                    got.append(event)\n                frame = {}"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-or-protocol-outside-frozen-predicate-extraction",
+              "required": "Read UTF8 lines until expected filtered event count; EOF before complete fails. Source consumes id:/data: and blankline frames,only payload.seq>0 appended; require raw id == payload.agent_id:payload.seq. Nonpositive notices ignored for saved replay; stop at selected count,not EOF/all future events. Preserve full actual public payload for equality and independent raw frame ID; do not replace projected text stream.",
+              "canonicalAttempt": "Accepted c71 has bounded API paging and raw replay with query/token exchange/count/selected frames; exact original source composition and emitted public runner chain has not been authored/validated for this group. No missing primitive inferred merely from unimplemented authoring.",
+              "missingObservation": "Same actual saved identities/snapshot/cursor/public payloads,original actors and owned restart/cleanup must be bound and compared in YAML without expected-return stubs or scripts. Redaction-affected captures cannot prove raw payload equality."
+            }
+          },
+          {
+            "id": "sse-cursor-output-and-evidence-class",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-receipts-stream-evidence.py",
+            "sourceHelperSha256": "065178d9c5b4c77f80e3fb1ef7cd78eb63a62ff3c8a452617daeda8992a59dcd",
+            "sourceLines": {
+              "start": 436,
+              "end": 444,
+              "text": "    assert [e[\"event_id\"] for e in got] == [e[\"event_id\"] for e in expected], \"SSE replay differs from ListEvents\"\n    assert got == expected, \"SSE payload differs from persisted events\"\n    assert not ({e[\"event_id\"] for e in got} & other_ids), \"agent filter leaked a foreign event\"\n    assert all(e[\"kind\"] in allowed and e[\"agent_id\"] == agent_id(label) for e in got)\n    assert all(e[\"seq\"] > 0 for e in got), \"unexpected live-only notice in saved replay\"\n    save(label, stage + \"-sse\", {\"types\": allowed, \"event_ids\": [e[\"event_id\"] for e in got],\n                                  \"texts\": [e[\"payload\"].get(\"text\") for e in got if e[\"kind\"] == \"message.delivered\"],\n                                  \"cursor_from\": f\"{agent_id(label)}:{after}\", \"cursor_to\": f\"{agent_id(label)}:{got[-1]['seq']}\",\n                                  \"classification\": \"ordinary saved-event replay; no feed.gap asserted\"})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/34"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-or-protocol-outside-frozen-predicate-extraction",
+              "required": "Ordered eventID equality then full actual payload list equality,foreign event-ID exclusion,allowed kinds/exactagent/positive seq; persist public delivered full texts and actual cursor from/to. Preserve explicit ordinary saved-event replay classification,no feed.gap claim.",
+              "canonicalAttempt": "Accepted c71 has bounded API paging and raw replay with query/token exchange/count/selected frames; exact original source composition and emitted public runner chain has not been authored/validated for this group. No missing primitive inferred merely from unimplemented authoring.",
+              "missingObservation": "Same actual saved identities/snapshot/cursor/public payloads,original actors and owned restart/cleanup must be bound and compared in YAML without expected-return stubs or scripts. Redaction-affected captures cannot prove raw payload equality."
+            }
+          },
+          {
+            "id": "sse-owned-archive-cleanup",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-receipts-stream-evidence.py",
+            "sourceHelperSha256": "065178d9c5b4c77f80e3fb1ef7cd78eb63a62ff3c8a452617daeda8992a59dcd",
+            "sourceLines": {
+              "start": 447,
+              "end": 453,
+              "text": "def cleanup():\n    for file in OUT.glob(\"*.id\"):\n        label = file.stem\n        expected = f\"coverage-rs-{label}-{RUN}\"\n        a = agent(label)\n        if a[\"name\"] == expected and a[\"repo\"] == os.environ[\"AFT_AGENT_FLOW_REPO\"] and not a.get(\"archived_at\"):\n            http(path(label) + \"/archive\", \"POST\", {\"reason\": \"cancelled\"}, f\"coverage-rs-{RUN}-{label}-archive\")"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#teardown"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-or-protocol-outside-frozen-predicate-extraction",
+              "required": "For actual claimed ID labels,read public row; archive only when exact coverage-rs-label-RUN name/repo and not archived_at. Fixed POST reasoncancelled/idempotency-key coverage-rs-RUN-label-archive must204 emptybody; no unowned adoption. Original cleanup only stream/other captured IDs; managed hook still requires this authenticated source-derived archive producer.",
+              "canonicalAttempt": "Accepted c71 has bounded API paging and raw replay with query/token exchange/count/selected frames; exact original source composition and emitted public runner chain has not been authored/validated for this group. No missing primitive inferred merely from unimplemented authoring.",
+              "missingObservation": "Same actual saved identities/snapshot/cursor/public payloads,original actors and owned restart/cleanup must be bound and compared in YAML without expected-return stubs or scripts. Redaction-affected captures cannot prove raw payload equality."
+            }
+          },
+          {
+            "id": "sse-owned-container-serve-opencode-restart",
+            "sourceHelper": "campaign:tests/aft/scripts/agent-flows-restart-serve.sh",
+            "sourceHelperSha256": "eedce3f74c6ce6a11e4b760be9424e6baba61b51286de55054b92bf1c5fbedeb",
+            "sourceLines": {
+              "start": 1,
+              "end": 30,
+              "text": "#!/usr/bin/env bash\n# Recreate only the owned loom-local service; its volume and OpenCode process\n# are part of that service, so the evidence describes a serve+OpenCode restart.\nset -euo pipefail\n# shellcheck source=tests/aft/scripts/agent-flows-ownership.sh\nsource \"$(dirname \"${BASH_SOURCE[0]}\")/agent-flows-ownership.sh\"\nagent_flows_check_manifest\ncd \"$AFT_SOURCE_ROOT\"\ncompose=(agent_flows_podman compose -p \"$AFT_OWNED_PROJECT\" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f \"$AFT_WORK_DIR/fleet-override.yml\")\ncontainer=\"$(\"${compose[@]}\" ps -q loom-local | tr -d '\\r')\"\nagent_flows_check_container \"$container\"\nold_pid=\"$(agent_flows_podman inspect --format '{{.State.Pid}}' \"$container\" | tr -d '\\r')\"\nold_started=\"$(agent_flows_podman inspect --format '{{.State.StartedAt}}' \"$container\" | tr -d '\\r')\"\n[[ \"$old_pid\" =~ ^[1-9][0-9]*$ ]] || { echo 'loom-local was not running' >&2; exit 1; }\n[[ -n \"$old_started\" ]] || { echo 'loom-local start identity missing' >&2; exit 1; }\nprintf 'time=%s project=%s old_container=%s old_init_pid=%s old_started=%s scope=loom-local-plus-OpenCode\\n' \"$(date -u +%FT%TZ)\" \"$AFT_OWNED_PROJECT\" \"$container\" \"$old_pid\" \"$old_started\" >> \"$AFT_WORK_DIR/restarts.log\"\nagent_flows_podman top \"$container\" pid comm >> \"$AFT_WORK_DIR/restarts.log\"\n\"${compose[@]}\" restart loom-local\ndeadline=$((SECONDS + 180))\nuntil curl -fsS --max-time 3 \"$AFT_API_URL/api/config\" >/dev/null 2>&1; do\n  (( SECONDS < deadline )) || { echo 'loom-local did not become ready' >&2; exit 1; }\n  sleep 1\ndone\nnew_container=\"$(\"${compose[@]}\" ps -q loom-local | tr -d '\\r')\"\nagent_flows_check_container \"$new_container\"\nnew_pid=\"$(agent_flows_podman inspect --format '{{.State.Pid}}' \"$new_container\" | tr -d '\\r')\"\nnew_started=\"$(agent_flows_podman inspect --format '{{.State.StartedAt}}' \"$new_container\" | tr -d '\\r')\"\n[[ \"$new_pid\" =~ ^[1-9][0-9]*$ && \"$new_pid\" != \"$old_pid\" && -n \"$new_started\" && \"$new_started\" != \"$old_started\" ]] || { echo 'loom-local process/start identity did not change' >&2; exit 1; }\nprintf 'ready=%s new_container=%s new_init_pid=%s new_started=%s\\n' \"$(date -u +%FT%TZ)\" \"$new_container\" \"$new_pid\" \"$new_started\" >> \"$AFT_WORK_DIR/restarts.log\"\nagent_flows_podman top \"$new_container\" pid comm >> \"$AFT_WORK_DIR/restarts.log\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26"
+            ],
+            "sourceLauncher": {
+              "path": "tests/aft/run-aft-agent-flows.sh",
+              "sha256": "43875166b14615435c75bc42e52733b3f51ad474694cfcaf90bd3eeaf089edde",
+              "line": 39,
+              "text": "export AFT_RESTART_SERVE=\"$TESTS_DIR/scripts/agent-flows-restart-serve.sh\""
+            },
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "required-source-provisioning-and-effect-scope",
+              "required": "Original restart is exact owned loom-local container,therefore serve plus colocatedOpenCode; verify manifest/container before/after,actual old/new initPID+StartedAt distinct,public /api/config readiness within180s(eachrequest3s),retain process inventory/log. Native helper SIGTERM restart is a different unselected case. Replace source poll/sleep with genuine bounded signal,not authored sleep or arbitrary shell.",
+              "canonicalAttempt": "Existing serve-restart private fixture/process operation requires exact producer scope review; process-only or standalone harness restart is not credited as the source container restart. Parent/legacy owner notified, no new operation authorized.",
+              "missingObservation": "Exact container/generation restart producer and before/after identity/readiness evidence under same owned fixture,while preserving saved histories and primary UI reopen."
+            }
+          }
+        ],
+        "nativeHelperDirectCalls": "none in original selected test; four native-helper inventory entries remain unrelated-external-helper-case. Real model selector/imported ownership source closure still required.",
+        "acceptance": "35 selected extracted obligations (3 conditional),10 extra source groups uncovered; no new YAML/source-preservation/runtime proof."
       }
     }
   ],
@@ -47768,24 +48988,25 @@
     "originalSteps": 207,
     "helperInventoryEntries": 1072,
     "classificationCounts": {
-      "selected-invocation-predicate-reachable": 219,
-      "unrelated-to-static-selected-call-closure": 380,
+      "selected-invocation-predicate-reachable": 251,
+      "unrelated-to-static-selected-call-closure": 374,
       "helper-selftest-negative-requirement": 213,
-      "excluded-static-selected-invocation-branch": 9,
-      "selected-invocation-predicate-conditionally-reachable": 8,
-      "selected-function-reachable-branch-unresolved": 211,
+      "excluded-static-selected-invocation-branch": 10,
+      "selected-invocation-predicate-conditionally-reachable": 11,
+      "selected-function-reachable-branch-unresolved": 181,
       "selected-external-helper-branch-unresolved": 28,
       "unrelated-external-helper-case": 4
     },
-    "reachableCandidatePredicates": 466,
-    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered.",
+    "reachableCandidatePredicates": 471,
+    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open.",
     "reviewedAuthoredUnvalidatedPredicates": 20,
     "partiallyMappedRepeatedPredicates": 3,
     "fullPreservationAcceptance": false,
     "additionalUninventoriedStopNativeGuards": 14,
     "ownershipImportedPredicateDenominator": "unresolved; excluded from1072 frozen extraction, included in required followup",
     "additionalUninventoriedFilesGuards": 6,
-    "additionalUninventoriedChildSourceGroups": 56
+    "additionalUninventoriedChildSourceGroups": 56,
+    "additionalUninventoriedSseSourceGroups": 10
   },
   "dependencies": {
     "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
