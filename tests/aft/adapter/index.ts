@@ -11,7 +11,7 @@ import { getFixture, getAgent, type OwnedFixture } from './ownership.js';
 import { CorrelationInput, CorrelationOutput, correlateEvents } from './correlation.js';
 import { FailureInput, FailureOutput, observeNativeFailure } from './native-failure.js';
 import { FilesInput, FilesOutput, observeFiles } from './files.js';
-import { NativeInput, NativeOutput, observeNative } from './native.js';
+import { NativeInput, NativeOutput, observeNative, NativeRegistrationInput, NativeRegistrationOutput, observeNativeRegistration } from './native.js';
 import { SavedEventsInput, SavedEventsOutput, collectSavedEvents } from './events.js';
 import { FilesystemInput, FilesystemOutput, observeFilesystem } from './filesystem.js';
 import { GitLifecycleInput, GitLifecycleOutput, observeGitLifecycle } from './git-lifecycle.js';
@@ -58,6 +58,14 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     evidenceClasses: ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const };
   const common = { implementation, implementationSha256: implementation.sha256, ...read, evidenceClasses: [...read.evidenceClasses] };
   return [
+    defineOperation({...common,id:'loom.native.registration',inputSchema:NativeRegistrationInput,outputSchema:NativeRegistrationOutput,
+      async run(input,context) {
+        const {fixture,agent} = await getAgent(context,input.agent);
+        requireFact(agent.native,'unsupported-capability','Owned native transport is missing');
+        const value = await observeNativeRegistration(input,agent.native,agent.row,context.signal);
+        return {value,identity:identity(fixture,agent.row),evidenceClass:fixture.evidenceClass,secrets:fixture.secrets};
+      },
+    }),
     defineOperation({ ...common, id: 'loom.agent.bind', inputSchema: BindAgentInput, outputSchema: BindAgentOutput,
       async run(input, context) {
         const fixture = await getFixture(context, input.leaseId);
