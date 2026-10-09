@@ -34412,7 +34412,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34421,8 +34421,8 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2634,
                 "sourceFunction": "turn_events",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -34434,7 +34434,23 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Render marker window for reasoning22/35/grid37,render23/reload36,clipboard code27/table29/message31; reduced marker for45. Exactly one marker delivery, FIRST later turn_completed from sorted saved stream, strict sequence-between window; does NOT assert only one later completion.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34447,7 +34463,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34456,8 +34472,8 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2636,
                 "sourceFunction": "turn_events",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -34469,7 +34485,23 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Render marker window for reasoning22/35/grid37,render23/reload36,clipboard code27/table29/message31; reduced marker for45. Exactly one marker delivery, FIRST later turn_completed from sorted saved stream, strict sequence-between window; does NOT assert only one later completion.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34482,7 +34514,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34491,8 +34523,8 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2675,
                 "sourceFunction": "record_expansion_geometry",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -34500,7 +34532,19 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Only when real collapsed group/entry selected; exact owned history list and <768 before EACH append incl scroll/click failure outcomes.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34513,7 +34557,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34522,8 +34566,8 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2681,
                 "sourceFunction": "validate_expansion_target",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -34531,7 +34575,19 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34544,7 +34600,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34553,8 +34609,8 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2682,
                 "sourceFunction": "validate_expansion_target",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -34562,7 +34618,19 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34575,7 +34643,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34584,8 +34652,8 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2684,
                 "sourceFunction": "validate_expansion_target",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -34593,7 +34661,19 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34606,7 +34686,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34615,8 +34695,8 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2709,
                 "sourceFunction": "click_collapsed_work",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -34624,7 +34704,19 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Only when actual collapsed nodes exist; source FIRST matching control count/kind/rowIndex/status invariant across real scroll before actual UI click; bounded loops, no direct expanded-attribute mutation.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34637,7 +34729,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34646,13 +34738,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2861,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34665,7 +34766,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34674,13 +34775,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2862,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34693,7 +34803,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34702,13 +34812,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2866,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34721,7 +34840,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34730,13 +34849,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2869,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34749,7 +34877,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34758,13 +34886,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2871,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34777,7 +34914,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34786,13 +34923,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2873,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34805,7 +34951,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34814,13 +34960,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2874,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34833,7 +34988,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34842,13 +34997,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2879,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34861,7 +35025,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34870,13 +35034,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2883,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34889,7 +35062,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34898,13 +35071,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2894,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34917,7 +35099,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34926,13 +35108,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2895,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34945,7 +35136,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34954,13 +35145,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2896,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -34973,7 +35173,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -34982,13 +35182,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2897,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -35001,7 +35210,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35010,13 +35219,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2909,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -35806,7 +36024,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35815,12 +36033,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3787,
                 "sourceFunction": "assert_live_observation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+                ],
+                "sourceReason": "Captured FIRST simultaneous live-tool observation at correct render route is required; subsequent screenshot may show completed transition but cannot substitute for captured live fact.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -35833,7 +36059,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35842,12 +36068,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3788,
                 "sourceFunction": "assert_live_observation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+                ],
+                "sourceReason": "Captured FIRST simultaneous live-tool observation at correct render route is required; subsequent screenshot may show completed transition but cannot substitute for captured live fact.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -35860,7 +36094,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35869,12 +36103,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3789,
                 "sourceFunction": "assert_live_observation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+                ],
+                "sourceReason": "Captured FIRST simultaneous live-tool observation at correct render route is required; subsequent screenshot may show completed transition but cannot substitute for captured live fact.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -35887,7 +36129,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35896,12 +36138,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3791,
                 "sourceFunction": "assert_live_observation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+                ],
+                "sourceReason": "Captured FIRST simultaneous live-tool observation at correct render route is required; subsequent screenshot may show completed transition but cannot substitute for captured live fact.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -35914,7 +36164,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35923,12 +36173,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3818,
                 "sourceFunction": "live_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+                ],
+                "sourceReason": "Actual live-check16 reads captured first simultaneous tool/Working/Stop observer data, binds current render Chat and exact saved VISUAL_RENDER delivery.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -36416,7 +36674,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -36425,12 +36683,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4197,
                 "sourceFunction": "render_reload_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Read before-reload32 saved EventIDs, fresh current saved list: require exact full prefix plus total length unchanged before repeating render_check and source projection.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -36443,7 +36709,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -36452,12 +36718,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4198,
                 "sourceFunction": "render_reload_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Read before-reload32 saved EventIDs, fresh current saved list: require exact full prefix plus total length unchanged before repeating render_check and source projection.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -36470,7 +36744,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -36479,12 +36753,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4214,
                 "sourceFunction": "reduced_live_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
+                ],
+                "sourceReason": "Actual UI second turn under reduced media, same render agent: same callback current preference+Stop+last-agent caret+Working, no fresh words, caret and first Working child animation none. Not completed screenshot.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -36497,7 +36779,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -36506,12 +36788,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4215,
                 "sourceFunction": "reduced_live_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
+                ],
+                "sourceReason": "Actual UI second turn under reduced media, same render agent: same callback current preference+Stop+last-agent caret+Working, no fresh words, caret and first Working child animation none. Not completed screenshot.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -36524,7 +36814,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -36533,12 +36823,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4216,
                 "sourceFunction": "reduced_live_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
+                ],
+                "sourceReason": "Actual UI second turn under reduced media, same render agent: same callback current preference+Stop+last-agent caret+Working, no fresh words, caret and first Working child animation none. Not completed screenshot.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -36551,7 +36849,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -36560,12 +36858,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4224,
                 "sourceFunction": "reduced_saved_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Actual second VISUAL_REDUCED delivery and FIRST later completion strict window. Aggregate saved message text has README/npm test/>=100words; current LAST agent markdown rawtext npmtest/no caret and actual reduced preference.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -36578,7 +36884,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -36587,12 +36893,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4228,
                 "sourceFunction": "reduced_saved_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Actual second VISUAL_REDUCED delivery and FIRST later completion strict window. Aggregate saved message text has README/npm test/>=100words; current LAST agent markdown rawtext npmtest/no caret and actual reduced preference.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -38358,7 +38672,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -38367,8 +38681,8 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2688,
                 "sourceFunction": "validate_expansion_target",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -38376,7 +38690,19 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -38389,7 +38715,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -38398,8 +38724,8 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2691,
                 "sourceFunction": "validate_expansion_target",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -38407,7 +38733,19 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -38545,7 +38883,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -38554,13 +38892,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2882,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "ONLY captured running-tool label contains one of README.md/package.json/exact visual-missing-RUN; require ANY of those named paths in ANY later saved tool input. If no names recognized, original only requires some later saved tool, no added filename requirement.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -38573,7 +38920,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -38582,13 +38929,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2908,
                 "sourceFunction": "render_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Approved584 typed observations/saved capture may support portions; published geometryfc remains separate unreviewed candidate. Exact source-equivalent running/sample/payload/reload/reduced/real-scroll-click composition has not been authored or proved here.",
+                "missingObservation": "Retain actual observed live timestamp and actor,correct first/later saved window,ALL per-tool matches and original optional branches,source-backed full reply,expanded DOM identities,media/styles and unchanged reload history with declared YAML predicates; no expected-result providers."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false.",
+                "acceptance": "Source selected-caller/branch only; coverage unresolved, no authored YAML/preservation/runtime proof."
+              }
             },
             {
               "source": {
@@ -43548,7 +43904,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -43557,13 +43913,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 111,
                 "sourceFunction": "assert_full_reply",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Source-selected terminal renderer projection interface exists independently; exact declared actual DOM/full-message assertion at these callers unproved.",
+                "missingObservation": "Actual LAST rendered agent row/full saved source terminal match including beyond8000UTF16,mode/version/source identity and absence of Show all; expected Markdown alone is not measured raw DOM."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Selected actual LAST saved message rendered via terminal-full source projection at render23/reload36: nonempty saved source,exact UTF16 length/mode/version,Show all false and full rawDOM equals projected terminal. No <=8000 shortcut for terminal full reply.",
+                "acceptance": "Source only;coverage unresolved,no YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -43576,7 +43941,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -43585,13 +43950,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 113,
                 "sourceFunction": "assert_full_reply",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Source-selected terminal renderer projection interface exists independently; exact declared actual DOM/full-message assertion at these callers unproved.",
+                "missingObservation": "Actual LAST rendered agent row/full saved source terminal match including beyond8000UTF16,mode/version/source identity and absence of Show all; expected Markdown alone is not measured raw DOM."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Selected actual LAST saved message rendered via terminal-full source projection at render23/reload36: nonempty saved source,exact UTF16 length/mode/version,Show all false and full rawDOM equals projected terminal. No <=8000 shortcut for terminal full reply.",
+                "acceptance": "Source only;coverage unresolved,no YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -43604,7 +43978,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -43613,13 +43987,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 115,
                 "sourceFunction": "assert_full_reply",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Source-selected terminal renderer projection interface exists independently; exact declared actual DOM/full-message assertion at these callers unproved.",
+                "missingObservation": "Actual LAST rendered agent row/full saved source terminal match including beyond8000UTF16,mode/version/source identity and absence of Show all; expected Markdown alone is not measured raw DOM."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Selected actual LAST saved message rendered via terminal-full source projection at render23/reload36: nonempty saved source,exact UTF16 length/mode/version,Show all false and full rawDOM equals projected terminal. No <=8000 shortcut for terminal full reply.",
+                "acceptance": "Source only;coverage unresolved,no YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -43632,7 +44015,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -43641,13 +44024,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 116,
                 "sourceFunction": "assert_full_reply",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Source-selected terminal renderer projection interface exists independently; exact declared actual DOM/full-message assertion at these callers unproved.",
+                "missingObservation": "Actual LAST rendered agent row/full saved source terminal match including beyond8000UTF16,mode/version/source identity and absence of Show all; expected Markdown alone is not measured raw DOM."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Selected actual LAST saved message rendered via terminal-full source projection at render23/reload36: nonempty saved source,exact UTF16 length/mode/version,Show all false and full rawDOM equals projected terminal. No <=8000 shortcut for terminal full reply.",
+                "acceptance": "Source only;coverage unresolved,no YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -45836,6 +46228,758 @@
           }
         ],
         "acceptance": "No new YAML, preservation credit, runtime or public provider proof. Other visual rendering/reasoning/clipboard/imports remain open."
+      },
+      "renderSelectedBranchReview": {
+        "at": "2026-10-09T13:02:54.215799+00:00",
+        "frozenHelperByteMatch": true,
+        "frozenDisclosureHelperByteMatch": true,
+        "scope": "Selected live16/render23/reload36/reduced43,45 andsharedactual expansion22,35,37/fullreply helpers. All observations/untranslated predicates remain uncovered.",
+        "inventoryPredicatesReviewed": [
+          {
+            "line": 2634,
+            "endLine": 2634,
+            "function": "turn_events",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+            ],
+            "conditional": false,
+            "sourceReason": "Render marker window for reasoning22/35/grid37,render23/reload36,clipboard code27/table29/message31; reduced marker for45. Exactly one marker delivery, FIRST later turn_completed from sorted saved stream, strict sequence-between window; does NOT assert only one later completion."
+          },
+          {
+            "line": 2636,
+            "endLine": 2636,
+            "function": "turn_events",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+            ],
+            "conditional": false,
+            "sourceReason": "Render marker window for reasoning22/35/grid37,render23/reload36,clipboard code27/table29/message31; reduced marker for45. Exactly one marker delivery, FIRST later turn_completed from sorted saved stream, strict sequence-between window; does NOT assert only one later completion."
+          },
+          {
+            "line": 2675,
+            "endLine": 2675,
+            "function": "record_expansion_geometry",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "sourceReason": "Only when real collapsed group/entry selected; exact owned history list and <768 before EACH append incl scroll/click failure outcomes."
+          },
+          {
+            "line": 2681,
+            "endLine": 2681,
+            "function": "validate_expansion_target",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll."
+          },
+          {
+            "line": 2682,
+            "endLine": 2683,
+            "function": "validate_expansion_target",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll."
+          },
+          {
+            "line": 2684,
+            "endLine": 2686,
+            "function": "validate_expansion_target",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll."
+          },
+          {
+            "line": 2709,
+            "endLine": 2711,
+            "function": "click_collapsed_work",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "sourceReason": "Only when actual collapsed nodes exist; source FIRST matching control count/kind/rowIndex/status invariant across real scroll before actual UI click; bounded loops, no direct expanded-attribute mutation."
+          },
+          {
+            "line": 2861,
+            "endLine": 2861,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2862,
+            "endLine": 2862,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2866,
+            "endLine": 2866,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2869,
+            "endLine": 2870,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2871,
+            "endLine": 2872,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2873,
+            "endLine": 2873,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2874,
+            "endLine": 2874,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2879,
+            "endLine": 2879,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2883,
+            "endLine": 2883,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2894,
+            "endLine": 2894,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2895,
+            "endLine": 2895,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2896,
+            "endLine": 2896,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2897,
+            "endLine": 2897,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 2909,
+            "endLine": 2909,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 3787,
+            "endLine": 3787,
+            "function": "assert_live_observation",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+            ],
+            "conditional": false,
+            "sourceReason": "Captured FIRST simultaneous live-tool observation at correct render route is required; subsequent screenshot may show completed transition but cannot substitute for captured live fact."
+          },
+          {
+            "line": 3788,
+            "endLine": 3788,
+            "function": "assert_live_observation",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+            ],
+            "conditional": false,
+            "sourceReason": "Captured FIRST simultaneous live-tool observation at correct render route is required; subsequent screenshot may show completed transition but cannot substitute for captured live fact."
+          },
+          {
+            "line": 3789,
+            "endLine": 3790,
+            "function": "assert_live_observation",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+            ],
+            "conditional": false,
+            "sourceReason": "Captured FIRST simultaneous live-tool observation at correct render route is required; subsequent screenshot may show completed transition but cannot substitute for captured live fact."
+          },
+          {
+            "line": 3791,
+            "endLine": 3792,
+            "function": "assert_live_observation",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+            ],
+            "conditional": false,
+            "sourceReason": "Captured FIRST simultaneous live-tool observation at correct render route is required; subsequent screenshot may show completed transition but cannot substitute for captured live fact."
+          },
+          {
+            "line": 3818,
+            "endLine": 3818,
+            "function": "live_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual live-check16 reads captured first simultaneous tool/Working/Stop observer data, binds current render Chat and exact saved VISUAL_RENDER delivery."
+          },
+          {
+            "line": 4197,
+            "endLine": 4197,
+            "function": "render_reload_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Read before-reload32 saved EventIDs, fresh current saved list: require exact full prefix plus total length unchanged before repeating render_check and source projection."
+          },
+          {
+            "line": 4198,
+            "endLine": 4198,
+            "function": "render_reload_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Read before-reload32 saved EventIDs, fresh current saved list: require exact full prefix plus total length unchanged before repeating render_check and source projection."
+          },
+          {
+            "line": 4214,
+            "endLine": 4214,
+            "function": "reduced_live_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual UI second turn under reduced media, same render agent: same callback current preference+Stop+last-agent caret+Working, no fresh words, caret and first Working child animation none. Not completed screenshot."
+          },
+          {
+            "line": 4215,
+            "endLine": 4215,
+            "function": "reduced_live_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual UI second turn under reduced media, same render agent: same callback current preference+Stop+last-agent caret+Working, no fresh words, caret and first Working child animation none. Not completed screenshot."
+          },
+          {
+            "line": 4216,
+            "endLine": 4216,
+            "function": "reduced_live_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual UI second turn under reduced media, same render agent: same callback current preference+Stop+last-agent caret+Working, no fresh words, caret and first Working child animation none. Not completed screenshot."
+          },
+          {
+            "line": 4224,
+            "endLine": 4224,
+            "function": "reduced_saved_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual second VISUAL_REDUCED delivery and FIRST later completion strict window. Aggregate saved message text has README/npm test/>=100words; current LAST agent markdown rawtext npmtest/no caret and actual reduced preference."
+          },
+          {
+            "line": 4228,
+            "endLine": 4228,
+            "function": "reduced_saved_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual second VISUAL_REDUCED delivery and FIRST later completion strict window. Aggregate saved message text has README/npm test/>=100words; current LAST agent markdown rawtext npmtest/no caret and actual reduced preference."
+          },
+          {
+            "line": 2688,
+            "endLine": 2688,
+            "function": "validate_expansion_target",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll."
+          },
+          {
+            "line": 2691,
+            "endLine": 2693,
+            "function": "validate_expansion_target",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "sourceReason": "Only selected collapsed target in reasoning capture/grid or render expansion: before and after scroll. Entry tool-call/reasoning requires completed/failed; GROUP branch does not. Positive centered rect/inside viewport+pane/actual hit required only AFTER scroll."
+          },
+          {
+            "line": 2882,
+            "endLine": 2882,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY captured running-tool label contains one of README.md/package.json/exact visual-missing-RUN; require ANY of those named paths in ANY later saved tool input. If no names recognized, original only requires some later saved tool, no added filename requirement."
+          },
+          {
+            "line": 2908,
+            "endLine": 2908,
+            "function": "render_check",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual render-check23 and repeated call from render-reload-check36 compare ALL saved tool payloads/aggregate answer and actual expanded DOM; failure is truthiness of tool.failed, not strict boolean false."
+          },
+          {
+            "line": 111,
+            "endLine": 111,
+            "function": "assert_full_reply",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected actual LAST saved message rendered via terminal-full source projection at render23/reload36: nonempty saved source,exact UTF16 length/mode/version,Show all false and full rawDOM equals projected terminal. No <=8000 shortcut for terminal full reply."
+          },
+          {
+            "line": 113,
+            "endLine": 114,
+            "function": "assert_full_reply",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected actual LAST saved message rendered via terminal-full source projection at render23/reload36: nonempty saved source,exact UTF16 length/mode/version,Show all false and full rawDOM equals projected terminal. No <=8000 shortcut for terminal full reply."
+          },
+          {
+            "line": 115,
+            "endLine": 115,
+            "function": "assert_full_reply",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected actual LAST saved message rendered via terminal-full source projection at render23/reload36: nonempty saved source,exact UTF16 length/mode/version,Show all false and full rawDOM equals projected terminal. No <=8000 shortcut for terminal full reply."
+          },
+          {
+            "line": 116,
+            "endLine": 117,
+            "function": "assert_full_reply",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected actual LAST saved message rendered via terminal-full source projection at render23/reload36: nonempty saved source,exact UTF16 length/mode/version,Show all false and full rawDOM equals projected terminal. No <=8000 shortcut for terminal full reply."
+          }
+        ],
+        "direct": 33,
+        "conditional": 8,
+        "additionalSourceGroups": [
+          {
+            "id": "visual-first-live-tool-same-callback",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 1169,
+              "end": 1180,
+              "text": "  const captureLive=() => {if(p.stopped||window.__aftChatVisualLive)return;\n    const tool=root.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running]');\n    const working=root.querySelector('[data-testid=working-row]');\n    const stop=root.querySelector('form button[title=\"Stop the running turn\"]');\n    const label=tool?.textContent?.trim()||'';\n    if(!tool||!working||!stop||!label)return;\n    window.__aftChatVisualLive={path:location.pathname,at:new Date().toISOString(),\n      source:tool.dataset.testid,label,live:!!tool,working:!!working,running:!!stop,\n      workingText:working.textContent,stopTitle:stop.title};\n    p.liveObserver?.disconnect(); };\n  p.liveObserver=new MutationObserver(captureLive);\n  p.liveObserver.observe(root,{subtree:true,childList:true,attributes:true,characterData:true});"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "Prearmed root MutationObserver plus every RAF captures FIRST same-callback actual running tool(tool-live or tool-call statusrunning),Working andStop with nonempty label; exact route,ISO timestamp,source testid/Workingtext/Stop title recorded,observer disconnects after first. live-check16 requires exact marker delivery and validates that captured object, not only screenshot current state.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "Engine-owned synchronous region receipt must preserve original first matching live witness,actual time and agent route; no completed-only screenshot or synthetic tool input."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-saved-first-completion-marker-window",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2631,
+              "end": 2637,
+              "text": "def turn_events(case, marker):\n    evs = events(case)\n    delivered = [e for e in evs if e[\"kind\"] == \"message.delivered\" and marker in e[\"payload\"].get(\"text\", \"\")]\n    assert len(delivered) == 1, f\"expected one actual Chat delivery for {marker}: {delivered}\"\n    end = next((e for e in evs if e[\"kind\"] == \"agent.turn_completed\" and e[\"seq\"] > delivered[0][\"seq\"]), None)\n    assert end, \"real turn did not complete\"\n    return delivered[0], end, [e for e in evs if delivered[0][\"seq\"] < e[\"seq\"] < end[\"seq\"]]"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "Exactly one delivery containing supplied marker VISUAL_RENDER or VISUAL_REDUCED, FIRST later turn_completed from complete sorted saved stream; take strict seqbetween items. Render/reasoning/copy first marker remains distinct from reduced second turn.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "Original fresh complete saved event pages/source IDs/turn ordering and actual marker selection must be bound; do not require ONLY one later completion or pick LAST completion."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-native-source-grounded-tools-and-answer",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2856,
+              "end": 2883,
+              "text": "def render_check():\n    current(\"render\")\n    delivered, end, between = turn_events(\"render\", \"VISUAL_RENDER\")\n    answer = \"\\n\".join(e[\"payload\"].get(\"text\", \"\") for e in between\n                       if e[\"kind\"] == \"item.completed\" and e[\"payload\"].get(\"itemKind\") == \"message\")\n    assert answer and f\"VISUAL_END_{RUN}\" in answer, \"saved final answer missing the requested end marker\"\n    assert \"npm test\" in answer and \"node --test\" in answer and \"README.md\" in answer and \"package.json\" in answer, answer\n    tools = [e for e in between if e[\"kind\"] == \"item.completed\" and e[\"payload\"].get(\"itemKind\") == \"tool\"]\n    successes = [e for e in tools if not (e[\"payload\"].get(\"tool\") or {}).get(\"failed\")]\n    failures = [e for e in tools if (e[\"payload\"].get(\"tool\") or {}).get(\"failed\")]\n    assert len(tools) >= 3 and len(successes) >= 2 and failures, \"provider did not make two successful reads and one genuine failed read\"\n    readme_line = \"- `npm test` runs the tests.\"\n    package_line = '\"test\": \"node --test\"'\n    assert any(\"README.md\" in (e[\"payload\"].get(\"tool\") or {}).get(\"input\", \"\") and\n               readme_line in (e[\"payload\"].get(\"tool\") or {}).get(\"output\", \"\") for e in successes), \"README answer lacks real tool source\"\n    assert any(\"package.json\" in (e[\"payload\"].get(\"tool\") or {}).get(\"input\", \"\") and\n               package_line in (e[\"payload\"].get(\"tool\") or {}).get(\"output\", \"\") for e in successes), \"code answer lacks real package source\"\n    assert any(\"visual-missing-\" in (e[\"payload\"].get(\"tool\") or {}).get(\"input\", \"\") for e in failures), \"requested missing-file read did not fail\"\n    assert max(e[\"seq\"] for e in tools) < max(e[\"seq\"] for e in between if e[\"kind\"] == \"item.completed\" and e[\"payload\"].get(\"itemKind\") == \"message\"), \"tool did not precede final answer\"\n    live = json.loads((WORK / \"render-live.json\").read_text())\n    from datetime import datetime\n    observed_at = datetime.fromisoformat(live[\"at\"].replace(\"Z\", \"+00:00\"))\n    later = [e for e in tools if datetime.fromisoformat(e[\"created_at\"].replace(\"Z\", \"+00:00\")) >= observed_at]\n    assert later, \"no saved tool completed after the observed running UI row\"\n    named = [name for name in (\"README.md\", \"package.json\", f\"visual-missing-{RUN}.txt\") if name in live[\"label\"]]\n    if named:\n        assert any(any(name in (e[\"payload\"].get(\"tool\") or {}).get(\"input\", \"\") for name in named) for e in later), \"observed running tool never completed as a saved item\"\n    assert any(\"README.md\" in (e[\"payload\"].get(\"tool\") or {}).get(\"input\", \"\") for e in tools), \"saved completed tool did not match repo read\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "Aggregate saved message answer includes endmarker/npmtest/nodetest/README/package;ALL saved tool item.completed in window include>=3tools,>=2truthy-notfailed successes and>=1truthyfailed. Successful README/package input AND exact source output strings; genuine failed visual-missing input;max toolseq before max assistant-message seq. Actual captured live ISO time<=some saved tool created_at; filename match ONLY if observed live label recognized optionalnamed set.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "No fabricated native tool or aliasing success to failedISfalse; same source and full actual payload text/redaction facts must be retained. Existing capture redactionAffected forbids claiming unavailable raw values."
+            },
+            "bounds": {
+              "minTools": 3,
+              "minSuccesses": 2,
+              "minFailures": 1
+            }
+          },
+          {
+            "id": "visual-first-expanded-control-ownership-hit",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2640,
+              "end": 2718,
+              "text": "GROUP_COLLAPSED = (\"[data-testid=chat-transcript] [data-testid=tool-group][aria-expanded=false], \"\n                   \"[data-testid=chat-transcript] [data-testid=work-toggle][aria-expanded=false]\")\nENTRY_COLLAPSED = (\"[data-testid=chat-transcript] [data-testid=tool-call] [role=button][aria-expanded=false], \"\n                   \"[data-testid=chat-transcript] [data-testid=reasoning] [role=button][aria-expanded=false]\")\n\n\ndef expansion_geometry(selector):\n    # Only geometry, DOM identity and hit ownership leave the browser; never tool text.\n    js = \"\"\"(() => {\n      const pane=document.querySelector('[data-testid=chat-transcript]');\n      const matches=[...document.querySelectorAll(SELECTOR)];\n      const target=matches[0];\n      if(!pane || !target) return {route:location.pathname,count:matches.length,panePresent:!!pane};\n      const r=target.getBoundingClientRect(), p=pane.getBoundingClientRect();\n      const x=r.left+r.width/2,y=r.top+r.height/2;\n      const hit=document.elementFromPoint(x,y);\n      const row=target.closest('li[data-kind]');\n      return {route:location.pathname,count:matches.length,panePresent:true,\n        inPane:pane.contains(target),rowIndex:row?[...pane.querySelectorAll('li[data-kind]')].indexOf(row):-1,\n        kind:target.dataset.testid||target.closest('[data-testid]')?.dataset.testid||null,\n        button:target.tagName==='BUTTON'||target.getAttribute('role')==='button',\n        expanded:target.getAttribute('aria-expanded'),status:target.closest('[data-status]')?.dataset.status||null,\n        rect:{left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height},\n        pane:{left:p.left,top:p.top,right:p.right,bottom:p.bottom},\n        viewport:{width:innerWidth,height:innerHeight},\n        hitTag:hit?.tagName||null,hitTarget:!!hit&&(hit===target||target.contains(hit)),\n        centerInPane:x>=p.left&&x<=p.right&&y>=p.top&&y<=p.bottom,\n        centerInViewport:x>=0&&x<=innerWidth&&y>=0&&y<=innerHeight};\n    })()\"\"\".replace(\"SELECTOR\", json.dumps(selector))\n    return evaluate(js)\n\n\ndef record_expansion_geometry(entry):\n    path = WORK / \"render-expand-geometry.json\"\n    history = json.loads(path.read_text()) if path.exists() else []\n    assert isinstance(history, list) and len(history) < 768, \"bounded expansion geometry history exhausted\"\n    history.append(entry)\n    write(path.name, history)\n\n\ndef validate_expansion_target(geometry, expected_kinds, after_scroll):\n    assert geometry.get(\"route\") == f\"/ws/{WS}/chat/{agent_id('render')}\", \"work toggle changed owned Chat route\"\n    assert geometry.get(\"panePresent\") and geometry.get(\"inPane\") and geometry.get(\"count\", 0) > 0, \\\n        \"work toggle missing from owned transcript\"\n    assert geometry.get(\"kind\") in expected_kinds and geometry.get(\"button\") and \\\n        geometry.get(\"expanded\") == \"false\" and geometry.get(\"rowIndex\", -1) >= 0, \\\n        \"work toggle identity, role or collapsed state changed\"\n    if expected_kinds == (\"tool-call\", \"reasoning\"):\n        assert geometry.get(\"status\") in (\"completed\", \"failed\"), \"work entry is not completed\"\n    if after_scroll:\n        rect = geometry.get(\"rect\") or {}\n        assert rect.get(\"width\", 0) > 0 and rect.get(\"height\", 0) > 0 and \\\n            geometry.get(\"centerInPane\") and geometry.get(\"centerInViewport\") and \\\n            geometry.get(\"hitTarget\"), \"centered work toggle remains covered or outside Chat pane\"\n\n\ndef click_collapsed_work(selector, expected_kinds):\n    before = expansion_geometry(selector)\n    record = {\"kinds\": expected_kinds, \"selector\": selector, \"before\": before, \"outcome\": \"pending\"}\n    record_expansion_geometry(record)\n    validate_expansion_target(before, expected_kinds, False)\n    try:\n        browser(\"scrollintoview\", selector)\n    except Exception:\n        record_expansion_geometry({**record, \"outcome\": \"scroll-failed\"})\n        raise\n    after = expansion_geometry(selector)\n    record = {**record, \"after\": after, \"outcome\": \"centered-pending-hit-test\"}\n    record_expansion_geometry(record)\n    assert (after.get(\"count\"), after.get(\"kind\"), after.get(\"rowIndex\"), after.get(\"status\")) == \\\n        (before.get(\"count\"), before.get(\"kind\"), before.get(\"rowIndex\"), before.get(\"status\")), \\\n        \"first collapsed work toggle changed during centering\"\n    validate_expansion_target(after, expected_kinds, True)\n    try:\n        browser(\"click\", selector)\n    except Exception:\n        record_expansion_geometry({**record, \"outcome\": \"click-failed\"})\n        raise\n    record_expansion_geometry({**record, \"outcome\": \"clicked\"})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "FIRST actual collapsed selector match;owned transcript containment/closest rowindex/kind/button or role/aria false/nearest status. Before+after real scroll count/kind/rowindex/status exact;after rectpositive centerinsidepane+viewport andactual elementFromPoint selfor descendant. No tool text in geometry history; append pending/scrollfailed/clickfailed/clicked exactbounded history.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "Use ONE enginecanonical samecallback geometry contract only after review; source first-selector semantics matters and no hit/absent target cannot fabricate coordinates. Ancestor/row ownership,pre/post actor and index invariants still need typed composition."
+            },
+            "bounds": {
+              "maxHistoryBeforeAppendExclusive": 768
+            }
+          },
+          {
+            "id": "visual-real-work-expansion-bounds",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2721,
+              "end": 2735,
+              "text": "def expand_work():\n    for _ in range(20):\n        closed = evaluate(f\"document.querySelectorAll({json.dumps(GROUP_COLLAPSED)}).length\")\n        if not closed:\n            break\n        click_collapsed_work(GROUP_COLLAPSED, (\"tool-group\", \"work-toggle\"))\n    else:\n        raise AssertionError(\"too many collapsed work groups\")\n    for _ in range(30):\n        closed = evaluate(f\"document.querySelectorAll({json.dumps(ENTRY_COLLAPSED)}).length\")\n        if not closed:\n            break\n        click_collapsed_work(ENTRY_COLLAPSED, (\"tool-call\", \"reasoning\"))\n    else:\n        raise AssertionError(\"too many collapsed work entries\")"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "Real scroll+click only as needed while collapsed groups/entries exist;source20 group iterations then30 entryiterations,check onceeach iteration and for-else fail if exhausted. Already expanded state allowed; no scenario success assertion hidden in adapter or synthetic expanded attr.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "Declarative bounded operations must preserve early exit and failure diagnostics with same actualcontrols; canonical geometry alone is insufficient."
+            },
+            "bounds": {
+              "groupLoopIterations": 20,
+              "entryLoopIterations": 30
+            }
+          },
+          {
+            "id": "visual-all-tool-payload-row-matches",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2898,
+              "end": 2910,
+              "text": "    for saved in tools:\n        t = saved[\"payload\"].get(\"tool\") or {}\n        raw_input, output = (t.get(\"input\") or \"\").strip(), (t.get(\"output\") or \"\").strip()\n        try:\n            expected_input = json.dumps(json.loads(raw_input), indent=2, ensure_ascii=False) if raw_input.startswith((\"{\", \"[\")) else raw_input\n        except json.JSONDecodeError:\n            expected_input = raw_input\n        expected_status = \"failed\" if t.get(\"failed\") else \"completed\"\n        matches = [d for d in dom[\"tools\"] if d[\"status\"] == expected_status and d[\"failed\"] == bool(t.get(\"failed\")) and\n                   (not expected_input or expected_input in d[\"pres\"]) and (not output or output in d[\"pres\"])]\n        assert matches, f\"saved tool input/output/error missing from an expanded completed UI row: {t.get('name')}\"\n    assert not evaluate(\"!!document.querySelector('[data-testid=tool-live], [data-testid=tool-call][data-status=running]')\"), \"ghost running tool after completion\"\n    write(\"render-oracle.json\", {\"delivered\": delivered, \"turn_completed\": end, \"saved_answer\": answer, \"saved_tools\": tools, \"dom\": dom})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "For EVERY saved tool:strip actual input/output;JSON-looking input starting{/[ pretty-json ensure_asciiFalse indent2 if valid,malformed retains raw. failed truthiness selects failed/completed andDOMicon bool;each nonempty actual input/output must be member of ANY rendered row prelist. Matching ANY row per saved tool,not one-to-one or injected EventID attrs. Global absence of tool-live/anyrunning tool required.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "Retain all input/output/error fields andactual expanded DOMpre arrays/status/icon,actual measured byte comparators/conditional empties;redaction/unavailable isnot guessed empty."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-full-reply-table-highlight-source-checks",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2884,
+              "end": 2897,
+              "text": "    expand_work()\n    dom = evaluate(RENDER_DOM)\n    saved_reply = [e for e in between if e[\"kind\"] == \"item.completed\" and\n                   e[\"payload\"].get(\"itemKind\") == \"message\"][-1]\n    full_source = saved_reply[\"payload\"][\"text\"]\n    full_reply = run_markdown_projection(full_source, [], [], terminal_only=True)\n    disclosures.assert_full_reply(full_source, dom, full_reply)\n    write(\"render-full-reply.json\", {\"saved_event_id\": saved_reply[\"event_id\"],\n        \"source_utf16\": js_utf16_length(full_source), \"crosses_former_limit\": js_utf16_length(full_source) > 8000,\n        \"projection\": full_reply, \"dom\": {\"answer\": dom[\"answer\"], \"showAll\": dom[\"showAll\"]}})\n    assert dom[\"groups\"] >= 1 and len(dom[\"tools\"]) >= 3, \"grouped real tool rows missing from Chat\"\n    assert dom[\"table\"] and any(\"README.md\" in row and \"npm test\" in \" \".join(row) for row in dom[\"table\"]), dom[\"table\"]\n    assert any(c[\"language\"] == \"json\" and package_line in c[\"text\"] and c[\"tokenSpans\"] > 0 for c in dom[\"code\"]), dom[\"code\"]\n    assert \"npm test\" in dom[\"answer\"] and f\"VISUAL_END_{RUN}\" in dom[\"answer\"], \"rendered answer differs from saved facts\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "Expand real work,select LAST saved message fullsource via terminal-full([],[]),compare full DOM rawreply/Showall through shareddisclosure oracle. Actualgroup>=1/tools>=3,tablecellarrays README+npmtogether,ANYjsoncode with actualpackage testscript+tokenSpans>0,rawreply contains npmtest/endmarker.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "Actualtable/code token spans andfull rawDOM/sourcehash proof remain required;terminalfull permits beyond8000up to128000,not first-turn motion cap reused."
+            },
+            "bounds": {
+              "minGroups": 1,
+              "minToolRows": 3,
+              "positiveJsonTokenSpans": true
+            }
+          },
+          {
+            "id": "visual-exact-reload-event-list-no-extra",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 4193,
+              "end": 4200,
+              "text": "def render_reload_check():\n    current(\"render\")\n    before = json.loads((WORK / \"render-before-reload.json\").read_text())[\"events\"]\n    after = events(\"render\")\n    assert [e[\"event_id\"] for e in before] == [e[\"event_id\"] for e in after[:len(before)]], \"reload changed saved render history\"\n    assert len(after) == len(before), \"unexpected extra events after completed render turn\"\n    render_check()\n    write(\"render-after-reload.json\", {\"events\": after})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/32",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "Snapshot before reload32 usedas exact EventID sequence;after sourceprefix eq ANDlen exactlyequal,then repeat ALL render_check including actualtools/table/code/fullreply/firstlive-time match. No prefix-only acceptance of extras or later-turn filling missing capture.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "Keep actual saved snapshot identity/complete cursor and fresh source read;not just first/lastEventID or synthetic history."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-reduced-second-turn-real-css",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 4203,
+              "end": 4217,
+              "text": "def reduced_live_check():\n    current(\"render\")\n    state = evaluate(\"\"\"(() => {const c=document.querySelector('[data-testid=chat-transcript]');\n      const a=[...c.querySelectorAll('li[data-kind=agent]')].at(-1);\n      const caret=a?.querySelector('[data-streaming-caret]');\n      const working=c.querySelector('[data-testid=working-row]');\n      return {reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,\n        streaming:!!document.querySelector('form button[title=\"Stop the running turn\"]'),\n        caret:!!caret,caretAnimation:caret&&getComputedStyle(caret).animationName,\n        fresh:a?.querySelectorAll('[data-fresh]').length||0,\n        working:!!working,workingAnimation:working&&getComputedStyle(working.firstElementChild).animationName};})()\"\"\")\n    assert state[\"reduced\"] and state[\"streaming\"] and state[\"caret\"] and state[\"working\"], state\n    assert state[\"caretAnimation\"] == \"none\" and state[\"fresh\"] == 0, state\n    assert state[\"workingAnimation\"] == \"none\", state\n    write(\"render-reduced-live.json\", state)"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/38",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/39",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "Owned light/reduced-media actor precedes secondsend;live43 samecallback actualmatchMedia preference,globalStop,last-agent caret/transcriptWorking;caret animationName none,Working FIRST child animationName none andlastagentdata-fresh count0.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "Actual preference/media+computedstyles and simultaneouslive controls must be measured,not inferred from requested media setting or completed screenshot."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-reduced-saved-window-and-end-dom",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 4220,
+              "end": 4229,
+              "text": "def reduced_saved_check():\n    delivered, end, between = turn_events(\"render\", \"VISUAL_REDUCED\")\n    answer = \"\\n\".join(e[\"payload\"].get(\"text\", \"\") for e in between\n                       if e[\"kind\"] == \"item.completed\" and e[\"payload\"].get(\"itemKind\") == \"message\")\n    assert \"README.md\" in answer and \"npm test\" in answer and len(answer.split()) >= 100, \"real reduced-motion reply lacked the requested grounded length\"\n    shown = evaluate(\"\"\"(() => {const a=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);\n      return {text:a?.querySelector('[data-testid=chat-markdown]')?.textContent||'',caret:!!a?.querySelector('[data-streaming-caret]'),\n        reduced:matchMedia('(prefers-reduced-motion: reduce)').matches};})()\"\"\")\n    assert shown[\"reduced\"] and not shown[\"caret\"] and \"npm test\" in shown[\"text\"], shown\n    write(\"render-reduced-end.json\", {\"delivered\": delivered, \"turn_completed\": end, \"answer\": answer, \"dom\": shown})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/40",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/41",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-actor-and-observation-not-yet-preserved",
+              "required": "Secondprompt requests>=120words but source saved acceptance is>=100words exactly plusREADME/npmtest;aggregateitems between sole VISUAL_REDUCED delivery andFIRSTlatercompletion. Endsamecallback LASTagentrawmarkdown npmtest,no caret,actualreducedpreference. Originalprompt andsourceguard both preserved without conflatingthresholds.",
+              "canonicalAttempt": "Canonical approved584 retained/saved primitives and separately published geometryfc are not complete source-equivalent authored assertions/provisioning. No preservation acceptance credited.",
+              "missingObservation": "Keep trueUI Enter actor/send identity andsavedsecondturngrounding,actualterminalDOM/pref plusnamedreduced-end screenshot. No guessed provider answer or replaced sourceguard."
+            },
+            "bounds": {
+              "requestedWords": 120,
+              "savedAcceptanceWords": 100
+            }
+          }
+        ],
+        "acceptance": "Source reachability only; all41 coverage unresolved. Five raw584 admissions areunchanged,not proof ofsourcepredicates/runtime. Geometryfc implementation candidate unreviewed andunconsumed."
       }
     },
     {
@@ -51426,17 +52570,17 @@
     "originalSteps": 207,
     "helperInventoryEntries": 1072,
     "classificationCounts": {
-      "selected-invocation-predicate-reachable": 334,
+      "selected-invocation-predicate-reachable": 367,
       "unrelated-to-static-selected-call-closure": 374,
       "helper-selftest-negative-requirement": 213,
       "excluded-static-selected-invocation-branch": 10,
-      "selected-invocation-predicate-conditionally-reachable": 31,
-      "selected-function-reachable-branch-unresolved": 92,
+      "selected-invocation-predicate-conditionally-reachable": 39,
+      "selected-function-reachable-branch-unresolved": 51,
       "selected-external-helper-branch-unresolved": 14,
       "unrelated-external-helper-case": 4
     },
     "reachableCandidatePredicates": 471,
-    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit. Visual pacing/projection/arrival deadlines/control exit32 Python and14 external Markdown guards narrowed (26 direct,20 conditional),including actual terminal projection23/36 and nonplain46;9 supplemental source groups preserve all-candidate pressure/first-tie/first-rendered/every-arrival/last-control-exit semantics. Other visual/imported branches still unresolved.",
+    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit. Visual pacing/projection/arrival deadlines/control exit32 Python and14 external Markdown guards narrowed (26 direct,20 conditional),including actual terminal projection23/36 and nonplain46;9 supplemental source groups preserve all-candidate pressure/first-tie/first-rendered/every-arrival/last-control-exit semantics. Other visual/imported branches still unresolved. Visual41 running/native tool/fullreply/render/reload/reduced/expansion guards narrowed33direct8conditional;10 exact sourceactor/payload/centering/history/window groups uncovered. RemainingvisualPython51/external14+ownershipimports unreconciled; geometryfc unreviewed/unconsumed.",
     "reviewedAuthoredUnvalidatedPredicates": 20,
     "partiallyMappedRepeatedPredicates": 3,
     "fullPreservationAcceptance": false,
@@ -51445,7 +52589,8 @@
     "additionalUninventoriedFilesGuards": 6,
     "additionalUninventoriedChildSourceGroups": 56,
     "additionalUninventoriedSseSourceGroups": 10,
-    "additionalUninventoriedVisualMotionSourceGroups": 19
+    "additionalUninventoriedVisualMotionSourceGroups": 19,
+    "additionalUninventoriedVisualRenderSourceGroups": 10
   },
   "dependencies": {
     "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",

@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "890243c8fbbf12500f959b754f6778dfc96b2ab7c41b7b2e2b6b5d4adeae69ae"
+        "sha256": "d9752df15f6cd2d594149054b2b75483b2c7fe04e7364ac809d3f2c90f31d7ad"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -940,7 +940,7 @@
       "conservativeReachableCandidates": 471,
       "helperSelftestOrNegativeRecords": 213,
       "unrelatedBranchesOrCases": 388,
-      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35 selected extracted obligations plus Visual first-turn boundary57 and pacing/projection46(20 conditional); all newly reviewed visual records uncovered.105 supplemental source groups and remaining visual/imported/provisioning predicates unresolved.1072 classified inventory is not final preservation denominator; full historical index unavailable."
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35 selected extracted obligations;Visual boundary57+pacing/projection46(20conditional)+render41(8conditional).All newly reviewedvisualpredicates uncovered.115 supplemental sourcegroups+remaining51Python/14external branches/imported ownership/provisioning unresolved.1072classifiedinventory notfinalpreservation denominator;frozenfullindex unavailable."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -2293,5 +2293,25 @@
     "newYamlOrPreservationCredit": false,
     "rawAdmissionReceiptsUnchanged": true,
     "runtimeStarted": 0
+  },
+  "visualRenderSelectedBranchReview": {
+    "at": "2026-10-09T13:02:54.215799+00:00",
+    "git56bbSourceHashesMatch": true,
+    "visualSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+    "disclosureSha256": "c981ec05a5c8633c67eb83d10a0fc9f80f1a114bcdc29ad477f6a104bead21a0",
+    "selectedExtracted": 41,
+    "direct": 33,
+    "conditional": 8,
+    "sourceGroupsUncovered": 10,
+    "actualFirstSelectorAndOptionalFilenameMatch": true,
+    "strictFullReloadList": true,
+    "reducedPromptVsAcceptanceWords": {
+      "prompt": 120,
+      "guard": 100
+    },
+    "geometryFcUnreviewedAndUnconsumed": true,
+    "newYamlOrPreservationCredit": false,
+    "accepted584AdmissionReceiptsUnchanged": true,
+    "runtime": 0
   }
 }
