@@ -53,7 +53,7 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
   project=r.env.LOCAL_MODE_COMPOSE_PROJECT||r.env.LOOM_STACK_PROJECT||project;
   if(r.binary==='bash') return '';
   if(a[0]==='system') return JSON.stringify([{...connection,URI:change==='connection'?'ssh://foreign':connection.URI}]);
-  if(a.includes('image')) return JSON.stringify([{Id:image}]);
+  if(a.includes('image')) return JSON.stringify([{Id:change==='unprefixed-image'?image.slice(7):change==='different-image'?'e'.repeat(64):change==='short-image'?image.slice(7,19):image}]);
   if(a.includes('compose')) { if(a.includes('up')) {up=true;const override=JSON.parse(await fs.readFile(path.join(driver.runtimeRoot,'compose.json'),'utf8'));ownedLease=override.services[cloud?'loom-serve':'loom-local'].labels['io.loom.aft.lease'];if(change==='fail-up')throw new Error('Bearer private-up-token');} if(a.includes('down')) {if(change==='fail-down')throw new Error('secret=private-down-token');up=false;}
    if(a.includes('restart')){await onRestart?.();if(restartMode!=='unchanged')restarted=true;if(restartMode==='throw-after')throw new Error('Bearer private-restart-token');}return ''; }
   if(a.includes('logs'))return change==='embedded'?'embedded fleet-db started':'opened cloud fleet-db client';
@@ -707,3 +707,12 @@ for(const phase of ['GET','POST'])test(`GF1 public Compose archive enforces inde
   assert.equal(r.reads.length,1);assert.equal(r.writes.length,phase==='GET'?0:1);
  }finally{await r.cleanup();}
 });
+
+ test('image inspection accepts the exact unprefixed digest and denies different or short IDs before startup',async()=>{
+  for(const value of ['unprefixed-image','different-image','short-image']){
+   const r=await setup();r.mutate(value);try{
+    if(value==='unprefixed-image'){const acquired=await r.lifecycle.acquire(r.request,new AbortController().signal);assert.equal(acquired.workspaceId,'LOCALMODE');assert.equal((await r.lifecycle.release(acquired.lease.id,'run')).released,true);}
+    else {await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal));assert.equal(r.calls.some(call=>call.binary==='bash'||call.args.includes('up')),false);}
+   }finally{await r.cleanup();}
+  }
+ });

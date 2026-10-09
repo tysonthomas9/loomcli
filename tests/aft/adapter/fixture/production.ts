@@ -340,7 +340,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
     await this.command('podman', ['--connection', this.config.connection, 'info', '--format', 'json'], signal);
     for (const imageId of Object.values(this.cloud ? this.stackImages : this.images)) {
       const observed = JSON.parse(await this.command('podman', ['--connection', this.config.connection, 'image', 'inspect', imageId], signal));
-      check(Array.isArray(observed) && observed.length === 1 && observed[0].Id === imageId, 'source-mismatch');
+      check(Array.isArray(observed) && observed.length === 1 && typeof observed[0].Id === 'string' && /^(?:sha256:)?[a-f0-9]{64}$/.test(observed[0].Id) && observed[0].Id.replace(/^sha256:/, '') === imageId.replace(/^sha256:/, ''), 'source-mismatch');
     }
   }
   private async stamp(filename: string) {
