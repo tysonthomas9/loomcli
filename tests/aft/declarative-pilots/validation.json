@@ -708,5 +708,85 @@
       "AFT_SELECTION_SHA256"
     ],
     "rawCopiesMaterialized": false
+  },
+  "committedDevelopment6b9Diagnostic": {
+    "status": "committed-development-candidate-unaccepted",
+    "engineHead": "6b9e6f8661fb3d515509613122b70258251b58dd",
+    "at": "2026-10-09T10:04:54.536Z",
+    "enginePackageSha256": "ab36227d543d7cafe467f44ce342037149349ef832816d8ece270baada4379ed",
+    "acceptedBaseline": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+    "adapterSource": "36bf343fa7a4a850898e47cd8da4e7055d349b31",
+    "adapterImplementationSha256": "1a659b3afb264d27348d8e960604fb454714a3defb1ef79c4d20caf1d4ffe687",
+    "files": [
+      {
+        "file": "bare-stop.test.yaml",
+        "sha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1",
+        "status": "bounded-admission-timeout-development-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:06:09.775897+00:00",
+        "finishedAt": "2026-10-09T10:07:09.790436+00:00"
+      },
+      {
+        "file": "child-repeat.test.yaml",
+        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112",
+        "status": "bounded-admission-timeout-development-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:06:09.777205+00:00",
+        "finishedAt": "2026-10-09T10:07:09.795376+00:00"
+      },
+      {
+        "file": "stream-render-clock.test.yaml",
+        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d",
+        "status": "bounded-admission-timeout-development-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:06:09.778411+00:00",
+        "finishedAt": "2026-10-09T10:07:09.795720+00:00"
+      },
+      {
+        "file": "files-save-reload.test.yaml",
+        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954",
+        "status": "bounded-admission-timeout-development-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:06:09.777370+00:00",
+        "finishedAt": "2026-10-09T10:07:09.797317+00:00"
+      },
+      {
+        "file": "sse-cursor.test.yaml",
+        "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea",
+        "status": "bounded-admission-timeout-development-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:06:09.777505+00:00",
+        "finishedAt": "2026-10-09T10:07:09.797424+00:00"
+      }
+    ],
+    "effects": 0,
+    "runtimeExecuted": 0,
+    "acceptance": false,
+    "initialUnboundedDiagnostic": {
+      "status": "terminated-without-result",
+      "file": "bare-stop.test.yaml",
+      "effects": 0
+    },
+    "perFileGuardMs": 60000,
+    "finishedAt": "2026-10-09T10:07:09.797743+00:00",
+    "emittedVerification": {
+      "engine": "6b9e6f8661fb3d515509613122b70258251b58dd",
+      "count": 112,
+      "mismatches": []
+    },
+    "retainedDirectory": "/private/tmp/loom-aft-pilot-validation-16e28787/development-6b9e6f86",
+    "engineReceiptSha256": "5974b9c2efff7ce87b9633f824ac7a3e03df46018eef1e69fb46c272a1efacf9",
+    "interpretation": "Unaccepted development loader diagnostics on unchanged raw files; a bounded timeout establishes no admission result, no schema rejection, and no preservation credit. Coherent approved adapter interfaces; exact single canonical installed engine module; no effects, browser, runtime or engine pin change.",
+    "followup": "Engine owner must diagnose raw-loader CPU noncompletion. Existing accepted-e8 rejection receipt remains independent. Journal/bounds still under development."
   }
 }
