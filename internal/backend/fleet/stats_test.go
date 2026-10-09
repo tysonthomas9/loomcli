@@ -27,6 +27,9 @@ func respondEmptyCanonicalView(w http.ResponseWriter, path string) bool {
 func TestStats_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/api/v1/test-ws/issues/count":
 			if r.URL.Query().Get("group_by") != "status" {
@@ -111,6 +114,9 @@ func TestStats_HappyPath(t *testing.T) {
 
 func TestStats_AllStatuses(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		if respondEmptyCanonicalView(w, r.URL.Path) {
 			return
 		}
@@ -148,6 +154,9 @@ func TestStats_AllStatuses(t *testing.T) {
 
 func TestStats_EmptyWorkspace(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		if respondEmptyCanonicalView(w, r.URL.Path) {
 			return
 		}
@@ -172,6 +181,9 @@ func TestStats_EmptyWorkspace(t *testing.T) {
 
 func TestStats_MissingStatusKeys(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		if respondEmptyCanonicalView(w, r.URL.Path) {
 			return
 		}

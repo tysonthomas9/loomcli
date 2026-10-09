@@ -1762,6 +1762,9 @@ func TestReady_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	parent := "epic-1"
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		if got, want := r.URL.Path, "/api/v1/test-ws/issues/ready"; got != want {
 			t.Errorf("path = %q, want %q", got, want)
 		}
@@ -1792,6 +1795,9 @@ func TestReady_ClientFiltersSourceReposWithoutServerLimit(t *testing.T) {
 	repoA := "repo-a"
 	repoB := "repo-b"
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		gotQuery = r.URL.RawQuery
 		respondOK(w, []*readyIssueWithParent{
 			{fleetIssueWire: fleetIssueWire{ID: "repo-a", Title: "A", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoA},
@@ -1850,6 +1856,9 @@ func TestDeferred_HappyPath(t *testing.T) {
 func TestBlocked_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		if got, want := r.URL.Path, "/api/v1/test-ws/issues/blocked"; got != want {
 			t.Errorf("path = %q, want %q", got, want)
 		}
