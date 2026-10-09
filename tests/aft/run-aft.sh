@@ -982,7 +982,10 @@ if [[ "$AFT_SUITE_GLOB" == loomgit-* || -n "$AFT_REAL_GITHUB" ]]; then
     mkdir "$AGENT_BROWSER_PROFILE" # Refuse profile reuse, including interrupted runs.
     # A persistent profile cannot be opened by parallel suite sessions. Put this
     # override last so caller flags cannot accidentally share it concurrently.
-    AFT_ISOLATION_ARGS=(--max-browsers 1)
+    # --max-browsers only counts agent-browser Chromes already running on the
+    # host, other agents' included; on a shared host the operator may raise it
+    # deliberately with AFT_ISOLATED_MAX_BROWSERS (never by closing others').
+    AFT_ISOLATION_ARGS=(--max-browsers "${AFT_ISOLATED_MAX_BROWSERS:-1}")
     echo "[aft] owned browser profile: $AGENT_BROWSER_PROFILE; namespace: $AGENT_BROWSER_NAMESPACE"
 fi
 
