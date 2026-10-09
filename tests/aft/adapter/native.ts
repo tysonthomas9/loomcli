@@ -1,5 +1,6 @@
 import { probeOccurrences, type SyntheticProbe } from './synthetic-probe.js';
 import { z } from 'zod';
+import { RedactionFacts, redactionFacts } from './redaction.js';
 import { AgentRef, AgentRow, Id, Json, NativeRef, ObservationError, ServiceRegistration, requireFact, sha256, type NativeAccess } from './protocol.js';
 
 export const NativeInput = z.object({ agent: AgentRef, view: z.enum([
@@ -23,7 +24,7 @@ export const NativeOutput = z.discriminatedUnion('view', [
     ...RecordIdentity, completedAt: z.union([z.string(), z.number()]), provider: Id, model: Id,
   }).strict()) }).strict(),
   z.object({ ...Base, view: z.literal('tools'), complete: z.boolean(), records: z.array(z.object({
-    ...RecordIdentity, itemId: Id, messageType: Id, name: Id, state: Id, input: Json, output: Json,
+    ...RecordIdentity, itemId: Id, messageType: Id, name: Id, state: Id, input: Json, output: Json, outputPresent: z.boolean(), inputRedaction: RedactionFacts, outputRedaction: RedactionFacts,
     probe: z.object({ handle: Id, inputOccurrences: z.number().int().nonnegative(), outputOccurrences: z.number().int().nonnegative() }).strict().nullable(),
   }).strict()) }).strict(),
   z.object({ ...Base, view: z.literal('usage'), complete: z.boolean(), records: z.array(z.object({
@@ -59,7 +60,7 @@ export async function verifyNativeService(access: NativeAccess, expectedGenerati
   return registration;
 }
 export async function observeNative(input: z.infer<typeof NativeInput>, access: NativeAccess,
-  owned: AgentRow, signal: AbortSignal, probe?: SyntheticProbe): Promise<z.infer<typeof NativeOutput>> {
+  owned: AgentRow, signal: AbortSignal, probe?: SyntheticProbe, secrets: readonly string[] = []): Promise<z.infer<typeof NativeOutput>> {
   requireFact(!input.probeHandle || (input.view === 'tools' && probe?.handle === input.probeHandle), 'ownership-mismatch', 'Native synthetic probe is not bound');
   const before = await verifyNativeService(access, input.expectedGeneration, signal);
   const row = AgentRow.parse(await access.agent(input.agent.agentId));
@@ -127,7 +128,8 @@ export async function observeNative(input: z.infer<typeof NativeInput>, access: 
         if (probe && tool.state.status === 'completed') requireFact(tool.state.content !== undefined,
           'observation-failed', 'Completed native tool output is missing');
         return [{ id: `${message.id}/tool/${tool.id}`, sessionId: message.sessionID, itemId: message.id, name: tool.name,
-          messageType: message.type, state: tool.state.status, input: tool.state.input, output: tool.state.content ?? null,
+          messageType: message.type, state: tool.state.status, input: tool.state.input, output: tool.state.content ?? null, outputPresent: tool.state.content !== undefined,
+          inputRedaction: redactionFacts(tool.state.input, secrets), outputRedaction: redactionFacts(tool.state.content ?? null, secrets),
           probe: probe ? { handle: probe.handle, inputOccurrences: probeOccurrences(JSON.stringify(tool.state.input || {}), probe),
             outputOccurrences: probeOccurrences(JSON.stringify(tool.state.content || {}), probe) } : null }];
       })) };

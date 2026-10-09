@@ -22,6 +22,8 @@ export * from './synthetic-probe.js';
 export * from './projection.js';
 export * from './container-observations.js';
 export * from './renderer-target.js';
+export * from './composition.js';
+export * from './redaction.js';
 export { createLegacyProviders } from './legacy/providers.js';
 export type { LegacyAccessFactory } from './legacy/providers.js';
 
@@ -81,14 +83,14 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     defineOperation({ ...common, id: 'loom.api.savedEvents', inputSchema: SavedEventsInput, outputSchema: SavedEventsOutput,
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
-        const value = await collectSavedEvents(input, fixture.readApi, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined);
+        const value = await collectSavedEvents(input, fixture.readApi, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined, fixture.secrets);
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),
     defineOperation({ ...common, id: 'loom.api.correlate', inputSchema: CorrelationInput, outputSchema: CorrelationOutput,
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
-        const value = await correlateEvents(input, fixture.readApi, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined);
+        const value = await correlateEvents(input, fixture.readApi, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined, fixture.secrets);
         return { value, identity: { ...identity(fixture, agent.row), turnId: input.turnId,
           ...(input.requestId ? { requestId: input.requestId } : {}), ...(input.itemId ? { itemId: input.itemId } : {}) },
           evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
@@ -107,7 +109,7 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
         requireFact(agent.native, 'unsupported-capability', 'Native observation is not available for this fixture');
-        const value = await observeNative(input, agent.native, agent.row, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined);
+        const value = await observeNative(input, agent.native, agent.row, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined, fixture.secrets);
         requireFact(!('complete' in value) || value.complete, 'incomplete-pages', 'Native message history is incomplete');
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
@@ -163,3 +165,6 @@ export function registerLoomCore(registry: CapabilityRegistry, implementation: I
   for (const provider of createCoreProviders(implementation, gitReader)) registry.register(provider);
 }
 
+
+export { createFixtureProviders, productionFixtureOptions } from './fixture/providers.js';
+export type { FixtureProviderOptions } from './fixture/providers.js';

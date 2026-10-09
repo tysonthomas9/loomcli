@@ -57,6 +57,8 @@ test('public registry validates before transport and returns redacted typed evid
   const schema = SavedEventsOutput;
   const parsed = schema.parse(observed.data);
   assert.equal(z.object({text:z.string()}).parse(parsed.events[0]!.payload).text, 'independently observed value');
+  assert.deepEqual(parsed.events[0]!.redaction.omittedPaths,['/password']);
+  assert.equal(Object.hasOwn(parsed.events[0]!.payload as object,'password'),false);
   assert.notEqual(z.object({text:z.string()}).parse(parsed.events[0]!.payload).text, 'caller expected value');
   harness.setPayload({ text: 'changed actual value' });
   const changed = await harness.invoke('loom.api.savedEvents', input);
@@ -190,6 +192,9 @@ test('public native and saved-event probe facts expose actual leaks before sanit
   assert.equal(leaking.availability, 'observed');
   const facts = nativeSchema.parse(leaking.data).records[0]!;
   assert.equal(facts.probe!.inputOccurrences, 1); assert.equal(facts.probe!.outputOccurrences, 1);
+  assert.equal(facts.outputPresent,true);
+  assert.deepEqual(facts.inputRedaction.replacedTextPaths,['/command']);
+  assert.deepEqual(facts.outputRedaction.replacedTextPaths,['/text']);
   assert.ok(!JSON.stringify(leaking).includes(probe.value));
   const artifact = await harness.evidenceStore.resolve(leaking.provenance.artifacts[0]!.id);
   assert.ok(!(await readFile(artifact, 'utf8')).includes(probe.value));

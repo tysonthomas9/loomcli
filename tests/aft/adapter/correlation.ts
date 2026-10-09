@@ -11,9 +11,9 @@ export const CorrelationOutput = z.object({ turnId: Id, requestId: Id.nullable()
 }).strict();
 /** A bounded read selector binds exact source IDs. It does not evaluate any
  * scenario outcome, cancellation/tool-success count, or expected text. */
-export async function correlateEvents(input: z.infer<typeof CorrelationInput>, read: ReadTransport, signal: AbortSignal, probe?: SyntheticProbe) {
+export async function correlateEvents(input: z.infer<typeof CorrelationInput>, read: ReadTransport, signal: AbortSignal, probe?: SyntheticProbe, secrets: readonly string[] = []) {
   requireFact(new Set(input.eventIds).size === input.eventIds.length, 'identity-mismatch', 'Duplicate event correlation IDs');
-  const history = await collectSavedEvents(input, read, signal, probe);
+  const history = await collectSavedEvents(input, read, signal, probe, secrets);
   const events = input.eventIds.map(id => {
     const matches = history.events.filter(event => event.eventId === id);
     requireFact(matches.length === 1, 'identity-mismatch', 'Requested saved event is missing or duplicated');
