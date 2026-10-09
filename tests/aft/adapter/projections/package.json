@@ -1,0 +1,26 @@
+{
+  "name": "@loom/aft-projections",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test *.test.ts",
+    "typecheck": "tsc --noEmit --strict --noUncheckedIndexedAccess --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext *.ts",
+    "build": "tsc --strict --noUncheckedIndexedAccess --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext --declaration --outDir dist *.ts"
+  },
+  "dependencies": {
+    "unified": "11.0.5",
+    "remark-parse": "11.0.0",
+    "remark-gfm": "4.0.1",
+    "remark-rehype": "11.1.2",
+    "rehype-sanitize": "6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "tsx": "4.20.6",
+    "@types/node": "24.10.0"
+  },
+  "exports": {
+    ".": "./index.ts"
+  }
+}

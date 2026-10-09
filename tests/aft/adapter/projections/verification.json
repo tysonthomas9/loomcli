@@ -1,0 +1,150 @@
+{
+  "taskId": "d6245b30-b44d-4170-8a1c-82cb50199046",
+  "baseSha": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+  "branch": "codex/aft-adapter-projections",
+  "gitRootId": "fd2aa6ab-6083-4ba4-b7b6-ccfc59debcae",
+  "scope": "tests/aft/adapter/projections/",
+  "evidenceClass": "Deterministic pure/injected comparator tests and read-only static source checks; no runtime acceptance",
+  "testSummary": {
+    "total": 22,
+    "passed": 22,
+    "failed": 0,
+    "deterministic": 18,
+    "staticSourceAndMapping": 4
+  },
+  "gates": [
+    {
+      "name": "tests",
+      "status": "fulfilled",
+      "value": {
+        "chunk_id": "ee95bd",
+        "wall_time_seconds": 0.843637167,
+        "exit_code": 0,
+        "original_token_count": 561,
+        "output": "\n> @loom/aft-projections@0.1.0 test\n> tsx --test *.test.ts\n\n\u2714 preview retains both original Python and product JS length contracts explicitly (0.987417ms)\n\u2714 text comparisons require complete data and preserve exact versus Python word equality (0.21075ms)\n\u2714 plain source projection rejects Markdown and preserves motion UTF16 facts (0.2375ms)\n\u2714 renderer tree is data-only and cannot credit incomplete, cyclic or unknown nodes (0.260541ms)\n\u2714 loom-lead-prompt-argv-precedence: injected records are comparator evidence only (0.161958ms)\n\u2714 argv negatives detect moved prompt, expanded template, duplicate safety and retries (0.121791ms)\n\u2714 loom-agent-message-receipt-replay: pinned source variants preserve stable receipt fields (0.496ms)\n\u2714 receipt identity, source, public fields and backwards state cannot normalize across variants (0.272292ms)\n\u2714 waiting-to-handed requires exact complete delivered/native source-specific proof (0.390084ms)\n\u2714 static preservation map retains exact original source and case predicates (15.160125ms)\n\u2714 loom-chat-markdown-projection-v1: literal full text, chrome and prefix ranges (38.265375ms)\n\u2714 code-header-only arrival creates chrome but zero reply words (0.706208ms)\n\u2714 GFM delimiter arrival can retract reply words while source progresses (7.968833ms)\n\u2714 literal HTML, inline marks, lists, entity decoding and UTF16 emoji (25.250166ms)\n\u2714 terminal full projection exceeds 17000 UTF16 units without motion parsing (20.113125ms)\n\u2714 whole reference/HTML blocks and safe partition boundaries preserve exact raw text (0.567666ms)\n\u2714 foreign/corrupt frames remain null and cannot satisfy absence or cardinality (1.652833ms)\n\u2714 all six source identities and seven installed identities are mandatory gates (0.253333ms)\n\u2714 strict data-only inputs enforce original frame/arrival/mode bounds (2.3245ms)\n\u2714 static source receipts match all six pinned files; no frontend code executes (3.564ms)\n\u2714 projection parser dependency closure preserves the exact frontend lock entries (3.555666ms)\n\u2714 supplemental replay contracts pin each original source independently (0.284375ms)\n\u2139 tests 22\n\u2139 suites 0\n\u2139 pass 22\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 431.361209\n"
+      }
+    },
+    {
+      "name": "typecheck",
+      "status": "fulfilled",
+      "value": {
+        "chunk_id": "47f2b4",
+        "wall_time_seconds": 0.844472167,
+        "exit_code": 0,
+        "original_token_count": 44,
+        "output": "\n> @loom/aft-projections@0.1.0 typecheck\n> tsc --noEmit --strict --noUncheckedIndexedAccess --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext *.ts\n\n"
+      }
+    },
+    {
+      "name": "build",
+      "status": "fulfilled",
+      "value": {
+        "chunk_id": "aafc6d",
+        "wall_time_seconds": 0.882026583,
+        "exit_code": 0,
+        "original_token_count": 48,
+        "output": "\n> @loom/aft-projections@0.1.0 build\n> tsc --strict --noUncheckedIndexedAccess --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext --declaration --outDir dist *.ts\n\n"
+      }
+    },
+    {
+      "name": "lint",
+      "status": "fulfilled",
+      "value": {
+        "chunk_id": "c3df33",
+        "wall_time_seconds": 0.961826333,
+        "exit_code": 0,
+        "original_token_count": 0,
+        "output": ""
+      }
+    }
+  ],
+  "notRun": [
+    "Product renderer or browser parity",
+    "Production lead/backend CLI argv construction",
+    "Real API receipt replay",
+    "Native/provider/session runtime",
+    "Stack, Podman, paid models, auth copying",
+    "Broad Go/frontend/make gates",
+    "Canonical root operation integration"
+  ],
+  "ci": "No CI queried; no base failure claim or waiver",
+  "artifactManifest": "SHA256/bytes of assigned files excluding verification.json, node_modules and dist; appended below",
+  "verifiedAtUtc": "2026-10-09T06:15:54.913254+00:00",
+  "fileReceipts": [
+    {
+      "path": "tests/aft/adapter/projections/.gitignore",
+      "bytes": 20,
+      "sha256": "790e3169bc19b046fe55ba1da6d13b976c28363c8c00462a2195fe5faf260910"
+    },
+    {
+      "path": "tests/aft/adapter/projections/contracts.test.ts",
+      "bytes": 10880,
+      "sha256": "a919c24287868cc8bfcd9487fbfc56aa74007a9d81ae75e85eb0617d02188418"
+    },
+    {
+      "path": "tests/aft/adapter/projections/coverage.json",
+      "bytes": 7927,
+      "sha256": "c780b2781aee8db518ae4a3901a193981a97043cbb42526787f18be7cdeda829"
+    },
+    {
+      "path": "tests/aft/adapter/projections/coverage.test.ts",
+      "bytes": 2250,
+      "sha256": "c994ea7463b09c35314109f9d299d3f36a40d23c74290db7ee490098e5393fa2"
+    },
+    {
+      "path": "tests/aft/adapter/projections/identity.ts",
+      "bytes": 2547,
+      "sha256": "978e4d717cf59bc08a0b4dfbd5ab64726601715e61cf612117669aba86bdd88e"
+    },
+    {
+      "path": "tests/aft/adapter/projections/index.ts",
+      "bytes": 1113,
+      "sha256": "ba8e6140f256b71ad20172ba4244339e4bda615ea3d6df7c51cf6b8463b92674"
+    },
+    {
+      "path": "tests/aft/adapter/projections/markdown.test.ts",
+      "bytes": 7877,
+      "sha256": "f3bb4882055261dbe89b663af0e64b5f4fb4060c5a5186f6369655b22c054223"
+    },
+    {
+      "path": "tests/aft/adapter/projections/markdown.ts",
+      "bytes": 10100,
+      "sha256": "14efe48d3d92a225ff7a7410a7c298800ad32fc4a3139869bbd48208c957b497"
+    },
+    {
+      "path": "tests/aft/adapter/projections/original-contracts.json",
+      "bytes": 329849,
+      "sha256": "17fdfa1aa593957910bb19dcb29e3611064e9cf11da76c8d8a02c509d41a9a53"
+    },
+    {
+      "path": "tests/aft/adapter/projections/package-lock.json",
+      "bytes": 63830,
+      "sha256": "10c526d93ca146514cc482575e4b0f079818b67cec010babafb0dd9f354964cd"
+    },
+    {
+      "path": "tests/aft/adapter/projections/package.json",
+      "bytes": 787,
+      "sha256": "7d46748c2c3523ec660bf082917c072096339acedc370fc2e0a6825589ebe17e"
+    },
+    {
+      "path": "tests/aft/adapter/projections/prompt-argv.ts",
+      "bytes": 3657,
+      "sha256": "92a83516cbd021d2782d856626a0fd5538ba2aa21c32dfea2b4d7a434a3b0f2e"
+    },
+    {
+      "path": "tests/aft/adapter/projections/provenance.test.ts",
+      "bytes": 2868,
+      "sha256": "bc9ccb07fb81a23c36ef1c8a75d7051eb96e0eb5000ba4ead0abfd2893a38db3"
+    },
+    {
+      "path": "tests/aft/adapter/projections/receipt-replay.ts",
+      "bytes": 5479,
+      "sha256": "db72d6da91905ff7ddcd084c7a08216e979f0f1a0c8a0a6e0ef8a168c69b4c8f"
+    },
+    {
+      "path": "tests/aft/adapter/projections/text.ts",
+      "bytes": 9816,
+      "sha256": "2b580a58623547a032fb492cba2e840c9aac2cfe5f76972158e6cab0682def46"
+    }
+  ]
+}
