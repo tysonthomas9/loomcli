@@ -1612,5 +1612,91 @@
     "globalConservativeReachableCandidates": 467,
     "globalFrozenInventory": 1072,
     "newYamlOrPreservationCredit": false
+  },
+  "newAdmissionOnlyEnvPreparation": {
+    "at": "2026-10-09T11:39:45.622668+00:00",
+    "authorization": "Parent2026-10-09T11:36Z NEW admission-only manifest/public env. No historical recovery/equivalence.",
+    "status": "PREPARED AND HANDOFF ONLY; no new loadSuiteFiles or baseline timeout rerun",
+    "diagnosticDirectory": "/private/tmp/loom-aft-pilot-validation-16e28787/admission-only-new-selection-fb37wl0c",
+    "selectionManifest": {
+      "purpose": "NEW admission-only diagnostic selection; NOT historical inventory recovery or runtime selection acceptance",
+      "sourceRepository": "tysonthomas9/loomcli",
+      "sourceRef": "e8c77dfe8aee6cdc81a844d109e221374e6e1c81",
+      "sourceTree": "2458b58776c313db2d831e224783b80c18624fd4",
+      "sourceBase": "b675d0803a9e04f0eab06f6b5aa2ef1e1cad8eb0",
+      "frozenOriginalSourceRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+      "scope": "Five unchanged skipped declarative draft raw files,loader admission only,effects forbidden",
+      "files": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "sha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1",
+          "bytes": 74576
+        },
+        {
+          "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+          "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112",
+          "bytes": 33926
+        },
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954",
+          "bytes": 68285
+        },
+        {
+          "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
+          "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea",
+          "bytes": 35463
+        },
+        {
+          "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+          "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d",
+          "bytes": 29753
+        }
+      ]
+    },
+    "artifacts": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/admission-only-new-selection-fb37wl0c/diagnostic-selection.json",
+        "sha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+        "bytes": 1488
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/admission-only-new-selection-fb37wl0c/public-env-basis.json",
+        "sha256": "fa6842722f97d3face2de650bc730c9fed1c6a6514459294ee7121e8e16c7a96",
+        "bytes": 1249
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/admission-only-new-selection-fb37wl0c/construct-public-env.mjs",
+        "sha256": "1e2f78078974e4fc7761738b19e7da00526161aa6313fdb87e79ed930c615f46",
+        "bytes": 1723
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/admission-only-new-selection-fb37wl0c/c71-f377-public-env.json",
+        "sha256": "bec8596b1d2795ec9c42830dd399452463ecb93bd1c9153290fd4f73ff959e6c",
+        "bytes": 439124
+      }
+    ],
+    "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+    "c71F377EnvSha256": "37209e50a44c99f42124998cfc0d9d8ca21837ec1fec2dc6644d2e2bff85816b",
+    "digestConvention": "sha256(JSON.stringify(Object.entries(env).sort()))",
+    "coherentAdapter": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+    "acceptedEngine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+    "acceptedCanonicalEmittedBytesMatched": 112,
+    "actualBaselineImplementation": {
+      "root": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/tests/aft/adapter",
+      "entry": "dist/composition.js",
+      "exportName": "createLoomProviders",
+      "sha256": "be64b7ac1cd616a8e984ed947425105a1c5299833c715c43124b96ca9a6fc173",
+      "files": 2362,
+      "uniqueFileBytes": 8887167,
+      "uniqueFilesMatchRecordedHashes": true
+    },
+    "versionSpecificFieldPolicy": "Same NEW selection and public constants,each version pinLoomImplementation(actual emitted adapter) computes all4 source/build manifest fields; candidate fullpublic env persisted separately. Never claim unchanged historicalenv5b473 equivalence.",
+    "forbiddenEffects": "No driver,binder,provider invoke,stack,auth,UI,Podman,network/runtime launch. Preparation is readonly canonical pinner plus task-owned diagnostic JSON/JS artifacts.",
+    "effects": 0,
+    "runtimeExecuted": 0,
+    "fullPilotAdmissionCredit": false,
+    "originalInventoryRecoveryCredit": false,
+    "owners": "Engine/parent sent exact paths/hashes before any comparison; engine owns loader correction/proof,maintainedc71 unchanged."
   }
 }
