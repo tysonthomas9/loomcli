@@ -70,5 +70,8 @@ export async function pinLoomImplementation(adapterRoot: string, mode: 'source' 
     }
   };
   await walk('');
+  // Fixed reviewed process helper is executed outside TypeScript; pin its bytes
+  // separately from source/emitted JS and exclude its deterministic test file.
+  files.add('fixture/kernel-process.py');
   return calculateImplementationPin(adapterRoot, [...files].sort(), mode === 'emitted' ? 'dist/composition.js' : 'composition.ts', 'createLoomProviders');
 }

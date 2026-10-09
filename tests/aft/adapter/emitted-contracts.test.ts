@@ -7,6 +7,7 @@ import { readdir, readFile, mkdtemp, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin } from '@tysonthomas9/aft/capabilities';
+import { pinLoomImplementation } from './composition.js';
 import { pinProjectionImplementation } from './projection.js';
 import type * as Adapter from './index.js';
 
@@ -16,6 +17,14 @@ test('emitted source-built adapter registers actual providers and retains fixtur
   assert.deepEqual(await readFile(path.join(root, 'dist/legacy/scenarios.json')), await readFile(path.join(root, 'legacy/scenarios.json')));
   const receipt = JSON.parse(await readFile(path.join(root, 'dist/build-receipt.json'), 'utf8')) as { runtimeFiles: { path: string; sha256: string }[] };
   assert.ok(receipt.runtimeFiles.some(file => file.path === 'dist/legacy/scenarios.json'));
+  assert.deepEqual(await readFile(path.join(root,'dist/fixture/kernel-process.py')),await readFile(path.join(root,'fixture/kernel-process.py')));
+  assert.ok(receipt.runtimeFiles.some(file=>file.path==='dist/fixture/kernel-process.py'));
+  for(const mode of ['source','emitted'] as const) {
+    const closure=await pinLoomImplementation(root,mode);
+    assert.ok(closure.files.some(file=>file.path==='fixture/kernel-process.py'));
+    if(mode==='emitted') assert.ok(closure.files.some(file=>file.path==='dist/fixture/kernel-process.py'));
+    assert.equal(closure.files.some(file=>file.path.endsWith('kernel-process.test.py')),false);
+  }
   assert.ok(receipt.runtimeFiles.some(file => file.path.startsWith('dist/projections/node_modules/micromark/')));
   const files = (await readdir(root)).filter(name => name.endsWith('.ts') && !name.endsWith('.test.ts'));
   const corePin = calculateImplementationPin(root, [...files, ...receipt.runtimeFiles.map(file => file.path), 'dist/build-receipt.json'], 'dist/index.js', 'createCoreProviders');
