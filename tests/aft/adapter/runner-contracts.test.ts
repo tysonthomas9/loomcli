@@ -103,8 +103,9 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
   await writeFile(path.join(root,'aft.policy.json'),JSON.stringify({requiredProfile:'declarative',registry:providers.map(provider =>
     ({id:provider.id,version:provider.version,implementationSha256:provider.implementationSha256}))}));
   const native = (agent: unknown, probe: unknown, registration?: string) => ({capability:{request:{id:'loom.native.observe',version:1,input:{
-    agent,view:literal('tools'),nativeSessionId:literal('ses_owned'),
-    nativeRoot:literal(''),expectedGeneration:registration ? ref(registration,'/serviceGeneration') : literal('generation'),
+    agent,view:literal('tools'),nativeSessionId:registration ? ref(registration,'/currentNativeSessionId') : literal('ses_owned'),
+    nativeRoot:registration ? ref(registration,'/currentNativeRoot') : literal(''),
+    expectedGeneration:registration ? ref(registration,'/serviceGeneration') : literal('generation'),
     ...(registration ? {expectedServicePid:ref(registration,'/servicePid'),expectedEndpointId:ref(registration,'/registeredEndpointId')} : {}),
     maxMessages:literal(200),probeHandle:probe}},as:'tools'}});
   const positive = (name: string, outputOccurrences: number) => ({name,steps:[
