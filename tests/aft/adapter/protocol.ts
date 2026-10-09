@@ -52,6 +52,7 @@ export interface NativeAccess {
   sessions(agentId: string): Promise<NativeRef[]>;
   agent(agentId: string): Promise<AgentRow>;
   read: ReadTransport;
+  log?(nativeSessionId: string, signal: AbortSignal): Promise<string>;
 }
 export class ObservationError extends Error {
   constructor(readonly code: 'ownership-mismatch' | 'identity-mismatch' | 'source-mismatch' |
