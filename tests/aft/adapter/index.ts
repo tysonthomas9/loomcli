@@ -4,6 +4,8 @@ import type { ObservationResult } from '@tysonthomas9/aft/types';
 import { z } from 'zod';
 import { AgentRef, AgentRow, AgentHistory, Id, requireFact, redact, type AgentRow as Row } from './protocol.js';
 import { getFixtureEvidenceStore } from './evidence.js';
+import { retainSavedCapture } from './saved-capture.js';
+export { SavedCaptureInput, rereadSavedCapture } from './saved-capture.js';
 import { enrollOwnedWorkspaceAgent, requireOwnedWorkspaceRecord, requireOwnedWorkspace } from './workspaces.js';
 import { defineOperation } from './operation.js';
 import { getSyntheticProbe } from './synthetic-probe.js';
@@ -106,11 +108,12 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
         identity: identity(fixture, row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),
-    defineOperation({ ...common, id: 'loom.api.savedEvents', inputSchema: SavedEventsInput, outputSchema: SavedEventsOutput,
+    defineOperation({ ...common, id: 'loom.api.savedEvents', effects:['read-api','read-filesystem'],inputSchema: SavedEventsInput, outputSchema: SavedEventsOutput,
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
         const value = await collectSavedEvents(input, fixture.readApi, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined, fixture.secrets);
-        return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
+        const captureReceipt=await retainSavedCapture(context,input,value,implementation.sha256);
+        return { value:{...value,captureReceipt}, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),
     defineOperation({ ...common, id: 'loom.api.correlate', inputSchema: CorrelationInput, outputSchema: CorrelationOutput,

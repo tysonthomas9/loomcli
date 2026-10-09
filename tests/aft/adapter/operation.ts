@@ -8,7 +8,7 @@ export interface OperationOptions<I, O> {
   id: string;
   implementationSha256: string;
   implementation: ImplementationPin;
-  inputSchema: z.ZodType<I>;
+  inputSchema: z.ZodType<I, z.ZodTypeDef, unknown>;
   outputSchema: z.ZodType<O>;
   effects: CapabilityEffect[];
   retry: CapabilityProvider['retry'];
