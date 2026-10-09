@@ -78,8 +78,8 @@ export function redact(value: Json, secrets: readonly string[] = []): Json {
       .replace(/\b(token|password|secret|api[_-]?key)\s*[=:]\s*[^\s,;]+/gi, '$1=[REDACTED]');
   }
   if (Array.isArray(value)) return value.map(entry => redact(entry, secrets));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key,
-    /^(?:authorization|password|token|secret|api[_-]?key|ownerToken)$/i.test(key) ? '[REDACTED]' : redact(entry, secrets),
-  ]));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !/^(?:authorization|proxy-authorization|cookie|set-cookie|password|token|secret|access_?token|refresh_?token|client_?secret|private_?key|api[_-]?key|ownerToken)$/i.test(key))
+    .map(([key, entry]) => [key, redact(entry, secrets)]));
   return value;
 }

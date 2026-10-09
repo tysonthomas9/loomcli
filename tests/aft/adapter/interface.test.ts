@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { z } from 'zod';
 import { fileURLToPath } from 'node:url';
 import { readdir, mkdtemp, realpath, rm, readFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -8,6 +9,8 @@ import { createEvidenceStore, putEvidenceStore } from './evidence.js';
 import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin, getRegisteredResource, revokeCapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { createCoreProviders } from './index.js';
 import { putFixture, getFixture, disposeFixtures, type OwnedFixture } from './ownership.js';
+import { SavedEventsOutput } from './events.js';
+import { NativeOutput } from './native.js';
 import { AgentRow, type Json, type HttpResponse } from './protocol.js';
 
 async function setup(t: { after(fn: () => Promise<void>): void }) {
@@ -51,13 +54,13 @@ test('public registry validates before transport and returns redacted typed evid
   assert.equal(observed.provenance.artifacts[0]!.redaction, 'sanitized');
   const retained = await harness.evidenceStore.resolve(observed.provenance.artifacts[0]!.id);
   assert.deepEqual(JSON.parse(await readFile(retained, 'utf8')), observed.data);
-  const schema = harness.registry.get('loom.api.savedEvents', 1).outputSchema;
+  const schema = SavedEventsOutput;
   const parsed = schema.parse(observed.data);
-  assert.equal(parsed.events[0].payload.text, 'independently observed value');
-  assert.notEqual(parsed.events[0].payload.text, 'caller expected value');
+  assert.equal(z.object({text:z.string()}).parse(parsed.events[0]!.payload).text, 'independently observed value');
+  assert.notEqual(z.object({text:z.string()}).parse(parsed.events[0]!.payload).text, 'caller expected value');
   harness.setPayload({ text: 'changed actual value' });
   const changed = await harness.invoke('loom.api.savedEvents', input);
-  assert.equal(schema.parse(changed.data).events[0].payload.text, 'changed actual value');
+  assert.equal(z.object({text:z.string()}).parse(schema.parse(changed.data).events[0]!.payload).text, 'changed actual value');
 });
 test('foreign, missing and expired leases never read observations; cleanup survives abort', async t => {
   const harness = await setup(t);
@@ -133,11 +136,11 @@ test('native model and deletion evidence rejects foreign/stale/duplicate proofs 
     sessions: async () => [{ agent_id: row.agent_id, harness: 'opencode', native_root: '', native_id: 'ses_owned' }], agent: async () => row,
     read: async route => route === '/api/info' ? { status: 200, body: { pid: 42 } } : route.includes('/message?') ? { status: 200, body: messages } : { status, body } };
   const nativeInput = { agent: input.agent, view: 'completed-models', nativeSessionId: 'ses_owned', nativeRoot: '', expectedGeneration: 'gen_1', maxMessages: 200 };
-  const schema = harness.registry.get('loom.native.observe', 1).outputSchema;
+  const schema = NativeOutput.options[3];
   const models = await harness.invoke('loom.native.observe', nativeInput);
   assert.equal(models.availability, 'observed');
-  assert.equal(schema.parse(models.data).records[0].model, 'actual-model');
-  assert.notEqual(schema.parse(models.data).records[0].model, 'expected-model');
+  assert.equal(schema.parse(models.data).records[0]!.model, 'actual-model');
+  assert.notEqual(schema.parse(models.data).records[0]!.model, 'expected-model');
   const stale = await harness.invoke('loom.native.observe', { ...nativeInput, expectedGeneration: 'stale' });
   assert.equal(stale.availability, 'error'); assert.equal(stale.data, undefined);
   messages = { data: [{ id: 'msg_1', sessionID: 'foreign', type: 'assistant', time: {} }] };
@@ -146,7 +149,7 @@ test('native model and deletion evidence rejects foreign/stale/duplicate proofs 
   assert.equal((await harness.invoke('loom.native.observe', nativeInput)).availability, 'error');
   status = 404; body = { _tag: 'SessionNotFoundError', sessionID: 'ses_owned', message: 'Session not found: ses_owned' };
   const absent = await harness.invoke('loom.native.observe', { ...nativeInput, view: 'presence' });
-  assert.equal(absent.availability, 'observed'); assert.equal(schema.parse(absent.data).present, false);
+  assert.equal(absent.availability, 'observed'); assert.equal(NativeOutput.options[1].parse(absent.data).present, false);
   body = { _tag: 'NotFoundError' };
   const unknown = await harness.invoke('loom.native.observe', { ...nativeInput, view: 'presence' });
   assert.equal(unknown.availability, 'error'); assert.equal(unknown.data, undefined);
@@ -182,11 +185,11 @@ test('public native and saved-event probe facts expose actual leaks before sanit
       { data: [{ id: 'msg_1', sessionID: 'ses_owned', type: 'assistant', time: { completed: 1 }, content: messageContent }] } :
       { data: { id: 'ses_owned', metadata: { agent_id: row.agent_id }, location: { directory: row.worktree_path } } } }) };
   const nativeInput = { agent: input.agent, view: 'tools', nativeSessionId: 'ses_owned', nativeRoot: '', expectedGeneration: 'gen_1', maxMessages: 200, probeHandle: probe.handle };
-  const nativeSchema = harness.registry.get('loom.native.observe', 1).outputSchema;
+  const nativeSchema = NativeOutput.options[4];
   const leaking = await harness.invoke('loom.native.observe', nativeInput);
   assert.equal(leaking.availability, 'observed');
-  const facts = nativeSchema.parse(leaking.data).records[0];
-  assert.equal(facts.probe.inputOccurrences, 1); assert.equal(facts.probe.outputOccurrences, 1);
+  const facts = nativeSchema.parse(leaking.data).records[0]!;
+  assert.equal(facts.probe!.inputOccurrences, 1); assert.equal(facts.probe!.outputOccurrences, 1);
   assert.ok(!JSON.stringify(leaking).includes(probe.value));
   const artifact = await harness.evidenceStore.resolve(leaking.provenance.artifacts[0]!.id);
   assert.ok(!(await readFile(artifact, 'utf8')).includes(probe.value));
@@ -194,11 +197,11 @@ test('public native and saved-event probe facts expose actual leaks before sanit
   assert.equal(partial.availability, 'incomplete'); assert.equal(partial.data, undefined);
   messageContent = [{ type: 'tool', id: 'call_1', name: 'bash', state: { status: 'completed', input: { command: '[REDACTED]' }, content: {} } }];
   const alreadyRedacted = await harness.invoke('loom.native.observe', nativeInput);
-  assert.equal(nativeSchema.parse(alreadyRedacted.data).records[0].probe.inputOccurrences, 0);
+  assert.equal(nativeSchema.parse(alreadyRedacted.data).records[0]!.probe!.inputOccurrences, 0);
   harness.setPayload({ itemId: 'item_1', output: probe.value });
   const saved = await harness.invoke('loom.api.savedEvents', { ...input, probeHandle: probe.handle });
   assert.equal(saved.availability, 'observed');
-  assert.equal(harness.registry.get('loom.api.savedEvents', 1).outputSchema.parse(saved.data).events[0].probe.payloadOccurrences, 1);
+  assert.equal(SavedEventsOutput.parse(saved.data).events[0]!.probe!.payloadOccurrences, 1);
   assert.ok(!JSON.stringify(saved).includes(probe.value));
   const foreign = await harness.invoke('loom.api.savedEvents', { ...input, probeHandle: 'foreign-probe' });
   assert.equal(foreign.availability, 'error'); assert.equal(foreign.data, undefined);
