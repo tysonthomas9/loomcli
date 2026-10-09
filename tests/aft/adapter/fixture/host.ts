@@ -316,7 +316,7 @@ export class HostFixtureDriver implements FixtureDriver {
   async launchOwnedCli(argv: readonly string[], envOverrides: Readonly<Record<string, string>>, stdin: string,
     waitForExit: boolean, signal: AbortSignal): Promise<{ id: string; generation: string; pid: number; completion: CliCompletion }> {
     signal.throwIfAborted();this.requireWorkerRegistrationIdle(); check(this.record && this.processes.launch, 'unsupported-capability');
-    check(!['registered-services','cleanup-preparation','cleanup-resource'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
+    check(!['registered-services','cleanup-preparation','cleanup-resource','http-mutation'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
     return this.withServiceOperation('cli-launch',async()=>{
     check(argv.length > 0 && argv.length <= 128 && argv.every(arg => typeof arg === 'string' && arg.length <= 1024 * 1024 && !arg.includes('\0')));
     const seed = argv.length === 12 && argv[0] === 'daemon' && argv[1] === 'seed-worktree' && argv[2] === '--workspace' &&
@@ -387,7 +387,7 @@ export class HostFixtureDriver implements FixtureDriver {
     check(target !== 'fake-model' || this.profile === 'legacy-deterministic', 'unsupported-capability');
     check(target !== 'fake-github' || this.config.fakeGitHub, 'unsupported-capability');
     const service = { api: 'serve', 'fake-model': 'fake-model', 'fake-github': 'fake-github' }[target];
-    return this.withServiceOperation(service,async()=>{
+    const request=()=>this.withServiceOperation(service,async()=>{
       const handle=this.handles.get(service);check(handle&&handle.state()==='running'&&handle.pid>0,'ownership-mismatch');
       const generation=expectedGeneration??handle!.generation;check(handle!.generation===generation,'identity-mismatch');
       const index={api:0,'fake-model':2,'fake-github':4}[target],origin=`http://127.0.0.1:${this.ports[index]}`;
@@ -396,6 +396,7 @@ export class HostFixtureDriver implements FixtureDriver {
       const response=await this.http(origin,method,relative,body,signal);
       signal.throwIfAborted();this.requireCurrentHandle(service,handle!);check(handle!.state()==='running','identity-mismatch');return response;
     });
+    return method==='GET'?request():this.withServiceOperation('http-mutation',request);
   }
   private env(): Record<string, string> {
     const c = this.config; const runtime = path.join(this.root, 'runtime');
