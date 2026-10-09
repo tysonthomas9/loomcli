@@ -7,7 +7,9 @@ import { FixtureWorkerStateId,FixtureWorkerStateEffects,FixtureWorkerStateInput,
 import { FixtureComposeServeId,RestartComposeServeId,FixtureComposeServeEffects,RestartComposeServeEffects,
   FixtureComposeServeInput,FixtureComposeServeOutput,RestartComposeServeInput,RestartComposeServeOutput,
   observeComposeServe,restartComposeServe } from './fixture-compose.js';
-import { getFixtureEvidenceStore } from './evidence.js';
+import { beginNativeOperation } from './native-operation-authority.js';
+import { NativeOperationEffects } from './native-operation-effects.js';
+import { captureNativeAgent, guardedEnrollmentStore, ownedNativeInvocation } from './native-invocation.js';
 import { retainSavedCapture } from './saved-capture.js';
 export { SavedCaptureInput, rereadSavedCapture } from './saved-capture.js';
 import { enrollOwnedWorkspaceAgent, requireOwnedWorkspaceRecord, requireOwnedWorkspace } from './workspaces.js';
@@ -106,34 +108,49 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
         return {value,identity:identity(fixture),evidenceClass:grant.evidenceClass,secrets:fixture.secrets};
       },
     }),
-    defineOperation({...common,id:'loom.native.registration',effects:['read-native'],inputSchema:NativeRegistrationInput,outputSchema:NativeRegistrationOutput,
+    defineOperation({...common,id:'loom.native.registration',effects:[...NativeOperationEffects['loom.native.registration']],retry:'never',inputSchema:NativeRegistrationInput,outputSchema:NativeRegistrationOutput,
       async run(input,context) {
-        const {fixture,agent} = await getAgent(context,input.agent);
-        requireFact(agent.native,'unsupported-capability','Owned native transport is missing');
-        const value = await observeNativeRegistration(input,agent.native,agent.row,context.signal);
-        return {value,identity:identity(fixture,agent.row),evidenceClass:fixture.evidenceClass,secrets:fixture.secrets};
+        const {guard,captured,access}=await ownedNativeInvocation(context,input.agent,'loom.native.registration');
+        const value=await captured.checked(()=>observeNativeRegistration(input,access,captured.row,context.signal));
+        return {value,identity:identity(guard.fixture,captured.row),evidenceClass:guard.grant.evidenceClass,secrets:guard.fixture.secrets,
+          retention:{recheck:()=>captured.recheck(),retain:serialized=>captured.checked(()=>guard.retain(serialized))}};
       },
     }),
-    defineOperation({ ...common, id: 'loom.agent.bind', inputSchema: BindAgentInput, outputSchema: BindAgentOutput,
+    defineOperation({ ...common, id: 'loom.agent.bind',effects:[...NativeOperationEffects['loom.agent.bind']],retry:'never', inputSchema: BindAgentInput, outputSchema: BindAgentOutput,
       async run(input, context) {
-        const fixture = await getFixture(context, input.leaseId);
+        const guard=beginNativeOperation(context,input.leaseId,'loom.agent.bind'),fixture=guard.fixture;
+        const unbound=()=>{guard.recheck();requireFact(!fixture.agents.has(input.agentId),
+          'ownership-mismatch','Foreign or duplicate agent binding');};
+        unbound();
         requireOwnedWorkspaceRecord(fixture,input.workspaceId);
+        await guard.verify();unbound();
         if(fixture.ownedWorkspaces&&!fixture.ownedWorkspaces.find(value=>value.workspaceId===input.workspaceId&&value.identityKind==='native-agent-id')!.agentIds.includes(input.agentId))
-          await enrollOwnedWorkspaceAgent(fixture,input.workspaceId,input.agentId,context.signal,getFixtureEvidenceStore(context,fixture.leaseId));
+          await enrollOwnedWorkspaceAgent(fixture,input.workspaceId,input.agentId,context.signal,
+            guardedEnrollmentStore(context,guard,unbound),unbound);
         const workspace = requireOwnedWorkspace(fixture,input.workspaceId,input.agentId);
-        requireFact(!fixture.agents.has(input.agentId), 'ownership-mismatch', 'Foreign or duplicate agent binding');
-        const agent = await fixture.resolveAgent(input.agentId, context.signal, input.workspaceId);
+        const record=requireOwnedWorkspaceRecord(fixture,input.workspaceId);
+        unbound();
+        const agent = await guard.checked(()=>fixture.resolveAgent(input.agentId, context.signal, input.workspaceId));
+        unbound();
+        const currentWorkspace=requireOwnedWorkspace(fixture,input.workspaceId,input.agentId);
+        requireFact(requireOwnedWorkspaceRecord(fixture,input.workspaceId)===record &&
+          Object.entries(workspace).every(([key,value])=>currentWorkspace[key as keyof typeof currentWorkspace]===value),
+          'identity-mismatch','Selected source changed during agent discovery');
         const row = AgentRow.parse(agent.row);
         requireFact(row.agent_id === input.agentId && row.workspace_id === input.workspaceId && row.repo === workspace.repo && (!workspace.commonDir || agent.commonDir===workspace.commonDir),
           'ownership-mismatch', 'Agent discovery returned a foreign identity');
-        fixture.agents.set(input.agentId, { ...agent, row });
-        try { await getAgent(context, { fixtureLeaseId: fixture.leaseId, workspaceId: input.workspaceId, agentId: input.agentId }); }
-        catch (error) { fixture.agents.delete(input.agentId); throw error; }
-        const agentRef = AgentRef.parse({ fixtureLeaseId: fixture.leaseId, workspaceId: row.workspace_id, agentId: row.agent_id });
-        return { value: { agentRef, ...agentRef,
-          parentAgentId: row.parent_agent_id, rootAgentId: row.root_agent_id, repo: row.repo, worktree: row.worktree_path, branch: row.branch,
-          nativeSessionId: row.harness_session_id, nativeRoot: row.harness_session_root, harness: row.harness },
-          identity: identity(fixture, row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
+        const bound={...agent,row};fixture.agents.set(input.agentId,bound);
+        const rollback=()=>{if(fixture.agents.get(input.agentId)===bound)fixture.agents.delete(input.agentId);};
+        try {
+          const agentRef=AgentRef.parse({fixtureLeaseId:fixture.leaseId,workspaceId:row.workspace_id,agentId:row.agent_id});
+          const captured=captureNativeAgent(guard,agentRef);
+          await captured.checked(()=>getAgent(context,agentRef));
+          return { value: { agentRef, ...agentRef,
+            parentAgentId: row.parent_agent_id, rootAgentId: row.root_agent_id, repo: row.repo, worktree: row.worktree_path, branch: row.branch,
+            nativeSessionId: row.harness_session_id, nativeRoot: row.harness_session_root, harness: row.harness },
+            identity: identity(fixture,row),evidenceClass:guard.grant.evidenceClass,secrets:fixture.secrets,
+            retention:{recheck:()=>captured.recheck(),retain:serialized=>captured.checked(()=>guard.retain(serialized)),onFailure:rollback}};
+        } catch(error) {rollback();throw error;}
       },
     }),
     defineOperation({ ...common, id: 'loom.agent.observe', inputSchema: AgentObserveInput, outputSchema: AgentObserveOutput,
@@ -176,13 +193,13 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),
-    defineOperation({ ...common, id: 'loom.native.observe', effects: ['read-native'], inputSchema: NativeInput, outputSchema: NativeOutput,
+    defineOperation({ ...common, id: 'loom.native.observe', effects: [...NativeOperationEffects['loom.native.observe']],retry:'never', inputSchema: NativeInput, outputSchema: NativeOutput,
       async run(input, context) {
-        const { fixture, agent } = await getAgent(context, input.agent);
-        requireFact(agent.native, 'unsupported-capability', 'Native observation is not available for this fixture');
-        const value = await observeNative(input, agent.native, agent.row, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined, fixture.secrets);
+        const {guard,captured,access}=await ownedNativeInvocation(context,input.agent,'loom.native.observe'),fixture=guard.fixture;
+        const value = await captured.checked(()=>observeNative(input, access, captured.row, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined, fixture.secrets));
         requireFact(!('complete' in value) || value.complete, 'incomplete-pages', 'Native message history is incomplete');
-        return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
+        return { value, identity: identity(fixture, captured.row), evidenceClass: guard.grant.evidenceClass, secrets: fixture.secrets,
+          retention:{recheck:()=>captured.recheck(),retain:serialized=>captured.checked(()=>guard.retain(serialized))} };
       },
     }),
     defineOperation({ ...common, id: 'loom.native.failure', effects: ['read-native'], inputSchema: FailureInput, outputSchema: FailureOutput,

@@ -11,6 +11,8 @@ import { createCoreProviders } from './index.js';
 import { putFixture, getFixture, disposeFixtures, type OwnedFixture } from './ownership.js';
 import { SavedEventsOutput } from './events.js';
 import { NativeOutput } from './native.js';
+import { createFixtureOperationAuthority } from './authority.js';
+import { NativeOperationEffects } from './native-operation-effects.js';
 import { AgentRow, type Json, type HttpResponse } from './protocol.js';
 
 async function setup(t: { after(fn: () => Promise<void>): void }) {
@@ -38,6 +40,9 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
       kind: 'item.completed', turn_id: 'turn_1', payload, created_at: '2026-10-09T00:00:00Z' }], snapshot_seq: 1, next: 1, more: false } }; },
     readFiles: async () => ({ status: 404, body: {} }), resolveAgent: async () => ({ row, commonDir: '/owned/source/.git' }),
     verify: async () => {}, dispose: async () => { disposed++; } };
+  // Explicit TEST owner, not a production Host/native profile grant.
+  fixture.operationAuthority=createFixtureOperationAuthority(fixture,Object.fromEntries(
+    Object.entries(NativeOperationEffects).map(([id,effects])=>[id,{evidenceClass:'deterministic',effects:[...effects]}])));
   putFixture(context, fixture);
   const invoke = (id: string, input: unknown) => registry.invoke({ id, version: 1, input: {} }, input, context);
   return { registry, context, fixture, invoke, evidenceStore, get reads() { return reads; }, get disposed() { return disposed; }, setPayload(value: Json) { payload = value; } };
@@ -72,6 +77,25 @@ test('public native bind consumes separate empty and repository-addition receipt
   assert.equal(result.data.repo,'/owned/beta');assert.notEqual(result.data.repo,'/owned/source');
   assert.equal(result.data.nativeSessionId,'actual-beta-session');
   assert.deepEqual(result.data.agentRef,{fixtureLeaseId:'lease',workspaceId:'empty-then-added',agentId:'agt_added'});
+});
+test('public native bind cancellation during canonical enrollment cannot dispatch resolution or further evidence writes',async t=>{
+  const h=await setup(t);const {createOwnedWorkspaceRoster}=await import('./workspaces.js');
+  const owner={leaseId:h.fixture.leaseId,runId:h.context.runId,suiteId:h.context.suiteId,scope:h.context.scope,caseId:h.context.caseId,profile:h.fixture.profile};
+  const primary={identityKind:'native-agent-id' as const,workspaceId:'workspace',repo:'/owned/source',commonDir:'/owned/source/.git',
+    storeId:'actual-store',storeGeneration:'actual-store-generation',agentIds:['agt_owned']};
+  const creationReceipt=await h.evidenceStore.retain(JSON.stringify({kind:'workspace-created',...owner,...primary}));
+  h.fixture.ownedWorkspaces=await createOwnedWorkspaceRoster(owner,[{...primary,creationReceipt}],h.evidenceStore);
+  let enter!:()=>void,release!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),pendingRead=new Promise<void>(resolve=>{release=resolve;});
+  let resolves=0,writes=0;const retain=h.evidenceStore.retain;
+  h.evidenceStore.retain=async serialized=>{writes++;return retain(serialized);};
+  h.fixture.resolveAgent=async()=>{resolves++;throw Error('resolution must not occur');};
+  h.fixture.readWorkspaceAgent=async(workspaceId,agentId,signal)=>{assert.equal(signal,h.context.signal);enter();await pendingRead;
+    return {kind:'agent-enrolled',...owner,identityKind:'native-agent-id',workspaceId,agentId,repo:'/owned/source',commonDir:'/owned/source/.git',
+      storeId:'actual-store',storeGeneration:'actual-store-generation',parentAgentId:null,rootAgentId:null,createdByKind:'user',createdById:null,revision:1};};
+  const pending=h.invoke('loom.agent.bind',{leaseId:'lease',workspaceId:'workspace',agentId:'agt_added'});
+  await entered;revokeCapabilityContext(h.context);release();const result=await pending;
+  assert.equal(result.availability,'error');assert.equal(result.data,undefined);assert.deepEqual([resolves,writes],[0,0]);
+  assert.equal(h.fixture.agents.has('agt_added'),false);assert.deepEqual(h.fixture.ownedWorkspaces[0]!.agentIds,['agt_owned']);
 });
 test('agent observations distinguish missing requested model/outcome from actual nullable and completed values', async t => {
   const harness = await setup(t);
@@ -162,6 +186,8 @@ test('two child cases use only exported suite fixture handles; case cleanup cann
   suiteContext.scope = 'suite'; suiteContext.suiteId = harness.context.suiteId;
   putEvidenceStore(suiteContext, harness.evidenceStore);
   const suiteFixture = { ...harness.fixture, scope: 'suite' as const, leaseId: 'suite-lease' };
+  suiteFixture.operationAuthority=createFixtureOperationAuthority(suiteFixture,Object.fromEntries(
+    Object.entries(NativeOperationEffects).map(([id,effects])=>[id,{evidenceClass:'deterministic',effects:[...effects]}])));
   putFixture(suiteContext, suiteFixture);
   const child = (caseId: string, handles: string[]) => {
     const context = createCapabilityContext(harness.context.source, harness.registry, harness.context.runId, caseId);
@@ -286,7 +312,8 @@ test('native registration captures only validated owned facts and rejects change
     process:async()=>({pid:42,generation:'generation',executable:'/owned/opencode',argv:['/owned/opencode','serve','--service']}),
     agent:async()=>row,sessions:async()=>refs,read:async()=>({status:200,body:{pid:42}})};
   const request = {agent:input.agent,maxRegistrations:10};
-  assert.deepEqual(h.registry.get('loom.native.registration',1).effects,['read-native']);
+  assert.deepEqual(h.registry.get('loom.native.registration',1).effects,[...NativeOperationEffects['loom.native.registration']]);
+  assert.equal(h.registry.get('loom.native.registration',1).retry,'never');
   await assert.rejects(h.invoke('loom.native.registration',{...request,expectedGeneration:'guessed'}));
   assert.equal((await h.invoke('loom.native.registration',{...request,agent:{...input.agent,fixtureLeaseId:'foreign'}})).availability,'error');
   assert.equal(registrations,0);

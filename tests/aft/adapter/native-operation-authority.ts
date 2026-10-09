@@ -28,6 +28,7 @@ export function beginNativeOperation(context: CapabilityContext, leaseId: string
     retain: store.retain, resolve: store.resolve, resolveBounded: store.resolveBounded,
   };
   const roots = fixture.roots, agents = fixture.agents;
+  const secrets = fixture.secrets, secretValues = [...secrets];
   const recheck = () => {
     signal.throwIfAborted();
     requireFact(context.signal === signal && context.registrySha256 === registrySha256 &&
@@ -41,6 +42,7 @@ export function beginNativeOperation(context: CapabilityContext, leaseId: string
       fixture.verify === callbacks.verify && fixture.resolveAgent === callbacks.resolveAgent &&
       fixture.readWorkspaceAgent === callbacks.readWorkspaceAgent &&
       fixture.roots === roots && fixture.agents === agents &&
+      fixture.secrets === secrets && secrets.length === secretValues.length && secretValues.every((value,index)=>secrets[index]===value) &&
       store.retain === callbacks.retain && store.resolve === callbacks.resolve && store.resolveBounded === callbacks.resolveBounded,
     'ownership-mismatch', 'Native operation ownership changed');
   };
