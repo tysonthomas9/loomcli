@@ -52,7 +52,46 @@
     "compose-mutations": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "fixed container Loom CLI and owned process inspect/restart/stop; exact identities not PID text",
-      "status": "missing; configuration and HTTP hooks published separately"
+      "status": "missing; configuration and HTTP hooks published separately",
+      "selectedSSE": {
+        "sources": [
+          {
+            "path": "tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "cba2f1cd0eeb6a21b973c8826fd726b66b01301c7100ceb232eb3e8c86c3633e"
+          },
+          {
+            "path": "tests/aft/run-aft-agent-flows.sh",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "43875166b14615435c75bc42e52733b3f51ad474694cfcaf90bd3eeaf089edde"
+          },
+          {
+            "path": "tests/aft/scripts/agent-flows-restart-serve.sh",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "eedce3f74c6ce6a11e4b760be9424e6baba61b51286de55054b92bf1c5fbedeb"
+          },
+          {
+            "path": "tests/aft/scripts/agent-flows-ownership.sh",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "ff8df4fe520c7e3f1f85dd0875f830c73a47b1dd9cf39e6a2f55acac70f3a4e3"
+          }
+        ],
+        "sourceCase": "receipts-stream-sse tests[0] step26 (parent/pilot selection); frozen YAML line70",
+        "callPath": [
+          "AFT_RESTART_SERVE",
+          "run-aft-agent-flows.sh:39",
+          "agent-flows-restart-serve.sh"
+        ],
+        "originalActor": "Verify exact owned manifest/container, fixed owned Compose restart loom-local including colocated OpenCode, public API/config readiness guard180s, changed actual initPID AND StartedAt, before/after process inventory retained.",
+        "notEquivalent": [
+          "Host serve process restart",
+          "Native-only fixed SIGTERM and later successor",
+          "coverage-receipts-stream-native.sh restart of another case"
+        ],
+        "status": "Fixture owns fixed exact Compose lifecycle/identity/readiness hooks; legacy owns translation into source-faithful operation receipt. Unsupported before effect until actual producer/contract exists; current host serve-restart grants no selected SSE restart credit.",
+        "uiEvidenceLimit": "Selected test does not arm observed UI capture. Empty UI capture list grants no UI provenance.",
+        "evidenceClass": "static frozen Git source only; no helper/process/provider/browser/Compose execution"
+      }
     },
     "fixture-baseline": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
