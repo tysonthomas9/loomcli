@@ -40,6 +40,8 @@ export interface OwnedFixture {
   roots: Map<string, OwnedRoot>;
   agents: Map<string, OwnedAgent>;
   secrets: readonly string[];
+  /** Canonical partial acquisition resource: disposal only, never observation. */
+  readonly cleanupOnly?: true;
   syntheticProbe?: SyntheticProbe;
   rendererTarget?: OwnedRendererTarget;
   operationAuthority?: FixtureOperationAuthority;
@@ -58,10 +60,39 @@ export interface OwnedFixture {
 }
 export const fixturesKey = '@loom/aft-adapter/fixtures/v1';
 const resourceKey = (leaseId: string) => `${fixturesKey}:${leaseId}`;
-export function putFixture(context: CapabilityContext, fixture: OwnedFixture): void {
+function requireFixtureOwner(context: CapabilityContext, fixture: Pick<OwnedFixture, 'leaseId' | 'runId' | 'suiteId' | 'scope' | 'caseId'>): void {
   requireFact(fixture.runId === context.runId && fixture.suiteId === context.suiteId && fixture.scope === context.scope &&
     (fixture.scope === 'suite' || fixture.caseId === context.caseId) && fixture.leaseId && !context.resources.has(resourceKey(fixture.leaseId)),
     'ownership-mismatch', 'Fixture ownership is invalid or duplicated');
+}
+/** Register cleanup before attempting failure evidence. The returned immutable
+ * fixture carries only this owner's disposal callback; no evidence binding,
+ * workspace enrollment, transport or operation authority is issued. */
+export function putCleanupFixture(context: CapabilityContext,
+  owner: Pick<OwnedFixture, 'leaseId' | 'runId' | 'suiteId' | 'scope' | 'caseId' | 'profile' | 'dispose'>): OwnedFixture {
+  requireFixtureOwner(context, owner);
+  const unavailable = async (): Promise<never> => {
+    requireFact(false, 'observation-failed', 'Fixture acquisition is incomplete');
+  };
+  const fixture: OwnedFixture = Object.freeze({
+    leaseId: owner.leaseId, runId: owner.runId, suiteId: owner.suiteId, scope: owner.scope, caseId: owner.caseId,
+    profile: owner.profile, workspaceId: 'acquisition-incomplete', repo: 'acquisition-incomplete',
+    expiresAtUtcMs: 0, evidenceClass: 'deterministic', cleanupOnly: true,
+    roots: new Map<string, OwnedRoot>(), agents: new Map<string, OwnedAgent>(), secrets: [],
+    readApi: unavailable, readFiles: unavailable, resolveAgent: unavailable, verify: unavailable, dispose: owner.dispose,
+  });
+  const key = resourceKey(fixture.leaseId);
+  context.resources.set(key, fixture);
+  try { context.registerResource(fixture.leaseId, [key]); }
+  catch (error) {
+    if (context.resources.get(key) === fixture) context.resources.delete(key);
+    throw error;
+  }
+  return fixture;
+}
+export function putFixture(context: CapabilityContext, fixture: OwnedFixture): void {
+  requireFixtureOwner(context, fixture);
+  requireFact(!fixture.cleanupOnly, 'ownership-mismatch', 'Cleanup-only fixture cannot acquire observation authority');
   validateOwnedWorkspaceRoster(fixture);
   if (fixture.operationAuthority) validateFixtureOperationAuthority(fixture.operationAuthority,fixture);
   bindEvidenceStore(context, fixture.leaseId);
@@ -90,6 +121,7 @@ export function getFixtureAuthority(context: CapabilityContext, leaseId: string)
   requireFact(fixture && fixture.runId === context.runId && fixture.suiteId === context.suiteId &&
     (fromSuite ? fixture.scope === 'suite' : fixture.scope === context.scope && (fixture.scope === 'suite' || fixture.caseId === context.caseId)),
     'ownership-mismatch', 'Fixture handle is missing or belongs to another scope');
+  requireFact(!fixture.cleanupOnly, 'ownership-mismatch', 'Fixture acquisition is incomplete');
   requireFact(context.clock.epochUtcMs + context.clock.now() < fixture.expiresAtUtcMs,
     'ownership-mismatch', 'Fixture lease expired');
   context.signal.throwIfAborted();
@@ -124,6 +156,8 @@ export async function releaseFixture(context: CapabilityContext, leaseId: string
   // Cleanup remains available after expiry or cancellation. Keep failed
   // disposals registered so final cleanup can retry the exact resources.
   await fixture.dispose();
+  if (fixture.cleanupOnly) requireFact(context.resources.get(resourceKey(leaseId)) === fixture,
+    'ownership-mismatch', 'Cleanup fixture was replaced during disposal');
   context.resources.delete(resourceKey(leaseId));
 }
 export async function disposeFixtures(context: CapabilityContext): Promise<void> {
