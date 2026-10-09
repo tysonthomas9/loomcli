@@ -56,6 +56,12 @@ export function createTerminalMetadataDetach(access: TerminalMetadataAccess) {
     const parsed = TerminalDetachInput.safeParse(raw);
     if (!parsed.success || !call.invocationId) throw new LegacyError('invalid-input', 'Terminal detach input is invalid');
     const input = parsed.data;
+    const key = `${input.leaseId}\0${call.invocationId}`;
+    if (attempted.has(key)) throw new LegacyError('mutation-repeated', 'Terminal detach invocation was already attempted');
+    // Reserve synchronously before ownership checks or reads can yield. Every
+    // well-formed attempt is irrevocable, including pre-effect read failures;
+    // a caller must use a new invocation and reattest ownership to try again.
+    attempted.add(key);
     const owned = async () => {
       call.signal.throwIfAborted();
       const identity = await access.assertOwned(input, call);
@@ -64,13 +70,13 @@ export function createTerminalMetadataDetach(access: TerminalMetadataAccess) {
       return identity;
     };
     const identity = await owned();
-    const key = `${input.leaseId}\0${call.invocationId}`;
-    if (attempted.has(key)) throw new LegacyError('mutation-repeated', 'Terminal detach invocation was already attempted');
     // Frozen helper first probes reachability, then takes a fresh matching list.
+    // Its shell for-loop masks intermediate enumeration failures. Rejecting
+    // those failures here intentionally closes that gap; it is not an oracle
+    // the original helper already guaranteed.
     reachable(await access.readTabs(input, call.signal));
     await owned();
     const capturedSessions = sessions(await access.readTabs(input, call.signal), input.agentName);
-    attempted.add(key);
     const deletions: TerminalDetachFacts['deletions'] = [];
     for (const sessionName of capturedSessions) {
       await owned();
