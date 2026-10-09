@@ -2,10 +2,11 @@
 # P1.26 (D29): a task whose attempt froze code stays open, in status review
 # with the code-review label, until its revision is decided. Approve (once
 # applied) closes it, Reject sets it back to open, and an empty attempt still
-# closes as "No changes". While the task waits its epic stays open, and its
-# dependent may start on its frozen code (Tyson, 2026-10-09): approving the
-# dependent first waits for it, and rejecting it makes the dependent stale
-# until a Rebuild. Real TaskRuns record the revisions.
+# closes as "No changes". While the task waits its epic stays open. A
+# dependent in its stack starts on its frozen code (Tyson, 2026-10-09):
+# approving the dependent first waits for it, and rejecting it makes the
+# dependent stale until a Rebuild. A dependent outside its stack stays
+# blocked until it closes. Real TaskRuns record the revisions.
 set -euo pipefail
 
 phase="$1"
@@ -150,8 +151,9 @@ attempt)
   ;;
 in-review)
   # in-review <ws> <slot>: the finished attempt with code left its task in
-  # review with the code-review label and its epic open. Its dependent no
-  # longer waits for the review: it is ready (Tyson, 2026-10-09).
+  # review with the code-review label and its epic open. Its dependent is
+  # outside the task's stack, so it cannot be built on the task's code and
+  # stays blocked until the task closes (in-stack dependents start: chain).
   task="$(cat "$work-$3-task")"
   wait_status "$task" review True
   python3 - "$work-revisions.json" <<'PY'
@@ -159,10 +161,7 @@ import json, sys
 data = json.load(open(sys.argv[1]))["data"]
 assert len(data) == 1 and data[0]["no_changes"] is False and not data[0].get("verdict"), data
 PY
-  dependent="$(cat "$work-$3-dependent")"
-  for _ in $(seq 1 15); do blocked "$dependent" || break; sleep 1; done
-  ! blocked "$dependent" || { echo "the dependent still waits for the task in review" >&2; cat "$work-blocked.json" "$work-ready.json" >&2; exit 1; }
-  grep -q "\"$dependent\"" "$work-ready.json"
+  blocked "$(cat "$work-$3-dependent")" || { echo "the dependent outside the task's stack is not blocked by the task in review" >&2; cat "$work-blocked.json" "$work-ready.json" >&2; exit 1; }
   test "$(status "$(cat "$work-$3-epic")")" != "closed False"
   # The label belongs to Loom: an operator status edit keeps the task as is
   # only through Approve/Reject; agents are refused by the daemon (unit tested).
