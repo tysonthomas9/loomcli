@@ -29,6 +29,7 @@ export * from './ownership.js';
 export * from './protocol.js';
 export * from './native-host.js';
 export * from './native-operation-effects.js';
+export * from './native-operation-authority.js';
 export * from './synthetic-probe.js';
 export * from './projection.js';
 export * from './container-observations.js';
