@@ -1,0 +1,25 @@
+{
+  "name": "@loom/aft-legacy-operations",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --tsconfig tsconfig.runtime.json --test *.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@tysonthomas9/aft": ">=0.6.0"
+  },
+  "peerDependenciesMeta": {
+    "@tysonthomas9/aft": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "typescript": "5.9.3",
+    "tsx": "4.20.6"
+  }
+}

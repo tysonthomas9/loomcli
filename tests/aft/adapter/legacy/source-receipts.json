@@ -1,0 +1,157 @@
+{
+  "loomBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+  "coreDependency": "6d3d8f01112d47f0664bbd65f1163f1f1bbf51c8",
+  "evidenceClass": "static source receipt only",
+  "sources": [
+    {
+      "path": "internal/cli/agent/task.go",
+      "sha256": "8a66a811f7ffbccb0911ad104ab5eeed9dd4f00807032d5c6b27ac7ecec60936"
+    },
+    {
+      "path": "internal/cli/cleanup/usage_cmd.go",
+      "sha256": "efee51abc0d9c421bfe5715914fee8797a9650893afb0e6918cda6714b7183e1"
+    },
+    {
+      "path": "internal/cli/daemon/seed_worktree_cmd.go",
+      "sha256": "5cf5b4b5fb907a5dac4c0f78100594d824099126a6ef059f334ac8b5b02eec20"
+    },
+    {
+      "path": "internal/cli/role/role_cmd.go",
+      "sha256": "137cc68b2982799b8d7291520fba2f8fa5d65104ac4d028968ef979ca40e236f"
+    },
+    {
+      "path": "internal/harnessemu/emu.go",
+      "sha256": "a212e09ebbdb58c98d87b7b01e0212d4111c27f3b7b41a6f284401de62d2565c"
+    },
+    {
+      "path": "scripts/start-e2e-server.sh",
+      "sha256": "4ca58937b6771ac1b64338661274b309ff82f77aff24a693aad12b465f362ea4"
+    },
+    {
+      "path": "tests/aft/fixtures/fake-github/server.mjs",
+      "sha256": "17745b5757e0ca37df9b4e391d832ce2a2d05acb3600000b8671fd185fc4dcf4"
+    },
+    {
+      "path": "tests/aft/fixtures/fake-model/server.mjs",
+      "sha256": "22bd00763e849896416acdb27f795af0334b9e5e00f8536c173059e2f53caaeb"
+    },
+    {
+      "path": "tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml",
+      "sha256": "4a5a97253e9e823c2ee67ebd18746ee90214784a2104ad1ecb7436a0162e8996"
+    },
+    {
+      "path": "tests/aft/live-agent-coverage-suites/chat-controls-models.test.yaml",
+      "sha256": "d0fa6844a2fce40cd975f92be349f1117c8c67833389fe29cae6051d057676c7"
+    },
+    {
+      "path": "tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml",
+      "sha256": "d732c95c5a0cc2a60d729fa80665a1c7a097620d96e44d434603bb0b0e6c7980"
+    },
+    {
+      "path": "tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml",
+      "sha256": "cba2f1cd0eeb6a21b973c8826fd726b66b01301c7100ceb232eb3e8c86c3633e"
+    },
+    {
+      "path": "tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml",
+      "sha256": "f735d27bad5f339c4749fd6282a4a6aa62f61c19ca39219f3eb90f5f9bf74cd9"
+    },
+    {
+      "path": "tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml",
+      "sha256": "a90f0d534aa17f49e010ff684ba7f90d087c2cafab1d94b1cc6ca48a4a1ddcc9"
+    },
+    {
+      "path": "tests/aft/live-interactive-suites/li-custom-prompt.test.yaml",
+      "sha256": "ded85326247d72c82c140f96fc5e52a938b60d90129a2edfd4b13e688875d3ff"
+    },
+    {
+      "path": "tests/aft/live-interactive-suites/ll-lead-assignment.test.yaml",
+      "sha256": "d1cffa043f045d9d9682ed1d462c0aaf332c8832001d96d683b198cdc56cb93d"
+    },
+    {
+      "path": "tests/aft/live-pr-review-suites/lp-pr-review.test.yaml",
+      "sha256": "699a83bc7ec9b0b3bfb7a5f36c863f726911e25976d9d672e52cbb3da7102fd3"
+    },
+    {
+      "path": "tests/aft/live-worker-suites/lw-supervised-workers.test.yaml",
+      "sha256": "ef97ee7bbd81feaf0fc375d3296d668fdc6a4a4b84c20bad501334f62fa86d3e"
+    },
+    {
+      "path": "tests/aft/run-aft-agent-flows.sh",
+      "sha256": "43875166b14615435c75bc42e52733b3f51ad474694cfcaf90bd3eeaf089edde"
+    },
+    {
+      "path": "tests/aft/run-aft-podman.sh",
+      "sha256": "d5fee84647e9bf3b8b7aa760b54fb60bd3e413f3cb987852e92f1e1ac7491683"
+    },
+    {
+      "path": "tests/aft/run-aft.sh",
+      "sha256": "cc681df87e824d81d42df0e820ad98b8652da20d569207e436a938d0e460d80f"
+    },
+    {
+      "path": "tests/aft/scripts/agent-flows-restart-serve.sh",
+      "sha256": "eedce3f74c6ce6a11e4b760be9424e6baba61b51286de55054b92bf1c5fbedeb"
+    },
+    {
+      "path": "tests/aft/scripts/coverage-tool-policy-stack.sh",
+      "sha256": "a40c60969aac0c79d891da7e9c2836a4b4765b9803b9cb9bbb92ca0531d39a35"
+    },
+    {
+      "path": "tests/aft/scripts/live-close-agent-tab.sh",
+      "sha256": "82253319f090318c3c8b044a203c0430b08ec5b5ee06656be6e97fedfd6916bd"
+    },
+    {
+      "path": "tests/aft/scripts/live-stop-worker.sh",
+      "sha256": "483cec88bef7e143fbbfae6759ca0e6d595dca280716bfccbafca6f020432d96"
+    },
+    {
+      "path": "tests/aft/suites/agents-v1-children.test.yaml",
+      "sha256": "76c2cea794cd7cdb97c4cee7b0af72bf532050c23ef67c4d6b349a2f012ccbd8"
+    },
+    {
+      "path": "tests/aft/suites/agents-v1-lead-parity.test.yaml",
+      "sha256": "f8ca1f018533ba558b8080d5db3abc0b6d0166239a14f8f1cfb5f1714ed73270"
+    },
+    {
+      "path": "tests/aft/suites/agents-v1-lead.test.yaml",
+      "sha256": "82f1cecdc7c0b39867d3e8e390c5d98133bcb44c3f10495f37caeca762ddef38"
+    },
+    {
+      "path": "tests/aft/suites/agents-v1-lifecycle.test.yaml",
+      "sha256": "9275e00a1ce98ce6b215a877887e748a7cd6d760aafbadb38666b0b2b430a481"
+    },
+    {
+      "path": "tests/aft/suites/agents-v1-resume.test.yaml",
+      "sha256": "79d3ed4e7e860d3d1a667ad0895b7a9b87712bd5790f150d68a7c71d9a63f1b9"
+    },
+    {
+      "path": "tests/aft/suites/agents-v1-ui.test.yaml",
+      "sha256": "ae44757c504e6276a8ff551f6d43f7fc9defb475020c50cf1b71afe6b3cebda1"
+    },
+    {
+      "path": "tests/aft/suites/zz-agent-flow.test.yaml",
+      "sha256": "bed93c035b0221ee60868d16db59e38a4683c37d3545d1c0fef1455ec70a9550"
+    },
+    {
+      "path": "tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sha256": "dfef7004765de55939a5547e3b34e0736e57d42e2eee0aef2659e2eb77ba88ee"
+    },
+    {
+      "path": "tests/aft/suites/zz-lead-agent.test.yaml",
+      "sha256": "846dff40e98289516e9e3d885a467edca70047f07a1ff851c8d322a8eabb9f2a"
+    },
+    {
+      "path": "tests/aft/suites/zz-task-runner.test.yaml",
+      "sha256": "35567b5b00dc4ec107d9eae6ba4fa6c5fbef35f1868bcbeca807796e92493bb4"
+    },
+    {
+      "path": "tests/aft/surface-suites/custom-prompt-contracts.test.yaml",
+      "sha256": "55714a79ac29e99453e1782715d94e49fe09743fabebf66c2a76aebce03d359c"
+    }
+  ],
+  "coverage": {
+    "preservedCallers": 85,
+    "configurationHooks": 7,
+    "closedStimuli": 53,
+    "remaining": "Canonical launcher ownership/transport binding and final root registration/export are core-owner integration work; suite conversion/runtime acceptance remain parent-owned."
+  }
+}
