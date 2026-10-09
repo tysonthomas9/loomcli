@@ -20,6 +20,21 @@ const Receipt = z.object({ operation: z.literal(TerminalDetachId), leaseId: Id, 
 export const TerminalDetachOutput = TerminalDetachFacts.extend({ receipt: Receipt, redaction: RedactionFacts }).strict();
 const check = (ok: unknown): void => { if (!ok) throw new LegacyError('ownership-mismatch', 'Terminal fixture identity changed'); };
 const operation = () => LoomAuthorizedOperation.parse(TerminalDetachId);
+function ownedTerminalDriver(fixture: OwnedFixture): HostFixtureDriver {
+  const driver = privateFixtureDriver(fixture);
+  if (!(driver instanceof HostFixtureDriver)) throw new ObservationError('unsupported-capability', 'Fixture has no owned terminal API transport');
+  return driver;
+}
+function checkObservationRoute(fixture: OwnedFixture, driver: HostFixtureDriver, evidenceClass: string) {
+  const routing = driver.executionRouting;
+  if (routing.profile !== fixture.profile || routing.evidenceClass !== fixture.evidenceClass || evidenceClass !== routing.evidenceClass)
+    throw new ObservationError('source-mismatch', 'Terminal metadata evidence differs from the owned observation route');
+}
+async function checkServeGeneration(driver: HostFixtureDriver, input: z.infer<typeof TerminalDetachInput>, signal: AbortSignal) {
+  const process = await driver.inspectOwnedProcess('serve', input.expectedServeGeneration, signal);
+  if (process.id !== 'serve' || process.generation !== input.expectedServeGeneration || process.state !== 'running')
+    throw new ObservationError('ownership-mismatch', 'Terminal serve generation is no longer running');
+}
 
 export function createHostTerminalMetadataAccess(fixture: OwnedFixture, driver: HostFixtureDriver, store: EvidenceStore): TerminalMetadataAccess {
   check(driver.workspaceRoot.startsWith(driver.runtimeRoot + '/') && fixture.profile.startsWith('legacy-'));
@@ -29,12 +44,8 @@ export function createHostTerminalMetadataAccess(fixture: OwnedFixture, driver: 
       call.signal.throwIfAborted();
       check(fixture.leaseId === input.leaseId && fixture.runId === call.runId && Date.now() < fixture.expiresAtUtcMs);
       const grant = getFixtureOperationAuthority(fixture, operation(), TerminalDetachEffects);
-      const routing = driver.executionRouting;
-      check(routing.profile === fixture.profile && routing.evidenceClass === fixture.evidenceClass);
-      if (grant.evidenceClass !== routing.evidenceClass)
-        throw new LegacyError('source-mismatch', 'Terminal metadata evidence differs from the owned observation route');
-      const process = await driver.inspectOwnedProcess('serve', input.expectedServeGeneration, call.signal);
-      check(process.state === 'running');
+      checkObservationRoute(fixture, driver, grant.evidenceClass);
+      await checkServeGeneration(driver, input, call.signal);
       await fixture.verify(call.signal);
       const record = requireOwnedWorkspaceRecord(fixture, input.workspaceId, 'legacy-agent-name');
       check(record);
@@ -54,8 +65,7 @@ export function createHostTerminalMetadataAccess(fixture: OwnedFixture, driver: 
 }
 export type TerminalMetadataAccessFactory = (context: CapabilityContext, fixture: OwnedFixture) => TerminalMetadataAccess;
 export const productionTerminalMetadataAccess: TerminalMetadataAccessFactory = (context, fixture) => {
-  const driver = privateFixtureDriver(fixture);
-  if (!(driver instanceof HostFixtureDriver)) throw new LegacyError('unsupported-capability', 'Fixture has no owned terminal API transport');
+  const driver = ownedTerminalDriver(fixture);
   return createHostTerminalMetadataAccess(fixture, driver, getFixtureEvidenceStore(context, fixture.leaseId));
 };
 export function createTerminalDetachProviders(implementation: ImplementationPin, implementationSha256: string,
@@ -69,8 +79,14 @@ export function createTerminalDetachProviders(implementation: ImplementationPin,
       const grant = getFixtureOperationAuthority(fixture, operation(), TerminalDetachEffects);
       if (!z.enum(LegacyEvidenceClasses).safeParse(grant.evidenceClass).success)
         throw new ObservationError('source-mismatch', 'Terminal grant has an unsupported evidence class');
+      const driver = ownedTerminalDriver(fixture);
+      checkObservationRoute(fixture, driver, grant.evidenceClass);
+      await checkServeGeneration(driver, input, context.signal);
       requireOwnedWorkspaceRecord(fixture, input.workspaceId, 'legacy-agent-name');
       await enrollOwnedLegacyAgent(fixture, input.workspaceId, input.agentName, context.signal, getFixtureEvidenceStore(context, fixture.leaseId));
+      // Enrollment awaits owned API reads. Reattest the retained serve before
+      // a factory can obtain access; the HTTP port rechecks it at dispatch too.
+      await checkServeGeneration(driver, input, context.signal);
       let state = stores.get(fixture);
       if (!state) { state = { detach: createTerminalMetadataDetach(accessFactory(context, fixture)), sequence: 0 }; stores.set(fixture, state); }
       const call = { runId: context.runId, invocationId: `${context.caseId}:${state.sequence++}`, signal: context.signal };
