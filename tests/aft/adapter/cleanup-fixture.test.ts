@@ -126,18 +126,39 @@ for (const cancelled of [false, true]) test(`cleanup rejects a same-owner clone 
 });
 
 for (const cancelled of [false, true]) test(`cleanup issuance cannot be erased by replacement metadata (cancelled=${cancelled})`, async () => {
-  let owned = 0, foreign = 0;
-  const h = setup(async () => { owned++; });
-  const original = putCleanupFixture(h.context, h.owner);
-  const replacement = Object.freeze({ ...original, cleanupOnly: undefined, expiresAtUtcMs: Number.MAX_SAFE_INTEGER,
-    dispose: async () => { foreign++; } });
-  h.context.resources.set(h.key, replacement);
-  assert.throws(() => getFixtureAuthority(h.context, h.owner.leaseId));
-  if (cancelled) { h.context.signal = AbortSignal.abort(); revokeCapabilityContext(h.context); }
-  await assert.rejects(releaseFixture(h.context, h.owner.leaseId));
-  assert.deepEqual([owned, foreign], [0, 0]);
-  assert.equal(h.context.resources.get(h.key), replacement);
-  h.context.resources.set(h.key, original);
+  for (const metadata of ['undefined', 'false', 'absent']) {
+    let owned = 0, foreign = 0;
+    const h = setup(async () => { owned++; });
+    const original = putCleanupFixture(h.context, h.owner);
+    const fields = { ...original, expiresAtUtcMs: Number.MAX_SAFE_INTEGER, dispose: async () => { foreign++; } };
+    if (metadata === 'absent') delete fields.cleanupOnly;
+    const replacement = Object.freeze(metadata === 'absent' ? fields
+      : { ...fields, cleanupOnly: metadata === 'false' ? false : undefined });
+    h.context.resources.set(h.key, replacement);
+    assert.throws(() => getFixtureAuthority(h.context, h.owner.leaseId));
+    if (cancelled) { h.context.signal = AbortSignal.abort(); revokeCapabilityContext(h.context); }
+    await assert.rejects(releaseFixture(h.context, h.owner.leaseId));
+    assert.deepEqual([owned, foreign], [0, 0]);
+    assert.equal(h.context.resources.get(h.key), replacement);
+    h.context.resources.set(h.key, original);
+    await disposeFixtures(h.context);
+    assert.deepEqual([owned, foreign], [1, 0]);
+  }
+});
+
+for (const cancelled of [false, true]) test(`foreign context without issuance cannot dispose a genuine cleanup fixture (cancelled=${cancelled})`, async () => {
+  let disposed = 0;
+  const h = setup(async () => { disposed++; });
+  const fixture = putCleanupFixture(h.context, h.owner);
+  const target = createCapabilityContext(h.context.source, new CapabilityRegistry(), h.context.runId, h.context.caseId);
+  target.suiteId = h.context.suiteId;
+  target.resources.set(h.key, fixture);
+  if (cancelled) { target.signal = AbortSignal.abort(); revokeCapabilityContext(target); }
+  await assert.rejects(disposeFixtures(target));
+  assert.equal(disposed, 0);
+  assert.equal(target.resources.get(h.key), fixture);
+  assert.equal(h.context.resources.get(h.key), fixture);
   await disposeFixtures(h.context);
-  assert.deepEqual([owned, foreign], [1, 0]);
+  assert.equal(disposed, 1);
+  assert.equal(target.resources.get(h.key), fixture);
 });

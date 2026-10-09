@@ -162,7 +162,7 @@ export async function releaseFixture(context: CapabilityContext, leaseId: string
   requireFact(fixture && fixture.runId === context.runId && fixture.suiteId === context.suiteId && fixture.scope === context.scope &&
     (fixture.scope === 'suite' || fixture.caseId === context.caseId), 'ownership-mismatch', 'Cannot release a foreign fixture');
   const cleanupIdentity = cleanupFixtureIdentities.get(context)?.get(leaseId);
-  if (cleanupIdentity) requireFact(cleanupIdentity.deref() === fixture,
+  if (cleanupIdentity || fixture.cleanupOnly) requireFact(cleanupIdentity?.deref() === fixture,
     'ownership-mismatch', 'Cleanup fixture is not the exact issued owner');
   // Cleanup remains available after expiry or cancellation. Keep failed
   // disposals registered so final cleanup can retry the exact resources.
@@ -170,6 +170,11 @@ export async function releaseFixture(context: CapabilityContext, leaseId: string
   if (cleanupIdentity) requireFact(context.resources.get(resourceKey(leaseId)) === fixture,
     'ownership-mismatch', 'Cleanup fixture was replaced during disposal');
   context.resources.delete(resourceKey(leaseId));
+  if (cleanupIdentity) {
+    const identities = cleanupFixtureIdentities.get(context)!;
+    identities.delete(leaseId);
+    if (!identities.size) cleanupFixtureIdentities.delete(context);
+  }
 }
 export async function disposeFixtures(context: CapabilityContext): Promise<void> {
   const failures: unknown[] = [];
