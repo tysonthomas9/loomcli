@@ -3621,6 +3621,75 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FeedbackRevisionRequest"
+  /api/workspaces/{ws}/issues/{id}/rebuild:
+    post:
+      operationId: rebuildStaleTask
+      tags: [git]
+      summary: Rebuild a task whose code was built on a rejected or replaced revision
+      description: Rejects the task's newest revision with the rebuild as the reason, cancels any approval of it still waiting to apply, and moves the task's base to the newest revision of the task it depends on, so the task reopens for a new attempt. Never automatic. Refused with 409 when the task is not stale or there is no newer revision to build on yet.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor]
+              properties:
+                actor:
+                  type: object
+                  required: [kind, id]
+                  properties:
+                    kind:
+                      type: string
+                      enum: [human, agent, lead]
+                    id:
+                      type: string
+      responses:
+        "200":
+          description: The task was set aside for a rebuild.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [change_id, revision, depends_on, rebuild_on, verdict]
+                    properties:
+                      change_id:
+                        type: string
+                      revision:
+                        type: integer
+                      depends_on:
+                        type: string
+                      rebuild_on:
+                        type: integer
+                      verdict:
+                        type: string
+                        description: reject, or empty when the revision was already rejected.
+        "409":
+          description: Not stale, nothing newer to build on, or the revision is already applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+                  message:
+                    type: string
   /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict:
     post:
       operationId: submitRevisionVerdict
@@ -6669,10 +6738,10 @@ components:
           description: True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
         follow_status:
           type: string
-          description: Lead follow state of this revision's approval (approved, applied, conflict, apply_pending, superseded, spent). "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled); approving again re-arms it.
+          description: Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it.
         follow_reason:
           type: string
-          description: Reviewer-facing reason for a spent follow.
+          description: Reviewer-facing reason for a spent or waiting follow, such as "waiting for T1 to be approved".
         needs_working_area:
           type: boolean
           description: True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed.
@@ -6724,6 +6793,19 @@ components:
         feedback_merge_cancelled:
           type: boolean
           description: True when this fix-up cancelled the change's pending Approve and merge, so merging needs a new Approve.
+        depends_on:
+          type: string
+          description: The task this revision's code was built on, before that task's code was reviewed (a dependent starts once its blocker's agent finishes).
+        lineage_state:
+          type: string
+          enum: [stale, dependency_abandoned]
+          description: Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.
+        lineage_reason:
+          type: string
+          description: 'Why the base is stale and what a rebuild would build on, such as "built on T1''s revision 1, which was rejected: rebuild it on revision 2".'
+        rebuild_on:
+          type: integer
+          description: The revision of depends_on a rebuild would build on; absent while there is none yet.
     RevisionDiffFile:
       type: object
       required: [path, patchSize, truncated]

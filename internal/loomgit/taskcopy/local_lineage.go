@@ -105,32 +105,20 @@ func ReadLineageStatus(ctx context.Context, workspace, task, repo string) (Linea
 		return LineageStatus{}, err
 	}
 	defer func() { _ = st.Close() }()
-	pinned, err := st.LocalLineage(ctx, workspace, task, repo)
+	state, err := st.LineageStatus(ctx, workspace, task, repo)
 	if err != nil {
 		return LineageStatus{}, err
 	}
+	pinned := state.Pinned
 	ref, err := refname.RevisionHead(workspace, pinned.PredecessorChange, strconv.Itoa(pinned.PredecessorRevision))
 	if err != nil {
 		return LineageStatus{}, err
 	}
-	result := LineageStatus{State: "current", BasedOn: LineageBase{Ref: ref, SHA: pinned.BaseSHA,
+	result := LineageStatus{State: state.State, BasedOn: LineageBase{Ref: ref, SHA: pinned.BaseSHA,
 		Change: pinned.PredecessorChange, Revision: pinned.PredecessorRevision}}
-	abandoned, err := st.ChangeAbandoned(ctx, workspace, pinned.PredecessorChange)
-	if err != nil {
-		return LineageStatus{}, err
-	}
-	if abandoned {
-		result.State = string(loomgit.DependencyAbandoned)
-		return result, nil
-	}
-	number, _, err := st.LatestReadyRevision(ctx, workspace, pinned.PredecessorChange)
-	if err != nil {
-		return LineageStatus{}, err
-	}
-	if number > pinned.PredecessorRevision {
-		result.State = string(loomgit.Stale)
-		result.AvailableRevision = number
-		result.AvailableRef, err = refname.RevisionHead(workspace, pinned.PredecessorChange, strconv.Itoa(number))
+	if state.Available > 0 {
+		result.AvailableRevision = state.Available
+		result.AvailableRef, err = refname.RevisionHead(workspace, pinned.PredecessorChange, strconv.Itoa(state.Available))
 	}
 	return result, err
 }

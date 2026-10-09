@@ -953,6 +953,24 @@ func (e ReviewRevisionFeedbackStatus) Valid() bool {
 	}
 }
 
+// Defines values for ReviewRevisionLineageState.
+const (
+	DependencyAbandoned ReviewRevisionLineageState = "dependency_abandoned"
+	Stale               ReviewRevisionLineageState = "stale"
+)
+
+// Valid indicates whether the value is a known member of the ReviewRevisionLineageState enum.
+func (e ReviewRevisionLineageState) Valid() bool {
+	switch e {
+	case DependencyAbandoned:
+		return true
+	case Stale:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ReviewRevisionPublishStatus.
 const (
 	ReviewRevisionPublishStatusNotPublished ReviewRevisionPublishStatus = "not_published"
@@ -1606,19 +1624,19 @@ func (e GetScopedFileTreeParamsScope) Valid() bool {
 
 // Defines values for UpdateGitSettingsJSONBodyActorKind.
 const (
-	Agent UpdateGitSettingsJSONBodyActorKind = "agent"
-	Human UpdateGitSettingsJSONBodyActorKind = "human"
-	Lead  UpdateGitSettingsJSONBodyActorKind = "lead"
+	UpdateGitSettingsJSONBodyActorKindAgent UpdateGitSettingsJSONBodyActorKind = "agent"
+	UpdateGitSettingsJSONBodyActorKindHuman UpdateGitSettingsJSONBodyActorKind = "human"
+	UpdateGitSettingsJSONBodyActorKindLead  UpdateGitSettingsJSONBodyActorKind = "lead"
 )
 
 // Valid indicates whether the value is a known member of the UpdateGitSettingsJSONBodyActorKind enum.
 func (e UpdateGitSettingsJSONBodyActorKind) Valid() bool {
 	switch e {
-	case Agent:
+	case UpdateGitSettingsJSONBodyActorKindAgent:
 		return true
-	case Human:
+	case UpdateGitSettingsJSONBodyActorKindHuman:
 		return true
-	case Lead:
+	case UpdateGitSettingsJSONBodyActorKindLead:
 		return true
 	default:
 		return false
@@ -1733,6 +1751,27 @@ func (e GetGraphParamsStatus) Valid() bool {
 	case GetGraphParamsStatusClosed:
 		return true
 	case GetGraphParamsStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RebuildStaleTaskJSONBodyActorKind.
+const (
+	RebuildStaleTaskJSONBodyActorKindAgent RebuildStaleTaskJSONBodyActorKind = "agent"
+	RebuildStaleTaskJSONBodyActorKindHuman RebuildStaleTaskJSONBodyActorKind = "human"
+	RebuildStaleTaskJSONBodyActorKindLead  RebuildStaleTaskJSONBodyActorKind = "lead"
+)
+
+// Valid indicates whether the value is a known member of the RebuildStaleTaskJSONBodyActorKind enum.
+func (e RebuildStaleTaskJSONBodyActorKind) Valid() bool {
+	switch e {
+	case RebuildStaleTaskJSONBodyActorKindAgent:
+		return true
+	case RebuildStaleTaskJSONBodyActorKindHuman:
+		return true
+	case RebuildStaleTaskJSONBodyActorKindLead:
 		return true
 	default:
 		return false
@@ -3065,6 +3104,9 @@ type ReviewRevision struct {
 	// Date Commit date (ISO 8601) of the revision head, when the repo is readable.
 	Date *string `json:"date,omitempty"`
 
+	// DependsOn The task this revision's code was built on, before that task's code was reviewed (a dependent starts once its blocker's agent finishes).
+	DependsOn *string `json:"depends_on,omitempty"`
+
 	// FeedbackMergeCancelled True when this fix-up cancelled the change's pending Approve and merge, so merging needs a new Approve.
 	FeedbackMergeCancelled *bool `json:"feedback_merge_cancelled,omitempty"`
 
@@ -3074,13 +3116,19 @@ type ReviewRevision struct {
 	// FeedbackStatus For a review fix-up of a change whose PR is open, how Loom's automatic update of that PR stands (no Approve needed).
 	FeedbackStatus *ReviewRevisionFeedbackStatus `json:"feedback_status,omitempty"`
 
-	// FollowReason Reviewer-facing reason for a spent follow.
+	// FollowReason Reviewer-facing reason for a spent or waiting follow, such as "waiting for T1 to be approved".
 	FollowReason *string `json:"follow_reason,omitempty"`
 
-	// FollowStatus Lead follow state of this revision's approval (approved, applied, conflict, apply_pending, superseded, spent). "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled); approving again re-arms it.
+	// FollowStatus Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it.
 	FollowStatus *string `json:"follow_status,omitempty"`
 	HeadSha      string  `json:"head_sha"`
 	Incomplete   bool    `json:"incomplete"`
+
+	// LineageReason Why the base is stale and what a rebuild would build on, such as "built on T1's revision 1, which was rejected: rebuild it on revision 2".
+	LineageReason *string `json:"lineage_reason,omitempty"`
+
+	// LineageState Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.
+	LineageState *ReviewRevisionLineageState `json:"lineage_state,omitempty"`
 
 	// MergeAfter Open PRs below this one in its stack, bottom first. Empty when it is the bottom PR (Approve and merge merges it now).
 	MergeAfter *[]int `json:"merge_after,omitempty"`
@@ -3117,6 +3165,9 @@ type ReviewRevision struct {
 	// PublishStatus Outcome of this revision's Approve and create PR request, if it made one.
 	PublishStatus *ReviewRevisionPublishStatus `json:"publish_status,omitempty"`
 
+	// RebuildOn The revision of depends_on a rebuild would build on; absent while there is none yet.
+	RebuildOn *int `json:"rebuild_on,omitempty"`
+
 	// Repo Workspace repo name the revision diff route accepts.
 	Repo string `json:"repo"`
 
@@ -3127,6 +3178,9 @@ type ReviewRevision struct {
 
 // ReviewRevisionFeedbackStatus For a review fix-up of a change whose PR is open, how Loom's automatic update of that PR stands (no Approve needed).
 type ReviewRevisionFeedbackStatus string
+
+// ReviewRevisionLineageState Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.
+type ReviewRevisionLineageState string
 
 // ReviewRevisionPublishStatus Outcome of this revision's Approve and create PR request, if it made one.
 type ReviewRevisionPublishStatus string
@@ -4165,6 +4219,17 @@ type GetIssueEventsParams struct {
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
 }
 
+// RebuildStaleTaskJSONBody defines parameters for RebuildStaleTask.
+type RebuildStaleTaskJSONBody struct {
+	Actor struct {
+		Id   string                            `json:"id"`
+		Kind RebuildStaleTaskJSONBodyActorKind `json:"kind"`
+	} `json:"actor"`
+}
+
+// RebuildStaleTaskJSONBodyActorKind defines parameters for RebuildStaleTask.
+type RebuildStaleTaskJSONBodyActorKind string
+
 // ListTaskRevisionsParams defines parameters for ListTaskRevisions.
 type ListTaskRevisionsParams struct {
 	// Lead Report applied and needs_working_area for this lead. Without it, applied means applied in any lead and needs_working_area means some approved target lead still lacks a working area.
@@ -4381,6 +4446,9 @@ type AddDependencyJSONRequestBody = AddDependencyRequest
 
 // MoveIssueJSONRequestBody defines body for MoveIssue for application/json ContentType.
 type MoveIssueJSONRequestBody = MoveIssueRequest
+
+// RebuildStaleTaskJSONRequestBody defines body for RebuildStaleTask for application/json ContentType.
+type RebuildStaleTaskJSONRequestBody RebuildStaleTaskJSONBody
 
 // SaveIssueTabsJSONRequestBody defines body for SaveIssueTabs for application/json ContentType.
 type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody

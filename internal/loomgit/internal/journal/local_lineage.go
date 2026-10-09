@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+
+	"github.com/tysonthomas9/loomcli/internal/loomgit"
 )
 
 type LocalLineage struct {
@@ -89,6 +91,141 @@ func (s *SQLite) LocalLineage(ctx context.Context, workspace, task, repo string)
 		return LocalLineage{}, ErrNotFound
 	}
 	return l, err
+}
+
+// LineageState is a dependent's standing against the predecessor revision it
+// was built on (P3.1): "current", "stale" or "dependency_abandoned".
+type LineageState struct {
+	Pinned LocalLineage
+	State  string
+	// Rejected says the pinned predecessor revision was rejected.
+	Rejected bool
+	// Available is the predecessor's newest source revision after the pinned
+	// one that is not rejected: what a rebuild would build on; 0 if none.
+	Available int
+}
+
+// LineageStatus reads a dependent's lineage without moving its base. It is
+// stale when the predecessor revision it was built on was rejected or a newer
+// one exists (Tyson, 2026-10-09); a rebuild is never automatic.
+func (s *SQLite) LineageStatus(ctx context.Context, workspace, task, repo string) (LineageState, error) {
+	pinned, err := s.LocalLineage(ctx, workspace, task, repo)
+	if err != nil {
+		return LineageState{}, err
+	}
+	out := LineageState{Pinned: pinned, State: "current"}
+	abandoned, err := s.ChangeAbandoned(ctx, workspace, pinned.PredecessorChange)
+	if err != nil || abandoned {
+		if abandoned {
+			out.State = "dependency_abandoned"
+		}
+		return out, err
+	}
+	if out.Rejected, err = s.revisionRejected(ctx, workspace, pinned.PredecessorChange, pinned.PredecessorRevision); err != nil {
+		return LineageState{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT number FROM change_revisions
+		WHERE workspace=? AND change_id=? AND kind='source' AND ready=1 AND derived_from_change='' AND number>?
+		ORDER BY number DESC`, workspace, pinned.PredecessorChange, pinned.PredecessorRevision)
+	if err != nil {
+		return LineageState{}, err
+	}
+	var newer []int
+	for rows.Next() {
+		var number int
+		if err := rows.Scan(&number); err != nil {
+			_ = rows.Close()
+			return LineageState{}, err
+		}
+		newer = append(newer, number)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return LineageState{}, err
+	}
+	for _, number := range newer {
+		rejected, err := s.revisionRejected(ctx, workspace, pinned.PredecessorChange, number)
+		if err != nil {
+			return LineageState{}, err
+		}
+		if !rejected {
+			out.Available = number
+			break
+		}
+	}
+	if out.Rejected || len(newer) > 0 {
+		out.State = "stale"
+	}
+	return out, nil
+}
+
+// Reason says, for a reviewer, why a dependent built on predecessor (a task
+// ID) is not current and what a rebuild would build on. It is "" when current.
+func (st LineageState) Reason(predecessor string) string {
+	switch {
+	case st.State == "dependency_abandoned":
+		return fmt.Sprintf("%s was abandoned; this code was built on it", predecessor)
+	case st.State != "stale":
+		return ""
+	}
+	base := fmt.Sprintf("built on %s's revision %d", predecessor, st.Pinned.PredecessorRevision)
+	if st.Rejected {
+		base += ", which was rejected"
+	} else {
+		base += ", which was replaced"
+	}
+	if st.Available > 0 {
+		return fmt.Sprintf("%s: rebuild it on revision %d", base, st.Available)
+	}
+	return fmt.Sprintf("%s: rebuild it once %s has a new revision", base, predecessor)
+}
+
+// DependentLineage reads the lineage of the task behind change: its state and
+// the predecessor's task. found is false for a change built on no predecessor.
+func (s *SQLite) DependentLineage(ctx context.Context, workspace, change string) (LineageState, string, bool, error) {
+	var task, repo string
+	err := s.db.QueryRowContext(ctx, `SELECT task_id, repo FROM driver_changes WHERE workspace=? AND change_id=?`,
+		workspace, change).Scan(&task, &repo)
+	if errors.Is(err, sql.ErrNoRows) {
+		return LineageState{}, "", false, nil
+	}
+	if err != nil {
+		return LineageState{}, "", false, err
+	}
+	state, err := s.LineageStatus(ctx, workspace, task, repo)
+	if errors.Is(err, ErrNotFound) {
+		return LineageState{}, "", false, nil
+	}
+	if err != nil {
+		return LineageState{}, "", false, err
+	}
+	// A published dependent is rebuilt on its predecessor's new layer by the
+	// stack's own restack, so its local base is never stale.
+	if _, published, err := s.Publication(ctx, workspace, change); err != nil {
+		return LineageState{}, "", false, err
+	} else if published && state.State == "stale" {
+		state.State, state.Rejected, state.Available = "current", false, 0
+	}
+	predecessor, err := s.TaskForChange(ctx, workspace, state.Pinned.PredecessorChange)
+	if predecessor == "" {
+		predecessor = state.Pinned.PredecessorChange
+	}
+	return state, predecessor, true, err
+}
+
+func (s *SQLite) revisionRejected(ctx context.Context, workspace, change string, number int) (bool, error) {
+	verdict, err := s.LatestVerdict(ctx, loomgit.Revision{Workspace: workspace, Change: change, Number: number})
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return verdict.Kind == "reject", err
+}
+
+// ClearLocalLineage drops a dependent's pin, so its next attempt is built on
+// the predecessor's newest revision. Only an explicit rebuild calls it.
+func (s *SQLite) ClearLocalLineage(ctx context.Context, workspace, task, repo string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM local_lineage WHERE workspace=? AND task_id=? AND repo=?`,
+		workspace, task, repo)
+	return err
 }
 
 func (s *SQLite) DependencyForChange(ctx context.Context, workspace, change string) (string, error) {

@@ -10,17 +10,20 @@ const {
   applyRevision,
   createRevisionPR,
   getTaskRevisions,
+  rebuildTask,
   submitRevisionVerdict,
 } = vi.hoisted(() => ({
   applyRevision: vi.fn(),
   createRevisionPR: vi.fn(),
   getTaskRevisions: vi.fn(),
+  rebuildTask: vi.fn(),
   submitRevisionVerdict: vi.fn(),
 }));
 vi.mock("@/api/git/revisions", () => ({
   applyRevision,
   createRevisionPR,
   getTaskRevisions,
+  rebuildTask,
   submitRevisionVerdict,
 }));
 
@@ -303,6 +306,119 @@ describe("RevisionsSection", () => {
     expect(
       screen.getByRole("button", { name: "Approve and create PR" }),
     ).toBeDisabled();
+  });
+
+  // Tyson, 2026-10-09: B starts on A's unreviewed revision; approving B
+  // first waits for A, and a rejected or replaced A makes B stale.
+  it("says what an approved dependent waits for", async () => {
+    getTaskRevisions.mockResolvedValue([
+      {
+        ...revision,
+        verdict: "approve",
+        depends_on: "A",
+        follow_status: "waiting_for_dependency",
+        follow_reason: "waiting for A to be approved",
+      },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="B" lead="lead" />);
+    expect(
+      await screen.findByTestId("revision-waiting-dependency"),
+    ).toHaveTextContent(
+      "Approved, not applied yet: waiting for A to be approved",
+    );
+    expect(screen.queryByTestId("revision-stale")).not.toBeInTheDocument();
+  });
+
+  it("shows a dependent built on unreviewed code", async () => {
+    getTaskRevisions.mockResolvedValue([{ ...revision, depends_on: "A" }]);
+    render(<RevisionsSection workspaceId="W" taskId="B" lead="lead" />);
+    expect(await screen.findByTestId("revision-depends-on")).toHaveTextContent(
+      "Built on A's code before it was reviewed",
+    );
+    expect(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    ).toBeEnabled();
+  });
+
+  it("refuses Approve on a stale dependent and offers Rebuild", async () => {
+    const reason =
+      "built on A's revision 1, which was rejected: rebuild it on revision 2";
+    const stale = {
+      ...revision,
+      depends_on: "A",
+      verdict: "approve",
+      follow_status: "spent",
+      follow_reason: reason,
+      lineage_state: "stale",
+      lineage_reason: reason,
+      rebuild_on: 2,
+    };
+    getTaskRevisions
+      .mockResolvedValueOnce([stale])
+      .mockResolvedValueOnce([{ ...revision, verdict: "reject" }]);
+    rebuildTask.mockResolvedValue(undefined);
+    const onChanged = vi.fn();
+    render(
+      <RevisionsSection
+        workspaceId="W"
+        taskId="B"
+        lead="lead"
+        onChanged={onChanged}
+      />,
+    );
+    expect(await screen.findByTestId("revision-stale")).toHaveTextContent(
+      `Out of date: ${reason}`,
+    );
+    expect(
+      screen.queryByTestId("revision-follow-spent"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    ).toBeDisabled();
+    expect(screen.getByTestId("approve-menu-toggle")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Override" })).toBeEnabled();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Rebuild on A's revision 2" }),
+    );
+    await waitFor(() => expect(rebuildTask).toHaveBeenCalledWith("W", "B"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByTestId("revision-stale")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("offers no Rebuild until the stale dependent's blocker has a new revision", async () => {
+    getTaskRevisions.mockResolvedValue([
+      {
+        ...revision,
+        depends_on: "A",
+        lineage_state: "stale",
+        lineage_reason:
+          "built on A's revision 1, which was rejected: rebuild it once A has a new revision",
+      },
+    ]);
+    render(<RevisionsSection workspaceId="W" taskId="B" lead="lead" />);
+    expect(await screen.findByTestId("revision-stale")).toHaveTextContent(
+      "rebuild it once A has a new revision",
+    );
+    expect(screen.queryByTestId("rebuild")).not.toBeInTheDocument();
+  });
+
+  it("shows the server's reason when Approve is refused", async () => {
+    submitRevisionVerdict.mockRejectedValue(
+      new ApiError(409, "Conflict", {
+        error: "stale",
+        message:
+          "approve is refused: built on A's revision 1, which was rejected",
+      }),
+    );
+    render(<RevisionsSection workspaceId="W" taskId="B" lead="lead" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve and create PR" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "approve is refused: built on A's revision 1, which was rejected",
+    );
   });
 
   it("does not offer verdicts for an incomplete revision", async () => {

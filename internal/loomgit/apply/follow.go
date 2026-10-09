@@ -143,6 +143,13 @@ func followApprovals(ctx context.Context, store *journal.SQLite, cfg *config.Loo
 			if !exists || selected.Revision != approval.Revision {
 				continue
 			}
+			if spent, err := spendStaleDependent(ctx, store, approval, &result); err != nil {
+				return result, err
+			} else if spent {
+				delete(remaining, approval.Change)
+				progress = true
+				continue
+			}
 			if _, blocked := remaining[approval.Predecessor]; blocked {
 				continue
 			}
@@ -209,6 +216,26 @@ func latestApprovals(ctx context.Context, store *journal.SQLite, pending []journ
 		remaining[approval.Change] = approval
 	}
 	return remaining, nil
+}
+
+// spendStaleDependent settles the approval of a dependent built on a
+// predecessor revision that was since rejected or replaced (Tyson,
+// 2026-10-09): applying it would put code built on the wrong base on the
+// lead. The reviewer sees why, and a rebuild plus a new approval moves it on.
+func spendStaleDependent(ctx context.Context, store *journal.SQLite, approval journal.PendingApproval, result *FollowResult) (bool, error) {
+	if approval.Predecessor == "" {
+		return false, nil
+	}
+	state, predecessor, found, err := store.DependentLineage(ctx, approval.Workspace, approval.Change)
+	if err != nil || !found || state.State == "current" {
+		return false, err
+	}
+	reason := state.Reason(predecessor)
+	if err := store.SpendApprovalFollow(ctx, approval, reason); err != nil {
+		return false, err
+	}
+	result.Spent = append(result.Spent, SpentApproval{Change: approval.Change, Revision: approval.Revision, Reason: reason})
+	return true, nil
 }
 
 func predecessorReady(ctx context.Context, store *journal.SQLite, approval journal.PendingApproval) (bool, error) {

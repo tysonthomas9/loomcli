@@ -5,6 +5,7 @@ import {
   cancelRevisionMerge,
   createRevisionPR,
   getTaskRevisions,
+  rebuildTask,
   submitRevisionVerdict,
   type ReviewRevision,
 } from "@/hooks/api";
@@ -109,7 +110,23 @@ export function RevisionsSection({
       setOverride("");
       setReason("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not record verdict");
+      setError(reviewErrorMessage(err, "Could not record verdict"));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  // Rebuild a dependent whose base was rejected or replaced (never automatic).
+  async function rebuild(revision: ReviewRevision) {
+    setBusy(`${revision.change_id}:${revision.number}`);
+    setError("");
+    try {
+      await rebuildTask(workspaceId, taskId);
+      if (!controlled)
+        setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      onChanged?.();
+    } catch (err) {
+      setError(reviewErrorMessage(err, "Could not rebuild"));
     } finally {
       setBusy("");
     }
@@ -256,6 +273,9 @@ export function RevisionsSection({
         // or Approve and create PR that could not publish).
         const canCreatePR = approved && revision.applied && !hasPR;
         const merge = mergeState(revision, approved, decided);
+        // Built on a revision of the task it depends on that was rejected or
+        // replaced: Approve is refused until it is rebuilt (Override is not).
+        const stale = Boolean(revision.lineage_state);
         return (
           <div className={styles.revision} key={key}>
             <div>
@@ -269,6 +289,38 @@ export function RevisionsSection({
                   ? "Review fix-up (no Approve needed)"
                   : (revision.verdict ?? "Awaiting review")}
             </div>
+            {revision.depends_on && !stale && !decided && (
+              <div data-testid="revision-depends-on">
+                Built on {revision.depends_on}&apos;s code before it was
+                reviewed
+              </div>
+            )}
+            {stale && (
+              <div
+                role="status"
+                className={styles.actions}
+                data-testid="revision-stale"
+              >
+                <span>Out of date: {revision.lineage_reason}</span>
+                {revision.lineage_state === "stale" &&
+                  Boolean(revision.rebuild_on) && (
+                    <button
+                      type="button"
+                      data-testid="rebuild"
+                      disabled={Boolean(busy)}
+                      onClick={() => void rebuild(revision)}
+                    >
+                      Rebuild on {revision.depends_on}&apos;s revision{" "}
+                      {revision.rebuild_on}
+                    </button>
+                  )}
+              </div>
+            )}
+            {revision.follow_status === "waiting_for_dependency" && (
+              <div role="status" data-testid="revision-waiting-dependency">
+                Approved, not applied yet: {revision.follow_reason}
+              </div>
+            )}
             {revision.feedback_status && (
               <div data-testid="feedback-status">{feedbackText(revision)}</div>
             )}
@@ -323,7 +375,8 @@ export function RevisionsSection({
                 </button>
               </div>
             )}
-            {spent && (
+            {/* A stale base says why once, with its rebuild, above. */}
+            {spent && !stale && (
               <div role="status" data-testid="revision-follow-spent">
                 Not applied:{" "}
                 {revision.follow_reason || "this approval can no longer apply"}
@@ -351,7 +404,11 @@ export function RevisionsSection({
                     <button
                       type="button"
                       data-testid="approve-merge"
-                      disabled={disabled || (merge.action === "merge" && !lead)}
+                      disabled={
+                        disabled ||
+                        (merge.action === "merge" && !lead) ||
+                        (merge.action !== "merge" && stale)
+                      }
                       onClick={() =>
                         void (merge.action === "merge"
                           ? approveMerge(revision)
@@ -365,7 +422,7 @@ export function RevisionsSection({
                   <button
                     type="button"
                     data-testid="approve-create-pr"
-                    disabled={disabled || decided}
+                    disabled={disabled || decided || stale}
                     onClick={() => void decide(revision, "approve", "", false)}
                   >
                     Approve and create PR
@@ -379,7 +436,7 @@ export function RevisionsSection({
                     aria-haspopup="menu"
                     aria-expanded={menu === key}
                     data-testid="approve-menu-toggle"
-                    disabled={disabled || decided}
+                    disabled={disabled || decided || stale}
                     onClick={() => setMenu(menu === key ? "" : key)}
                   >
                     ▾
@@ -391,7 +448,7 @@ export function RevisionsSection({
                       type="button"
                       role="menuitem"
                       data-testid="approve-only"
-                      disabled={disabled}
+                      disabled={disabled || stale}
                       onClick={() => void decide(revision, "approve", "", true)}
                     >
                       Approve only
@@ -443,6 +500,15 @@ export function RevisionsSection({
       })}
     </section>
   );
+}
+
+/** The server's reason for a refused review action, else its error code. */
+function reviewErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    const body = err.body as { message?: unknown } | undefined;
+    if (typeof body?.message === "string" && body.message) return body.message;
+  }
+  return err instanceof Error ? err.message : fallback;
 }
 
 /** The newest revision of each change, in list order. */
