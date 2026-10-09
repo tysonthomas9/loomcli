@@ -9,6 +9,8 @@ const result = spawnSync(process.execPath, [path.join(root, 'node_modules/typesc
 if (result.status !== 0) process.exit(result.status ?? 1);
 await mkdir(path.join(root, 'dist/legacy'), { recursive: true });
 await copyFile(path.join(root, 'legacy/scenarios.json'), path.join(root, 'dist/legacy/scenarios.json'));
+await mkdir(path.join(root, 'dist/fixture'), { recursive: true });
+await copyFile(path.join(root, 'fixture/kernel-process.py'), path.join(root, 'dist/fixture/kernel-process.py'));
 const parserLock = JSON.parse(await readFile(path.join(root, 'projections/package-lock.json'), 'utf8'));
 const parserManifest = JSON.parse(await readFile(path.join(root, 'projections/package.json'), 'utf8'));
 const packages = new Set();

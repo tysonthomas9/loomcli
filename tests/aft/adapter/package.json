@@ -10,7 +10,7 @@
     }
   },
   "scripts": {
-    "test": "tsx --test *.test.ts */*.test.ts",
+    "test": "tsx --test *.test.ts */*.test.ts && python3 fixture/kernel-process.test.py",
     "typecheck": "tsc --noEmit",
     "build": "node build.mjs",
     "lint": "eslint .",
