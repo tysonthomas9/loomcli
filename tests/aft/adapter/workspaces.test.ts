@@ -436,3 +436,29 @@ test('native child may use another owned repository while parent retains its own
   childRepo=fields.repo;childCommon=fields.commonDir;await enrollOwnedWorkspaceAgent(fixture,'workspace','same-repo-child',signal,store);
   assert.equal(requireOwnedWorkspace(fixture,'workspace','same-repo-child').repo,fields.repo);
 });
+
+test('parent review oversized final repository receipt is rejected before store resolution',async t=>{
+ const {store}=await setup(t);
+ const initialCreationReceipt=await store.retain(JSON.stringify(emptyCreation()));
+ const value={kind:'workspace-repositories-added',...owner,...addedFields,httpStatus:201,initialCreationReceipt};
+ const creationReceipt=await store.retain(JSON.stringify(value)+' '.repeat(4_000_001));
+ let resolutions=0;const counted={...store,async resolve(id:string){resolutions++;return store.resolve(id);}};
+ await assert.rejects(createOwnedWorkspaceRoster(owner,[{...addedFields,creationReceipt}],counted));
+ assert.equal(resolutions,0,'bound must deny before full receipt store verification/read');
+});
+test('ordinary and repository-added creation receipts accept the exact bound and deny oversized metadata before resolution',async t=>{
+  const {store}=await setup(t);const initialCreationReceipt=await store.retain(JSON.stringify(emptyCreation()));
+  const ordinary={...fields,agentIds:[]};
+  for(const {value,record} of [
+    {value:{kind:'workspace-created',...owner,...ordinary},record:ordinary},
+    {value:{kind:'workspace-repositories-added',...owner,...addedFields,httpStatus:201,initialCreationReceipt},record:addedFields},
+  ]) {
+    const json=JSON.stringify(value);const creationReceipt=await store.retain(json+' '.repeat(4_000_000-Buffer.byteLength(json)));
+    assert.equal(creationReceipt.bytes,4_000_000);
+    const roster=await createOwnedWorkspaceRoster(owner,[{...record,creationReceipt}],store);
+    assert.equal(roster[0]!.workspaceId,record.workspaceId);
+    let resolutions=0;const counted={...store,async resolve(id:string){resolutions++;return store.resolve(id);}};
+    await assert.rejects(createOwnedWorkspaceRoster(owner,[{...record,creationReceipt:{...creationReceipt,bytes:4_000_001}}],counted));
+    assert.equal(resolutions,0);
+  }
+});
