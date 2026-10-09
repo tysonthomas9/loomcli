@@ -26,6 +26,7 @@ fi
 # here and removed from the forwarded args. `set --` rewrites the positional
 # args afterwards, so every later "$@" use stays correct without edits.
 AFT_LIVE=""
+AFT_REAL_GITHUB=""
 AFT_WITH_DAEMON=""
 AFT_MAX_REAL_CASES=""
 AFT_SUITE_GLOB=""
@@ -38,6 +39,7 @@ LIVE_MAX_CASES_CEILING=10
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --live)            AFT_LIVE=1; shift ;;
+        --real-github)     AFT_REAL_GITHUB=1; shift ;;
         --with-daemon)     AFT_WITH_DAEMON=1; shift ;;
         --real-backend)
             [[ $# -ge 2 ]] || { echo "[aft] --real-backend needs a value" >&2; exit 1; }
@@ -105,6 +107,75 @@ if [[ -n "$AFT_WITH_DAEMON" && -z "$AFT_LIVE" ]]; then
     echo "[aft] --with-daemon is reserved for --live worker suites" >&2
     exit 1
 fi
+# Real-GitHub tier (PX.7): real codex writes the task code and the Loom server
+# publishes and merges on a NEW private sandbox repo created for this run
+# (tysonthomas9/loom-aft-git-<yyyymmdd-hhmm>). Gated like the live tier: explicit
+# flag, deterministic AFT (--no-agent), a mandatory case cap, suites only from
+# real-github-suites/. The token reaches only the server process.
+if [[ -n "$AFT_REAL_GITHUB" ]]; then
+    if [[ -n "$AFT_LIVE" || -n "$AFT_SUITE_GLOB" || -n "$AFT_WITH_DAEMON" ]]; then
+        echo "[aft] --real-github cannot combine with --live, --suite or --with-daemon" >&2
+        exit 1
+    fi
+    if [[ -n "${AFT_REAL_BACKEND:-}" && "$AFT_REAL_BACKEND" != codex ]]; then
+        echo "[aft] --real-github uses real codex; unset AFT_REAL_BACKEND=$AFT_REAL_BACKEND" >&2
+        exit 1
+    fi
+    AFT_REAL_BACKEND=codex
+    rg_saw_no_agent=""
+    rg_expect_value=""
+    for arg in "$@"; do
+        if [[ -n "$rg_expect_value" ]]; then rg_expect_value=""; continue; fi
+        case "$arg" in
+            --strict|--heal) echo "[aft] --real-github refuses $arg: the recovery agent is an unaccounted model call" >&2; exit 1 ;;
+            --no-agent) rg_saw_no_agent=1 ;;
+            --filter) rg_expect_value=1 ;;
+            -*) ;;
+            *) echo "[aft] --real-github refuses the positional argument '$arg': extra suite paths bypass --max-real-cases" >&2; exit 1 ;;
+        esac
+    done
+    [[ -n "$rg_saw_no_agent" ]] || { echo "[aft] --real-github requires --no-agent" >&2; exit 1; }
+    [[ -n "$AFT_MAX_REAL_CASES" ]] || { echo "[aft] --real-github requires --max-real-cases <n>" >&2; exit 1; }
+    if [[ "$AFT_MAX_REAL_CASES" -gt "$LIVE_MAX_CASES_CEILING" ]]; then
+        echo "[aft] refusing to start: --max-real-cases $AFT_MAX_REAL_CASES exceeds the ceiling of $LIVE_MAX_CASES_CEILING" >&2
+        exit 1
+    fi
+    rg_root="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$SCRIPT_DIR/real-github-suites")"
+    : "${AFT_SUITES:=$rg_root}"
+    rg_target="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$AFT_SUITES")"
+    case "$rg_target" in
+        "$rg_root"|"$rg_root"/*) : ;;
+        *) echo "[aft] --real-github needs AFT_SUITES under $rg_root (resolved to '$rg_target')" >&2; exit 1 ;;
+    esac
+    [[ -e "$rg_target" ]] || { echo "[aft] --real-github: $rg_target does not exist" >&2; exit 1; }
+    # The real-tier copies must match the generated fake-tier suites.
+    if ! python3 "$SCRIPT_DIR/scripts/gen-matrix-suites.py" --check "$SCRIPT_DIR"; then
+        echo "[aft] real-github suites are stale; run tests/aft/scripts/gen-matrix-suites.py" >&2
+        exit 1
+    fi
+    LIVE_CASE_COUNT="$( { grep -rhE '^[[:space:]]*-[[:space:]]+name:' "$rg_target" 2>/dev/null || true; } | wc -l | tr -d ' ')"
+    if [[ "$LIVE_CASE_COUNT" -eq 0 || "$LIVE_CASE_COUNT" -gt "$AFT_MAX_REAL_CASES" ]]; then
+        echo "[aft] refusing to start: $LIVE_CASE_COUNT real-github case(s) vs --max-real-cases $AFT_MAX_REAL_CASES" >&2
+        exit 1
+    fi
+    command -v gh >/dev/null 2>&1 && env -u GITHUB_TOKEN -u GH_TOKEN gh auth status >/dev/null 2>&1 \
+        || { echo "[aft] --real-github needs the operator's gh login (gh auth login)" >&2; exit 1; }
+    LIVE_ACCOUNT_LOCK="$REPO_ROOT/tmp/aft-live.codex.lock"
+    mkdir -p "$REPO_ROOT/tmp"
+    if ! ( set -o noclobber; echo "$$" > "$LIVE_ACCOUNT_LOCK" ) 2>/dev/null; then
+        rg_lock_pid="$(cat "$LIVE_ACCOUNT_LOCK" 2>/dev/null || true)"
+        if [[ -n "$rg_lock_pid" ]] && kill -0 "$rg_lock_pid" 2>/dev/null; then
+            echo "[aft] refusing to start: another real codex run holds the account lock (pid $rg_lock_pid)" >&2
+            exit 1
+        fi
+        mv -f "$LIVE_ACCOUNT_LOCK" "${LIVE_ACCOUNT_LOCK}.stale" 2>/dev/null || true
+        ( set -o noclobber; echo "$$" > "$LIVE_ACCOUNT_LOCK" ) 2>/dev/null \
+            || { echo "[aft] refusing to start: lost the race for the codex account lock" >&2; exit 1; }
+    fi
+    LIVE_LOCK_WRITTEN=1
+    echo "[aft] real-github tier: $LIVE_CASE_COUNT case(s), cap $AFT_MAX_REAL_CASES, suites $rg_target"
+fi
+
 # Everything the live tier is allowed to do is decided HERE — before the stack, the
 # real-binary lookup, or any credential read. Each check is exact rather than
 # substring/glob based: a bypass here spends money on the wrong corpus.
@@ -420,6 +491,9 @@ if [[ -n "${AFT_REAL_BACKEND:-}" ]]; then
     # real repository was mutated. Every remote these suites use is a file:// path,
     # so nothing legitimate needs an agent or a credential prompt.
     REAL_UNSET_FLAGS="${REAL_UNSET_FLAGS:+$REAL_UNSET_FLAGS }-u LOOM_WEBUI_GITHUB_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u GEMINI_API_KEY -u GOOGLE_API_KEY -u SSH_AUTH_SOCK"
+    # Real-GitHub tier: the server alone gets the operator's token (exported in
+    # the launch subshell below, never in argv). Agents are env-filtered (P2.1).
+    [[ -n "$AFT_REAL_GITHUB" ]] && REAL_UNSET_FLAGS="${REAL_UNSET_FLAGS/ -u GITHUB_TOKEN/}"
 
     echo "[aft] ====================================================================="
     echo "[aft] REAL $(printf '%s' "$AFT_REAL_BACKEND" | tr '[:lower:]' '[:upper:]') MODE -- server $REAL_BIN is the operator's real CLI"
@@ -768,6 +842,15 @@ elif [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
     start_fake_github forge-server.mjs || exit 1
     export AFT_GIT_CONFIG_GLOBAL="$REPORT_DIR/operator.gitconfig"
     printf '[user]\n\tname = AFT Operator\n\temail = aft-operator@example.test\n' > "$AFT_GIT_CONFIG_GLOBAL"
+elif [[ -n "$AFT_REAL_GITHUB" ]]; then
+    # An owned global config with an identity and no credential helper, and no
+    # system config: nothing the server starts can borrow the operator's keychain.
+    export AFT_GIT_CONFIG_GLOBAL="$REPORT_DIR/operator.gitconfig"
+    printf '[user]\n\tname = AFT Operator\n\temail = aft-operator@example.test\n' > "$AFT_GIT_CONFIG_GLOBAL"
+    AFT_GITHUB_SANDBOX="$(bash "$SCRIPT_DIR/scripts/real-github-repo.sh" create)" || { echo "[aft] could not create the sandbox repo" >&2; exit 1; }
+    export AFT_GITHUB_SANDBOX AFT_MATRIX_FORGE=github AFT_REAL_CODEX_BIN="$REAL_BIN_PATH"
+    AFT_REPORT_DIR="$REPORT_DIR" bash "$SCRIPT_DIR/scripts/real-github-repo.sh" ledger "$AFT_GITHUB_SANDBOX" created "cases=$LIVE_CASE_COUNT cap=$AFT_MAX_REAL_CASES"
+    echo "[aft] sandbox repo: https://github.com/$AFT_GITHUB_SANDBOX"
 fi
 echo "[aft] starting e2e stack (api :${E2E_PORT}, frontend :${E2E_FRONTEND_PORT}; log: $REPORT_DIR/server.log)..."
 # Stub AI backends — scoped to the SERVER process only, never this script's env:
@@ -791,15 +874,22 @@ if [[ -n "${AFT_REAL_BACKEND:-}" ]]; then
     # which would let a live case produce its artifact WITHOUT exercising the app-server
     # path the tier exists to test — a green run proving the wrong thing.
     LIVE_LEAD_CONTROLLED="LOOM_LEAD_CONTROLLED=1"
-    # $REAL_UNSET_FLAGS is deliberately unquoted: it expands to "-u VAR" pairs or nothing.
-    # shellcheck disable=SC2086
-    env $REAL_UNSET_FLAGS E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
-        PATH="$SERVER_PATH" FLUE_REPO="$FLUE_REPO" \
-        "$LIVE_LEAD_CONTROLLED" \
-        ${FAKE_GH_BASE:+LOOM_CONNECTOR_GITHUB_BASE_URL="$FAKE_GH_BASE"} \
-        GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false \
-        LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
-        bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
+    (
+        if [[ -n "$AFT_REAL_GITHUB" ]]; then
+            # Read into the server's environment only; never echoed or put in argv.
+            GITHUB_TOKEN="$(env -u GITHUB_TOKEN -u GH_TOKEN gh auth token)"
+            export GITHUB_TOKEN GIT_CONFIG_GLOBAL="$AFT_GIT_CONFIG_GLOBAL" GIT_CONFIG_NOSYSTEM=1
+        fi
+        # $REAL_UNSET_FLAGS is deliberately unquoted: it expands to "-u VAR" pairs or nothing.
+        # shellcheck disable=SC2086
+        exec env $REAL_UNSET_FLAGS E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
+            PATH="$SERVER_PATH" FLUE_REPO="$FLUE_REPO" \
+            "$LIVE_LEAD_CONTROLLED" \
+            ${FAKE_GH_BASE:+LOOM_CONNECTOR_GITHUB_BASE_URL="$FAKE_GH_BASE"} \
+            GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false \
+            LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
+            bash "$REPO_ROOT/scripts/start-e2e-server.sh"
+    ) >"$REPORT_DIR/server.log" 2>&1 &
 else
     # Strip host GitHub credentials from serve: an inherited PAT flips the degraded
     # 503 egress_unavailable contract into a live connector-seed + egress attempt
@@ -849,7 +939,7 @@ export AFT_WS="E2E-WS"   # primary workspace id seeded by start-e2e-server.sh
 export AFT_LOOM_BIN="$REPO_ROOT/tmp/loom-e2e"
 export AFT_LOOM_CONFIG_DIR="$REPO_ROOT/tmp/e2e-workspace/.loom-config"
 export LOOM_BASE_URL="$API_URL"
-if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+if [[ "$AFT_SUITE_GLOB" == loomgit-* || -n "$AFT_REAL_GITHUB" ]]; then
     export RUN_ID="${RUN_ID:-$(date +%s)-$$}"
 else
     export RUN_ID="${RUN_ID:-$(date +%s)}"
@@ -873,7 +963,7 @@ export AFT_WORK_DIR="$REPORT_DIR/_work/$RUN_ID"  # scratch space for run-step st
 mkdir -p "$AFT_WORK_DIR"
 
 AFT_ISOLATION_ARGS=()
-if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+if [[ "$AFT_SUITE_GLOB" == loomgit-* || -n "$AFT_REAL_GITHUB" ]]; then
     # Installed agent-browser supports these environment settings. Clear any
     # operator attach/restore/provider config before AFT launches named sessions.
     for browser_env in $(compgen -v); do
@@ -951,7 +1041,18 @@ $CAFFEINATE node "$AFT_DIR/dist/cli.js" run "${AFT_SUITE_PATHS[@]}" --report-dir
 AFT_EXIT=$?
 set -e
 
-if [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
+if [[ -n "$AFT_REAL_GITHUB" ]]; then
+    # Harness-owned cleanup, pass or fail: close the run's open PRs, prove no real
+    # codex process leaked, and record the kept repo in the ledger.
+    bash "$SCRIPT_DIR/scripts/real-github-repo.sh" close-prs "$AFT_GITHUB_SANDBOX" || AFT_EXIT=1
+    bash "$SCRIPT_DIR/scripts/live-sweep.sh" "${REAL_BIN_PATH:-}" "${LIVE_PID_BASELINE:-}" || AFT_EXIT=1
+    rg_prs="$(wc -l < "$AFT_WORK_DIR/matrix-prs.log" 2>/dev/null | tr -d ' ' || echo 0)"
+    AFT_REPORT_DIR="$REPORT_DIR" bash "$SCRIPT_DIR/scripts/real-github-repo.sh" ledger "$AFT_GITHUB_SANDBOX" finished \
+        "exit=$AFT_EXIT wall=$(( $(date +%s) - RUN_STARTED_AT ))s prs=${rg_prs:-0} work=$AFT_WORK_DIR" || true
+    echo "[aft] sandbox repo kept for inspection: https://github.com/$AFT_GITHUB_SANDBOX"
+fi
+
+if [[ "$AFT_SUITE_GLOB" == loomgit-* || -n "$AFT_REAL_GITHUB" ]]; then
     CLEANUP_FAILURES="$(find "$AFT_WORK_DIR" -type f -name cleanup.failed -print)"
     if [[ -n "$CLEANUP_FAILURES" ]]; then
         echo "[aft] journey cleanup/readback failed; retain these receipts:" >&2

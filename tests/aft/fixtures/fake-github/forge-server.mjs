@@ -9,6 +9,9 @@ const merges = new Map();
 let remote = "";
 let nativeStacks = false;
 const repoNativeStacks = new Map();
+// Repos registered with content_checks mirror the real-GitHub sandbox's required
+// Actions check "check": a commit whose tree has a file containing FAIL is red.
+const contentChecks = new Set();
 // Multi-repo mode: one bare remote per owner/repo; pulls and GraphQL are per repo.
 let remotes = {};
 const prStatus = new Map();
@@ -36,6 +39,16 @@ function currentPull(pull) {
 
 function inRepo(pull, owner, repo) {
   return pull.repo === `${owner}/${repo}`;
+}
+
+function contentFails(key, sha) {
+  if (!contentChecks.has(key) || !sha) return false;
+  try {
+    execFileSync("git", [`--git-dir=${remoteFor(key)}`, "grep", "-q", "FAIL", sha, "--"]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function supportsStacks(owner, repo) {
@@ -71,12 +84,14 @@ const server = createServer(async (request, response) => {
     if (remotes[body.repo]) return send(response, 409, { message: "fixture repo already registered" });
     remotes[body.repo] = body.remote;
     repoNativeStacks.set(body.repo, body.native_stacks === true);
+    if (body.content_checks === true) contentChecks.add(body.repo);
     return send(response, 201, { repo: body.repo });
   }
   if (path === "/__unregister" && request.method === "POST") {
     if (pulls.some((pull) => pull.repo === body.repo && pull.state === "open")) return send(response, 409, { message: "open product PRs remain; retain fixture for inspection" });
     delete remotes[body.repo];
     repoNativeStacks.delete(body.repo);
+    contentChecks.delete(body.repo);
     return send(response, 200, { repo: body.repo });
   }
   if (path === "/__reset" && request.method === "POST") {
@@ -166,6 +181,7 @@ const server = createServer(async (request, response) => {
     const pull = pulls.find((item) => item.number === Number(mergeRequest[3]));
     if (!pull || !inRepo(pull, mergeRequest[1], mergeRequest[2]) || pull.state !== "open") return send(response, 400, { status: "failed", details: { message: "pull request is not open" } });
     if (body.sha !== currentPull(pull).head.sha || body.bypass_rules === true) return send(response, 422, { message: "head changed or rules bypass requested" });
+    if (contentFails(pull.repo, body.sha)) return send(response, 405, { message: 'Required status check "check" is failing.' });
     const existing = [...merges.values()].find((item) => item.number === pull.number && item.status === "pending");
     if (existing) return send(response, 409, { status: "pending", details: existing.details });
     const uuid = randomUUID();
@@ -210,7 +226,8 @@ const server = createServer(async (request, response) => {
     const vars = body.variables || {};
     return send(response, 200, { data: { repository: { pullRequests: {
       nodes: pulls.filter((pull) => pull.state === "open" && (!vars.owner || inRepo(pull, vars.owner, vars.repo))).map((pull) => {
-        const override = prStatus.get(pull.number) || {};
+        const fails = contentFails(pull.repo, currentPull(pull).head.sha);
+        const override = { ...(contentChecks.has(pull.repo) ? { checks: fails ? "FAILURE" : "SUCCESS", merge_state: fails ? "BLOCKED" : "CLEAN" } : {}), ...(prStatus.get(pull.number) || {}) };
         const node = {
           number: pull.number, headRefName: pull.head.ref, mergeable: "MERGEABLE",
           reviewDecision: override.review || "APPROVED", mergeQueueEntry: null,
@@ -222,7 +239,10 @@ const server = createServer(async (request, response) => {
       pageInfo: { hasNextPage: false, endCursor: null },
     } } } });
   }
-  if (/^\/repos\/[^/]+\/[^/]+\/commits\/[^/]+\/check-runs$/.test(path) && request.method === "GET") {
+  const checkRuns = path.match(/^\/repos\/([^/]+)\/([^/]+)\/commits\/([^/]+)\/check-runs$/);
+  if (checkRuns && request.method === "GET") {
+    const key = `${checkRuns[1]}/${checkRuns[2]}`;
+    if (contentChecks.has(key)) return send(response, 200, { check_runs: [{ name: "check", status: "completed", conclusion: contentFails(key, decodeURIComponent(checkRuns[3])) ? "failure" : "success" }] });
     return send(response, 200, { check_runs: [] });
   }
   if (/^\/repos\/[^/]+\/[^/]+\/commits\/[^/]+\/status$/.test(path) && request.method === "GET") {
