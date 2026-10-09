@@ -18,7 +18,7 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
     ...(await readdir(fixtureRoot)).filter(file => file.endsWith('.ts') && !file.endsWith('.test.ts')).map(file => `fixture/${file}`)];
   const pin = calculateImplementationPin(root, files, 'fixture/providers.ts', 'createFixtureProviders');
   const revision = { repository: 'loom', commit: 'a'.repeat(40), tree: 'b'.repeat(40), sourceManifestSha256: 'c'.repeat(64), buildManifestSha256: 'd'.repeat(64) };
-  const plan: FixturePlan = { profile: 'agents-real-opencode', loomRevision: revision, fleetRevision: revision, engineRevision: revision, adapterRevision: revision,
+  const plan: FixturePlan = { profile: 'agents-real-opencode', loomRevision: { ...revision }, fleetRevision: { ...revision }, engineRevision: { ...revision }, adapterRevision: { ...revision },
     model: 'openai/model', caseCount: 1, maxCases: 10, selectionSha256: 'e'.repeat(64), leaseDurationMs: 10000 };
   let driverCalls = 0; let provisionFails = false; let cleanupFails = false; let incomplete = false; let changed = false; let bindFails = false;
   const calls: string[] = [];
@@ -44,7 +44,7 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
   const registry = new CapabilityRegistry(); for (const provider of createFixtureProviders(options)) registry.register(provider);
   const context = createCapabilityContext({ file: 'fixture.test.yaml', line: 1 }, registry, '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002');
   putEvidenceStore(context, store);
-  const input = { runId: context.runId, profile: plan.profile, loomRevision: revision, fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 };
+  const input = { runId: context.runId, profile: plan.profile, loomRevision: { ...revision }, fleetRevision: { ...revision }, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 };
   const invoke = (id: string, data: unknown, ctx: CapabilityContext = context) => registry.invoke({ id, version: 1, input: {} }, data, ctx);
   return { registry, context, input, invoke, store, options, calls, get driverCalls() { return driverCalls; },
     failBind() { bindFails = true; }, failProvision() { provisionFails = true; }, failCleanup(value: boolean) { cleanupFails = value; }, incomplete() { incomplete = true; }, changeSource() { changed = true; } };
