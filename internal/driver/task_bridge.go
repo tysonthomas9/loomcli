@@ -863,6 +863,10 @@ func (e HostBridgeTaskExecutor) finalizeAndFreezePatch(ctx context.Context, req 
 	result.RuntimeMetadata["change_id"] = revision.Change
 	result.RuntimeMetadata["revision"] = strconv.Itoa(revision.Number)
 	result.RuntimeMetadata["revision_head_sha"] = revision.HeadSHA
+	result.RuntimeMetadata["revision_incomplete"] = strconv.FormatBool(revision.Incomplete)
+	if revision.Incomplete {
+		result.RuntimeMetadata["retained_path"] = e.WorktreePath
+	}
 	return result, nil
 }
 

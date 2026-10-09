@@ -1120,3 +1120,31 @@ func TestLastJSONLine(t *testing.T) {
 		t.Fatalf("line = %s, want JSON object", line)
 	}
 }
+
+// D18 on the successful TaskRun freeze: an untracked secret-pattern path in the
+// runner's patch stays out of the revision, which is incomplete, and the task
+// copy is retained.
+func TestHostBridgeSuccessfulRunNeverFreezesUntrackedSecretPath(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	repo := newPatchBackRepo(t)
+	base := repo.commitFile("file.txt", "old\n", "base")
+	repo.write("server.pem", "non-secret test marker\n")
+	patch := "diff --git a/server.pem b/server.pem\nnew file mode 100644\n--- /dev/null\n+++ b/server.pem\n@@ -0,0 +1 @@\n+non-secret test marker\n"
+	executor := HostBridgeTaskExecutor{Store: memstore.New(), WorktreePath: repo.dir,
+		Command: hostBridgeHelperCommand(t, "success", base, patch)}
+	result, err := executor.ExecuteTask(context.Background(), hostBridgeTaskExecRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := result.RuntimeMetadata
+	if meta["patch_back_status"] != "frozen" || meta["revision_incomplete"] != "true" || meta["retained_path"] != repo.dir {
+		t.Fatalf("secret-path result = %+v", result)
+	}
+	tree := repo.git("ls-tree", "-r", "--name-only", meta["revision_head_sha"])
+	if strings.Contains(tree, "server.pem") {
+		t.Fatalf("revision captured server.pem: %s", tree)
+	}
+	if repo.read("server.pem") != "non-secret test marker\n" {
+		t.Fatal("task copy lost server.pem")
+	}
+}

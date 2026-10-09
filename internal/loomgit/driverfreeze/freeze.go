@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/capture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/changeset"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -200,11 +201,18 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 	}
 	var revision loomgit.Revision
 	err = agentcapture.WithTaskCopyLease(ctx, journalPath, sourceForFreeze(in.SourceRepo, in.Worktree), in.Worktree, func(ctx context.Context) error {
-		tree, err := stagePatch(ctx, runner, in)
+		tree, entries, err := stagePatch(ctx, runner, in)
 		if err != nil {
 			return err
 		}
-		revision, err = recordRevision(ctx, store, runner, in, tree)
+		complete := capture.Complete(entries)
+		if len(entries) > 0 {
+			if _, err := capture.SaveManifest(ctx, runner, in.Worktree, capture.Manifest{Workspace: in.Workspace,
+				Attempt: in.Attempt, Entries: entries, Complete: complete, Retained: !complete}); err != nil {
+				return err
+			}
+		}
+		revision, err = recordRevision(ctx, store, runner, in, tree, complete)
 		if err != nil {
 			return err
 		}
@@ -214,38 +222,49 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 			}
 		}
 		return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
-			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: true})
+			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: complete})
 	})
 	return revision, err
 }
 
-func stagePatch(ctx context.Context, runner *gitexec.Runner, in Request) (string, error) {
+// stagePatch stages the flat patch on Base in a private index, then applies
+// the capture engine's D18 rules: untracked secret-pattern paths never enter
+// the frozen tree.
+func stagePatch(ctx context.Context, runner *gitexec.Runner, in Request) (string, []capture.Entry, error) {
 	base, err := runner.Run(ctx, "rev-parse", "--verify", in.Base+"^{commit}")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if strings.TrimSpace(string(base)) != in.Base {
-		return "", fmt.Errorf("base must be an exact commit SHA")
+		return "", nil, fmt.Errorf("base must be an exact commit SHA")
 	}
 	index, err := os.CreateTemp("", "loom-driver-index-*")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	indexPath := index.Name()
 	_ = index.Close()
 	defer func() { _ = os.Remove(indexPath) }()
 	env := map[string]string{"GIT_INDEX_FILE": indexPath}
 	if _, err = runner.RunWithEnv(ctx, env, "read-tree", in.Base); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if _, err = runner.RunWithInput(ctx, in.Patch, env, "apply", "--cached", "--binary"); err != nil {
-		return "", err
+		return "", nil, err
+	}
+	parent := in.Base
+	if in.CommitHeadSHA != "" {
+		parent = in.CommitHeadSHA
+	}
+	entries, err := capture.ScreenStaged(ctx, runner, env, parent)
+	if err != nil {
+		return "", nil, err
 	}
 	tree, err := runner.RunWithEnv(ctx, env, "write-tree")
-	return strings.TrimSpace(string(tree)), err
+	return strings.TrimSpace(string(tree)), entries, err
 }
 
-func recordRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner, in Request, tree string) (loomgit.Revision, error) {
+func recordRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner, in Request, tree string, complete bool) (loomgit.Revision, error) {
 	change, err := changeForTask(ctx, store, in.Workspace, in.Task, in.Repo)
 	if err != nil {
 		return loomgit.Revision{}, err
@@ -279,7 +298,7 @@ func recordRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.
 	revision, err := changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
 		Workspace: in.Workspace, Change: change, RequestID: requestID,
 		Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base,
-		CaptureSHA: captureSHA, Outcome: in.Outcome, Complete: true,
+		CaptureSHA: captureSHA, Outcome: in.Outcome, Complete: complete,
 	})
 	if err != nil {
 		return revision, err

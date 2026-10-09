@@ -129,9 +129,18 @@ func TestIncompleteCaptureFreezesAsInterruptedOutcome(t *testing.T) {
 	}
 	in := SourceInput{Workspace: "W", Change: "C", RequestID: "cancel", Attempt: "A",
 		TaskID: "task", BaseSHA: base, CaptureSHA: result.CaptureSHA, Complete: false}
+	in.Outcome = "running"
+	in.RequestID = "running"
+	if _, err := FreezeSource(context.Background(), store, runner, in); !errors.Is(err, loomgit.NewError(loomgit.CaptureIncomplete, "", nil)) {
+		t.Fatalf("incomplete capture without a terminal outcome = %v, want capture_incomplete", err)
+	}
+	// D18: a successful run that left an untracked secret-pattern path out
+	// freezes as an incomplete completed revision.
 	in.Outcome = "completed"
-	if _, err := FreezeSource(context.Background(), store, runner, in); err == nil {
-		t.Fatal("completed incomplete capture was accepted")
+	in.RequestID = "completed"
+	completed, err := FreezeSource(context.Background(), store, runner, in)
+	if err != nil || !completed.Ready || !completed.Incomplete || completed.NoChanges || completed.Outcome != "completed" {
+		t.Fatalf("completed incomplete revision = %+v, %v", completed, err)
 	}
 	in.Outcome = "failed"
 	in.RequestID = "failed"

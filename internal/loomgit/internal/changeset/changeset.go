@@ -107,10 +107,21 @@ func installRefs(ctx context.Context, runner *gitexec.Runner, r loomgit.Revision
 	return r, nil
 }
 
+// incompleteOutcome lists the terminal outcomes that may freeze an incomplete
+// capture. A successful run is one: D18 keeps an untracked secret-pattern path
+// out of its revision and marks the revision incomplete.
+func incompleteOutcome(outcome string) bool {
+	switch outcome {
+	case "cancelled", "failed", "abandoned", "completed", "timeout":
+		return true
+	}
+	return false
+}
+
 // FreezeSource records a task-copy capture as a source revision.
 // The original capture ref remains at the unrewritten capture commit.
 func FreezeSource(ctx context.Context, store loomgit.RevisionStore, runner *gitexec.Runner, in SourceInput) (loomgit.Revision, error) {
-	if !in.Complete && in.Outcome != "cancelled" && in.Outcome != "failed" && in.Outcome != "abandoned" {
+	if !in.Complete && !incompleteOutcome(in.Outcome) {
 		return loomgit.Revision{}, loomgit.NewError(loomgit.CaptureIncomplete, "capture is incomplete", nil)
 	}
 	if err := validateNames(in.Workspace, in.Change); err != nil {
