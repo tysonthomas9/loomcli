@@ -18,6 +18,7 @@ import { LegacyError } from './operations.js';
 import { createFixtureOperationAuthority } from '../authority.js';
 import { LegacyOperationEffects } from './providers.js';
 import { testLegacyRoster } from './test-roster.js';
+import { materializeRenderer } from '../fixture/renderer-fixtures.test.js';
 
 const hash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
 async function setup() {
@@ -37,6 +38,9 @@ async function setup() {
   const revision = { repository: 'injected-build', commit: 'a'.repeat(40), tree: 'b'.repeat(40),
     sourceManifestSha256: manifest(sourceEntries), buildManifestSha256: manifest(buildEntries) };
   const registered = { revision, source: { root: source, entries: sourceEntries }, build: { root: build, entries: buildEntries } };
+  // The shared injected receipt producer exercises source/build preflight; it
+  // does not stand in for a compiled product renderer or runtime acceptance.
+  await materializeRenderer(registered);
   const config: HostConfig = { loom: registered, fleet: registered, engine: registered, adapter: registered,
     tempParent: root, lockParent: path.join(root, 'locks'), hostHome: path.join(root, 'home'), toolPath: '/injected/toolchain',
     connection: 'injected', connectionFingerprint: 'c'.repeat(64), minimumFreeBytes: 1, attestedImages: false,
@@ -117,7 +121,8 @@ async function setup() {
 
 test('canonical acquisition binds actual host driver to role, usage, all backend argv and serve generations', async t => {
   const r = await setup(); t.after(r.cleanup);
-  assert.equal((await r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId: 'E2E-WS', operation: 'show', name: 'task' })).availability, 'observed');
+  const role = await r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId: 'E2E-WS', operation: 'show', name: 'task' });
+  assert.equal(role.availability, 'observed', JSON.stringify(role.error));
   assert.equal((await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId: 'E2E-WS', agentId: 'worker' } })).availability, 'observed');
   for (const backend of ['codex','claude','cursor','opencode']) for (const mode of ['once','auto','daemon']) {
     const result = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker', backend,
@@ -258,5 +263,16 @@ test('every bound action rejects a missing required effect before its host facto
     const input = row.id === 'loom.cli.usage' ? { agent: { ...row.input.agent, fixtureLeaseId: r.leaseId } } : { ...row.input, leaseId: r.leaseId };
     const result = await r.invoke(row.id, input);
     assert.equal(result.availability, 'unsupported', row.id); assert.equal(r.factories(), 0, row.id); assert.equal(r.launches.length, 0, row.id);
+  }
+});
+
+test('actual host binding refuses backend or model environment drift before task launch', async t => {
+  for (const variant of ['backend','model'] as const) {
+    const r = await setup(); t.after(r.cleanup);
+    const route = r.driver.executionRouting;
+    Object.defineProperty(r.driver, 'executionRouting', { get: () => ({ ...route,
+      ...(variant === 'backend' ? { allowedTaskBackends: ['opencode'] } : { model: 'foreign-model' }) }) });
+    const result = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null });
+    assert.equal(result.availability, 'error'); assert.equal(r.launches.length, 0, variant);
   }
 });
