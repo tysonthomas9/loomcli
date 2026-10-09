@@ -35,12 +35,12 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
  const connection={Identity:'/owned/key',Name:'owned',URI:'ssh://owned'};
  const config:ProductionConfig={loom:registered,fleet:registered,engine:registered,adapter:registered,tempParent:root,lockParent:path.join(root,'locks'),hostHome:path.join(root,'home'),toolPath:'/pinned/toolchain',connection:'owned',connectionFingerprint:hash(JSON.stringify([connection])),minimumFreeBytes:1,fixtureRunId,attestedImages:true,emulatorBinary:{path:path.join(build,'emulator'),sha256:hash(elf)},modecloud:{codexAuthRoot:auth,frontendDist:frontend}};
  const plan:FixturePlan={profile,loomRevision:revision,fleetRevision:revision,engineRevision:revision,adapterRevision:revision,model:profile==='agents-emulator'?'aft/m':'openai/m',maxCases:10,caseCount:1,selectionSha256:'d'.repeat(64),leaseDurationMs:10000};
- let onExec:((request:ProcessRequest)=>Promise<void>)|undefined,onRestart:(()=>Promise<void>)|undefined,onRead:((signal:AbortSignal)=>Promise<void>)|undefined;
+ let onExec:((request:ProcessRequest)=>Promise<void>)|undefined,onCommand:((request:ProcessRequest)=>Promise<void>)|undefined,onRestart:(()=>Promise<void>)|undefined,onRead:((signal:AbortSignal)=>Promise<void>)|undefined;
  let restartMode='success',restarted=false,readFails=false,clockNow=0;const readinessStatuses:number[]=[],delays:number[]=[];
  const calls:ProcessRequest[]=[]; let project='',up=false,change='',port=5000,serial=0;
  const services=cloud?['redis','fleet-auth-seed','fleet-db','loom-serve','worker','stub-upstream']:['redis','fleet-db','loom-local','ui-local'];
  const run=async (r:ProcessRequest)=>{
-  calls.push(r); const a=r.args;
+  calls.push(r); await onCommand?.(r); const a=r.args;
   if(r.binary==='git') return a[0]==='rev-parse'?(a[1]==='HEAD'?revision.commit:revision.tree):a[0]==='ls-files'?se.map(e=>e.relativePath).join('\0')+'\0':'';
   project=r.env.LOCAL_MODE_COMPOSE_PROJECT||r.env.LOOM_STACK_PROJECT||project;
   if(r.binary==='bash') return '';
@@ -74,7 +74,7 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
   {now:()=>clockNow,monotonicNow:requestTime??(()=>clockNow),async nextAttempt(signal){signal.throwIfAborted();delays.push(1000);clockNow+=1000;}});
  const lifecycle=new FixtureLifecycle([plan],()=>driver,()=>1000,()=> 'opaque-fixture');
  const request={runId:'run',profile,loomRevision:revision,fleetRevision:revision,model:plan.model,maxCases:1,selectionSha256:plan.selectionSha256};
- return {root,source,driver,lifecycle,request,calls,onExec(callback:(request:ProcessRequest)=>Promise<void>){onExec=callback;},mutate(v:string){change=v;},
+ return {root,source,driver,lifecycle,request,calls,onCommand(callback?: (request:ProcessRequest)=>Promise<void>){onCommand=callback;},onExec(callback:(request:ProcessRequest)=>Promise<void>){onExec=callback;},mutate(v:string){change=v;},
   restartMode(value:string){restartMode=value;},restoreOriginalContainer(){restarted=false;restartMode='success';},onRestart(callback:()=>Promise<void>){onRestart=callback;},onRead(callback:(signal:AbortSignal)=>Promise<void>){onRead=callback;},failRead(){readFails=true;},statuses(...values:number[]){readinessStatuses.push(...values);},delays,
   advance(ms:number){clockNow+=ms;},async cleanup(){await fs.rm(root,{recursive:true});}};
 }
@@ -86,6 +86,30 @@ for(const profile of ['agents-real-opencode','agents-emulator']) test(`${profile
   if(profile==='agents-emulator')assert.equal(o.services['loom-local'].environment.LOOM_OPENCODE_BIN,'/opt/fixture/loom-harness-emu');
   assert.equal(r.calls.some(c=>c.binary==='bash'&&c.args.includes('make')),profile==='agents-real-opencode');assert.ok(r.calls.some(c=>c.args.includes('up')&&c.args.includes('--no-build')));
   assert.equal((await r.lifecycle.observe(a.lease.id,'run')).services.length,4);const released=await r.lifecycle.release(a.lease.id,'run');assert.equal(released.released,true);assert.ok(await fs.readFile(released.receipt.id));
+ }finally{await r.cleanup();}
+});
+
+test('explicit observation signal reaches every fixed Git and Podman inspection command unchanged',async()=>{
+ const r=await setup('agents-emulator');try{
+  const a=await r.lifecycle.acquire(r.request,new AbortController().signal),controller=new AbortController();
+  const start=r.calls.length;assert.equal((await r.lifecycle.observe(a.lease.id,'run',controller.signal)).owned,true);
+  const calls=r.calls.slice(start);assert.ok(calls.some(call=>call.binary==='git'));assert.ok(calls.some(call=>call.binary==='podman'));
+  assert.ok(calls.every(call=>call.signal===controller.signal));
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
+
+for(const binary of ['git','podman'] as const)test(`abort during fixed ${binary} verification prevents subsequent command and observation artifact`,async()=>{
+ const r=await setup('agents-emulator');try{
+  const a=await r.lifecycle.acquire(r.request,new AbortController().signal),controller=new AbortController();
+  const evidence=path.join(r.driver.runtimeRoot,'evidence'),before=await fs.readdir(evidence),start=r.calls.length;
+  let enter!:()=>void,leave!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),blocked=new Promise<void>(resolve=>{leave=resolve;});
+  r.onCommand(async request=>{if(request.binary===binary){assert.equal(request.signal,controller.signal);enter();await blocked;}});
+  const observing=r.lifecycle.observe(a.lease.id,'run',controller.signal),denied=assert.rejects(observing);
+  await entered;controller.abort();leave();await denied;
+  assert.equal(r.calls.slice(start).filter(call=>call.binary===binary).length,1);
+  assert.deepEqual(await fs.readdir(evidence),before);
+  r.onCommand();assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
  }finally{await r.cleanup();}
 });
 

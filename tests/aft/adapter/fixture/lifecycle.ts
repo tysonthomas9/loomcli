@@ -30,12 +30,12 @@ export interface FixturePlan {
 }
 export interface FixtureDriver {
   preflight(plan: FixturePlan, signal: AbortSignal): Promise<void>;
-  identity(plan: FixturePlan): Promise<boolean>;
+  identity(plan: FixturePlan, signal?: AbortSignal): Promise<boolean>;
   allocate(leaseId: string, runId: string, record: (resource: Resource) => void): Promise<void>;
   provision(plan: FixturePlan, record: (resource: Resource) => void, signal: AbortSignal): Promise<{
     apiOrigin: string; filesOrigin: string; workspaceId: string; repo: string;
   }>;
-  inspect(resource: Resource): Promise<Inventory>;
+  inspect(resource: Resource, signal?: AbortSignal): Promise<Inventory>;
   prepareObserve?(signal:AbortSignal):Promise<void>;
   prepareCleanup?(signal:AbortSignal):Promise<void>;
   remove(resource: Resource): Promise<void>;
@@ -175,21 +175,26 @@ export class FixtureLifecycle {
       return { released: result.released, remainingOwnedResources: result.remainingOwnedResources, receipt };
     } finally { lease.busy = false; }
   }
-  async observe(leaseId: string, runId: string) {
+  async observe(leaseId: string, runId: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const lease = this.owned(leaseId, runId);
     lease.busy = true;
     try {
       const plan = this.plans.get(lease.request.profile)!;
-      const sourceMatches = await lease.driver.identity(plan);
+      const sourceMatches = await lease.driver.identity(plan, signal);
+      signal?.throwIfAborted();
       fail(sourceMatches, 'source-mismatch');
       const services: Inventory['services'] = [];
-      await lease.driver.prepareObserve?.(new AbortController().signal);
+      await lease.driver.prepareObserve?.(signal ?? new AbortController().signal);
+      signal?.throwIfAborted();
       for (const resource of lease.resources) {
-        const observed = await lease.driver.inspect(resource);
+        const observed = await lease.driver.inspect(resource, signal);
+        signal?.throwIfAborted();
         fail(observed.complete && observed.owned, 'ownership-mismatch');
         services.push(...observed.services);
       }
       const inventory = await lease.driver.artifact('observe', { leaseId, resources: lease.resources, services });
+      signal?.throwIfAborted();
       return { owned: true, sourceMatches, services, inventory };
     } finally { lease.busy = false; }
   }

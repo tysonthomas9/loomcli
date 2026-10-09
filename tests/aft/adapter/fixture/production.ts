@@ -100,14 +100,18 @@ async function regularBytes(filename: string): Promise<Buffer> {
     return bytes;
   } finally { await file.close(); }
 }
-export async function verifyManifest(manifest: FileManifest, expected: string): Promise<void> {
+export async function verifyManifest(manifest: FileManifest, expected: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   check(await fs.realpath(manifest.root) === manifest.root, 'source-mismatch');
+  signal?.throwIfAborted();
   check(manifest.entries.length > 0 && new Set(manifest.entries.map(entry => entry.relativePath)).size === manifest.entries.length, 'source-mismatch');
   const entries = [...manifest.entries].sort((a, b) => a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0);
   for (const entry of entries) {
+    signal?.throwIfAborted();
     check(entry.relativePath.split('/').every(part => part && part !== '.' && part !== '..') && !path.isAbsolute(entry.relativePath) &&
       !entry.relativePath.includes('\\') && /^[a-f0-9]{64}$/.test(entry.sha256), 'source-mismatch');
     check(hash(await regularBytes(path.join(manifest.root, entry.relativePath))) === entry.sha256, 'source-mismatch');
+    signal?.throwIfAborted();
   }
   check(hash(entries.map(entry => `${entry.sha256}  ${entry.relativePath}\n`).join('')) === expected, 'source-mismatch');
 }
@@ -218,7 +222,9 @@ export class ComposeFixtureDriver implements FixtureDriver {
       LOCAL_MODE_LOOM_AGENTS_IMAGE: this.images.loom, LOCAL_MODE_FLEETDB_IMAGE: this.images.fleet };
   }
   private async command(binary: ProcessRequest['binary'], args: string[], signal?: AbortSignal) {
-    return this.run({ binary, args, cwd: this.config.loom.source.root, env: this.env(), signal });
+    signal?.throwIfAborted();
+    const result = await this.run({ binary, args, cwd: this.config.loom.source.root, env: this.env(), signal });
+    signal?.throwIfAborted(); return result;
   }
   private async connection(signal?: AbortSignal) {
     const records = JSON.parse(await this.command('podman', ['system', 'connection', 'list', '--format', 'json'], signal)) as { Name: string; URI: string; Identity: string }[];
@@ -236,19 +242,25 @@ export class ComposeFixtureDriver implements FixtureDriver {
       ...(this.profile === 'agents-real-opencode' ? ['-f', 'test/local-mode/docker-compose.agents-real.yml'] : []),
       '-f', path.join(this.root, 'compose.json')];
   }
-  async identity(plan: FixturePlan): Promise<boolean> {
+  async identity(plan: FixturePlan, signal?: AbortSignal): Promise<boolean> {
     try {
+      signal?.throwIfAborted();
       for (const [build, expected] of [[this.config.loom, plan.loomRevision], [this.config.fleet, plan.fleetRevision],
         [this.config.engine, plan.engineRevision], [this.config.adapter, plan.adapterRevision]] as const) {
         check(JSON.stringify(build.revision) === JSON.stringify(expected), 'source-mismatch');
-        const head = (await this.run({ binary: 'git', args: ['rev-parse', 'HEAD'], cwd: build.source.root, env: { PATH: this.config.toolPath }, })).trim();
-        const tree = (await this.run({ binary: 'git', args: ['rev-parse', 'HEAD^{tree}'], cwd: build.source.root, env: { PATH: this.config.toolPath }, })).trim();
-        const dirty = await this.run({ binary: 'git', args: ['status', '--porcelain', '--untracked-files=no'], cwd: build.source.root, env: { PATH: this.config.toolPath }, });
+        const git = async (args: string[]) => {
+          signal?.throwIfAborted();
+          const value = await this.run({ binary: 'git', args, cwd: build.source.root, env: { PATH: this.config.toolPath }, signal });
+          signal?.throwIfAborted(); return value;
+        };
+        const head = (await git(['rev-parse', 'HEAD'])).trim();
+        const tree = (await git(['rev-parse', 'HEAD^{tree}'])).trim();
+        const dirty = await git(['status', '--porcelain', '--untracked-files=no']);
         check(head === expected.commit && tree === expected.tree && !dirty.trim(), 'source-mismatch');
-        const tracked = (await this.run({ binary: 'git', args: ['ls-files', '-z'], cwd: build.source.root, env: { PATH: this.config.toolPath } })).split('\0').filter(Boolean).sort();
+        const tracked = (await git(['ls-files', '-z'])).split('\0').filter(Boolean).sort();
         check(JSON.stringify(tracked) === JSON.stringify(build.source.entries.map(entry => entry.relativePath).sort()), 'source-mismatch');
-        await verifyManifest(build.source, expected.sourceManifestSha256);
-        await verifyManifest(build.build, expected.buildManifestSha256);
+        await verifyManifest(build.source, expected.sourceManifestSha256, signal);
+        await verifyManifest(build.build, expected.buildManifestSha256, signal);
       }
       return true;
     } catch { return false; }
@@ -627,11 +639,13 @@ export class ComposeFixtureDriver implements FixtureDriver {
       if(retry){await retry(signal);check(this.retryRestartAttestation===retry,'identity-mismatch');this.retryRestartAttestation=undefined;}
     });
   }
-  async inspect(resource: Resource): Promise<Inventory> {
+  async inspect(resource: Resource, signal?: AbortSignal): Promise<Inventory> {
+    signal?.throwIfAborted();
     if (resource.kind === 'ports') return { complete: true, owned: resource.generation === this.leaseId && this.ports.length > 0, services: [] };
     if (resource.kind === 'compose') {
       check(resource.id === this.project && resource.generation === this.leaseId);
-      const records = await this.inventory();
+      const records = await this.inventory(signal);
+      signal?.throwIfAborted();
       if (this.objects.length) check(records.every(record => this.objects.some(owned => owned.kind === record.kind && owned.id === record.id && owned.generation === record.generation&&
         owned.namespaceSha256===record.namespaceSha256&&(owned.pid===record.pid||record.kind==='container'&&record.state==='exited'&&record.pid===0))) &&
         this.objects.every(owned => records.some(record => record.id === owned.id && record.kind === owned.kind)));
@@ -641,8 +655,10 @@ export class ComposeFixtureDriver implements FixtureDriver {
       })) };
     }
     const stamp = this.stamps.get(resource.id); const current = await this.files.lstat(resource.id);
+    signal?.throwIfAborted();
     check(stamp && !current.isSymbolicLink() && stamp.dev === current.dev && stamp.ino === current.ino && resource.generation === `${current.dev}:${current.ino}`);
     if (resource.kind === 'lock') check((await this.files.readFile(resource.id, 'utf8')) === this.locks.get(resource.id));
+    signal?.throwIfAborted();
     return { complete: true, owned: true, services: [] };
   }
   async remove(resource: Resource): Promise<void> {

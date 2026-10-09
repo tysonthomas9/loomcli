@@ -57,7 +57,7 @@ function rig() {
   };
   let created = 0;
   const manager = new FixtureLifecycle([plan], () => { created++; return driver; }, () => clock, () => `opaque-${created}`);
-  return { manager, calls, artifacts, removed, get created() { return created; },
+  return { manager, driver, calls, artifacts, removed, get created() { return created; },
     setClock(value: number) { clock = value; }, setSource(value: boolean) { sourceMatches = value; },
     failProvision() { provisionFails = true; }, failAllocation() { allocationFails = true; },
     failRemove(id: string) { removeFails = id; }, foreign(id: string) { foreign = id; }, incomplete(id: string) { incomplete = id; },
@@ -77,6 +77,45 @@ test('acquisition mints an opaque lease without an existing lease; observes and 
   assert.equal(released.released, true);
   assert.deepEqual(r.removed, ['owned-compose', 'owned-ports', 'owned-lock', 'owned-directory']);
   assert.equal((await r.manager.release(result.lease.id, 'run')).released, true);
+});
+
+test('explicit observation signal is the same instance at identity, preparation and each resource', async () => {
+  const r = rig(), acquired = await r.manager.acquire(input, signal()), controller = new AbortController();
+  const received: (AbortSignal | undefined)[] = [];
+  const identity = r.driver.identity.bind(r.driver), inspect = r.driver.inspect.bind(r.driver);
+  r.driver.identity = async (plan, signal) => { received.push(signal); return identity(plan, signal); };
+  r.driver.prepareObserve = async signal => { received.push(signal); };
+  r.driver.inspect = async (resource, signal) => { received.push(signal); return inspect(resource, signal); };
+  assert.equal((await r.manager.observe(acquired.lease.id, 'run', controller.signal)).owned, true);
+  assert.equal(received.length, 6); assert.ok(received.every(actual => actual === controller.signal));
+});
+
+test('preaborted observation signal invokes no identity, preparation, inspection or artifact', async () => {
+  const r = rig(), acquired = await r.manager.acquire(input, signal()), controller = new AbortController();
+  const before = [...r.calls]; controller.abort();
+  await assert.rejects(r.manager.observe(acquired.lease.id, 'run', controller.signal));
+  assert.deepEqual(r.calls, before); assert.equal((await r.manager.release(acquired.lease.id, 'run')).released, true);
+});
+
+for (const stage of ['identity', 'prepare', 'inspect', 'artifact'] as const) test(`abort during ${stage} denies observation and leaves cleanup available`, async () => {
+  const r = rig(), acquired = await r.manager.acquire(input, signal()), controller = new AbortController();
+  const before = r.calls.length;
+  if (stage === 'identity') r.driver.identity = async () => { controller.abort(); return true; };
+  if (stage === 'prepare') r.driver.prepareObserve = async () => { controller.abort(); };
+  if (stage === 'inspect') {
+    const inspect = r.driver.inspect.bind(r.driver);
+    r.driver.inspect = async (resource, signal) => { controller.abort(); return inspect(resource, signal); };
+  }
+  if (stage === 'artifact') {
+    const artifact = r.driver.artifact.bind(r.driver);
+    r.driver.artifact = async (kind, value) => { if (kind === 'observe') controller.abort(); return artifact(kind, value); };
+  }
+  await assert.rejects(r.manager.observe(acquired.lease.id, 'run', controller.signal));
+  const dispatched = r.calls.slice(before);
+  if (stage === 'identity' || stage === 'prepare') assert.equal(dispatched.some(call => call.startsWith('inspect:')), false);
+  if (stage === 'inspect') assert.equal(dispatched.filter(call => call.startsWith('inspect:')).length, 1);
+  if (stage !== 'artifact') assert.equal(dispatched.includes('artifact:observe'), false);
+  assert.equal((await r.manager.release(acquired.lease.id, 'run')).released, true);
 });
 
 for (const [name, change, code] of [
