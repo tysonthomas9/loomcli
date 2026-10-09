@@ -114,17 +114,72 @@ test('legacy names and native IDs have separate store authority even with identi
 });
 test('legacy lineage uses actual scoped Parent observations without synthesized native actor fields',async t=>{
   const {enrollOwnedLegacyAgent}=await import('./workspaces.js');const {store,record}=await setup(t);
-  const values={...fields,identityKind:'legacy-agent-name' as const,workspaceId:'legacy',agentIds:['lead'],storeId:'legacy-store'};
+  const values={...fields,identityKind:'legacy-agent-name' as const,workspaceId:'legacy',agentIds:[],storeId:'legacy-store'};
   const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...values}));
   const f=makeFixture(await createOwnedWorkspaceRoster(owner,[await record(),{...values,creationReceipt}],store));
   let parent='lead';let parentParent:string|null=null;
   f.readWorkspaceLegacyAgent=async(workspaceId,name)=>({kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...owner,workspaceId,name,
     repo:fields.repo,commonDir:fields.commonDir,storeId:'legacy-store',storeGeneration:fields.storeGeneration,parentName:name==='worker'?parent:parentParent,
     createdAt:'2026-10-09T00:00:00Z',updatedAt:'2026-10-09T00:01:00Z'});
+  await enrollOwnedLegacyAgent(f,'legacy','lead',new AbortController().signal,store);
   parent='foreign';await assert.rejects(enrollOwnedLegacyAgent(f,'legacy','worker',new AbortController().signal,store));
   parent='lead';parentParent='worker';await assert.rejects(enrollOwnedLegacyAgent(f,'legacy','worker',new AbortController().signal,store));
   parentParent=null;await enrollOwnedLegacyAgent(f,'legacy','worker',new AbortController().signal,store);
   assert.equal(requireOwnedWorkspace(f,'legacy','worker','legacy-agent-name').workspaceId,'legacy');
+});
+
+test('existing legacy membership revalidates retained creation identity without freezing mutable updates',async t=>{
+  const {enrollOwnedLegacyAgent}=await import('./workspaces.js');const {store}=await setup(t),signal=new AbortController().signal;
+  const values={...fields,identityKind:'legacy-agent-name' as const,agentIds:[],repositories,agentSources:[]};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...values}));
+  const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[{...values,creationReceipt}],store));
+  let createdAt='actual-creation',updatedAt='first-update',parentName:string|null=null,assignedRepos=['alpha','beta'];
+  let reads=0,missing=false;
+  fixture.readWorkspaceLegacyAgent=async(workspaceId,name)=>{
+    reads++;if(missing)throw new Error('Actual actor row is absent');
+    return {kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...owner,workspaceId,name,repo:null,commonDir:null,
+      storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentName,createdAt,updatedAt,assignedRepos,assignedRepoGroups:[]};
+  };
+  await enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store);
+  const roster=fixture.ownedWorkspaces!,receiptCount=roster[0]!.enrollmentReceipts.length;
+  updatedAt='normal-mutable-update';assignedRepos=['beta'];
+  const before=reads;await enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store);
+  assert.ok(reads>before);assert.equal(fixture.ownedWorkspaces,roster);assert.equal(roster[0]!.enrollmentReceipts.length,receiptCount);
+  createdAt='replacement-creation';await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store),/creation identity/);
+  createdAt='actual-creation';parentName='foreign';await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store));
+  parentName=null;missing=true;await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store));missing=false;
+  const retained=roster[0]!.enrollmentReceipts[0]!;await writeFile(await store.resolve(retained.id),'{}');
+  await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store));
+});
+
+test('existing legacy lineage rejects replaced parent, cycles and identity changes during read',async t=>{
+  const {enrollOwnedLegacyAgent}=await import('./workspaces.js');const {store}=await setup(t),signal=new AbortController().signal;
+  const values={...fields,identityKind:'legacy-agent-name' as const,agentIds:[]};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...values}));
+  const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[{...values,creationReceipt}],store));
+  let parentCreated='lead-created',workerCreated='worker-created',leadParent:string|null=null,changeOnSecond=false,workerReads=0;
+  fixture.readWorkspaceLegacyAgent=async(workspaceId,name)=>{
+    if(name==='worker'){workerReads++;if(changeOnSecond&&workerReads===2)workerCreated='raced-replacement';}
+    return {kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...owner,workspaceId,name,repo:fields.repo,commonDir:fields.commonDir,
+      storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentName:name==='worker'?'lead':leadParent,
+      createdAt:name==='worker'?workerCreated:parentCreated,updatedAt:'mutable-update'};
+  };
+  await enrollOwnedLegacyAgent(fixture,'workspace','lead',signal,store);
+  await enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store);
+  parentCreated='recreated-lead';await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store),/creation identity/);
+  parentCreated='lead-created';leadParent='worker';await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store));
+  leadParent=null;workerReads=0;changeOnSecond=true;
+  await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','worker',signal,store),/creation identity/);
+  assert.deepEqual(fixture.ownedWorkspaces![0]!.agentIds,['lead','worker']);
+});
+
+test('creation membership without an immutable legacy enrollment receipt cannot adopt a current row',async t=>{
+  const {enrollOwnedLegacyAgent}=await import('./workspaces.js');const {store,record}=await setup(t),signal=new AbortController().signal;
+  const values={...fields,identityKind:'legacy-agent-name' as const,workspaceId:'legacy',agentIds:['worker']};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...values}));
+  const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[await record(),{...values,creationReceipt}],store));
+  fixture.readWorkspaceLegacyAgent=async()=>{throw new Error('A current listing cannot establish original creation');};
+  await assert.rejects(enrollOwnedLegacyAgent(fixture,'legacy','worker',signal,store),/retained creation identity/);
 });
 
 test('missing serialized identity kind fails before receipt lookup and cannot grant native authority',async t=>{
