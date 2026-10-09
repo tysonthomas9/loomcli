@@ -70,11 +70,45 @@ test('transport delete uncertainty is retained once without a retry or private e
 });
 test('foreign identities, unsafe input and wrong retained generation have zero effects', async () => {
   const s = setup([tab('first')]);
+  let sequence = 0;
   for (const patch of [{ leaseId: 'other' }, { workspaceId: 'foreign' }, { agentName: 'foreign' },
     { expectedServeGeneration: 'old' }, { workspaceId: '../WS' }, { sessionName: 'arbitrary' }])
-    await assert.rejects(s.detach({ ...input, ...patch }, call));
-  await assert.rejects(s.detach(input, { ...call, runId: 'foreign' }), { code: 'ownership-mismatch' });
+    await assert.rejects(s.detach({ ...input, ...patch }, { ...call, invocationId: `invalid:${sequence++}` }));
+  await assert.rejects(s.detach(input, { ...call, runId: 'foreign', invocationId: 'foreign-run' }), { code: 'ownership-mismatch' });
   assert.deepEqual(s.effects, []);
+});
+test('same invocation is reserved before deferred reads so concurrent callers cannot duplicate DELETE', async () => {
+  const s = setup([tab('first')]); const read = s.access.readTabs;
+  let release!: () => void, entered!: () => void, reads = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  s.access.readTabs = async (...args) => { if (++reads === 1) { entered(); await gate; } return read(...args); };
+  const first = s.detach(input, call); await ready;
+  const second = s.detach(input, call); release();
+  const results = await Promise.allSettled([first, second]);
+  assert.deepEqual(results.map(result => result.status), ['fulfilled', 'rejected']);
+  assert.equal(results[1]!.status === 'rejected' && results[1]!.reason.code, 'mutation-repeated');
+  assert.equal(s.deleted(), 1); assert.equal(reads, 3);
+});
+test('uncertain DELETE consumes the invocation during and after a deferred transport failure', async () => {
+  const s = setup([tab('first')]); let release!: () => void, entered!: () => void, attempts = 0;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  s.access.deleteCapturedTab = async () => { attempts++; entered(); await gate; throw new Error('private-uncertain-delete'); };
+  const first = s.detach(input, call); await ready;
+  const second = s.detach(input, call); release();
+  const results = await Promise.allSettled([first, second]);
+  assert.deepEqual(results.map(result => result.status), ['fulfilled', 'rejected']);
+  assert.equal(results[0]!.status === 'fulfilled' && results[0]!.value.facts.deletions[0]!.outcome, 'transport-error');
+  await assert.rejects(s.detach(input, call), { code: 'mutation-repeated' }); assert.equal(attempts, 1);
+});
+test('well-formed pre-effect read failures consume their invocation without a same-ID replay', async () => {
+  const s = setup([]); let reads = 0;
+  s.access.readTabs = async () => { reads++; throw new Error('injected unavailable read'); };
+  await assert.rejects(s.detach(input, call));
+  s.access.readTabs = async () => { reads++; return { status: 200, body: [] }; };
+  await assert.rejects(s.detach(input, call), { code: 'mutation-repeated' });
+  assert.equal(reads, 1); assert.equal(s.deleted(), 0);
 });
 test('malformed, oversized, unsafe matching or incomplete list never proves absence or mutates', async () => {
   const invalidBodies: HttpResponse['body'][] = [{}, { data: null }, { data: {} }, [tab('../escape')], [tab('unsafe space')]];
@@ -93,6 +127,12 @@ test('the initial reachability probe does not replace the subsequent fresh list'
   const s = setup([tab('first')]); const read = s.access.readTabs; let count = 0;
   s.access.readTabs = async (...args) => { const result = await read(...args); return ++count === 1 ? { status: 200, body: {} } : result; };
   const result = await s.detach(input, call); assert.deepEqual(result.facts.capturedSessions, ['first']); assert.equal(s.deleted(), 1);
+});
+test('typed detach intentionally closes the original masked intermediate-enumeration failure', async () => {
+  const s = setup([], []); let reads = 0;
+  s.access.readTabs = async () => ({ status: 200, body: ++reads === 2 ? {} : [] });
+  await assert.rejects(s.detach(input, call), { code: 'response-invalid' });
+  assert.equal(reads, 2); assert.equal(s.deleted(), 0);
 });
 test('unreachable initial and final read fail without inventing an empty list', async () => {
   const first = setup([]); first.access.readTabs = async () => ({ status: 503, body: [] });

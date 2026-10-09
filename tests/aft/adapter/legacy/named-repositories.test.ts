@@ -6,7 +6,7 @@ import { CapabilityRegistry, calculateImplementationPin, createCapabilityContext
 import { createEvidenceStore, putEvidenceStore } from '../evidence.js';
 import { createFixtureOperationAuthority } from '../authority.js';
 import { putFixture, type OwnedFixture } from '../ownership.js';
-import { createOwnedWorkspaceRoster } from '../workspaces.js';
+import { createOwnedWorkspaceRoster, requireOwnedWorkspace } from '../workspaces.js';
 import { ObservationError } from '../protocol.js';
 import { createLegacyProviders, LegacyOperationEffects } from './providers.js';
 import type { LegacyAccess, LegacyLease, CliCommand } from './operations.js';
@@ -64,9 +64,9 @@ test('legacy workspace and usage actors preserve named topology without choosing
   fixture.readWorkspaceLegacyAgent = async (workspaceId, name) => {
     assert.equal(workspaceId, 'WS');
     if (name !== 'all' && name !== 'child') throw new ObservationError('ownership-mismatch', 'Private actor is absent');
-    const repo = name === 'all' ? '/owned/alpha' : '/owned/beta';
+    const repo = name === 'all' ? null : '/owned/beta';
     return { kind: 'legacy-agent-enrolled', identityKind: 'legacy-agent-name',
-      ...owner, workspaceId, name, repo, commonDir: `${repo}/.git`, storeId: 'owned-store',
+      ...owner, workspaceId, name, repo, commonDir: repo === null ? null : `${repo}/.git`, storeId: 'owned-store',
       storeGeneration: 'captured-store-generation', parentName: name === 'all' ? null : 'all',
       createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:01:00Z',
       assignedRepos: name === 'all' || childGroups.length ? [] : ['beta'], assignedRepoGroups: name === 'all' ? [] : childGroups };
@@ -97,6 +97,10 @@ test('legacy workspace and usage actors preserve named topology without choosing
   const role = await invoke('loom.cli.role', { leaseId: lease.id, workspaceId: 'WS', operation: 'list', name: null });
   assert.equal(role.availability, 'observed', JSON.stringify(role));
   const allUsage = await usage('all'); assert.equal(allUsage.availability, 'observed', JSON.stringify(allUsage));
+  // Unselected actor facts retain membership, but the topology anchor never
+  // becomes evidence of this actor's chosen physical worktree.
+  assert.throws(() => requireOwnedWorkspace(fixture, 'WS', 'all', 'legacy-agent-name'), /selection/);
+  assert.equal(requireOwnedWorkspace(fixture, 'WS', 'all', 'legacy-agent-name', 'beta').repo, '/owned/beta');
   const childUsage = await usage('child'); assert.equal(childUsage.availability, 'observed', JSON.stringify(childUsage));
   assert.equal(fixture.ownedWorkspaces![0]!.creationReceipt.id, creationReceipt.id);
   assert.deepEqual(fixture.ownedWorkspaces![0]!.agentSources!.at(-1), { agentId: 'child', repoNames: ['beta'] });
