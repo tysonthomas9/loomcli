@@ -9,6 +9,8 @@ import { ObservationResultSchema } from '@tysonthomas9/aft/types';
 import { putFixture, disposeFixtures, type OwnedFixture } from '../ownership.js';
 import { createLegacyProviders, RoleOutput } from './providers.js';
 import type { LegacyAccess, LegacyLease } from './operations.js';
+import { createFixtureOperationAuthority } from '../authority.js';
+import { LegacyOperationEffects } from './providers.js';
 
 test('all six legacy providers register strict contracts and return canonical envelopes', async t => {
   const root = fileURLToPath(new URL('..', import.meta.url));
@@ -33,6 +35,8 @@ test('all six legacy providers register strict contracts and return canonical en
   const fixture: OwnedFixture = { leaseId: 'lease', runId: 'run', caseId: 'case', suiteId: context.suiteId, scope: context.scope, workspaceId: 'WS', repo: '/owned/source', profile: 'legacy',
     expiresAtUtcMs: Number.MAX_SAFE_INTEGER, evidenceClass: 'deterministic', roots: new Map(), agents: new Map(), secrets: [],
     readApi: unsupported, readFiles: unsupported, resolveAgent: unsupported, verify: async () => { verified++; }, dispose: async () => {} };
+  fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId, scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile }, Object.fromEntries(Object.entries(LegacyOperationEffects).map(([operation, effects]) =>
+    [operation, { evidenceClass: 'deterministic' as const, effects: [...effects] }])));
   putFixture(context, fixture);
   const invoke = (input: unknown) => registry.invoke({ id: 'loom.cli.role', version: 1, input: {} }, input, context);
   const result = ObservationResultSchema.parse(await invoke({ leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }));
@@ -54,8 +58,10 @@ test('all six legacy providers register strict contracts and return canonical en
   // CLI result is not evidence of a real native actor.
   const nativeContext = createCapabilityContext({ file: 'native-envelope.yaml', line: 1 }, registry);
   Object.assign(nativeContext, { runId: 'run' }); putEvidenceStore(nativeContext, evidenceStore);
-  putFixture(nativeContext, { ...fixture, suiteId: nativeContext.suiteId, scope: nativeContext.scope,
-    caseId: nativeContext.caseId, evidenceClass: 'real-native' });
+  const nativeFixture: OwnedFixture = { ...fixture, suiteId: nativeContext.suiteId, scope: nativeContext.scope,
+    caseId: nativeContext.caseId, evidenceClass: 'real-native' };
+  nativeFixture.operationAuthority = createFixtureOperationAuthority({ leaseId: nativeFixture.leaseId, runId: nativeFixture.runId, suiteId: nativeFixture.suiteId, scope: nativeFixture.scope, caseId: nativeFixture.caseId, profile: nativeFixture.profile }, { 'loom.cli.role': { evidenceClass: 'real-native', effects: ['read-api'] } });
+  putFixture(nativeContext, nativeFixture);
   const native = ObservationResultSchema.parse(await registry.invoke({ id: 'loom.cli.role', version: 1, input: {} },
     { leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }, nativeContext));
   assert.equal(native.availability, 'observed'); assert.equal(native.provenance.evidenceClass, 'real-native');
@@ -90,6 +96,7 @@ test('suite fixture configuration keeps its original restoration across declared
   const fixture: OwnedFixture = { leaseId: 'lease', runId: 'run', caseId: 'setup', suiteId: suite.suiteId, scope: 'suite', workspaceId: 'WS', repo: '/owned/source', profile: 'legacy',
     expiresAtUtcMs: Number.MAX_SAFE_INTEGER, evidenceClass: 'deterministic', roots: new Map(), agents: new Map(), secrets: [],
     readApi: unsupported, readFiles: unsupported, resolveAgent: unsupported, verify: async () => {}, dispose: async () => { await cleanup?.(); } };
+  fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId, scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile }, { 'loom.fixture.configure': { evidenceClass: 'deterministic', effects: ['write-fixture'] } });
   putFixture(suite, fixture);
   // This bounded unit accessor exercises provider state across cases; actual
   // runner suite authorization remains the engine's separate integration gate.
@@ -110,4 +117,73 @@ test('suite fixture configuration keeps its original restoration across declared
   lease.active = false; await disposeFixtures(suite); assert.equal(state, 'original');
   const retained = await evidence.resolve(second.provenance.artifacts[0]!.id);
   assert.deepEqual(JSON.parse(await readFile(retained, 'utf8')), second.data);
+});
+
+test('registry authorizes operation classes and external effects before factories; backend/model changes fail closed', async t => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const pin = calculateImplementationPin(root, ['legacy/providers.ts','legacy/operations.ts','authority.ts','redaction.ts'], 'legacy/providers.ts', 'createLegacyProviders');
+  const registry = new CapabilityRegistry(); let factories = 0, effects = 0;
+  const unused = async (): Promise<never> => { throw new Error('Unused deterministic transport'); };
+  const lease: LegacyLease = { id: 'mixed-lease', runId: 'mixed-run', active: true, evidence: 'real-native', secrets: [],
+    binary: '/injected/loom', cwd: '/injected/work', env: {}, workspaces: ['WS'], agents: [{ workspaceId: 'WS', id: 'worker', name: 'worker', generation: 'row-revision' }],
+    roles: [], issues: [], repos: [], processes: [], fixtures: [] };
+  const access: LegacyAccess = { lease: async (_id, _signal, operation) => ({ ...lease, evidence: operation === 'loom.cli.task' ? 'live-provider' : 'real-native' }),
+    async execute(_id, command) { effects++; return { processId: 'owned-cli', generation: 'owned-generation',
+      exitCode: command.argv[4] === 'task' ? null : 0, complete: command.argv[4] !== 'task', stdout: '[]', stderr: '' }; },
+    registerProcess: async () => {}, stimulate: unused, request: unused, validateSeedPath: unused, seedCommit: unused,
+    snapshot: unused, restore: unused, writeConfiguration: unused, enrollCleanup: () => {} };
+  for (const provider of createLegacyProviders(pin, pin.sha256, () => { factories++; return access; })) registry.register(provider);
+  const context = createCapabilityContext({ file: 'declared-live-double.yaml', line: 1 }, registry); Object.assign(context, { runId: 'mixed-run' });
+  const evidenceRoot = await realpath(await mkdtemp(fileURLToPath(new URL('.seed-test-evidence-', import.meta.url))));
+  t.after(() => rm(evidenceRoot, { recursive: true, force: true })); putEvidenceStore(context, await createEvidenceStore(evidenceRoot));
+  const fixture: OwnedFixture = { leaseId: lease.id, runId: lease.runId, suiteId: context.suiteId, scope: context.scope, caseId: context.caseId,
+    workspaceId: 'WS', repo: '/injected/work', profile: 'legacy-real-codex', expiresAtUtcMs: Number.MAX_SAFE_INTEGER, evidenceClass: 'real-native',
+    roots: new Map(), agents: new Map(), secrets: [], readApi: unused, readFiles: unused, resolveAgent: unused, verify: async () => {}, dispose: async () => {} };
+  putFixture(context, fixture);
+  const task = { leaseId: lease.id, workspaceId: 'WS', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null };
+  const invoke = (id: string, input: unknown) => registry.invoke({ id, version: 1, input: {} }, input, context);
+  assert.equal((await invoke('loom.cli.task', task)).availability, 'unsupported'); assert.equal(factories, 0);
+  const owner = { leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId, scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile };
+  fixture.operationAuthority = createFixtureOperationAuthority(owner, { 'loom.cli.task': { evidenceClass: 'live-provider', effects: ['start-owned-process'] } });
+  assert.equal((await invoke('loom.cli.task', task)).availability, 'unsupported'); assert.equal(factories, 0);
+  fixture.operationAuthority = createFixtureOperationAuthority(owner, {
+    'loom.cli.role': { evidenceClass: 'real-native', effects: ['read-api'] },
+    'loom.cli.task': { evidenceClass: 'live-provider', effects: ['start-owned-process','external-provider'] },
+  });
+  assert.equal((await invoke('loom.cli.task', { ...task, backend: 'claude' })).availability, 'unsupported'); assert.equal(factories, 0);
+  await assert.rejects(invoke('loom.cli.task', { ...task, model: 'unreviewed-paid-model' })); assert.equal(factories, 0);
+  const role = await invoke('loom.cli.role', { leaseId: lease.id, workspaceId: 'WS', operation: 'list', name: null });
+  assert.equal(role.availability, 'observed'); assert.equal(role.provenance.evidenceClass, 'real-native');
+  const paidDouble = await invoke('loom.cli.task', task);
+  assert.equal(paidDouble.availability, 'observed'); assert.equal(paidDouble.provenance.evidenceClass, 'live-provider');
+  assert.equal((paidDouble.data as { receipt: { evidence: string } }).receipt.evidence, 'live-provider');
+  assert.equal(factories, 1); assert.equal(effects, 2);
+  // Declared classes above exercise envelopes only. No backend or paid service ran.
+});
+
+test('legacy redaction receipts distinguish omitted source fields from absence', async t => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const pin = calculateImplementationPin(root, ['legacy/providers.ts','legacy/operations.ts','redaction.ts'], 'legacy/providers.ts', 'createLegacyProviders');
+  const registry = new CapabilityRegistry(); const unused = async (): Promise<never> => { throw new Error('Unused transport'); };
+  const lease: LegacyLease = { id: 'privacy-lease', runId: 'privacy-run', active: true, evidence: 'deterministic', secrets: ['literal-private'], binary: '/injected/loom',
+    cwd: '/injected/work', env: {}, workspaces: ['WS'], agents: [], roles: [], issues: [], repos: [], processes: [], fixtures: [] };
+  const access: LegacyAccess = { lease: async () => lease, execute: async () => ({ processId: 'p', generation: 'g', exitCode: 0, complete: true, stderr: '',
+    stdout: JSON.stringify({ authorization: 'literal-private', nested: { text: 'literal-private', visible: 'safe' } }) }),
+    registerProcess: unused, stimulate: unused, request: unused, validateSeedPath: unused, seedCommit: unused, snapshot: unused, restore: unused, writeConfiguration: unused, enrollCleanup: () => {} };
+  for (const provider of createLegacyProviders(pin, pin.sha256, () => access)) registry.register(provider);
+  const context = createCapabilityContext({ file: 'privacy-double.yaml', line: 1 }, registry); Object.assign(context, { runId: lease.runId });
+  const evidenceRoot = await realpath(await mkdtemp(fileURLToPath(new URL('.seed-test-evidence-', import.meta.url))));
+  t.after(() => rm(evidenceRoot, { recursive: true, force: true })); putEvidenceStore(context, await createEvidenceStore(evidenceRoot));
+  const fixture: OwnedFixture = { leaseId: lease.id, runId: lease.runId, suiteId: context.suiteId, scope: context.scope, caseId: context.caseId,
+    workspaceId: 'WS', repo: '/injected/work', profile: 'legacy-deterministic', expiresAtUtcMs: Number.MAX_SAFE_INTEGER, evidenceClass: 'deterministic',
+    roots: new Map(), agents: new Map(), secrets: lease.secrets, readApi: unused, readFiles: unused, resolveAgent: unused, verify: async () => {}, dispose: async () => {} };
+  fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId,
+    scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile }, { 'loom.cli.role': { evidenceClass: 'deterministic', effects: ['read-api'] } }); putFixture(context, fixture);
+  const result = await registry.invoke({ id: 'loom.cli.role', version: 1, input: {} }, { leaseId: lease.id, workspaceId: 'WS', operation: 'list', name: null }, context);
+  assert.equal(result.availability, 'observed');
+  const data = RoleOutput.parse(result.data);
+  assert.deepEqual(data.body, { nested: { text: '[REDACTED]', visible: 'safe' } });
+  assert.deepEqual(data.receipt.factsRedaction, { omittedPaths: ['/body/authorization'], replacedTextPaths: ['/body/nested/text'] });
+  assert.ok(data.redaction.omittedPaths.includes('/body/authorization')); assert.ok(data.redaction.replacedTextPaths.includes('/body/nested/text'));
+  assert.equal(JSON.stringify(data).includes('literal-private'), false);
 });
