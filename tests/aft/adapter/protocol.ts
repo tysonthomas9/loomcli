@@ -69,6 +69,7 @@ export const sha256 = async (value: string | Uint8Array): Promise<string> => {
 
 // Public evidence is projected first, then redacted recursively. Native credentials
 // and endpoint URLs are never included in any public projection or exception.
+export const privateEvidenceField = /^(?:authorization|proxy-authorization|cookie|set-cookie|password|token|secret|access_?token|refresh_?token|client_?secret|private_?key|api[_-]?key|ownerToken)$/i;
 export function redact(value: Json, secrets: readonly string[] = []): Json {
   if (typeof value === 'string') {
     let safe = value;
@@ -79,7 +80,10 @@ export function redact(value: Json, secrets: readonly string[] = []): Json {
   }
   if (Array.isArray(value)) return value.map(entry => redact(entry, secrets));
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => !/^(?:authorization|proxy-authorization|cookie|set-cookie|password|token|secret|access_?token|refresh_?token|client_?secret|private_?key|api[_-]?key|ownerToken)$/i.test(key))
-    .map(([key, entry]) => [key, redact(entry, secrets)]));
+    .filter(([key]) => !privateEvidenceField.test(key))
+    .map(([key, entry]) => {
+      requireFact(redact(key, secrets) === key, 'observation-failed', 'Observation key contains private material');
+      return [key, redact(entry, secrets)];
+    }));
   return value;
 }

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { CapabilityRegistry, calculateImplementationPin, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
+import { CapabilityRegistry, calculateImplementationPin, getRegisteredResource, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { createCoreProviders, defineOperation, createSyntheticProbe, createEvidenceStore, putEvidenceStore,
   putFixture, getFixture, disposeFixtures, type OwnedFixture, AgentRow, AgentRef, type HttpResponse } from './index.js';
 import type { RunnerOptions } from '@tysonthomas9/aft/runner';
@@ -86,7 +86,10 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
       const a = fixtures[0]!; const b = fixtures[1]!; expectedToken = a.syntheticProbe!.value;
       return {value:{leaseId:a.leaseId,otherLease:b.leaseId,probeHandle:a.syntheticProbe!.handle,otherProbe:b.syntheticProbe!.handle,runToken:context.runId,agent:{fixtureLeaseId:a.leaseId,workspaceId:'workspace',agentId:'agt_owned'},otherAgent:{fixtureLeaseId:b.leaseId,workspaceId:'workspace',agentId:'agt_owned'}},
         evidenceClass:'deterministic',identity:{fixtureLeaseId:a.leaseId}};
-    }, dispose: disposeFixtures,
+    }, async dispose(context) {
+      for (const lease of ['lease-A','lease-B']) assert.ok(getRegisteredResource(context, `@loom/aft-adapter/fixtures/v1:${lease}`, lease));
+      await disposeFixtures(context);
+    },
   });
   const foreignRun = defineOperation({ id: 'test.foreignRun', implementation:testPin, implementationSha256:testPin.sha256,
     inputSchema:z.object({leaseId:z.string()}).strict(), outputSchema:z.object({ok:z.boolean()}).strict(),

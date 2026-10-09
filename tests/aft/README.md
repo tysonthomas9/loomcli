@@ -17,6 +17,47 @@ for `/api/monitor/status` cache and join propagation; `context-delivery` (45s) f
 epic assignment delivery state crossing monitor/UI boundaries; and `terminal-launch`
 (40-120s) for PTY spawn plus terminal tab/session launch metadata.
 
+## Typed adapter development
+
+`tests/aft/adapter` is the shared Loom capability module. Its emitted entry point
+exports `registerLoomAdapter`, `createLoomProviders`, and `pinLoomImplementation`.
+A trusted launcher supplies owned fixture plans and private transports; YAML can
+only call registered operations with their closed input schemas. Core observations,
+fixture lifecycle, legacy operations, and the independent Markdown projection use
+the same AFT registry, envelope, and resource authority. Browser actions and case
+expectations stay in the suite.
+
+```bash
+cd tests/aft/adapter
+npm ci
+npm run setup:projections
+npm run typecheck
+npm run build
+npm test
+npm run lint
+```
+
+The package locks an exact source-built AFT Git commit. `build` retains the legacy
+catalog beside emitted code, copies the pinned parser closure, and writes a byte
+manifest for the emitted adapter. These checks use deterministic process and
+transport doubles and isolated local files. They do not start Loom, a browser,
+Podman, or a model provider. Legacy source-receipt tests require Git object
+`56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8`; shallow CI must fetch that object.
+
+Fixture leases authorize exact run/suite/case scopes. A suite exports authority
+with `{resource: {binding: ..., pointer: ...}}`; `{data: ...}` grants no authority.
+Case cleanup cannot dispose a suite lease. Owning cleanup remains enrolled after
+failure, abort, or expiration. Native credentials and private runtime lease data
+never enter observations or retained artifacts.
+
+Saved-event and native tool observations report sanitization paths explicitly.
+An omitted credential field differs from a source field that was absent; replaced
+text differs from text already redacted by the product. Only the code-owned,
+harmless test sentinel has pre-redaction occurrence facts. An unreadable or partial
+observation cannot prove absence. Renderer projection requires source/dependency
+bytes linked to the owned frontend build receipt; matching package versions or
+adapter development packages do not establish runtime renderer identity.
+
 ## Run
 
 ```bash
