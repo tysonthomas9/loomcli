@@ -50247,7 +50247,49 @@
           "evidenceBoundary": "Canonical StepSchema read-only field feasibility only; not full suite/admission/public runner/preservation/runtime proof",
           "initialDiagnosticErratum": "First diagnostic incorrectly nested arm instead of actual operation:arm. Initial false control retained separately; corrected exact canonical shape used here."
         },
-        "acceptance": "15 extracted records narrowed,not preserved assertions;8 sourcegroups uncovered,oldstep25 onlyscreenshot. Exact atomically measured style/hover/focus shape needs source-backed feasibility triage; no new operation/engine expansion/runtime."
+        "acceptance": "15 extracted records narrowed,not preserved assertions;8 sourcegroups uncovered,oldstep25 onlyscreenshot. Exact atomically measured style/hover/focus shape needs source-backed feasibility triage; no new operation/engine expansion/runtime.",
+        "atomicFieldFeasibilityReview": {
+          "at": "2026-10-09T15:04:43.698355+00:00",
+          "scope": "Read-only missing atomic hover field feasibility; no engine implementation authorization",
+          "engine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+          "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+          "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+          "sourceLines": {
+            "start": 3824,
+            "end": 3832,
+            "text": "REPLY_ACTIONS_DOM = r\"\"\"(() => {\n  const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);\n  const p=r?.querySelector('[data-testid=message-actions]'), b=p?.querySelector('button[aria-label=\"Copy message\"]');\n  const m=r?.querySelector('[data-testid=chat-markdown]');\n  const rect=x=>{if(!x)return null;const q=x.getBoundingClientRect();return {x:q.x,y:q.y,width:q.width,height:q.height};};\n  return {path:location.pathname,text:m?.textContent||'',copy:!!b,time:p?.textContent||'',\n    opacity:p&&getComputedStyle(p).opacity,pointerEvents:p&&getComputedStyle(p).pointerEvents,\n    hovered:r?.matches(':hover')??false,focused:p?.contains(document.activeElement)??false,\n    row:rect(r),pill:rect(p),button:rect(b),markdown:rect(m),viewportHeight:innerHeight};})()\"\"\""
+          },
+          "ownerTriage": "agent-a43468f0-1931-41df-92fc-9a50f0dfc1d5 at2026-10-09T14:53:09Z; matches pilot prior canonicalStepSchema negatives",
+          "requiredFacts": [
+            "LAST actual assistant row; FIRST footer/copy/markdown in same row",
+            "One synchronous actual callback supplies path/text/copy/time,opacity,pointerEvents,row.matches(hover),footer.contains(document.activeElement),row/pill/button/markdown rects andviewportHeight",
+            "Missing targets/null vs actual no-hit preserved; actual light/dark fourstage rest/hover/leave/focus actors and measured comparisons remain inYAML"
+          ],
+          "canonicalSupportedPieces": "Accepted atomic DOM sampling+geometry and separate allowlisted scalar style/focused captures; CSS hover selectors can observe selected-region matching/count. These pieces do not compose all source operands into one callback.",
+          "missingAtomicFields": [
+            {
+              "required": "Actual computedstyle opacity",
+              "current": "Atomic DomField computed-style property only position; prior exact StepSchema attempt rejects opacity"
+            },
+            {
+              "required": "Actual computedstyle pointerEvents",
+              "current": "Atomic DomField computed-style property only position; prior exact StepSchema attempt rejects pointer-events"
+            },
+            {
+              "required": "Selected row matches hover",
+              "current": "No closed hovered field; CSS hover count is a distinct possible selected-node observation,not yet fullsource composition"
+            },
+            {
+              "required": "Footer contains actual activeElement",
+              "current": "Scalar focused checks activeElement===el; existing contains tests another authored region,not actual activeElement membership in same callback"
+            }
+          ],
+          "schemaExpansionAuthorized": false,
+          "coverage": "unresolved",
+          "destination": [],
+          "runtime": 0,
+          "preservationAccepted": false
+        }
       },
       "identityArrivalSelectedBranchReview": {
         "at": "2026-10-09T14:46:38.904469+00:00",
@@ -56596,6 +56638,33 @@
           "canonicalContractPending": "Fixture author reports restartOwnedServe authored/gating but supplies no reviewed public YAML operation/input/output checkpoint yet. Consume exact accepted canonical schema after parent review; no independent pilot schema or native TERM substitute.",
           "coverage": "unresolved",
           "destination": [],
+          "runtime": 0,
+          "preservationAccepted": false
+        },
+        "restartCandidateStatusReview": {
+          "at": "2026-10-09T15:04:43.698355+00:00",
+          "scope": "Private Compose successor review status only; original selectedSSE oldstep26 unresolved",
+          "privateCandidate": "3df52606ee6ccc2f53ffe40f8808c23bdce6ca72",
+          "parentApproval": false,
+          "timingCorrectionOnlyApproved": "2d1250235f08e69390519870d377d86e6f9678dd",
+          "sourceCompatibilityAccepted": false,
+          "parentRepro": {
+            "path": "/private/tmp/aft-compose-successor-review-276315dd.fll2zris/tests/aft/adapter/review.log",
+            "sha256": "eea54dc74b97cd74e892f35e7e2efb1c3304b1ba6aab55cf58a441e1e4574cc4",
+            "test": "parent review failed first successor attestation cannot enroll a later target generation for cleanup",
+            "outcome": "1RED; release true/down on a later target generation instead of false/no down",
+            "verification": "Pilot rehashed and read retained parent log; did not rerun transport test"
+          },
+          "requiredNegative": "First candidate target-only StartedAt/generation replacement during initial marker read must not authorize cleanup of a later stable generation. Retain exact attempted candidate identity before awaited attestation; failure cannot enroll a new generation. Original stale-neighbor test is a distinct case.",
+          "sourceDifferences": [
+            "Source revalidates authentic new owned container; no identical-container-ID requirement",
+            "180s source readiness clock starts after restart; each request3000ms; source retry-check-after-failure permits different late-positive boundary than strict180s cutoff",
+            "60s dispatch/4MiB output cap and exact unchanged neighbors are additional reviewed ownership/budget choices,not original source predicates"
+          ],
+          "canonicalAttempt": "No reviewed public operation/schema/observabletarget producer available. Current authored oldstep26 captures saved-other-first before screenshot but invokes no restart; no WIP consumption, nativeTERM fallback or assertion credit.",
+          "coverage": "unresolved",
+          "destination": [],
+          "effects": 0,
           "runtime": 0,
           "preservationAccepted": false
         }
