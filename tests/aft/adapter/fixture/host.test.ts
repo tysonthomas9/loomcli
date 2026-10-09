@@ -65,7 +65,7 @@ async function setup(profile: string) {
       handles.set('cli', handle); return handle;
     },
     start(command, readiness, generation) {
-      const id = command.argv[0] === 'serve' ? 'serve' : command.argv.includes('preview') ? 'frontend' : command.argv[0]?.endsWith('/fake-model/server.mjs') ? 'fake-model' : 'daemon';
+      const id = command.argv[0] === 'app-server' ? 'codex-preflight' : command.argv[0] === 'serve' ? 'serve' : command.argv.includes('preview') ? 'frontend' : command.argv[0]?.endsWith('/fake-model/server.mjs') ? 'fake-model' : 'daemon';
       if(spawnFails) throw new LaunchNotStarted();
       starts.push({ id, command, readiness }); let alive = true;
       const handle: OwnedProcess = { pid: ++count + 40, generation: generation ?? `generation-${count}`, executable: command.executable, argv: command.argv,
@@ -79,9 +79,10 @@ async function setup(profile: string) {
     if (method === 'POST') return { status: 201, body: {} };
     return { status: 200, body: relative.endsWith('/E2E-WS') ? { data: { id: 'E2E-WS', repos: [{ path: driver.workspaceRoot }] } } : {} };
   };
-  const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, fs, http, () => `fixture-${++count}`, async () => ({ port: port++, async release() {} }));
+  const protocols:string[]=[];
+  const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, fs, http, () => `fixture-${++count}`, async () => ({ port: port++, async release() {} }),async endpoint=>{protocols.push(endpoint);if(failService==='codex-protocol')throw new Error('private probe failure');});
   const lifecycle = new FixtureLifecycle([plan], () => driver, () => 1000, () => 'opaque-fixture');
-  return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle,
+  return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle, protocols,
     request: { runId: 'test-run', profile, loomRevision: revision, fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
     failSpawn() { spawnFails = true; }, failService(value: string) { failService = value; }, failStop(value: string) { failStop = value; }, failHttp() { failHttp = true; },
     async cleanup() { await fs.rm(root, { recursive: true }); } };
@@ -93,7 +94,7 @@ for (const profile of legacyProfiles) test(`${profile}: production host driver u
     const acquired = await r.lifecycle.acquire(r.request, new AbortController().signal);
     assert.equal(acquired.workspaceId, 'E2E-WS'); assert.equal(acquired.repo, r.driver.workspaceRoot);
     assert.equal(acquired.repo.startsWith(r.root + '/loom-aft-host-'), true);
-    assert.deepEqual(r.starts.map(start => start.id), profile === 'legacy-deterministic' ? ['fake-model', 'serve', 'frontend'] : ['serve', 'frontend']);
+    assert.deepEqual(r.starts.map(start => start.id), profile === 'legacy-deterministic' ? ['fake-model', 'serve', 'frontend'] : profile === 'legacy-real-codex' ? ['codex-preflight','serve','frontend'] : ['serve', 'frontend']);
     const serve = r.starts.find(start => start.id === 'serve')!;
     assert.ok(serve.command.env.LOOM_CONFIG_DIR!.startsWith(acquired.repo));
     assert.equal(serve.command.env.LOOM_LEAD_CONTROLLED, '1');
@@ -107,7 +108,7 @@ for (const profile of legacyProfiles) test(`${profile}: production host driver u
     assert.ok(!r.runs.some(command => command.argv[0] === 'config'));
     assert.equal((await r.lifecycle.observe(acquired.lease.id, 'test-run')).services.length, r.starts.length);
     assert.equal((await r.lifecycle.release(acquired.lease.id, 'test-run')).released, true);
-    assert.deepEqual(r.stopped, [...r.starts.map(start => start.id)].reverse());
+    assert.deepEqual(r.stopped, [...(profile === 'legacy-real-codex' ? ['codex-preflight'] : []), ...r.starts.map(start => start.id).reverse()]);
     assert.equal((await fs.readdir(path.join(r.driver.runtimeRoot, 'evidence'))).length, 3);
     await assert.rejects(fs.lstat(path.join(r.driver.runtimeRoot, 'runtime')), { code: 'ENOENT' });
   } finally { await r.cleanup(); }
@@ -228,4 +229,15 @@ test('fake-model origin is resolved from its current owned service and refused a
  const h=r.driver.processesById.get('fake-model')!;await r.driver.stopOwnedProcess('fake-model',h.generation,new AbortController().signal);
  await assert.rejects(r.driver.fakeModelOrigin(new AbortController().signal));assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);
  }finally{await r.cleanup();}
+});
+test('controlled Codex preflight cleans its exact app-server before stack startup',async()=>{
+ const r=await setup('legacy-real-codex');try{const a=await r.lifecycle.acquire(r.request,new AbortController().signal);
+ const probe=r.starts[0]!;assert.equal(probe.id,'codex-preflight');assert.deepEqual(probe.command.argv,['app-server','--listen',r.protocols[0]]);assert.equal(probe.command.executable,r.config.realBinaries.codex!.executable);assert.equal(r.handles.get('codex-preflight')!.state(),'exited');assert.equal(r.stopped[0],'codex-preflight');assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);
+ }finally{await r.cleanup();}
+});
+test('failed Codex initialization launches no stack and still cleans the enrolled probe',async()=>{
+ const r=await setup('legacy-real-codex');r.failService('codex-protocol');try{await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal));assert.deepEqual(r.starts.map(s=>s.id),['codex-preflight']);assert.equal(r.handles.get('codex-preflight')!.state(),'exited');}finally{await r.cleanup();}
+});
+test('Codex probe teardown failure retains exact probe and account lock for retry',async()=>{
+ const r=await setup('legacy-real-codex');r.failStop('codex-preflight');try{let lease='';await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal),error=>{assert.ok(error instanceof FixtureError);lease=error.leaseId!;assert.ok(error.remainingOwnedResources.includes('codex-preflight'));return true;});assert.equal(r.starts.length,1);r.failStop('');assert.equal((await r.lifecycle.release(lease,'test-run')).released,true);}finally{await r.cleanup();}
 });
