@@ -13,7 +13,8 @@ import { createEvidenceStore,putEvidenceStore,type EvidenceStore } from './evide
 import { createFixtureOperationAuthority } from './authority.js';
 import { putFixture,type OwnedFixture } from './ownership.js';
 
-const input={agent:{fixtureLeaseId:'lease',workspaceId:'workspace',agentId:'agt_owned'},
+const agent={fixtureLeaseId:'lease',workspaceId:'workspace',agentId:'agt_owned'};
+const input={...agent,
   namePrefixes:['cov-files-actual-run-','cov-files-child-actual-run'],idempotencyKey:'cov-files-actual-run-agt_owned-cleanup'};
 // Canonical registry and real retained evidence; injected TEST-only fixed
 // archive/verification ports. No supported production profile is implied.
@@ -60,7 +61,7 @@ for(const missing of ArchiveAgentEffects)test(`archive missing only ${missing} d
 for(const status of [200,204,299,409])test(`archive retains actual HTTP ${status} without interpreting a response body`,async t=>{
   const h=await rig(t);h.status(status);const result=await h.invoke();
   assert.equal(result.availability,'observed');
-  assert.deepEqual(result.data,{agent:input.agent,observed:h.row,status,requestTimeoutMs:15000,
+  assert.deepEqual(result.data,{agent,observed:h.row,status,requestTimeoutMs:15000,
     idempotencyKey:input.idempotencyKey,body:{cancel:true},responseJsonParsed:false,conflictIgnored:status===409});
   assert.equal(h.fixture.agents.size,0);
   assert.equal(h.counts.post,1);assert.equal(h.counts.retain,1);
@@ -92,7 +93,7 @@ test('archive rejects callback replacement across verification before dispatch',
 });
 test('archive closes public header/body/path escapes without native metadata',async t=>{
   for(const change of [{idempotencyKey:'key\r\nAuthorization: forged'},{idempotencyKey:''},{body:{reason:'cancelled'}},
-    {method:'DELETE'},{path:'/foreign'},{headers:{Authorization:'secret'}},{agent:{...input.agent,agentId:'../../foreign'}}])
+    {method:'DELETE'},{path:'/foreign'},{headers:{Authorization:'secret'}},{agentId:'../../foreign'},{agent}])
     assert.equal(ArchiveAgentInput.safeParse({...input,...change}).success,false);
   const h=await rig(t);assert.equal(h.fixture.agents.size,0);
   assert.equal((await h.invoke()).availability,'observed');assert.equal(h.counts.post,1);

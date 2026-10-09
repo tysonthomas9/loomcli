@@ -85,7 +85,7 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
       inputSchema:ArchiveAgentInput,outputSchema:ArchiveAgentOutput,
       async run(input,context) {
         const {fixture,grant,value,retention}=await archiveAgent(context,input);
-        return {value,identity:{...identity(fixture),workspaceId:input.agent.workspaceId,agentId:input.agent.agentId},
+        return {value,identity:{...identity(fixture),workspaceId:input.workspaceId,agentId:input.agentId},
           evidenceClass:grant.evidenceClass,secrets:fixture.secrets,retention};
       },
     }),
