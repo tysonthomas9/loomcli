@@ -2,6 +2,7 @@ import type { EvidenceClass } from '@tysonthomas9/aft/types';
 import { createFixtureOperationAuthority, type FixtureAuthorityOwner } from '../authority.js';
 import type { FixturePlan } from './lifecycle.js';
 import { FixtureError } from './lifecycle.js';
+import { FixtureWorkersId,FixtureWorkersEffects } from '../fixture-workers.js';
 import { LegacyOperationEffects, legacyTaskEffects } from '../legacy/effects.js';
 export type FixtureModelSelection = {readonly kind:'backend-default'} | {readonly kind:'exact-model';readonly model:string;readonly selector:'agent-env'|'opencode-env'|'opencode-config'|'native-model'};
 const profiles = {
@@ -29,6 +30,7 @@ export function fixtureOperationAuthority(owner:FixtureAuthorityOwner,plan:Fixtu
  const route=fixtureRouting(plan), evidenceClass=route.evidenceClass;
  if(owner.profile!==route.profile)throw new FixtureError('identity-mismatch');
  return createFixtureOperationAuthority(owner,{
+  ...(['legacy-deterministic','legacy-real-codex','legacy-real-claude','legacy-real-cursor','legacy-real-opencode'].includes(plan.profile)?{[FixtureWorkersId]:{evidenceClass,effects:[...FixtureWorkersEffects]}}:{}),
   'loom.cli.role':{evidenceClass,effects:[...LegacyOperationEffects['loom.cli.role']]},'loom.cli.usage':{evidenceClass,effects:[...LegacyOperationEffects['loom.cli.usage']]},
   'loom.fixture.configure':{evidenceClass,effects:[...LegacyOperationEffects['loom.fixture.configure']]},
   'loom.runtime.stimulate':{evidenceClass,effects:[...LegacyOperationEffects['loom.runtime.stimulate'],'restart-owned-service']},

@@ -12,8 +12,12 @@ import { createEvidenceStore } from '../evidence.js';
 import { enrollOwnedLegacyAgent, requireOwnedWorkspace } from '../workspaces.js';
 import type { OwnedFixture } from '../ownership.js';
 import { getFixture } from '../ownership.js';
+import { getFixtureEvidenceStore } from '../evidence.js';
+import { FixtureWorkersId,FixtureWorkersEffects,FixtureWorkersOutput } from '../fixture-workers.js';
+import { createFixtureOperationAuthority } from '../authority.js';
 import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin } from '@tysonthomas9/aft/capabilities';
 import { createFixtureProviders, productionFixtureOptions } from './providers.js';
+import { registerLoomAdapter,pinLoomImplementation } from '../composition.js';
 import type { RegisteredIdentity } from './descendants.js';
 import { HostWorkspaceRecords } from './workspace-records.js';
 
@@ -202,20 +206,31 @@ test('host publishes creation receipts for both owned workspaces and enrolls onl
  }finally{await r.cleanup();}
 });
 
-async function setupBoundWorker(){
+async function setupBoundWorker(publicRegistry=false){
  const r=await setup('legacy-deterministic',true,false,undefined,true),signal=new AbortController().signal;
- const acquired=await r.lifecycle.acquire(r.request,signal);
+ const root=path.dirname(path.dirname(new URL(import.meta.url).pathname));
+ const pin=publicRegistry?await pinLoomImplementation(root,'source'):calculateImplementationPin(root,['fixture/providers.ts','fixture/host.ts','fixture/workspace-records.ts','fixture/routing.ts','fixture-workers.ts'], 'fixture/providers.ts','createFixtureProviders');
+ const options=productionFixtureOptions(pin,pin.sha256,[r.plan],r.config,r.config);options.driver=()=>r.driver;
+ const registry=new CapabilityRegistry();
+ if(publicRegistry)registerLoomAdapter(registry,{implementation:pin,fixtures:options});
+ else for(const provider of createFixtureProviders(options))registry.register(provider);
+ const context=createCapabilityContext({file:'worker-facts.test.yaml',line:1},registry,'00000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000004');
+ const acquired=publicRegistry?await (async()=>{
+   r.request.runId=context.runId;
+   const result=await registry.invoke({id:'loom.fixture.acquire',version:1,input:{}},r.request,context);
+   assert.equal(result.availability,'observed');return result.data as unknown as Awaited<ReturnType<FixtureLifecycle['acquire']>>;
+ })():await r.lifecycle.acquire(r.request,signal);
  const owner={leaseId:acquired.lease.id,runId:'test-run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:r.plan.profile};
- const store=await createEvidenceStore(path.join(r.driver.runtimeRoot,'evidence'));
- const roster=await r.driver.ownedWorkspaceRoster(owner,store,signal);
+ const store=publicRegistry?getFixtureEvidenceStore(context,acquired.lease.id):await createEvidenceStore(path.join(r.driver.runtimeRoot,'evidence'));
+ const roster=publicRegistry?(await getFixture(context,acquired.lease.id)).ownedWorkspaces:await r.driver.ownedWorkspaceRoster(owner,store,signal);
  const actor={workspace_key:'E2E-WS',name:'nova',repos:[],repo_groups:[],created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T00:00:00Z'};
  r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,data:[actor],total:1}:undefined);
- const fixture:OwnedFixture={...owner,workspaceId:acquired.workspaceId,repo:acquired.repo,ownedWorkspaces:roster,secrets:[],
+ const fixture:OwnedFixture=publicRegistry?await getFixture(context,acquired.lease.id):{...owner,workspaceId:acquired.workspaceId,repo:acquired.repo,ownedWorkspaces:roster,secrets:[],
   expiresAtUtcMs:Number.MAX_SAFE_INTEGER,evidenceClass:'deterministic',roots:new Map(),agents:new Map(),
   verify:async()=>{},readApi:async()=>{throw Error('unused');},readFiles:async()=>{throw Error('unused');},
   resolveAgent:async()=>{throw Error('unused');},dispose:async()=>{},
   readWorkspaceLegacyAgent:(ws,name,abort)=>r.driver.readWorkspaceLegacyAgent(owner,ws,name,abort)};
- r.driver.bindOwnedFixture(fixture,store);
+ if(!publicRegistry)r.driver.bindOwnedFixture(fixture,store);
  const cwd=r.driver.workspaceRoot,worktree=path.join(r.driver.runtimeRoot,'runtime','worker-worktree');await fs.mkdir(worktree);
  r.commonDir(worktree,path.join(cwd,'.git'));
  const daemon=r.handles.get('daemon')!,directory=path.join(cwd,'actual-daemon-state');await fs.mkdir(directory);
@@ -226,7 +241,9 @@ async function setupBoundWorker(){
  await fs.writeFile(stateFile,JSON.stringify({pid:daemon.pid,started_at:'2026-10-09T00:30:01Z',agents:[row]}));
  r.registration(row.pid,{generation:'actual-worker-start',executable:r.config.loomBinary,parentPid:daemon.pid,
   argvSha256:hash(Buffer.from([r.config.loomBinary,'task',worktree,'--auto','--daemon-mode','--backend','codex'].join('\0')+'\0'))});
- return {...r,signal,acquired,actor,row,stateFile,daemon};
+ return {...r,signal,acquired,actor,row,stateFile,daemon,registry,context,fixture,
+  observe:()=>registry.invoke({id:FixtureWorkersId,version:1,input:{}},{leaseId:acquired.lease.id},context),
+  release:()=>registry.invoke({id:'loom.fixture.release',version:1,input:{}},{leaseId:acquired.lease.id},context)};
 }
 
 test('actual Host worker hook binds product metadata to canonical actor, worktree and kernel parent',async()=>{
@@ -238,6 +255,86 @@ test('actual Host worker hook binds product metadata to canonical actor, worktre
   assert.equal((await r.driver.inspectOwnedProcess(facts[0]!.id,facts[0]!.generation,r.signal)).state,'running');
   assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
  }finally{await r.cleanup();}
+});
+
+test('public registry worker observation exposes actual owned serve and builtin worker generations',async()=>{
+ const r=await setupBoundWorker(true);try{
+  const before=r.starts.length,result=await r.observe();assert.equal(result.availability,'observed');
+  const facts=FixtureWorkersOutput.parse(result.data),serve=r.handles.get('serve')!;
+  assert.deepEqual(facts.serve,{id:'serve',pid:serve.pid,generation:serve.generation,state:'running'});
+  assert.equal(facts.fixtureLeaseId,r.acquired.lease.id);assert.equal(facts.coverage,'registered-builtin-running-workers');
+  assert.equal(facts.workers.length,1);assert.equal(facts.workers[0]!.generation,'actual-worker-start');
+  assert.equal(facts.workers[0]!.agentId,'nova');assert.equal(r.starts.length,before);
+  assert.equal(result.provenance.evidenceClass,'deterministic');assert.equal(result.provenance.identity.fixtureLeaseId,r.acquired.lease.id);
+  assert.ok(result.provenance.artifacts.length);assert.equal((await r.release()).availability,'observed');
+ }finally{await r.cleanup();}
+});
+test('public worker authority and effects are required before verification or registration access',async()=>{
+ for(const missing of ['authority','start-owned-process','read-api','read-filesystem'] as const){
+  const r=await setupBoundWorker(true);try{
+   let verifies=0;const verify=r.fixture.verify;r.fixture.verify=async signal=>{verifies++;await verify(signal);};
+   r.fixture.operationAuthority=missing==='authority'?undefined:createFixtureOperationAuthority(r.fixture,{
+    [FixtureWorkersId]:{evidenceClass:'deterministic',effects:FixtureWorkersEffects.filter(effect=>effect!==missing)}});
+   const requests=r.requests.length,captures=r.captures.length,starts=r.starts.length;
+   assert.equal((await r.observe()).availability,'unsupported');assert.equal(verifies,0);
+   assert.equal(r.requests.length,requests);assert.equal(r.captures.length,captures);assert.equal(r.starts.length,starts);
+   assert.equal((await r.release()).availability,'observed');
+  }finally{await r.cleanup();}
+ }
+});
+test('public worker observation rejects stopped serve, foreign actor and recreated incarnation without mutation',async()=>{
+ for(const changed of ['serve','actor','incarnation'] as const){const r=await setupBoundWorker(true);try{
+  assert.equal((await r.observe()).availability,'observed');const before=r.starts.length;
+  if(changed==='serve')r.handles.get('serve')!.state=()=> 'exited';
+  else r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,total:1,data:[{...r.actor,
+   ...(changed==='actor'?{workspace_key:'foreign'}:{created_at:'2026-10-09T02:00:00Z'})}]}:undefined);
+  const requests=r.requests.length;assert.equal((await r.observe()).availability,'error');assert.equal(r.starts.length,before);
+  assert.ok(r.requests.slice(requests).every(request=>request.method==='GET'));
+  if(changed==='serve')r.handles.get('serve')!.state=()=> 'running';
+  else r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,total:1,data:[r.actor]}:undefined);
+  await r.release();
+ }finally{await r.cleanup();}}
+});
+
+test('public worker observation holds one reservation and rejects a replacement during discovery',async()=>{
+ const r=await setupBoundWorker(true);let enter!:()=>void,leave!:()=>void,pending:ReturnType<typeof r.observe>|undefined;
+ try{
+  const entered=new Promise<void>(resolve=>{enter=resolve;}),blocked=new Promise<void>(resolve=>{leave=resolve;});
+  r.onCapture(async pid=>{if(pid===1700){enter();await blocked;}});
+  const serve=r.handles.get('serve')!;pending=r.observe();await entered;
+  const requests=r.requests.length,starts=r.starts.length,stops=r.registeredStops.length;
+  await assert.rejects(r.driver.stopOwnedProcess('serve',serve.generation,r.signal));
+  await assert.rejects(r.driver.requestOwnedHttp('api','DELETE','/api/workspaces/E2E-WS',null,r.signal));
+  await assert.rejects(r.driver.launchOwnedCli(['usage'],{},'',true,r.signal));
+  await assert.rejects(r.driver.prepareCleanup(r.signal));
+  assert.equal(r.requests.length,requests);assert.equal(r.starts.length,starts);assert.equal(r.registeredStops.length,stops);
+  (r.driver.processesById as Map<string,OwnedProcess>).set('serve',{...serve,generation:'foreign-replacement'});
+  leave();assert.equal((await pending).availability,'error');
+  (r.driver.processesById as Map<string,OwnedProcess>).set('serve',serve);r.onCapture(async()=>{});
+  assert.equal((await r.release()).availability,'observed');
+ }finally{leave?.();await pending?.catch(()=>{});await r.cleanup();}
+});
+test('public worker observation rejects a foreign lease before current fixture verification',async()=>{
+ const r=await setupBoundWorker(true);try{
+  let verifies=0;const verify=r.fixture.verify;r.fixture.verify=async signal=>{verifies++;await verify(signal);};
+  const captures=r.captures.length,requests=r.requests.length;
+  assert.equal((await r.registry.invoke({id:FixtureWorkersId,version:1,input:{}},{leaseId:'foreign-lease'},r.context)).availability,'error');
+  assert.equal(verifies,0);assert.equal(r.captures.length,captures);assert.equal(r.requests.length,requests);
+  await r.release();
+ }finally{await r.cleanup();}
+});
+
+test('public worker observation rejects changed authority while registration is captured',async()=>{
+ const r=await setupBoundWorker(true);let enter!:()=>void,leave!:()=>void,pending:ReturnType<typeof r.observe>|undefined;
+ const authority=r.fixture.operationAuthority;
+ try{
+  const entered=new Promise<void>(resolve=>{enter=resolve;}),blocked=new Promise<void>(resolve=>{leave=resolve;});
+  r.onCapture(async pid=>{if(pid===1700){enter();await blocked;}});
+  pending=r.observe();await entered;
+  r.fixture.operationAuthority=createFixtureOperationAuthority(r.fixture,{[FixtureWorkersId]:{evidenceClass:'deterministic',effects:[...FixtureWorkersEffects]}});
+  leave();const result=await pending;assert.equal(result.availability,'error');assert.equal(result.data,undefined);
+  r.fixture.operationAuthority=authority;r.onCapture(async()=>{});await r.release();
+ }finally{leave?.();await pending?.catch(()=>{});r.fixture.operationAuthority=authority;await r.cleanup();}
 });
 
 test('registered worker stop preserves the empty-body API actor and separately observes the exact exit',async()=>{
