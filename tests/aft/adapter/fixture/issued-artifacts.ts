@@ -56,7 +56,7 @@ export class IssuedArtifactReader {
    Object.entries(issued!.receipt).every(([key,value])=>receipt[key as keyof Artifact]===value)&&
    issued!.receipt.bytes>0&&issued!.receipt.bytes<=MAX_BYTES);
   let finish!:()=>void;this.active=new Promise<void>(resolve=>{finish=resolve;});
-  let handle:fs.FileHandle|undefined;
+  let handle:fs.FileHandle|undefined,text!:string;
   const matches=(stat:Awaited<ReturnType<fs.FileHandle['stat']>>)=>stat.isFile()&&stat.nlink===1&&
    Object.entries(issued!.stamp).every(([key,value])=>stat[key as keyof typeof stat]===value);
   try{
@@ -72,12 +72,17 @@ export class IssuedArtifactReader {
    check(extra.bytesRead===0&&matches(after)&&matches(named)&&!named.isSymbolicLink()&&digest(bytes)===issued!.receipt.sha256);
    await this.verifyRoots();check(await this.files.realpath(issued!.receipt.id)===issued!.receipt.id);
    signal.throwIfAborted();check(!this.disposed);
-   const text=bytes.toString('utf8');check(Buffer.byteLength(text)===bytes.length&&redact(text,this.secrets())===text);
-   return text;
+   // Fatal decoding rejects invalid sequences even when replacement text has
+   // the same encoded length. Preserve actual U+FFFD and BOM bytes as data.
+   text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);
+   check(Buffer.byteLength(text)===bytes.length&&redact(text,this.secrets())===text);
   }finally{
    try{if(handle){await handle.close();this.handles.delete(handle);}}
    finally{this.active=undefined;finish();}
   }
+  // Closing is awaited and can overlap abort/disposal. Recheck after that
+  // final asynchronous boundary before exposing the retained bytes.
+  signal.throwIfAborted();check(!this.disposed);return text;
  }
  /** Disposal waits an already-started open/read and retries exact descriptors
   * after close failures. Fresh cleanup does not depend on an aborted case. */

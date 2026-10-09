@@ -112,3 +112,10 @@ test('private token-bearing or invalid UTF8 artifacts do not become sanitized pu
   await fs.writeFile(receipt.id,bytes);await s.reader.remember(receipt,bytes);await assert.rejects(s.reader.read(receipt,signal()));
  }finally{await s.remove();}
 });
+
+test('valid replacement characters and BOM data remain byte-exact with fatal UTF8 decoding',async()=>{
+ const s=await setup();try{
+  const text=JSON.stringify({value:'actual \uFFFD \uFEFF data'}),receipt=await s.issue({value:'actual \uFFFD \uFEFF data'});
+  assert.equal(await s.reader.read(receipt,signal()),text);
+ }finally{await s.remove();}
+});
