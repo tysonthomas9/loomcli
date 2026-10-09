@@ -243,3 +243,10 @@ test('failed Codex initialization launches no stack and still cleans the enrolle
 test('Codex probe teardown failure retains exact probe and account lock for retry',async()=>{
  const r=await setup('legacy-real-codex');r.failStop('codex-preflight');try{let lease='';await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal),error=>{assert.ok(error instanceof FixtureError);lease=error.leaseId!;assert.ok(error.remainingOwnedResources.includes('codex-preflight'));return true;});assert.equal(r.starts.length,1);r.failStop('');assert.equal((await r.lifecycle.release(lease,'test-run')).released,true);}finally{await r.cleanup();}
 });
+test('paid task without exact reviewed authority and backend swap fail before CLI launch',async()=>{
+ const r=await setup('legacy-real-codex');try{const a=await r.lifecycle.acquire(r.request,new AbortController().signal);const count=r.runs.length;
+ for(const backend of ['codex','claude'])await assert.rejects(r.driver.launchOwnedCli(['--workspace','E2E-WS','--backend',backend,'task','owned'],{},'',false,new AbortController().signal));
+ assert.equal(r.runs.length,count);assert.equal(r.driver.cliRegistration.env.LOOM_AGENT_MODEL,r.plan.model);assert.equal(r.driver.cliRegistration.env.LOOM_OPENCODE_MODEL,r.plan.model);
+ assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);
+ }finally{await r.cleanup();}
+});

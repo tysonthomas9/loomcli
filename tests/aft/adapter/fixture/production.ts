@@ -9,6 +9,8 @@ import type { ContainerRead } from './container-read.js';
 import { readHttp, type Http } from './host.js';
 import { Json } from '../protocol.js';
 import { prepareRenderer, type PreparedRenderer } from './renderer.js';
+import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
+import type { FixtureAuthorityOwner } from '../authority.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
@@ -117,6 +119,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return '/root/.loom/workspaces/LOCALMODE'; }
   get fixtureSecrets() { return Object.values(this.cloudSecrets); }
+  get executionRouting() { check(this.plan);return fixtureRouting(this.plan!); }
+  createOperationAuthority(owner:FixtureAuthorityOwner) {check(this.plan);return fixtureOperationAuthority(owner,this.plan!);}
   async rendererRuntimeTarget(signal:AbortSignal) {
     signal.throwIfAborted(); await this.inspect({id:this.project,kind:'compose',generation:this.leaseId});
     const target=this.objects.find(object=>object.kind==='container'&&object.service===(this.cloud?'loom-serve':'ui-local'));
@@ -200,6 +204,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   async preflight(plan: FixturePlan, signal: AbortSignal): Promise<void> {
     check(['agents-real-opencode', 'agents-emulator', 'legacy-real-codex-podman'].includes(plan.profile), 'unsupported-capability');
     this.plan = structuredClone(plan); this.profile = plan.profile;
+    fixtureRouting(plan);
     check(safe(plan.model) && (plan.profile === 'agents-emulator' ? plan.model === 'aft/m' : !plan.model.startsWith('aft/')), 'identity-mismatch');
     check(safe(this.config.connection) && /^[a-f0-9]{64}$/.test(this.config.connectionFingerprint));
     for (const directory of [this.config.tempParent, this.config.lockParent, this.config.hostHome]) {
