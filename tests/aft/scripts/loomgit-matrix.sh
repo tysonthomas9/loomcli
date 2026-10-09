@@ -388,7 +388,13 @@ wait-rev)
   # wait-rev <case> <slot> <try> <tries>: bounded under AFT's 120 s run step; the
   # last try fails. Ends with the task in review with the code-review label.
   slot="$1" try="$2" tries="$3"
-  if ! wait_until 100 "revision of $slot" nonempty rev_field "$slot" head_sha 2> /dev/null; then
+  got=""
+  for _ in $(seq 1 50); do # wait_until would fail the step; a non-last try must pass
+    got="$(rev_field "$slot" head_sha 2> /dev/null || true)"
+    [[ -n "$got" ]] && break
+    sleep 2
+  done
+  if [[ -z "$got" ]]; then
     ((try < tries)) && { say "task $slot still running (try $try/$tries)"; exit 0; }
     fail "task $slot recorded no revision"
   fi
