@@ -185,7 +185,13 @@ function containerNative(driver: ComposeFixtureDriver, pinnedExecutable: string)
 export function productionFixtureOptions(implementation: ImplementationPin, implementationSha256: string,
   plans: readonly FixturePlan[], compose: ProductionConfig, host: HostConfig): FixtureProviderOptions {
   return { implementation, implementationSha256, plans,
-    driver: profile => profile.startsWith('agents-') || profile === 'legacy-real-codex-podman' ? new ComposeFixtureDriver(compose) : new HostFixtureDriver(host),
+    driver: profile => {
+      if(profile.startsWith('agents-')||profile==='legacy-real-codex-podman')return new ComposeFixtureDriver(compose);
+      // Production legacy binding requires actual captured store generation.
+      // Reject its missing launcher prerequisite before auth or provisioning.
+      requireFact(host.registeredProcesses,'unsupported-capability','Owned host store process capture is not configured');
+      return new HostFixtureDriver(host);
+    },
     async evidenceAfterFailure(driver) {
       requireFact(driver instanceof ComposeFixtureDriver || driver instanceof HostFixtureDriver, 'ownership-mismatch', 'Fixture driver is not owned');
       return createEvidenceStore(path.join(driver.runtimeRoot, 'evidence'));
