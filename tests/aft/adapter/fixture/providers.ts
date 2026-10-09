@@ -51,6 +51,7 @@ export interface FixtureProviderOptions {
     readApi: ReadTransport; readFiles: ReadTransport; resolveAgent: OwnedFixture['resolveAgent'];
     evidenceStore: EvidenceStore;
     rendererTarget?: OwnedFixture['rendererTarget'];
+    operationAuthority?: OwnedFixture['operationAuthority'];
   }>;
   evidenceAfterFailure(driver: FixtureDriver): Promise<EvidenceStore>;
 }
@@ -224,8 +225,9 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
           return { row, commonDir, native };
         };
       }
+      const route=driver.executionRouting,operationAuthority=driver.createOperationAuthority({leaseId:acquired.lease.id,runId:context.runId,suiteId:context.suiteId,scope:context.scope,caseId:context.caseId,profile:input.profile});
       const rendererTarget=await bindRenderer(isCompose?compose.loom:host.loom,acquired.lease.id,await driver.rendererRuntimeTarget(context.signal),path.join(runtimeRoot,'evidence'),roots);
-      return { evidenceClass: input.profile.includes('real') ? 'real-native' : 'deterministic', roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget,
+      return { evidenceClass: route.evidenceClass, roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget, operationAuthority,
         evidenceStore: await createEvidenceStore(path.join(runtimeRoot, 'evidence')),
         readApi: fixedRead(acquired.apiOrigin), readFiles: fixedRead(acquired.filesOrigin), resolveAgent };
     },

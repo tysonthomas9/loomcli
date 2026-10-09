@@ -24,6 +24,9 @@ export interface FixturePlan {
   engineRevision: Revision; adapterRevision: Revision;
   model: string; maxCases: number; caseCount: number; selectionSha256: string;
   leaseDurationMs: number;
+  // Trusted launcher policy, never acquisition/YAML data. A paid operation
+  // requires exact selected backend/model authority in addition to its lease.
+  liveProvider?: { backend: 'codex'|'claude'|'cursor'|'opencode'; model: string };
 }
 export interface FixtureDriver {
   preflight(plan: FixturePlan, signal: AbortSignal): Promise<void>;
@@ -76,6 +79,7 @@ export class FixtureLifecycle {
     fail(input.runId.length > 0 && input.runId.length <= 512, 'identity-mismatch');
     fail(equal(input.loomRevision, expected.loomRevision) && equal(input.fleetRevision, expected.fleetRevision), 'source-mismatch');
     fail(input.model === expected.model && input.selectionSha256 === expected.selectionSha256, 'identity-mismatch');
+    fail(!expected.liveProvider || expected.liveProvider.model === expected.model, 'identity-mismatch');
     fail(Number.isSafeInteger(input.maxCases) && input.maxCases > 0 && input.maxCases <= expected.maxCases &&
       expected.caseCount > 0 && expected.caseCount <= input.maxCases &&
       (input.profile !== 'agents-real-opencode' || input.maxCases <= 10) &&
