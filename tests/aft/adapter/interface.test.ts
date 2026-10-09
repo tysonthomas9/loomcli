@@ -489,3 +489,26 @@ test('filesystem scalar/array union rejects ambiguity and invalid paths before r
   const foreign=await h.invoke('loom.filesystem.observe',{...fields,rootId:'foreign',relativePath:'safe-run'});
   assert.equal(foreign.availability,'error'); assert.equal(calls,2);
 });
+
+test('canonical bind resolves a later native actor to the exact second repository before observation',async t=>{
+  const {createOwnedWorkspaceRoster}=await import('./workspaces.js');const {fixtureOwnerIdentity}=await import('./authority.js');
+  const h=await setup(t),owner=fixtureOwnerIdentity(h.fixture),original=h.fixture.agents.get('agt_owned')!.row;
+  const fields={identityKind:'native-agent-id' as const,workspaceId:'workspace',repo:original.repo,commonDir:'/owned/source/.git',storeId:'store',storeGeneration:'generation',
+    agentIds:[],agentSources:[],repositories:[{repoName:'alpha',sourceRepoId:'alpha',repo:original.repo,commonDir:'/owned/source/.git',groups:[]},
+      {repoName:'beta',sourceRepoId:'beta',repo:'/owned/beta',commonDir:'/owned/beta/.git',groups:[]}]};
+  const creationReceipt=await h.evidenceStore.retain(JSON.stringify({kind:'workspace-created',...owner,...fields}));
+  h.fixture.ownedWorkspaces=await createOwnedWorkspaceRoster(h.fixture,[{...fields,creationReceipt}],h.evidenceStore);
+  h.fixture.agents.clear();let foreign=true,resolves=0;
+  h.fixture.readWorkspaceAgent=async(workspaceId,agentId)=>({kind:'agent-enrolled',identityKind:'native-agent-id',...owner,workspaceId,agentId,
+    repo:foreign?'/foreign/beta':'/owned/beta',commonDir:'/owned/beta/.git',storeId:'store',storeGeneration:'generation',
+    parentAgentId:null,rootAgentId:null,createdByKind:'user',createdById:'actual-user',revision:1});
+  h.fixture.resolveAgent=async(agentId,_signal,workspaceId)=>{resolves++;assert.equal(workspaceId,'workspace');return {row:AgentRow.parse({...original,agent_id:agentId,repo:'/owned/beta'}),commonDir:'/owned/beta/.git'};};
+  const request={leaseId:'lease',workspaceId:'workspace',agentId:'agt_beta'};
+  const denied=await h.invoke('loom.agent.bind',request);assert.equal(denied.availability,'error');assert.equal(resolves,0);
+  foreign=false;const bound=await h.invoke('loom.agent.bind',request);assert.equal(bound.availability,'observed');
+  assert.equal(z.object({repo:z.string()}).parse(bound.data).repo,'/owned/beta');
+  const observed=await h.invoke('loom.agent.observe',{agent:{fixtureLeaseId:'lease',workspaceId:'workspace',agentId:'agt_beta'}});
+  assert.equal(observed.availability,'observed');assert.equal(observed.provenance.identity.repo,'/owned/beta');
+  assert.equal(z.object({agentId:z.string()}).parse(observed.data).agentId,'agt_beta');
+  assert.equal(resolves,2);
+});
