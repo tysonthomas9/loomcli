@@ -599,6 +599,140 @@ tests:
         intent: Screenshot the running child's current harmless tool or reasoning step and elapsed time (DF2)
       - screenshot: child-repeat-s27
         intent: Match the exact visible child row and its current step to a saved event in that same running turn
+      # Partial geometry authoring only. Four mobile actors and source predicates remain unresolved.
+      - observe:
+          operation: arm
+          kind: dom
+          id: child-tray-geometry
+          sampling: mutation
+          regions:
+            document:
+              locator: {selector: html, first: true}
+              fields:
+                viewport: {view: viewport}
+                theme: {view: attribute, attribute: data-theme}
+            tray:
+              locator: {selector: "[data-testid=agent-tray]", first: true}
+              fields:
+                rect: {view: rect}
+                scroll: {view: scroll-size}
+                open: {view: attribute, attribute: data-open}
+            header:
+              locator:
+                selector: "button[aria-expanded]"
+                first: true
+                within: {selector: "[data-testid=agent-tray]", first: true}
+              fields:
+                rect: {view: rect}
+                hit: {view: center-hit}
+                expanded: {view: attribute, attribute: aria-expanded}
+            list:
+              locator:
+                selector: ul
+                first: true
+                within: {selector: "[data-testid=agent-tray]", first: true}
+              fields:
+                rect: {view: rect}
+                scroll: {view: scroll-size}
+            rows:
+              locator:
+                selector: "li[data-tray-row]"
+                within:
+                  selector: ul
+                  first: true
+                  within: {selector: "[data-testid=agent-tray]", first: true}
+              fields:
+                id: {view: attribute, attribute: data-tray-row}
+                rect: {view: rect}
+                runningCount: {view: count, selector: "[data-status=running]"}
+            child:
+              locator:
+                selector: "li[data-tray-row]"
+                first: true
+                within:
+                  selector: ul
+                  first: true
+                  within: {selector: "[data-testid=agent-tray]", first: true}
+              fields:
+                id: {view: attribute, attribute: data-tray-row}
+                rect: {view: rect}
+                runningCount: {view: count, selector: "[data-status=running]"}
+            childLink:
+              locator:
+                selector: "a[href]"
+                first: true
+                within:
+                  selector: "li[data-tray-row]"
+                  first: true
+                  within:
+                    selector: ul
+                    first: true
+                    within: {selector: "[data-testid=agent-tray]", first: true}
+              fields:
+                hit: {view: center-hit}
+            headerColors:
+              locator:
+                selector: "[data-agent-color]"
+                within:
+                  selector: "button[aria-expanded]"
+                  first: true
+                  within: {selector: "[data-testid=agent-tray]", first: true}
+              fields:
+                color: {view: attribute, attribute: data-agent-color}
+            moreCandidates:
+              locator:
+                selector: "div[aria-hidden=true]"
+                within: {selector: "[data-testid=agent-tray]", first: true}
+              fields:
+                text: {view: text}
+            composer:
+              locator: {selector: 'section[aria-label="Agent chat"] form[data-chat-composer-form]', first: true}
+              fields:
+                rect: {view: rect}
+            nav:
+              locator: {selector: 'nav[aria-label="Primary"]', first: true}
+              fields:
+                rect: {view: rect}
+                position: {view: computed-style, property: position}
+          maxSamples: 1000
+          maxNodes: 1000
+          maxBytes: 4000000
+          withinMs: 30000
+        resolve:
+          /observe/regions/child/locator/selector:
+            op: concat
+            args:
+              - literal: 'li[data-tray-row="'
+              - ref: {binding: childId}
+              - literal: '"]'
+          /observe/regions/childLink/locator/within/selector:
+            op: concat
+            args:
+              - literal: 'li[data-tray-row="'
+              - ref: {binding: childId}
+              - literal: '"]'
+        intent: Capture source-shaped tray geometry atomically; mobile actors and predicates remain pending
+      - observe:
+          operation: freeze
+          id: child-tray-geometry
+          as: childTrayGeometry
+          phase: 1
+        intent: Retain the actual same-callback regions without inferring missing mobile proof
+      - assert:
+          all:
+            - op: eq
+              args: [{ref: {binding: childTrayGeometry, pointer: /complete}}, {literal: true}]
+            - op: eq
+              args: [{ref: {binding: childTrayGeometry, pointer: /gaps}}, {literal: 0}]
+            - op: eq
+              args: [{ref: {binding: childTrayGeometry, pointer: /overflow}}, {literal: false}]
+            - op: eq
+              args: [{ref: {binding: childTrayGeometry, pointer: /reset}}, {literal: false}]
+            - op: eq
+              args: [{ref: {binding: childTrayGeometry, pointer: /expired}}, {literal: false}]
+        intent: Reject incomplete geometry evidence; this is not the original mobile predicate
+      - observe: {operation: close, id: child-tray-geometry}
+        intent: Close the exact geometry observer
       - screenshot: child-repeat-s28
         intent: Capture numeric bounds and named screenshots of the authentic child tray at both mobile widths and themes
       - await:

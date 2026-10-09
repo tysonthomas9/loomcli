@@ -13791,7 +13791,7 @@
       ],
       "id": "child-repeat",
       "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
-      "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112",
+      "sha256": "f17277bd00aff3b5147f862deac6155d2204279160d5c15971c83396dd75ba04",
       "skipped": true,
       "oldSteps": [
         {
@@ -15124,19 +15124,76 @@
             {
               "gap": "pending-child-repeat-27",
               "reason": "Frozen executable helper or predicate requires explicit declarative translation; original retained in mapping; no passing substitute authored."
+            },
+            {
+              "gap": "mobile-source-actors-and-predicates-not-preserved",
+              "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+              "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+              "sourceLines": {
+                "start": 800,
+                "end": 991
+              },
+              "required": "Four dark/light x390/557x844 captures after actual same child same-running-turn API/saved activity checks; exact tray theme/header/rows/clipping/More/color/hit/1px predicates, named mobile screenshots and original viewport/theme restoration.",
+              "canonicalAttempt": "fc67 canonical observe arm(dom) captures first scoped tray/header/list/composer/nav/Open, all source rows, public geometry fields atomically; raw loader compatibility positive on exact unaccepted-whole fc67 and negative on maintained584. No geometry provider or actor executed.",
+              "missingObservation": "New capture is at current staged viewport; it does not establish the required four mobile contexts, actual theme-button condition/restoration, pre/post current-turn facts, source arithmetic/row projection/More parsing or predicates. ValueSchema has no arithmetic or structured row projection; separate concrete composition review needed. Original four named screenshots are still pending, desktop child-repeat-s28 is not a replacement."
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                59
+              ],
+              "line": 603,
+              "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+            },
+            {
+              "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                60
+              ],
+              "line": 715,
+              "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+            },
+            {
+              "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                61
+              ],
+              "line": 721,
+              "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+            },
+            {
+              "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                62
+              ],
+              "line": 734,
+              "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              59
+              63
             ],
-            "line": 602
+            "line": 736
           }
         },
         {
@@ -15169,9 +15226,9 @@
                 "tests",
                 0,
                 "steps",
-                60
+                64
               ],
-              "line": 604
+              "line": 738
             },
             {
               "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
@@ -15179,9 +15236,9 @@
                 "tests",
                 0,
                 "steps",
-                61
+                65
               ],
-              "line": 621
+              "line": 755
             },
             {
               "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
@@ -15189,9 +15246,9 @@
                 "tests",
                 0,
                 "steps",
-                62
+                66
               ],
-              "line": 649
+              "line": 783
             }
           ],
           "checkpoint": {
@@ -15200,9 +15257,9 @@
               "tests",
               0,
               "steps",
-              63
+              67
             ],
-            "line": 666
+            "line": 800
           }
         },
         {
@@ -15240,9 +15297,9 @@
               "tests",
               0,
               "steps",
-              64
+              68
             ],
-            "line": 668
+            "line": 802
           }
         },
         {
@@ -15278,9 +15335,9 @@
               "tests",
               0,
               "steps",
-              65
+              69
             ],
-            "line": 670
+            "line": 804
           },
           "selectedPredicateRequirements": {
             "helperId": "campaign:tests/aft/scripts/coverage-children-activity.py",
@@ -15334,9 +15391,9 @@
               "tests",
               0,
               "steps",
-              66
+              70
             ],
-            "line": 672
+            "line": 806
           },
           "selectedPredicateRequirements": {
             "helperId": "campaign:tests/aft/scripts/coverage-children-activity.py",
@@ -15378,9 +15435,9 @@
                 "tests",
                 0,
                 "steps",
-                67
+                71
               ],
-              "line": 674
+              "line": 808
             }
           ],
           "checkpoint": {
@@ -15389,9 +15446,9 @@
               "tests",
               0,
               "steps",
-              68
+              72
             ],
-            "line": 676
+            "line": 810
           }
         },
         {
@@ -15424,9 +15481,9 @@
                 "tests",
                 0,
                 "steps",
-                69
+                73
               ],
-              "line": 678
+              "line": 812
             }
           ],
           "checkpoint": {
@@ -15435,9 +15492,9 @@
               "tests",
               0,
               "steps",
-              70
+              74
             ],
-            "line": 695
+            "line": 829
           }
         },
         {
@@ -15473,9 +15530,9 @@
               "tests",
               0,
               "steps",
-              71
+              75
             ],
-            "line": 697
+            "line": 831
           },
           "selectedPredicateRequirements": {
             "helperId": "campaign:tests/aft/scripts/coverage-children-activity.py",
@@ -15519,9 +15576,9 @@
                 "tests",
                 0,
                 "steps",
-                72
+                76
               ],
-              "line": 699
+              "line": 833
             }
           ],
           "checkpoint": {
@@ -15530,9 +15587,9 @@
               "tests",
               0,
               "steps",
-              73
+              77
             ],
-            "line": 710
+            "line": 844
           }
         },
         {
@@ -15568,9 +15625,9 @@
               "tests",
               0,
               "steps",
-              74
+              78
             ],
-            "line": 712
+            "line": 846
           }
         },
         {
@@ -15600,9 +15657,9 @@
                 "tests",
                 0,
                 "steps",
-                75
+                79
               ],
-              "line": 714
+              "line": 848
             }
           ],
           "checkpoint": {
@@ -15611,9 +15668,9 @@
               "tests",
               0,
               "steps",
-              76
+              80
             ],
-            "line": 716
+            "line": 850
           }
         },
         {
@@ -15651,9 +15708,9 @@
                 "tests",
                 0,
                 "steps",
-                77
+                81
               ],
-              "line": 718
+              "line": 852
             },
             {
               "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
@@ -15661,9 +15718,9 @@
                 "tests",
                 0,
                 "steps",
-                78
+                82
               ],
-              "line": 739
+              "line": 873
             },
             {
               "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
@@ -15671,9 +15728,9 @@
                 "tests",
                 0,
                 "steps",
-                79
+                83
               ],
-              "line": 748
+              "line": 882
             }
           ],
           "checkpoint": {
@@ -15682,9 +15739,9 @@
               "tests",
               0,
               "steps",
-              80
+              84
             ],
-            "line": 756
+            "line": 890
           }
         },
         {
@@ -15720,9 +15777,9 @@
               "tests",
               0,
               "steps",
-              81
+              85
             ],
-            "line": 758
+            "line": 892
           }
         },
         {
@@ -15758,9 +15815,9 @@
               "tests",
               0,
               "steps",
-              82
+              86
             ],
-            "line": 760
+            "line": 894
           }
         },
         {
@@ -15796,9 +15853,9 @@
               "tests",
               0,
               "steps",
-              83
+              87
             ],
-            "line": 762
+            "line": 896
           }
         },
         {
@@ -15831,9 +15888,9 @@
                 "tests",
                 0,
                 "steps",
-                84
+                88
               ],
-              "line": 764
+              "line": 898
             },
             {
               "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
@@ -15841,9 +15898,9 @@
                 "tests",
                 0,
                 "steps",
-                85
+                89
               ],
-              "line": 781
+              "line": 915
             }
           ],
           "checkpoint": {
@@ -15852,9 +15909,9 @@
               "tests",
               0,
               "steps",
-              86
+              90
             ],
-            "line": 798
+            "line": 932
           }
         },
         {
@@ -15892,9 +15949,9 @@
               "tests",
               0,
               "steps",
-              87
+              91
             ],
-            "line": 800
+            "line": 934
           }
         },
         {
@@ -15930,9 +15987,9 @@
               "tests",
               0,
               "steps",
-              88
+              92
             ],
-            "line": 802
+            "line": 936
           },
           "selectedPredicateRequirements": {
             "helperId": "campaign:tests/aft/scripts/coverage-children-activity.py",
@@ -15995,9 +16052,9 @@
               "tests",
               0,
               "steps",
-              89
+              93
             ],
-            "line": 804
+            "line": 938
           },
           "selectedPredicateRequirements": {
             "helperId": "campaign:tests/aft/scripts/coverage-children-activity.py",
@@ -16049,9 +16106,9 @@
                 "tests",
                 0,
                 "steps",
-                90
+                94
               ],
-              "line": 806
+              "line": 940
             },
             {
               "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
@@ -16059,9 +16116,9 @@
                 "tests",
                 0,
                 "steps",
-                91
+                95
               ],
-              "line": 819
+              "line": 953
             },
             {
               "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
@@ -16069,9 +16126,9 @@
                 "tests",
                 0,
                 "steps",
-                92
+                96
               ],
-              "line": 851
+              "line": 985
             },
             {
               "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
@@ -16079,9 +16136,9 @@
                 "tests",
                 0,
                 "steps",
-                93
+                97
               ],
-              "line": 888
+              "line": 1022
             }
           ],
           "checkpoint": {
@@ -16090,9 +16147,9 @@
               "tests",
               0,
               "steps",
-              94
+              98
             ],
-            "line": 936
+            "line": 1070
           }
         },
         {
@@ -16122,9 +16179,9 @@
                 "tests",
                 0,
                 "steps",
-                95
+                99
               ],
-              "line": 938
+              "line": 1072
             }
           ],
           "checkpoint": {
@@ -16133,9 +16190,9 @@
               "tests",
               0,
               "steps",
-              96
+              100
             ],
-            "line": 940
+            "line": 1074
           }
         },
         {
@@ -16168,9 +16225,9 @@
                 "tests",
                 0,
                 "steps",
-                97
+                101
               ],
-              "line": 942
+              "line": 1076
             }
           ],
           "checkpoint": {
@@ -16179,9 +16236,9 @@
               "tests",
               0,
               "steps",
-              98
+              102
             ],
-            "line": 959
+            "line": 1093
           }
         },
         {
@@ -16217,9 +16274,9 @@
               "tests",
               0,
               "steps",
-              99
+              103
             ],
-            "line": 961
+            "line": 1095
           },
           "selectedPredicateRequirements": {
             "helperId": "campaign:tests/aft/scripts/coverage-children-activity.py",
@@ -16282,9 +16339,9 @@
               "tests",
               0,
               "steps",
-              100
+              104
             ],
-            "line": 963
+            "line": 1097
           }
         }
       ],
@@ -26868,6 +26925,99 @@
         "negativeAdmissionRequirementsRetained": true,
         "existingAdditionalSourceObligations": "selectedBranchReview.additionalSourceObligations already retains actual row/parent/lead/container/physical Git contracts; imported agent-flows-ownership.sh closure still unenumerated.",
         "acceptance": "No new YAML or preservation/runtime credit."
+      },
+      "geometryCompatibilityAuthoring": {
+        "at": "2026-10-09T13:25:29.041596+00:00",
+        "scope": "Four passive canonical geometry steps only,partial authoring compatibility,original mobile source step27 remains unresolved",
+        "previousRawSha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112",
+        "rawSha256": "f17277bd00aff3b5147f862deac6155d2204279160d5c15971c83396dd75ba04",
+        "locations": [
+          {
+            "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              59
+            ],
+            "line": 603,
+            "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+          },
+          {
+            "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              60
+            ],
+            "line": 715,
+            "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+          },
+          {
+            "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              61
+            ],
+            "line": 721,
+            "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+          },
+          {
+            "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              62
+            ],
+            "line": 734,
+            "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+          }
+        ],
+        "engineDelta": "fc67a57f1cd4f0c92008cb20a2f957646bb872a3",
+        "wholeEngineHeadApproved": false,
+        "maintainedEngine": "58470a6df949158d72aa9500fe515ce3c5721be5",
+        "sourceCallback": {
+          "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+          "sha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+          "startLine": 921,
+          "endLine": 964
+        },
+        "selectors": {
+          "first": [
+            "tray",
+            "header within first tray",
+            "list within first tray",
+            "child first exact saved ID within first list",
+            "Open within first exact child",
+            "composer",
+            "nav"
+          ],
+          "all": [
+            "li[data-tray-row] within first list",
+            "header colors within first header",
+            "More candidate divs within first tray"
+          ]
+        },
+        "sourcePredicateCredit": 0,
+        "runtime": 0,
+        "originalStepCoverage": "unresolved",
+        "newGuard": "Only rejects incomplete observer evidence; does not replace mobile_geometry_ok",
+        "gaps": {
+          "gap": "mobile-source-actors-and-predicates-not-preserved",
+          "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+          "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+          "sourceLines": {
+            "start": 800,
+            "end": 991
+          },
+          "required": "Four dark/light x390/557x844 captures after actual same child same-running-turn API/saved activity checks; exact tray theme/header/rows/clipping/More/color/hit/1px predicates, named mobile screenshots and original viewport/theme restoration.",
+          "canonicalAttempt": "fc67 canonical observe arm(dom) captures first scoped tray/header/list/composer/nav/Open, all source rows, public geometry fields atomically; raw loader compatibility positive on exact unaccepted-whole fc67 and negative on maintained584. No geometry provider or actor executed.",
+          "missingObservation": "New capture is at current staged viewport; it does not establish the required four mobile contexts, actual theme-button condition/restoration, pre/post current-turn facts, source arithmetic/row projection/More parsing or predicates. ValueSchema has no arithmetic or structured row projection; separate concrete composition review needed. Original four named screenshots are still pending, desktop child-repeat-s28 is not a replacement."
+        }
       }
     },
     {
@@ -53958,6 +54108,11 @@
       "native": "58696995caf6ae64c2c6d16e1cd1305483702392",
       "consumption": "authoring only; coherent integrated core SHA and raw/public runner validation pending"
     },
-    "approvedScalarFilesystem": "36bf343fa7a4a850898e47cd8da4e7055d349b31"
+    "approvedScalarFilesystem": "36bf343fa7a4a850898e47cd8da4e7055d349b31",
+    "geometryCompatibility": {
+      "engine": "fc67a57f1cd4f0c92008cb20a2f957646bb872a3",
+      "wholeHeadAccepted": false,
+      "scope": "Only parent-approved separate geometry delta used in isolated loader diagnostics; no maintained pin change or runtime authority credit."
+    }
   }
 }

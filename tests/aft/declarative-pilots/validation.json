@@ -871,7 +871,7 @@
     "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
   },
   "currentPublication": {
-    "at": "2026-10-09T10:41:27.265963+00:00",
+    "at": "2026-10-09T13:25:29.041596+00:00",
     "status": "in-progress reviewable draft; not preservation-complete",
     "taskNoteId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
     "branch": "codex/aft-declarative-pilots",
@@ -883,7 +883,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
-        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112"
+        "sha256": "f17277bd00aff3b5147f862deac6155d2204279160d5c15971c83396dd75ba04"
       },
       {
         "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "3345ce062952bb3dcb7f46a4962040466604fac9d46a6877714042eafe155baf"
+        "sha256": "f7e7655413bf5587ede2dcb4901fc57008fff31dc0c7428cc42b8e18100c8c81"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -913,22 +913,26 @@
       "individualExpandedStepSchema": {
         "count": 699,
         "errors": 0,
-        "credit": "individual schema only"
+        "credit": "individual schema only",
+        "scope": "Historical699 steps before new4geometry; new fullchild loader admitted on isolatedfc67 only. No revised699total claimed."
       },
       "latestFullLoaderAttempt": {
-        "engine": "58470a6df949158d72aa9500fe515ce3c5721be5",
+        "engine": "fc67a57f1cd4f0c92008cb20a2f957646bb872a3",
+        "wholeEngineHeadApproved": false,
         "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
-        "scope": "isolated source-built admission-only; not maintained consumer pin adoption",
-        "fullAdmissionPassed": 5,
-        "boundedTimeouts": 0,
+        "scope": "One changed child raw suite,isolated canonical geometry authored compatibility only",
+        "fullAdmissionPassed": 1,
+        "maintained584RejectedChangedChild": 1,
+        "other4RawByteUnchangedHistorical584Admissions": 4,
         "effects": 0,
         "runtimeStarted": 0,
-        "selectionBasis": "NEW e34d public selection/per-version pin+env; historical selection not recovered",
-        "receipt": "accepted584RawAdmissionDiagnostic"
+        "receipt": "geometryCompatibilityAuthoring",
+        "selectionBasis": "NEW098ab03f actual changed5file selection+perversion actualpin/publicenv; not e34d or historical recovery"
       },
-      "approvedCoherentConsumer": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+      "approvedCoherentConsumer": "49d1c50f83fb5b0726bc3ef8d61b88b1b2f94ee4",
       "f377PilotChecksObtained": true,
-      "f377Note": "Historical c71/f377 source-shaped timeout profile retained separately. New parent-approved584 source-built isolated f377 raw admission completes all5 unchanged files with no effects/runtime. No maintained root pin or preservation claim."
+      "f377Note": "Historical c71/f377 source-shaped timeout profile retained separately. New parent-approved584 source-built isolated f377 raw admission completes all5 unchanged files with no effects/runtime. No maintained root pin or preservation claim.",
+      "maintainedEngine": "58470a6df949158d72aa9500fe515ce3c5721be5"
     },
     "sourceMapping": {
       "originalSteps": 207,
@@ -944,7 +948,8 @@
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
-      "all5 raw admission now completed on approved584 isolated source-built f377; maintained consumer adoption/public runtime chains remain unverified",
+      "Changed child geometry authored4steps has isolated unaccepted-wholefc admission only; maintained584 rejects current child. Full mobile case source predicates/actors unpreserved; source step27 remains unresolved.",
+      "Prior five exact raw hashes admitted on isolated584/f377; accepted maintained49d/584 available. New child hash has no maintained admission and public runtime chains remain unverified",
       "Files repeated identity predicates and exact helper branch denominator uncovered",
       "Stop whole30s chain bound, tool trim/failed normalization, Respond no-request history, recovery correlation and native desc-assistant/first-truthy/full200-prefix uncovered",
       "child synchronous pre-Send/reactivation/native/source predicates require final reviewed ledger and provisioning",
@@ -2329,5 +2334,258 @@
     "fullPreservationAccepted": false,
     "allFiveYamlAnd584AdmissionReceiptsUnchanged": true,
     "runtime": 0
+  },
+  "geometryCompatibilityAuthoring": {
+    "at": "2026-10-09T13:25:29.041596+00:00",
+    "scope": "Four passive canonical geometry steps only,partial authoring compatibility,original mobile source step27 remains unresolved",
+    "previousRawSha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112",
+    "rawSha256": "f17277bd00aff3b5147f862deac6155d2204279160d5c15971c83396dd75ba04",
+    "locations": [
+      {
+        "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          59
+        ],
+        "line": 603,
+        "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+      },
+      {
+        "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          60
+        ],
+        "line": 715,
+        "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+      },
+      {
+        "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          61
+        ],
+        "line": 721,
+        "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+      },
+      {
+        "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          62
+        ],
+        "line": 734,
+        "coverage": "authored-compatibility-only; runtime unrun; source mobile predicate unresolved"
+      }
+    ],
+    "engineDelta": "fc67a57f1cd4f0c92008cb20a2f957646bb872a3",
+    "wholeEngineHeadApproved": false,
+    "maintainedEngine": "58470a6df949158d72aa9500fe515ce3c5721be5",
+    "sourceCallback": {
+      "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+      "sha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+      "startLine": 921,
+      "endLine": 964
+    },
+    "selectors": {
+      "first": [
+        "tray",
+        "header within first tray",
+        "list within first tray",
+        "child first exact saved ID within first list",
+        "Open within first exact child",
+        "composer",
+        "nav"
+      ],
+      "all": [
+        "li[data-tray-row] within first list",
+        "header colors within first header",
+        "More candidate divs within first tray"
+      ]
+    },
+    "sourcePredicateCredit": 0,
+    "runtime": 0,
+    "originalStepCoverage": "unresolved",
+    "newGuard": "Only rejects incomplete observer evidence; does not replace mobile_geometry_ok",
+    "gaps": {
+      "gap": "mobile-source-actors-and-predicates-not-preserved",
+      "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+      "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+      "sourceLines": {
+        "start": 800,
+        "end": 991
+      },
+      "required": "Four dark/light x390/557x844 captures after actual same child same-running-turn API/saved activity checks; exact tray theme/header/rows/clipping/More/color/hit/1px predicates, named mobile screenshots and original viewport/theme restoration.",
+      "canonicalAttempt": "fc67 canonical observe arm(dom) captures first scoped tray/header/list/composer/nav/Open, all source rows, public geometry fields atomically; raw loader compatibility positive on exact unaccepted-whole fc67 and negative on maintained584. No geometry provider or actor executed.",
+      "missingObservation": "New capture is at current staged viewport; it does not establish the required four mobile contexts, actual theme-button condition/restoration, pre/post current-turn facts, source arithmetic/row projection/More parsing or predicates. ValueSchema has no arithmetic or structured row projection; separate concrete composition review needed. Original four named screenshots are still pending, desktop child-repeat-s28 is not a replacement."
+    },
+    "evidenceClass": "schema/admission-only deterministic read-only checks; no observer runtime or mobile preservation",
+    "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+    "assets": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/geometry-preparation.json",
+        "sha256": "cf6c3075398dc6c5067ef609120826195fd03bbb66787f6c8ed67c82bfcf7655",
+        "bytes": 440
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/authored-fragment.yaml",
+        "sha256": "515bb883506eaf51e90a6f437578090419c1a1c7eece0e77eab23b099168ea67",
+        "bytes": 5427
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/diagnostic-selection.json",
+        "sha256": "098ab03f2dcfeafae6d09fd3922b12382ed3268e2857dcad6d367ac55b1b55d6",
+        "bytes": 1653
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/public-env-basis.json",
+        "sha256": "f3c77eebcf3b207432c32374e1078001b982ab4d96ce0170cc932e056537ef67",
+        "bytes": 1249
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/construct-public-env.mjs",
+        "sha256": "1e2f78078974e4fc7761738b19e7da00526161aa6313fdb87e79ed930c615f46",
+        "bytes": 1723
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/raw-compatibility.mjs",
+        "sha256": "633ccb6f7eddac2baef8150b8aa638e8c41508744c73c5cac7eef1d2df5f7c8d",
+        "bytes": 4156
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/584-public-env.json",
+        "sha256": "4243bb9b78e674ce30c06da0ba5785313363966ba638aec76c6357aefebd8ccd",
+        "bytes": 439164
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/fc67-public-env.json",
+        "sha256": "39878e29c1e0eb7c0bcfa8609dc21d12eec01d55bcb31ba2971bdcbf3499d23c",
+        "bytes": 439159
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/584-child-receipt.json",
+        "sha256": "43d35dc5506e653c2b9caabc6f6db9cd4f992cab6e8ce6abfb552f7066f08cfe",
+        "bytes": 3393
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/fc67-child-receipt.json",
+        "sha256": "1c863e70e90ad70641100d591e8fc7d9e71974d9527afc34278c6bd319a5c293",
+        "bytes": 1665
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/installed-engine-receipt.json",
+        "sha256": "0a9a770041b0e73cfca043e24815537430508cfef91d28365efe6f252d75e51b",
+        "bytes": 15542
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/npm-ci.log",
+        "sha256": "cda6a23caa43e6d5fbfb1c537b2d8ffa5481ab5603ea273e43193718370e1d2a",
+        "bytes": 166
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/projections-ci.log",
+        "sha256": "1b46ed15949f1c0e3434fb7320d5052fb6df120fbc98827d200f41a79bebebf2",
+        "bytes": 28
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/build.log",
+        "sha256": "b5644a9bcf54fb717ff2d7b31c12159c4da5d6424ddb28a18cc286f5199c7226",
+        "bytes": 51
+      }
+    ],
+    "receipts": {
+      "584-child-receipt.json": {
+        "purpose": "NEW passive geometry authoring compatibility only; no mobile preservation/runtime or whole-fc approval",
+        "engineHead": "58470a6df949158d72aa9500fe515ce3c5721be5",
+        "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+        "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter",
+        "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+        "canonicalModuleResolutionVerified": true,
+        "selectionSha256": "098ab03f2dcfeafae6d09fd3922b12382ed3268e2857dcad6d367ac55b1b55d6",
+        "envFileSha256": "4243bb9b78e674ce30c06da0ba5785313363966ba638aec76c6357aefebd8ccd",
+        "envSha256": "ad34be6343af022f7186bd49b89a3953baced925d7e44ab8dbcf4dfc0c1382eb",
+        "pinSha256": "24ae9f08d26aeb72298a3e69e852c3d438037458e39906f41ebe270f3d94d9a1",
+        "manifestFiles": 2362,
+        "uniqueManifestBytes": 8887163,
+        "providers": 22,
+        "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml",
+        "rawSha256": "f17277bd00aff3b5147f862deac6155d2204279160d5c15971c83396dd75ba04",
+        "rawBytes": 39353,
+        "verifyCalls": 1,
+        "verifyReads": 2362,
+        "verifyBytes": 8887163,
+        "verifyMs": 956.2362910000002,
+        "elapsedMs": 990.062042,
+        "effects": 0,
+        "runtimeStarted": 0,
+        "status": "REJECTED canonical unchanged raw suite",
+        "guardMs": 60000,
+        "errors": [
+          "invalid suite /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:603:9: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), maxEntries: Required\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:605:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), kind: Invalid literal value, expected \"resources\"\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:607:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"sampling\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:608:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"regions\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:697:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxSamples\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:698:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxNodes\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs"
+        ],
+        "rawUnchangedAfter": true
+      },
+      "fc67-child-receipt.json": {
+        "purpose": "NEW passive geometry authoring compatibility only; no mobile preservation/runtime or whole-fc approval",
+        "engineHead": "fc67a57f1cd4f0c92008cb20a2f957646bb872a3",
+        "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+        "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/tests/aft/adapter",
+        "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/geometry-compatibility-new/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+        "canonicalModuleResolutionVerified": true,
+        "selectionSha256": "098ab03f2dcfeafae6d09fd3922b12382ed3268e2857dcad6d367ac55b1b55d6",
+        "envFileSha256": "39878e29c1e0eb7c0bcfa8609dc21d12eec01d55bcb31ba2971bdcbf3499d23c",
+        "envSha256": "c33ac2eb91facb52d071f80521e8befc1e6c249e721906dc87a550b092485d83",
+        "pinSha256": "d84abd8a1786ee7d49d98566b34abc6c8b64e1789ee08b5a0c570d0685594756",
+        "manifestFiles": 2362,
+        "uniqueManifestBytes": 8887163,
+        "providers": 22,
+        "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml",
+        "rawSha256": "f17277bd00aff3b5147f862deac6155d2204279160d5c15971c83396dd75ba04",
+        "rawBytes": 39353,
+        "verifyCalls": 115,
+        "verifyReads": 2362,
+        "verifyBytes": 8887163,
+        "verifyMs": 766.0267130000038,
+        "elapsedMs": 834.7014999999999,
+        "effects": 0,
+        "runtimeStarted": 0,
+        "status": "ADMITTED canonical unchanged raw suite",
+        "guardMs": 60000,
+        "loadedSuites": 1,
+        "cases": [
+          {
+            "name": "repeated child attempts keep two keyed results and one final Lead summary",
+            "skipped": true,
+            "declaredSteps": 105
+          }
+        ],
+        "rawUnchangedAfter": true
+      }
+    },
+    "installedEmittedFileMatches": 114,
+    "singleCanonicalModuleVerified": true,
+    "newSelectionSha256": "098ab03f2dcfeafae6d09fd3922b12382ed3268e2857dcad6d367ac55b1b55d6",
+    "old584AllFiveAdmissionPreserved": "Old five receipts remain byte/hash-bound to old child4acc; current childf172 no longer accepted by584. Other4rawfiles unchanged. No old receipt rewritten or rerun counted."
+  },
+  "maintainedConsumerStatusUpdate": {
+    "at": "2026-10-09T13:25:29.041596+00:00",
+    "head": "49d1c50f83fb5b0726bc3ef8d61b88b1b2f94ee4",
+    "tree": "8b53e87a2f46db5d3a293d0444bec49d43592770",
+    "engine": "58470a6df949158d72aa9500fe515ce3c5721be5",
+    "receipt": {
+      "path": "/private/tmp/loom-declarative-aft-276315dd/tests/aft/adapter/.adapter-dev/engine-584-fixed-combined-receipt.json",
+      "sha256": "deb58ff4832cbc6285c06e2b3f312b743a837c64f44aee7a4fca998ce92aff18",
+      "bytes": 24298
+    },
+    "verifiedNow": "Actual core HEAD/tree/dependency and receipt SHAdeb58ff4 verified read-only; no combined tests rerun by pilot. Parent accepted421TS/12Python+type/build/lint. Nativeb1c4/terminal8afb scoped approval confirmed by parent; actual runtime factories/Host/producers remain open.",
+    "evidenceBoundary": "Deterministic maintained consumer acceptance only; no geometry wholehead/fullmotion/actual browser/provider/campaign acceptance. Frozen prior receipts remain unchanged."
   }
 }
