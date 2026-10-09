@@ -7,7 +7,7 @@ import { ComposeFixtureDriver, type ProductionConfig, type ProcessRequest } from
 import { FixtureLifecycle, FixtureError, type FixturePlan } from './lifecycle.js';
 import { materializeRenderer } from './renderer-fixtures.test.js';
 const hash = (v: string | Uint8Array) => createHash('sha256').update(v).digest('hex');
-async function setup(profile = 'agents-real-opencode') {
+async function setup(profile = 'agents-real-opencode',fixtureRunId?:string) {
  const root = await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname), 'test-artifacts-'));
  const source = path.join(root,'source'), build = path.join(root,'build');
  for (const dir of [source,build,path.join(root,'home'),path.join(root,'locks')]) await fs.mkdir(dir);
@@ -33,7 +33,7 @@ async function setup(profile = 'agents-real-opencode') {
  }
  revision.buildManifestSha256=digest(be);
  const connection={Identity:'/owned/key',Name:'owned',URI:'ssh://owned'};
- const config:ProductionConfig={loom:registered,fleet:registered,engine:registered,adapter:registered,tempParent:root,lockParent:path.join(root,'locks'),hostHome:path.join(root,'home'),toolPath:'/pinned/toolchain',connection:'owned',connectionFingerprint:hash(JSON.stringify([connection])),minimumFreeBytes:1,attestedImages:true,emulatorBinary:{path:path.join(build,'emulator'),sha256:hash(elf)},modecloud:{codexAuthRoot:auth,frontendDist:frontend}};
+ const config:ProductionConfig={loom:registered,fleet:registered,engine:registered,adapter:registered,tempParent:root,lockParent:path.join(root,'locks'),hostHome:path.join(root,'home'),toolPath:'/pinned/toolchain',connection:'owned',connectionFingerprint:hash(JSON.stringify([connection])),minimumFreeBytes:1,fixtureRunId,attestedImages:true,emulatorBinary:{path:path.join(build,'emulator'),sha256:hash(elf)},modecloud:{codexAuthRoot:auth,frontendDist:frontend}};
  const plan:FixturePlan={profile,loomRevision:revision,fleetRevision:revision,engineRevision:revision,adapterRevision:revision,model:profile==='agents-emulator'?'aft/m':'openai/m',maxCases:10,caseCount:1,selectionSha256:'d'.repeat(64),leaseDurationMs:10000};
  let onExec:((request:ProcessRequest)=>Promise<void>)|undefined;
  const calls:ProcessRequest[]=[]; let project='',up=false,change='',port=5000,serial=0;
@@ -47,7 +47,10 @@ async function setup(profile = 'agents-real-opencode') {
   if(a.includes('image')) return JSON.stringify([{Id:image}]);
   if(a.includes('compose')) { if(a.includes('up')) {up=true;if(change==='fail-up')throw new Error('Bearer private-up-token');} if(a.includes('down')) {if(change==='fail-down')throw new Error('secret=private-down-token');up=false;}return ''; }
   if(a.includes('logs'))return change==='embedded'?'embedded fleet-db started':'opened cloud fleet-db client';
-  if(a.includes('exec')){await onExec?.(r);return a.at(-1)?.includes('controlled-codex-preflight') ? JSON.stringify({ready:true,cleaned:change!=='probe-leak',complete:change!=='probe-incomplete'}) : JSON.stringify({sourceRepo:'/work/source-repos/aft-repo'});}
+  if(a.includes('exec')){await onExec?.(r);if(a.at(-1)?.includes('runtime-identity')){
+    const override=JSON.parse(await fs.readFile(path.join(driver.runtimeRoot,'compose.json'),'utf8'));
+    const service=override.services[cloud?'loom-serve':'loom-local'];return JSON.stringify({runId:change==='wrong-run-id'?'foreign-run':service.environment.RUN_ID,leaseId:change==='wrong-run-lease'?'foreign-lease':service.environment.AFT_FIXTURE_LEASE_ID});
+  }return a.at(-1)?.includes('controlled-codex-preflight') ? JSON.stringify({ready:true,cleaned:change!=='probe-leak',complete:change!=='probe-incomplete'}) : JSON.stringify({sourceRepo:'/work/source-repos/aft-repo'});}
   if(a.includes('ps')) return up?services.map(s=>`container-${s}`).join('\n'):'';
   if(a.includes('ls')) return up?(a.includes('volume')?'volume-owned':'network-owned'):'';
   if(a.includes('inspect')) {
@@ -144,5 +147,23 @@ test('unregistered model generations deny every mutation including omitted gener
  assert.equal(r.calls.filter(c=>c.args.includes('exec')).length,before);
  await r.driver.requestOwnedHttp('fake-model','GET','/__requests',null,signal);
  assert.equal(r.calls.filter(c=>c.args.includes('exec')).length,before+1);assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
+
+test('actual container RUN_ID is read back under its lease and is distinct from the engine run identity',async()=>{
+ for(const configured of [undefined,'af12345678']){
+ const r=await setup('agents-emulator',configured);try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),fact=await r.driver.runtimeIdentity(signal);
+ const override=JSON.parse(await fs.readFile(path.join(r.driver.runtimeRoot,'compose.json'),'utf8'));
+ assert.equal(fact.fixtureRunId,override.services['loom-local'].environment.RUN_ID);assert.match(fact.fixtureRunId,/^af[a-z0-9]{8}$/);
+ assert.notEqual(fact.fixtureRunId,a.lease.runId);if(configured)assert.equal(fact.fixtureRunId,configured);
+ for(const issue of ['wrong-run-id','wrong-run-lease']){r.mutate(issue);await assert.rejects(r.driver.runtimeIdentity(signal));}
+ r.mutate('');assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}}
+});
+test('invalid existing source RUN_ID fails before auth, allocation or commands',async()=>{
+ const r=await setup('agents-emulator','engine-run-uuid');try{
+ await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal));assert.equal(r.calls.length,0);
+ assert.deepEqual(await fs.readdir(path.join(r.root,'locks')),[]);
  }finally{await r.cleanup();}
 });
