@@ -20,9 +20,10 @@ import { LegacyOperationEffects } from './providers.js';
 import { testLegacyRoster } from './test-roster.js';
 import { materializeRenderer } from '../fixture/renderer-fixtures.test.js';
 import type { RegisteredProcessPort } from '../fixture/descendants.js';
+import { ObservationError } from '../protocol.js';
 
 const hash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
-async function setup(t: TestContext, options: { liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; onRoot?: (root: string) => void } = {}) {
+async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; onRoot?: (root: string) => void } = {}) {
   const created = await fs.mkdtemp(fileURLToPath(new URL('.seed-test-host-', import.meta.url)));
   t.after(async () => { await fs.rm(created, { recursive: true, force: true }); });
   const root = await fs.realpath(created); options.onRoot?.(root);
@@ -63,12 +64,16 @@ async function setup(t: TestContext, options: { liveClaude?: boolean; invalidSta
   let queued = 0, malformedReset = false;
   const fixtureRequests: { method: string; route: string; body: unknown }[] = [];
   const managed = new Map<string, { source: string; path: string; repo: string }>();
+  const worktrees = new Map<string, string>();
+  let seedHead = revision.commit, seedExit = 0;
   const handles: OwnedProcess[] = [];
   const processes: HostProcesses = {
     async run(command) {
       if (command.argv[0] === 'init') { await fs.mkdir(path.join(command.cwd, '.git')); return ''; }
       if (command.argv[0] === 'rev-parse' && command.argv[1] === '--git-common-dir')
-        return path.join([...managed.values()].find(row => row.repo === command.cwd)?.source ?? command.cwd, '.git');
+        return path.join([...managed.entries()].find(([ws, row]) => row.repo === command.cwd || worktrees.get(ws) === command.cwd)?.[1].source ?? command.cwd, '.git');
+      if (command.argv[0] === 'symbolic-ref') return 'agents/worker';
+      if (command.argv[0] === 'rev-parse' && command.argv[1] === 'HEAD' && [...worktrees.values()].includes(command.cwd)) return seedHead;
       if (command.argv[0] === 'rev-parse') return command.argv[1] === 'HEAD' ? revision.commit : revision.tree;
       if (command.argv[0] === 'ls-files') return sourceEntries.map(entry => entry.relativePath).join('\0') + '\0';
       return '';
@@ -84,13 +89,31 @@ async function setup(t: TestContext, options: { liveClaude?: boolean; invalidSta
       handles.push(handle);
       return handle;
     },
-    launch(command, _stdin, generation) {
+    launch(command, stdin, generation) {
       launches.push(command); if (failLaunch === 'proven') throw new LaunchNotStarted();
       if (failLaunch === 'uncertain') throw new Error('Injected uncertain launch failure');
       let alive = true;
       return { pid: ++count + 100, generation, executable: command.executable, argv: command.argv,
         state: () => alive ? 'running' : 'exited', async ready() {}, async stop() { alive = false; stops.push('cli'); },
-        async completion() { alive = false; return { exitCode, stderr, complete: true, stdout:
+        async completion() {
+          alive = false;
+          if (command.argv[0] === 'workspace') {
+            const workspaceId = command.argv[3]!, worktree = worktrees.get(workspaceId);
+            return { exitCode, stderr, complete: true, stdout: JSON.stringify({ ok: true, workspace: { key: workspaceId },
+              agents: [{ name: 'worker', worktree_ready: Boolean(worktree), ...(worktree ? { worktree_path: worktree } : {}) }] }) };
+          }
+          if (command.argv[0] === 'daemon' && command.argv[1] === 'seed-worktree') {
+            const workspaceId = command.argv[3]!, agentName = command.argv[5]!;
+            if (seedExit === 0) {
+              // Fixture-only bytes written by this injected CLI double. This
+              // does not prove any product worktree creation or agent activity.
+              await fs.writeFile(path.join(worktrees.get(workspaceId)!, command.argv[7]!), stdin);
+              seedHead = 'f'.repeat(40);
+            }
+            return { exitCode: seedExit, stderr: seedExit ? 'injected seed failure' : '', complete: true,
+              stdout: `seeded worktree: ws=${workspaceId} agent=${agentName} repos=repo\n` };
+          }
+          return { exitCode, stderr, complete: true, stdout:
           command.argv[2] === 'role' ? badRoles ? 'not JSON' : '[{"name":"task","model":"unused-role-model"}]' : '{"agent":"worker","cost":0}' }; } };
     },
   };
@@ -155,7 +178,12 @@ async function setup(t: TestContext, options: { liveClaude?: boolean; invalidSta
   assert.equal(acquired.availability, 'observed', JSON.stringify(acquired.error));
   const leaseId = (acquired.data as { lease: { id: string } }).lease.id;
   const fixture = getRegisteredResource(context, `${fixturesKey}:${leaseId}`, leaseId) as OwnedFixture;
+  if (options.seedWorktree) for (const workspaceId of ['E2E-WS', 'E2E-WS-2']) {
+    const worktree = path.join(driver.runtimeRoot, 'runtime', 'agent-worktrees', workspaceId, 'worker');
+    await fs.mkdir(worktree, { recursive: true }); worktrees.set(workspaceId, worktree);
+  }
   return { root, driver, fixture, evidenceStore: getFixtureEvidenceStore(context, leaseId), leaseId, invoke, launches, stops, factories: () => factories,
+    worktree: (workspaceId = 'E2E-WS') => worktrees.get(workspaceId)!, seedFailure: () => { seedExit = 17; },
     fixtureRequests, queued: () => queued, malformedReset: (value: boolean) => { malformedReset = value; },
     badAgents: () => { badAgents = true; }, badRoles: () => { badRoles = true; }, failLaunch: (kind: 'proven' | 'uncertain' = 'proven') => { failLaunch = kind; },
     processFailure: () => { exitCode = 17; stderr = 'exact process diagnostic'; }, restored: () => restoredBytes,
@@ -185,12 +213,13 @@ test('production host binding preserves managed workspace and source/config iden
         ...(mode === 'once' ? [] : ['--auto']), ...(mode === 'daemon' ? ['--daemon-mode'] : [])]);
     }
   }
-  // The private worktree hook is still absent: source association alone cannot
-  // authorize fixture writes or make an actor-created worktree observation.
+  // Source association alone cannot authorize writes when product diagnostics
+  // do not attest an existing ready worktree.
   const before = r.launches.length;
   const seed = await r.invoke('loom.fixture.seedWorktree', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker',
     relativePath: 'marker.txt', content: 'fixture bytes\n', commitMessage: 'fixture seed' });
-  assert.equal(seed.availability, 'unsupported'); assert.equal(r.launches.length, before);
+  assert.equal(seed.availability, 'error');
+  assert.equal(r.launches.slice(before).filter(command => command.argv[0] === 'daemon').length, 0);
   assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
 });
 
@@ -234,6 +263,78 @@ test('production managed binding rejects replaced captured store before legacy a
   const result = await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId: 'E2E-WS', agentId: 'worker' } });
   assert.equal(result.availability, 'error'); assert.equal(r.launches.length, 0);
   await fs.writeFile(filename, original);
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
+
+const seededCommand = (r: Awaited<ReturnType<typeof setup>>) => r.launches.filter(command => command.argv[1] === 'seed-worktree');
+const seedInput = { workspaceId: 'E2E-WS', agentName: 'worker', relativePath: 'marker.txt', content: 'fixture marker\n', commitMessage: 'fixture diff' };
+
+test('source-resolved existing worktree seed preserves exact CLI actor, stdin and fixture-only receipt', async t => {
+  const r = await setup(t, { seedWorktree: true });
+  for (const workspaceId of ['E2E-WS', 'E2E-WS-2']) {
+    const result = await r.invoke('loom.fixture.seedWorktree', { ...seedInput, workspaceId, leaseId: r.leaseId });
+    assert.equal(result.availability, 'observed', JSON.stringify(result.error));
+    assert.equal((result.data as { commit: string }).commit, 'f'.repeat(40));
+    assert.deepEqual((result.data as { receipt: { facts: unknown } }).receipt.facts, { commit: 'f'.repeat(40), actorActivity: false });
+    assert.equal(await fs.readFile(path.join(r.worktree(workspaceId), 'marker.txt'), 'utf8'), seedInput.content);
+    const command = seededCommand(r).at(-1)!;
+    assert.deepEqual(command.argv, ['daemon', 'seed-worktree', '--workspace', workspaceId, '--agent', 'worker',
+      '--file', 'marker.txt', '--content', '-', '--message', 'fixture diff']);
+    assert.equal(command.env.LOOM_TESTSUPPORT, '1'); assert.equal(command.cwd, r.driver.workspaceRoot);
+  }
+  assert.equal(seededCommand(r).length, 2);
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
+
+test('actual owned seed binding rejects path escapes, symlinks and hard links before the seed actor', async t => {
+  const r = await setup(t, { seedWorktree: true });
+  const outside = path.join(r.root, 'outside.txt'); await fs.writeFile(outside, 'unchanged');
+  await fs.symlink(outside, path.join(r.worktree(), 'linked.txt'));
+  await fs.link(outside, path.join(r.worktree(), 'hard.txt'));
+  await assert.rejects(r.invoke('loom.fixture.seedWorktree', { ...seedInput, leaseId: r.leaseId, relativePath: '../outside.txt' }));
+  for (const relativePath of ['linked.txt', 'hard.txt']) {
+    const result = await r.invoke('loom.fixture.seedWorktree', { ...seedInput, leaseId: r.leaseId, relativePath });
+    assert.equal(result.availability, 'error');
+  }
+  assert.equal(seededCommand(r).length, 0); assert.equal(await fs.readFile(outside, 'utf8'), 'unchanged');
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
+
+test('seed rechecks the exact physical worktree after validation and before CLI mutation', async t => {
+  const r = await setup(t, { seedWorktree: true });
+  await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId: 'E2E-WS', agentId: 'worker' } });
+  const access = productionLegacyAccess(r.fixture, r.evidenceStore), signal = new AbortController().signal;
+  const lease = await access.lease(r.leaseId, signal, 'loom.fixture.seedWorktree');
+  await access.validateSeedPath(r.leaseId, 'E2E-WS', 'worker', 'marker.txt', signal);
+  await fs.rename(r.worktree(), r.worktree() + '-retired'); await fs.mkdir(r.worktree());
+  await assert.rejects(access.execute(r.leaseId, { binary: lease.binary, cwd: lease.cwd,
+    argv: ['daemon', 'seed-worktree', '--workspace', 'E2E-WS', '--agent', 'worker', '--file', 'marker.txt', '--content', '-', '--message', 'fixture diff'],
+    env: { ...lease.env, LOOM_TESTSUPPORT: '1' }, stdin: seedInput.content }, signal));
+  assert.equal(seededCommand(r).length, 0); await assert.rejects(fs.stat(path.join(r.worktree(), 'marker.txt')), { code: 'ENOENT' });
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
+
+test('failed seed process keeps its uncertain target and never retries the mutating actor', async t => {
+  const r = await setup(t, { seedWorktree: true }); r.seedFailure();
+  const input = { ...seedInput, leaseId: r.leaseId };
+  assert.equal((await r.invoke('loom.fixture.seedWorktree', input)).availability, 'error');
+  assert.equal((await r.invoke('loom.fixture.seedWorktree', input)).availability, 'error');
+  assert.equal(seededCommand(r).length, 1); await assert.rejects(fs.stat(path.join(r.worktree(), 'marker.txt')), { code: 'ENOENT' });
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
+
+test('post-seed worktree replacement cannot produce a successful commit fact or replay the actor', async t => {
+  const r = await setup(t, { seedWorktree: true });
+  const read = r.driver.readLegacyWorktreeHead.bind(r.driver);
+  r.driver.readLegacyWorktreeHead = async (workspaceId, agentName, signal) => {
+    const head = await read(workspaceId, agentName, signal);
+    await fs.rename(r.worktree(), r.worktree() + '-retired'); await fs.mkdir(r.worktree()); return head;
+  };
+  const input = { ...seedInput, leaseId: r.leaseId };
+  const result = await r.invoke('loom.fixture.seedWorktree', input);
+  assert.equal(result.availability, 'error'); assert.equal(result.data, undefined);
+  assert.equal((await r.invoke('loom.fixture.seedWorktree', input)).availability, 'error');
+  assert.equal(seededCommand(r).length, 1);
   assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
 });
 
@@ -296,7 +397,8 @@ test('missing process registrations and unobservable scripted state fail before 
   const access = productionLegacyAccess(r.fixture, r.evidenceStore), signal = new AbortController().signal;
   for (const target of ['scripted-backend','workspace:E2E-WS']) await assert.rejects(access.snapshot(r.leaseId, target, signal), LegacyError);
   await assert.rejects(access.snapshot(r.leaseId, 'fake-github', signal));
-  await assert.rejects(access.validateSeedPath(r.leaseId, 'E2E-WS', 'worker', 'file', signal), LegacyError);
+  await assert.rejects(access.validateSeedPath(r.leaseId, 'E2E-WS', 'worker', 'file', signal),
+    error => error instanceof ObservationError && error.code === 'ownership-mismatch');
   await assert.rejects(access.stimulate(r.leaseId, { id: 'guessed', kind: 'harness', generation: 'guessed', workspaceId: null, agentName: null, sessionName: null }, 'harness-restart', null, signal), LegacyError);
   assert.equal(r.launches.length, 0); assert.equal(r.stops.length, 0);
 });
