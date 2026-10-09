@@ -15,6 +15,48 @@ export const rendererPackages = ['react','react-dom','react-markdown','remark-gf
 const File = z.object({relativePath:RelativePath,sha256:Digest}).strict();
 const Build = z.object({version:z.literal(1),sourceManifestSha256:Digest,installedRelativeRoot:RelativePath,buildRelativeRoot:RelativePath,
   sources:z.array(File).length(6),packages:z.array(File).length(7),build:z.array(File).min(1).max(50000)}).strict();
+export interface RendererBuildCoordinates {
+  sourceRoot:string;installedRoot:string;buildRoot:string;receiptRoot:string;sourceManifestSha256:string;
+}
+/** Called by the trusted build launcher after compilation and before sealing
+ * the enclosing build manifest. Reads existing bytes; never builds or repairs. */
+export async function writeRendererBuildReceipt(input:RendererBuildCoordinates) {
+  Digest.parse(input.sourceManifestSha256);
+  const roots=[input.sourceRoot,input.installedRoot,input.buildRoot,input.receiptRoot];
+  const stamps=await Promise.all(roots.map(async root=>{
+    check(path.isAbsolute(root)&&path.normalize(root)===root);
+    const stat=await lstat(root);check(!stat.isSymbolicLink()&&stat.isDirectory()&&await realpath(root)===root);return stat;
+  }));
+  const relative=(root:string)=>{const value=path.relative(input.receiptRoot,root).split(path.sep).join('/');RelativePath.parse(value);check(path.join(input.receiptRoot,value)===root);return value;};
+  const installedRelativeRoot=relative(input.installedRoot),buildRelativeRoot=relative(input.buildRoot);
+  check(input.installedRoot!==input.buildRoot&&!input.installedRoot.startsWith(input.buildRoot+path.sep)&&!input.buildRoot.startsWith(input.installedRoot+path.sep));
+  let visited=0;const output:string[]=[];
+  const walk=async(relativePath:string)=>{
+    const directory=path.join(input.buildRoot,relativePath);
+    const before=await lstat(directory);check(before.isDirectory()&&!before.isSymbolicLink()&&await realpath(directory)===directory);
+    for(const entry of await readdir(directory,{withFileTypes:true})){
+      check(++visited<=50000&&!entry.isSymbolicLink());const name=relativePath?`${relativePath}/${entry.name}`:entry.name;RelativePath.parse(name);
+      if(entry.isDirectory())await walk(name);else {check(entry.isFile());if(/\.(js|css|html|json|map)$/.test(name))output.push(name);}
+    }
+    const after=await lstat(directory);check(before.dev===after.dev&&before.ino===after.ino&&before.mtimeMs===after.mtimeMs&&before.ctimeMs===after.ctimeMs);
+  };
+  await walk('');check(output.some(file=>file.endsWith('.js')));
+  let consumed=0;
+  const read=async(root:string,files:readonly string[])=>{const entries:z.infer<typeof File>[]=[];for(const relativePath of [...files].sort()){
+    const actual=await observeFilesystem({leaseId:'renderer-build',rootId:'closure',relativePaths:[relativePath],view:'tree-digest',maxBytes:16*1024*1024,maxEntries:1},root);
+    const entry=actual.entries[0];check(entry?.kind==='file'&&entry.sha256);consumed+=entry!.bytes!;check(consumed<=256*1024*1024);
+    entries.push(File.parse({relativePath,sha256:entry!.sha256}));
+  }return entries;};
+  const receipt=Build.parse({version:1,sourceManifestSha256:input.sourceManifestSha256,installedRelativeRoot,buildRelativeRoot,
+    sources:await read(input.sourceRoot,rendererSources),packages:await read(input.installedRoot,rendererPackages),build:await read(input.buildRoot,output)});
+  const originalOutput=[...output].sort();output.length=0;visited=0;await walk('');check(JSON.stringify([...output].sort())===JSON.stringify(originalOutput));
+  for(const [index,root] of roots.entries()){
+    const after=await lstat(root),before=stamps[index]!;check(before.dev===after.dev&&before.ino===after.ino&&await realpath(root)===root);
+  }
+  const bytes=JSON.stringify(receipt);check(Buffer.byteLength(bytes)<=4*1024*1024);
+  const relativePath='renderer-build.json';await writeFile(path.join(input.receiptRoot,relativePath),bytes,{flag:'wx',mode:0o600});
+  return {relativePath,sha256:await sha256(bytes),receipt};
+}
 export interface PreparedRenderer {
   sourceRoot:string;installedRoot:string;buildRoot:string;
   sources:z.infer<typeof File>[];packages:z.infer<typeof File>[];build:z.infer<typeof File>[];

@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { RegisteredBuild } from './production.js';
-import { rendererSources, rendererPackages } from './renderer.js';
+import { rendererSources, rendererPackages, writeRendererBuildReceipt } from './renderer.js';
 const hash=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
 export async function materializeRenderer(loom:RegisteredBuild,buildRelativeRoot='renderer-dist') {
  const sourceRoot=path.join(loom.source.root,'internal/webui/frontend'),installedRelativeRoot='renderer-packages';
@@ -15,10 +15,7 @@ export async function materializeRenderer(loom:RegisteredBuild,buildRelativeRoot
  for(const file of ['index.html','app.js'])await put(loom.build.root,`${buildRelativeRoot}/${file}`,`deterministic build ${file}`,loom.build.entries);
  const digest=(entries:RegisteredBuild['build']['entries'])=>hash([...entries].sort((a,b)=>a.relativePath<b.relativePath?-1:1).map(e=>`${e.sha256}  ${e.relativePath}\n`).join(''));
  loom.revision.sourceManifestSha256=digest(loom.source.entries);
- const receipt={version:1,sourceManifestSha256:loom.revision.sourceManifestSha256,installedRelativeRoot,buildRelativeRoot,
-  sources:rendererSources.map(relativePath=>({relativePath,sha256:loom.source.entries.find(e=>e.relativePath===`internal/webui/frontend/${relativePath}`)!.sha256})),
-  packages:rendererPackages.map(relativePath=>({relativePath,sha256:loom.build.entries.find(e=>e.relativePath===`${installedRelativeRoot}/${relativePath}`)!.sha256})),
-  build:['index.html','app.js'].map(relativePath=>({relativePath,sha256:loom.build.entries.find(e=>e.relativePath===`${buildRelativeRoot}/${relativePath}`)!.sha256}))};
- await put(loom.build.root,'renderer-build.json',JSON.stringify(receipt),loom.build.entries);loom.revision.buildManifestSha256=digest(loom.build.entries);
+ const receipt=await writeRendererBuildReceipt({sourceRoot,installedRoot:path.join(loom.build.root,installedRelativeRoot),buildRoot:path.join(loom.build.root,buildRelativeRoot),receiptRoot:loom.build.root,sourceManifestSha256:loom.revision.sourceManifestSha256});
+ loom.build.entries.push({relativePath:receipt.relativePath,sha256:receipt.sha256});loom.revision.buildManifestSha256=digest(loom.build.entries);
  return {sourceRoot,installedRoot:path.join(loom.build.root,installedRelativeRoot),buildRoot:path.join(loom.build.root,buildRelativeRoot)};
 }
