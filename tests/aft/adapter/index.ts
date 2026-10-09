@@ -75,7 +75,7 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
       inputSchema:FixtureWorkerStateInput,outputSchema:FixtureWorkerStateOutput,
       async run(input,context) {
         const {fixture,grant,value}=await observeFixtureWorkerState(context,input);
-        return {value,identity:{...identity(fixture),workspaceId:input.workspaceId,agentId:input.agentName},
+        return {value,identity:{...identity(fixture),...(input.view==='state'?{workspaceId:input.workspaceId,agentId:input.agentName}:{})},
           evidenceClass:grant.evidenceClass,secrets:fixture.secrets};
       },
     }),
