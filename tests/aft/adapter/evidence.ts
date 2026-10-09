@@ -12,6 +12,21 @@ export interface EvidenceStore {
 }
 export const evidenceKey = '@loom/aft-adapter/evidence/v1';
 const key = evidenceKey;
+async function verifyRetainedFile(file: string, receipt: z.infer<typeof ArtifactRefSchema>): Promise<void> {
+  const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await handle.stat();
+    requireFact(before.isFile() && before.nlink === 1 && before.size === receipt.bytes, 'identity-mismatch', 'Evidence file changed');
+    const bytes = Buffer.alloc(receipt.bytes); let offset = 0;
+    while (offset < bytes.length) {
+      const read = await handle.read(bytes, offset, bytes.length - offset, offset);
+      requireFact(read.bytesRead > 0, 'identity-mismatch', 'Evidence bytes are incomplete'); offset += read.bytesRead;
+    }
+    const extra = await handle.read(Buffer.alloc(1), 0, 1, bytes.length), after = await handle.stat();
+    requireFact(extra.bytesRead === 0 && before.dev === after.dev && before.ino === after.ino && before.size === after.size &&
+      await sha256(bytes) === receipt.sha256, 'identity-mismatch', 'Evidence bytes changed');
+  } finally { await handle.close(); }
+}
 export function putEvidenceStore(context: CapabilityContext, store: EvidenceStore): void {
   requireFact(!context.resources.has(key), 'ownership-mismatch', 'Evidence store is already registered');
   context.resources.set(key, store);
@@ -58,12 +73,7 @@ export async function createEvidenceStore(directory: string): Promise<EvidenceSt
         receipts.set(id, { id, sha256: digest, bytes: Buffer.byteLength(serialized), mediaType: 'application/json', redaction: 'sanitized' });
       }
       const receipt = receipts.get(id)!;
-      const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
-      try {
-        const stat = await handle.stat();
-        requireFact(stat.isFile() && stat.size === receipt.bytes, 'identity-mismatch', 'Evidence file changed');
-        requireFact(await sha256(await handle.readFile()) === receipt.sha256, 'identity-mismatch', 'Evidence bytes changed');
-      } finally { await handle.close(); }
+      await verifyRetainedFile(file, receipt); await verify();
       return { ...receipt };
     },
     async resolve(id) {
@@ -71,14 +81,7 @@ export async function createEvidenceStore(directory: string): Promise<EvidenceSt
       const receipt = receipts.get(id);
       requireFact(receipt, 'ownership-mismatch', 'Evidence reference is unknown');
       const file = path.join(root, id);
-      const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
-      let bytes: Buffer;
-      try {
-        const stat = await handle.stat();
-        requireFact(stat.isFile() && stat.size === receipt.bytes, 'identity-mismatch', 'Evidence file changed');
-        bytes = await handle.readFile();
-      } finally { await handle.close(); }
-      requireFact(bytes.byteLength === receipt.bytes && await sha256(bytes) === receipt.sha256, 'identity-mismatch', 'Evidence bytes changed');
+      await verifyRetainedFile(file, receipt); await verify();
       return file;
     },
   };

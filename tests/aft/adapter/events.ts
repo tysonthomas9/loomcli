@@ -1,5 +1,6 @@
 import { probeOccurrences, type SyntheticProbe } from './synthetic-probe.js';
 import { z } from 'zod';
+import { ArtifactRefSchema } from '@tysonthomas9/aft/types';
 import { RedactionFacts, redactionFacts } from './redaction.js';
 import { EventPage, Id, Json, ObservationError, requireFact, type Event, type ReadTransport } from './protocol.js';
 
@@ -17,6 +18,7 @@ export const SavedEventsOutput = z.object({
     turnId: z.string().nullable(), payload: Json, createdAt: Id, redaction: RedactionFacts,
     probe: z.object({ handle: Id, payloadOccurrences: z.number().int().nonnegative() }).strict().nullable(),
   }).strict()),
+  captureReceipt:ArtifactRefSchema.optional(),
 }).strict();
 export async function collectSavedEvents(
   input: z.infer<typeof SavedEventsInput>, read: ReadTransport, signal: AbortSignal, probe?: SyntheticProbe, secrets: readonly string[] = [],
