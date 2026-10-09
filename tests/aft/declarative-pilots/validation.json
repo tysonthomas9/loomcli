@@ -924,8 +924,8 @@
         "guardMs": 60000
       },
       "approvedCoherentConsumer": "f3776276f88c31c5a89d6787ae824012ebb0be02",
-      "f377PilotChecksObtained": false,
-      "f377Note": "Parent approval recorded; no f377 results invented or attributed to477. No new engine pin here."
+      "f377PilotChecksObtained": true,
+      "f377Note": "Exact coherentf377/c71 source-shaped Stop loader profile and one-source-bind minimal reproduction obtained; profile stopped at bounded diagnostic guard. No completed full pilot admission, all-five replay, runtime or preservation claim. See rawLoaderTimeoutDiagnosis; prior477 five-file raw guard receipts remain separate."
     },
     "sourceMapping": {
       "originalSteps": 207,
@@ -950,5 +950,608 @@
     ],
     "consumerWorkRemaining": "Diagnose full loader noncompletion; consume corrected coherentf377 only with actual results; author reviewed canonical retained-ledger/receipt interfaces when published; narrow each selected helper branch and map all reachable predicates; preserve original actors/checkpoints/deadlines and cleanup. Runtime and bulk migration stay parent-gated.",
     "publicationPolicy": "Publish current source independently of journal/provider completion; no executable wrappers, expected-return stubs, original campaign changes or runtime claim."
+  },
+  "rawLoaderTimeoutDiagnosis": {
+    "status": "confirmed repeated verification bottleneck; no fix/admission/preservation claim",
+    "at": "2026-10-09T10:48:26.784Z",
+    "engine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+    "coherentAdapter": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+    "coherentAdapterTree": "98e2c318356340667380fc8bcacf0bb7b72d8e98",
+    "enginePackageSha256": "f90710c9244cae11136d43bd7e583f0e24fe21c1c8eca40d1d3b945df9a31a55",
+    "engineEmittedMatched": 112,
+    "profile": {
+      "status": "profile-stopped-or-loader-rejected-no-admission-credit",
+      "at": "2026-10-09T10:46:49.544Z",
+      "engine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+      "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+      "adapterPin": "be64b7ac1cd616a8e984ed947425105a1c5299833c715c43124b96ca9a6fc173",
+      "engineEmittedMatched": 112,
+      "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/bare-stop.test.yaml",
+      "rawSha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1",
+      "envKeyNames": [
+        "AFT_AGENT_FLOW_REPO",
+        "AFT_API_URL",
+        "AFT_BASE_URL",
+        "AFT_FLEET_BUILD_MANIFEST_SHA256",
+        "AFT_FLEET_COMMIT",
+        "AFT_FLEET_SOURCE_MANIFEST_SHA256",
+        "AFT_FLEET_TREE",
+        "AFT_LOOM_BUILD_MANIFEST_SHA256",
+        "AFT_LOOM_COMMIT",
+        "AFT_LOOM_SOURCE_MANIFEST_SHA256",
+        "AFT_LOOM_TREE",
+        "AFT_REAL_BACKEND",
+        "AFT_REAL_MODEL",
+        "AFT_SELECTION_SHA256",
+        "AFT_WS",
+        "RUN_ID"
+      ],
+      "envSha256": "5b473ee496241d98af3829b5858d86b4828ca1e3a0b323c912b506b4a0e7c793",
+      "effects": 0,
+      "runtimeExecuted": 0,
+      "hypothesis": "Repeated full provider manifest verification dominates step admission",
+      "internalProfileGuardMs": 45000,
+      "verifyCalls": 17,
+      "verifyMs": 46543.03854500001,
+      "verifyReads": 883388,
+      "verifyBytes": 3323800458,
+      "fsReads": 883389,
+      "fsBytes": 3323875034,
+      "bindingGet": 65,
+      "bindingSet": 4,
+      "bindingMs": 1.569620000004761,
+      "stepSchemaCalls": 273,
+      "stepSchemaMs": 88.95562500000415,
+      "suiteSchemaCalls": 1,
+      "suiteSchemaMs": 46.343290999999226,
+      "verifySamples": [
+        {
+          "call": 1,
+          "ms": 2802.5197919999996,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": null
+        },
+        {
+          "call": 2,
+          "ms": 2691.596458,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 258,
+            "keys": [
+              "assert"
+            ]
+          }
+        },
+        {
+          "call": 3,
+          "ms": 3411.2475839999997,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 259,
+            "keys": [
+              "bind"
+            ]
+          }
+        },
+        {
+          "call": 4,
+          "ms": 3112.793958,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 260,
+            "keys": [
+              "bind"
+            ]
+          }
+        },
+        {
+          "call": 5,
+          "ms": 2729.8567919999987,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 261,
+            "keys": [
+              "bind"
+            ]
+          }
+        },
+        {
+          "call": 6,
+          "ms": 2570.8743749999994,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 262,
+            "keys": [
+              "bind"
+            ]
+          }
+        },
+        {
+          "call": 7,
+          "ms": 2583.3533339999994,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 263,
+            "keys": [
+              "capability"
+            ]
+          }
+        },
+        {
+          "call": 8,
+          "ms": 2583.021834000003,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 264,
+            "keys": [
+              "assert"
+            ]
+          }
+        },
+        {
+          "call": 9,
+          "ms": 2790.762708000002,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 265,
+            "keys": [
+              "assert",
+              "intent"
+            ]
+          }
+        },
+        {
+          "call": 10,
+          "ms": 2578.6663340000014,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 266,
+            "keys": [
+              "resolve",
+              "api",
+              "intent"
+            ]
+          }
+        },
+        {
+          "call": 11,
+          "ms": 2612.0600000000013,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 267,
+            "keys": [
+              "bind",
+              "intent"
+            ]
+          }
+        },
+        {
+          "call": 12,
+          "ms": 2710.712459000002,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 268,
+            "keys": [
+              "capability",
+              "intent"
+            ]
+          }
+        },
+        {
+          "call": 13,
+          "ms": 2627.181375,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 269,
+            "keys": [
+              "resolve",
+              "api",
+              "intent"
+            ]
+          }
+        },
+        {
+          "call": 14,
+          "ms": 2809.209834000001,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 270,
+            "keys": [
+              "assert",
+              "intent"
+            ]
+          }
+        },
+        {
+          "call": 15,
+          "ms": 2648.2372079999986,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 271,
+            "keys": [
+              "screenshot",
+              "intent"
+            ]
+          }
+        },
+        {
+          "call": 16,
+          "ms": 2608.1982500000013,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 272,
+            "keys": [
+              "resolve",
+              "open",
+              "intent"
+            ]
+          }
+        },
+        {
+          "call": 17,
+          "ms": 2672.746250000004,
+          "reads": 51964,
+          "bytes": 195517674,
+          "step": {
+            "ordinal": 273,
+            "keys": [
+              "screenshot",
+              "intent"
+            ]
+          }
+        }
+      ],
+      "lastStep": {
+        "ordinal": 274,
+        "keys": [
+          "capture",
+          "intent"
+        ]
+      },
+      "providers": 22,
+      "manifestFilesPerVerify": 51964,
+      "errors": [
+        "DIAGNOSTIC_PROFILE_GUARD_NO_ADMISSION_RESULT"
+      ],
+      "elapsedMs": 46684.557333,
+      "finishedAt": "2026-10-09T10:47:36.268Z",
+      "cpuTop": [
+        {
+          "function": "",
+          "url": "file:///private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist/capabilities.js",
+          "line": 73,
+          "samples": 1059
+        },
+        {
+          "function": "lstat",
+          "url": "",
+          "line": 0,
+          "samples": 564
+        },
+        {
+          "function": "open",
+          "url": "",
+          "line": 0,
+          "samples": 560
+        },
+        {
+          "function": "",
+          "url": "file:///private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist/capabilities.js",
+          "line": 73,
+          "samples": 152
+        },
+        {
+          "function": "realpathSync",
+          "url": "node:fs",
+          "line": 2697,
+          "samples": 141
+        },
+        {
+          "function": "",
+          "url": "file:///private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist/capabilities.js",
+          "line": 73,
+          "samples": 75
+        },
+        {
+          "function": "",
+          "url": "file:///private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist/capabilities.js",
+          "line": 73,
+          "samples": 71
+        },
+        {
+          "function": "update",
+          "url": "",
+          "line": 0,
+          "samples": 65
+        },
+        {
+          "function": "read",
+          "url": "",
+          "line": 0,
+          "samples": 59
+        },
+        {
+          "function": "lstat",
+          "url": "",
+          "line": 0,
+          "samples": 44
+        },
+        {
+          "function": "open",
+          "url": "",
+          "line": 0,
+          "samples": 36
+        },
+        {
+          "function": "resolve",
+          "url": "node:path",
+          "line": 1245,
+          "samples": 32
+        },
+        {
+          "function": "lstat",
+          "url": "",
+          "line": 0,
+          "samples": 31
+        },
+        {
+          "function": "",
+          "url": "file:///private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist/capabilities.js",
+          "line": 52,
+          "samples": 30
+        },
+        {
+          "function": "open",
+          "url": "",
+          "line": 0,
+          "samples": 29
+        },
+        {
+          "function": "(program)",
+          "url": "",
+          "line": 0,
+          "samples": 29
+        },
+        {
+          "function": "resolve",
+          "url": "node:path",
+          "line": 1245,
+          "samples": 27
+        },
+        {
+          "function": "fstat",
+          "url": "",
+          "line": 0,
+          "samples": 26
+        },
+        {
+          "function": "close",
+          "url": "",
+          "line": 0,
+          "samples": 24
+        },
+        {
+          "function": "relative",
+          "url": "node:path",
+          "line": 1356,
+          "samples": 23
+        }
+      ],
+      "profileSha256": "40936dcdb1c818f71c96e2605957dbb7365260f9654071e57509aa664496252e"
+    },
+    "minimalReproduction": {
+      "status": "minimal-raw-loader-admitted",
+      "rawSourceSha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1",
+      "minimalSha256": "e5c12bcdaddff2947a9627292a3853a72baf6e7c15be6d8dc07d8717412e5db0",
+      "sourceLocation": "bare-stop.test.yaml#/setup/0",
+      "engine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+      "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+      "envSha256": "5b473ee496241d98af3829b5858d86b4828ca1e3a0b323c912b506b4a0e7c793",
+      "providers": 22,
+      "uniqueProviderImplementationPins": 1,
+      "manifestFilesPerProvider": [
+        {
+          "id": "loom.native.registration",
+          "files": 2362
+        },
+        {
+          "id": "loom.agent.bind",
+          "files": 2362
+        },
+        {
+          "id": "loom.agent.observe",
+          "files": 2362
+        },
+        {
+          "id": "loom.api.savedEvents",
+          "files": 2362
+        },
+        {
+          "id": "loom.api.correlate",
+          "files": 2362
+        },
+        {
+          "id": "loom.files.observe",
+          "files": 2362
+        },
+        {
+          "id": "loom.native.observe",
+          "files": 2362
+        },
+        {
+          "id": "loom.native.failure",
+          "files": 2362
+        },
+        {
+          "id": "loom.filesystem.observe",
+          "files": 2362
+        },
+        {
+          "id": "loom.agent.history",
+          "files": 2362
+        },
+        {
+          "id": "loom.git.lifecycle",
+          "files": 2362
+        },
+        {
+          "id": "loom.git.observe",
+          "files": 2362
+        },
+        {
+          "id": "loom.fixture.acquire",
+          "files": 2362
+        },
+        {
+          "id": "loom.fixture.observe",
+          "files": 2362
+        },
+        {
+          "id": "loom.fixture.release",
+          "files": 2362
+        },
+        {
+          "id": "loom.cli.role",
+          "files": 2362
+        },
+        {
+          "id": "loom.cli.usage",
+          "files": 2362
+        },
+        {
+          "id": "loom.cli.task",
+          "files": 2362
+        },
+        {
+          "id": "loom.runtime.stimulate",
+          "files": 2362
+        },
+        {
+          "id": "loom.fixture.seedWorktree",
+          "files": 2362
+        },
+        {
+          "id": "loom.fixture.configure",
+          "files": 2362
+        },
+        {
+          "id": "loom.markdown.project",
+          "files": 2362
+        }
+      ],
+      "verifyCalls": 3,
+      "verifyMs": 8418.051875000001,
+      "verifyReads": 155892,
+      "verifyBytes": 586553022,
+      "effects": 0,
+      "runtimeExecuted": 0,
+      "fullPilotCredit": false,
+      "loadedTests": 1,
+      "elapsedMs": 8421.236458,
+      "at": "2026-10-09T10:48:26.784Z"
+    },
+    "allOriginalRawPilotHashes": [
+      {
+        "file": "bare-stop.test.yaml",
+        "sha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1"
+      },
+      {
+        "file": "child-repeat.test.yaml",
+        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112"
+      },
+      {
+        "file": "files-save-reload.test.yaml",
+        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954"
+      },
+      {
+        "file": "sse-cursor.test.yaml",
+        "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea"
+      },
+      {
+        "file": "stream-render-clock.test.yaml",
+        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d"
+      }
+    ],
+    "artifacts": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/profile.mjs",
+        "sha256": "d5adc23b74eb6369d12e56eb24f4c134e5da93acb127591e8cddc4b36b7c044d",
+        "bytes": 6323
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/profile-receipt.json",
+        "sha256": "32d7b5f34b4e48bad691233eef4d45281da71a5e88ce66468aa995b6c15e86d9",
+        "bytes": 8266
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/loader.cpuprofile",
+        "sha256": "40936dcdb1c818f71c96e2605957dbb7365260f9654071e57509aa664496252e",
+        "bytes": 153924
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/profile-process.log",
+        "sha256": "ab6ea42f8dff34463be5632b1ba3b9a8f04488d6c61050626622fade333f1d95",
+        "bytes": 5417
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/minimal.mjs",
+        "sha256": "e172d40525b9da2641a49fe079882f54e32b270123ccc3ed41443084c51c464f",
+        "bytes": 4380
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/minimal-receipt.json",
+        "sha256": "5be4e55622dfdefeb8d6ab48a6c2451e4c81dfc30dfaff228c40e448302cd93b",
+        "bytes": 2324
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/minimal-process.log",
+        "sha256": "e02981b9ff90af813800c80660cc9f0f913517e940828514abd2cb7a851f2935",
+        "bytes": 1669
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/one-source-bind.test.yaml",
+        "sha256": "e5c12bcdaddff2947a9627292a3853a72baf6e7c15be6d8dc07d8717412e5db0",
+        "bytes": 347
+      }
+    ],
+    "sourceEvidence": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist/admission.js",
+        "sha256": "85cbbd58ceada35e4465af0b60bbd0ce4c87005a2a3112f07b0d78c02196ce87",
+        "lines": "181,86",
+        "obligation": "Each admitted step calls admitDocument; each document calls registry.verify."
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/loader-profile-f377/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist/capabilities.js",
+        "sha256": "3301b93df08d765a9dd2e1895eff26d86464ef3be24982534873804d9933b110",
+        "lines": "128-130,67-74,48-64",
+        "obligation": "Every provider recomputes its full manifest pin; actual.files.some uses expected pin.files.some membership, a quadratic source shape.22 providers share one immutable pin in this source-shaped registry."
+      }
+    ],
+    "interpretation": {
+      "registryVerifyFraction": 0.9969686166885864,
+      "verifiedFileReadBytesAreRepeated": "Measured read totals; not distinct file size or runtime data. No provider mutation/invoke happened.",
+      "quadraticMembership": "Source/CPU-profile backed subcost; comparison count not independently instrumented and no quantitative cost attribution beyond profile.",
+      "minimalScope": "One exact originalsetup/0 bind-only diagnostic raw suite, not a translated pilot or source-preservation run."
+    },
+    "guards": "One bounded original source-shaped profile per hypothesis;45s cooperative profile guard with60s outer process guard. All underlying schema/provider/manifest checks called unchanged. No raised timeout claimed as fix.",
+    "owner": "Engine owner notified with exact timings/artifacts; no engine/core edits or unsafe cache reuse in pilot.",
+    "remaining": "All5 full raw pilot admission still lacks completed outcome; existing exact60s timeout receipts preserved. Journal, runtime, helper preservation remain distinct open gates."
   }
 }
