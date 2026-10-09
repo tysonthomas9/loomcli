@@ -13,6 +13,7 @@ export interface RegisteredProcessHandle {
  inspect():Promise<RegisteredIdentity>;
  stop():Promise<void>;
  terminateGracefully?():Promise<void>;
+ awaitExit?():Promise<void>;
  abandon():Promise<void>;
 }
 export interface RegisteredProcessPort { capture(pid:number):Promise<RegisteredProcessHandle>; }
@@ -42,7 +43,7 @@ export function createRegisteredProcessPort(pythonBinary:string,helperFile:strin
   const timeout=setTimeout(()=>{fail();child.kill();},15000);
   let initial:RegisteredIdentity;
   try{initial=await first;}catch(error){child.kill();throw error;}finally{clearTimeout(timeout);}
-  const command=async(operation:'inspect'|'stop'|'terminate-gracefully')=>{
+  const command=async(operation:'inspect'|'stop'|'terminate-gracefully'|'await-exit')=>{
     check(!failed&&!pending);const result=response();try{child.stdin!.write(JSON.stringify({operation})+'\n');}catch{fail();}
     const deadline=setTimeout(()=>{fail();child.kill();},20000);
     try{const value=await result;check(value.generation===initial.generation&&value.executable===initial.executable&&value.argvSha256===initial.argvSha256&&value.configurationRoot===initial.configurationRoot);return value;}
@@ -55,7 +56,10 @@ export function createRegisteredProcessPort(pythonBinary:string,helperFile:strin
     const deadline=setTimeout(()=>child.kill(),20000);
     try{child.stdin!.end(JSON.stringify({operation})+'\n');await closed;}finally{clearTimeout(deadline);}
   };
-  return {identity:Object.freeze(initial),async terminateGracefully(){
+  return {identity:Object.freeze(initial),async awaitExit(){
+    if(stopped)return;const value=await command('await-exit');check(value.state==='exited');
+    await close('close');stopped=true;
+  },async terminateGracefully(){
     if(stopped)return;const value=await command('terminate-gracefully');check(value.state==='exited');
     await close('close');stopped=true;
   },async inspect(){return stopped?{...initial,state:'exited'}:command('inspect');},async abandon(){await close('abandon');},async stop(){
@@ -83,6 +87,8 @@ export class OwnedDescendants {
  async stop(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);await handle!.stop();}
  async terminateGracefully(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);
   if(!handle!.terminateGracefully)throw new FixtureError('unsupported-capability');await this.inspect(id,generation);await handle!.terminateGracefully();}
+ async awaitExit(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);
+  if(!handle!.awaitExit)throw new FixtureError('unsupported-capability');await this.inspect(id,generation);await handle!.awaitExit();}
  has(id:string){return this.handles.has(id);}
  initial(id:string){const handle=this.handles.get(id);check(handle);return handle!.identity;}
 }

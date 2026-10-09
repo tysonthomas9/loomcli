@@ -52,3 +52,29 @@ test('graceful registered service operation cannot use force cleanup as its fall
  await assert.rejects(r.descendants.terminateGracefully(registration.id,'foreign-generation'));assert.equal(graceful,0);
  await r.descendants.terminateGracefully(registration.id,identity.generation);assert.equal(graceful,1);assert.equal(r.stops,0);
 });
+
+test('exit observation requires the retained generation and never falls back to signalling',async()=>{
+ const r=setup();await r.descendants.enroll(registration);
+ await assert.rejects(r.descendants.awaitExit(registration.id,identity.generation));assert.equal(r.stops,0);
+ let observations=0;r.handle.awaitExit=async()=>{observations++;r.exit();};
+ await assert.rejects(r.descendants.awaitExit(registration.id,'foreign-generation'));assert.equal(observations,0);
+ await r.descendants.awaitExit(registration.id,identity.generation);assert.equal(observations,1);assert.equal(r.stops,0);
+});
+
+test('fixed await-exit protocol retains uncertain exit and closes only after terminal observation',async()=>{
+ const child=new EventEmitter() as EventEmitter & {stdout:PassThrough;stdin:PassThrough;kill():boolean};
+ child.stdout=new PassThrough();child.stdin=new PassThrough();child.kill=()=>{assert.fail('no helper kill');};
+ const operations:string[]=[];let first=true;
+ child.stdin.on('data',bytes=>{const value=JSON.parse(bytes.toString());operations.push(value.operation);
+  if(value.operation==='await-exit')queueMicrotask(()=>{
+   child.stdout.write(JSON.stringify(first?{error:'cleanup-unverified'}:{...identity,state:'exited'})+'\n');first=false;
+  });
+ });
+ child.stdin.on('finish',()=>queueMicrotask(()=>child.emit('close',0)));
+ const port=createRegisteredProcessPort('/attested/python','/attested/fixture/kernel-process.py',(()=>{
+  queueMicrotask(()=>child.stdout.write(JSON.stringify(identity)+'\n'));return child;
+ }) as unknown as typeof spawn);
+ const handle=await port.capture(identity.pid);await assert.rejects(handle.awaitExit!());
+ await handle.awaitExit!();await handle.awaitExit!();assert.equal((await handle.inspect()).state,'exited');
+ assert.deepEqual(operations,['await-exit','await-exit','close']);
+});

@@ -148,6 +148,19 @@ class RegisteredProcess:
             raise RuntimeError('graceful termination incomplete')
         return self.inspect()
 
+    def await_exit(self):
+        # Product stop endpoints acknowledge a request, not terminal exit. Wait
+        # on the captured kernel object without signalling or looking up a PID.
+        # Keep the one-shot Darwin notification terminal across later retries.
+        if self.inspect()['state'] == 'running':
+            if self.fd is not None:
+                self.exited = bool(select.select([self.fd], [], [], 15)[0])
+            else:
+                self.exited = bool(self.queue.control(None, 1, 15))
+        if not self.exited:
+            raise RuntimeError('exit observation incomplete')
+        return self.inspect()
+
     def close(self):
         if self.task is not None and self.task.value:
             self.mach.mach_port_deallocate(self.self_port, self.task.value)
@@ -170,10 +183,13 @@ def main():
             if len(line) > 128:
                 raise RuntimeError('invalid command')
             request = json.loads(line)
-            if request in ({'operation': 'inspect'}, {'operation': 'stop'}, {'operation': 'terminate-gracefully'}):
+            if request in ({'operation': 'inspect'}, {'operation': 'stop'}, {'operation': 'terminate-gracefully'}, {'operation': 'await-exit'}):
                 try:
                     operation = request['operation']
-                    result = owned.inspect() if operation == 'inspect' else owned.stop() if operation == 'stop' else owned.terminate_gracefully()
+                    operations = {'inspect': owned.inspect, 'stop': owned.stop,
+                                  'terminate-gracefully': owned.terminate_gracefully,
+                                  'await-exit': owned.await_exit}
+                    result = operations[operation]()
                 except NotImplementedError:
                     result = {'error': 'unsupported-capability'}
                 except Exception:
