@@ -29,6 +29,7 @@ export * from './renderer-contract.js';
 export * from './composition.js';
 export * from './redaction.js';
 export * from './authority.js';
+export * from './fixture-workers.js';
 export * from './git-lifecycle.js';
 export * from './workspaces.js';
 export { createLegacyProviders } from './legacy/providers.js';

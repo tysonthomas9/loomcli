@@ -1,4 +1,4 @@
-import { getRegisteredResource, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
+import { getRegisteredResource, isCapabilityContextActive, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
 import type { z } from 'zod';
 import type { NormalizedFilesystemInput, FilesystemOutput } from './filesystem.js';
 import type { GitLifecycleInput, GitLifecycleOutput } from './git-lifecycle.js';
@@ -66,7 +66,10 @@ export function putFixture(context: CapabilityContext, fixture: OwnedFixture): v
     throw error;
   }
 }
-export async function getFixture(context: CapabilityContext, leaseId: string): Promise<OwnedFixture> {
+/** Canonical lease authority only. Callers must admit operation effects before
+ * invoking fixture verification, which may use owned process transports. */
+export function getFixtureAuthority(context: CapabilityContext, leaseId: string): OwnedFixture {
+  requireFact(isCapabilityContextActive(context), 'ownership-mismatch', 'Fixture context is missing or revoked');
   let fixture = context.resources.get(resourceKey(leaseId)) as OwnedFixture | undefined;
   let fromSuite = false;
   if (fixture) {
@@ -83,6 +86,10 @@ export async function getFixture(context: CapabilityContext, leaseId: string): P
   requireFact(context.clock.epochUtcMs + context.clock.now() < fixture.expiresAtUtcMs,
     'ownership-mismatch', 'Fixture lease expired');
   context.signal.throwIfAborted();
+  return fixture;
+}
+export async function getFixture(context: CapabilityContext, leaseId: string): Promise<OwnedFixture> {
+  const fixture = getFixtureAuthority(context, leaseId);
   await fixture.verify(context.signal);
   return fixture;
 }
