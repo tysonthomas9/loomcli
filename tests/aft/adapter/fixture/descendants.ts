@@ -97,6 +97,8 @@ export class OwnedDescendants {
   if(!handle!.terminateGracefully)throw new FixtureError('unsupported-capability');await this.inspect(id,generation);await handle!.terminateGracefully();}
  async awaitExit(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);
   if(!handle!.awaitExit)throw new FixtureError('unsupported-capability');await this.inspect(id,generation);await handle!.awaitExit();}
+ requireExitObservation(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);
+  if(!handle!.awaitExit)throw new FixtureError('unsupported-capability');}
  has(id:string){return this.handles.has(id);}
  initial(id:string){const handle=this.handles.get(id);check(handle);return handle!.identity;}
 }

@@ -65,7 +65,7 @@ export class HostFixtureDriver implements FixtureDriver {
     this.activeOperations.add(id);
     try{return await operation();}finally{this.activeOperations.delete(id);}
   }
-  private requireWorkerRegistrationIdle(){check(!['worker-registration','cli-launch'].some(id=>this.activeOperations.has(id)),'identity-mismatch');}
+  private requireWorkerRegistrationIdle(){check(!['worker-registration','worker-action','cli-launch'].some(id=>this.activeOperations.has(id)),'identity-mismatch');}
   private requireHandle(id:string,generation:string){
     const handle=this.handles.get(id);check(handle&&handle.generation===generation,'identity-mismatch');return handle!;
   }
@@ -146,7 +146,7 @@ export class HostFixtureDriver implements FixtureDriver {
   async refreshOwnedProductProcesses(signal:AbortSignal):Promise<readonly OwnedWorkerFact[]>{
     signal.throwIfAborted();
     check(this.workspaceFixture&&this.workspaceOwner&&this.workspaceEvidence&&this.workspaceRecords&&this.descendants,'unsupported-capability');
-    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','cli-launch'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
+    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','cli-launch','worker-action'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
     const daemon=this.handles.get('daemon');check(daemon?.state()==='running','unsupported-capability');
     return this.withServiceOperation('worker-registration',async()=>{
       if(!this.workerRegistrations){
@@ -170,10 +170,18 @@ export class HostFixtureDriver implements FixtureDriver {
             const owned=requireOwnedWorkspace(fixture,fixture.workspaceId,name,'legacy-agent-name',source.repoName);
             check(owned.repo===source.repo&&owned.commonDir===common);
             const after=await this.files.lstat(worktree);check(!after.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino);
-          },nextId:()=>this.uuid()},this.descendants!,this.files);
+          },nextId:()=>this.uuid(),stop:(fact,generation,abort)=>this.requestOwnedHttpChecked('api','POST',
+            `/api/workspaces/${encodeURIComponent(fact.workspaceId)}/agents/${encodeURIComponent(fact.agentId)}/stop`,null,abort,generation)},this.descendants!,this.files);
       }
       return this.workerRegistrations.refresh(signal);
     });
+  }
+  async stopRegisteredWorker(id:string,generation:string,expectedServeGeneration:string,signal:AbortSignal){
+    signal.throwIfAborted();this.requireWorkerRegistrationIdle();
+    check(this.workerRegistrations&&this.workspaceFixture&&this.descendants,'unsupported-capability');
+    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','http-mutation'].some(key=>this.activeOperations.has(key)),'identity-mismatch');
+    this.requireHandle('serve',expectedServeGeneration);
+    return this.withServiceOperation('worker-action',()=>this.workerRegistrations!.stop(id,generation,expectedServeGeneration,signal));
   }
   async resolveLegacyWorktree(workspaceId:string,agentName:string,signal:AbortSignal,repoName?:string):Promise<{complete:true;workspaceId:string;agentName:string;root:OwnedRoot;branch:string;commonDir:string}>{
     check(this.workspaceOwner&&this.workspaceRecords,'unsupported-capability');
@@ -381,13 +389,18 @@ export class HostFixtureDriver implements FixtureDriver {
     return result;
   }
   async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relative: string, body: unknown, signal: AbortSignal, expectedGeneration?:string) {
-    signal.throwIfAborted(); check(this.ports.length === 5);
+    signal.throwIfAborted();
     if(method!=='GET')this.requireWorkerRegistrationIdle();
+    const request=()=>this.requestOwnedHttpChecked(target,method,relative,body,signal,expectedGeneration);
+    return method==='GET'?request():this.withServiceOperation('http-mutation',request);
+  }
+  private async requestOwnedHttpChecked(target:'api'|'fake-model'|'fake-github',method:Parameters<Http>[1],relative:string,body:unknown,signal:AbortSignal,expectedGeneration?:string){
+    signal.throwIfAborted();check(this.ports.length===5);
     check(target === 'api' ? relative.startsWith('/api/') : /^\/__(script|reset|fixture|state|requests)(\?|$)/.test(relative));
     check(target !== 'fake-model' || this.profile === 'legacy-deterministic', 'unsupported-capability');
     check(target !== 'fake-github' || this.config.fakeGitHub, 'unsupported-capability');
     const service = { api: 'serve', 'fake-model': 'fake-model', 'fake-github': 'fake-github' }[target];
-    const request=()=>this.withServiceOperation(service,async()=>{
+    return this.withServiceOperation(service,async()=>{
       const handle=this.handles.get(service);check(handle&&handle.state()==='running'&&handle.pid>0,'ownership-mismatch');
       const generation=expectedGeneration??handle!.generation;check(handle!.generation===generation,'identity-mismatch');
       const index={api:0,'fake-model':2,'fake-github':4}[target],origin=`http://127.0.0.1:${this.ports[index]}`;
@@ -396,7 +409,6 @@ export class HostFixtureDriver implements FixtureDriver {
       const response=await this.http(origin,method,relative,body,signal);
       signal.throwIfAborted();this.requireCurrentHandle(service,handle!);check(handle!.state()==='running','identity-mismatch');return response;
     });
-    return method==='GET'?request():this.withServiceOperation('http-mutation',request);
   }
   private env(): Record<string, string> {
     const c = this.config; const runtime = path.join(this.root, 'runtime');

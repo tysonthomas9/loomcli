@@ -93,21 +93,22 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
   };
   let onHttp:((method:string,relative:string)=>Promise<void>)|undefined;
   let responseOverride:((relative:string)=>unknown)|undefined;
-  const requests:{method:string;relative:string}[]=[];
+  const requests:{method:string;relative:string;body:unknown}[]=[];let stopStatus=200;
   const createdWorkspaces=new Map<string,{id:string;repos:{path:string;name:string;source_repo_id:string;groups:string[]}[]}>();
   const http: Http = async (_origin, method, relative,body) => {
-    requests.push({method,relative});await onHttp?.(method,relative);
+    requests.push({method,relative,body});await onHttp?.(method,relative);
     if(responseOverride){const overridden=responseOverride(relative);if(overridden!==undefined)return {status:200,body:overridden};}
     if (failHttp) return { status: 503, body: { message: 'Bearer private-http-token' } };
     if(relative==='/__requests')return {status:200,body:{requests:[],queued:0}};
     if(relative==='/__reset')return {status:200,body:{ok:true}};
+    if(method==='POST'&&relative.endsWith('/stop'))return {status:stopStatus,body:{success:stopStatus>=200&&stopStatus<300}};
     if(method==='POST'&&relative==='/api/workspaces'){const input=body as {name:string;repos:string[]},data={id:input.name.toUpperCase(),repos:input.repos.map(repo=>({path:repo,name:path.basename(repo),source_repo_id:path.basename(repo),groups:[]}))};createdWorkspaces.set(data.id,data);return {status:201,body:{success:true,data}};}
     if (method === 'POST') return { status: 201, body: {} };
     const data=createdWorkspaces.get(relative.split('/').at(-1)!);
     return { status: 200, body: data?{success:true,data}:{} };
   };
   const registeredRunning=new Map<number,boolean>();let failRegisteredStop=false;const registeredStops:string[]=[],captures:number[]=[],abandoned:number[]=[];
-  const registrationOverrides=new Map<number,Partial<RegisteredIdentity>>();let onCapture:((pid:number)=>Promise<void>)|undefined;
+  const registrationOverrides=new Map<number,Partial<RegisteredIdentity>>();let onCapture:((pid:number)=>Promise<void>)|undefined,onExit:((pid:number)=>Promise<void>)|undefined;
   const registeredPort={async capture(pid:number){
     const parent=[...handles.entries()].find(([name,handle])=>['serve','daemon'].includes(name)&&handle.pid===pid)?.[1];
     assert.ok([999,1001,1002].includes(pid)||parent||registrationOverrides.has(pid));captures.push(pid);registeredRunning.set(pid,true);
@@ -120,6 +121,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     return {identity,async inspect(){return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,
       state:registeredRunning.get(pid)&&(!parent||parent.state()==='running')?'running' as const:'exited' as const,...registrationOverrides.get(pid)};},
       async terminateGracefully(){assert.ok([1001,1002].includes(pid));registeredRunning.set(pid,false);registeredStops.push('opencode-term');},
+      async awaitExit(){await onExit?.(pid);assert.equal(registeredRunning.get(pid),false);},
       async stop(){if(!registeredRunning.get(pid)||parent?.state()==='exited')return;if(failRegisteredStop)throw new Error('private child cleanup');
         registeredRunning.set(pid,false);if(parent)await parent.stop();registeredStops.push(pid===999?'fleet':parent?'parent-force':'opencode-force');},
       async abandon(){abandoned.push(pid);}};
@@ -130,6 +132,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
   return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle, protocols, requests,
     registeredStops,captures,abandoned,failRegisteredCleanup(value:boolean){failRegisteredStop=value;},
     registration(pid:number,values:Partial<RegisteredIdentity>){registrationOverrides.set(pid,values);},onCapture(callback:(pid:number)=>Promise<void>){onCapture=callback;},
+    exitRegistered(pid:number){registeredRunning.set(pid,false);},onExit(callback:(pid:number)=>Promise<void>){onExit=callback;},stopStatus(value:number){stopStatus=value;},
     request: { runId: 'test-run', profile, loomRevision: { ...revision }, fleetRevision: { ...revision }, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
     onHttp(callback:(method:string,relative:string)=>Promise<void>){onHttp=callback;},
     overrideResponse(callback:(relative:string)=>unknown){responseOverride=callback;},
@@ -231,6 +234,84 @@ test('actual Host worker hook binds product metadata to canonical actor, worktre
   assert.equal((await r.driver.inspectOwnedProcess(facts[0]!.id,facts[0]!.generation,r.signal)).state,'running');
   assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
  }finally{await r.cleanup();}
+});
+
+test('registered worker stop preserves the empty-body API actor and separately observes the exact exit',async()=>{
+ for(const status of [200,202]){const r=await setupBoundWorker();try{
+  const fact=(await r.driver.refreshOwnedProductProcesses(r.signal))[0]!,serve=r.handles.get('serve')!;
+  r.stopStatus(status);r.onHttp(async(method,relative)=>{if(method==='POST'&&relative.endsWith('/nova/stop'))r.exitRegistered(1700);});
+  const starts=r.starts.length,forces=r.registeredStops.length;
+  const stopped=await r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,r.signal);
+  assert.deepEqual(stopped,{response:{status,body:{success:true}},transition:{beforeGeneration:fact.generation,afterGeneration:null,affectedIds:[fact.id],complete:true}});
+  assert.deepEqual(r.requests.filter(value=>value.relative.endsWith('/stop')),[{method:'POST',relative:'/api/workspaces/E2E-WS/agents/nova/stop',body:null}]);
+  assert.equal(r.starts.length,starts);assert.equal(r.registeredStops.length,forces);assert.equal(r.daemon.state(),'running');
+  await assert.rejects(r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,r.signal));
+  assert.equal(r.requests.filter(value=>value.relative.endsWith('/stop')).length,1);
+  assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+ }finally{await r.cleanup();}}
+});
+
+test('registered worker stop denies foreign IDs, generations, actor incarnation and registration before POST',async()=>{
+ for(const invalid of ['id','worker-generation','serve-generation','actor','registration'] as const){const r=await setupBoundWorker();try{
+  const fact=(await r.driver.refreshOwnedProductProcesses(r.signal))[0]!,serve=r.handles.get('serve')!;
+  if(invalid==='actor')r.actor.created_at='2026-10-09T02:00:00Z';
+  if(invalid==='registration'){r.row.pid=1701;await fs.writeFile(r.stateFile,JSON.stringify({pid:r.daemon.pid,started_at:'2026-10-09T00:30:01Z',agents:[r.row]}));}
+  await assert.rejects(r.driver.stopRegisteredWorker(invalid==='id'?'foreign':fact.id,invalid==='worker-generation'?'foreign':fact.generation,
+   invalid==='serve-generation'?'foreign':serve.generation,r.signal));
+  assert.equal(r.requests.filter(value=>value.relative.endsWith('/stop')).length,0);
+  assert.equal(r.registeredStops.length,0);assert.equal(r.daemon.state(),'running');
+ }finally{await r.cleanup();}}
+});
+
+test('registered worker API failure or unobserved exit retains authority without a second mutation or force fallback',async()=>{
+ for(const failure of ['http','exit'] as const){const r=await setupBoundWorker();try{
+  const fact=(await r.driver.refreshOwnedProductProcesses(r.signal))[0]!,serve=r.handles.get('serve')!;
+  if(failure==='http')r.stopStatus(503);
+  await assert.rejects(r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,r.signal));
+  await assert.rejects(r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,r.signal));
+  assert.equal(r.requests.filter(value=>value.relative.endsWith('/stop')).length,1);assert.equal(r.registeredStops.length,0);
+  assert.equal((await r.driver.inspectOwnedProcess(fact.id,fact.generation,r.signal)).state,'running');
+  assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+ }finally{await r.cleanup();}}
+});
+
+test('registered worker stop reserves the full API-and-exit operation against cleanup, discovery and CLI',async()=>{
+ const r=await setupBoundWorker();let enter!:()=>void,leave!:()=>void;let pending:ReturnType<HostFixtureDriver['stopRegisteredWorker']>|undefined;
+ try{
+  const fact=(await r.driver.refreshOwnedProductProcesses(r.signal))[0]!,serve=r.handles.get('serve')!;
+  const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{leave=resolve;});
+  r.onExit(async pid=>{assert.equal(pid,1700);enter();await gate;});
+  r.onHttp(async(method,relative)=>{if(method==='POST'&&relative.endsWith('/nova/stop'))r.exitRegistered(1700);});
+  pending=r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,r.signal);await entered;
+  const mutations=r.requests.filter(value=>value.method!=='GET').length,runs=r.runs.length,forces=r.registeredStops.length;
+  await assert.rejects(r.driver.refreshOwnedProductProcesses(r.signal));await assert.rejects(r.driver.prepareCleanup(r.signal));
+  await assert.rejects(r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,r.signal));
+  await assert.rejects(r.driver.stopOwnedProcess('daemon',r.daemon.generation,r.signal));
+  await assert.rejects(r.driver.restartOwnedProcess('serve',serve.generation,r.signal));
+  await assert.rejects(r.driver.requestOwnedHttp('api','DELETE','/api/workspaces/E2E-WS',null,r.signal));
+  await assert.rejects(r.driver.launchOwnedCli(['usage'],{},'',true,r.signal));
+  assert.equal(r.requests.filter(value=>value.method!=='GET').length,mutations);assert.equal(r.runs.length,runs);assert.equal(r.registeredStops.length,forces);
+  leave();assert.equal((await pending).transition.complete,true);
+  assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+ }finally{leave?.();await pending?.catch(()=>{});await r.cleanup();}
+});
+
+test('registered worker stop rejects changed serve or parent identity and cancellation without retry',async()=>{
+ for(const changed of ['serve','parent','abort'] as const){const r=await setupBoundWorker();try{
+  const fact=(await r.driver.refreshOwnedProductProcesses(r.signal))[0]!,serve=r.handles.get('serve')!,abort=new AbortController();
+  r.onHttp(async(method,relative)=>{if(method==='POST'&&relative.endsWith('/nova/stop')){
+   if(changed==='serve')(r.driver.processesById as Map<string,OwnedProcess>).set('serve',{...serve,generation:'replacement'});
+   if(changed==='parent')r.registration(r.daemon.pid,{generation:'replacement'});
+   if(changed==='abort')abort.abort();
+  }});
+  await assert.rejects(r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,abort.signal));
+  assert.equal(r.requests.filter(value=>value.relative.endsWith('/stop')).length,1);assert.equal(r.registeredStops.length,0);
+  await assert.rejects(r.driver.stopRegisteredWorker(fact.id,fact.generation,serve.generation,r.signal));
+  assert.equal(r.requests.filter(value=>value.relative.endsWith('/stop')).length,1);
+  if(changed==='serve')(r.driver.processesById as Map<string,OwnedProcess>).set('serve',serve);
+  if(changed==='parent')r.registration(r.daemon.pid,{generation:`actual-parent-${r.daemon.pid}`});
+  r.onHttp(async()=>{});assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+ }finally{await r.cleanup();}}
 });
 
 test('Host worker discovery serializes mutation, parent stop and cleanup across deferred kernel capture',async()=>{
