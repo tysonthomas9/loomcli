@@ -170,6 +170,18 @@
         "failed exact-byte restoration keeps lease for retry; foreign ownership writes0",
         "writes and cleanup use the same retained owned target identity; incomplete source state cannot prove absence"
       ]
+    },
+    "terminal-metadata-detach": {
+      "owner": "agent-ac5d7616-d39d-4b56-ac6c-3979cc039c75",
+      "source": {
+        "path": "tests/aft/scripts/live-close-agent-tab.sh",
+        "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "sha256": "82253319f090318c3c8b044a203c0430b08ec5b5ee06656be6e97fedfd6916bd"
+      },
+      "canonicalOperation": "loom.runtime.detachTerminal",
+      "actor": "Reachable tabs GET, fresh matching agent_id/nonempty session_name list, DELETE every captured matching session in original order, final reachable matching list. DELETE attempts best-effort Kill but metadata removal never proves process exit.",
+      "facts": "Captured sessions, each actual HTTP status or uncertain transport attempt, final remaining sessions, exact owned serve generation. YAML owns all-success and zero-remaining predicates. Overflow/partial listings are incomplete before mutation.",
+      "status": "Typed leaf algorithm/closed schemas/production Host endpoint binding implemented; old terminal-close process transition rejects before transport. New canonical authority ID, trusted fixture grant, default root registration and actual serve generation binding to caller still require exact shared checkpoints and public registry/Host integration tests. No runtime or terminal process exit proof."
     }
   },
   "operations": [

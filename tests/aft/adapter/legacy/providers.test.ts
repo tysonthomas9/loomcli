@@ -17,7 +17,7 @@ test('all six legacy providers register strict contracts and return canonical en
   const root = fileURLToPath(new URL('..', import.meta.url));
   const pin = calculateImplementationPin(root, ['legacy/providers.ts', 'legacy/operations.ts', 'legacy/catalog.ts',
     'legacy/scenarios.json', 'protocol.ts', 'operation.ts', 'ownership.ts', 'evidence.ts'], 'legacy/providers.ts', 'createLegacyProviders');
-  const registry = new CapabilityRegistry(); let executed = 0; let verified = 0;
+  const registry = new CapabilityRegistry(); let executed = 0; let verified = 0; let factories = 0;
   const lease: LegacyLease = { id: 'lease', runId: 'run', active: true, evidence: 'deterministic', secrets: [],
     binary: '/owned/bin/loom', cwd: '/owned/work', env: {}, workspaces: ['WS'], agents: [], roles: [], issues: [], repos: [], processes: [], fixtures: [] };
   const unsupported = async (): Promise<never> => { throw new Error('Unused transport'); };
@@ -25,7 +25,7 @@ test('all six legacy providers register strict contracts and return canonical en
     execute: async () => { executed++; return { processId: 'cli', generation: 'gen', complete: true, exitCode: 0, stdout: '[]', stderr: '' }; },
     registerProcess: unsupported, stimulate: unsupported, request: unsupported, validateSeedPath: unsupported,
     seedCommit: unsupported, snapshot: unsupported, restore: unsupported, writeConfiguration: unsupported, enrollCleanup: () => {} };
-  for (const provider of createLegacyProviders(pin, pin.sha256, () => access)) registry.register(provider);
+  for (const provider of createLegacyProviders(pin, pin.sha256, () => { factories++; return access; })) registry.register(provider);
   for (const id of ['loom.cli.role', 'loom.cli.usage', 'loom.cli.task', 'loom.runtime.stimulate', 'loom.fixture.seedWorktree', 'loom.fixture.configure'])
     assert.equal(registry.get(id, 1).retry, 'never');
   const context = createCapabilityContext({ file: 'test.yaml', line: 1 }, registry);
@@ -40,6 +40,9 @@ test('all six legacy providers register strict contracts and return canonical en
     [operation, { evidenceClass: 'deterministic' as const, effects: [...effects] }])));
   fixture.ownedWorkspaces = await testLegacyRoster(fixture, evidenceStore);
   putFixture(context, fixture);
+  const terminal = await registry.invoke({ id: 'loom.runtime.stimulate', version: 1, input: {} },
+    { leaseId: 'lease', targetId: 'terminal', operation: 'terminal-close', expectedGeneration: 'gen' }, context);
+  assert.equal(terminal.availability, 'unsupported'); assert.equal(factories, 0); assert.equal(executed, 0);
   const invoke = (input: unknown) => registry.invoke({ id: 'loom.cli.role', version: 1, input: {} }, input, context);
   const result = ObservationResultSchema.parse(await invoke({ leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }));
   assert.equal(result.availability, 'observed'); assert.ok(result.data); assert.equal(result.provenance.identity.fixtureLeaseId, 'lease');
