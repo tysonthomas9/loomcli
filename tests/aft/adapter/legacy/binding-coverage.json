@@ -1,0 +1,1945 @@
+{
+  "loomBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+  "inventoryIndexSha256": "4055541f111c878152782d94840d2466e1744e59e795b9e5376e15a5e9e35640",
+  "profileApplicability": [
+    "legacy-deterministic",
+    "legacy-real-codex",
+    "legacy-real-claude",
+    "legacy-real-cursor",
+    "legacy-real-opencode",
+    "agents-emulator",
+    "agents-real-opencode",
+    "legacy-real-codex-podman"
+  ],
+  "profileSelectionStatus": "Parent frozen case/profile selection must resolve applicability; this artifact grants no profile coverage.",
+  "hooks": {
+    "host-cli": {
+      "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "request": "cliRegistration + launchOwnedCli + inspectOwnedProcess; exact seed allowlist, stderr, before-spawn enrollment",
+      "checkpoint": "0f77ac596b435811bf4a9fc8d927733276db6d1e",
+      "status": "Bound host role/usage/task through actual driver; corrected stderr and proven-no-start retirement consumed from98e49c615."
+    },
+    "host-origin": {
+      "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "request": "fakeModelOrigin derived from owned process and port generation",
+      "status": "Bound exact fakeModelOrigin generation getter760733; foreign endpoint and stopped generation rejected before write."
+    },
+    "runtime-targets": {
+      "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "request": "trusted product legacy/native harness/worker/terminal registration plus exact generation-at-effect transition",
+      "status": "host serve bound; other targets missing"
+    },
+    "compose-mutations": {
+      "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "request": "fixed container Loom CLI and owned process inspect/restart/stop; exact identities not PID text",
+      "status": "missing; configuration and HTTP hooks published separately"
+    },
+    "fixture-baseline": {
+      "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "request": "known fresh model/GitHub baseline or exact captured private state; requests/count is not full queue snapshot",
+      "status": "missing; unsupported before mutation"
+    },
+    "seed-resolution": {
+      "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "request": "actual product-resolved legacy agent worktree + selected repo; native-v1 IDs cannot replace legacy names",
+      "status": "missing; path validation/seed argv implemented independently"
+    },
+    "workspace-fixture": {
+      "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "request": "finite source fixture repo seed factory and owned restore/disposal registration",
+      "status": "missing"
+    },
+    "operation-authority": {
+      "owner": "agent-0f30e493-e8b6-4f7c-bb49-c320a3725a17",
+      "request": "canonical per-operation expected evidence and permitted effects from private provisioning/backend/model authority",
+      "status": "Bound exact canonical404998 grants before factory; mixed read/live-task class and backend/model denial tested through registry; actual production grants still fixture-owned."
+    },
+    "engine-final": {
+      "owner": "agent-a43468f0-1931-41df-92fc-9a50f0dfc1d5",
+      "request": "accepted final engine context/cleanup/retry/stream contract",
+      "status": "Unmodified correction3a043624 package used for focused tests; independent final pin/acceptance remains parent-owned."
+    },
+    "owned-workspaces": {
+      "owner": "agent-0f30e493-e8b6-4f7c-bb49-c320a3725a17",
+      "fixtureOwner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "request": "Canonical owned fixture workspace records plus actual creation receipts for E2E-WS-AGENT/nova and E2E-AGV1-*; discovery never grants ownership",
+      "status": "Required; current published fixture binds only initialworkspace"
+    }
+  },
+  "operations": [
+    {
+      "id": "loom.runtime.stimulate",
+      "profiles": [
+        "legacy-deterministic",
+        "legacy-real-codex",
+        "legacy-real-claude",
+        "legacy-real-cursor",
+        "legacy-real-opencode",
+        "agents-emulator",
+        "agents-real-opencode",
+        "legacy-real-codex-podman"
+      ],
+      "remainingHooks": [
+        "runtime-targets",
+        "compose-mutations",
+        "operation-authority",
+        "engine-final",
+        "owned-workspaces"
+      ]
+    },
+    {
+      "id": "loom.cli.role",
+      "profiles": [
+        "legacy-deterministic",
+        "legacy-real-codex",
+        "legacy-real-claude",
+        "legacy-real-cursor",
+        "legacy-real-opencode",
+        "agents-emulator",
+        "agents-real-opencode",
+        "legacy-real-codex-podman"
+      ],
+      "remainingHooks": [
+        "compose-mutations",
+        "operation-authority",
+        "engine-final",
+        "owned-workspaces"
+      ]
+    },
+    {
+      "id": "loom.cli.usage",
+      "profiles": [
+        "legacy-deterministic",
+        "legacy-real-codex",
+        "legacy-real-claude",
+        "legacy-real-cursor",
+        "legacy-real-opencode",
+        "agents-emulator",
+        "agents-real-opencode",
+        "legacy-real-codex-podman"
+      ],
+      "remainingHooks": [
+        "compose-mutations",
+        "operation-authority",
+        "engine-final",
+        "owned-workspaces"
+      ]
+    },
+    {
+      "id": "loom.cli.task",
+      "profiles": [
+        "legacy-deterministic",
+        "legacy-real-codex",
+        "legacy-real-claude",
+        "legacy-real-cursor",
+        "legacy-real-opencode",
+        "agents-emulator",
+        "agents-real-opencode",
+        "legacy-real-codex-podman"
+      ],
+      "remainingHooks": [
+        "host-cli",
+        "compose-mutations",
+        "operation-authority",
+        "engine-final",
+        "owned-workspaces"
+      ]
+    },
+    {
+      "id": "loom.fixture.seedWorktree",
+      "profiles": [
+        "legacy-deterministic",
+        "agents-emulator"
+      ],
+      "remainingHooks": [
+        "host-cli",
+        "seed-resolution",
+        "compose-mutations",
+        "engine-final",
+        "owned-workspaces"
+      ]
+    },
+    {
+      "id": "loom.fixture.configure",
+      "profiles": [
+        "legacy-deterministic",
+        "agents-emulator"
+      ],
+      "remainingHooks": [
+        "host-origin",
+        "fixture-baseline",
+        "workspace-fixture",
+        "compose-mutations",
+        "operation-authority",
+        "engine-final",
+        "owned-workspaces"
+      ]
+    }
+  ],
+  "sourceCallers": [
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml#tests/3/steps/0",
+      "sourceCaseId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml#tests/3",
+      "sourceFile": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml",
+      "sourceLine": 222,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml#tests/3/steps/7",
+      "sourceCaseId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml#tests/3",
+      "sourceFile": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-asks.test.yaml",
+      "sourceLine": 237,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-models.test.yaml#tests/1/steps/1",
+      "sourceCaseId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-models.test.yaml#tests/1",
+      "sourceFile": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-models.test.yaml",
+      "sourceLine": 177,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml#tests/0/steps/0",
+      "sourceCaseId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml",
+      "sourceLine": 17,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml#tests/0/steps/6",
+      "sourceCaseId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-create.test.yaml",
+      "sourceLine": 35,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/0",
+      "sourceCaseId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml",
+      "sourceLine": 16,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+      "sourceCaseId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml",
+      "sourceLine": 70,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml#tests/0/steps/0",
+      "sourceCaseId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml",
+      "sourceLine": 18,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml#tests/0/steps/34",
+      "sourceCaseId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-waiting.test.yaml",
+      "sourceLine": 108,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml#tests/0/steps/0",
+      "sourceCaseId": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml",
+      "sourceLine": 23,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml#tests/0/steps/21",
+      "sourceCaseId": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-agent-flow-suites/recovery-lifecycle.test.yaml",
+      "sourceLine": 74,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-interactive-suites/li-custom-prompt.test.yaml#tests/0/steps/21",
+      "sourceCaseId": "campaign:tests/aft/live-interactive-suites/li-custom-prompt.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-interactive-suites/li-custom-prompt.test.yaml",
+      "sourceLine": 268,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-interactive-suites/ll-lead-assignment.test.yaml#tests/0/steps/19",
+      "sourceCaseId": "campaign:tests/aft/live-interactive-suites/ll-lead-assignment.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-interactive-suites/ll-lead-assignment.test.yaml",
+      "sourceLine": 239,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-pr-review-suites/lp-pr-review.test.yaml#tests/0/steps/19",
+      "sourceCaseId": "campaign:tests/aft/live-pr-review-suites/lp-pr-review.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-pr-review-suites/lp-pr-review.test.yaml",
+      "sourceLine": 495,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml#tests/0/steps/40",
+      "sourceCaseId": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml",
+      "sourceLine": 519,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml#tests/1/steps/33",
+      "sourceCaseId": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml#tests/1",
+      "sourceFile": "campaign:tests/aft/live-worker-suites/lw-supervised-workers.test.yaml",
+      "sourceLine": 825,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1/steps/6",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 150,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 327,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3/steps/6",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 355,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3/steps/8",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/3",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 394,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/4/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/4",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+      "sourceLine": 272,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/6/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/6",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+      "sourceLine": 359,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/7/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/7",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+      "sourceLine": 416,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/8/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml#tests/8",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+      "sourceLine": 465,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 46,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0/steps/8",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 69,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        },
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/1/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/1",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 96,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/2/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/2",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 142,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/4/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/4",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 262,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/6/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/6",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 370,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 449,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8/steps/23",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/8",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 549,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/9/steps/3",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/9",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 615,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/10/steps/14",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/10",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 709,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/11/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/11",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 746,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 826,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12/steps/11",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/12",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 875,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 903,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13/steps/15",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/13",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 974,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 1014,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14/steps/6",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lead.test.yaml#tests/14",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "sourceLine": 1046,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/0/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml",
+      "sourceLine": 35,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/1/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/1",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml",
+      "sourceLine": 120,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/2/steps/2",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml#tests/2",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml",
+      "sourceLine": 193,
+      "operations": [
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+      "sourceLine": 39,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0/steps/5",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+      "sourceLine": 53,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        },
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+      "sourceLine": 114,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1/steps/8",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/1",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+      "sourceLine": 135,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        },
+        {
+          "id": "loom.runtime.stimulate",
+          "remainingHooks": [
+            "runtime-targets",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/2/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-resume.test.yaml#tests/2",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+      "sourceLine": 189,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+      "sourceLine": 215,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2/steps/5",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/2",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+      "sourceLine": 234,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/4/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/4",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+      "sourceLine": 326,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/5/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/5",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+      "sourceLine": 358,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+      "sourceLine": 402,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6/steps/5",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/6",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+      "sourceLine": 420,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/7/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-ui.test.yaml#tests/7",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+      "sourceLine": 452,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-agent-flow.test.yaml#tests/2/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-agent-flow.test.yaml#tests/2",
+      "sourceFile": "campaign:tests/aft/suites/zz-agent-flow.test.yaml",
+      "sourceLine": 203,
+      "operations": [
+        {
+          "id": "loom.fixture.seedWorktree",
+          "remainingHooks": [
+            "host-cli",
+            "seed-resolution",
+            "compose-mutations",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/0/steps/12",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 144,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/3/steps/11",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/3",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 240,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/4/steps/11",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/4",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 287,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/7/steps/11",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/7",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 488,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/11/steps/13",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/11",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 651,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/12/steps/9",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/12",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 713,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/15/steps/5",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/15",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 1006,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/16/steps/23",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/16",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 1067,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/18/steps/19",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/18",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 1142,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/19/steps/14",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/19",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 1193,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/21/steps/11",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml#tests/21",
+      "sourceFile": "campaign:tests/aft/suites/zz-custom-prompt.test.yaml",
+      "sourceLine": 1292,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-lead-agent.test.yaml#tests/3/steps/9",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-lead-agent.test.yaml#tests/3",
+      "sourceFile": "campaign:tests/aft/suites/zz-lead-agent.test.yaml",
+      "sourceLine": 268,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-lead-agent.test.yaml#tests/8/steps/9",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-lead-agent.test.yaml#tests/8",
+      "sourceFile": "campaign:tests/aft/suites/zz-lead-agent.test.yaml",
+      "sourceLine": 504,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/6/steps/10",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/6",
+      "sourceFile": "campaign:tests/aft/suites/zz-task-runner.test.yaml",
+      "sourceLine": 568,
+      "operations": [
+        {
+          "id": "loom.cli.task",
+          "remainingHooks": [
+            "host-cli",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/7/steps/12",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/7",
+      "sourceFile": "campaign:tests/aft/suites/zz-task-runner.test.yaml",
+      "sourceLine": 685,
+      "operations": [
+        {
+          "id": "loom.cli.task",
+          "remainingHooks": [
+            "host-cli",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/7/steps/13",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/7",
+      "sourceFile": "campaign:tests/aft/suites/zz-task-runner.test.yaml",
+      "sourceLine": 699,
+      "operations": [
+        {
+          "id": "loom.cli.task",
+          "remainingHooks": [
+            "host-cli",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/10/steps/3",
+      "sourceCaseId": "campaign:tests/aft/suites/zz-task-runner.test.yaml#tests/10",
+      "sourceFile": "campaign:tests/aft/suites/zz-task-runner.test.yaml",
+      "sourceLine": 852,
+      "operations": [
+        {
+          "id": "loom.cli.task",
+          "remainingHooks": [
+            "host-cli",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/0/steps/0",
+      "sourceCaseId": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml",
+      "sourceLine": 30,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/2/steps/1",
+      "sourceCaseId": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/2",
+      "sourceFile": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml",
+      "sourceLine": 162,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/3/steps/2",
+      "sourceCaseId": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/3",
+      "sourceFile": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml",
+      "sourceLine": 219,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/5/steps/1",
+      "sourceCaseId": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml#tests/5",
+      "sourceFile": "campaign:tests/aft/surface-suites/custom-prompt-contracts.test.yaml",
+      "sourceLine": 344,
+      "operations": [
+        {
+          "id": "loom.cli.role",
+          "remainingHooks": [
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/0/steps/0",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/0",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 53,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/1",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 133,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 226,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2/steps/6",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/2",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 246,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 431,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4/steps/6",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/4",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 449,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    },
+    {
+      "sourceCallerId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/5/steps/1",
+      "sourceCaseId": "campaign:tests/aft/suites/agents-v1-children.test.yaml#tests/5",
+      "sourceFile": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "sourceLine": 547,
+      "operations": [
+        {
+          "id": "loom.fixture.configure",
+          "remainingHooks": [
+            "host-origin",
+            "fixture-baseline",
+            "workspace-fixture",
+            "compose-mutations",
+            "operation-authority",
+            "engine-final",
+            "owned-workspaces"
+          ]
+        }
+      ],
+      "status": "original contract retained; no runtime acceptance claim"
+    }
+  ],
+  "sourceConfigurationHooks": [
+    {
+      "file_id": "campaign:tests/aft/live-pr-review-suites/lp-pr-review.test.yaml",
+      "kind": "setup",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-children.test.yaml",
+      "kind": "setup",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-lead-parity.test.yaml",
+      "kind": "setup",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-lead.test.yaml",
+      "kind": "setup",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-lifecycle.test.yaml",
+      "kind": "setup",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-resume.test.yaml",
+      "kind": "setup",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    },
+    {
+      "file_id": "campaign:tests/aft/suites/agents-v1-ui.test.yaml",
+      "kind": "setup",
+      "status": "preserved; launcher-owned fixture prerequisite"
+    }
+  ],
+  "usageSource": "internal/cli/cleanup/usage_cmd.go (actor contract); no direct usage caller identified in frozen 85-caller mapping",
+  "evidence": "Deterministic interface/binding evidence only; unsupported is not coverage or a waiver.",
+  "sharedDependencies": {
+    "core": "404998b4f30afb4a00496823a46749fd58a784c3",
+    "fixture": "0ef1e89851f996fb008e52285b77a079272a8155",
+    "ownedModelOrigin": "760733e3176a27f5710387d441fcd99198013912"
+  }
+}

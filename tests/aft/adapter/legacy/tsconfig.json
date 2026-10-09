@@ -19,6 +19,27 @@
       ],
       "@tysonthomas9/aft/capabilities": [
         "./node_modules/@tysonthomas9/aft/dist/capabilities.d.ts"
+      ],
+      "unified": [
+        "./node_modules/unified/index.d.ts"
+      ],
+      "remark-parse": [
+        "./node_modules/remark-parse/index.d.ts"
+      ],
+      "remark-gfm": [
+        "./node_modules/remark-gfm/index.d.ts"
+      ],
+      "remark-rehype": [
+        "./node_modules/remark-rehype/index.d.ts"
+      ],
+      "rehype-sanitize": [
+        "./node_modules/rehype-sanitize/index.d.ts"
+      ],
+      "mdast": [
+        "./node_modules/@types/mdast/index.d.ts"
+      ],
+      "hast": [
+        "./node_modules/@types/hast/index.d.ts"
       ]
     }
   },
