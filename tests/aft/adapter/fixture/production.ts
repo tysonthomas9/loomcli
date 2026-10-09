@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
@@ -44,6 +44,8 @@ export interface ProductionConfig {
   // rebuilds an unproven image or silently uses a mutable shared tag.
   attestedImages: boolean;
   minimumFreeBytes: number;
+  // Separate ModeCloud topology, backed by the reviewed supplemental overlay.
+  modecloud?: { codexAuthRoot: string; frontendDist: string };
 }
 export type ComposeRead = (origin: string, relative: string, signal: AbortSignal) => Promise<unknown>;
 const fetchRead: ComposeRead = async (origin, relative, signal) => {
@@ -84,8 +86,9 @@ export async function verifyManifest(manifest: FileManifest, expected: string): 
   }
   check(hash(entries.map(entry => `${entry.sha256}  ${entry.relativePath}\n`).join('')) === expected, 'source-mismatch');
 }
-interface ObjectRecord { id: string; kind: 'container' | 'volume' | 'network'; generation: string; service: string; pid: number; state: string }
+interface ObjectRecord { id: string; kind: 'container' | 'volume' | 'network'; generation: string; service: string; pid: number; state: string; healthy?: boolean; workVolume?: string }
 const SERVICES = ['redis', 'fleet-db', 'loom-local', 'ui-local'];
+const CLOUD_SERVICES = ['redis', 'fleet-auth-seed', 'fleet-db', 'loom-serve', 'worker', 'stub-upstream'];
 
 export class ComposeFixtureDriver implements FixtureDriver {
   private root = '';
@@ -101,6 +104,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
   private removed = false;
   private plan?: FixturePlan;
   private images = { loom: '', fleet: '' };
+  private stackImages: Record<string, string> = {};
+  private readonly cloudSecrets: Record<string, string> = {};
   private readonly config: ProductionConfig;
   private readonly cleanups: (() => Promise<void>)[] = [];
   constructor(config: ProductionConfig, private readonly run: ProcessRunner = runProcess,
@@ -109,6 +114,9 @@ export class ComposeFixtureDriver implements FixtureDriver {
     private readonly http: ComposeRead = fetchRead, private readonly requestHttp: Http = readHttp) { this.config = structuredClone(config); }
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return '/root/.loom/workspaces/LOCALMODE'; }
+  get fixtureSecrets() { return Object.values(this.cloudSecrets); }
+  private get cloud() { return this.profile === 'legacy-real-codex-podman'; }
+  private get serviceNames() { return this.cloud ? CLOUD_SERVICES : SERVICES; }
   enrollCleanup(cleanup: () => Promise<void>) { check(this.root); this.cleanups.push(cleanup); }
   async readOwnedConfiguration(target: 'opencode' | 'emu-scenarios', signal: AbortSignal) {
     return this.nativeRead({ operation: 'configuration-read', target }, signal) as Promise<{ bytes: string | null; complete: true }>;
@@ -120,14 +128,22 @@ export class ComposeFixtureDriver implements FixtureDriver {
   async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relativePath: string, body: unknown, signal: AbortSignal) {
     signal.throwIfAborted(); check(this.ports.length === 3);
     await this.inspect({ id: this.project, kind: 'compose', generation: this.leaseId });
-    check(this.objects.some(object => object.kind === 'container' && object.service === 'loom-local' && object.state === 'running'));
+    check(this.objects.some(object => object.kind === 'container' && object.service === (this.cloud ? 'loom-serve' : 'loom-local') && object.state === 'running'));
     check(target !== 'fake-github', 'unsupported-capability');
-    if (target === 'fake-model') return this.nativeRead({ operation: 'fixture-http', method, relativePath, body: Json.parse(body) }, signal) as Promise<{ status: number; body: unknown }>;
+    if (target === 'fake-model') {
+      check(!this.cloud, 'unsupported-capability');
+      return this.nativeRead({ operation: 'fixture-http', method, relativePath, body: Json.parse(body) }, signal) as Promise<{ status: number; body: unknown }>;
+    }
     check(relativePath.startsWith('/api/'));
-    return this.requestHttp(`http://127.0.0.1:${this.ports[1]}`, method, relativePath, body, signal);
+    return this.requestHttp(`http://127.0.0.1:${this.ports[this.cloud ? 0 : 1]}`, method, relativePath, body, signal);
   }
   private env(): Record<string, string> {
     const c = this.config;
+    if (this.cloud) return { PATH: c.toolPath, HOME: c.hostHome, CONTAINER_CONNECTION: c.connection,
+      LOOM_STACK_PROJECT: this.project, LOOM_STACK_SERVE_PORT: String(this.ports[0]), LOOM_STACK_FLEET_DB_PORT: String(this.ports[1]),
+      LOOM_STACK_STUB_PORT: String(this.ports[2]), LOOM_STACK_WORKSPACE: 'E2E-WS', FLEET_SEED_ACTOR: 'loom-serve@podman-stack.local',
+      LOOM_STACK_CODEX_HOST_DIR: c.modecloud!.codexAuthRoot, LOOM_AFT_FRONTEND_DIST: c.modecloud!.frontendDist,
+      LOOM_AFT_FLUE_AGENT_MODEL: this.plan!.model, ...this.cloudSecrets };
     return { PATH: c.toolPath, HOME: c.hostHome, CONTAINER_CONNECTION: c.connection,
       LOCAL_MODE_COMPOSE_PROJECT: this.project, LOCAL_MODE_FLEETDB_PORT: String(this.ports[0]),
       LOCAL_MODE_API_PORT: String(this.ports[1]), LOCAL_MODE_UI_PORT: String(this.ports[2]),
@@ -149,6 +165,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
     check(hash(JSON.stringify([{ Identity: selectedRecord.Identity, Name: selectedRecord.Name, URI: selectedRecord.URI }])) === this.config.connectionFingerprint);
   }
   private composeArgs(): string[] {
+    if (this.cloud) return ['--connection', this.config.connection, 'compose', '-p', this.project,
+      '-f', 'deploy/podman-stack/compose.yaml', '-f', path.join(this.root, 'compose.json')];
     return ['--connection', this.config.connection, 'compose', '-p', this.project,
       '-f', 'test/local-mode/docker-compose.yml', '-f', 'test/local-mode/docker-compose.agents.yml',
       ...(this.profile === 'agents-real-opencode' ? ['-f', 'test/local-mode/docker-compose.agents-real.yml'] : []),
@@ -172,9 +190,9 @@ export class ComposeFixtureDriver implements FixtureDriver {
     } catch { return false; }
   }
   async preflight(plan: FixturePlan, signal: AbortSignal): Promise<void> {
-    check(['agents-real-opencode', 'agents-emulator'].includes(plan.profile), 'unsupported-capability');
+    check(['agents-real-opencode', 'agents-emulator', 'legacy-real-codex-podman'].includes(plan.profile), 'unsupported-capability');
     this.plan = structuredClone(plan); this.profile = plan.profile;
-    check(safe(plan.model) && (plan.profile === 'agents-real-opencode' ? !plan.model.startsWith('aft/') : plan.model === 'aft/m'), 'identity-mismatch');
+    check(safe(plan.model) && (plan.profile === 'agents-emulator' ? plan.model === 'aft/m' : !plan.model.startsWith('aft/')), 'identity-mismatch');
     check(safe(this.config.connection) && /^[a-f0-9]{64}$/.test(this.config.connectionFingerprint));
     for (const directory of [this.config.tempParent, this.config.lockParent, this.config.hostHome]) {
       check(await this.files.realpath(directory) === directory && (await this.files.lstat(directory)).isDirectory());
@@ -183,7 +201,20 @@ export class ComposeFixtureDriver implements FixtureDriver {
     check(storage.bavail * storage.bsize >= Math.max(9 * 1024 ** 3, this.config.minimumFreeBytes), 'observation-failed');
     check(await this.identity(plan), 'source-mismatch');
     check(this.config.attestedImages, 'source-mismatch');
-    for (const [name, build] of [['loom', this.config.loom], ['fleet', this.config.fleet]] as const) {
+    if (this.cloud) {
+      const config = this.config.modecloud; check(config, 'source-mismatch');
+      for (const dir of [config!.codexAuthRoot, config!.frontendDist]) check(await this.files.realpath(dir) === dir && (await this.files.lstat(dir)).isDirectory());
+      check((await this.files.lstat(path.join(config!.codexAuthRoot, 'auth.json'))).isFile() && !(await this.files.lstat(path.join(config!.codexAuthRoot, 'auth.json'))).isSymbolicLink());
+      const prefix = path.relative(this.config.loom.build.root, config!.frontendDist);
+      check(prefix && !prefix.startsWith('..') && !path.isAbsolute(prefix) && this.config.loom.build.entries.some(entry => entry.relativePath === `${prefix}/index.html`), 'source-mismatch');
+      check(this.config.loom.build.entries.some(entry => entry.relativePath === 'modecloud-images.json'), 'source-mismatch');
+      const receipt = JSON.parse((await regularBytes(path.join(this.config.loom.build.root, 'modecloud-images.json'))).toString('utf8'));
+      check(receipt.sourceManifestSha256 === plan.loomRevision.sourceManifestSha256 && receipt.fleetSourceManifestSha256 === plan.fleetRevision.sourceManifestSha256, 'source-mismatch');
+      for (const service of ['fleet-db', 'loom-serve', 'worker', 'stub-upstream']) {
+        check(/^sha256:[a-f0-9]{64}$/.test(receipt.images?.[service]), 'source-mismatch'); this.stackImages[service] = receipt.images[service];
+      }
+      this.images = { loom: this.stackImages['loom-serve']!, fleet: this.stackImages['fleet-db']! };
+    } else for (const [name, build] of [['loom', this.config.loom], ['fleet', this.config.fleet]] as const) {
       check(build.build.entries.some(entry => entry.relativePath === 'container-image.json'), 'source-mismatch');
       const receipt = JSON.parse((await regularBytes(path.join(build.build.root, 'container-image.json'))).toString('utf8'));
       check(/^sha256:[a-f0-9]{64}$/.test(receipt.imageId) && receipt.sourceManifestSha256 === build.revision.sourceManifestSha256, 'source-mismatch');
@@ -197,7 +228,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
     }
     await this.connection(signal);
     await this.command('podman', ['--connection', this.config.connection, 'info', '--format', 'json'], signal);
-    for (const imageId of Object.values(this.images)) {
+    for (const imageId of Object.values(this.cloud ? this.stackImages : this.images)) {
       const observed = JSON.parse(await this.command('podman', ['--connection', this.config.connection, 'image', 'inspect', imageId], signal));
       check(Array.isArray(observed) && observed.length === 1 && observed[0].Id === imageId, 'source-mismatch');
     }
@@ -218,7 +249,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
     await this.files.mkdir(path.join(this.root, 'evidence'), { mode: 0o700 });
     await this.stamp(path.join(this.root, 'evidence'));
     // Account and build locks are exclusive and never steal stale locks.
-    const names = [ ...(this.profile === 'agents-real-opencode' ? ['aft-live.opencode.lock'] : []), 'aft-fixture-build.lock' ];
+    const names = [ ...(this.profile === 'agents-real-opencode' ? ['aft-live.opencode.lock'] : this.cloud ? ['aft-live.codex.lock'] : []), 'aft-fixture-build.lock' ];
     for (const name of names) {
       const filename = path.join(this.config.lockParent, name);
       const handle = await this.files.open(filename, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
@@ -231,7 +262,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
       if (index === 0) record({ id: `ports:${this.leaseId}`, kind: 'ports', generation: this.leaseId });
     }
     const labels = { 'io.loom.aft.lease': this.leaseId };
-    const override = { services: Object.fromEntries(SERVICES.map(service => [service, {
+    const override = this.cloud ? this.cloudOverride(labels) : { services: Object.fromEntries(SERVICES.map(service => [service, {
       labels,
       ...(service === 'fleet-db' ? { build: { context: this.config.fleet.source.root }, environment: { FLEET_RATE_LIMIT_ENABLED: 'false' } } : {}),
       ...(service === 'loom-local' ? { volumes: [`${this.config.adapter.build.root}:/opt/aft:ro`] } : {}),
@@ -245,6 +276,19 @@ export class ComposeFixtureDriver implements FixtureDriver {
     const filename = path.join(this.root, 'compose.json');
     await this.files.writeFile(filename, JSON.stringify(override), { mode: 0o600, flag: 'wx' });
     await this.stamp(filename);
+  }
+  private cloudOverride(labels: Record<string, string>) {
+    for (const key of ['LOOM_FLEET_DB_API_KEY', 'LOOM_RUN_TOKEN_SIGNING_KEY', 'LOOM_CONNECTOR_VAULT_KEY', 'LOOM_FLEET_API_KEY', 'LOOM_WORKER_TOKEN', 'LOOM_STACK_STUB_SECRET'])
+      this.cloudSecrets[key] = (key === 'LOOM_FLEET_DB_API_KEY' ? 'fldb_' : '') + randomBytes(32).toString(key === 'LOOM_CONNECTOR_VAULT_KEY' ? 'base64' : 'hex');
+    return { services: Object.fromEntries(CLOUD_SERVICES.map(service => [service, { labels,
+      ...(this.stackImages[service] ? { image: this.stackImages[service] } : {}),
+      ...(service === 'fleet-db' ? { environment: { FLEET_AUTH_DEV_MODE: 'true', FLEET_AUTHZ_ENABLED: 'false' } } : {}),
+      ...(service === 'loom-serve' ? { environment: { CODEX_HOME: '/home/node/.codex-rw', LOOM_STACK_CODEX_RW_DIR: '/home/node/.codex-rw',
+        FLUE_REPO: '/opt/flue', AFT_FIXTURE_MODE: 'modecloud', LOOM_DRIVER_TASK_RUNNER_CMD_JSON: null, LOOM_FLUE_AGENT_MODEL: this.plan!.model,
+        LOOM_FRONTEND_DIR: '/opt/webui', LOOM_FRONTEND_URL: `http://localhost:${this.ports[0]}` },
+        volumes: [`${this.config.modecloud!.codexAuthRoot}:/home/node/.codex:ro`, `${this.config.modecloud!.frontendDist}:/opt/webui:ro`,
+          `${this.config.adapter.build.root}:/opt/aft:ro`] } : {}),
+    }])), volumes: Object.fromEntries(['redis-data', 'loom-data', 'loom-work'].map(name => [name, { labels }])), networks: { 'loom-stack': { labels } } };
   }
   private async closeSockets() {
     for (const socket of this.sockets) await socket.release();
@@ -265,20 +309,34 @@ export class ComposeFixtureDriver implements FixtureDriver {
         const labels = kind === 'container' ? value.Config?.Labels : value.Labels;
         check(labels?.['com.docker.compose.project'] === this.project && labels?.['io.loom.aft.lease'] === this.leaseId);
         const service = kind === 'container' ? labels['com.docker.compose.service'] : kind;
-        check(kind !== 'container' || SERVICES.includes(service));
-        if (kind === 'container' && ['fleet-db', 'loom-local', 'ui-local'].includes(service)) {
-          const portIndex = { 'fleet-db': 0, 'loom-local': 1, 'ui-local': 2 }[service as 'fleet-db' | 'loom-local' | 'ui-local'];
+        check(kind !== 'container' || this.serviceNames.includes(service));
+        const ports: Record<string, number> = this.cloud ? { 'loom-serve': 0, 'fleet-db': 1, 'stub-upstream': 2 } : { 'fleet-db': 0, 'loom-local': 1, 'ui-local': 2 };
+        if (kind === 'container' && service in ports) {
+          const portIndex = ports[service]!;
           const mappings = value.NetworkSettings?.Ports?.['8080/tcp'];
           check(Array.isArray(mappings) && mappings.length > 0 && mappings.every((mapping: { HostPort: string }) => Number(mapping.HostPort) === this.ports[portIndex]));
         }
         if (kind === 'container' && service === 'fleet-db') check(value.Image === this.images.fleet, 'source-mismatch');
         if (kind === 'container' && service === 'loom-local') check(value.Image === this.images.loom, 'source-mismatch');
+        if (kind === 'container' && this.cloud && this.stackImages[service]) check(value.Image === this.stackImages[service], 'source-mismatch');
+        let workVolume: string | undefined;
+        if (kind === 'container' && this.cloud && service === 'loom-serve') {
+          const mounts = value.Mounts?.filter((mount: { Destination: string }) => mount.Destination === '/work');
+          check(Array.isArray(mounts) && mounts.length === 1 && mounts[0].Type === 'volume' && typeof mounts[0].Name === 'string'); workVolume = mounts[0].Name;
+          const credentials = value.Mounts?.filter((mount: { Destination: string }) => mount.Destination === '/home/node/.codex');
+          const frontend = value.Mounts?.filter((mount: { Destination: string }) => mount.Destination === '/opt/webui');
+          check(credentials?.length === 1 && credentials[0].RW === false && credentials[0].Source === this.config.modecloud!.codexAuthRoot);
+          check(frontend?.length === 1 && frontend[0].RW === false && frontend[0].Source === this.config.modecloud!.frontendDist);
+        }
+        if (kind === 'container' && service === 'fleet-auth-seed') check(value.State?.Status !== 'exited' || value.State.ExitCode === 0, 'observation-failed');
         records.push({ id: kind === 'volume' ? value.Name : value.Id ?? value.ID, kind, service,
           generation: kind === 'container' ? `${value.Id}:${value.State?.StartedAt}` : `${value.Name ?? value.Id ?? value.ID}:${value.CreatedAt ?? value.Created}`,
-          pid: kind === 'container' ? value.State?.Pid ?? 0 : 0, state: kind === 'container' ? value.State?.Status ?? 'unknown' : 'allocated' });
+          pid: kind === 'container' ? value.State?.Pid ?? 0 : 0, state: kind === 'container' ? value.State?.Status ?? 'unknown' : 'allocated',
+          ...(kind === 'container' ? { healthy: value.State?.Health?.Status === 'healthy' } : {}), ...(workVolume ? { workVolume } : {}) });
       }
     }
     check(new Set(records.map(record => `${record.kind}:${record.id}`)).size === records.length);
+    if (this.cloud) for (const record of records.filter(record => record.workVolume)) check(records.some(volume => volume.kind === 'volume' && volume.id === record.workVolume));
     return records;
   }
   async provision(plan: FixturePlan, record: (resource: Resource) => void, signal: AbortSignal) {
@@ -293,7 +351,15 @@ export class ComposeFixtureDriver implements FixtureDriver {
     await this.closeSockets();
     await this.command('podman', [...this.composeArgs(), 'up', '--no-build', '-d'], signal);
     this.objects = await this.inventory(signal);
-    check(SERVICES.every(service => this.objects.filter(object => object.kind === 'container' && object.service === service && object.state === 'running').length === 1), 'observation-failed');
+    check(this.serviceNames.every(service => this.objects.filter(object => object.kind === 'container' && object.service === service &&
+      (object.state === 'running' || service === 'fleet-auth-seed' && object.state === 'exited')).length === 1), 'observation-failed');
+    for (const service of this.cloud ? ['fleet-db', 'loom-serve'] : ['loom-local']) {
+      const container = this.objects.find(object => object.kind === 'container' && object.service === service)!;
+      await this.command('podman', ['--connection', this.config.connection, 'wait', '--condition=healthy', '--condition=unhealthy', '--condition=exited', container.id], signal);
+      const after = await this.inventory(signal); const ready = after.find(object => object.id === container.id);
+      check(ready && ready.generation === container.generation && ready.state === 'running' && ready.healthy, 'observation-failed');
+    }
+    if (this.cloud) return this.provisionCloud(signal);
     const apiOrigin = `http://127.0.0.1:${this.ports[1]}`;
     const filesOrigin = `http://127.0.0.1:${this.ports[2]}`;
     await this.read(apiOrigin, '/api/config', signal);
@@ -308,6 +374,20 @@ export class ComposeFixtureDriver implements FixtureDriver {
     if (this.profile === 'agents-real-opencode') check(models.filter(model => !model.id.startsWith('aft/')).length > 1, 'identity-mismatch');
     return { apiOrigin, filesOrigin, workspaceId: 'LOCALMODE', repo: data!.repos[0]!.path };
   }
+  private async provisionCloud(signal: AbortSignal) {
+    const container = this.objects.find(object => object.kind === 'container' && object.service === 'loom-serve')!;
+    const logs = await this.command('podman', ['--connection', this.config.connection, 'logs', '--tail', '5000', container.id], signal);
+    check(logs.includes('opened cloud fleet-db client') && !logs.includes('embedded fleet-db started'), 'identity-mismatch');
+    const apiOrigin = `http://127.0.0.1:${this.ports[0]}`;
+    await this.read(apiOrigin, '/api/health', signal);
+    const seed = await this.nativeRead({ operation: 'seed-modecloud-repo' }, signal) as { sourceRepo: string };
+    check(seed.sourceRepo === '/work/source-repos/aft-repo', 'identity-mismatch');
+    const created = await this.requestOwnedHttp('api', 'POST', '/api/workspaces', { name: 'e2e-ws', type: 'empty', path: '/work/workspaces/E2E-WS', repos: [seed.sourceRepo] }, signal);
+    check(created.status === 201, 'identity-mismatch');
+    const repoList = await this.read(apiOrigin, '/api/workspaces/E2E-WS/repos', signal) as { success?: boolean; repos?: { name: string }[] };
+    check(repoList.success === true && Array.isArray(repoList.repos) && repoList.repos.length === 1 && repoList.repos[0]!.name === 'aft-repo', 'identity-mismatch');
+    return { apiOrigin, filesOrigin: apiOrigin, workspaceId: 'E2E-WS', repo: seed.sourceRepo };
+  }
   async read(origin: string, relative: string, signal: AbortSignal): Promise<unknown> {
     check(relative.startsWith('/api/') && !relative.startsWith('//') && !relative.includes('\\'));
     return this.http(origin, relative, signal);
@@ -315,7 +395,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   async nativeRead(request: ContainerRead, signal: AbortSignal): Promise<unknown> {
     await this.inspect({ id: this.project, kind: 'compose', generation: this.leaseId });
     signal.throwIfAborted();
-    const container = this.objects.filter(object => object.kind === 'container' && object.service === 'loom-local');
+    const container = this.objects.filter(object => object.kind === 'container' && object.service === (this.cloud ? 'loom-serve' : 'loom-local'));
     check(container.length === 1 && container[0]!.state === 'running');
     return JSON.parse(await this.command('podman', ['--connection', this.config.connection, 'exec', container[0]!.id,
       'node', '/opt/aft/fixture/container-read.js', JSON.stringify(request)], signal));

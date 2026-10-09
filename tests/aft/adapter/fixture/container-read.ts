@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, readFile, writeFile, unlink, realpath } from 'node:fs/promises';
+import { lstat, readFile, writeFile, unlink, realpath, mkdir, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -12,6 +12,7 @@ import { readHttp } from './host.js';
 // adapter build; neither executable paths nor SQL/JS/commands are accepted.
 export const ContainerReadRequest = z.discriminatedUnion('operation', [
   ...ContainerObservationRequest.options,
+  z.object({ operation: z.literal('seed-modecloud-repo') }).strict(),
   z.object({ operation: z.literal('fixture-http'), method: z.enum(['GET', 'POST', 'PATCH', 'DELETE']),
     relativePath: z.string().regex(/^\/__(script|reset|requests)(\?|$)/), body: Json }).strict(),
   z.object({ operation: z.literal('configuration-read'), target: z.enum(['opencode', 'emu-scenarios']) }).strict(),
@@ -26,8 +27,21 @@ export const ContainerReadRequest = z.discriminatedUnion('operation', [
 export type ContainerRead = z.infer<typeof ContainerReadRequest>;
 export async function readContainer(input: unknown) {
   const request = ContainerReadRequest.parse(input);
-  const native = createNativeHostAccess({ configRoot: '/root/.loom', workspaceId: 'LOCALMODE',
-    repo: '/root/.loom/workspaces/LOCALMODE/source-repo', pinnedExecutable: await realpath(process.env.LOOM_OPENCODE_BIN ?? '/usr/local/bin/opencode') });
+  const cloud = process.env.AFT_FIXTURE_MODE === 'modecloud';
+  if (request.operation === 'seed-modecloud-repo') {
+    requireFact(cloud && await realpath('/work') === '/work', 'ownership-mismatch', 'ModeCloud work volume is not owned');
+    const sourceRepo = '/work/source-repos/aft-repo'; await mkdir(sourceRepo, { recursive: true });
+    requireFact(await realpath(sourceRepo) === sourceRepo, 'ownership-mismatch', 'Source repository is not owned');
+    const git = async (args: string[]) => new Promise<void>((resolve, reject) => execFile('git', args, { cwd: sourceRepo,
+      env: { PATH: '/usr/local/bin:/usr/bin:/bin', GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1' } }, error => error ? reject(new Error('Owned seed failed')) : resolve()));
+    await git(['init', '-q']); await git(['-c', 'user.name=aft', '-c', 'user.email=aft@example.test', 'commit', '--allow-empty', '-m', 'seed', '-q']);
+    await rmdir('/work/workspaces/E2E-WS/worktrees'); return { sourceRepo };
+  }
+  const paths = cloud ? { configRoot: '/home/node/.loom', workspaceId: 'E2E-WS', repo: '/work/source-repos/aft-repo',
+    worktreeParent: '/work/worktrees/aft-repo', commonDir: '/work/source-repos/aft-repo/.git' } :
+    { configRoot: '/root/.loom', workspaceId: 'LOCALMODE', repo: '/root/.loom/workspaces/LOCALMODE/source-repo',
+      worktreeParent: '/root/.loom/worktrees/source-repo', commonDir: '/root/.loom/workspaces/LOCALMODE/source-repo/.git' };
+  const native = createNativeHostAccess({ ...paths, pinnedExecutable: await realpath(cloud ? '/usr/local/bin/codex' : process.env.LOOM_OPENCODE_BIN ?? '/usr/local/bin/opencode') });
   switch (request.operation) {
     case 'fixture-http': return readHttp('http://127.0.0.1:4010', request.method, request.relativePath, request.body, AbortSignal.timeout(15000));
     case 'configuration-read': case 'configuration-write': {
@@ -44,8 +58,7 @@ export async function readContainer(input: unknown) {
       return { complete: true };
     }
     case 'git-observe': case 'filesystem-root': case 'filesystem-observe':
-      return readContainerObservation(request, native, { workspaceId: 'LOCALMODE', repo: '/root/.loom/workspaces/LOCALMODE/source-repo',
-        worktreeParent: '/root/.loom/worktrees/source-repo', commonDir: '/root/.loom/workspaces/LOCALMODE/source-repo/.git' });
+      return readContainerObservation(request, native, paths);
     case 'agent': return native.agent(request.agentId);
     case 'sessions': return native.sessions(request.agentId);
     case 'registration': return native.registration();
@@ -54,12 +67,12 @@ export async function readContainer(input: unknown) {
     case 'git-common-dir': {
       const row = await native.agent(request.agentId);
       const worktree = await realpath(row.worktree_path);
-      requireFact(worktree === `/root/.loom/worktrees/source-repo/${row.agent_id}`, 'ownership-mismatch', 'Worktree is outside fixture');
+      requireFact(worktree === path.join(paths.worktreeParent, row.agent_id), 'ownership-mismatch', 'Worktree is outside fixture');
       const output = await new Promise<string>((resolve, reject) => execFile('git', ['rev-parse', '--git-common-dir'], {
         cwd: worktree, env: { PATH: '/usr/local/bin:/usr/bin:/bin' }, encoding: 'utf8', maxBuffer: 1024 * 1024,
       }, (error, stdout) => error ? reject(new Error('Owned Git read failed')) : resolve(stdout.trim())));
       const commonDir = await realpath(path.resolve(worktree, output));
-      requireFact(commonDir === '/root/.loom/workspaces/LOCALMODE/source-repo/.git', 'ownership-mismatch', 'Git common directory is outside fixture');
+      requireFact(commonDir === paths.commonDir, 'ownership-mismatch', 'Git common directory is outside fixture');
       return { commonDir };
     }
   }
