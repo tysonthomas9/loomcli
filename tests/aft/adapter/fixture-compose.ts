@@ -4,9 +4,10 @@ import type { CapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { ArtifactRefSchema,ClockSchema,ProvenanceSchema,JsonValueSchema,type CapabilityEffect } from '@tysonthomas9/aft/types';
 import { Id,Digest,requireFact,redact } from './protocol.js';
 import { RedactionFacts } from './redaction.js';
-import { getFixtureAuthority,type OwnedFixture } from './ownership.js';
-import { fixtureOwnerIdentity,getFixtureOperationAuthority } from './authority.js';
-import { getFixtureEvidenceStore,readFixtureArtifact } from './evidence.js';
+import { type OwnedFixture } from './ownership.js';
+import { fixtureOwnerIdentity } from './authority.js';
+import { readFixtureArtifact } from './evidence.js';
+import { beginFixtureOperation } from './native-operation-authority.js';
 
 export const FixtureComposeServeId='loom.fixture.observeComposeServe' as const;
 export const RestartComposeServeId='loom.runtime.restartComposeServe' as const;
@@ -70,57 +71,59 @@ function provenance(context:CapabilityContext,fixture:OwnedFixture,implementatio
     identity:{runId:context.runId,fixtureLeaseId:fixture.leaseId,workspaceId:fixture.workspaceId},
     observedAt:{clockId:context.clock.id,monoMs,utcMs:context.clock.epochUtcMs+monoMs,phase:0},evidenceClass,artifacts:[]});
 }
-async function retain(context:CapabilityContext,fixture:OwnedFixture,value:unknown) {
+async function retain(fixture:OwnedFixture,value:unknown,guardedRetain:(serialized:string)=>Promise<z.infer<typeof ArtifactRefSchema>>) {
   const bytes=JSON.stringify(JsonValueSchema.parse(value));
   requireFact(Buffer.byteLength(bytes)<=maxBytes,'incomplete-pages','Compose capture exceeds the bounded receipt size');
   requireFact(redact(bytes,fixture.secrets)===bytes,'incomplete-pages','Compose receipt contains private material');
-  return getFixtureEvidenceStore(context,fixture.leaseId).retain(bytes);
+  return guardedRetain(bytes);
 }
 /** Both operations use the same canonical fixture registry, not a separate
  * target authority map. The supported owning producer must authenticate its
  * exact retained container/marker/namespace and lifecycle receipt under lease. */
 export async function observeComposeServe(context:CapabilityContext,input:z.infer<typeof FixtureComposeServeInput>,implementationSha256:string) {
-  const fixture=getFixtureAuthority(context,input.leaseId),grant=getFixtureOperationAuthority(fixture,FixtureComposeServeId,FixtureComposeServeEffects);
+  const guard=beginFixtureOperation(context,input.leaseId,FixtureComposeServeId,FixtureComposeServeEffects),{fixture,grant}=guard;
   requireFact(fixture.profile==='agents-real-opencode','unsupported-capability','Compose route is unavailable');
   const producer=fixture.observeComposeServe;
   requireFact(producer,'unsupported-capability','Owned Compose observation producer is unavailable');
-  const recheck=()=>requireFact(getFixtureAuthority(context,input.leaseId)===fixture&&fixture.observeComposeServe===producer&&
-    getFixtureOperationAuthority(fixture,FixtureComposeServeId,FixtureComposeServeEffects)===grant,
-    'ownership-mismatch','Compose observation authority changed');
-  await fixture.verify(context.signal);context.signal.throwIfAborted();recheck();
-  const target=ComposeServeTarget.parse(await producer.call(fixture,context.signal));
+  const recheck=()=>{guard.recheck();requireFact(fixture.observeComposeServe===producer,
+    'ownership-mismatch','Compose observation authority changed');};
+  const checked=async<T>(call:()=>Promise<T>)=>{recheck();const value=await call();recheck();return value;};
+  const retention={recheck,retain:(serialized:string)=>checked(()=>guard.retain(serialized))};
+  await checked(()=>guard.verify());context.signal.throwIfAborted();recheck();
+  const target=ComposeServeTarget.parse(await checked(()=>producer.call(fixture,context.signal)));
   context.signal.throwIfAborted();recheck();checkTarget(fixture,target);
   const clock=ClockSchema.parse({id:context.clock.id,domain:context.clock.domain,epochUtcMs:context.clock.epochUtcMs,maxErrorMs:context.clock.maxErrorMs});
   const captured=Capture.parse({kind:'loom-compose-target-capture',owner:owner(context),fixtureOwner:fixtureOwnerIdentity(fixture),
     provenance:provenance(context,fixture,implementationSha256,grant.evidenceClass),clock,target});
-  const targetReceipt=await retain(context,fixture,captured);context.signal.throwIfAborted();recheck();
-  return {fixture,grant,value:FixtureComposeServeOutput.parse({target,targetReceipt})};
+  const targetReceipt=await retain(fixture,captured,retention.retain);context.signal.throwIfAborted();recheck();
+  return {fixture,grant,value:FixtureComposeServeOutput.parse({target,targetReceipt}),retention};
 }
 export async function restartComposeServe(context:CapabilityContext,input:RestartComposeServeInput,implementationSha256:string) {
-  const fixture=getFixtureAuthority(context,input.leaseId),grant=getFixtureOperationAuthority(fixture,RestartComposeServeId,RestartComposeServeEffects);
+  const guard=beginFixtureOperation(context,input.leaseId,RestartComposeServeId,RestartComposeServeEffects),{fixture,grant}=guard;
   requireFact(fixture.profile==='agents-real-opencode','unsupported-capability','Compose route is unavailable');
   const producer=fixture.restartComposeServe;
   requireFact(producer,'unsupported-capability','Owned Compose restart producer is unavailable');
-  const recheck=()=>requireFact(getFixtureAuthority(context,input.leaseId)===fixture&&fixture.restartComposeServe===producer&&
-    getFixtureOperationAuthority(fixture,RestartComposeServeId,RestartComposeServeEffects)===grant,
-    'ownership-mismatch','Compose restart authority changed');
-  await fixture.verify(context.signal);context.signal.throwIfAborted();recheck();
-  const capture=Capture.parse(await readFixtureArtifact(context,fixture.leaseId,input.targetReceipt));
+  const recheck=()=>{guard.recheck();requireFact(fixture.restartComposeServe===producer,
+    'ownership-mismatch','Compose restart authority changed');};
+  const checked=async<T>(call:()=>Promise<T>)=>{recheck();const value=await call();recheck();return value;};
+  const retention={recheck,retain:(serialized:string)=>checked(()=>guard.retain(serialized))};
+  await checked(()=>guard.verify());context.signal.throwIfAborted();recheck();
+  const capture=Capture.parse(await checked(()=>readFixtureArtifact(context,fixture.leaseId,input.targetReceipt,recheck)));
   context.signal.throwIfAborted();recheck();checkContextOwner(context,fixture,capture);checkTarget(fixture,capture.target);
   requireFact(capture.provenance.registrySha256===context.registrySha256&&capture.provenance.implementationSha256===implementationSha256&&
     capture.provenance.identity.runId===context.runId&&capture.provenance.identity.fixtureLeaseId===fixture.leaseId&&
     capture.provenance.identity.workspaceId===fixture.workspaceId&&capture.provenance.observedAt.clockId===capture.clock.id&&
     Math.abs(capture.provenance.observedAt.utcMs-capture.clock.epochUtcMs-capture.provenance.observedAt.monoMs)<=capture.clock.maxErrorMs,
     'identity-mismatch','Compose capture source or pin differs');
-  const facts=ComposeRestartFacts.parse(await producer.call(fixture,capture.target,context.signal));
+  const facts=ComposeRestartFacts.parse(await checked(()=>producer.call(fixture,capture.target,context.signal)));
   context.signal.throwIfAborted();recheck();
   requireFact(facts.fixtureLeaseId===fixture.leaseId&&isDeepStrictEqual(facts.before,capture.target.container)&&
     facts.successor.predecessorContainerId===facts.before.containerId&&
     facts.successor.containerIdChanged===(facts.after.containerId!==facts.before.containerId)&&
     facts.successor.namespaceSha256===capture.target.namespaceSha256,
     'identity-mismatch','Compose restart receipt does not bind the observed target');
-  const receipt=await retain(context,fixture,{kind:'loom-compose-restart-capture',owner:owner(context),fixtureOwner:fixtureOwnerIdentity(fixture),
-    targetReceipt:input.targetReceipt,provenance:provenance(context,fixture,implementationSha256,grant.evidenceClass),facts});
+  const receipt=await retain(fixture,{kind:'loom-compose-restart-capture',owner:owner(context),fixtureOwner:fixtureOwnerIdentity(fixture),
+    targetReceipt:input.targetReceipt,provenance:provenance(context,fixture,implementationSha256,grant.evidenceClass),facts},retention.retain);
   context.signal.throwIfAborted();recheck();
-  return {fixture,grant,value:RestartComposeServeOutput.parse({...facts,receipt})};
+  return {fixture,grant,value:RestartComposeServeOutput.parse({...facts,receipt}),retention};
 }

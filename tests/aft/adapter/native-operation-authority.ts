@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { CapabilityContext } from '@tysonthomas9/aft/capabilities';
-import { ArtifactRefSchema, JsonValueSchema } from '@tysonthomas9/aft/types';
+import { ArtifactRefSchema, JsonValueSchema, type CapabilityEffect } from '@tysonthomas9/aft/types';
 import { getFixtureOperationAuthority, fixtureOwnerIdentity } from './authority.js';
 import { getFixtureEvidenceStore } from './evidence.js';
 import { NativeOperationEffects, type NativeAuthorizedOperation } from './native-operation-effects.js';
@@ -12,8 +12,16 @@ import { requireFact } from './protocol.js';
  * The supported owner must already have issued the exact operation grant. */
 export function beginNativeOperation(context: CapabilityContext, leaseId: string, operation: NativeAuthorizedOperation) {
   requireFact(Object.hasOwn(NativeOperationEffects, operation), 'unsupported-capability', 'Unknown native operation');
+  return beginFixtureOperation(context,leaseId,operation,NativeOperationEffects[operation],4_000_000);
+}
+
+/** The same private guard for the three explicitly effectful worker/Compose
+ * contracts. Required effects come from their code-owned canonical maps; this
+ * function issues no grant and changes no unrelated operation descriptor. */
+export function beginFixtureOperation(context:CapabilityContext,leaseId:string,
+  operation:NativeAuthorizedOperation|'loom.fixture.observeWorkerState'|'loom.fixture.observeComposeServe'|'loom.runtime.restartComposeServe',
+  effects:readonly CapabilityEffect[],maximumBytes:4_000_000|4194304=4194304) {
   const fixture = getFixtureAuthority(context, leaseId);
-  const effects = NativeOperationEffects[operation];
   const authority = fixture.operationAuthority;
   const grant = getFixtureOperationAuthority(fixture, operation, effects);
   const store = getFixtureEvidenceStore(context, leaseId);
@@ -44,7 +52,7 @@ export function beginNativeOperation(context: CapabilityContext, leaseId: string
       fixture.roots === roots && fixture.agents === agents &&
       fixture.secrets === secrets && secrets.length === secretValues.length && secretValues.every((value,index)=>secrets[index]===value) &&
       store.retain === callbacks.retain && store.resolve === callbacks.resolve && store.resolveBounded === callbacks.resolveBounded,
-    'ownership-mismatch', 'Native operation ownership changed');
+    'ownership-mismatch', 'Owned operation ownership changed');
   };
   const checked = async <T>(call: () => Promise<T>): Promise<T> => {
     recheck();
@@ -62,12 +70,12 @@ export function beginNativeOperation(context: CapabilityContext, leaseId: string
       // an owned artifact. Callers redact first; this guard does not sanitize.
       // The lease-bound store is the only target.
       const bytes = Buffer.byteLength(serialized);
-      requireFact(bytes <= 4_000_000, 'incomplete-pages', 'Native evidence exceeds the canonical byte bound');
+      requireFact(bytes <= maximumBytes, 'incomplete-pages', 'Owned evidence exceeds the canonical byte bound');
       JsonValueSchema.parse(JSON.parse(serialized));
       const digest = createHash('sha256').update(serialized).digest('hex');
       const receipt = ArtifactRefSchema.parse(await checked(() => callbacks.retain.call(store, serialized)));
       requireFact(receipt.bytes === bytes && receipt.sha256 === digest && receipt.mediaType === 'application/json' &&
-        receipt.redaction === 'sanitized', 'identity-mismatch', 'Native evidence receipt does not match the retained output');
+        receipt.redaction === 'sanitized', 'identity-mismatch', 'Owned evidence receipt does not match the retained output');
       recheck();
       return receipt;
     },

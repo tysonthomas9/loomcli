@@ -232,3 +232,24 @@ test('worker-state validates captured stderr bytes independently from line and c
   const h=await setup(t);h.value.stderr.capturedBytes++;
   assert.equal((await h.invoke()).availability,'error');
 });
+
+for(const view of ['parents','state'] as const)test(`parent: worker ${view} final retention must deny changed grant`,async t=>{
+  const h=await setup(t),store=getFixtureEvidenceStore(h.context,h.fixture.leaseId),retain=store.retain;let writes=0;
+  store.retain=async text=>{const result=await retain.call(store,text);writes++;h.fixture.operationAuthority=h.grant();return result;};
+  const result=await h.invoke(view==='state'?h.input:{view:'parents',leaseId:h.fixture.leaseId});
+  console.log(JSON.stringify({view,availability:result.availability,retainedWrites:writes}));
+  assert.notEqual(result.availability,'observed','final receipt write must retain exact grant authority');
+});
+for(const view of ['parents','state'] as const)test(`worker ${view} rejects a writer method replaced by its producer before dispatch`,async t=>{
+  const h=await setup(t),producer=h.fixture.observeWorkerState!,store=getFixtureEvidenceStore(h.context,h.fixture.leaseId);let writes=0;
+  h.fixture.observeWorkerState=async(input,signal)=>{const result=await producer(input,signal);
+    store.retain=async()=>{writes++;throw Error('replacement writer');};return result;};
+  const result=await h.invoke(view==='state'?h.input:{view:'parents',leaseId:h.fixture.leaseId});
+  assert.equal(result.availability,'error');assert.equal(result.data,undefined);assert.equal(writes,0);assert.equal(result.provenance.artifacts.length,0);
+});
+test('worker parents output retains only in the registered lease store despite a substituted context-global store',async t=>{
+  const h=await setup(t),store=getFixtureEvidenceStore(h.context,h.fixture.leaseId),retain=store.retain;let writes=0,foreignWrites=0;
+  store.retain=async bytes=>{writes++;return retain.call(store,bytes);};
+  h.context.resources.set('@loom/aft-adapter/evidence/v1',{...store,async retain(){foreignWrites++;throw Error('foreign writer');}});
+  const result=await h.invoke({view:'parents',leaseId:h.fixture.leaseId});assert.equal(result.availability,'observed');assert.deepEqual([writes,foreignWrites],[1,0]);
+});

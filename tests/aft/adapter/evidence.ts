@@ -57,30 +57,41 @@ export async function retainEvidence(context: CapabilityContext, serialized: str
 /** Read a known canonical JSON receipt after the operation has admitted its
  * fixture/effects. The private retained byte bound precedes every allocation;
  * a caller path or understated DATA receipt never grants file authority. */
-export async function readFixtureArtifact(context:CapabilityContext,leaseId:string,expected:z.infer<typeof ArtifactRefSchema>) {
+export async function readFixtureArtifact(context:CapabilityContext,leaseId:string,expected:z.infer<typeof ArtifactRefSchema>,
+  recheck?:()=>void) {
+  recheck?.();
   const receipt=ArtifactRefSchema.parse(expected),store=getFixtureEvidenceStore(context,leaseId);
   requireFact(receipt.mediaType==='application/json'&&receipt.redaction==='sanitized',
     'identity-mismatch','Fixture artifact is not canonical sanitized JSON');
   const filename=await store.resolveBounded(receipt,4*1024*1024);
+  recheck?.();
   context.signal.throwIfAborted();
   const file=await open(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
   try {
+    recheck?.();
     const before=await file.stat();
+    recheck?.();
     requireFact(before.isFile()&&before.nlink===1&&before.size===receipt.bytes,
       'identity-mismatch','Fixture artifact bytes changed');
     const bytes=Buffer.alloc(receipt.bytes);let offset=0;
     while(offset<bytes.length) {
+      recheck?.();
       context.signal.throwIfAborted();
       const read=await file.read(bytes,offset,bytes.length-offset,offset);
+      recheck?.();
       requireFact(read.bytesRead>0,'incomplete-pages','Fixture artifact is incomplete');offset+=read.bytesRead;
     }
-    const extra=await file.read(Buffer.alloc(1),0,1,bytes.length),after=await file.stat();
+    const extra=await file.read(Buffer.alloc(1),0,1,bytes.length);recheck?.();
+    const after=await file.stat();recheck?.();
     requireFact(extra.bytesRead===0&&before.dev===after.dev&&before.ino===after.ino&&before.size===after.size&&
-      before.mtimeMs===after.mtimeMs&&before.ctimeMs===after.ctimeMs&&await sha256(bytes)===receipt.sha256,
+      before.mtimeMs===after.mtimeMs&&before.ctimeMs===after.ctimeMs,
+      'identity-mismatch','Fixture artifact changed during read');
+    const digest=await sha256(bytes);recheck?.();
+    requireFact(digest===receipt.sha256,
       'identity-mismatch','Fixture artifact changed during read');
     context.signal.throwIfAborted();
     return JsonValueSchema.parse(JSON.parse(bytes.toString('utf8')));
-  } finally {await file.close();}
+  } finally {await file.close();recheck?.();}
 }
 /** Directory is created/owned by the fixture or launcher. It survives resource
  * teardown so report references resolve after process and native cleanup. */

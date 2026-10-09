@@ -242,3 +242,65 @@ else if(command[0]==='eval')console.log('null');
   assert.equal(h.counts().mutations,2);assert.equal(owners.length,2);
   for(const owner of owners)assert.equal(owner.resources.has('@loom/aft-adapter/fixtures/v1:lease'),false);
 });
+
+test('parent: replacing the lease-bound store during observation must not adopt the new store',async t=>{
+  const h=await setup(t);
+  const foreignRoot=path.join(h.root,'replacement-store');await mkdir(foreignRoot);
+  const foreign=await createEvidenceStore(foreignRoot);let writes=0;
+  const retain=foreign.retain;foreign.retain=async text=>{writes++;return retain.call(foreign,text);};
+  const producer=h.fixture.observeComposeServe!;
+  h.fixture.observeComposeServe=async signal=>{
+    const value=await producer(signal);
+    h.context.resources.set('@loom/aft-adapter/evidence/v1:lease',foreign);
+    return value;
+  };
+  const result=await h.observe();
+  console.log(JSON.stringify({availability:result.availability,replacementStoreWrites:writes}));
+  assert.notEqual(result.availability,'observed','must deny store replacement before success');
+  assert.equal(writes,0,'must not write to newly substituted store');
+});
+
+test('parent: replacing the grant during final observation-envelope retention must deny publication',async t=>{
+  const h=await setup(t),retain=h.store.retain;let writes=0;
+  h.store.retain=async text=>{
+    const result=await retain.call(h.store,text);
+    if(++writes===2)h.fixture.operationAuthority=h.grant();
+    return result;
+  };
+  const result=await h.observe();
+  console.log(JSON.stringify({availability:result.availability,retainedWrites:writes,transition:'grant during final retention'}));
+  assert.notEqual(result.availability,'observed','final retention must remain inside authority checks');
+});
+
+test('parent: replacing the grant during final restart-envelope retention must deny publication',async t=>{
+  const h=await setup(t),capture=await h.capture(),retain=h.store.retain;let writes=0;
+  h.store.retain=async text=>{
+    const result=await retain.call(h.store,text);
+    if(++writes===2)h.fixture.operationAuthority=h.grant();
+    return result;
+  };
+  const result=await h.restart({leaseId:h.fixture.leaseId,targetReceipt:capture.targetReceipt});
+  console.log(JSON.stringify({availability:result.availability,retainedWrites:writes,transition:'grant during restart final retention'}));
+  assert.notEqual(result.availability,'observed','final retention must remain inside authority checks');
+});
+test('Compose observation writes both receipts to its pinned lease store when the context-global store changes',async t=>{
+  const h=await setup(t);let foreignWrites=0,writes=0;const retain=h.store.retain;
+  h.store.retain=async bytes=>{writes++;return retain.call(h.store,bytes);};
+  h.context.resources.set('@loom/aft-adapter/evidence/v1',{...h.store,async retain(){foreignWrites++;throw Error('foreign context store');}});
+  assert.equal((await h.observe()).availability,'observed');assert.deepEqual([writes,foreignWrites],[2,0]);
+});
+test('Compose observation rejects store method replacement by its producer before dispatching a write',async t=>{
+  const h=await setup(t),producer=h.fixture.observeComposeServe!;let writes=0;
+  h.fixture.observeComposeServe=async signal=>{const target=await producer(signal);
+    h.store.retain=async()=>{writes++;throw Error('replacement writer');};return target;};
+  const result=await h.observe();assert.equal(result.availability,'error');assert.equal(result.data,undefined);
+  assert.equal(writes,0);assert.equal(result.provenance.artifacts.length,0);
+});
+test('Compose restart rejects store replacement during the captured receipt read before opening a new transition',async t=>{
+  const h=await setup(t),capture=await h.capture(),resolve=h.store.resolveBounded;let replacementWrites=0;
+  h.store.resolveBounded=async(...args)=>{const file=await resolve.call(h.store,...args);
+    h.context.resources.set('@loom/aft-adapter/evidence/v1:lease',{...h.store,async retain(){replacementWrites++;throw Error('replacement writer');}});
+    return file;};
+  const result=await h.restart({leaseId:h.fixture.leaseId,targetReceipt:capture.targetReceipt});
+  assert.equal(result.availability,'error');assert.equal(result.data,undefined);assert.equal(h.counts().restarts,0);assert.equal(replacementWrites,0);
+});
