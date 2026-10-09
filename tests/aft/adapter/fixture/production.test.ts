@@ -133,3 +133,16 @@ test('foreign retained API generation and unbound model generation cannot dispat
  assert.equal(r.calls.filter(c=>c.args.includes('exec')).length,before);assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
  }finally{await r.cleanup();}
 });
+
+test('unregistered model generations deny every mutation including omitted generation and direct protocol calls',async()=>{
+ const r=await setup('agents-emulator');try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),before=r.calls.filter(c=>c.args.includes('exec')).length;
+ for(const relative of ['/__script','/__reset','/__fixture'])for(const generation of [undefined,'foreign','generation']){
+   await assert.rejects(r.driver.requestOwnedHttp('fake-model','POST',relative,{},signal,generation));
+   await assert.rejects(r.driver.nativeRead({operation:'fixture-http',method:'POST',relativePath:relative,body:{}} as unknown as Parameters<typeof r.driver.nativeRead>[0],signal));
+ }
+ assert.equal(r.calls.filter(c=>c.args.includes('exec')).length,before);
+ await r.driver.requestOwnedHttp('fake-model','GET','/__requests',null,signal);
+ assert.equal(r.calls.filter(c=>c.args.includes('exec')).length,before+1);assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
