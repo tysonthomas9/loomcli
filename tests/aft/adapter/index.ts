@@ -24,6 +24,7 @@ export * from './container-observations.js';
 export * from './renderer-target.js';
 export * from './composition.js';
 export * from './redaction.js';
+export * from './authority.js';
 export { createLegacyProviders } from './legacy/providers.js';
 export type { LegacyAccessFactory } from './legacy/providers.js';
 
