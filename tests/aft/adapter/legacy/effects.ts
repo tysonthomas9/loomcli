@@ -8,7 +8,7 @@ export const TerminalDetachEffects = Object.freeze(['read-api', 'read-filesystem
 // configure; runtime ownership discovery starts fixed Git/kernel helpers and
 // serve restart starts its replacement. Paid task discovery is covered by the
 // task process effect.
-export const LegacyOperationEffects: Readonly<Record<Exclude<LoomAuthorizedOperation, 'loom.runtime.detachTerminal' | 'loom.fixture.observeWorkers'>, readonly CapabilityEffect[]>> = Object.freeze({
+export const LegacyOperationEffects: Readonly<Record<Exclude<LoomAuthorizedOperation, 'loom.runtime.detachTerminal' | 'loom.fixture.observeWorkers' | 'loom.fixture.observeWorkerState'>, readonly CapabilityEffect[]>> = Object.freeze({
   'loom.cli.role': Object.freeze(['read-api', 'read-filesystem', 'start-owned-process'] as const),
   'loom.cli.usage': Object.freeze(['read-api', 'read-filesystem', 'start-owned-process'] as const),
   'loom.cli.task': Object.freeze(['read-api', 'read-filesystem', 'start-owned-process'] as const),
