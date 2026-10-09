@@ -8,6 +8,8 @@ import { z } from 'zod';
 import { CapabilityRegistry, calculateImplementationPin, getRegisteredResource, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { createCoreProviders, defineOperation, createSyntheticProbe, createEvidenceStore, putEvidenceStore,
   putFixture, getFixture, disposeFixtures, type OwnedFixture, AgentRow, AgentRef, type HttpResponse } from './index.js';
+import { SavedCaptureInput, rereadSavedCapture } from './saved-capture.js';
+import { SavedEventsOutput } from './events.js';
 import type { RunnerOptions } from '@tysonthomas9/aft/runner';
 
 const literal = (value: unknown) => ({ literal: value });
@@ -69,7 +71,11 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
         const probe = createSyntheticProbe(context.runId, leaseId);
         const fixture: OwnedFixture = { leaseId, runId: context.runId, caseId: context.caseId, suiteId: context.suiteId, scope: context.scope,
           workspaceId: 'workspace', repo: row.repo, profile: 'deterministic', evidenceClass: 'deterministic', expiresAtUtcMs: Date.now() + 100000,
-          roots: new Map([['fixture-files', {path:filesRoot,device:filesStamp.dev,inode:filesStamp.ino}]]), agents: new Map(), syntheticProbe: probe, secrets: [], readApi: async () => ({status:404,body:{}}),
+          roots: new Map([['fixture-files', {path:filesRoot,device:filesStamp.dev,inode:filesStamp.ino}]]), agents: new Map(), syntheticProbe: probe, secrets: [], readApi: async route => {
+            assert.match(route,/\/events\?/);
+            return {status:200,body:{events:[{agent_id:row.agent_id,seq:1,event_id:'saved_event',kind:'item.completed',turn_id:'saved_turn',
+              payload:{text:'independent saved value'},created_at:'2026-10-09T00:00:00Z'}],snapshot_seq:1,next:1,more:false}};
+          },
           readFiles: async () => ({status:404,body:{}}), resolveAgent: async (agentId) => {
             assert.equal(agentId, 'agt_bound'); agentReads++;
             return {row: AgentRow.parse({...row,agent_id:agentId}),commonDir:'/owned/repo/.git'};
@@ -103,7 +109,27 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
     effects:['read-api'], retry:'never', cleanup:'none', evidenceClasses:['deterministic'],
     async run(input, context) { context.runId = 'foreign-run'; await getFixture(context, input.leaseId); return {value:{ok:true},evidenceClass:'deterministic'}; },
   });
-  providers.push(acquire, foreignRun); for (const provider of providers) registry.register(provider);
+  let priorCaseCapture: SavedCaptureInput | undefined;
+  const reread = defineOperation({id:'test.rereadCapture',implementation:testPin,implementationSha256:testPin.sha256,
+    inputSchema:SavedCaptureInput,outputSchema:SavedEventsOutput,effects:['read-api','read-filesystem'],retry:'never',cleanup:'none',
+    evidenceClasses:['deterministic'],async run(input,context) {
+      const observed=await rereadSavedCapture(context,input,pin.sha256);
+      return {value:observed.data,evidenceClass:'deterministic',identity:{fixtureLeaseId:input.agent.fixtureLeaseId}};
+    }});
+  const remember = defineOperation({id:'test.rememberCapture',implementation:testPin,implementationSha256:testPin.sha256,
+    inputSchema:SavedCaptureInput,outputSchema:z.object({remembered:z.boolean()}).strict(),effects:['read-api','read-filesystem'],
+    retry:'never',cleanup:'none',evidenceClasses:['deterministic'],async run(input,context) {
+      await rereadSavedCapture(context,input,pin.sha256);priorCaseCapture=input;
+      return {value:{remembered:true},evidenceClass:'deterministic',identity:{fixtureLeaseId:input.agent.fixtureLeaseId}};
+    }});
+  const prior = defineOperation({id:'test.priorCapture',implementation:testPin,implementationSha256:testPin.sha256,
+    inputSchema:z.object({agent:AgentRef}).strict(),outputSchema:SavedEventsOutput,effects:['read-api','read-filesystem'],
+    retry:'never',cleanup:'none',evidenceClasses:['deterministic'],async run(input,context) {
+      assert.ok(priorCaseCapture);
+      const observed=await rereadSavedCapture(context,{...priorCaseCapture,agent:input.agent},pin.sha256);
+      return {value:observed.data,evidenceClass:'deterministic',identity:{fixtureLeaseId:input.agent.fixtureLeaseId}};
+    }});
+  providers.push(acquire,foreignRun,reread,remember,prior); for (const provider of providers) registry.register(provider);
   await writeFile(path.join(root,'aft.policy.json'),JSON.stringify({requiredProfile:'declarative',registry:providers.map(provider =>
     ({id:provider.id,version:provider.version,implementationSha256:provider.implementationSha256}))}));
   const native = (agent: unknown, probe: unknown, registration?: string) => ({capability:{request:{id:'loom.native.observe',version:1,input:{
@@ -125,10 +151,23 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
     {assert:{op:'eq',args:[ref('file','/entries/0/exists'),literal(exists)]}},
   ]});
   const suiteFile = path.join(root,'adapter.test.yaml');
-  await writeFile(suiteFile,JSON.stringify({suite:'Adapter runner contracts',setup:[{capability:{request:{id:acquire.id,version:1,input:{}},as:'fixture'}}],
+  const saved = (agent:unknown,as:string) => ({capability:{request:{id:'loom.api.savedEvents',version:1,input:{agent,
+    after:literal(0),pageSize:literal(2),maxPages:literal(2),maxRecords:literal(10),kinds:literal([])}},as}});
+  const rereadStep=(agent:unknown,receipt:unknown,as='reread')=>({capability:{request:{id:reread.id,version:1,input:{agent,captureReceipt:receipt}},as}});
+  await writeFile(suiteFile,JSON.stringify({suite:'Adapter runner contracts',setup:[{capability:{request:{id:acquire.id,version:1,input:{}},as:'fixture'}},
+    saved(ref('fixture','/agent'),'setupCapture')],
     exports:{agent:{data:{binding:'fixture',pointer:'/agent'}},otherAgent:{data:{binding:'fixture',pointer:'/otherAgent'}},lease:{resource:{binding:'fixture',pointer:'/leaseId'}},probe:{data:{binding:'fixture',pointer:'/probeHandle'}},
-      otherLease:{data:{binding:'fixture',pointer:'/otherLease'}},otherProbe:{data:{binding:'fixture',pointer:'/otherProbe'}},runToken:{data:{binding:'fixture',pointer:'/runToken'}},fixtureRunId:{data:{binding:'fixture',pointer:'/fixtureRunId'}}},
-    tests:[fileCase('scalar file present','marker-',true),fileCase('scalar file missing','absent-',false),
+      otherLease:{data:{binding:'fixture',pointer:'/otherLease'}},otherProbe:{data:{binding:'fixture',pointer:'/otherProbe'}},runToken:{data:{binding:'fixture',pointer:'/runToken'}},fixtureRunId:{data:{binding:'fixture',pointer:'/fixtureRunId'}},
+      savedReceipt:{data:{binding:'setupCapture',pointer:'/captureReceipt'}}},
+    tests:[{name:'suite saved capture',steps:[rereadStep(ref('agent'),ref('savedReceipt')),
+      {assert:{op:'eq',args:[ref('reread','/events/0/payload/text'),literal('independent saved value')]}}]},
+      {name:'saved wrong expectation',steps:[rereadStep(ref('agent'),ref('savedReceipt')),
+        {assert:{op:'eq',args:[ref('reread','/events/0/payload/text'),literal('incorrect expectation')]}}]},
+      {name:'receipt data without lease authority',steps:[rereadStep(ref('otherAgent'),ref('savedReceipt'))]},
+      {name:'case saved capture',steps:[saved(ref('agent'),'caseCapture'),rereadStep(ref('agent'),ref('caseCapture','/captureReceipt')),
+        {capability:{request:{id:remember.id,version:1,input:{agent:ref('agent'),captureReceipt:ref('caseCapture','/captureReceipt')}},as:'remembered'}}]},
+      {name:'copied prior case capture',steps:[{capability:{request:{id:prior.id,version:1,input:{agent:ref('agent')}},as:'prior'}}]},
+      fileCase('scalar file present','marker-',true),fileCase('scalar file missing','absent-',false),
       fileCase('scalar wrong expectation','marker-',false),fileCase('scalar foreign root','marker-',true,'foreign-root'),positive('first',0),positive('second',0),positive('independent wrong expectation',1),
       {name:'bind reference chain',steps:[
         {capability:{request:{id:'loom.agent.bind',version:1,input:{leaseId:ref('lease'),workspaceId:literal('workspace'),agentId:literal('agt_bound')}},as:'boundAgent'}},
@@ -152,9 +191,10 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
     screenshots:false,retries:0,stepTimeoutMs:500,pollIntervalMs:1,budgetWarn:0,budgets:{},reportDir:path.join(root,'reports'),a11y:false,
     a11yBaselines:path.join(root,'baselines'),a11yImpact:'serious',testidAttribute:'data-testid'};
   const result = await runFiles([suiteFile], options);
-  for (const name of ['first','second','bind reference chain','native registration chain','scalar file present','scalar file missing']) assert.equal(result.tests.find(item=>item.name===name)?.status,'passed',name);
+  for (const name of ['first','second','bind reference chain','native registration chain','scalar file present','scalar file missing','suite saved capture','case saved capture']) assert.equal(result.tests.find(item=>item.name===name)?.status,'passed',name);
   for (const name of ['independent wrong expectation','cross fixture probe','data grants no authority','cross run',
-    'missing reference projection','foreign reference identity','unexported reference scope','scalar wrong expectation','scalar foreign root'])
+    'missing reference projection','foreign reference identity','unexported reference scope','scalar wrong expectation','scalar foreign root',
+    'saved wrong expectation','receipt data without lease authority','copied prior case capture'])
     assert.equal(result.tests.find(item=>item.name===name)?.status,'failed',name);
   assert.deepEqual(nativeInputs,[expectedToken,expectedToken,expectedToken,expectedToken]);
   const calls = (await readFile(commands,'utf8')).trim().split('\n').map(line=>JSON.parse(line) as string[]);
