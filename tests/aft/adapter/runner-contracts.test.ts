@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm, lstat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,9 +51,13 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
   const evidence = await createEvidenceStore(await realpath(await mkdir(path.join(root, 'evidence')).then(() => path.join(root, 'evidence'))));
   let cleanup = 0; let agentReads = 0; const nativeInputs: string[] = []; const owners: CapabilityContext[] = [];
   let expectedToken = '';
+  const fixtureRunId = 'owned-fixture-run';
+  const filesRoot = path.join(root, 'fixture-files'); await mkdir(filesRoot);
+  await writeFile(path.join(filesRoot, 'marker-' + fixtureRunId), 'actual fixture bytes');
+  const filesStamp = await lstat(filesRoot);
   const acquire = defineOperation({ id: 'test.ownedFixture', implementation: testPin, implementationSha256: testPin.sha256,
     inputSchema: z.object({}).strict(), outputSchema: z.object({ leaseId: z.string(), otherLease: z.string(),
-      probeHandle: z.string(), otherProbe: z.string(), runToken: z.string(), agent: AgentRef, otherAgent: AgentRef }).strict(),
+      probeHandle: z.string(), otherProbe: z.string(), runToken: z.string(), fixtureRunId: z.string(), agent: AgentRef, otherAgent: AgentRef }).strict(),
     effects: ['write-fixture'], retry: 'never', cleanup: 'release-lease', evidenceClasses: ['deterministic'],
     async run(_input, context) {
       owners.push(context); putEvidenceStore(context, evidence);
@@ -65,7 +69,7 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
         const probe = createSyntheticProbe(context.runId, leaseId);
         const fixture: OwnedFixture = { leaseId, runId: context.runId, caseId: context.caseId, suiteId: context.suiteId, scope: context.scope,
           workspaceId: 'workspace', repo: row.repo, profile: 'deterministic', evidenceClass: 'deterministic', expiresAtUtcMs: Date.now() + 100000,
-          roots: new Map(), agents: new Map(), syntheticProbe: probe, secrets: [], readApi: async () => ({status:404,body:{}}),
+          roots: new Map([['fixture-files', {path:filesRoot,device:filesStamp.dev,inode:filesStamp.ino}]]), agents: new Map(), syntheticProbe: probe, secrets: [], readApi: async () => ({status:404,body:{}}),
           readFiles: async () => ({status:404,body:{}}), resolveAgent: async (agentId) => {
             assert.equal(agentId, 'agt_bound'); agentReads++;
             return {row: AgentRow.parse({...row,agent_id:agentId}),commonDir:'/owned/repo/.git'};
@@ -87,7 +91,7 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
         putFixture(context, fixture); return fixture;
       });
       const a = fixtures[0]!; const b = fixtures[1]!; expectedToken = a.syntheticProbe!.value;
-      return {value:{leaseId:a.leaseId,otherLease:b.leaseId,probeHandle:a.syntheticProbe!.handle,otherProbe:b.syntheticProbe!.handle,runToken:context.runId,agent:{fixtureLeaseId:a.leaseId,workspaceId:'workspace',agentId:'agt_owned'},otherAgent:{fixtureLeaseId:b.leaseId,workspaceId:'workspace',agentId:'agt_owned'}},
+      return {value:{leaseId:a.leaseId,otherLease:b.leaseId,probeHandle:a.syntheticProbe!.handle,otherProbe:b.syntheticProbe!.handle,runToken:context.runId,fixtureRunId,agent:{fixtureLeaseId:a.leaseId,workspaceId:'workspace',agentId:'agt_owned'},otherAgent:{fixtureLeaseId:b.leaseId,workspaceId:'workspace',agentId:'agt_owned'}},
         evidenceClass:'deterministic',identity:{fixtureLeaseId:a.leaseId}};
     }, async dispose(context) {
       for (const lease of ['lease-A','lease-B']) assert.ok(getRegisteredResource(context, `@loom/aft-adapter/fixtures/v1:${lease}`, lease));
@@ -114,11 +118,18 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
     {assert:{op:'eq',args:[ref('tools','/records/0/probe/inputOccurrences'),literal(1)]}},
     {assert:{op:'eq',args:[ref('tools','/records/0/probe/outputOccurrences'),literal(outputOccurrences)]}},
   ]});
+  const fileCase = (name: string, prefix: string, exists: boolean, rootId = 'fixture-files') => ({name,steps:[
+    {capability:{request:{id:'loom.filesystem.observe',version:1,input:{leaseId:ref('lease'),rootId:literal(rootId),
+      relativePath:{op:'concat',args:[literal(prefix),ref('fixtureRunId')]},view:literal('presence'),maxBytes:literal(100),maxEntries:literal(1)}},as:'file'}},
+    {assert:{op:'eq',args:[ref('file','/entries/0/relativePath'),{op:'concat',args:[literal(prefix),ref('fixtureRunId')]}]}},
+    {assert:{op:'eq',args:[ref('file','/entries/0/exists'),literal(exists)]}},
+  ]});
   const suiteFile = path.join(root,'adapter.test.yaml');
   await writeFile(suiteFile,JSON.stringify({suite:'Adapter runner contracts',setup:[{capability:{request:{id:acquire.id,version:1,input:{}},as:'fixture'}}],
     exports:{agent:{data:{binding:'fixture',pointer:'/agent'}},otherAgent:{data:{binding:'fixture',pointer:'/otherAgent'}},lease:{resource:{binding:'fixture',pointer:'/leaseId'}},probe:{data:{binding:'fixture',pointer:'/probeHandle'}},
-      otherLease:{data:{binding:'fixture',pointer:'/otherLease'}},otherProbe:{data:{binding:'fixture',pointer:'/otherProbe'}},runToken:{data:{binding:'fixture',pointer:'/runToken'}}},
-    tests:[positive('first',0),positive('second',0),positive('independent wrong expectation',1),
+      otherLease:{data:{binding:'fixture',pointer:'/otherLease'}},otherProbe:{data:{binding:'fixture',pointer:'/otherProbe'}},runToken:{data:{binding:'fixture',pointer:'/runToken'}},fixtureRunId:{data:{binding:'fixture',pointer:'/fixtureRunId'}}},
+    tests:[fileCase('scalar file present','marker-',true),fileCase('scalar file missing','absent-',false),
+      fileCase('scalar wrong expectation','marker-',false),fileCase('scalar foreign root','marker-',true,'foreign-root'),positive('first',0),positive('second',0),positive('independent wrong expectation',1),
       {name:'bind reference chain',steps:[
         {capability:{request:{id:'loom.agent.bind',version:1,input:{leaseId:ref('lease'),workspaceId:literal('workspace'),agentId:literal('agt_bound')}},as:'boundAgent'}},
         {capability:{request:{id:'loom.agent.observe',version:1,input:{agent:ref('boundAgent','/agentRef')}},as:'observedAgent'}},
@@ -141,9 +152,9 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
     screenshots:false,retries:0,stepTimeoutMs:500,pollIntervalMs:1,budgetWarn:0,budgets:{},reportDir:path.join(root,'reports'),a11y:false,
     a11yBaselines:path.join(root,'baselines'),a11yImpact:'serious',testidAttribute:'data-testid'};
   const result = await runFiles([suiteFile], options);
-  for (const name of ['first','second','bind reference chain','native registration chain']) assert.equal(result.tests.find(item=>item.name===name)?.status,'passed',name);
+  for (const name of ['first','second','bind reference chain','native registration chain','scalar file present','scalar file missing']) assert.equal(result.tests.find(item=>item.name===name)?.status,'passed',name);
   for (const name of ['independent wrong expectation','cross fixture probe','data grants no authority','cross run',
-    'missing reference projection','foreign reference identity','unexported reference scope'])
+    'missing reference projection','foreign reference identity','unexported reference scope','scalar wrong expectation','scalar foreign root'])
     assert.equal(result.tests.find(item=>item.name===name)?.status,'failed',name);
   assert.deepEqual(nativeInputs,[expectedToken,expectedToken,expectedToken,expectedToken]);
   const calls = (await readFile(commands,'utf8')).trim().split('\n').map(line=>JSON.parse(line) as string[]);

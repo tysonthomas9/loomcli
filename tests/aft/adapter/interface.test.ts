@@ -461,3 +461,31 @@ test('fixed temporary namespace reads preserve exact marker paths and cannot tur
     {pinnedExecutable:'/owned/opencode',agent:never,sessions:never,registration:never,process:never,read:never},
     {workspaceId:'workspace',repo:'/owned/repo',worktreeParent:'/owned/worktrees',commonDir:'/owned/repo/.git'}));
 });
+
+// Public admission is exercised on the maintained canonical engine, before the
+// normalized request reaches the fixed container reader.
+test('filesystem scalar/array union rejects ambiguity and invalid paths before remote transport', async t => {
+  const {containerFilesystemObserver}=await import('./container-observations.js');
+  const {FilesystemOutput}=await import('./filesystem.js');
+  const h=await setup(t); let calls=0;
+  const stamp={path:'/tmp',device:12,inode:34};
+  h.fixture.roots.set('fixture-temporary',{...stamp,remoteObserve:containerFilesystemObserver(async request=>{
+    calls++; assert.equal(request.operation,'filesystem-observe');
+    if(request.operation!=='filesystem-observe')throw new Error('Wrong fixed request');
+    assert.deepEqual(request.relativePaths,['safe-run']);
+    return {root:stamp,data:{entries:[{relativePath:'safe-run',exists:false,kind:'missing',bytes:null,sha256:null,contentBase64:null}]}};
+  },{kind:'fixture-temporary'},stamp)});
+  const fields={leaseId:'lease',rootId:'fixture-temporary',view:'presence',maxBytes:100,maxEntries:1};
+  for(const paths of [{relativePath:'safe-run'},{relativePaths:['safe-run']}]) {
+    const result=await h.invoke('loom.filesystem.observe',{...fields,...paths});
+    assert.equal(result.availability,'observed'); assert.equal(FilesystemOutput.parse(result.data).entries[0]!.exists,false);
+  }
+  assert.equal(calls,2);
+  for(const paths of [{},{relativePath:'safe-run',relativePaths:['safe-run']},{relativePaths:[]},
+    {relativePath:''},{relativePath:'../foreign'},{relativePaths:['../foreign']},{relativePath:'/tmp/foreign'},
+    {relativePath:'safe-run',command:'stat'}]) {
+    await assert.rejects(h.invoke('loom.filesystem.observe',{...fields,...paths})); assert.equal(calls,2);
+  }
+  const foreign=await h.invoke('loom.filesystem.observe',{...fields,rootId:'foreign',relativePath:'safe-run'});
+  assert.equal(foreign.availability,'error'); assert.equal(calls,2);
+});

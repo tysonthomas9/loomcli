@@ -13,7 +13,7 @@ import { FailureInput, FailureOutput, observeNativeFailure } from './native-fail
 import { FilesInput, FilesOutput, observeFiles } from './files.js';
 import { NativeInput, NativeOutput, observeNative, NativeRegistrationInput, NativeRegistrationOutput, observeNativeRegistration } from './native.js';
 import { SavedEventsInput, SavedEventsOutput, collectSavedEvents } from './events.js';
-import { FilesystemInput, FilesystemOutput, observeFilesystem } from './filesystem.js';
+import { FilesystemInput, FilesystemOutput, normalizeFilesystemInput, observeFilesystem } from './filesystem.js';
 import { GitLifecycleInput, GitLifecycleOutput, observeGitLifecycle } from './git-lifecycle.js';
 import { GitInput, GitOutput, observeGit, type GitReader } from './git.js';
 export * from './operation.js';
@@ -149,7 +149,8 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
       },
     }),
     defineOperation({ ...common, id: 'loom.filesystem.observe', effects: ['read-filesystem'], inputSchema: FilesystemInput, outputSchema: FilesystemOutput,
-      async run(input, context) {
+      async run(request, context) {
+        const input = normalizeFilesystemInput(request);
         const fixture = await getFixture(context, input.leaseId);
         const root = fixture.roots.get(input.rootId);
         requireFact(root, 'ownership-mismatch', 'Filesystem root is not owned');

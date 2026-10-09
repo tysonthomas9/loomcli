@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { collectSavedEvents, SavedEventsInput } from './events.js';
 import { observeNative, NativeInput } from './native.js';
-import { observeFilesystem, FilesystemInput } from './filesystem.js';
+import { observeFilesystem, FilesystemInput, normalizeFilesystemInput } from './filesystem.js';
 import { observeFiles } from './files.js';
 import { AgentRow, sha256, type NativeAccess, type Json } from './protocol.js';
 const signal = new AbortController().signal;
@@ -100,7 +100,7 @@ test('filesystem retains exact Unicode bytes; refuses symlink, traversal, duplic
   const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'loom-adapter-fs-')));
   try {
     await writeFile(path.join(directory, 'owned.txt'), 'line one\n🙂\r\n'); await symlink('/etc', path.join(directory, 'foreign'));
-    const input = FilesystemInput.parse({ leaseId: 'lease', rootId: 'repo', relativePaths: ['owned.txt', 'absent'], view: 'bytes', maxBytes: 1000, maxEntries: 10 });
+    const input = normalizeFilesystemInput(FilesystemInput.parse({ leaseId: 'lease', rootId: 'repo', relativePaths: ['owned.txt', 'absent'], view: 'bytes', maxBytes: 1000, maxEntries: 10 }));
     const observed = await observeFilesystem(input, directory);
     assert.equal(Buffer.from(observed.entries[0]!.contentBase64!, 'base64').toString('utf8'), 'line one\n🙂\r\n'); assert.equal(observed.entries[1]!.exists, false);
     await assert.rejects(observeFilesystem({ ...input, relativePaths: ['foreign/passwd'] }, directory));
