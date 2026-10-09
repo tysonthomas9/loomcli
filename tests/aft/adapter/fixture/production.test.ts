@@ -7,7 +7,7 @@ import { ComposeFixtureDriver, type ProductionConfig, type ProcessRequest } from
 import { FixtureLifecycle, FixtureError, type FixturePlan } from './lifecycle.js';
 import { materializeRenderer } from './renderer-fixtures.test.js';
 const hash = (v: string | Uint8Array) => createHash('sha256').update(v).digest('hex');
-async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,useProductionReadiness=false) {
+async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,useProductionReadiness=false,requestTime?:()=>number) {
  const root = await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname), 'test-artifacts-'));
  const source = path.join(root,'source'), build = path.join(root,'build');
  for (const dir of [source,build,path.join(root,'home'),path.join(root,'locks')]) await fs.mkdir(dir);
@@ -71,7 +71,7 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
   return relative.endsWith('/repos')?{success:true,repos:[{name:'aft-repo'}]}:relative.endsWith('/LOCALMODE')?{data:{id:'LOCALMODE',path:'/root/.loom/workspaces/LOCALMODE',repos:[{name:'source-repo',path:'/root/.loom/workspaces/LOCALMODE/source-repo'}]}}:relative.endsWith('/models')?{providers:[{models:[{id:plan.model},{id:'openai/alternate'}]}]}:{};};
  const driver=new ComposeFixtureDriver(config,run,files,()=>`id${++serial}`,async()=>({port:port++,async release(){}}),http,async()=>({status:201,body:{}}),
   useProductionReadiness?undefined:async(origin,signal)=>{await http(origin,'/api/config',signal);return {status:readinessStatuses.shift()??200,complete:true};},
-  {now:()=>clockNow,async nextAttempt(signal){signal.throwIfAborted();delays.push(1000);clockNow+=1000;}});
+  {now:()=>clockNow,monotonicNow:requestTime??(()=>clockNow),async nextAttempt(signal){signal.throwIfAborted();delays.push(1000);clockNow+=1000;}});
  const lifecycle=new FixtureLifecycle([plan],()=>driver,()=>1000,()=> 'opaque-fixture');
  const request={runId:'run',profile,loomRevision:revision,fleetRevision:revision,model:plan.model,maxCases:1,selectionSha256:plan.selectionSha256};
  return {root,source,driver,lifecycle,request,calls,onExec(callback:(request:ProcessRequest)=>Promise<void>){onExec=callback;},mutate(v:string){change=v;},
@@ -354,11 +354,96 @@ test('selected SSE retries failed fixed config reads inside the original window 
  }finally{await r.cleanup();}
 });
 
-test('selected SSE never credits a config response returned after the readiness deadline',async()=>{
+test('source failure-only deadline accepts a bounded successful response crossing the deadline',async()=>{
  const r=await setup();try{
-  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);r.onRead(async()=>r.advance(180000));
-  await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  let dispatched=false,advanced=false;r.onRestart(async()=>{dispatched=true;});
+  r.onExec(async request=>{if(dispatched&&!advanced&&request.args.at(-1)?.includes('runtime-identity')){advanced=true;r.advance(179000);}});
+  r.onRead(async()=>r.advance(2000));
+  const fact=await r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal);
+  assert.equal(fact.readiness.status,200);assert.equal(fact.readiness.elapsedMs,181000);assert.equal(fact.readiness.attempts,1);
   assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);assert.deepEqual(r.delays,[]);
+  const receipt=JSON.parse(await fs.readFile(fact.receipt.id,'utf8'));
+  assert.deepEqual(receipt.value.readinessClock,{policy:'deadline-after-failed-request',invocationStartMs:0,readinessStartMs:0,failureDeadlineSeconds:180});
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
+
+test('source final retry sleep can cross the failure deadline before a successful request',async()=>{
+ const r=await setup();let reads=0;try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  let dispatched=false,advanced=false;r.onRestart(async()=>{dispatched=true;});
+  r.onExec(async request=>{if(dispatched&&!advanced&&request.args.at(-1)?.includes('runtime-identity')){advanced=true;r.advance(179000);}});
+  r.statuses(503,200);r.onRead(async()=>{reads++;});
+  const fact=await r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal);
+  assert.equal(reads,2);assert.equal(fact.readiness.status,200);assert.equal(fact.readiness.elapsedMs,180000);
+  assert.deepEqual(r.delays,[1000]);assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
+
+test('source failure checks integer invocation seconds and cannot retry a failed request at the deadline',async()=>{
+ const r=await setup();let reads=0;try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  let dispatched=false,advanced=false;r.onRestart(async()=>{r.advance(500);dispatched=true;});
+  r.onExec(async request=>{if(dispatched&&!advanced&&request.args.at(-1)?.includes('runtime-identity')){advanced=true;r.advance(178000);}});
+  r.statuses(503);r.onRead(async()=>{reads++;r.advance(1500);});
+  let receipt='';await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal),error=>{
+   receipt=(error as FixtureError).receipt!.id;return error instanceof FixtureError;
+  });
+  const data=JSON.parse(await fs.readFile(receipt,'utf8')).value;
+  assert.equal(data.readinessAttempts[0].elapsedMs,179500);assert.equal(data.readinessAttempts[0].status,503);
+  assert.equal(reads,1);assert.deepEqual(r.delays,[]);assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
+
+test('failure-only window expiration never vetoes success but external abort still does',async()=>{
+ for(const externalAbort of [false,true]){
+  const r=await setup(),original=AbortSignal.timeout,deadline=new AbortController(),signal=new AbortController();
+  try{
+   const a=await r.lifecycle.acquire(r.request,signal.signal);
+   AbortSignal.timeout=((ms:number)=>ms===180000?deadline.signal:original.call(AbortSignal,ms)) as typeof AbortSignal.timeout;
+   r.onRead(async()=>{deadline.abort();if(externalAbort)signal.abort();});
+   if(externalAbort)await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal.signal));
+   else assert.equal((await r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal.signal)).readiness.status,200);
+   assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
+   assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+  }finally{AbortSignal.timeout=original;await r.cleanup();}
+ }
+});
+
+test('source late success allowance never waives the individual three-second request bound',async()=>{
+ const r=await setup();let reads=0;try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  r.onRead(async()=>{if(++reads===1)r.advance(3001);});
+  const fact=await r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal);
+  assert.equal(reads,2);assert.equal(fact.readiness.attempts,2);assert.equal(fact.readiness.elapsedMs,4001);assert.deepEqual(r.delays,[1000]);
+  const receipt=JSON.parse(await fs.readFile(fact.receipt.id,'utf8'));
+  assert.equal(receipt.value.readinessAttempts[0].complete,false);assert.equal(receipt.value.readinessAttempts[0].status,undefined);
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
+
+test('source integer clock preserves the invocation subsecond phase instead of flooring elapsed milliseconds',async()=>{
+ const r=await setup();let reads=0;try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);r.advance(500);
+  let dispatched=false,advanced=false;r.onRestart(async()=>{r.advance(500);dispatched=true;});
+  r.onExec(async request=>{if(dispatched&&!advanced&&request.args.at(-1)?.includes('runtime-identity')){advanced=true;r.advance(179000);}});
+  r.statuses(503,200);r.onRead(async()=>{if(++reads===1)r.advance(500);});
+  const fact=await r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal);
+  assert.equal(reads,2);assert.equal(fact.readiness.elapsedMs,180500);assert.deepEqual(r.delays,[1000]);
+  const receipt=JSON.parse(await fs.readFile(fact.receipt.id,'utf8'));
+  assert.deepEqual(receipt.value.readinessClock,{policy:'deadline-after-failed-request',invocationStartMs:500,readinessStartMs:1000,failureDeadlineSeconds:181});
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
+
+test('individual request duration is independent of the source wall clock deadline',async()=>{
+ let requestTime=0;const r=await setup('agents-real-opencode',undefined,false,()=>requestTime);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  r.onRead(async()=>{r.advance(184000);requestTime=100;});
+  const fact=await r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal);
+  assert.equal(fact.readiness.status,200);assert.equal(fact.readiness.elapsedMs,184000);assert.deepEqual(r.delays,[]);
   assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
  }finally{await r.cleanup();}
 });
