@@ -245,7 +245,7 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
       const evidenceStore=await createEvidenceStore(path.join(runtimeRoot,'evidence'));
       const workspaceBinding=isCompose?{}:{ownedWorkspaces:await driver.ownedWorkspaceRoster(owner,evidenceStore,context.signal),
         readWorkspaceLegacyAgent:(workspaceId:string,name:string,signal:AbortSignal)=>driver.readWorkspaceLegacyAgent(owner,workspaceId,name,signal)};
-      return { ...(isCompose?await driver.runtimeIdentity(context.signal):{}),evidenceClass: route.evidenceClass, roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget, operationAuthority,
+      return { ...await driver.runtimeIdentity(context.signal),evidenceClass: route.evidenceClass, roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget, operationAuthority,
         evidenceStore,...workspaceBinding,
         readApi: fixedRead(acquired.apiOrigin), readFiles: fixedRead(acquired.filesOrigin), resolveAgent };
     },

@@ -6,7 +6,7 @@ import { FixtureError } from './lifecycle.js';
 import type { Resource } from './lifecycle.js';
 const check=(value:unknown)=>{if(!value)throw new FixtureError('ownership-mismatch');};
 const Identity=z.object({pid:z.number().int().positive(),generation:z.string().min(1),executable:z.string().min(1),argvSha256:z.string().regex(/^[a-f0-9]{64}$/),
-  parentPid:z.number().int().nonnegative(),configurationRoot:z.string(),state:z.enum(['running','exited'])}).strict();
+  parentPid:z.number().int().nonnegative(),configurationRoot:z.string(),fixtureRunId:z.string().regex(/^[A-Za-z0-9_-]{0,128}$/).optional(),state:z.enum(['running','exited'])}).strict();
 export type RegisteredIdentity=z.infer<typeof Identity>;
 export interface RegisteredProcessHandle {
  identity:RegisteredIdentity;
@@ -46,7 +46,7 @@ export function createRegisteredProcessPort(pythonBinary:string,helperFile:strin
   const command=async(operation:'inspect'|'stop'|'terminate-gracefully'|'await-exit')=>{
     check(!failed&&!pending);const result=response();try{child.stdin!.write(JSON.stringify({operation})+'\n');}catch{fail();}
     const deadline=setTimeout(()=>{fail();child.kill();},20000);
-    try{const value=await result;check(value.generation===initial.generation&&value.executable===initial.executable&&value.argvSha256===initial.argvSha256&&value.configurationRoot===initial.configurationRoot);return value;}
+    try{const value=await result;check(value.generation===initial.generation&&value.executable===initial.executable&&value.argvSha256===initial.argvSha256&&value.configurationRoot===initial.configurationRoot&&value.fixtureRunId===initial.fixtureRunId);return value;}
     finally{clearTimeout(deadline);}
   };
   let stopped=false;
@@ -78,7 +78,7 @@ export class OwnedDescendants {
   check(registration.id&&registration.pid>0&&registration.configurationRoot&&path.isAbsolute(registration.executable));
   const old=this.handles.get(registration.id);
   if(old){const current=await old.inspect();check(current.state==='running'&&current.pid===registration.pid&&current.executable===registration.executable&&current.configurationRoot===registration.configurationRoot&&
-   current.generation===old.identity.generation&&current.argvSha256===old.identity.argvSha256&&
+   current.generation===old.identity.generation&&current.argvSha256===old.identity.argvSha256&&current.fixtureRunId===old.identity.fixtureRunId&&
    (registration.argvSha256===undefined||current.argvSha256===registration.argvSha256)&&
    (registration.parentPid===undefined||current.parentPid===registration.parentPid)&&
    (registration.parentPids===undefined||registration.parentPids.filter(pid=>pid===current.parentPid).length===1));return current;}
@@ -91,7 +91,7 @@ export class OwnedDescendants {
    (registration.parentPids===undefined||registration.parentPids.filter(pid=>pid===identity.parentPid).length===1))){await handle.abandon();throw new FixtureError('ownership-mismatch');}
   this.handles.set(registration.id,handle);this.record({id:registration.id,kind:'process',generation:identity.generation});return identity;
  }
- async inspect(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);const current=Identity.parse(await handle!.inspect());check(['pid','generation','executable','argvSha256','configurationRoot'].every(key=>current[key as keyof RegisteredIdentity]===handle!.identity[key as keyof RegisteredIdentity]));return current;}
+ async inspect(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);const current=Identity.parse(await handle!.inspect());check(['pid','generation','executable','argvSha256','configurationRoot','fixtureRunId'].every(key=>current[key as keyof RegisteredIdentity]===handle!.identity[key as keyof RegisteredIdentity]));return current;}
  async stop(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);await handle!.stop();}
  async terminateGracefully(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);
   if(!handle!.terminateGracefully)throw new FixtureError('unsupported-capability');await this.inspect(id,generation);await handle!.terminateGracefully();}
