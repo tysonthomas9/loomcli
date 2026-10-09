@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -32,4 +34,12 @@ test('emitted source-built adapter registers actual providers and retains fixtur
   assert.equal(result.availability, 'observed');
   const actual = emitted.MarkdownOutputSchema.parse(result.data);
   assert.equal(actual.terminal, 'actual compiled bytes');
+});
+
+test('renderer source and emitted modules initialize independently without import-order authority',async()=>{
+  const run=promisify(execFile);
+  for(const module of ['renderer-contract','renderer-target','fixture/host']) {
+    await run(process.execPath,['--input-type=module','--eval',`await import('./dist/${module}.js')`],{cwd:root});
+    await run(path.join(root,'node_modules/.bin/tsx'),['--eval',`import('./${module}.ts').catch(error=>{console.error(error);process.exitCode=1})`],{cwd:root});
+  }
 });

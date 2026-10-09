@@ -41,7 +41,7 @@ export interface OwnedFixture {
   rendererTarget?: OwnedRendererTarget;
   operationAuthority?: FixtureOperationAuthority;
   ownedWorkspaces?: OwnedWorkspaceRoster;
-  readWorkspaceAgent?: (workspaceId:string,agentId:string,signal:AbortSignal)=>Promise<Omit<WorkspaceAgentFact,'identityKind'> & {identityKind?:'native-agent-id'}>;
+  readWorkspaceAgent?: (workspaceId:string,agentId:string,signal:AbortSignal)=>Promise<WorkspaceAgentFact>;
   readWorkspaceLegacyAgent?: (workspaceId:string,name:string,signal:AbortSignal)=>Promise<LegacyWorkspaceAgentFact>;
   readApi: ReadTransport;
   readFiles: ReadTransport;
