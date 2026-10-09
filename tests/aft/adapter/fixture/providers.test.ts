@@ -260,3 +260,31 @@ for (const revoked of [false, true]) test(`public provider cleanup cannot transf
     foreign.context.resources.delete(key); r.failCleanup(false); await disposeFixtures(r.context);
   }
 });
+
+import { HostFixtureDriver, type HostConfig } from './host.js';
+test('review late Host binding failure preserves exact cleanup callback', async t => {
+  const r = await setup(t);
+  const revision = {...r.input.loomRevision};
+  const registered = {revision,source:{root:'/owned/source',entries:[]},build:{root:'/owned/build',entries:[]}};
+  const config:HostConfig = {loom:registered,fleet:registered,engine:registered,adapter:registered,
+    tempParent:'/owned/temp',lockParent:'/owned/locks',hostHome:'/owned/home',toolPath:'/owned/bin',
+    connection:'owned',connectionFingerprint:'f'.repeat(64),attestedImages:true,minimumFreeBytes:1,
+    loomBinary:'/owned/bin/loom',fleetBinary:'/owned/bin/fleet',nodeBinary:'/owned/bin/node',gitBinary:'/owned/bin/git',
+    pinnedOpenCodeBinary:'/owned/bin/opencode',realBinaries:{},daemon:false,fakeGitHub:false,maxBudgetUsd:'0'};
+  const injectedLifecycle = r.options.driver(r.input.profile);
+  const driver = Object.assign(new HostFixtureDriver(config),injectedLifecycle);
+  r.options.driver = () => driver;
+  r.failCleanup(true);
+  const result = await r.invoke('loom.fixture.acquire',r.input);
+  assert.equal(result.availability,'error');
+  const key=[...r.context.resources.keys()].find(key=>key.startsWith(`${fixturesKey}:`));
+  assert.ok(key);
+  const original=r.context.resources.get(key) as {cleanupOnly?:boolean;expiresAtUtcMs:number;dispose():Promise<void>};
+  let foreign=0;
+  const replacement=Object.freeze({...original,dispose:async()=>{foreign++;}});
+  r.context.resources.set(key,replacement);
+  let denied=false;try{await disposeFixtures(r.context);}catch{denied=true;}
+  console.log(JSON.stringify({availability:result.availability,cleanupOnly:original.cleanupOnly??null,
+    expiresAtUtcMs:original.expiresAtUtcMs,denied,foreignCallback:foreign,replacementRetained:r.context.resources.get(key)===replacement}));
+  assert.equal(denied,true);assert.equal(foreign,0);assert.equal(r.context.resources.get(key),replacement);
+});

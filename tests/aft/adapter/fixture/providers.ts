@@ -130,8 +130,8 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
             },
           };
           privateFixtures.set(fixture, { manager, driver: driver! });
-          putFixture(context, fixture); boundFixture = fixture;
           if(driver instanceof HostFixtureDriver)driver.bindOwnedFixture(fixture,evidenceStore);
+          putFixture(context, fixture); boundFixture = fixture;
           return { value: { ...acquired,...(fixtureRunId?{fixtureRunId}:{}), syntheticProbeHandle: fixture.syntheticProbe!.handle, syntheticProbeRunId: fixture.syntheticProbe!.runId }, evidenceClass: fixture.evidenceClass,
             identity: { fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId } };
         } catch (error) {
