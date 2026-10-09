@@ -36,3 +36,9 @@ test('history and surviving Git lifecycle use closed requests with no paths or c
     assert.equal(ContainerReadRequest.safeParse({operation:'agent-history',agentId:'agt_owned',...extra}).success,false);
   assert.equal(ContainerReadRequest.safeParse({operation:'filesystem-root',root:{kind:'fixture-temporary',path:'/host/tmp'}}).success,false);
 });
+
+test('fixed model protocol cannot parse script, reset or fixture mutations',()=>{
+ for(const method of ['POST','PATCH','DELETE'])for(const relativePath of ['/__script','/__reset','/__fixture'])
+   assert.equal(ContainerReadRequest.safeParse({operation:'fixture-http',method,relativePath,body:{}}).success,false);
+ assert.ok(ContainerReadRequest.safeParse({operation:'fixture-http',method:'GET',relativePath:'/__requests',body:null}).success);
+});
