@@ -54,7 +54,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     pinnedOpenCodeBinary: path.join(build, 'opencode'), realBinaries: Object.fromEntries(['codex', 'claude', 'cursor', 'opencode'].map(name => [name,
       { executable: realBinary, sha256: hash('real-binary'), authRoot }])), daemon, fakeGitHub: false, maxBudgetUsd: '5.00',
   };
-  const plan: FixturePlan = { profile, loomRevision: revision, fleetRevision: revision, engineRevision: revision, adapterRevision: revision,
+  const plan: FixturePlan = { profile, loomRevision: { ...revision }, fleetRevision: { ...revision }, engineRevision: { ...revision }, adapterRevision: { ...revision },
     model: profile === 'legacy-deterministic' ? 'aft/m' : profile === 'legacy-real-cursor' ? 'backend-default' : 'openai/real-model', maxCases: 10, caseCount: 1, selectionSha256: 'd'.repeat(64), leaseDurationMs: 10000 };
   const starts: { id: string; command: HostCommand; readiness: string }[] = []; const runs: HostCommand[] = []; const stopped: string[] = [];
   let failService = ''; let failStop = ''; let spawnFails = false; let port = 4100; let count = 0; let failHttp = false;
@@ -130,7 +130,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
   return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle, protocols, requests,
     registeredStops,captures,abandoned,failRegisteredCleanup(value:boolean){failRegisteredStop=value;},
     registration(pid:number,values:Partial<RegisteredIdentity>){registrationOverrides.set(pid,values);},onCapture(callback:(pid:number)=>Promise<void>){onCapture=callback;},
-    request: { runId: 'test-run', profile, loomRevision: revision, fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
+    request: { runId: 'test-run', profile, loomRevision: { ...revision }, fleetRevision: { ...revision }, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
     onHttp(callback:(method:string,relative:string)=>Promise<void>){onHttp=callback;},
     overrideResponse(callback:(relative:string)=>unknown){responseOverride=callback;},
     cliOutput(value:unknown){cliOutput=JSON.stringify(value);},commonDir(repo:string,value:string){commonDirectories.set(repo,value);},head(value:string){headOutput=value;},
