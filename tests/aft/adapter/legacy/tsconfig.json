@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
+    "resolveJsonModule": true,
+    "paths": {
+      "zod": [
+        "./node_modules/zod/index.d.ts"
+      ],
+      "@tysonthomas9/aft/types": [
+        "./node_modules/@tysonthomas9/aft/dist/types.d.ts"
+      ],
+      "@tysonthomas9/aft/capabilities": [
+        "./node_modules/@tysonthomas9/aft/dist/capabilities.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
