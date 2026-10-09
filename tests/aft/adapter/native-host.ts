@@ -26,7 +26,7 @@ export interface NativeHostAccess extends NativeAccess {
   /** Fixed owning-workspace row read for canonical enrollment producers. */
   rawAgent(agentId: string, signal: AbortSignal): Promise<ReturnType<typeof AgentRow.parse>>;
 }
-async function linuxProcessIdentity(pid: number): Promise<ProcessIdentity> {
+export async function linuxProcessIdentity(pid: number): Promise<ProcessIdentity> {
   requireFact(process.platform === 'linux', 'unsupported-capability', 'Native process generation requires the owned Linux runtime');
   const executable = await realpath(`/proc/${pid}/exe`);
   const argv = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').filter(Boolean);
