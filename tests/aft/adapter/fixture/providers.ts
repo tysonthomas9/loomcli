@@ -7,8 +7,8 @@ import { defineOperation } from '../operation.js';
 import { putFixture, getFixture, releaseFixture, fixturesKey, type OwnedFixture, type OwnedAgent } from '../ownership.js';
 import { createNativeHostAccess } from '../native-host.js';
 import { createSyntheticProbe } from '../synthetic-probe.js';
-import { ContainerRootIdentity, containerFilesystemObserver, containerGitObserver, type ContainerObservationRead } from '../container-observations.js';
-import { AgentRow, NativeRef, ServiceRegistration, HttpResponse, Id, Digest, ObservationError, requireFact,
+import { ContainerRootIdentity, containerFilesystemObserver, containerGitObserver, containerGitLifecycleObserver, type ContainerObservationRead } from '../container-observations.js';
+import { AgentRow, AgentHistory, NativeRef, ServiceRegistration, HttpResponse, Id, Digest, ObservationError, requireFact,
   type NativeAccess, type ProcessIdentity, type ReadTransport } from '../protocol.js';
 import { FixtureLifecycle, FixtureError, type FixtureDriver, type FixturePlan, type AcquireRequest } from './lifecycle.js';
 import { HostFixtureDriver, readHttp, type HostConfig } from './host.js';
@@ -174,6 +174,7 @@ function containerNative(driver: ComposeFixtureDriver, pinnedExecutable: string)
         'identity-mismatch', 'Native process is not pinned'); return result;
     },
     agent: async agentId => AgentRow.parse(await read({ operation: 'agent', agentId })),
+    history: async agentId => AgentHistory.parse(await read({ operation: 'agent-history', agentId })),
     sessions: async agentId => z.array(NativeRef).parse(await read({ operation: 'sessions', agentId })),
     read: async (route, signal) => HttpResponse.parse(await read({ operation: 'read', route }, signal)),
   };
@@ -199,6 +200,8 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
         const read: ContainerObservationRead = (request, signal) => driver.nativeRead(request, signal);
         const managed = ContainerRootIdentity.parse(await read({ operation: 'filesystem-root', root: { kind: 'managed-repo' } }, context.signal));
         roots.set('managed-repo', { ...managed, remoteObserve: containerFilesystemObserver(read, { kind: 'managed-repo' }, managed) });
+        const temporary=ContainerRootIdentity.parse(await read({operation:'filesystem-root',root:{kind:'fixture-temporary'}},context.signal));
+        roots.set('fixture-temporary',{...temporary,remoteObserve:containerFilesystemObserver(read,{kind:'fixture-temporary'},temporary)});
         resolveAgent = async (agentId, signal): Promise<OwnedAgent> => {
           const row = await native.agent(agentId);
           const common = z.object({ commonDir: Id }).strict().parse(await driver.nativeRead({ operation: 'git-common-dir', agentId }, signal));
@@ -207,7 +210,9 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
           roots.set(`agent-worktree:${agentId}`, { ...stamp, remoteObserve: containerFilesystemObserver(read, selector, stamp) });
           return { row, commonDir: common.commonDir, native, gitObserve: containerGitObserver(read,
             { fixtureLeaseId: acquired.lease.id, workspaceId: acquired.workspaceId, agentId },
-            { worktree: row.worktree_path, commonDir: common.commonDir, branch: row.branch }) };
+            { worktree: row.worktree_path, commonDir: common.commonDir, branch: row.branch }),
+            gitLifecycle: containerGitLifecycleObserver(read,{fixtureLeaseId:acquired.lease.id,workspaceId:acquired.workspaceId,agentId},
+              {sourceRoot:acquired.repo,commonDir:common.commonDir,branch:row.branch,worktree:row.worktree_path}) };
         };
       } else {
         const native = createNativeHostAccess({ configRoot: path.join(driver.workspaceRoot, '.loom-config'), workspaceId: acquired.workspaceId,

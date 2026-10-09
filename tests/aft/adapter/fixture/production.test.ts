@@ -35,6 +35,7 @@ async function setup(profile = 'agents-real-opencode') {
  const connection={Identity:'/owned/key',Name:'owned',URI:'ssh://owned'};
  const config:ProductionConfig={loom:registered,fleet:registered,engine:registered,adapter:registered,tempParent:root,lockParent:path.join(root,'locks'),hostHome:path.join(root,'home'),toolPath:'/pinned/toolchain',connection:'owned',connectionFingerprint:hash(JSON.stringify([connection])),minimumFreeBytes:1,attestedImages:true,emulatorBinary:{path:path.join(build,'emulator'),sha256:hash(elf)},modecloud:{codexAuthRoot:auth,frontendDist:frontend}};
  const plan:FixturePlan={profile,loomRevision:revision,fleetRevision:revision,engineRevision:revision,adapterRevision:revision,model:profile==='agents-emulator'?'aft/m':'openai/m',maxCases:10,caseCount:1,selectionSha256:'d'.repeat(64),leaseDurationMs:10000};
+ let onExec:((request:ProcessRequest)=>Promise<void>)|undefined;
  const calls:ProcessRequest[]=[]; let project='',up=false,change='',port=5000,serial=0;
  const services=cloud?['redis','fleet-auth-seed','fleet-db','loom-serve','worker','stub-upstream']:['redis','fleet-db','loom-local','ui-local'];
  const run=async (r:ProcessRequest)=>{
@@ -46,7 +47,7 @@ async function setup(profile = 'agents-real-opencode') {
   if(a.includes('image')) return JSON.stringify([{Id:image}]);
   if(a.includes('compose')) { if(a.includes('up')) {up=true;if(change==='fail-up')throw new Error('Bearer private-up-token');} if(a.includes('down')) {if(change==='fail-down')throw new Error('secret=private-down-token');up=false;}return ''; }
   if(a.includes('logs'))return change==='embedded'?'embedded fleet-db started':'opened cloud fleet-db client';
-  if(a.includes('exec'))return a.at(-1)?.includes('controlled-codex-preflight') ? JSON.stringify({ready:true,cleaned:change!=='probe-leak',complete:change!=='probe-incomplete'}) : JSON.stringify({sourceRepo:'/work/source-repos/aft-repo'});
+  if(a.includes('exec')){await onExec?.(r);return a.at(-1)?.includes('controlled-codex-preflight') ? JSON.stringify({ready:true,cleaned:change!=='probe-leak',complete:change!=='probe-incomplete'}) : JSON.stringify({sourceRepo:'/work/source-repos/aft-repo'});}
   if(a.includes('ps')) return up?services.map(s=>`container-${s}`).join('\n'):'';
   if(a.includes('ls')) return up?(a.includes('volume')?'volume-owned':'network-owned'):'';
   if(a.includes('inspect')) {
@@ -61,7 +62,7 @@ async function setup(profile = 'agents-real-opencode') {
  const driver=new ComposeFixtureDriver(config,run,files,()=>`id${++serial}`,async()=>({port:port++,async release(){}}),http,async()=>({status:201,body:{}}));
  const lifecycle=new FixtureLifecycle([plan],()=>driver,()=>1000,()=> 'opaque-fixture');
  const request={runId:'run',profile,loomRevision:revision,fleetRevision:revision,model:plan.model,maxCases:1,selectionSha256:plan.selectionSha256};
- return {root,source,driver,lifecycle,request,calls,mutate(v:string){change=v;},async cleanup(){await fs.rm(root,{recursive:true});}};
+ return {root,source,driver,lifecycle,request,calls,onExec(callback:(request:ProcessRequest)=>Promise<void>){onExec=callback;},mutate(v:string){change=v;},async cleanup(){await fs.rm(root,{recursive:true});}};
 }
 for(const profile of ['agents-real-opencode','agents-emulator']) test(`${profile}: concrete compose driver preserves profile realness and resource ownership`,async()=>{
  const r=await setup(profile);try{
@@ -101,4 +102,34 @@ test('distinct ModeCloud profile preserves supplemental overlay and named work-v
 });
 for(const issue of ['hostbind','writable-auth','embedded','unhealthy','probe-leak','probe-incomplete'])test(`ModeCloud ${issue} cannot become an available fixture`,async()=>{
  const r=await setup('legacy-real-codex-podman');r.mutate(issue);try{await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal));}finally{await r.cleanup();}
+});
+
+test('owned container observations validate the same container generation after the fixed read',async()=>{
+ const r=await setup('agents-emulator');try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+ const override=JSON.parse(await fs.readFile(path.join(r.driver.runtimeRoot,'compose.json'),'utf8'));
+ assert.equal(override.services['loom-local'].environment.AFT_FIXTURE_NAMESPACE,'owned-container');assert.equal(override.services['loom-local'].environment.AFT_FIXTURE_LEASE_ID,a.lease.id);
+ const before=r.calls.filter(c=>c.args.includes('exec')).length;
+ r.onExec(async()=>r.mutate('stale'));
+ await assert.rejects(r.driver.nativeRead({operation:'agent-history',agentId:'agt_owned'},signal));
+ assert.equal(r.calls.filter(c=>c.args.includes('exec')).length,before+1);
+ r.mutate('');r.onExec(async()=>{});assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
+test('container operation excludes teardown while a fixed read is in flight',async()=>{
+ const r=await setup('agents-emulator');try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+ let enter!:()=>void,leave!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{leave=resolve;});
+ r.onExec(async()=>{enter();await gate;});const read=r.driver.nativeRead({operation:'registration'},signal);await entered;
+ const failed=await r.lifecycle.release(a.lease.id,'run');assert.equal(failed.released,false);assert.equal(r.calls.some(c=>c.args.includes('down')),false);
+ leave();await read;r.onExec(async()=>{});assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
+});
+test('foreign retained API generation and unbound model generation cannot dispatch container mutations',async()=>{
+ const r=await setup('agents-emulator');try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),before=r.calls.filter(c=>c.args.includes('exec')).length;
+ await assert.rejects(r.driver.requestOwnedHttp('api','POST','/api/workspaces',{},signal,'foreign'));
+ await assert.rejects(r.driver.requestOwnedHttp('fake-model','POST','/__script',{},signal,'unbound-model-generation'));
+ assert.equal(r.calls.filter(c=>c.args.includes('exec')).length,before);assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
 });
