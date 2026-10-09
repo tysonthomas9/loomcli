@@ -9,6 +9,7 @@ import { productionLegacyAccess } from './legacy/host-access.js';
 import { getFixtureEvidenceStore } from './evidence.js';
 import { createLegacyProviders, type LegacyAccessFactory } from './legacy/providers.js';
 import type { LegacyProviderOptions } from './legacy/effects.js';
+import { createTerminalDetachProviders } from './legacy/terminal-providers.js';
 import { createProjectionProvider, pinProjectionImplementation } from './projection.js';
 import { requireFact } from './protocol.js';
 import type { GitReader } from './git.js';
@@ -48,6 +49,7 @@ export function createLoomProviders(options: LoomCompositionOptions) {
     ...createFixtureProviders({ ...options.fixtures, plans, implementation: pin, implementationSha256: pin.sha256 }),
     ...createLegacyProviders(pin, pin.sha256, options.legacyAccess ?? ((context, fixture) =>
       productionLegacyAccess(fixture, getFixtureEvidenceStore(context, fixture.leaseId))), legacyOptions),
+    ...createTerminalDetachProviders(pin, pin.sha256),
     createProjectionProvider(pin),
   ];
 }

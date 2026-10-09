@@ -36,6 +36,9 @@ export * from './workspaces.js';
 export { createLegacyProviders } from './legacy/providers.js';
 export type { LegacyAccessFactory } from './legacy/providers.js';
 export { productionLegacyAccess } from './legacy/host-access.js';
+export { TerminalDetachId, TerminalDetachInput, TerminalDetachFacts } from './legacy/terminal-metadata.js';
+export { TerminalDetachEffects } from './legacy/effects.js';
+export { TerminalDetachOutput, createTerminalDetachProviders } from './legacy/terminal-providers.js';
 
 export const BindAgentInput = z.object({ leaseId: Id, workspaceId: Id, agentId: Id }).strict();
 export const BindAgentOutput = z.object({ agentRef: AgentRef, fixtureLeaseId: Id, workspaceId: Id, agentId: Id,
