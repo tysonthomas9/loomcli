@@ -47,6 +47,47 @@
         "stoppedFact": "afterGeneration:null is valid; no immediate saved-command respawn",
         "notEquivalent": "Force cleanup SIGKILL/task_terminate is a distinct actor. Darwin graceful port remains unsupported.",
         "remaining": "Legacy target lookup must expose exact enrolled service generation; genuine source-caused successor attestation/enrollment and cleanup still missing. No bound graceful journey or coverage claim."
+      },
+      "workerStop": {
+        "sources": [
+          {
+            "path": "tests/aft/scripts/live-stop-worker.sh",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "483cec88bef7e143fbbfae6759ca0e6d595dca280716bfccbafca6f020432d96"
+          },
+          {
+            "path": "tests/aft/live-worker-suites/lw-supervised-workers.test.yaml",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "ef97ee7bbd81feaf0fc375d3296d668fdc6a4a4b84c20bad501334f62fa86d3e"
+          }
+        ],
+        "originalCallers": [
+          {
+            "path": "tests/aft/live-worker-suites/lw-supervised-workers.test.yaml",
+            "line": 520,
+            "agentName": "lw-task-${RUN_ID:-local}",
+            "workspaceId": "E2E-WS"
+          },
+          {
+            "path": "tests/aft/live-worker-suites/lw-supervised-workers.test.yaml",
+            "line": 826,
+            "agentName": "lw-plan-${RUN_ID:-local}",
+            "workspaceId": "E2E-WS"
+          }
+        ],
+        "originalActor": "Attest actual daemon alive, fixed scoped curl -sf -X POST with EMPTY body and no JSON Content-Type, then observe agent list and daemon log; no force flag or respawn.",
+        "originalOracle": {
+          "daemonBeforeAndAfter": "Original kill -0 proves daemon liveness before POST and after completion; typed port must use exact captured owned daemon generation.",
+          "agentRows": "Fresh successful agents GET must contain exactly one matching name with desired_state==stopped AND state==stopped. Missing/malformed/incomplete observations cannot satisfy the predicate.",
+          "daemonLog": "At least one actual owned daemon log line contains BOTH agent stopped via control socket AND worktree=<agent> on that SAME line. Existing matching lines count in the original; no freshness claim.",
+          "httpBoundary": "Original curl -sf checks request success and rejects HTTP errors; it does not enumerate exactly200/202. Product200/202 are authentic acknowledgments, neither is process-exit proof.",
+          "waiting": "Original100 iterations with sleep1; typed deterministic checks await signals/drain/saved observations, never sleep or silently replay POST."
+        },
+        "privatePort": "stopRegisteredWorker(id,expectedWorkerGeneration,retainedExpectedServeGeneration,signal); fixed EMPTY-body POST plus captured kernel awaitExit, no force-cleanup fallback",
+        "typedStrengthening": "Exact owned kernel exit is additional generation-transition evidence; it does not substitute daemon liveness, stopped row or same-line log predicates. Unknown or incomplete exit cannot mint afterGeneration:null.",
+        "ownership": "Canonical immutable actor/store/source identity and exact worker/serve/daemon/parent generations before and after; synchronous operation reservation, uncertain mutation consumed with no automatic retry.",
+        "expectedOutcomes": "Expose bounded complete observed row counts/states, daemon identities/liveness and actual log marker facts for YAML assertions; no opaque helper-success verdict.",
+        "status": "Shared f98 runtime effects include fixed Git/kernel process starts; concrete EMPTY-body API-stop/kernel-exit/row-log-alive producer and default public registry consumer remain required. Current builtin discovery approval is not original actor/oracle proof."
       }
     },
     "compose-mutations": {
