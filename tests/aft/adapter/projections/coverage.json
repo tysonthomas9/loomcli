@@ -1,0 +1,63 @@
+{
+  "task_id": "d6245b30-b44d-4170-8a1c-82cb50199046",
+  "base_sha": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+  "core_interface_commit": "3404d963b7912115b3d70fc361a0dbe1db28c0d1",
+  "core_interface_consumed": "Read-only interface coordination; no root import or copied schema. Parent-approved core integration required.",
+  "inventory_index_sha256": "4055541f111c878152782d94840d2466e1744e59e795b9e5376e15a5e9e35640",
+  "original_contracts": "original-contracts.json",
+  "original_source_removed": false,
+  "runtime_acceptance": "unverified",
+  "contracts": [
+    {
+      "name": "loom-chat-markdown-projection-v1",
+      "implementation": ["markdown.ts", "identity.ts", "text.ts"],
+      "tests": ["markdown.test.ts", "contracts.test.ts", "provenance.test.ts"],
+      "supported_domain": "Pinned CommonMark/GFM/sanitize AST, literal HTML, headings/lists/tasks/autolinks/references/footnotes, code fences and tables; source-shaped block partitions; default unexpanded table/code chrome and streaming visibility. Motion source <=8000 UTF16, terminal <=128000, <=20000 frames, <=5000 arrivals. No browser object, DOM actions, user code or frontend imports.",
+      "tree_safety_bounds": { "depth": 512, "nodes": 524288, "children_per_node": 128000, "text_utf16": 4000000 },
+      "safety_bound_behavior": "Throw an explicit error rather than produce a partial projection. These additional data-tree bounds are not permission to weaken an original case.",
+      "facts": ["raw/visible/reply-content text", "source UTF16 length", "streaming source ranges, including invisible syntax and ambiguous mappings", "arrival visible/content changes and required source offsets", "GFM word retractions", "streaming-to-terminal frame distinction", "six source/CSS/lock hashes and seven renderer dependency versions"],
+      "independent_goldens": ["Original Start/table/JSON/End raw strings and (6,8),(60,64),(91,97),(len,len) ranges", "hidden streaming table actions", "code-header-only zero reply words", "14-to-13 GFM word retraction", "HTML text and emoji", "full terminal answer beyond17000 and at128000 units"],
+      "remaining_required": ["Code-owned measured context supplied by the core wrapper; YAML cannot provide source identity", "Canonical loom.markdown.project input/output schemas and registration in core", "Canonical incomplete envelope for null frame mappings; never absence/cardinality credit", "Pilot confirms exact saved source and actual DOM raw/visible/content against this independent projection", "All original source_projection predicates, identity correlation and monotonic frame positions remain explicit YAML expectations", "AFT engine retains actual clock ledger, saved arrivals, pacing, arrival deadlines and terminal-event evidence", "Full saved reply vs actual DOM, Show all false, real tools/facts/highlighted spans and screenshots remain required"],
+      "evidence": "Source-shaped deterministic projection goldens and static byte/version checks; browser/provider/runtime parity unverified"
+    },
+    {
+      "name": "loom-thinking-preview-text",
+      "implementation": ["text.ts"],
+      "tests": ["contracts.test.ts"],
+      "supported_domain": "Bounded saved plain text; first line, heading/mark stripping, cap120. Explicit utf16 and python-codepoints length/regex contracts; no silent normalization between them.",
+      "remaining_required": ["Original Python oracle and product JS preview differ on non-BMP cap boundaries and some whitespace; pilot must preserve/report the governing contract rather than silently change it", "Saved EventID/content/order and reload invariance", "Exact Thinking heading/status/expanded/body/empty-state observations", "Row >=32px high, horizontal containment tolerance1px, chevron right gap0..12px, tabindex0", "Real screenshots across original theme/viewport/keyboard matrix"],
+      "evidence": "Pure deterministic text facts only; geometry and rendered state unverified"
+    },
+    {
+      "name": "loom-reply-actions-layout",
+      "implementation": [],
+      "remaining_required": ["Original rest/hover/leave/focus stages, same path/text, copy and timestamp presence", "Opacity0/1 and pointer events none/auto; exact hovered/focused state", "Pill/button containment, footer gap0..8px, layout drift <=1px, focused/hovered button in viewport", "Original screenshots and browser actions remain explicit steps"],
+      "evidence": "Static preservation mapping only; not relocated"
+    },
+    {
+      "name": "loom-lead-prompt-argv-precedence",
+      "implementation": ["prompt-argv.ts"],
+      "tests": ["contracts.test.ts"],
+      "supported_domain": "Complete bounded captured or injected argv records; fixed codex exec flags, final positional prompt, literal template, inline-over-prompt_file precedence, empty-prompt built-in Lead fallback, single safety suffix and identical retries.",
+      "relocation_complete": false,
+      "remaining_required": ["Production-seam deterministic lead launcher with real argv construction and stub backend remains in original CUS-D14/CUS-S1 generated probes; not run by this task", "Original UI role/modal byte-exact storage and terminal launch observations", "Actual backend artifact following custom prompt in li-custom-prompt remains original live-provider evidence"],
+      "evidence": "Injected argv comparator tests only; no production CLI construction or live model proof"
+    },
+    {
+      "name": "loom-agent-message-receipt-replay",
+      "implementation": ["receipt-replay.ts"],
+      "tests": ["contracts.test.ts", "provenance.test.ts"],
+      "supported_domain": "Source-hash-bound receipts-stream and children-u3 variants. Same owned AgentID/RequestID, closed equal public field sets, stable message/replaced/interrupted/turn fields. waiting->handed only with exact source-specific delivered/native-input facts; no backwards state or cross-version normalization.",
+      "source_differences_preserved": ["receipts-stream requires message_id/state/replaced, interrupted optional; one delivery/native proof", "children-u3 requires interrupted too and preserves first proof record in original two-record delivery/native pair"],
+      "remaining_required": ["Real replay uses exact captured UI RequestIDs and POST messages route, never withdrawal replay", "Original HTTP status/body and exact UI/network observations", "No waiting slot or saved-event changes; receipts-stream uses original progressed event-kind filter", "Finished child state/attempt/slots and all ordered event IDs unchanged", "Native session/root identity and exact input count retained before/after; child pair order and count preserved", "All original queue UI, terminal/native/provider evidence and screenshots remain required"],
+      "evidence": "Supplemental deterministic field/proof comparator only; no real HTTP replay, persisted events or native runtime proof"
+    }
+  ],
+  "integration": {
+    "owner": "agent-0f30e493-e8b6-4f7c-bb49-c320a3725a17",
+    "exports": "projections/index.ts; no duplicate engine envelopes, schemas or capability registry",
+    "dependencies": "Isolated projections/package.json and package-lock.json; parser transitive closure pinned byte-for-byte to original frontend lock, tooling to core checkpoint lock. npm ci --ignore-scripts --prefix tests/aft/adapter/projections before isolated checks.",
+    "root_changes_required": ["Wire closed input/output schemas, canonical operation envelope, code-owned measured identity and implementation pin", "Map projection error/null facts to unavailable/incomplete before engine expectations can use them", "Install nested dependencies and run recursive adapter tests/typecheck/build/lint", "Parent review approved projection commit before core integration"],
+    "excluded_actions": ["No PR creation/merge", "No product/YAML/helper/root edits", "No stack/Podman/browser/auth-copy/model/real CLI", "No broad Go/frontend gates", "No delegated workers"]
+  }
+}
