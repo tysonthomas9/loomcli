@@ -49,6 +49,8 @@ export interface ProductionConfig {
   minimumFreeBytes: number;
   // Separate ModeCloud topology, backed by the reviewed supplemental overlay.
   modecloud?: { codexAuthRoot: string; frontendDist: string };
+  // Existing source-launcher RUN_ID, supplied only by trusted provisioning.
+  fixtureRunId?:string;
 }
 export type ComposeRead = (origin: string, relative: string, signal: AbortSignal) => Promise<unknown>;
 const fetchRead: ComposeRead = async (origin, relative, signal) => {
@@ -96,6 +98,7 @@ const CLOUD_SERVICES = ['redis', 'fleet-auth-seed', 'fleet-db', 'loom-serve', 'w
 export class ComposeFixtureDriver implements FixtureDriver {
   private root = '';
   private leaseId = '';
+  private provisionedRunId='';
   private project = '';
   private profile = '';
   private ports: number[] = [];
@@ -145,6 +148,11 @@ export class ComposeFixtureDriver implements FixtureDriver {
   private get cloud() { return this.profile === 'legacy-real-codex-podman'; }
   private get serviceNames() { return this.cloud ? CLOUD_SERVICES : SERVICES; }
   enrollCleanup(cleanup: () => Promise<void>) { check(this.root); this.cleanups.push(cleanup); }
+  async runtimeIdentity(signal:AbortSignal){
+    const value=await this.nativeRead({operation:'runtime-identity'},signal) as {runId?:unknown;leaseId?:unknown};
+    check(value.runId===this.provisionedRunId&&value.leaseId===this.leaseId,'identity-mismatch');
+    return {fixtureRunId:this.provisionedRunId};
+  }
   async readOwnedConfiguration(target: 'opencode' | 'emu-scenarios', signal: AbortSignal) {
     return this.nativeRead({ operation: 'configuration-read', target }, signal) as Promise<{ bytes: string | null; complete: true }>;
   }
@@ -222,6 +230,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
     } catch { return false; }
   }
   async preflight(plan: FixturePlan, signal: AbortSignal): Promise<void> {
+    check(this.config.fixtureRunId===undefined||/^[A-Za-z0-9_-]{1,128}$/.test(this.config.fixtureRunId)&&(!plan.profile.startsWith('agents-')||/^af[a-z0-9]{8}$/.test(this.config.fixtureRunId)),'identity-mismatch');
     check(['agents-real-opencode', 'agents-emulator', 'legacy-real-codex-podman'].includes(plan.profile), 'unsupported-capability');
     this.plan = structuredClone(plan); this.profile = plan.profile;
     fixtureRouting(plan);
@@ -276,6 +285,9 @@ export class ComposeFixtureDriver implements FixtureDriver {
   }
   async allocate(leaseId: string, _runId: string, record: (resource: Resource) => void): Promise<void> {
     this.leaseId = leaseId;
+    this.provisionedRunId=this.config.fixtureRunId??`af${randomBytes(4).toString('hex')}`;
+    check(/^[A-Za-z0-9_-]{1,128}$/.test(this.provisionedRunId),'identity-mismatch');
+    check(!this.profile.startsWith('agents-')||/^af[a-z0-9]{8}$/.test(this.provisionedRunId),'identity-mismatch');
     this.project = `loom-aft-${this.uuid().replace(/-/g, '')}`;
     check(/^[a-z0-9-]+$/.test(this.project));
     this.root = await this.files.mkdtemp(path.join(this.config.tempParent, 'loom-aft-fixture-'));
@@ -300,10 +312,10 @@ export class ComposeFixtureDriver implements FixtureDriver {
     const override = this.cloud ? this.cloudOverride(labels) : { services: Object.fromEntries(SERVICES.map(service => [service, {
       labels,
       ...(service === 'fleet-db' ? { build: { context: this.config.fleet.source.root }, environment: { FLEET_RATE_LIMIT_ENABLED: 'false' } } : {}),
-      ...(service === 'loom-local' ? { environment: {AFT_FIXTURE_NAMESPACE:'owned-container',AFT_FIXTURE_LEASE_ID:this.leaseId}, volumes: [`${this.config.adapter.build.root}:/opt/aft:ro`] } : {}),
+      ...(service === 'loom-local' ? { environment: {RUN_ID:this.provisionedRunId,AFT_FIXTURE_NAMESPACE:'owned-container',AFT_FIXTURE_LEASE_ID:this.leaseId}, volumes: [`${this.config.adapter.build.root}:/opt/aft:ro`] } : {}),
       ...(service === 'ui-local' ? { volumes: [`${this.renderer!.buildRoot}:/srv:ro`] } : {}),
       ...(service === 'loom-local' && this.profile === 'agents-emulator' ? {
-        environment: {AFT_FIXTURE_NAMESPACE:'owned-container',AFT_FIXTURE_LEASE_ID:this.leaseId, LOOM_OPENCODE_BIN: '/opt/fixture/loom-harness-emu', LOOM_HARNESS_EMU: '1',
+        environment: {RUN_ID:this.provisionedRunId,AFT_FIXTURE_NAMESPACE:'owned-container',AFT_FIXTURE_LEASE_ID:this.leaseId, LOOM_OPENCODE_BIN: '/opt/fixture/loom-harness-emu', LOOM_HARNESS_EMU: '1',
           LOOM_HARNESS_EMU_MODEL: 'http://127.0.0.1:4010/v1', LOOM_HARNESS_EMU_SCENARIOS: '/root/.loom/agents-opencode/emu-scenarios.json' },
         volumes: [`${this.config.adapter.build.root}:/opt/aft:ro`, `${this.config.emulatorBinary!.path}:/opt/fixture/loom-harness-emu:ro`],
       } : {}),
@@ -320,7 +332,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
       ...(this.stackImages[service] ? { image: this.stackImages[service] } : {}),
       ...(service === 'fleet-db' ? { environment: { FLEET_AUTH_DEV_MODE: 'true', FLEET_AUTHZ_ENABLED: 'false' } } : {}),
       ...(service === 'loom-serve' ? { environment: { CODEX_HOME: '/home/node/.codex-rw', LOOM_STACK_CODEX_RW_DIR: '/home/node/.codex-rw',
-        FLUE_REPO: '/opt/flue', AFT_FIXTURE_NAMESPACE:'owned-container', AFT_FIXTURE_LEASE_ID:this.leaseId, AFT_FIXTURE_MODE: 'modecloud', LOOM_DRIVER_TASK_RUNNER_CMD_JSON: null, LOOM_FLUE_AGENT_MODEL: this.plan!.model,
+        FLUE_REPO: '/opt/flue', RUN_ID:this.provisionedRunId, AFT_FIXTURE_NAMESPACE:'owned-container', AFT_FIXTURE_LEASE_ID:this.leaseId, AFT_FIXTURE_MODE: 'modecloud', LOOM_DRIVER_TASK_RUNNER_CMD_JSON: null, LOOM_FLUE_AGENT_MODEL: this.plan!.model,
         LOOM_FRONTEND_DIR: '/opt/webui', LOOM_FRONTEND_URL: `http://localhost:${this.ports[0]}` },
         volumes: [`${this.config.modecloud!.codexAuthRoot}:/home/node/.codex:ro`, `${this.config.modecloud!.frontendDist}:/opt/webui:ro`,
           `${this.config.adapter.build.root}:/opt/aft:ro`] } : {}),
