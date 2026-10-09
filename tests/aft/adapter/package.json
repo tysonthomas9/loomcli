@@ -1,0 +1,33 @@
+{
+  "name": "@loom/aft-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "test": "tsx --test *.test.ts */*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --outDir dist",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "typescript": "5.9.3",
+    "tsx": "4.20.6",
+    "eslint": "9.39.1",
+    "typescript-eslint": "8.46.1"
+  },
+  "peerDependencies": {
+    "@tysonthomas9/aft": ">=0.6.0"
+  },
+  "peerDependenciesMeta": {
+    "@tysonthomas9/aft": {
+      "optional": true
+    }
+  }
+}
