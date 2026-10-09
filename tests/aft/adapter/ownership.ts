@@ -2,6 +2,7 @@ import { getRegisteredResource, type CapabilityContext } from '@tysonthomas9/aft
 import type { z } from 'zod';
 import type { FilesystemInput, FilesystemOutput } from './filesystem.js';
 import type { GitInput, GitOutput } from './git.js';
+import type { OwnedRendererTarget } from './renderer-target.js';
 import type { SyntheticProbe } from './synthetic-probe.js';
 import type { EvidenceClass } from '@tysonthomas9/aft/types';
 import { bindEvidenceStore, evidenceKey } from './evidence.js';
@@ -33,6 +34,7 @@ export interface OwnedFixture {
   agents: Map<string, OwnedAgent>;
   secrets: readonly string[];
   syntheticProbe?: SyntheticProbe;
+  rendererTarget?: OwnedRendererTarget;
   readApi: ReadTransport;
   readFiles: ReadTransport;
   resolveAgent(agentId: string, signal: AbortSignal): Promise<OwnedAgent>;
