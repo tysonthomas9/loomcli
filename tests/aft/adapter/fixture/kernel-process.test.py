@@ -77,5 +77,40 @@ class DarwinExitTests(unittest.TestCase):
         self.assertEqual(calls, [7])
 
 
+class GracefulTerminationTests(unittest.TestCase):
+    def test_linux_fixed_term_uses_captured_pidfd_and_observed_exit(self):
+        owned, calls = registered([], 0)
+        owned.fd = 42
+        with patch.object(kernel, 'identity', return_value=owned.before), \
+                patch.object(kernel.signal, 'pidfd_send_signal', create=True) as send, \
+                patch.object(kernel.select, 'select', side_effect=[([], [], []), ([42], [], [])]):
+            self.assertEqual(owned.terminate_gracefully()['state'], 'exited')
+            send.assert_called_once_with(42, kernel.signal.SIGTERM)
+            self.assertTrue(owned.exited)
+        self.assertEqual(calls, [])
+
+    def test_linux_missing_exit_is_incomplete_and_same_handle_can_observe_later_exit(self):
+        owned, calls = registered([], 0)
+        owned.fd = 42
+        with patch.object(kernel, 'identity', return_value=owned.before), \
+                patch.object(kernel.signal, 'pidfd_send_signal', create=True) as send, \
+                patch.object(kernel.select, 'select', side_effect=[([], [], []), ([], [], []), ([42], [], [])]):
+            with self.assertRaisesRegex(RuntimeError, 'graceful termination incomplete'):
+                owned.terminate_gracefully()
+            self.assertFalse(owned.exited)
+            self.assertEqual(owned.terminate_gracefully()['state'], 'exited')
+            send.assert_called_once_with(42, kernel.signal.SIGTERM)
+        self.assertEqual(calls, [])
+
+    def test_darwin_refuses_before_any_force_or_pid_fallback(self):
+        owned, calls = registered([], 0)
+        with patch.object(kernel.signal, 'pidfd_send_signal', create=True) as send:
+            with self.assertRaises(NotImplementedError):
+                owned.terminate_gracefully()
+            send.assert_not_called()
+        self.assertEqual(calls, [])
+        self.assertEqual(owned.queue.reads, 0)
+
+
 if __name__ == '__main__':
     unittest.main()
