@@ -14,6 +14,7 @@ import { LegacyOperationEffects } from './effects.js';
 import { requireOwnedWorkspace } from '../workspaces.js';
 import { checkConfiguredModel } from './model-selection.js';
 import type { BaselineTarget } from '../fixture/baseline.js';
+import { validateLocalSeedPath } from './seed-path.js';
 
 const Name = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 // These projections follow ops.WorkspaceData and domain.Agent, not AgentRow.
@@ -43,6 +44,19 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
     driver.configurationRoot === path.join(driver.workspaceRoot, '.loom-config'));
   let cached: LegacyLease | undefined;
   const baselines = new Map<BaselineTarget, string>();
+  type SeedResolution = Awaited<ReturnType<HostFixtureDriver['resolveLegacyWorktree']>>;
+  const seeds = new Map<string, { resolved: SeedResolution; relativePath: string; state: 'prepared' | 'executing' | 'completed' | 'uncertain' }>();
+  const seedKey = (workspaceId: string, agentName: string) => JSON.stringify([workspaceId, agentName]);
+  const seedResolution = async (workspaceId: string, agentName: string, signal: AbortSignal) => {
+    const workspace = requireOwnedWorkspace(fixture, workspaceId, agentName, 'legacy-agent-name');
+    const resolved = await driver.resolveLegacyWorktree(workspaceId, agentName, signal);
+    requireOwned(resolved.complete && resolved.workspaceId === workspaceId && resolved.agentName === agentName &&
+      resolved.commonDir === workspace.commonDir);
+    return resolved;
+  };
+  const sameSeedRoot = (before: SeedResolution, after: SeedResolution) => requireOwned(before.root.path === after.root.path &&
+    before.root.device === after.root.device && before.root.inode === after.root.inode &&
+    before.commonDir === after.commonDir && before.branch === after.branch);
   const identity = (id: string) => requireOwned(id === fixture.leaseId);
   const evidenceFor = (operation: LoomAuthorizedOperation) => {
     const route = driver.executionRouting;
@@ -164,6 +178,13 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       const actor = operation === 'loom.cli.task' ? command.argv[5] : operation === 'loom.cli.usage' ? command.argv[4] :
         operation === 'loom.fixture.seedWorktree' ? command.argv[5] : undefined;
       requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name');
+      const seed = operation === 'loom.fixture.seedWorktree' ? seeds.get(seedKey(workspaceId, actor!)) : undefined;
+      if (operation === 'loom.fixture.seedWorktree') {
+        requireOwned(seed?.state === 'prepared' && seed.relativePath === command.argv[7]);
+        const current = await seedResolution(workspaceId, actor!, signal);
+        sameSeedRoot(seed!.resolved, current);
+        await validateLocalSeedPath(current.root, seed!.relativePath, signal);
+      }
       if (operation === 'loom.cli.task') {
         const route = driver.executionRouting;
         requireOwned(route.allowedTaskBackends.includes(command.argv[3]!));
@@ -176,10 +197,14 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
         }
         checkConfiguredModel(route.modelSelection, command.argv[3]!, command.env, configuredModel);
       }
-      const result = await driver.launchOwnedCli(plan.argv, plan.envOverrides, plan.stdin, plan.waitForExit, signal);
-      const registered = await driver.inspectOwnedProcess(result.id, result.generation, signal);
-      requireOwned(registered.pid === result.pid);
-      return { processId: result.id, generation: result.generation, ...result.completion };
+      if (seed) seed.state = 'executing';
+      try {
+        const result = await driver.launchOwnedCli(plan.argv, plan.envOverrides, plan.stdin, plan.waitForExit, signal);
+        const registered = await driver.inspectOwnedProcess(result.id, result.generation, signal);
+        requireOwned(registered.pid === result.pid);
+        if (seed) seed.state = result.completion.complete && result.completion.exitCode === 0 ? 'completed' : 'uncertain';
+        return { processId: result.id, generation: result.generation, ...result.completion };
+      } catch (error) { if (seed) seed.state = 'uncertain'; throw error; }
     },
     async registerProcess(id, result, signal) { await verify(id, signal); await driver.inspectOwnedProcess(result.processId, result.generation, signal); },
     async stimulate(id, process, operation, request, signal) {
@@ -198,8 +223,24 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       if (relative === '/__reset') return HttpResponse.parse(await driver.resetFixtureBaseline(target, generation!, signal));
       return HttpResponse.parse(await driver.requestOwnedHttp(target, method, relative, Json.parse(body), signal, generation));
     },
-    async validateSeedPath() { return unsupported(); },
-    async seedCommit() { return unsupported(); },
+    async validateSeedPath(id, workspaceId, agentName, relativePath, signal) {
+      evidenceFor('loom.fixture.seedWorktree'); await verify(id, signal);
+      if (fixture.evidenceClass !== 'deterministic') return unsupported();
+      const key = seedKey(workspaceId, agentName);
+      if (seeds.has(key)) throw new LegacyError('mutation-repeated', 'Owned seed target already has a pending or uncertain mutation');
+      const resolved = await seedResolution(workspaceId, agentName, signal);
+      await validateLocalSeedPath(resolved.root, relativePath, signal);
+      seeds.set(key, { resolved, relativePath, state: 'prepared' });
+    },
+    async seedCommit(id, workspaceId, agentName, signal) {
+      evidenceFor('loom.fixture.seedWorktree'); await verify(id, signal);
+      const key = seedKey(workspaceId, agentName), seed = seeds.get(key);
+      requireOwned(seed?.state === 'completed');
+      sameSeedRoot(seed!.resolved, await seedResolution(workspaceId, agentName, signal));
+      const head = await driver.readLegacyWorktreeHead(workspaceId, agentName, signal);
+      sameSeedRoot(seed!.resolved, await seedResolution(workspaceId, agentName, signal));
+      seeds.delete(key); return head;
+    },
     async snapshot(id, target, signal): Promise<ConfigurationSnapshot> {
       await verify(id, signal);
       if (target === 'fake-model' || target === 'fake-github') {
