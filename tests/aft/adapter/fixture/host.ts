@@ -7,6 +7,8 @@ import { ComposeFixtureDriver, type ProductionConfig } from './production.js';
 import { LaunchNotStarted, nodeProcesses, reservePort, type PortReservation, type HostProcesses, type OwnedProcess, type HostCommand, type CliCompletion } from './process.js';
 import { initializeCodex, type CodexProtocolProbe } from './codex-probe.js';
 import { prepareRenderer, type PreparedRenderer } from './renderer.js';
+import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
+import type { FixtureAuthorityOwner } from '../authority.js';
 
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -53,6 +55,8 @@ export class HostFixtureDriver implements FixtureDriver {
   get processesById(): ReadonlyMap<string, OwnedProcess> { return this.handles; }
   get configurationRoot() { return path.join(this.workspaceRoot, '.loom-config'); }
   get cliRegistration() { return { binary: this.config.loomBinary, cwd: this.workspaceRoot, env: this.env() }; }
+  get executionRouting() { check(this.plan); return fixtureRouting(this.plan!); }
+  createOperationAuthority(owner:FixtureAuthorityOwner) {check(this.plan);return fixtureOperationAuthority(owner,this.plan!);}
   async rendererRuntimeTarget(signal:AbortSignal) {
     const target=this.handles.get('frontend');check(target?.state()==='running'&&this.renderer,'identity-mismatch');
     await this.inspectOwnedProcess('frontend',target!.generation,signal);
@@ -81,6 +85,10 @@ export class HostFixtureDriver implements FixtureDriver {
     const seed = argv.length === 12 && argv[0] === 'daemon' && argv[1] === 'seed-worktree' && argv[2] === '--workspace' &&
       argv[4] === '--agent' && argv[6] === '--file' && argv[8] === '--content' && argv[9] === '-' && argv[10] === '--message' && this.profile === 'legacy-deterministic';
     check(seed || ['--workspace', 'usage', 'agent', 'workspace', 'config'].includes(argv[0]!), 'unsupported-capability');
+    if(argv[0]==='--workspace'&&argv[2]==='--backend'&&argv[4]==='task'){
+      const route=this.executionRouting;
+      check(route.allowedTaskBackends.includes(argv[3]!)&&(route.evidenceClass==='deterministic'||route.externalProvider),'unsupported-capability');
+    }
     check(Object.keys(envOverrides).every(key => ['LOOM_WORKSPACE_ID', 'LOOM_ASSIGNED_TASK_ID', 'LOOM_SOURCE_REPOS'].includes(key) ||
       seed && key === 'LOOM_TESTSUPPORT' && envOverrides[key] === '1'));
     check(Buffer.byteLength(stdin) <= 1024 * 1024);
@@ -129,6 +137,7 @@ export class HostFixtureDriver implements FixtureDriver {
       LOOM_CONFIG_DIR: configRoot, LOOM_DISABLE_H2C: '1', LOOM_ISSUE_BACKEND: 'fleetdb', LOOM_FLEET_DB_ACTOR: 'loom-e2e',
       FLEET_DB_BIN: c.fleetBinary, FLEET_RATE_LIMIT_ENABLED: 'false', FLEET_REDIS_POOL_SIZE: '200', FLEET_REDIS_MIN_IDLE_CONNS: '10',
       LOOM_SDK_ROOT: path.join(c.loom.source.root, 'sdk'), LOOM_LEAD_CONTROLLED: '1',
+      LOOM_AGENT_MODEL: this.plan!.model, LOOM_OPENCODE_MODEL: this.plan!.model,
       LOOM_FRONTEND_DIR: this.renderer!.buildRoot,
       LOOM_MAX_BUDGET_USD: c.maxBudgetUsd, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false',
       GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
@@ -153,6 +162,7 @@ export class HostFixtureDriver implements FixtureDriver {
   async preflight(plan: FixturePlan, signal: AbortSignal): Promise<void> {
     check(legacyProfiles.includes(plan.profile as typeof legacyProfiles[number]), 'unsupported-capability');
     this.plan = structuredClone(plan); this.profile = plan.profile;
+    fixtureRouting(plan);
     this.backend = plan.profile.replace('legacy-real-', '');
     check(this.profile === 'legacy-deterministic' ? plan.model === 'aft/m' : /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(plan.model) && !plan.model.startsWith('aft/'), 'identity-mismatch');
     for (const directory of [this.config.tempParent, this.config.lockParent, this.config.hostHome]) {
