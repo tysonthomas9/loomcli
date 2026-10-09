@@ -143,6 +143,17 @@ test('missing serialized identity kind fails before receipt lookup and cannot gr
 
 const repositories=[{repoName:'alpha',sourceRepoId:'source-alpha',repo:fields.repo,commonDir:fields.commonDir,groups:['shared']},
   {repoName:'beta',sourceRepoId:'source-beta',repo:'/owned/beta',commonDir:'/owned/beta/.git',groups:['beta-only','shared']}];
+test('canonical legacy assignment helper retains source union, order and missing observation rejection',async()=>{
+  const {resolveLegacyRepositoryAssignments:resolve}=await import('./workspaces.js');
+  assert.deepEqual(resolve(repositories,[],[]),['alpha','beta']);
+  assert.deepEqual(resolve([...repositories].reverse(),[],[]),['beta','alpha']);
+  assert.deepEqual(resolve(repositories,[],['beta-only']),['beta']);
+  assert.deepEqual(resolve(repositories,['alpha'],['shared']),['alpha','beta']);
+  assert.deepEqual(resolve(repositories,['alpha'],['unknown']),['alpha']);
+  assert.ok(Object.isFrozen(resolve(repositories,[],[])));
+  for(const [names,groups] of [[undefined,[]],[[],undefined],[[],['unknown']],[['foreign'],[]],[['alpha','alpha'],[]],[[],['shared','shared']]] as const)
+    assert.throws(()=>resolve(repositories,names,groups));
+});
 test('legacy unselected physical source retains actual multi-repository membership without an anchor choice',async t=>{
   const {LegacyWorkspaceAgentFact,enrollOwnedLegacyAgent,requireOwnedWorkspaceRecord}=await import('./workspaces.js');
   const {store}=await setup(t),signal=new AbortController().signal;
