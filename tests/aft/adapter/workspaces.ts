@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, readFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { ArtifactRefSchema } from '@tysonthomas9/aft/types';
@@ -241,22 +242,73 @@ export async function enrollOwnedLegacyAgent(fixture:OwnedFixture,workspaceId:st
   const roster=fixture.ownedWorkspaces;
   requireFact(roster&&fixture.readWorkspaceLegacyAgent,'unsupported-capability','Owned legacy store enrollment is unavailable');
   const record=roster.find(value=>value.workspaceId===workspaceId&&value.identityKind==='legacy-agent-name')!;
-  if(record.agentIds.includes(name))return;
+  const existing=record.agentIds.includes(name);
+  // A workspace-scoped name can be deleted and reused. Membership alone does
+  // not attest the current incarnation, and current API data cannot replace a
+  // missing original creation receipt. This local index grants no authority.
+  const originals=new Map<string,LegacyWorkspaceAgentFact>();
+  for(const receipt of record.enrollmentReceipts) {
+    signal.throwIfAborted();
+    requireFact(receipt.bytes>0&&receipt.bytes<=4_000_000,'incomplete-pages','Legacy enrollment receipt exceeds the evidence bound');
+    const file=await store.resolve(receipt.id),handle=await open(file,constants.O_RDONLY|constants.O_NOFOLLOW);
+    let bytes:Buffer;
+    try {
+      const before=await handle.stat();
+      requireFact(before.isFile()&&before.nlink===1&&before.size===receipt.bytes,'identity-mismatch','Legacy enrollment receipt changed');
+      bytes=Buffer.alloc(receipt.bytes);let offset=0;
+      while(offset<bytes.length) {
+        signal.throwIfAborted();const read=await handle.read(bytes,offset,bytes.length-offset,offset);
+        requireFact(read.bytesRead>0,'identity-mismatch','Legacy enrollment receipt is incomplete');offset+=read.bytesRead;
+      }
+      const extra=await handle.read(Buffer.alloc(1),0,1,bytes.length),after=await handle.stat();
+      requireFact(extra.bytesRead===0&&before.dev===after.dev&&before.ino===after.ino&&before.size===after.size&&
+        await sha256(bytes)===receipt.sha256,'identity-mismatch','Legacy enrollment receipt bytes changed');
+    } finally {await handle.close();}
+    await store.resolve(receipt.id);
+    const serialized=bytes.toString('utf8');
+    requireFact(redact(serialized,fixture.secrets)===serialized,'observation-failed','Legacy enrollment receipt contains private material');
+    const original=LegacyWorkspaceAgentFact.parse(JSON.parse(serialized));
+    requireFact(!originals.has(original.name)&&record.agentIds.includes(original.name)&&
+      ['workspaceId','storeId','storeGeneration'].every(key=>original[key as keyof typeof original]===record[key as keyof typeof record])&&
+      Object.entries(fixtureOwnerIdentity(fixture)).every(([key,value])=>original[key as keyof FixtureAuthorityOwner]===value),
+      'identity-mismatch','Retained legacy enrollment identity is foreign or duplicated');
+    factSources(record,original);originals.set(original.name,original);
+  }
+  if(existing)requireFact(originals.has(name),'incomplete-pages','Legacy actor has no retained creation identity');
+  const sameCreation=(before:LegacyWorkspaceAgentFact,after:LegacyWorkspaceAgentFact)=>
+    ['identityKind','workspaceId','storeId','storeGeneration','name','createdAt','parentName'].every(key=>
+      before[key as keyof typeof before]===after[key as keyof typeof after])&&
+    Object.keys(fixtureOwnerIdentity(fixture)).every(key=>before[key as keyof FixtureAuthorityOwner]===after[key as keyof FixtureAuthorityOwner]);
   const read=async(actor:string)=>{
     signal.throwIfAborted();
     const fact=LegacyWorkspaceAgentFact.parse(await fixture.readWorkspaceLegacyAgent!(workspaceId,actor,signal));
     requireFact(fact.name===actor&&['workspaceId','storeId','storeGeneration'].every(key=>fact[key as keyof typeof fact]===record[key as keyof typeof record])&&
       Object.entries(fixtureOwnerIdentity(fixture)).every(([key,value])=>fact[key as keyof FixtureAuthorityOwner]===value),
-      'identity-mismatch','Legacy actor belongs to another workspace/store');factSources(record,fact);return fact;
+      'identity-mismatch','Legacy actor belongs to another workspace/store');
+    const repoNames=factSources(record,fact);
+    if(record.agentIds.includes(actor)) {
+      const original=originals.get(actor);
+      requireFact(original,'incomplete-pages','Legacy actor has no retained creation identity');
+      requireFact(sameCreation(original,fact),'identity-mismatch','Legacy actor creation identity changed');
+      const retainedSources=record.agentSources?.find(source=>source.agentId===actor)?.repoNames;
+      requireFact(!repoNames||retainedSources&&repoNames.every(repo=>retainedSources.includes(repo)),
+        'ownership-mismatch','Current legacy assignments exceed retained source authority');
+    }
+    return fact;
   };
   await fixture.verify(signal);
-  const fact=await read(name);const repoNames=factSources(record,fact);const seen=new Set([name]);let parent=fact.parentName;
+  const fact=await read(name);const repoNames=factSources(record,fact);const seen=new Set([name]),observed=[fact];let parent=fact.parentName;
   while(parent!==null) {
     requireFact(seen.size<1000&&!seen.has(parent)&&record.agentIds.includes(parent),'identity-mismatch','Legacy parent lineage is foreign, cyclic or exceeds bound');
-    seen.add(parent);parent=(await read(parent)).parentName;
+    seen.add(parent);const value=await read(parent);observed.push(value);parent=value.parentName;
   }
+  // Re-read immutable identities across the bounded observation. Mutable
+  // updatedAt/model/assignment values are not creation identity.
+  for(const before of observed)requireFact(sameCreation(before,await read(before.name)),
+    'identity-mismatch','Legacy actor creation identity changed during observation');
   await fixture.verify(signal);signal.throwIfAborted();
   requireFact(fixture.ownedWorkspaces===roster,'identity-mismatch','Workspace roster changed during legacy enrollment');
+  if(existing)return;
   const serialized=JSON.stringify(fact);
   requireFact(redact(serialized,fixture.secrets)===serialized,'observation-failed','Legacy enrollment contains private material');
   const receipt=await store.retain(serialized);
