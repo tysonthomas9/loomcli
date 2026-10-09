@@ -1,20 +1,17 @@
-import { lstat, realpath, writeFile, readdir } from 'node:fs/promises';
+import { lstat, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { sha256, Digest, RelativePath } from '../protocol.js';
-import type { OwnedRendererTarget } from '../renderer-target.js';
+import { rendererBuildClosure, type OwnedRendererTarget } from '../renderer-target.js';
+import { RENDERER_SOURCE_FILES, RENDERER_PACKAGE_FILES, RendererFileSchema as File, RendererSourceBuildReceipt as Build, RendererBuildReceipt } from '../renderer-contract.js';
 import { observeFilesystem } from '../filesystem.js';
 import type { OwnedFixture } from '../ownership.js';
 import type { RegisteredBuild } from './production.js';
 import { FixtureError } from './lifecycle.js';
 
 const check = (value:unknown) => { if (!value) throw new FixtureError('source-mismatch'); };
-export const rendererSources = ['src/components/AgentChat/ChatMarkdown.tsx','src/components/AgentChat/LongText.tsx',
-  'src/components/AgentChat/codeHighlight.ts','src/components/AgentChat/MessageCopyButton.tsx','src/components/AgentChat/ChatMarkdown.module.css','package-lock.json'];
-export const rendererPackages = ['react','react-dom','react-markdown','remark-gfm','rehype-sanitize','esbuild','jsdom'].map(name=>`${name}/package.json`);
-const File = z.object({relativePath:RelativePath,sha256:Digest}).strict();
-const Build = z.object({version:z.literal(1),sourceManifestSha256:Digest,installedRelativeRoot:RelativePath,buildRelativeRoot:RelativePath,
-  sources:z.array(File).length(6),packages:z.array(File).length(7),build:z.array(File).min(1).max(50000)}).strict();
+export const rendererSources = RENDERER_SOURCE_FILES;
+export const rendererPackages = RENDERER_PACKAGE_FILES;
 export interface RendererBuildCoordinates {
   sourceRoot:string;installedRoot:string;buildRoot:string;receiptRoot:string;sourceManifestSha256:string;
 }
@@ -30,17 +27,7 @@ export async function writeRendererBuildReceipt(input:RendererBuildCoordinates) 
   const relative=(root:string)=>{const value=path.relative(input.receiptRoot,root).split(path.sep).join('/');RelativePath.parse(value);check(path.join(input.receiptRoot,value)===root);return value;};
   const installedRelativeRoot=relative(input.installedRoot),buildRelativeRoot=relative(input.buildRoot);
   check(input.installedRoot!==input.buildRoot&&!input.installedRoot.startsWith(input.buildRoot+path.sep)&&!input.buildRoot.startsWith(input.installedRoot+path.sep));
-  let visited=0;const output:string[]=[];
-  const walk=async(relativePath:string)=>{
-    const directory=path.join(input.buildRoot,relativePath);
-    const before=await lstat(directory);check(before.isDirectory()&&!before.isSymbolicLink()&&await realpath(directory)===directory);
-    for(const entry of await readdir(directory,{withFileTypes:true})){
-      check(++visited<=50000&&!entry.isSymbolicLink());const name=relativePath?`${relativePath}/${entry.name}`:entry.name;RelativePath.parse(name);
-      if(entry.isDirectory())await walk(name);else {check(entry.isFile());if(/\.(js|css|html|json|map)$/.test(name))output.push(name);}
-    }
-    const after=await lstat(directory);check(before.dev===after.dev&&before.ino===after.ino&&before.mtimeMs===after.mtimeMs&&before.ctimeMs===after.ctimeMs);
-  };
-  await walk('');check(output.some(file=>file.endsWith('.js')));
+  const output=await rendererBuildClosure(input.buildRoot);check(output.some(file=>file.relativePath.endsWith('.js')));
   let consumed=0;
   const read=async(root:string,files:readonly string[])=>{const entries:z.infer<typeof File>[]=[];for(const relativePath of [...files].sort()){
     const actual=await observeFilesystem({leaseId:'renderer-build',rootId:'closure',relativePaths:[relativePath],view:'tree-digest',maxBytes:16*1024*1024,maxEntries:1},root);
@@ -48,8 +35,8 @@ export async function writeRendererBuildReceipt(input:RendererBuildCoordinates) 
     entries.push(File.parse({relativePath,sha256:entry!.sha256}));
   }return entries;};
   const receipt=Build.parse({version:1,sourceManifestSha256:input.sourceManifestSha256,installedRelativeRoot,buildRelativeRoot,
-    sources:await read(input.sourceRoot,rendererSources),packages:await read(input.installedRoot,rendererPackages),build:await read(input.buildRoot,output)});
-  const originalOutput=[...output].sort();output.length=0;visited=0;await walk('');check(JSON.stringify([...output].sort())===JSON.stringify(originalOutput));
+    sources:await read(input.sourceRoot,rendererSources),packages:await read(input.installedRoot,rendererPackages),build:output});
+  check(JSON.stringify(await rendererBuildClosure(input.buildRoot))===JSON.stringify(output));
   for(const [index,root] of roots.entries()){
     const after=await lstat(root),before=stamps[index]!;check(before.dev===after.dev&&before.ino===after.ino&&await realpath(root)===root);
   }
@@ -76,7 +63,7 @@ export async function prepareRenderer(loom:RegisteredBuild):Promise<PreparedRend
     buildRoot:path.join(loom.build.root,receipt.buildRelativeRoot),sources:receipt.sources,packages:receipt.packages,build:receipt.build};
   check(new Set(receipt.sources.map(f=>f.relativePath)).size===6&&rendererSources.every(p=>receipt.sources.some(f=>f.relativePath===p)));
   check(new Set(receipt.packages.map(f=>f.relativePath)).size===7&&rendererPackages.every(p=>receipt.packages.some(f=>f.relativePath===p)));
-  check(new Set(receipt.build.map(f=>f.relativePath)).size===receipt.build.length&&receipt.build.some(f=>f.relativePath.endsWith('.js'))&&receipt.build.every(f=>/\.(js|css|html|json|map)$/.test(f.relativePath)));
+  check(new Set(receipt.build.map(f=>f.relativePath)).size===receipt.build.length&&receipt.build.some(f=>f.relativePath.endsWith('.js')));
   for(const [root,entries,manifest,prefix] of [
     [prepared.sourceRoot,receipt.sources,loom.source,'internal/webui/frontend'],
     [prepared.installedRoot,receipt.packages,loom.build,receipt.installedRelativeRoot],
@@ -90,12 +77,7 @@ export async function prepareRenderer(loom:RegisteredBuild):Promise<PreparedRend
     }
     const after=await lstat(root);check(before.dev===after.dev&&before.ino===after.ino&&await realpath(root)===root);
   }
-  const built:string[]=[];
-  const walk=async(relative:string)=>{for(const entry of await readdir(path.join(prepared.buildRoot,relative),{withFileTypes:true})){
-    check(!entry.isSymbolicLink());const name=relative?`${relative}/${entry.name}`:entry.name;
-    if(entry.isDirectory())await walk(name);else if(/\.(js|css|html|json|map)$/.test(name))built.push(name);check(built.length<=50000);
-  }};
-  await walk('');check(built.length===receipt.build.length&&built.every(name=>receipt.build.some(f=>f.relativePath===name)));
+  check(JSON.stringify(await rendererBuildClosure(prepared.buildRoot))===JSON.stringify([...receipt.build].sort((a,b)=>a.relativePath<b.relativePath?-1:a.relativePath>b.relativePath?1:0)));
   return prepared;
 }
 export async function bindRenderer(loom:RegisteredBuild,leaseId:string,target:{targetId:string;generation:string;buildRoot:string},receiptRoot:string,
@@ -105,8 +87,8 @@ export async function bindRenderer(loom:RegisteredBuild,leaseId:string,target:{t
   const source=await physical(renderer.sourceRoot),installed=await physical(renderer.installedRoot),build=await physical(renderer.buildRoot);
   const receiptIdentity=await physical(receiptRoot);
   const ids={sourceRootId:'renderer-source',installedRootId:'renderer-installed',buildRootId:'renderer-build'};
-  const bytes=JSON.stringify({version:1,fixtureLeaseId:leaseId,targetId:target.targetId,generation:target.generation,...ids,roots:{source,installed,build},
-    sources:renderer.sources,packages:renderer.packages,build:renderer.build});
+  const bytes=JSON.stringify(RendererBuildReceipt.parse({version:1,fixtureLeaseId:leaseId,targetId:target.targetId,generation:target.generation,...ids,roots:{source,installed,build},
+    sources:renderer.sources,packages:renderer.packages,build:renderer.build}));
   const relativePath='renderer-target.json';await writeFile(path.join(receiptRoot,relativePath),bytes,{flag:'wx',mode:0o600});
   roots.set(ids.sourceRootId,source);roots.set(ids.installedRootId,installed);roots.set(ids.buildRootId,build);roots.set('renderer-receipt',receiptIdentity);
   return {targetId:target.targetId,generation:target.generation,...ids,receipt:{rootId:'renderer-receipt',relativePath,sha256:await sha256(bytes)}};

@@ -2,6 +2,7 @@ import type { EvidenceClass } from '@tysonthomas9/aft/types';
 import { createFixtureOperationAuthority, type FixtureAuthorityOwner } from '../authority.js';
 import type { FixturePlan } from './lifecycle.js';
 import { FixtureError } from './lifecycle.js';
+import { LegacyOperationEffects, legacyTaskEffects } from '../legacy/effects.js';
 const profiles = {
  'agents-real-opencode':{backend:'opencode',observation:'real-native'},
  'agents-emulator':{backend:'opencode',observation:'deterministic'},
@@ -23,12 +24,12 @@ export function fixtureOperationAuthority(owner:FixtureAuthorityOwner,plan:Fixtu
  const route=fixtureRouting(plan), evidenceClass=route.evidenceClass;
  if(owner.profile!==route.profile)throw new FixtureError('identity-mismatch');
  return createFixtureOperationAuthority(owner,{
-  'loom.cli.role':{evidenceClass,effects:['read-api']},'loom.cli.usage':{evidenceClass,effects:['read-api']},
-  'loom.fixture.configure':{evidenceClass,effects:['write-fixture']},
-  'loom.runtime.stimulate':{evidenceClass,effects:['stop-owned-process','restart-owned-service']},
+  'loom.cli.role':{evidenceClass,effects:[...LegacyOperationEffects['loom.cli.role']]},'loom.cli.usage':{evidenceClass,effects:[...LegacyOperationEffects['loom.cli.usage']]},
+  'loom.fixture.configure':{evidenceClass,effects:[...LegacyOperationEffects['loom.fixture.configure']]},
+  'loom.runtime.stimulate':{evidenceClass,effects:[...LegacyOperationEffects['loom.runtime.stimulate'],'restart-owned-service']},
   ...(route.evidenceClass==='deterministic'?{
-    'loom.cli.task':{evidenceClass:'deterministic' as const,effects:['start-owned-process' as const]},
-    'loom.fixture.seedWorktree':{evidenceClass:'deterministic' as const,effects:['write-fixture' as const]},
-  }:route.externalProvider?{'loom.cli.task':{evidenceClass:'live-provider' as const,effects:['start-owned-process' as const,'external-provider' as const]}}:{}),
+    'loom.cli.task':{evidenceClass:'deterministic' as const,effects:[...legacyTaskEffects({taskExecution:'deterministic'})]},
+    'loom.fixture.seedWorktree':{evidenceClass:'deterministic' as const,effects:[...LegacyOperationEffects['loom.fixture.seedWorktree']]},
+  }:route.externalProvider?{'loom.cli.task':{evidenceClass:'live-provider' as const,effects:[...legacyTaskEffects({taskExecution:'live-provider'})]}}:{}),
  });
 }
