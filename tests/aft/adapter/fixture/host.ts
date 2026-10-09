@@ -4,7 +4,7 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import { FixtureError, type Artifact, type FixtureDriver, type FixturePlan, type Inventory, type Resource } from './lifecycle.js';
 import { ComposeFixtureDriver, type ProductionConfig } from './production.js';
-import { nodeProcesses, reservePort, type PortReservation, type HostProcesses, type OwnedProcess, type HostCommand, type CliCompletion } from './process.js';
+import { LaunchNotStarted, nodeProcesses, reservePort, type PortReservation, type HostProcesses, type OwnedProcess, type HostCommand, type CliCompletion } from './process.js';
 
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -34,6 +34,7 @@ export class HostFixtureDriver implements FixtureDriver {
   private readonly commands = new Map<string, { command: HostCommand; readiness: string }>();
   private record?: (resource: Resource) => void;
   private readonly cleanups: (() => Promise<void>)[] = [];
+  private readonly unspawned = new Map<string, string>();
   private sockets: PortReservation[] = [];
   private ports: number[] = [];
   private lock?: { path: string; contents: string };
@@ -61,13 +62,19 @@ export class HostFixtureDriver implements FixtureDriver {
     waitForExit: boolean, signal: AbortSignal): Promise<{ id: string; generation: string; pid: number; completion: CliCompletion }> {
     signal.throwIfAborted(); check(this.record && this.processes.launch, 'unsupported-capability');
     check(argv.length > 0 && argv.length <= 128 && argv.every(arg => typeof arg === 'string' && arg.length <= 1024 * 1024 && !arg.includes('\0')));
-    check(['--workspace', 'usage', 'agent', 'workspace', 'config'].includes(argv[0]!), 'unsupported-capability');
-    check(Object.keys(envOverrides).every(key => ['LOOM_WORKSPACE_ID', 'LOOM_ASSIGNED_TASK_ID', 'LOOM_SOURCE_REPOS'].includes(key)));
+    const seed = argv.length === 12 && argv[0] === 'daemon' && argv[1] === 'seed-worktree' && argv[2] === '--workspace' &&
+      argv[4] === '--agent' && argv[6] === '--file' && argv[8] === '--content' && argv[9] === '-' && argv[10] === '--message' && this.profile === 'legacy-deterministic';
+    check(seed || ['--workspace', 'usage', 'agent', 'workspace', 'config'].includes(argv[0]!), 'unsupported-capability');
+    check(Object.keys(envOverrides).every(key => ['LOOM_WORKSPACE_ID', 'LOOM_ASSIGNED_TASK_ID', 'LOOM_SOURCE_REPOS'].includes(key) ||
+      seed && key === 'LOOM_TESTSUPPORT' && envOverrides[key] === '1'));
     check(Buffer.byteLength(stdin) <= 1024 * 1024);
     const id = `cli-${this.uuid()}`, generation = this.uuid();
     const command = { executable: this.config.loomBinary, argv: [...argv], cwd: this.workspaceRoot, env: { ...this.env(), ...envOverrides } };
     this.record!({ id, kind: 'process', generation });
-    const handle = this.processes.launch!(command, stdin, generation); this.handles.set(id, handle);
+    let handle;
+    try { handle = this.processes.launch!(command, stdin, generation); }
+    catch (error) { if (error instanceof LaunchNotStarted) this.unspawned.set(id, generation); throw error; }
+    this.handles.set(id, handle);
     check(handle.generation === generation && handle.pid > 0); await handle.ready(signal);
     const completion = waitForExit ? await handle.completion(signal) : { exitCode: null, stdout: '', stderr: '', complete: false };
     return { id, generation, pid: handle.pid, completion };
@@ -89,6 +96,9 @@ export class HostFixtureDriver implements FixtureDriver {
     check(target === 'api' ? relative.startsWith('/api/') : /^\/__(script|reset|fixture|state|requests)(\?|$)/.test(relative));
     check(target !== 'fake-model' || this.profile === 'legacy-deterministic', 'unsupported-capability');
     check(target !== 'fake-github' || this.config.fakeGitHub, 'unsupported-capability');
+    const service = { api: 'serve', 'fake-model': 'fake-model', 'fake-github': 'fake-github' }[target];
+    const handle = this.handles.get(service); check(handle && handle.state() === 'running' && handle.pid > 0, 'ownership-mismatch');
+    await this.inspectOwnedProcess(service, handle!.generation, signal);
     const index = { api: 0, 'fake-model': 2, 'fake-github': 4 }[target];
     return this.http(`http://127.0.0.1:${this.ports[index]}`, method, relative, body, signal);
   }
@@ -208,7 +218,10 @@ export class HostFixtureDriver implements FixtureDriver {
   }
   private async start(id: string, command: HostCommand, readiness: string, record: (resource: Resource) => void, signal: AbortSignal) {
     const generation = this.uuid(); record({ id, kind: 'process', generation });
-    const handle = this.processes.start(command, readiness, generation); this.handles.set(id, handle); this.commands.set(id, { command, readiness });
+    let handle;
+    try { handle = this.processes.start(command, readiness, generation); }
+    catch (error) { if (error instanceof LaunchNotStarted) this.unspawned.set(id, generation); throw error; }
+    this.handles.set(id, handle); this.commands.set(id, { command, readiness });
     check(handle.generation === generation, 'identity-mismatch');
     await handle.ready(signal); check(handle.pid > 0 && handle.state() === 'running', 'observation-failed');
   }
@@ -256,6 +269,7 @@ export class HostFixtureDriver implements FixtureDriver {
   }
   async inspect(resource: Resource): Promise<Inventory> {
     if (resource.kind === 'process') {
+      if (this.unspawned.get(resource.id) === resource.generation) return { complete: true, owned: true, services: [] };
       const handle = this.handles.get(resource.id); check(handle && handle.generation === resource.generation);
       return { complete: true, owned: true, services: [{ id: resource.id, pid: handle!.pid, generation: handle!.generation, state: handle!.state() }] };
     }
@@ -268,7 +282,7 @@ export class HostFixtureDriver implements FixtureDriver {
   async remove(resource: Resource) {
     await this.inspect(resource);
     await this.drainCleanups();
-    if (resource.kind === 'process') { await this.handles.get(resource.id)!.stop(); return; }
+    if (resource.kind === 'process') { if (!this.unspawned.has(resource.id)) await this.handles.get(resource.id)!.stop(); return; }
     if (resource.kind === 'ports') { await this.closeSockets(); return; }
     if (resource.kind === 'lock') { await this.files.unlink(resource.id); return; }
     check([...this.handles.values()].every(handle => handle.state() === 'exited'));

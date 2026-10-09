@@ -119,6 +119,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
   }
   async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relativePath: string, body: unknown, signal: AbortSignal) {
     signal.throwIfAborted(); check(this.ports.length === 3);
+    await this.inspect({ id: this.project, kind: 'compose', generation: this.leaseId });
+    check(this.objects.some(object => object.kind === 'container' && object.service === 'loom-local' && object.state === 'running'));
     check(target !== 'fake-github', 'unsupported-capability');
     if (target === 'fake-model') return this.nativeRead({ operation: 'fixture-http', method, relativePath, body: Json.parse(body) }, signal) as Promise<{ status: number; body: unknown }>;
     check(relativePath.startsWith('/api/'));
@@ -325,6 +327,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
       const records = await this.inventory();
       if (this.objects.length) check(records.every(record => this.objects.some(owned => owned.kind === record.kind && owned.id === record.id && owned.generation === record.generation)) &&
         this.objects.every(owned => records.some(record => record.id === owned.id && record.kind === owned.kind)));
+      if (this.objects.length) this.objects = records;
       return { complete: true, owned: true, services: records.filter(record => record.kind === 'container').map(record => ({
         id: record.id, pid: record.pid, generation: record.generation, state: record.state,
       })) };

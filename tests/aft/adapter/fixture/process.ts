@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { FixtureError } from './lifecycle.js';
@@ -29,31 +29,35 @@ export async function reservePort(): Promise<PortReservation> {
 }
 // A process group's identity is established only by this ChildProcess handle.
 // Never look up or kill a process by port, basename, argv text or a saved PID.
-export const nodeProcesses: HostProcesses = {
+export class LaunchNotStarted extends FixtureError { constructor() { super('observation-failed'); } }
+export function createNodeProcesses(spawnChild: typeof spawn = spawn, signalGroup: typeof process.kill = process.kill): HostProcesses {
+  const launch = (...args: Parameters<typeof spawn>): ChildProcess => { try { return spawnChild(...args); } catch { throw new LaunchNotStarted(); } };
+  return {
   run(command, signal) {
     return new Promise((resolve, reject) => {
-      const child = spawn(command.executable, command.argv, { cwd: command.cwd, env: command.env,
+      const child = launch(command.executable, command.argv, { cwd: command.cwd, env: command.env,
         signal, shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
       const chunks: Buffer[] = []; let bytes = 0;
-      child.stdout.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) child.kill(); else chunks.push(chunk); });
+      child.stdout!.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) child.kill(); else chunks.push(chunk); });
       child.on('error', () => reject(new FixtureError('observation-failed')));
       child.on('close', code => code === 0 && bytes <= 4 * 1024 * 1024 ? resolve(Buffer.concat(chunks).toString('utf8')) : reject(new FixtureError('observation-failed')));
     });
   },
   launch(command, stdin, generation) {
-    const child = spawn(command.executable, command.argv, { cwd: command.cwd, env: command.env,
-      shell: false, detached: true, stdio: ['pipe', 'pipe', 'ignore'] });
-    let running = true; let bytes = 0; const chunks: Buffer[] = [];
+    const child = launch(command.executable, command.argv, { cwd: command.cwd, env: command.env,
+      shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let running = true; let bytes = 0; let errorBytes = 0; const chunks: Buffer[] = []; const errors: Buffer[] = [];
     const spawned = new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', () => reject(new FixtureError('observation-failed'))); });
     void spawned.catch(() => undefined);
     const completed = new Promise<CliCompletion>((resolve, reject) => {
-      child.stdout.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) child.kill(); else chunks.push(chunk); });
+      child.stdout!.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) child.kill(); else chunks.push(chunk); });
+      child.stderr!.on('data', (chunk: Buffer) => { errorBytes += chunk.length; if (errorBytes > 4 * 1024 * 1024) child.kill(); else errors.push(chunk); });
       child.once('error', () => { running = false; reject(new FixtureError('observation-failed')); });
       child.once('close', code => { running = false;
-        if (bytes > 4 * 1024 * 1024 || code === null) reject(new FixtureError('observation-failed'));
-        else resolve({ exitCode: code, stdout: Buffer.concat(chunks).toString('utf8'), stderr: '', complete: true }); });
+        if (bytes > 4 * 1024 * 1024 || errorBytes > 4 * 1024 * 1024 || code === null) reject(new FixtureError('observation-failed'));
+        else resolve({ exitCode: code, stdout: Buffer.concat(chunks).toString('utf8'), stderr: Buffer.concat(errors).toString('utf8'), complete: true }); });
     });
-    void completed.catch(() => undefined); child.stdin.on('error', () => undefined); child.stdin.end(stdin);
+    void completed.catch(() => undefined); child.stdin!.on('error', () => undefined); child.stdin!.end(stdin);
     return { pid: child.pid ?? 0, generation, executable: command.executable, argv: Object.freeze([...command.argv]), state: () => running ? 'running' : 'exited',
       async ready(signal) { signal.throwIfAborted(); await spawned; signal.throwIfAborted(); },
       async completion(signal) {
@@ -63,15 +67,15 @@ export const nodeProcesses: HostProcesses = {
       },
       async stop() {
         if (running && child.pid) {
-          try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new FixtureError('observation-failed'); }
+          try { signalGroup(-child.pid, 'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new FixtureError('observation-failed'); }
         }
         await completed.catch(() => undefined);
-        if (child.pid) { try { process.kill(-child.pid, 0); throw new FixtureError('ownership-mismatch'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new FixtureError('ownership-mismatch'); } }
+        if (child.pid) { try { signalGroup(-child.pid, 0); throw new FixtureError('ownership-mismatch'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new FixtureError('ownership-mismatch'); } }
       },
     };
   },
   start(command, readinessText, registeredGeneration) {
-    const child = spawn(command.executable, command.argv, { cwd: command.cwd, env: command.env,
+    const child = launch(command.executable, command.argv, { cwd: command.cwd, env: command.env,
       shell: false, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const generation = registeredGeneration ?? randomUUID(); let running = true;
     let readyResolve!: () => void; let readyReject!: (error: Error) => void;
@@ -86,7 +90,7 @@ export const nodeProcesses: HostProcesses = {
       tail = (tail + chunk.toString('utf8')).slice(-8192);
       if (tail.includes(readinessText)) { tail = ''; readyResolve(); }
     };
-    child.stdout.on('data', data); child.stderr.on('data', data);
+    child.stdout!.on('data', data); child.stderr!.on('data', data);
     child.on('error', () => { running = false; readyReject(new FixtureError('observation-failed')); closedResolve(); });
     child.on('close', () => { running = false; readyReject(new FixtureError('observation-failed')); closedResolve(); });
     return {
@@ -107,14 +111,16 @@ export const nodeProcesses: HostProcesses = {
           // The group exists only while the exact spawned leader is alive.
           // This covers group members only. Detached services are separately
           // enrolled from product registration and kernel generation identity.
-          try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new FixtureError('observation-failed'); }
+          try { signalGroup(-child.pid, 'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new FixtureError('observation-failed'); }
         }
         await closed;
         if (child.pid) {
-          try { process.kill(-child.pid, 0); throw new FixtureError('ownership-mismatch'); }
+          try { signalGroup(-child.pid, 0); throw new FixtureError('ownership-mismatch'); }
           catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new FixtureError('ownership-mismatch'); }
         }
       },
     };
   },
-};
+  };
+}
+export const nodeProcesses = createNodeProcesses();

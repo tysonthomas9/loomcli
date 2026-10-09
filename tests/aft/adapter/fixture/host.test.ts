@@ -5,7 +5,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { HostFixtureDriver, legacyProfiles, type HostConfig, type Http } from './host.js';
 import { FixtureLifecycle, FixtureError, type FixturePlan } from './lifecycle.js';
-import { type HostProcesses, type HostCommand, type OwnedProcess } from './process.js';
+import { LaunchNotStarted, type HostProcesses, type HostCommand, type OwnedProcess } from './process.js';
 import { type RegisteredBuild, verifyManifest } from './production.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -47,7 +47,7 @@ async function setup(profile: string) {
   const plan: FixturePlan = { profile, loomRevision: revision, fleetRevision: revision, engineRevision: revision, adapterRevision: revision,
     model: profile === 'legacy-deterministic' ? 'aft/m' : 'openai/real-model', maxCases: 10, caseCount: 1, selectionSha256: 'd'.repeat(64), leaseDurationMs: 10000 };
   const starts: { id: string; command: HostCommand; readiness: string }[] = []; const runs: HostCommand[] = []; const stopped: string[] = [];
-  let failService = ''; let failStop = ''; let port = 4100; let count = 0; let failHttp = false;
+  let failService = ''; let failStop = ''; let spawnFails = false; let port = 4100; let count = 0; let failHttp = false;
   const handles = new Map<string, OwnedProcess>();
   const processes: HostProcesses = {
     async run(command) {
@@ -57,6 +57,7 @@ async function setup(profile: string) {
       return '';
     },
     launch(command, stdin, generation) {
+      if(spawnFails) throw new LaunchNotStarted();
       runs.push(command); let alive = true;
       const handle = { pid: ++count + 100, generation, executable: command.executable, argv: command.argv,
         state: () => alive ? 'running' as const : 'exited' as const, async ready() {}, async stop() { alive = false; stopped.push('cli'); },
@@ -65,6 +66,7 @@ async function setup(profile: string) {
     },
     start(command, readiness, generation) {
       const id = command.argv[0] === 'serve' ? 'serve' : command.argv.includes('preview') ? 'frontend' : command.argv[0]?.endsWith('/fake-model/server.mjs') ? 'fake-model' : 'daemon';
+      if(spawnFails) throw new LaunchNotStarted();
       starts.push({ id, command, readiness }); let alive = true;
       const handle: OwnedProcess = { pid: ++count + 40, generation: generation ?? `generation-${count}`, executable: command.executable, argv: command.argv,
         state: () => alive ? 'running' : 'exited', async ready() { if (id === failService) throw new Error('Bearer private-ready-token'); },
@@ -81,7 +83,7 @@ async function setup(profile: string) {
   const lifecycle = new FixtureLifecycle([plan], () => driver, () => 1000, () => 'opaque-fixture');
   return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle,
     request: { runId: 'test-run', profile, loomRevision: revision, fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
-    failService(value: string) { failService = value; }, failStop(value: string) { failStop = value; }, failHttp() { failHttp = true; },
+    failSpawn() { spawnFails = true; }, failService(value: string) { failService = value; }, failStop(value: string) { failStop = value; }, failHttp() { failHttp = true; },
     async cleanup() { await fs.rm(root, { recursive: true }); } };
 }
 
@@ -201,4 +203,22 @@ test('restoration failure blocks process/path cleanup and retries after cancella
     assert.ok(await fs.lstat(r.driver.workspaceRoot)); assert.equal((await fs.readFile(first.receipt.id,'utf8')).includes('private-restore-token'),false);
     fails=false; assert.equal((await r.lifecycle.release(acquired.lease.id,'test-run')).released,true); assert.equal(attempts,2);
   } finally { await r.cleanup(); }
+});
+
+test('proven synchronous launch failure retires its pre-spawn intent and allows exact cleanup',async()=>{
+ const r=await setup('legacy-deterministic');r.failSpawn();try{
+  await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal),error=>{assert.ok(error instanceof FixtureError);assert.equal(error.remainingOwnedResources.length,0);return true;});assert.deepEqual(r.starts,[]);
+ }finally{await r.cleanup();}
+});
+test('proven synchronous CLI failure retires only its intent; completed fixture still releases',async()=>{
+ const r=await setup('legacy-deterministic');try{const a=await r.lifecycle.acquire(r.request,new AbortController().signal);r.failSpawn();await assert.rejects(r.driver.launchOwnedCli(['usage'],{},'',true,new AbortController().signal));assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);}finally{await r.cleanup();}
+});
+test('only deterministic bounded seed-worktree receives test support, unrelated daemon or env denied',async()=>{
+ const r=await setup('legacy-deterministic');try{const a=await r.lifecycle.acquire(r.request,new AbortController().signal);
+ const result=await r.driver.launchOwnedCli(['daemon','seed-worktree','--workspace','E2E-WS','--agent','owned','--file','seed.txt','--content','-','--message','seed'],{LOOM_TESTSUPPORT:'1'},'seed bytes',true,new AbortController().signal);assert.equal(result.completion.stdout,'seed bytes');
+ await assert.rejects(r.driver.launchOwnedCli(['daemon','rm'],{LOOM_TESTSUPPORT:'1'},'',true,new AbortController().signal));await assert.rejects(r.driver.launchOwnedCli(['usage'],{LOOM_TESTSUPPORT:'1'},'',true,new AbortController().signal));assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);
+ }finally{await r.cleanup();}
+});
+test('HTTP mutation refuses a stopped owned service before using its saved port',async()=>{
+ const r=await setup('legacy-deterministic');try{const a=await r.lifecycle.acquire(r.request,new AbortController().signal);const h=r.driver.processesById.get('serve')!;await r.driver.stopOwnedProcess('serve',h.generation,new AbortController().signal);await assert.rejects(r.driver.requestOwnedHttp('api','POST','/api/workspaces',{},new AbortController().signal));assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);}finally{await r.cleanup();}
 });
