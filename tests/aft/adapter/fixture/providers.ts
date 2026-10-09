@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { CapabilityContext, CapabilityProvider, CapabilityRegistry, ImplementationPin } from '@tysonthomas9/aft/capabilities';
 import { ArtifactRefSchema, type EvidenceClass } from '@tysonthomas9/aft/types';
 import { defineOperation } from '../operation.js';
-import { putFixture, getFixture, releaseFixture, fixturesKey, type OwnedFixture, type OwnedAgent } from '../ownership.js';
+import { putFixture, putCleanupFixture, getFixture, releaseFixture, fixturesKey, type OwnedFixture, type OwnedAgent } from '../ownership.js';
 import { createNativeHostAccess } from '../native-host.js';
 import { createSyntheticProbe } from '../synthetic-probe.js';
 import { ContainerRootIdentity, containerFilesystemObserver, containerGitObserver, containerGitLifecycleObserver, type ContainerObservationRead } from '../container-observations.js';
@@ -76,36 +76,41 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
       },
       async run(input, context) {
         requireFact(input.runId === context.runId, 'identity-mismatch', 'Acquisition run does not match execution');
+        const owner = { runId: context.runId, suiteId: context.suiteId, scope: context.scope, caseId: context.caseId, profile: input.profile };
         let driver: FixtureDriver | undefined;
         const manager = new FixtureLifecycle(options.plans, () => { driver = options.driver(input.profile); return driver; },
           () => context.clock.epochUtcMs + context.clock.now());
         let acquired: z.infer<typeof ProvisionedOutput>;
         let boundFixture: OwnedFixture | undefined;
         const registerIncomplete = async (leaseId: string) => {
-            const existing = context.resources.get(`${fixturesKey}:${leaseId}`);
-            if (existing) {
-              requireFact(existing === boundFixture, 'ownership-mismatch', 'Cannot replace fixture cleanup ownership');
-              boundFixture.expiresAtUtcMs = 0;
-              return;
-            }
-            if (!context.resources.has(evidenceKey)) putEvidenceStore(context, await options.evidenceAfterFailure(driver!));
-            // Cleanup-only registration is never an available fixture. It lets
-            // canonical final disposal retry a failed partial acquisition.
-            const unavailable = async (): Promise<never> => { throw new ObservationError('observation-failed', 'Fixture acquisition is incomplete'); };
-            const fixture: OwnedFixture = { leaseId, runId: context.runId, suiteId: context.suiteId, scope: context.scope, caseId: context.caseId,
-              profile: input.profile, workspaceId: 'acquisition-incomplete', repo: 'acquisition-incomplete', expiresAtUtcMs: 0,
-              evidenceClass: 'deterministic', roots: new Map(), agents: new Map(), secrets: [],
-              readApi: unavailable, readFiles: unavailable, resolveAgent: unavailable, verify: unavailable,
-              async dispose() {
-                const state = privateFixtures.get(fixture)!;
-                const released = await manager.release(leaseId, input.runId); state.lastRelease = released;
-                requireFact(released.released, 'ownership-mismatch', 'Partial acquisition cleanup is incomplete');
-              } };
-            privateFixtures.set(fixture, { manager, driver: driver! }); putFixture(context, fixture);
+          const existing = context.resources.get(`${fixturesKey}:${leaseId}`);
+          if (existing) {
+            requireFact(existing === boundFixture, 'ownership-mismatch', 'Cannot replace fixture cleanup ownership');
+            if (!boundFixture.cleanupOnly) boundFixture.expiresAtUtcMs = 0;
+            return;
+          }
+          const state: PrivateFixture = { manager, driver: driver! };
+          const fixture = putCleanupFixture(context, { ...owner, leaseId,
+            async dispose() {
+              const released = await manager.release(leaseId, input.runId); state.lastRelease = released;
+              requireFact(released.released, 'ownership-mismatch', 'Partial acquisition cleanup is incomplete');
+            } });
+          privateFixtures.set(fixture, state); boundFixture = fixture;
+          // Failure evidence can be unavailable; disposal authority is already
+          // retained independently in the canonical resource owner.
+          if (!context.resources.has(evidenceKey)) {
+            const store = await options.evidenceAfterFailure(driver!);
+            requireFact(context.resources.get(`${fixturesKey}:${leaseId}`) === fixture,
+              'ownership-mismatch', 'Cleanup fixture changed during failure evidence recovery');
+            if (!context.resources.has(evidenceKey)) putEvidenceStore(context, store);
+          }
         };
         try { acquired = await manager.acquire(input, context.signal); }
         catch (error) {
-          if (error instanceof FixtureError && error.leaseId && error.remainingOwnedResources.length) await registerIncomplete(error.leaseId);
+          if (error instanceof FixtureError && error.leaseId && error.remainingOwnedResources.length) {
+            try { await registerIncomplete(error.leaseId); }
+            catch { /* Failure evidence never masks the original acquisition error. */ }
+          }
           if (error instanceof FixtureError) throw new ObservationError(error.code, `Fixture ${error.code}`);
           throw error;
         }
