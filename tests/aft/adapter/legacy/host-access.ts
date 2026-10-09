@@ -7,8 +7,8 @@ import { privateFixtureDriver } from '../fixture/providers.js';
 import { HostFixtureDriver } from '../fixture/host.js';
 import { HttpResponse, Json } from '../protocol.js';
 import { checkedCliPlan } from './cli-plan.js';
-import { LegacyError, LegacyEvidenceClasses, type LegacyAccess, type LegacyLease, type ConfigurationSnapshot } from './operations.js';
-import { fixtureOwnerIdentity, getFixtureOperationAuthority, type LoomAuthorizedOperation } from '../authority.js';
+import { LegacyError, LegacyEvidenceClasses, type LegacyAccess, type LegacyLease, type ConfigurationSnapshot, type LegacyAuthorizedOperation } from './operations.js';
+import { fixtureOwnerIdentity, getFixtureOperationAuthority } from '../authority.js';
 import type { EvidenceStore } from '../evidence.js';
 import { LegacyOperationEffects } from './effects.js';
 import { requireOwnedWorkspace } from '../workspaces.js';
@@ -58,7 +58,7 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
     before.root.device === after.root.device && before.root.inode === after.root.inode &&
     before.commonDir === after.commonDir && before.branch === after.branch);
   const identity = (id: string) => requireOwned(id === fixture.leaseId);
-  const evidenceFor = (operation: LoomAuthorizedOperation) => {
+  const evidenceFor = (operation: LegacyAuthorizedOperation) => {
     const route = driver.executionRouting;
     requireOwned(route.profile === fixture.profile && route.evidenceClass === fixture.evidenceClass);
     const expected = operation === 'loom.cli.task' && route.externalProvider ? 'live-provider' : route.evidenceClass;
@@ -170,7 +170,7 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
     },
     async execute(id, command, signal) {
       await verify(id, signal); requireOwned(cached);
-      const operation: LoomAuthorizedOperation = command.argv[0] === 'usage' ? 'loom.cli.usage' : command.argv[1] === 'seed-worktree' ? 'loom.fixture.seedWorktree' :
+      const operation: LegacyAuthorizedOperation = command.argv[0] === 'usage' ? 'loom.cli.usage' : command.argv[1] === 'seed-worktree' ? 'loom.fixture.seedWorktree' :
         command.argv[2] === 'role' ? 'loom.cli.role' : command.argv[4] === 'task' ? 'loom.cli.task' : unsupported();
       const evidence = evidenceFor(operation);
       const plan = checkedCliPlan({ ...cached!, evidence }, command);

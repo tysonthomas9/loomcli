@@ -45,6 +45,8 @@ export function createLegacyProviders(implementation: ImplementationPin, impleme
   const common = { implementation, implementationSha256, retry: 'never' as const, evidenceClasses: [...LegacyEvidenceClasses] };
   async function invoke<K extends keyof ReturnType<typeof createLegacyOperations>>(method: K, input: unknown,
     context: CapabilityContext, leaseId: string, workspaceId?: string) {
+    if (method === 'stimulate' && RuntimeInput.parse(input).operation === 'terminal-close')
+      throw new ObservationError('unsupported-capability', 'Tab metadata deletion is a separate observation, not a process transition');
     const fixture = await getFixture(context, leaseId);
     const operation = operationIds[method];
     let grant = getFixtureOperationAuthority(fixture, operation, LegacyOperationEffects[operation]);

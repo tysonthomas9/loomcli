@@ -82,14 +82,15 @@ test('mutation invocation is consumed once, including after a failed transport',
 });
 test('runtime stop may have no replacement; owned lifecycle actor is fixed and occurs once', async () => {
   const s = setup();
-  for (const [targetId, operation] of [['harness', 'harness-restart'], ['serve', 'serve-restart'], ['worker', 'worker-stop'], ['terminal', 'terminal-close']]) {
+  for (const [targetId, operation] of [['harness', 'harness-restart'], ['serve', 'serve-restart'], ['worker', 'worker-stop']]) {
     const call = s.call(); const result = await s.ops.stimulate({ leaseId: 'lease', targetId, operation, expectedGeneration: 'gen-1' }, call);
     assert.equal(result.afterGeneration, targetId === 'serve' ? 'gen-2' : null);
     await assert.rejects(s.ops.stimulate({ leaseId: 'lease', targetId, operation, expectedGeneration: 'gen-1' }, call), reject('mutation-repeated'));
   }
-  assert.equal(s.transitions.length, 4); assert.equal(s.requests.length, 0);
+  assert.equal(s.transitions.length, 3); assert.equal(s.requests.length, 0);
   assert.deepEqual((s.transitions[2] as { request: unknown }).request, { method: 'POST', path: '/api/workspaces/WS/agents/worker/stop', body: null });
-  assert.deepEqual((s.transitions[3] as { request: unknown }).request, { method: 'DELETE', path: '/api/workspaces/WS/terminal/tabs/tab-1', body: null });
+  await assert.rejects(s.ops.stimulate({ leaseId: 'lease', targetId: 'terminal', operation: 'terminal-close', expectedGeneration: 'gen-1' }, s.call()), reject('unsupported-capability'));
+  assert.equal(s.transitions.length, 3);
 });
 test('foreign, stale, mismatched and unsafe inputs cause no transport mutations', async () => {
   const s = setup();
