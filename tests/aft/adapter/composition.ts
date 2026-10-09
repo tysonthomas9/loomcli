@@ -3,6 +3,7 @@ import path from 'node:path';
 import { calculateImplementationPin, type ImplementationPin, type CapabilityRegistry } from '@tysonthomas9/aft/capabilities';
 import { createCoreProviders } from './index.js';
 import { createFixtureProviders, type FixtureProviderOptions } from './fixture/providers.js';
+import { productionLegacyAccess } from './legacy/host-access.js';
 import { createLegacyProviders, type LegacyAccessFactory } from './legacy/providers.js';
 import { createProjectionProvider, pinProjectionImplementation } from './projection.js';
 import { requireFact } from './protocol.js';
@@ -11,7 +12,7 @@ import type { GitReader } from './git.js';
 export interface LoomCompositionOptions {
   implementation: ImplementationPin & { sha256: string };
   fixtures: Omit<FixtureProviderOptions, 'implementation' | 'implementationSha256'>;
-  legacyAccess: LegacyAccessFactory;
+  legacyAccess?: LegacyAccessFactory;
   gitReader?: GitReader;
 }
 /** All transports are code-owned. Suite data selects closed operations only;
@@ -21,7 +22,7 @@ export function createLoomProviders(options: LoomCompositionOptions) {
   return [
     ...createCoreProviders(pin, options.gitReader),
     ...createFixtureProviders({ ...options.fixtures, implementation: pin, implementationSha256: pin.sha256 }),
-    ...createLegacyProviders(pin, pin.sha256, options.legacyAccess),
+    ...createLegacyProviders(pin, pin.sha256, options.legacyAccess ?? ((_context, fixture) => productionLegacyAccess(fixture))),
     createProjectionProvider(pin),
   ];
 }

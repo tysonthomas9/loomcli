@@ -256,20 +256,24 @@ test('registered fixture-created workspaces bind exact agents before discovery a
   const {createOwnedWorkspaceRoster}=await import('./workspaces.js');
   const h=await setup(t);const f=h.fixture;
   const record=async(workspaceId:string,agentIds:string[])=>{
-    const fields={workspaceId,repo:f.repo,commonDir:'/owned/source/.git',storeId:'owned-store',storeGeneration:'store-generation',agentIds};
+    const source=workspaceId==='workspace'?f.repo:'/owned/second';
+    const fields={workspaceId,repo:source,commonDir:source+'/.git',storeId:'owned-store',storeGeneration:'store-generation',agentIds};
     const creationReceipt=await h.evidenceStore.retain(JSON.stringify({kind:'workspace-created',leaseId:f.leaseId,runId:f.runId,suiteId:f.suiteId,
       scope:f.scope,caseId:f.caseId,profile:f.profile,...fields}));return {...fields,creationReceipt};
   };
   f.ownedWorkspaces=await createOwnedWorkspaceRoster(f,[await record('workspace',['agt_owned']),await record('E2E-WS-AGENT',['nova'])],h.evidenceStore);
   let discovered=0;
   f.resolveAgent=async(agentId,_signal,workspaceId)=>{discovered++;assert.equal(agentId,'nova');assert.equal(workspaceId,'E2E-WS-AGENT');
-    return {row:{...f.agents.get('agt_owned')!.row,agent_id:'nova',workspace_id:'E2E-WS-AGENT'},commonDir:'/owned/source/.git'};};
+    return {row:{...f.agents.get('agt_owned')!.row,agent_id:'nova',workspace_id:'E2E-WS-AGENT',repo:'/owned/second'},commonDir:'/owned/second/.git'};};
   for(const input of [{leaseId:'lease',workspaceId:'foreign',agentId:'nova'},{leaseId:'lease',workspaceId:'E2E-WS-AGENT',agentId:'unregistered'}])
     assert.notEqual((await h.invoke('loom.agent.bind',input)).availability,'observed');
   assert.equal(discovered,0);
   const result=await h.invoke('loom.agent.bind',{leaseId:'lease',workspaceId:'E2E-WS-AGENT',agentId:'nova'});
   assert.equal(result.availability,'observed');assert.equal(result.provenance.identity.workspaceId,'E2E-WS-AGENT');
   assert.equal(discovered,1);
+  f.readFiles=async route=>{assert.ok(route.includes('/E2E-WS-AGENT/files/stat?'));assert.ok(route.includes('repo=second'));
+    return {status:200,body:{path:'file',size:1,version:'v1',is_dir:false,mod_time:'2026-10-09T00:00:00Z'}};};
+  assert.equal((await h.invoke('loom.files.observe',{agent:{fixtureLeaseId:'lease',workspaceId:'E2E-WS-AGENT',agentId:'nova'},path:'file',view:'stat',maxBytes:100})).availability,'observed');
   assert.equal((await h.invoke('loom.agent.observe',{agent:{fixtureLeaseId:'lease',workspaceId:'E2E-WS-AGENT',agentId:'nova'}})).availability,'observed');
 });
 
@@ -292,4 +296,28 @@ test('saved-history and lifecycle observations expose actual facts and never tre
   const git=await h.invoke('loom.git.lifecycle',{...request,maxBytes:10000});assert.equal(git.availability,'observed');
   assert.equal(z.object({worktreePresent:z.boolean()}).parse(git.data).worktreePresent,false);
   agent.gitLifecycle=async()=>{throw new Error('unreadable source');};assert.equal((await h.invoke('loom.git.lifecycle',{...request,maxBytes:10000})).availability,'error');
+});
+
+test('later UI native child binds through actual scoped identity facts without legacy-name authority',async t=>{
+  const {createOwnedWorkspaceRoster}=await import('./workspaces.js');const h=await setup(t);const f=h.fixture;
+  const fields={identityKind:'native-agent-id' as const,workspaceId:'workspace',repo:f.repo,commonDir:'/owned/source/.git',storeId:'native-store',storeGeneration:'generation',agentIds:['agt_owned']};
+  const owner={leaseId:f.leaseId,runId:f.runId,suiteId:f.suiteId,scope:f.scope,caseId:f.caseId,profile:f.profile};
+  const creationReceipt=await h.evidenceStore.retain(JSON.stringify({kind:'workspace-created',...owner,...fields}));
+  f.ownedWorkspaces=await createOwnedWorkspaceRoster(f,[{...fields,creationReceipt}],h.evidenceStore);
+  let foreign=false;let resolves=0;
+  f.readWorkspaceAgent=async(workspaceId,agentId)=>({kind:'agent-enrolled',identityKind:'native-agent-id',...owner,workspaceId,agentId,repo:f.repo,
+    commonDir:fields.commonDir,storeId:foreign?'foreign-store':fields.storeId,storeGeneration:fields.storeGeneration,
+    parentAgentId:agentId==='agt_owned'?null:'agt_owned',rootAgentId:agentId==='agt_owned'?null:'agt_owned',
+    createdByKind:agentId==='agt_owned'?'user':'agent',createdById:agentId==='agt_owned'?'actual-user':'agt_owned',revision:1});
+  f.resolveAgent=async(agentId,_signal,workspaceId)=>{resolves++;assert.equal(workspaceId,'workspace');return {
+    row:{...f.agents.get('agt_owned')!.row,agent_id:agentId,worktree_path:'/owned/child',parent_agent_id:'agt_owned',root_agent_id:'agt_owned',
+      created_by_kind:'agent',created_by_id:'agt_owned'},commonDir:fields.commonDir};};
+  foreign=true;assert.equal((await h.invoke('loom.agent.bind',{leaseId:'lease',workspaceId:'workspace',agentId:'agt_child'})).availability,'error');
+  assert.equal(resolves,0);foreign=false;
+  const bound=await h.invoke('loom.agent.bind',{leaseId:'lease',workspaceId:'workspace',agentId:'agt_child'});
+  assert.equal(bound.availability,'observed');assert.equal(bound.provenance.identity.rootAgentId,'agt_owned');assert.equal(resolves,1);
+  assert.equal((await h.invoke('loom.agent.bind',{leaseId:'lease',workspaceId:'workspace',agentId:'agt_child'})).availability,'error');
+  assert.equal(resolves,1);
+  const observed=await h.invoke('loom.agent.observe',{agent:{fixtureLeaseId:'lease',workspaceId:'workspace',agentId:'agt_child'}});
+  assert.equal(observed.availability,'observed');assert.equal(observed.provenance.identity.parentAgentId,'agt_owned');
 });

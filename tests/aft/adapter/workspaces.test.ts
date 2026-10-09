@@ -87,3 +87,42 @@ test('later child enrollment checks actual parent/root lineage and cross-store s
   corrupt='';await enrollOwnedWorkspaceAgent(fixture,'workspace','agt_child',new AbortController().signal,store);
   assert.equal(requireOwnedWorkspace(fixture,'workspace','agt_child').workspaceId,'workspace');
 });
+
+test('legacy names and native IDs have separate store authority even with identical spelling',async t=>{
+  const {enrollOwnedLegacyAgent}=await import('./workspaces.js');const {store,record}=await setup(t);
+  const legacyRecord=async(workspaceId:string,agentIds:string[])=>{
+    const values={...fields,identityKind:'legacy-agent-name' as const,workspaceId,agentIds,storeId:'legacy-store'};
+    return {...values,creationReceipt:await store.retain(JSON.stringify({kind:'workspace-created',...owner,...values}))};
+  };
+  const roster=await createOwnedWorkspaceRoster(owner,[await record(),await legacyRecord('workspace',['nova']),await legacyRecord('other',[])],store);
+  const f=makeFixture(roster);let wrong=false;let reads=0;
+  f.readWorkspaceLegacyAgent=async(workspaceId,name)=>{reads++;return {kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...owner,workspaceId,name,
+    repo:fields.repo,commonDir:fields.commonDir,storeId:wrong?'native-store':'legacy-store',storeGeneration:fields.storeGeneration,parentName:null,
+    createdAt:'2026-10-09T00:00:00Z',updatedAt:'2026-10-09T00:01:00Z'};};
+  assert.equal(requireOwnedWorkspace(f,'workspace','nova','legacy-agent-name').repo,fields.repo);
+  assert.throws(()=>requireOwnedWorkspace(f,'workspace','nova'));
+  assert.throws(()=>requireOwnedWorkspace(f,'workspace','agt_primary','legacy-agent-name'));
+  assert.throws(()=>requireOwnedWorkspace(f,'other','nova','legacy-agent-name'));
+  wrong=true;await assert.rejects(enrollOwnedLegacyAgent(f,'other','nova',new AbortController().signal,store));
+  wrong=false;await enrollOwnedLegacyAgent(f,'other','nova',new AbortController().signal,store);
+  assert.equal(requireOwnedWorkspace(f,'other','nova','legacy-agent-name').workspaceId,'other');
+  assert.throws(()=>requireOwnedWorkspace(f,'other','nova'));
+  const before=reads;await assert.rejects(enrollOwnedLegacyAgent(f,'unowned','nova',new AbortController().signal,store));assert.equal(reads,before);
+  const nativePort=f.readWorkspaceAgent;
+  f.readWorkspaceLegacyAgent=async()=>{throw new Error('Legacy lineage/store observation unavailable');};
+  await assert.rejects(enrollOwnedLegacyAgent(f,'other','new',new AbortController().signal,store));assert.equal(f.readWorkspaceAgent,nativePort);
+});
+test('legacy lineage uses actual scoped Parent observations without synthesized native actor fields',async t=>{
+  const {enrollOwnedLegacyAgent}=await import('./workspaces.js');const {store,record}=await setup(t);
+  const values={...fields,identityKind:'legacy-agent-name' as const,workspaceId:'legacy',agentIds:['lead'],storeId:'legacy-store'};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...values}));
+  const f=makeFixture(await createOwnedWorkspaceRoster(owner,[await record(),{...values,creationReceipt}],store));
+  let parent='lead';let parentParent:string|null=null;
+  f.readWorkspaceLegacyAgent=async(workspaceId,name)=>({kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...owner,workspaceId,name,
+    repo:fields.repo,commonDir:fields.commonDir,storeId:'legacy-store',storeGeneration:fields.storeGeneration,parentName:name==='worker'?parent:parentParent,
+    createdAt:'2026-10-09T00:00:00Z',updatedAt:'2026-10-09T00:01:00Z'});
+  parent='foreign';await assert.rejects(enrollOwnedLegacyAgent(f,'legacy','worker',new AbortController().signal,store));
+  parent='lead';parentParent='worker';await assert.rejects(enrollOwnedLegacyAgent(f,'legacy','worker',new AbortController().signal,store));
+  parentParent=null;await enrollOwnedLegacyAgent(f,'legacy','worker',new AbortController().signal,store);
+  assert.equal(requireOwnedWorkspace(f,'legacy','worker','legacy-agent-name').workspaceId,'legacy');
+});
