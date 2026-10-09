@@ -3,6 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { AgentRow, AgentRef, Id, RelativePath, requireFact, type NativeAccess } from './protocol.js';
 import { observeFilesystem, FilesystemOutput, type FilesystemInput } from './filesystem.js';
+import { observeGitLifecycle, GitLifecycleOutput, type GitLifecycleInput } from './git-lifecycle.js';
 import { observeGit, GitOutput, type GitInput, type GitReader } from './git.js';
 
 const RootSelector = z.discriminatedUnion('kind', [z.object({ kind: z.literal('managed-repo') }).strict(),
@@ -12,6 +13,7 @@ const Bounds = { maxBytes: z.number().int().min(1).max(16 * 1024 * 1024), maxEnt
 export const ContainerObservationRequest = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('git-observe'), agentId: Id, view: z.enum(['status', 'refs', 'diff', 'origin']),
     paths: z.array(RelativePath).max(1000), maxBytes: z.number().int().min(1).max(4 * 1024 * 1024) }).strict(),
+  z.object({ operation: z.literal('git-lifecycle'), agentId: Id, maxBytes: z.number().int().min(1).max(4 * 1024 * 1024) }).strict(),
   z.object({ operation: z.literal('filesystem-root'), root: RootSelector }).strict(),
   z.object({ operation: z.literal('filesystem-observe'), root: RootSelector, relativePaths: Paths,
     view: z.enum(['presence', 'bytes', 'tree-digest']), ...Bounds }).strict(),
@@ -23,15 +25,21 @@ export interface ContainerOwnedPaths { workspaceId: string; repo: string; worktr
  * Paths are product-resolved from the attested source/agent store, never YAML. */
 export async function readContainerObservation(raw: unknown, access: NativeAccess, paths: ContainerOwnedPaths, reader?: GitReader) {
   const request = ContainerObservationRequest.parse(raw);
-  const ownedAgent = async (agentId: string) => {
+  const ownedAgent = async (agentId: string, worktreeMustExist = true) => {
     requireFact(/^agt_[A-Za-z0-9_-]+$/.test(agentId), 'ownership-mismatch', 'Invalid owned agent identifier');
     const row = AgentRow.parse(await access.agent(agentId));
     requireFact(row.agent_id === agentId && row.workspace_id === paths.workspaceId && row.repo === paths.repo &&
       row.worktree_path === path.join(paths.worktreeParent, agentId), 'ownership-mismatch', 'Container agent path is foreign');
-    requireFact(await realpath(row.worktree_path) === row.worktree_path && await realpath(paths.repo) === paths.repo,
+    requireFact((!worktreeMustExist || await realpath(row.worktree_path) === row.worktree_path) &&
+      await realpath(paths.worktreeParent)===paths.worktreeParent && await realpath(paths.repo) === paths.repo,
       'ownership-mismatch', 'Container repository/worktree is not canonical');
     return row;
   };
+  if (request.operation === 'git-lifecycle') {
+    const row = await ownedAgent(request.agentId,false);
+    return observeGitLifecycle({agent:{fixtureLeaseId:'private-container',workspaceId:paths.workspaceId,agentId:request.agentId},maxBytes:request.maxBytes},
+      {sourceRoot:paths.repo,commonDir:paths.commonDir,branch:row.branch,worktree:row.worktree_path},reader);
+  }
   if (request.operation === 'git-observe') {
     const row = await ownedAgent(request.agentId);
     return observeGit({ agent: { fixtureLeaseId: 'private-container', workspaceId: paths.workspaceId, agentId: request.agentId },
@@ -71,5 +79,16 @@ export function containerGitObserver(read: ContainerObservationRead, agent: Agen
     requireFact(output.worktree === owned.worktree && output.commonDir === owned.commonDir && output.branch === owned.branch,
       'identity-mismatch', 'Remote Git ownership changed');
     return output;
+  };
+}
+
+export function containerGitLifecycleObserver(read: ContainerObservationRead,agent:AgentRef,
+  owned:{sourceRoot:string;worktree:string;commonDir:string;branch:string}) {
+  return async(input:z.infer<typeof GitLifecycleInput>,signal:AbortSignal)=>{
+    requireFact(input.agent.agentId===agent.agentId&&input.agent.workspaceId===agent.workspaceId&&input.agent.fixtureLeaseId===agent.fixtureLeaseId,
+      'ownership-mismatch','Remote lifecycle Git agent is foreign');
+    const output=GitLifecycleOutput.parse(await read({operation:'git-lifecycle',agentId:agent.agentId,maxBytes:input.maxBytes},signal));
+    requireFact(output.agentId===agent.agentId&&Object.entries(owned).every(([key,value])=>output[key as keyof typeof owned]===value),
+      'identity-mismatch','Remote lifecycle Git ownership changed'); return output;
   };
 }

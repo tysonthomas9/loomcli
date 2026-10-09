@@ -12,6 +12,9 @@ const Grants = z.record(LoomAuthorizedOperation,Grant);
 export type FixtureOperationAuthority = Readonly<Partial<Record<LoomAuthorizedOperation,
   {readonly evidenceClass:z.infer<typeof Grant>['evidenceClass']; readonly effects:readonly CapabilityEffect[]}>>>;
 export type FixtureAuthorityOwner = Pick<OwnedFixture,'leaseId'|'runId'|'suiteId'|'scope'|'caseId'|'profile'>;
+export function fixtureOwnerIdentity(owner:FixtureAuthorityOwner):FixtureAuthorityOwner {
+  return {leaseId:owner.leaseId,runId:owner.runId,suiteId:owner.suiteId,scope:owner.scope,caseId:owner.caseId,profile:owner.profile};
+}
 const generated = new WeakMap<object,FixtureAuthorityOwner>();
 /** Called only by a trusted fixture owner after exact profile/backend/model
  * preflight. An omitted grant denies the operation; no YAML authority exists. */
@@ -19,7 +22,7 @@ export function createFixtureOperationAuthority(owner: FixtureAuthorityOwner, gr
   const parsed = Grants.parse(grants);
   const authority = Object.freeze(Object.fromEntries(Object.entries(parsed).map(([operation,grant])=>
     [operation,Object.freeze({evidenceClass:grant.evidenceClass,effects:Object.freeze([...grant.effects])})])));
-  generated.set(authority,Object.freeze({...owner})); return authority;
+  generated.set(authority,Object.freeze(fixtureOwnerIdentity(owner))); return authority;
 }
 export function validateFixtureOperationAuthority(authority: FixtureOperationAuthority, fixture: FixtureAuthorityOwner): void {
   const owner = generated.get(authority);

@@ -82,10 +82,12 @@ test('native host reads owned SQLite and fixed authenticated routes with determi
   db.exec(`CREATE TABLE agents (agent_id TEXT, workspace_id TEXT, repo TEXT, worktree_path TEXT, branch TEXT, harness TEXT,
     harness_session_id TEXT, harness_session_root TEXT, parent_agent_id TEXT, root_agent_id TEXT, created_by_kind TEXT, created_by_id TEXT,
     preset TEXT, revision INTEGER, state TEXT, running_turn_id TEXT, deleted_at TEXT, history_purged_at TEXT);
-    CREATE TABLE agent_native_sessions (agent_id TEXT, harness TEXT, native_root TEXT, native_id TEXT);`);
+    CREATE TABLE agent_native_sessions (agent_id TEXT, harness TEXT, native_root TEXT, native_id TEXT);
+    CREATE TABLE agent_events (agent_id TEXT, event_id TEXT);`);
   db.prepare('INSERT INTO agents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('agt_owned', 'workspace', '/owned/source', '/owned/tree',
     'loom/agent/owned', 'opencode', 'ses_owned', '', null, null, 'user', null, 'lead', 1, 'idle', null, null, null);
-  db.prepare('INSERT INTO agent_native_sessions VALUES (?,?,?,?)').run('agt_owned', 'opencode', '', 'ses_owned'); db.close();
+  db.prepare('INSERT INTO agent_native_sessions VALUES (?,?,?,?)').run('agt_owned', 'opencode', '', 'ses_owned');
+  db.exec("INSERT INTO agent_events VALUES ('agt_owned','evt1'),('agt_owned','evt2'),('foreign','evt3');"); db.close();
   const calls: string[] = [];
   const access = createNativeHostAccess({ configRoot: root, workspaceId: 'workspace', repo: '/owned/source', pinnedExecutable: '/owned/opencode',
     processIdentity: async pid => ({ pid, generation: 'generation', executable: '/owned/opencode', argv: ['/owned/opencode', 'serve', '--service'] }),
@@ -97,6 +99,11 @@ test('native host reads owned SQLite and fixed authenticated routes with determi
         new Response('{"pid":42}', { headers: { 'content-type': 'application/json' } });
     } });
   assert.equal((await access.agent('agt_owned')).harness_session_root, '');
+  assert.equal((await access.history!('agt_owned')).savedEventCount,2);
+  await assert.rejects(access.history!('foreign'));
+  const update=new DatabaseSync(path.join(root,'agents.db'));
+  update.exec("DELETE FROM agent_events WHERE agent_id='agt_owned'; UPDATE agents SET deleted_at='2026-10-09T01:00:00Z',history_purged_at='2026-10-09T01:00:00Z' WHERE agent_id='agt_owned';");update.close();
+  assert.deepEqual(await access.history!('agt_owned'),{agentId:'agt_owned',workspaceId:'workspace',repo:'/owned/source',revision:1,deletedAt:'2026-10-09T01:00:00Z',historyPurgedAt:'2026-10-09T01:00:00Z',savedEventCount:0});
   assert.equal((await access.sessions('agt_owned'))[0]!.native_id, 'ses_owned');
   const privateLease = await access.registration(); assert.equal(privateLease.generation, 'generation');
   assert.equal(privateLease.password, 'private-password');
@@ -108,6 +115,8 @@ test('native host reads owned SQLite and fixed authenticated routes with determi
   await assert.rejects(access.agent('foreign'));
   await unlink(registration); await symlink('/etc/hosts', registration);
   await assert.rejects(access.registration());
+  await unlink(path.join(root,'agents.db'));
+  await assert.rejects(access.history!('agt_owned'));
 });
 
 test('Git observations reject foreign identity, changed HEAD, duplicates and failed reads', async t => {

@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import { containedPath } from './filesystem.js';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { AgentRow, NativeRef, ServiceRegistration, Json, ObservationError, requireFact,
+import { AgentRow, AgentHistory, NativeRef, ServiceRegistration, Json, ObservationError, requireFact,
   type NativeAccess, type ProcessIdentity } from './protocol.js';
 
 export interface NativeHostOptions {
@@ -93,6 +93,15 @@ export function createNativeHostAccess(options: NativeHostOptions): NativeAccess
       const row = AgentRow.parse(rows[0]);
       requireFact(row.repo === options.repo, 'ownership-mismatch', 'Native agent belongs to another repository');
       return row;
+    },
+    async history(agentId) {
+      const rows = await query('SELECT a.agent_id, a.workspace_id, a.repo, a.revision, a.deleted_at, a.history_purged_at, (SELECT COUNT(*) FROM agent_events e WHERE e.agent_id=a.agent_id) AS saved_event_count FROM agents a WHERE a.agent_id=? AND a.workspace_id=?', [agentId,options.workspaceId]);
+      requireFact(rows.length===1,'identity-mismatch','Agent saved-history identity is missing or duplicated');
+      const raw = rows[0] as Record<string,unknown>;
+      const value = AgentHistory.parse({agentId:raw.agent_id,workspaceId:raw.workspace_id,repo:raw.repo,revision:raw.revision,
+        deletedAt:raw.deleted_at,historyPurgedAt:raw.history_purged_at,savedEventCount:raw.saved_event_count});
+      requireFact(value.agentId===agentId&&value.workspaceId===options.workspaceId&&value.repo===options.repo,
+        'identity-mismatch','Agent saved-history belongs to another owned repository'); return value;
     },
     async sessions(agentId) {
       const rows = await query('SELECT agent_id, harness, native_root, native_id FROM agent_native_sessions WHERE agent_id=? ORDER BY native_id', [agentId]);
