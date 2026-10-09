@@ -16,7 +16,8 @@ import { seedOwnedRepository } from './repository.js';
 import type { EvidenceStore } from '../evidence.js';
 import { fixtureOwnerIdentity } from '../authority.js';
 import { z } from 'zod';
-import type { OwnedRoot } from '../ownership.js';
+import type { OwnedRoot,OwnedFixture } from '../ownership.js';
+import { appendCreatedWorkspaces,validateOwnedWorkspaceRoster } from '../workspaces.js';
 
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -54,6 +55,7 @@ export class HostFixtureDriver implements FixtureDriver {
   private workspaceRecords?:HostWorkspaceRecords;
   private workspaceOwner?:Readonly<FixtureAuthorityOwner>;
   private workspaceEvidence?:EvidenceStore;
+  private workspaceFixture?:OwnedFixture;
   private runtimeRemoved=false;
   private readonly activeOperations = new Set<string>();
   private async withServiceOperation<T>(id:string,operation:()=>Promise<T>):Promise<T>{
@@ -106,6 +108,11 @@ export class HostFixtureDriver implements FixtureDriver {
     const roster=await this.workspaceRecords!.roster(owner,store,signal);
     this.workspaceOwner=Object.freeze(fixtureOwnerIdentity(owner));this.workspaceEvidence=store;return roster;
   }
+  bindOwnedFixture(fixture:OwnedFixture,store:EvidenceStore){
+    check(this.workspaceOwner&&store===this.workspaceEvidence&&fixture.leaseId===this.leaseId&&
+      JSON.stringify(fixtureOwnerIdentity(fixture))===JSON.stringify(this.workspaceOwner)&&!this.workspaceFixture);
+    validateOwnedWorkspaceRoster(fixture);this.workspaceFixture=fixture;
+  }
   async createOwnedWorkspaceFixture(fixtureId:'slack-clone'|'legacy-e2e-repo'|'agent-api-source-repo',workspaceId:string,name:string,signal:AbortSignal){
     signal.throwIfAborted();check(this.workspaceOwner&&this.workspaceEvidence&&this.workspaceRecords,'unsupported-capability');
     // Native source setups have distinct main/README/multiple-repo contracts;
@@ -114,13 +121,16 @@ export class HostFixtureDriver implements FixtureDriver {
     check(/^[a-z][a-z0-9-]{0,63}$/.test(name)&&workspaceId===name.toUpperCase()&&!this.workspaceRecords!.has(workspaceId));
     return this.withServiceOperation('workspace-fixture',async()=>{
       check(!this.workspaceRecords!.has(workspaceId));const before=await this.workspaceStoreIdentity(signal);
-      const sourceRepo=path.join(this.root,'runtime',`source-${this.uuid()}`);
+      const sourceParent=path.join(this.root,'runtime',`repositories-${this.uuid()}`);await this.files.mkdir(sourceParent,{mode:0o700});
+      const sourceRepo=path.join(sourceParent,fixtureId==='slack-clone'?'slack-clone':'agent-repo');
       await seedOwnedRepository(fixtureId==='slack-clone'?'slack-clone':'empty-legacy',{
         runtimeRoot:path.join(this.root,'runtime'),destination:sourceRepo,source:this.config.loom,
         gitBinary:this.config.gitBinary,toolPath:this.config.toolPath},this.processes,signal,this.files);
       const created=await this.requestOwnedHttp('api','POST','/api/workspaces',{name,type:'empty',repos:[sourceRepo]},signal);
       await this.workspaceRecords!.captureCreated(workspaceId,sourceRepo,created,before,signal);
-      return this.workspaceRecords!.creationRecord(this.workspaceOwner!,workspaceId,this.workspaceEvidence!,signal);
+      const record=await this.workspaceRecords!.creationRecord(this.workspaceOwner!,workspaceId,this.workspaceEvidence!,signal);
+      if(this.workspaceFixture)await appendCreatedWorkspaces(this.workspaceFixture,[record],signal,this.workspaceEvidence!);
+      return record;
     });
   }
   async readWorkspaceLegacyAgent(owner:FixtureAuthorityOwner,workspaceId:string,name:string,signal:AbortSignal){
@@ -131,14 +141,14 @@ export class HostFixtureDriver implements FixtureDriver {
   async resolveLegacyWorktree(workspaceId:string,agentName:string,signal:AbortSignal):Promise<{complete:true;workspaceId:string;agentName:string;root:OwnedRoot;branch:string;commonDir:string}>{
     check(this.workspaceOwner&&this.workspaceRecords,'unsupported-capability');
     const actor=await this.readWorkspaceLegacyAgent(this.workspaceOwner!,workspaceId,agentName,signal);
-    const workspace=await this.workspaceRecords!.workspace(workspaceId,signal);
+    await this.workspaceRecords!.workspace(workspaceId,signal);
     const completion=(await this.launchOwnedCli(['workspace','ops','diagnose',workspaceId,'--json'],{},'',true,signal)).completion;
     check(completion.complete&&completion.exitCode===0,'observation-failed');
     const status=z.object({ok:z.boolean(),workspace:z.object({key:z.string()}).passthrough(),agents:z.array(z.object({
       name:z.string(),worktree_path:z.string().optional(),worktree_ready:z.boolean()}).passthrough()).max(1000)}).passthrough().parse(JSON.parse(completion.stdout));
     check(status.workspace.key===workspaceId);
     const matches=status.agents.filter(agent=>agent.name===agentName);check(matches.length===1&&matches[0]!.worktree_ready&&matches[0]!.worktree_path);
-    const worktree=matches[0]!.worktree_path!,commonDir=await this.ownedCommonDir(worktree,signal);check(commonDir===workspace.commonDir);
+    const worktree=matches[0]!.worktree_path!,commonDir=await this.ownedCommonDir(worktree,signal);check(commonDir===actor.commonDir);
     const before=await this.files.lstat(worktree);
     const branch=(await this.processes.run({executable:this.config.gitBinary,argv:['symbolic-ref','--quiet','--short','HEAD'],cwd:worktree,
       env:{PATH:this.config.toolPath,HOME:path.join(this.root,'runtime','home'),GIT_CONFIG_NOSYSTEM:'1'}},signal)).trim();
