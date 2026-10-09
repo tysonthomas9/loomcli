@@ -14,6 +14,7 @@ import { FixtureLifecycle, FixtureError, type FixtureDriver, type FixturePlan, t
 import { HostFixtureDriver, readHttp, type HostConfig } from './host.js';
 import { ComposeFixtureDriver, type ProductionConfig } from './production.js';
 import { ContainerReadRequest } from './container-read.js';
+import { bindRenderer } from './renderer.js';
 import { createEvidenceStore, putEvidenceStore, evidenceKey, type EvidenceStore } from '../evidence.js';
 
 // Operation-specific schemas are owned here. General envelopes, artifact refs,
@@ -21,7 +22,7 @@ import { createEvidenceStore, putEvidenceStore, evidenceKey, type EvidenceStore 
 const Revision = z.object({ repository: Id, commit: z.string().regex(/^[a-f0-9]{40}$/), tree: Id,
   sourceManifestSha256: Digest, buildManifestSha256: Digest }).strict();
 const Profiles = z.enum(['agents-real-opencode', 'agents-emulator', 'legacy-deterministic',
-  'legacy-real-codex', 'legacy-real-claude', 'legacy-real-cursor', 'legacy-real-opencode']);
+  'legacy-real-codex', 'legacy-real-claude', 'legacy-real-cursor', 'legacy-real-opencode', 'legacy-real-codex-podman']);
 export const AcquireInput = z.object({ runId: Id, profile: Profiles, loomRevision: Revision, fleetRevision: Revision,
   model: Id, maxCases: z.number().int().positive(), selectionSha256: Digest }).strict();
 export const LeaseInput = z.object({ leaseId: Id }).strict();
@@ -49,6 +50,7 @@ export interface FixtureProviderOptions {
     evidenceClass: EvidenceClass; roots: OwnedFixture['roots']; secrets: readonly string[];
     readApi: ReadTransport; readFiles: ReadTransport; resolveAgent: OwnedFixture['resolveAgent'];
     evidenceStore: EvidenceStore;
+    rendererTarget?: OwnedFixture['rendererTarget'];
   }>;
   evidenceAfterFailure(driver: FixtureDriver): Promise<EvidenceStore>;
 }
@@ -178,12 +180,12 @@ function containerNative(driver: ComposeFixtureDriver, pinnedExecutable: string)
 export function productionFixtureOptions(implementation: ImplementationPin, implementationSha256: string,
   plans: readonly FixturePlan[], compose: ProductionConfig, host: HostConfig): FixtureProviderOptions {
   return { implementation, implementationSha256, plans,
-    driver: profile => profile.startsWith('agents-') ? new ComposeFixtureDriver(compose) : new HostFixtureDriver(host),
+    driver: profile => profile.startsWith('agents-') || profile === 'legacy-real-codex-podman' ? new ComposeFixtureDriver(compose) : new HostFixtureDriver(host),
     async evidenceAfterFailure(driver) {
       requireFact(driver instanceof ComposeFixtureDriver || driver instanceof HostFixtureDriver, 'ownership-mismatch', 'Fixture driver is not owned');
       return createEvidenceStore(path.join(driver.runtimeRoot, 'evidence'));
     },
-    async bind(driver, acquired, input) {
+    async bind(driver, acquired, input, context) {
       const isCompose = driver instanceof ComposeFixtureDriver;
       requireFact(isCompose || driver instanceof HostFixtureDriver, 'ownership-mismatch', 'Fixture transport is not a production driver');
       const runtimeRoot = driver.runtimeRoot;
@@ -191,10 +193,10 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
       const roots: OwnedFixture['roots'] = new Map([['runtime', { path: runtimeRoot, device: stat.dev, inode: stat.ino }]]);
       let resolveAgent: OwnedFixture['resolveAgent'];
       if (isCompose) {
-        const pinnedExecutable = input.profile === 'agents-emulator' ? '/opt/fixture/loom-harness-emu' : '/usr/local/bin/opencode';
+        const pinnedExecutable = input.profile === 'agents-emulator' ? '/opt/fixture/loom-harness-emu' : input.profile === 'legacy-real-codex-podman' ? '/usr/local/bin/codex' : '/usr/local/bin/opencode';
         const native = containerNative(driver, pinnedExecutable);
         const read: ContainerObservationRead = (request, signal) => driver.nativeRead(request, signal);
-        const managed = ContainerRootIdentity.parse(await read({ operation: 'filesystem-root', root: { kind: 'managed-repo' } }, new AbortController().signal));
+        const managed = ContainerRootIdentity.parse(await read({ operation: 'filesystem-root', root: { kind: 'managed-repo' } }, context.signal));
         roots.set('managed-repo', { ...managed, remoteObserve: containerFilesystemObserver(read, { kind: 'managed-repo' }, managed) });
         resolveAgent = async (agentId, signal): Promise<OwnedAgent> => {
           const row = await native.agent(agentId);
@@ -222,7 +224,8 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
           return { row, commonDir, native };
         };
       }
-      return { evidenceClass: input.profile.includes('real') ? 'real-native' : 'deterministic', roots, secrets: [],
+      const rendererTarget=await bindRenderer(isCompose?compose.loom:host.loom,acquired.lease.id,await driver.rendererRuntimeTarget(context.signal),path.join(runtimeRoot,'evidence'),roots);
+      return { evidenceClass: input.profile.includes('real') ? 'real-native' : 'deterministic', roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget,
         evidenceStore: await createEvidenceStore(path.join(runtimeRoot, 'evidence')),
         readApi: fixedRead(acquired.apiOrigin), readFiles: fixedRead(acquired.filesOrigin), resolveAgent };
     },

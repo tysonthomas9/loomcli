@@ -5,6 +5,8 @@ import path from 'node:path';
 import { FixtureError, type Artifact, type FixtureDriver, type FixturePlan, type Inventory, type Resource } from './lifecycle.js';
 import { ComposeFixtureDriver, type ProductionConfig } from './production.js';
 import { LaunchNotStarted, nodeProcesses, reservePort, type PortReservation, type HostProcesses, type OwnedProcess, type HostCommand, type CliCompletion } from './process.js';
+import { initializeCodex, type CodexProtocolProbe } from './codex-probe.js';
+import { prepareRenderer, type PreparedRenderer } from './renderer.js';
 
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -22,7 +24,7 @@ export const readHttp: Http = async (origin, method, relative, body, signal) => 
   const response = await fetch(new URL(relative, origin), { method, signal, redirect: 'error',
     ...(method === 'POST' || method === 'PATCH' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
   const text = await response.text(); check(Buffer.byteLength(text) <= 4 * 1024 * 1024, 'observation-failed');
-  return { status: response.status, body: text ? JSON.parse(text) : null };
+  return { status: response.status, body: relative === '/readyz' ? text : text ? JSON.parse(text) : null };
 };
 
 export class HostFixtureDriver implements FixtureDriver {
@@ -40,15 +42,29 @@ export class HostFixtureDriver implements FixtureDriver {
   private lock?: { path: string; contents: string };
   private backend = '';
   private plan?: FixturePlan;
+  private renderer?: PreparedRenderer;
   private readonly config: HostConfig;
   constructor(config: HostConfig, private readonly processes: HostProcesses = nodeProcesses,
     private readonly files: typeof fs = fs, private readonly http: Http = readHttp,
-    private readonly uuid: () => string = randomUUID, private readonly reserve: () => Promise<PortReservation> = reservePort) { this.config = structuredClone(config); }
+    private readonly uuid: () => string = randomUUID, private readonly reserve: () => Promise<PortReservation> = reservePort,
+    private readonly codexProtocol: CodexProtocolProbe = initializeCodex) { this.config = structuredClone(config); }
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return path.join(this.root, 'runtime', 'e2e-workspace'); }
   get processesById(): ReadonlyMap<string, OwnedProcess> { return this.handles; }
   get configurationRoot() { return path.join(this.workspaceRoot, '.loom-config'); }
   get cliRegistration() { return { binary: this.config.loomBinary, cwd: this.workspaceRoot, env: this.env() }; }
+  async rendererRuntimeTarget(signal:AbortSignal) {
+    const target=this.handles.get('frontend');check(target?.state()==='running'&&this.renderer,'identity-mismatch');
+    await this.inspectOwnedProcess('frontend',target!.generation,signal);
+    return {targetId:'frontend',generation:target!.generation,buildRoot:this.renderer!.buildRoot};
+  }
+  async fakeModelOrigin(signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted(); check(this.profile === 'legacy-deterministic', 'unsupported-capability');
+    const handle = this.handles.get('fake-model');
+    check(handle && handle.pid > 0 && handle.state() === 'running', 'ownership-mismatch');
+    await this.inspectOwnedProcess('fake-model', handle!.generation, signal);
+    return `http://127.0.0.1:${this.ports[2]}`;
+  }
   enrollCleanup(cleanup: () => Promise<void>) { check(this.record); this.cleanups.push(cleanup); }
   private async drainCleanups() {
     while (this.cleanups.length) { await this.cleanups[this.cleanups.length - 1]!(); this.cleanups.pop(); }
@@ -113,7 +129,7 @@ export class HostFixtureDriver implements FixtureDriver {
       LOOM_CONFIG_DIR: configRoot, LOOM_DISABLE_H2C: '1', LOOM_ISSUE_BACKEND: 'fleetdb', LOOM_FLEET_DB_ACTOR: 'loom-e2e',
       FLEET_DB_BIN: c.fleetBinary, FLEET_RATE_LIMIT_ENABLED: 'false', FLEET_REDIS_POOL_SIZE: '200', FLEET_REDIS_MIN_IDLE_CONNS: '10',
       LOOM_SDK_ROOT: path.join(c.loom.source.root, 'sdk'), LOOM_LEAD_CONTROLLED: '1',
-      LOOM_FRONTEND_DIR: path.join(c.loom.source.root, 'internal', 'webui', 'frontend', 'dist'),
+      LOOM_FRONTEND_DIR: this.renderer!.buildRoot,
       LOOM_MAX_BUDGET_USD: c.maxBudgetUsd, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false',
       GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
       GIT_CONFIG_KEY_1: 'protocol.allow', GIT_CONFIG_VALUE_1: 'never',
@@ -143,6 +159,7 @@ export class HostFixtureDriver implements FixtureDriver {
       check(await this.files.realpath(directory) === directory && (await this.files.lstat(directory)).isDirectory());
     }
     check(await this.identity(plan), 'source-mismatch');
+    this.renderer = await prepareRenderer(this.config.loom);
     for (const binary of [this.config.loomBinary, this.config.fleetBinary, this.config.nodeBinary, this.config.gitBinary]) {
       check(path.isAbsolute(binary) && await this.files.realpath(binary) === binary && (await this.files.lstat(binary)).isFile(), 'source-mismatch');
       await this.files.access(binary, constants.X_OK);
@@ -227,6 +244,21 @@ export class HostFixtureDriver implements FixtureDriver {
   }
   async provision(_plan: FixturePlan, record: (resource: Resource) => void, signal: AbortSignal) {
     this.record = record;
+    if (this.profile === 'legacy-real-codex') {
+      const reservation = await this.reserve(); this.sockets.push(reservation);
+      await reservation.release(); this.sockets.pop();
+      const endpoint = `ws://127.0.0.1:${reservation.port}`;
+      const bounded = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
+      await this.start('codex-preflight', { executable: this.config.realBinaries.codex!.executable,
+        argv: ['app-server', '--listen', endpoint], cwd: path.join(this.root, 'runtime', 'home'), env: this.env() },
+      'readyz:', record, bounded);
+      const probe = this.handles.get('codex-preflight')!;
+      try {
+        check(probe.state() === 'running' && (await this.http(`http://127.0.0.1:${reservation.port}`, 'GET', '/readyz', null, bounded)).status === 200, 'observation-failed');
+        await this.codexProtocol(endpoint, bounded);
+      } finally { await probe.stop(); }
+      check(probe.state() === 'exited', 'ownership-mismatch');
+    }
     await this.seed(this.workspaceRoot, signal);
     const second = path.join(this.root, 'runtime', 'e2e-workspace-2'); await this.seed(second, signal);
     if (this.profile === 'legacy-deterministic') {
@@ -258,7 +290,7 @@ export class HostFixtureDriver implements FixtureDriver {
     check(workspaces.status === 200 && data?.id === 'E2E-WS' && data.repos.some(repo => repo.path === this.workspaceRoot), 'identity-mismatch');
     const frontend = path.join(this.config.loom.source.root, 'internal', 'webui', 'frontend');
     await this.start('frontend', { executable: this.config.nodeBinary,
-      argv: [path.join(frontend, 'node_modules', 'vite', 'bin', 'vite.js'), 'preview', '--port', String(this.ports[1]), '--strictPort', '--host', '127.0.0.1'],
+      argv: [path.join(frontend, 'node_modules', 'vite', 'bin', 'vite.js'), 'preview', '--outDir', this.renderer!.buildRoot, '--port', String(this.ports[1]), '--strictPort', '--host', '127.0.0.1'],
       cwd: frontend, env: { PATH: this.config.toolPath, HOME: path.join(this.root, 'runtime', 'home'), E2E_API_URL: apiOrigin } },
     `http://127.0.0.1:${this.ports[1]}`, record, signal);
     check((await this.http(filesOrigin, 'GET', '/api/config', null, signal)).status === 200, 'observation-failed');
