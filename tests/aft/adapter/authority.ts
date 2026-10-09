@@ -3,7 +3,7 @@ import { CAPABILITY_EFFECTS, EVIDENCE_CLASSES, type CapabilityEffect } from '@ty
 import { requireFact } from './protocol.js';
 import type { OwnedFixture } from './ownership.js';
 
-export const LoomAuthorizedOperation = z.enum(['loom.agent.bind','loom.native.registration','loom.native.observe','loom.cli.role','loom.cli.usage','loom.cli.task',
+export const LoomAuthorizedOperation = z.enum(['loom.agent.bind','loom.agent.archive','loom.native.registration','loom.native.observe','loom.cli.role','loom.cli.usage','loom.cli.task',
   'loom.runtime.stimulate','loom.runtime.detachTerminal','loom.fixture.observeWorkers','loom.fixture.observeWorkerState',
   'loom.fixture.observeComposeServe','loom.runtime.restartComposeServe','loom.fixture.seedWorktree','loom.fixture.configure']);
 export type LoomAuthorizedOperation = z.infer<typeof LoomAuthorizedOperation>;

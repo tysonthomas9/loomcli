@@ -19,7 +19,7 @@ export function beginNativeOperation(context: CapabilityContext, leaseId: string
  * contracts. Required effects come from their code-owned canonical maps; this
  * function issues no grant and changes no unrelated operation descriptor. */
 export function beginFixtureOperation(context:CapabilityContext,leaseId:string,
-  operation:NativeAuthorizedOperation|'loom.fixture.observeWorkerState'|'loom.fixture.observeComposeServe'|'loom.runtime.restartComposeServe',
+  operation:NativeAuthorizedOperation|'loom.agent.archive'|'loom.fixture.observeWorkerState'|'loom.fixture.observeComposeServe'|'loom.runtime.restartComposeServe',
   effects:readonly CapabilityEffect[],maximumBytes:4_000_000|4194304=4194304) {
   const fixture = getFixtureAuthority(context, leaseId);
   const authority = fixture.operationAuthority;
