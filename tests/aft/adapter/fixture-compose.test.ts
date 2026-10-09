@@ -78,6 +78,27 @@ test('missing external provider permission denies before fixture verification, p
   const result=await h.restart({leaseId:h.fixture.leaseId,targetReceipt:capture.targetReceipt});assert.equal(result.availability,'unsupported');
   assert.deepEqual(h.counts(),before);
 });
+for(const missing of ['write-fixture','stop-owned-process'] as const) test(`Compose observation missing only ${missing} denies before getter, verification and artifacts`,async t=>{
+  const h=await setup(t),complete=['read-filesystem','start-owned-process','write-fixture','stop-owned-process'] as const;
+  h.fixture.operationAuthority=createFixtureOperationAuthority(h.fixture,{[FixtureComposeServeId]:{
+    evidenceClass:'deterministic',effects:complete.filter(effect=>effect!==missing)}});
+  const producer=h.fixture.observeComposeServe;let getters=0,writes=0;
+  Object.defineProperty(h.fixture,'observeComposeServe',{get(){getters++;return producer;}});
+  const retain=h.store.retain;h.store.retain=async bytes=>{writes++;return retain.call(h.store,bytes);};
+  assert.equal((await h.observe()).availability,'unsupported');assert.equal(getters,0);assert.equal(writes,0);
+  assert.deepEqual(h.counts(),{verifies:0,reads:0,restarts:0,mutations:0});
+});
+test('Compose restart missing only write-fixture denies before getter, verification and artifacts',async t=>{
+  const h=await setup(t),capture=await h.capture(),before=h.counts();
+  const complete=['read-api','read-filesystem','start-owned-process','stop-owned-process','restart-owned-service','external-provider','write-fixture'] as const;
+  h.fixture.operationAuthority=createFixtureOperationAuthority(h.fixture,{[RestartComposeServeId]:{
+    evidenceClass:'deterministic',effects:complete.filter(effect=>effect!=='write-fixture')}});
+  const producer=h.fixture.restartComposeServe;let getters=0,writes=0;
+  Object.defineProperty(h.fixture,'restartComposeServe',{get(){getters++;return producer;}});
+  const retain=h.store.retain;h.store.retain=async bytes=>{writes++;return retain.call(h.store,bytes);};
+  assert.equal((await h.restart({leaseId:h.fixture.leaseId,targetReceipt:capture.targetReceipt})).availability,'unsupported');
+  assert.equal(getters,0);assert.equal(writes,0);assert.deepEqual(h.counts(),before);
+});
 test('unknown receipts, substituted metadata and foreign lease cannot reach the restart producer',async t=>{
   const h=await setup(t),capture=await h.capture();
   for(const request of [

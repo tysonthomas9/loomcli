@@ -10,9 +10,12 @@ import { getFixtureEvidenceStore,readFixtureArtifact } from './evidence.js';
 
 export const FixtureComposeServeId='loom.fixture.observeComposeServe' as const;
 export const RestartComposeServeId='loom.runtime.restartComposeServe' as const;
-export const FixtureComposeServeEffects=Object.freeze(['read-filesystem','start-owned-process'] as const satisfies readonly CapabilityEffect[]);
+// Verification writes lifecycle artifacts; fixed inspection helpers may be
+// terminated on overflow. Restart additionally owns its transition artifacts.
+export const FixtureComposeServeEffects=Object.freeze(['read-filesystem','start-owned-process',
+  'write-fixture','stop-owned-process'] as const satisfies readonly CapabilityEffect[]);
 export const RestartComposeServeEffects=Object.freeze(['read-api','read-filesystem','start-owned-process',
-  'stop-owned-process','restart-owned-service','external-provider'] as const satisfies readonly CapabilityEffect[]);
+  'stop-owned-process','restart-owned-service','external-provider','write-fixture'] as const satisfies readonly CapabilityEffect[]);
 export const ComposeContainerIdentity=z.object({containerId:Id,initPid:z.number().int().positive(),startedAt:Id,generation:Id}).strict();
 export const ComposeProcessInventory=z.object({text:z.string().max(4*1024*1024),complete:z.literal(true),redaction:RedactionFacts}).strict();
 export const ComposeServeTarget=z.object({fixtureLeaseId:Id,kind:z.literal('compose-container'),service:z.literal('loom-local'),

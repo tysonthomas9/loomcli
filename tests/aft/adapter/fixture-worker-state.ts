@@ -9,9 +9,10 @@ import { getFixtureAuthority } from './ownership.js';
 import { getFixtureOperationAuthority, fixtureOwnerIdentity } from './authority.js';
 
 export const FixtureWorkerStateId = 'loom.fixture.observeWorkerState' as const;
-// The fixed API, canonical actor/source and kernel inspection ports may launch
-// owned Git/kernel helpers. This observer sends no signal or API mutation.
-export const FixtureWorkerStateEffects = Object.freeze(['read-api','read-filesystem','start-owned-process'] as const satisfies readonly CapabilityEffect[]);
+// Verification retains lifecycle artifacts and may terminate an owned helper
+// on overflow. The producer reads API/actor/kernel facts without replaying stop.
+export const FixtureWorkerStateEffects = Object.freeze(['read-api','read-filesystem','start-owned-process',
+  'write-fixture','stop-owned-process'] as const satisfies readonly CapabilityEffect[]);
 const ParentIdentity = z.object({id:Id,pid:z.number().int().positive(),generation:Id}).strict();
 /** The owning producer reads this association from its retained launched handle
  * and captured kernel registration. Neither DATA nor schema parsing enrolls a
