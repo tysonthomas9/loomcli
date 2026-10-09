@@ -112,5 +112,47 @@ class GracefulTerminationTests(unittest.TestCase):
         self.assertEqual(owned.queue.reads, 0)
 
 
+class ExitObservationTests(unittest.TestCase):
+    def test_linux_awaits_retained_pidfd_without_sending_signal(self):
+        owned, calls = registered([], 0)
+        owned.fd = 42
+        with patch.object(kernel, 'identity', return_value=owned.before), \
+                patch.object(kernel.signal, 'pidfd_send_signal', create=True) as send, \
+                patch.object(kernel.select, 'select', side_effect=[([], [], []), ([42], [], [])]) as select:
+            self.assertEqual(owned.await_exit()['state'], 'exited')
+            self.assertEqual(select.call_args_list[-1].args, ([42], [], [], 15))
+            send.assert_not_called()
+        self.assertEqual(calls, [])
+
+    def test_darwin_exit_consumed_once_survives_retry_without_identity_lookup(self):
+        owned, calls = registered([[], ['exit'], []], 0)
+        with patch.object(kernel, 'identity', return_value=owned.before) as identity:
+            self.assertEqual(owned.await_exit()['state'], 'exited')
+            identity.reset_mock()
+            self.assertEqual(owned.await_exit()['state'], 'exited')
+            identity.assert_not_called()
+        self.assertEqual(calls, [])
+        self.assertEqual(owned.queue.reads, 2)
+
+    def test_incomplete_wait_retains_handle_for_later_exit_without_signals(self):
+        owned, calls = registered([[], [], [], ['exit']], 0)
+        with patch.object(kernel, 'identity', return_value=owned.before):
+            with self.assertRaisesRegex(RuntimeError, 'exit observation incomplete'):
+                owned.await_exit()
+            self.assertFalse(owned.exited)
+            self.assertEqual(owned.task.value, 7)
+            self.assertEqual(owned.await_exit()['state'], 'exited')
+        self.assertEqual(calls, [])
+        self.assertEqual(owned.queue.reads, 4)
+
+    def test_replaced_identity_refuses_before_wait(self):
+        owned, calls = registered([[]], 0)
+        with patch.object(kernel, 'identity', return_value={**owned.before, 'generation': 'foreign'}):
+            with self.assertRaisesRegex(RuntimeError, 'identity changed'):
+                owned.await_exit()
+        self.assertEqual(calls, [])
+        self.assertEqual(owned.queue.reads, 1)
+
+
 if __name__ == '__main__':
     unittest.main()
