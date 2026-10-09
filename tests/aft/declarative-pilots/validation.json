@@ -916,16 +916,19 @@
         "credit": "individual schema only"
       },
       "latestFullLoaderAttempt": {
-        "engine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
-        "adapter": "477a2c09080739ea5825cfb1c22a916866fc6fc3",
-        "rawPreflightAndSuiteSchemaPassed": 5,
-        "fullAdmissionPassed": 0,
-        "boundedTimeouts": 5,
-        "guardMs": 60000
+        "engine": "58470a6df949158d72aa9500fe515ce3c5721be5",
+        "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+        "scope": "isolated source-built admission-only; not maintained consumer pin adoption",
+        "fullAdmissionPassed": 5,
+        "boundedTimeouts": 0,
+        "effects": 0,
+        "runtimeStarted": 0,
+        "selectionBasis": "NEW e34d public selection/per-version pin+env; historical selection not recovered",
+        "receipt": "accepted584RawAdmissionDiagnostic"
       },
       "approvedCoherentConsumer": "f3776276f88c31c5a89d6787ae824012ebb0be02",
       "f377PilotChecksObtained": true,
-      "f377Note": "Exact coherentf377/c71 source-shaped Stop loader profile and one-source-bind minimal reproduction obtained; profile stopped at bounded diagnostic guard. No completed full pilot admission, all-five replay, runtime or preservation claim. See rawLoaderTimeoutDiagnosis; prior477 five-file raw guard receipts remain separate."
+      "f377Note": "Historical c71/f377 source-shaped timeout profile retained separately. New parent-approved584 source-built isolated f377 raw admission completes all5 unchanged files with no effects/runtime. No maintained root pin or preservation claim."
     },
     "sourceMapping": {
       "originalSteps": 207,
@@ -941,14 +944,14 @@
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
-      "all5 full raw admission has no outcome before guarded timeout",
+      "all5 raw admission now completed on approved584 isolated source-built f377; maintained consumer adoption/public runtime chains remain unverified",
       "Files repeated identity predicates and exact helper branch denominator uncovered",
       "Stop whole30s chain bound, tool trim/failed normalization, Respond no-request history, recovery correlation and native desc-assistant/first-truthy/full200-prefix uncovered",
       "child synchronous pre-Send/reactivation/native/source predicates require final reviewed ledger and provisioning",
       "visual exact RAF/phase/source/delta/completion/Markdown/2word/300ms/12tick/180000ms preservation and receipt pipeline incomplete",
       "SSE full raw replay/cursor/header/payload/foreign exclusion and native restart provisioning incomplete"
     ],
-    "consumerWorkRemaining": "Diagnose full loader noncompletion; consume corrected coherentf377 only with actual results; author reviewed canonical retained-ledger/receipt interfaces when published; narrow each selected helper branch and map all reachable predicates; preserve original actors/checkpoints/deadlines and cleanup. Runtime and bulk migration stay parent-gated.",
+    "consumerWorkRemaining": "Consume exact reviewed canonical geometry/output/core-motion/provisioning contracts when available, author every uncovered source predicate and exercise actual public runner with declared deterministic transports. All5 raw admission now passed in isolated584/f377; preservation, maintained root adoption,original inventory recovery and runtime/bulk migration remain separate gates.",
     "publicationPolicy": "Publish current source independently of journal/provider completion; no executable wrappers, expected-return stubs, original campaign changes or runtime claim."
   },
   "rawLoaderTimeoutDiagnosis": {
@@ -1981,5 +1984,275 @@
     "boundedEngineGeometryDesignAuthorized": true,
     "directPilotSchemaAuthorization": false,
     "mappingStatus": "Still uncovered pending exact canonical contract and authored raw-suite proof; engine owns separate leaf after output accounting."
+  },
+  "accepted584RawAdmissionDiagnostic": {
+    "at": "2026-10-09T12:27:48.347448+00:00",
+    "purpose": "Independent actual canonical full raw-suite admission on parent-approved584 in task-owned source-built f377 adapter; no maintained-consumer adoption or runtime/preservation claim.",
+    "parentApproval": {
+      "engineHead": "58470a6df949158d72aa9500fe515ce3c5721be5",
+      "engineTree": "271de29490d6a572d72b54546ede96bffd683e67",
+      "reviewReceiptPath": "/private/tmp/aft-engine-review-747947b4.aCMw7TwK/corrective-584-review-receipt.json",
+      "reviewReceiptSha256": "9e66d748c1066cf8b8233cd407cb1c8f0fcca54ebcf9037f225a2390c2083402",
+      "scope": "Deterministic engine journal/native/input/performance checkpoint accepted. Capacity/core motion/geometry/real runtime excluded."
+    },
+    "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+    "adapterSourceTree": "98e2c318356340667380fc8bcacf0bb7b72d8e98",
+    "taskOwnedDiagnosticRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai",
+    "sourceBuiltFreshDependencies": true,
+    "singleCanonicalEngineModule": true,
+    "installedEngineByteMatch": 114,
+    "actualAdapterManifestFileMatch": 2362,
+    "actualUniqueManifestBytes": 8887163,
+    "actualAdapterPinSha256": "24ae9f08d26aeb72298a3e69e852c3d438037458e39906f41ebe270f3d94d9a1",
+    "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+    "publicEnvFile": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/accepted-584-public-env.json",
+    "publicEnvFileSha256": "97aebfae9dc2f68ae4397e0ce747410235d1e946c9eca2966b4081711e2f340d",
+    "publicEnvSha256": "8829f4e8666f385a5a166d88c7da986004e13cde19a792c3ed8f6dce13a70c85",
+    "enginePackageSha256": "7c15fef4a8819d8bcee032719c794a8f1a4015fd7c80867829964a7999d5a0a7",
+    "engineSourceBuildReceiptSha256": "5f2ae19aec9bb8f756bedd445adc09ec5b3c7c74b3cc1a3b5f8fc1530bcc35a8",
+    "allFiveSummaryPath": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/all-five-admission-summary.json",
+    "allFiveSummarySha256": "135d047d2f6ca3fb6180deedc86d5d803366cf2d665d5b45d62bd06bbf1f7c2b",
+    "finalAuditPath": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/final-admission-audit.json",
+    "finalAuditSha256": "6610e5a17c4fee18a76b30940383aafe6add3530cec437c8d288f905cbf07fa2",
+    "records": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/bare-stop.test.admission.json",
+        "sha256": "3935c275789b6246d6e03e9aa09eb1892cb1dba244d283d040cedf9f06ccbec9",
+        "result": {
+          "purpose": "NEW selection e34d,accepted584 raw admission only; not historical inventory/env recovery or runtime",
+          "engineHead": "58470a6df949158d72aa9500fe515ce3c5721be5",
+          "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+          "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter",
+          "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+          "canonicalModuleResolutionVerified": true,
+          "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+          "envFileSha256": "97aebfae9dc2f68ae4397e0ce747410235d1e946c9eca2966b4081711e2f340d",
+          "envSha256": "8829f4e8666f385a5a166d88c7da986004e13cde19a792c3ed8f6dce13a70c85",
+          "pinSha256": "24ae9f08d26aeb72298a3e69e852c3d438037458e39906f41ebe270f3d94d9a1",
+          "manifestFiles": 2362,
+          "uniqueManifestBytes": 8887163,
+          "providers": 22,
+          "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "rawSha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1",
+          "rawBytes": 74576,
+          "verifyCalls": 131,
+          "verifyReads": 2362,
+          "verifyBytes": 8887163,
+          "verifyMs": 782.145669999999,
+          "elapsedMs": 952.3257079999998,
+          "effects": 0,
+          "runtimeStarted": 0,
+          "status": "ADMITTED canonical unchanged raw suite",
+          "guardMs": 60000,
+          "loadedSuites": 1,
+          "cases": [],
+          "rawUnchangedAfter": true
+        }
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/child-repeat.test.admission.json",
+        "sha256": "4f95d149b9b0f717cc53b3d5e0a5152da2bf2de2541234a0c89f9514b0b551fb",
+        "result": {
+          "purpose": "NEW selection e34d,accepted584 raw admission only; not historical inventory/env recovery or runtime",
+          "engineHead": "58470a6df949158d72aa9500fe515ce3c5721be5",
+          "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+          "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter",
+          "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+          "canonicalModuleResolutionVerified": true,
+          "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+          "envFileSha256": "97aebfae9dc2f68ae4397e0ce747410235d1e946c9eca2966b4081711e2f340d",
+          "envSha256": "8829f4e8666f385a5a166d88c7da986004e13cde19a792c3ed8f6dce13a70c85",
+          "pinSha256": "24ae9f08d26aeb72298a3e69e852c3d438037458e39906f41ebe270f3d94d9a1",
+          "manifestFiles": 2362,
+          "uniqueManifestBytes": 8887163,
+          "providers": 22,
+          "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml",
+          "rawSha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112",
+          "rawBytes": 33926,
+          "verifyCalls": 111,
+          "verifyReads": 2362,
+          "verifyBytes": 8887163,
+          "verifyMs": 769.5973780000015,
+          "elapsedMs": 830.0697089999999,
+          "effects": 0,
+          "runtimeStarted": 0,
+          "status": "ADMITTED canonical unchanged raw suite",
+          "guardMs": 60000,
+          "loadedSuites": 1,
+          "cases": [],
+          "rawUnchangedAfter": true
+        }
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/files-save-reload.test.admission.json",
+        "sha256": "7ac01cb5d673346afe2e5630f8676f472b1bd9e51d0cddd0b6047f5adeb06d2a",
+        "result": {
+          "purpose": "NEW selection e34d,accepted584 raw admission only; not historical inventory/env recovery or runtime",
+          "engineHead": "58470a6df949158d72aa9500fe515ce3c5721be5",
+          "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+          "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter",
+          "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+          "canonicalModuleResolutionVerified": true,
+          "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+          "envFileSha256": "97aebfae9dc2f68ae4397e0ce747410235d1e946c9eca2966b4081711e2f340d",
+          "envSha256": "8829f4e8666f385a5a166d88c7da986004e13cde19a792c3ed8f6dce13a70c85",
+          "pinSha256": "24ae9f08d26aeb72298a3e69e852c3d438037458e39906f41ebe270f3d94d9a1",
+          "manifestFiles": 2362,
+          "uniqueManifestBytes": 8887163,
+          "providers": 22,
+          "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "rawSha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954",
+          "rawBytes": 68285,
+          "verifyCalls": 239,
+          "verifyReads": 2362,
+          "verifyBytes": 8887163,
+          "verifyMs": 797.9143410000008,
+          "elapsedMs": 925.4260830000003,
+          "effects": 0,
+          "runtimeStarted": 0,
+          "status": "ADMITTED canonical unchanged raw suite",
+          "guardMs": 60000,
+          "loadedSuites": 1,
+          "cases": [],
+          "rawUnchangedAfter": true
+        }
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/sse-cursor.test.admission.json",
+        "sha256": "2730b1bac4972425e6b5dbb63ab9da3e77cd68eeb1cb3eba61021a6d9b00d9f3",
+        "result": {
+          "purpose": "NEW selection e34d,accepted584 raw admission only; not historical inventory/env recovery or runtime",
+          "engineHead": "58470a6df949158d72aa9500fe515ce3c5721be5",
+          "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+          "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter",
+          "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+          "canonicalModuleResolutionVerified": true,
+          "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+          "envFileSha256": "97aebfae9dc2f68ae4397e0ce747410235d1e946c9eca2966b4081711e2f340d",
+          "envSha256": "8829f4e8666f385a5a166d88c7da986004e13cde19a792c3ed8f6dce13a70c85",
+          "pinSha256": "24ae9f08d26aeb72298a3e69e852c3d438037458e39906f41ebe270f3d94d9a1",
+          "manifestFiles": 2362,
+          "uniqueManifestBytes": 8887163,
+          "providers": 22,
+          "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/sse-cursor.test.yaml",
+          "rawSha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea",
+          "rawBytes": 35463,
+          "verifyCalls": 121,
+          "verifyReads": 2362,
+          "verifyBytes": 8887163,
+          "verifyMs": 771.7753339999999,
+          "elapsedMs": 836.4442080000001,
+          "effects": 0,
+          "runtimeStarted": 0,
+          "status": "ADMITTED canonical unchanged raw suite",
+          "guardMs": 60000,
+          "loadedSuites": 1,
+          "cases": [],
+          "rawUnchangedAfter": true
+        }
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/stream-render-clock.test.admission.json",
+        "sha256": "73a378e620932ceddd7b923cad37a2bf8632bb6e938cc9286781bf7ffcb670ed",
+        "result": {
+          "purpose": "NEW selection e34d,accepted584 raw admission only; not historical inventory/env recovery or runtime",
+          "engineHead": "58470a6df949158d72aa9500fe515ce3c5721be5",
+          "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+          "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter",
+          "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+          "canonicalModuleResolutionVerified": true,
+          "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+          "envFileSha256": "97aebfae9dc2f68ae4397e0ce747410235d1e946c9eca2966b4081711e2f340d",
+          "envSha256": "8829f4e8666f385a5a166d88c7da986004e13cde19a792c3ed8f6dce13a70c85",
+          "pinSha256": "24ae9f08d26aeb72298a3e69e852c3d438037458e39906f41ebe270f3d94d9a1",
+          "manifestFiles": 2362,
+          "uniqueManifestBytes": 8887163,
+          "providers": 22,
+          "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+          "rawSha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d",
+          "rawBytes": 29753,
+          "verifyCalls": 107,
+          "verifyReads": 2362,
+          "verifyBytes": 8887163,
+          "verifyMs": 775.8757490000012,
+          "elapsedMs": 825.0724170000001,
+          "effects": 0,
+          "runtimeStarted": 0,
+          "status": "ADMITTED canonical unchanged raw suite",
+          "guardMs": 60000,
+          "loadedSuites": 1,
+          "cases": [],
+          "rawUnchangedAfter": true
+        }
+      }
+    ],
+    "artifactHashes": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/provisioning.json",
+        "bytes": 1026,
+        "sha256": "3108af5a60ae016055104267c91aa94aed1ef6c22adfd010d74a794ec3f7c004"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/installed-engine-receipt.json",
+        "bytes": 15575,
+        "sha256": "4f9f7780716a0f527304e49153e389b3bff87e1c9a1c0c5abac70b6326792d3b"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/accepted-584-public-env.json",
+        "bytes": 439157,
+        "sha256": "97aebfae9dc2f68ae4397e0ce747410235d1e946c9eca2966b4081711e2f340d"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/raw-admission.mjs",
+        "bytes": 4174,
+        "sha256": "e16a8a4cc88650bbbe02c1418eefbb68c8143e3e0043ffc94df3288bba38554e"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/run-all.py",
+        "bytes": 1899,
+        "sha256": "3905dce2608b2df1bb1549f30214c94a9d905b82d772673380b70b947ac77db1"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/all-five-admission-summary.json",
+        "bytes": 10034,
+        "sha256": "135d047d2f6ca3fb6180deedc86d5d803366cf2d665d5b45d62bd06bbf1f7c2b"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/install.log",
+        "bytes": 163,
+        "sha256": "b1dcb44806d425dec75916fbbe021dcef9c55bd812b690b223ac9d8bd6137285"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/clean-install.log",
+        "bytes": 163,
+        "sha256": "b1dcb44806d425dec75916fbbe021dcef9c55bd812b690b223ac9d8bd6137285"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/projections-install.log",
+        "bytes": 28,
+        "sha256": "b7cd8ab6cfbce1378f7b9529d377e6943f053243d03771767832ec1e76209b7f"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/build.log",
+        "bytes": 51,
+        "sha256": "b5644a9bcf54fb717ff2d7b31c12159c4da5d6424ddb28a18cc286f5199c7226"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/canonical-resolution-preflight-error.log",
+        "bytes": 923,
+        "sha256": "b270f88d1555f0eeb4c5f0afc10f346e91229adbe2025d2d8bce8609fa0f3fd7"
+      }
+    ],
+    "admitted": 5,
+    "rejected": 0,
+    "effects": 0,
+    "runtimeStarted": 0,
+    "guardMs": 60000,
+    "firstHarnessFailure": "CommonJS require.resolve on import-only package export failed before loader. Exact log retained; corrected only harness ESM import.meta.resolve with parent URL flag,actual engine module paths verified; no raw YAML/provider/source edits.",
+    "caseMetadataLimitation": "First harness records cases=[] because it inspected entry.tests instead of entry.suite.tests; this is NOT zero-case admission. Canonical runner returns linear wrapper/suite at154 and admits all tests at admission335 with no skip exclusion. Five hash-bound original draft skip flags independently retained; no case executed. Receipts unchanged, no loader rerun to repair metadata.",
+    "maintainedRootPinChanged": false,
+    "originalFrozenInventoryRecovered": false,
+    "historicalPublicEnvRecovered": false,
+    "newPreservationCredit": 0
   }
 }
