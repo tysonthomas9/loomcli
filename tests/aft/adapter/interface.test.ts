@@ -43,6 +43,23 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
   return { registry, context, fixture, invoke, evidenceStore, get reads() { return reads; }, get disposed() { return disposed; }, setPayload(value: Json) { payload = value; } };
 }
 const input = { agent: { fixtureLeaseId: 'lease', workspaceId: 'workspace', agentId: 'agt_owned' }, after: 0, pageSize: 2, maxPages: 2, maxRecords: 10, kinds: [] };
+test('canonical registry pins captured saved-event snapshot before reread and rejects later tail substitution', async t => {
+  const harness = await setup(t);
+  const capture = SavedEventsOutput.parse((await harness.invoke('loom.api.savedEvents',input)).data);
+  const routes:string[] = [];
+  harness.fixture.readApi = async route => { routes.push(route); return {status:200,body:{
+    events:[{agent_id:'agt_owned',seq:1,event_id:'event_1',kind:'item.completed',turn_id:'turn_1',
+      payload:{text:'independently observed value'},created_at:'2026-10-09T00:00:00Z'}],snapshot_seq:1,next:1,more:false}}; };
+  const reread = await harness.invoke('loom.api.savedEvents',{...input,snapshotSeq:capture.snapshotSeq});
+  assert.equal(reread.availability,'observed');
+  assert.match(routes[0]!,/snapshot=1/);
+  harness.fixture.readApi = async () => ({status:200,body:{events:[],snapshot_seq:2,next:0,more:false}});
+  const substituted = await harness.invoke('loom.api.savedEvents',{...input,snapshotSeq:capture.snapshotSeq});
+  assert.equal(substituted.availability,'error'); assert.equal(substituted.data,undefined);
+  harness.fixture.readApi = async () => ({status:200,body:{events:[],snapshot_seq:1,next:0,more:false}});
+  const missing = await harness.invoke('loom.api.savedEvents',{...input,snapshotSeq:capture.snapshotSeq});
+  assert.equal(missing.availability,'incomplete'); assert.equal(missing.data,undefined);
+});
 test('public registry validates before transport and returns redacted typed evidence', async t => {
   const harness = await setup(t);
   await assert.rejects(harness.invoke('loom.api.savedEvents', { ...input, command: 'unsafe' }));
