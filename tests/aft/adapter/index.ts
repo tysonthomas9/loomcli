@@ -21,6 +21,7 @@ export * from './native-host.js';
 export * from './synthetic-probe.js';
 export * from './projection.js';
 export * from './container-observations.js';
+export * from './renderer-target.js';
 export { createLegacyProviders } from './legacy/providers.js';
 export type { LegacyAccessFactory } from './legacy/providers.js';
 

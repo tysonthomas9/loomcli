@@ -3,6 +3,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { calculateImplementationPin, type ImplementationPin } from '@tysonthomas9/aft/capabilities';
 import { defineOperation } from './operation.js';
+import { measureFixtureProjection, RendererTargetIdentity } from './renderer-target.js';
 import { containedPath } from './filesystem.js';
 import { Digest, Id, requireFact, sha256 } from './protocol.js';
 import { projectMarkdown, validateProjectionIdentity, type ProjectionIdentity } from './projections/index.js';
@@ -17,23 +18,25 @@ const ProjectionIdentitySchema = z.object({ chatMarkdownSha256: Digest, longText
   messageCopySha256: Digest, cssSha256: Digest, lockSha256: Digest,
   dependencies: z.object({ react: Id, 'react-dom': Id, 'react-markdown': Id, 'remark-gfm': Id, 'rehype-sanitize': Id, esbuild: Id, jsdom: Id }).strict(),
 }).strict();
-const MotionInput = z.object({ mode: z.literal('motion'), answer: z.string().min(1).max(8000),
+const MotionInput = z.object({ mode: z.literal('motion'), leaseId: Id.optional(), answer: z.string().min(1).max(8000),
   frames: z.array(z.object({ text: z.string().max(128000), streaming: z.boolean() }).strict()).max(20000),
   arrivals: z.array(z.string().max(128000)).max(5000),
 }).strict();
 export const MarkdownInputSchema = z.discriminatedUnion('mode', [MotionInput,
-  z.object({ mode: z.literal('terminal-full'), answer: z.string().min(1).max(128000), frames: z.array(z.never()).max(0), arrivals: z.array(z.never()).max(0) }).strict(),
+  z.object({ mode: z.literal('terminal-full'), leaseId: Id.optional(), answer: z.string().min(1).max(128000), frames: z.array(z.never()).max(0), arrivals: z.array(z.never()).max(0) }).strict(),
 ]);
 const Count = z.number().int().nonnegative();
 const Frame = z.object({ minSourceUtf16: Count, maxSourceUtf16: Count, visibleWords: Count, visible: z.string(), content: z.string(), contentWords: Count }).strict();
 export const MarkdownOutputSchema = z.discriminatedUnion('mode', [
-  z.object({ mode: z.literal('motion'), version: z.literal(1), terminal: z.string(), terminalVisible: z.string(), terminalContent: z.string(),
+  z.object({ mode: z.literal('motion'), target: RendererTargetIdentity.nullable(), version: z.literal(1), terminal: z.string(), terminalVisible: z.string(), terminalContent: z.string(),
     frames: z.array(Frame), arrivals: z.array(z.object({ sourceUtf16: Count, visibleChanged: z.boolean(), contentChanged: z.boolean(),
       requiredMinSourceUtf16: Count, projectedUtf16: Count, projectedWords: Count }).strict()), sourceUtf16: Count, identity: ProjectionIdentitySchema }).strict(),
-  z.object({ mode: z.literal('terminal-full'), version: z.literal(1), sourceUtf16: Count, terminal: z.string(), chatMarkdownSha256: Digest, cssSha256: Digest }).strict(),
+  z.object({ mode: z.literal('terminal-full'), target: RendererTargetIdentity.nullable(), version: z.literal(1), sourceUtf16: Count, terminal: z.string(), chatMarkdownSha256: Digest, cssSha256: Digest }).strict(),
 ]);
 export interface MeasuredProjection {
   readonly identity: ProjectionIdentity;
+  readonly target?: z.infer<typeof RendererTargetIdentity>;
+  readonly fixtureLeaseId?: string;
   verify(): Promise<ProjectionIdentity>;
 }
 /** Called by owned code with source-built package roots, never with YAML paths.
@@ -107,20 +110,24 @@ export async function pinProjectionImplementation(adapterRoot: string, mode: 'so
   }
   return calculateImplementationPin(adapterRoot, files, 'projection.ts', 'createProjectionProvider');
 }
-export function createProjectionProvider(implementation: ImplementationPin & { sha256: string }, measured: MeasuredProjection) {
+export function createProjectionProvider(implementation: ImplementationPin & { sha256: string }, measured?: MeasuredProjection) {
   return defineOperation({ id: 'loom.markdown.project', implementation, implementationSha256: implementation.sha256,
     inputSchema: MarkdownInputSchema, outputSchema: MarkdownOutputSchema, effects: ['read-filesystem'], retry: 'read-only-until-deadline', cleanup: 'none',
     evidenceClasses: ['deterministic'],
     async run(input, context) {
       context.signal.throwIfAborted();
-      const identity = await measured.verify();
-      const result = projectMarkdown(input.mode === 'motion' ? { answer: input.answer, frames: input.frames, arrivals: input.arrivals } : input, { identity });
-      await measured.verify(); context.signal.throwIfAborted();
+      const observer = measured ?? await measureFixtureProjection(context, Id.parse(input.leaseId));
+      if (observer.fixtureLeaseId) requireFact(input.leaseId === observer.fixtureLeaseId, 'ownership-mismatch', 'Projection lease is foreign');
+      const identity = await observer.verify();
+      const result = projectMarkdown(input.mode === 'motion' ? { answer: input.answer, frames: input.frames, arrivals: input.arrivals } : { mode: 'terminal-full', answer: input.answer, frames: [], arrivals: [] }, { identity });
+      await observer.verify(); context.signal.throwIfAborted();
       if ('frames' in result) {
         requireFact(result.frames.every(frame => frame !== null), 'incomplete-pages', 'Markdown frame cannot be mapped to saved source');
-        return { value: MarkdownOutputSchema.parse({ ...result, mode: 'motion' }), evidenceClass: 'deterministic' };
+        return { value: MarkdownOutputSchema.parse({ ...result, mode: 'motion', target: observer.target ?? null }), evidenceClass: 'deterministic',
+          identity: observer.fixtureLeaseId ? { fixtureLeaseId: observer.fixtureLeaseId } : undefined };
       }
-      return { value: result, evidenceClass: 'deterministic' };
+      return { value: { ...result, target: observer.target ?? null }, evidenceClass: 'deterministic',
+        identity: observer.fixtureLeaseId ? { fixtureLeaseId: observer.fixtureLeaseId } : undefined };
     },
   });
 }
