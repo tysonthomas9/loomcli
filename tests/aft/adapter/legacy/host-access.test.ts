@@ -5,12 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin, getRegisteredResource } from '@tysonthomas9/aft/capabilities';
-import { createFixtureProviders } from '../fixture/providers.js';
+import { createFixtureProviders, productionFixtureOptions } from '../fixture/providers.js';
 import { HostFixtureDriver, type HostConfig, type Http } from '../fixture/host.js';
 import type { HostProcesses, HostCommand, OwnedProcess } from '../fixture/process.js';
 import { LaunchNotStarted } from '../fixture/process.js';
 import type { FixturePlan } from '../fixture/lifecycle.js';
-import { createEvidenceStore } from '../evidence.js';
+import { getFixtureEvidenceStore } from '../evidence.js';
 import { fixturesKey, type OwnedFixture } from '../ownership.js';
 import { createLegacyProviders } from './providers.js';
 import { productionLegacyAccess } from './host-access.js';
@@ -19,9 +19,10 @@ import { createFixtureOperationAuthority } from '../authority.js';
 import { LegacyOperationEffects } from './providers.js';
 import { testLegacyRoster } from './test-roster.js';
 import { materializeRenderer } from '../fixture/renderer-fixtures.test.js';
+import type { RegisteredProcessPort } from '../fixture/descendants.js';
 
 const hash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
-async function setup(t: TestContext, options: { liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; secondWorkspace?: boolean; onRoot?: (root: string) => void } = {}) {
+async function setup(t: TestContext, options: { liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; onRoot?: (root: string) => void } = {}) {
   const created = await fs.mkdtemp(fileURLToPath(new URL('.seed-test-host-', import.meta.url)));
   t.after(async () => { await fs.rm(created, { recursive: true, force: true }); });
   const root = await fs.realpath(created); options.onRoot?.(root);
@@ -61,15 +62,26 @@ async function setup(t: TestContext, options: { liveClaude?: boolean; invalidSta
   let restoredBytes: string | undefined;
   let queued = 0, malformedReset = false;
   const fixtureRequests: { method: string; route: string; body: unknown }[] = [];
+  const managed = new Map<string, { source: string; path: string; repo: string }>();
+  const handles: OwnedProcess[] = [];
   const processes: HostProcesses = {
     async run(command) {
+      if (command.argv[0] === 'init') { await fs.mkdir(path.join(command.cwd, '.git')); return ''; }
+      if (command.argv[0] === 'rev-parse' && command.argv[1] === '--git-common-dir')
+        return path.join([...managed.values()].find(row => row.repo === command.cwd)?.source ?? command.cwd, '.git');
       if (command.argv[0] === 'rev-parse') return command.argv[1] === 'HEAD' ? revision.commit : revision.tree;
       if (command.argv[0] === 'ls-files') return sourceEntries.map(entry => entry.relativePath).join('\0') + '\0';
       return '';
     },
     start(command, _readiness, generation) {
       let alive = true; const handle: OwnedProcess = { pid: ++count + 100, generation: generation!, executable: command.executable, argv: command.argv,
-        state: () => alive ? 'running' : 'exited', async ready() {}, async stop() { alive = false; stops.push(command.argv[0]!); } };
+        state: () => alive ? 'running' : 'exited', async ready() {
+          if (command.argv[0] === 'serve') {
+            const directory = path.join(command.env.LOOM_CONFIG_DIR!, 'fleet-db'); await fs.mkdir(directory, { recursive: true });
+            await fs.writeFile(path.join(directory, 'runtime.json'), JSON.stringify({ pid: 999, url: 'http://127.0.0.1:6001', started_at: '2026-10-09T00:00:00Z' }));
+          }
+        }, async stop() { alive = false; stops.push(command.argv[0]!); } };
+      handles.push(handle);
       return handle;
     },
     launch(command, _stdin, generation) {
@@ -91,13 +103,20 @@ async function setup(t: TestContext, options: { liveClaude?: boolean; invalidSta
       if (route === '/__script') { queued += (body as { steps: unknown[] }).steps.length; return { status: 200, body: { queued } }; }
       if (route === '/__fixture') { const value = body as { pr: unknown; files: unknown[] }; return { status: 200, body: { ok: true, pr: value.pr, files: value.files.length } }; }
     }
+    if (method === 'POST' && route === '/api/workspaces') {
+      const input = body as { name: string; repos: string[] }, workspaceId = input.name.toUpperCase();
+      const workspace = path.join(driver.runtimeRoot, 'runtime', 'managed', workspaceId), repo = path.join(workspace, 'repos', 'repo');
+      await fs.mkdir(repo, { recursive: true });
+      managed.set(workspaceId, { source: input.repos[0]!, path: workspace, repo });
+      return { status: 201, body: { success: true, data: { id: workspaceId, path: workspace, repos: [{ name: 'repo', path: repo }] } } };
+    }
     if (method === 'POST') return { status: 201, body: {} };
     const workspaceId = route.split('/')[3];
-    const repo = workspaceId === 'E2E-WS' ? driver.workspaceRoot : path.join(driver.runtimeRoot, 'runtime/e2e-workspace-2');
+    const repo = managed.get(workspaceId!)?.repo ?? (workspaceId === 'E2E-WS' ? driver.workspaceRoot : path.join(driver.runtimeRoot, 'runtime/e2e-workspace-2'));
     if (route === `/api/workspaces/${workspaceId}`) return { status: 200, body: { success: true,
-      data: { id: workspaceId, path: repo, repos: [{ name: 'repo', path: repo }] } } };
+      data: { id: workspaceId, path: managed.get(workspaceId!)?.path ?? repo, repos: [{ name: 'repo', path: repo }] } } };
     if (route.endsWith('/agents')) return { status: 200, body: { success: true, total: badAgents ? 2 : 1,
-      data: [{ name: 'worker', workspace_key: workspaceId, role_name: 'task', updated_at: '2026-10-09T00:00:00Z' }] } };
+      data: [{ name: 'worker', workspace_key: workspaceId, role_name: 'task', parent: '', created_at: '2026-10-09T00:00:00Z', updated_at: '2026-10-09T00:00:00Z' }] } };
     if (route.endsWith('/issues?limit=1000')) return { status: 200, body: { success: true, data: [{ id: 'issue' }] } };
     return { status: 200, body: {} };
   };
@@ -105,27 +124,24 @@ async function setup(t: TestContext, options: { liveClaude?: boolean; invalidSta
     if (filename === path.join(driver.runtimeRoot, 'runtime')) restoredBytes = await fs.readFile(path.join(driver.configurationRoot, 'agents-opencode/config/opencode/opencode.json'), 'utf8');
     await fs.rm(filename, options);
   } };
-  const driver = new HostFixtureDriver(config, processes, files, http, () => `injected-${++count}`, async () => ({ port: port++, async release() {} }));
+  const registeredPort: RegisteredProcessPort = { async capture(pid: number) {
+    assert.equal(pid, 999); let alive = true;
+    const identity = { pid, generation: 'injected-captured-store', executable: config.fleetBinary, argvSha256: 'e'.repeat(64),
+      parentPid: handles.find(handle => handle.argv[0] === 'serve')!.pid, configurationRoot: driver.configurationRoot, state: 'running' as const };
+    return { identity, async inspect() { return { ...identity, state: alive ? 'running' as const : 'exited' as const }; },
+      async stop() { alive = false; }, async abandon() { assert.fail('Owned store must stay enrolled'); } };
+  } };
+  const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, files, http, () => `injected-${++count}`, async () => ({ port: port++, async release() {} }), undefined,
+    registeredPort);
   const adapterRoot = fileURLToPath(new URL('..', import.meta.url));
   const pin = calculateImplementationPin(adapterRoot, ['fixture/providers.ts'], 'fixture/providers.ts', 'createFixtureProviders');
   const legacyPin = calculateImplementationPin(adapterRoot, ['legacy/providers.ts','legacy/host-access.ts','legacy/cli-plan.ts'], 'legacy/providers.ts', 'createLegacyProviders');
   const registry = new CapabilityRegistry(); let factories = 0;
-  for (const provider of createFixtureProviders({ implementation: pin, implementationSha256: pin.sha256, plans: [plan], driver: () => driver,
-    evidenceAfterFailure: () => createEvidenceStore(path.join(driver.runtimeRoot, 'evidence')),
-    async bind(_driver, acquired, input, context) {
-      const stat = await fs.lstat(driver.runtimeRoot);
-      const evidenceClass = options.liveClaude ? 'real-native' as const : 'deterministic' as const;
-      return { evidenceClass, operationAuthority: createFixtureOperationAuthority({ leaseId: acquired.lease.id, runId: context.runId,
-        suiteId: context.suiteId, scope: context.scope, caseId: context.caseId, profile: input.profile },
-        Object.fromEntries(Object.entries(LegacyOperationEffects).map(([operation, effects]) => [operation, {
-          evidenceClass: options.liveClaude && operation === 'loom.cli.task' ? 'live-provider' as const : evidenceClass,
-          effects: operation === 'loom.runtime.stimulate' ? [...effects, 'restart-owned-service'] :
-            options.liveClaude && operation === 'loom.cli.task' ? [...effects, 'external-provider'] : [...effects] }]))),
-        roots: new Map([['runtime', { path: driver.runtimeRoot, device: stat.dev, inode: stat.ino }]]), secrets: [],
-        evidenceStore: await createEvidenceStore(path.join(driver.runtimeRoot, 'evidence')), readApi: async () => { throw new Error('Unused'); },
-        readFiles: async () => { throw new Error('Unused'); }, resolveAgent: async () => { throw new Error('No native-v1 registration'); } };
-    } })) registry.register(provider);
-  for (const provider of createLegacyProviders(legacyPin, legacyPin.sha256, (_context, fixture) => { factories++; return productionLegacyAccess(fixture); },
+  const fixtureOptions = { ...productionFixtureOptions(pin, pin.sha256, [plan], config, config), driver: () => driver };
+  for (const provider of createFixtureProviders(fixtureOptions)) registry.register(provider);
+  for (const provider of createLegacyProviders(legacyPin, legacyPin.sha256, (context, fixture) => {
+    factories++; return productionLegacyAccess(fixture, getFixtureEvidenceStore(context, fixture.leaseId));
+  },
     { taskExecution: options.liveClaude ? 'live-provider' : 'deterministic' })) registry.register(provider);
   const context = createCapabilityContext({ file: 'injected-host.yaml', line: 1 }, registry); Object.assign(context, { runId: 'binding-run' });
   const invoke = (id: string, input: unknown) => registry.invoke({ id, version: 1, input: {} }, input, context);
@@ -139,16 +155,87 @@ async function setup(t: TestContext, options: { liveClaude?: boolean; invalidSta
   assert.equal(acquired.availability, 'observed', JSON.stringify(acquired.error));
   const leaseId = (acquired.data as { lease: { id: string } }).lease.id;
   const fixture = getRegisteredResource(context, `${fixturesKey}:${leaseId}`, leaseId) as OwnedFixture;
-  fixture.readWorkspaceLegacyAgent = async () => { throw new Error('Injected member needs no enrollment lookup'); };
-  fixture.ownedWorkspaces = await testLegacyRoster(fixture, await createEvidenceStore(path.join(driver.runtimeRoot, 'evidence')),
-    [{ workspaceId: fixture.workspaceId, repo: fixture.repo, agentIds: ['worker'] }, ...(options.secondWorkspace ?
-      [{ workspaceId: 'E2E-WS-2', repo: path.join(driver.runtimeRoot, 'runtime/e2e-workspace-2'), agentIds: ['worker'] }] : [])]);
-  return { root, driver, fixture, leaseId, invoke, launches, stops, factories: () => factories,
+  return { root, driver, fixture, evidenceStore: getFixtureEvidenceStore(context, leaseId), leaseId, invoke, launches, stops, factories: () => factories,
     fixtureRequests, queued: () => queued, malformedReset: (value: boolean) => { malformedReset = value; },
     badAgents: () => { badAgents = true; }, badRoles: () => { badRoles = true; }, failLaunch: (kind: 'proven' | 'uncertain' = 'proven') => { failLaunch = kind; },
     processFailure: () => { exitCode = 17; stderr = 'exact process diagnostic'; }, restored: () => restoredBytes,
     async cleanup() { await fs.rm(root, { recursive: true, force: true }); } };
 }
+
+test('production host binding preserves managed workspace and source/config identities for original CLI actors', async t => {
+  const r = await setup(t);
+  assert.notEqual(r.fixture.repo, r.driver.workspaceRoot);
+  assert.equal(r.fixture.ownedWorkspaces!.length, 2);
+  const primary = r.fixture.ownedWorkspaces!.find(row => row.workspaceId === 'E2E-WS')!;
+  assert.equal(primary.commonDir, path.join(r.driver.workspaceRoot, '.git'));
+  assert.equal(primary.storeGeneration, 'injected-captured-store');
+  for (const workspaceId of ['E2E-WS', 'E2E-WS-2']) {
+    const role = await r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId, operation: 'show', name: 'task' });
+    assert.equal(role.availability, 'observed', JSON.stringify(role.error));
+    assert.equal((await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId, agentId: 'worker' } })).availability, 'observed');
+    for (const backend of ['codex', 'claude', 'cursor', 'opencode']) for (const mode of ['once', 'auto', 'daemon']) {
+      const result = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId, agentName: 'worker', backend, mode,
+        issueId: mode === 'daemon' ? 'issue' : null, repoName: 'repo' });
+      assert.equal(result.availability, 'observed', JSON.stringify(result.error));
+      const command = r.launches.at(-1)!;
+      assert.equal(command.cwd, r.driver.workspaceRoot);
+      assert.equal(command.env.LOOM_CONFIG_DIR, r.driver.configurationRoot);
+      assert.equal(command.env.LOOM_SOURCE_REPOS, r.fixture.ownedWorkspaces!.find(row => row.workspaceId === workspaceId)!.repo);
+      assert.deepEqual(command.argv, ['--workspace', workspaceId, '--backend', backend, 'task', 'worker',
+        ...(mode === 'once' ? [] : ['--auto']), ...(mode === 'daemon' ? ['--daemon-mode'] : [])]);
+    }
+  }
+  // The private worktree hook is still absent: source association alone cannot
+  // authorize fixture writes or make an actor-created worktree observation.
+  const before = r.launches.length;
+  const seed = await r.invoke('loom.fixture.seedWorktree', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker',
+    relativePath: 'marker.txt', content: 'fixture bytes\n', commitMessage: 'fixture seed' });
+  assert.equal(seed.availability, 'unsupported'); assert.equal(r.launches.length, before);
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
+
+test('managed binding refuses unrelated primary repo and forged commonDir or store associations before CLI effects', async t => {
+  const r = await setup(t);
+  const originalRepo = r.fixture.repo, originalRoster = r.fixture.ownedWorkspaces;
+  const other = path.join(r.driver.runtimeRoot, 'runtime', 'unrelated'); await fs.mkdir(other);
+  r.fixture.repo = other;
+  const input = { leaseId: r.leaseId, workspaceId: 'E2E-WS', operation: 'show', name: 'task' };
+  assert.equal((await r.invoke('loom.cli.role', input)).availability, 'error'); assert.equal(r.launches.length, 0);
+  r.fixture.repo = originalRepo;
+  // An authenticated injected receipt with the wrong Git/store association
+  // cannot replace the driver's actual successful provisioning facts.
+  r.fixture.ownedWorkspaces = await testLegacyRoster(r.fixture, r.evidenceStore,
+    originalRoster!.map(row => ({ workspaceId: row.workspaceId, repo: row.repo, agentIds: [] })));
+  assert.equal((await r.invoke('loom.cli.role', input)).availability, 'error'); assert.equal(r.launches.length, 0);
+  // Equality with the launcher's source path is not an alternate ownership
+  // authority; the private creation still names the managed checkout.
+  r.fixture.repo = r.driver.workspaceRoot;
+  r.fixture.ownedWorkspaces = await testLegacyRoster(r.fixture, r.evidenceStore,
+    originalRoster!.map(row => ({ workspaceId: row.workspaceId,
+      repo: row.workspaceId === 'E2E-WS' ? r.driver.workspaceRoot : row.repo, agentIds: [] })));
+  assert.equal((await r.invoke('loom.cli.role', input)).availability, 'error'); assert.equal(r.launches.length, 0);
+  r.fixture.repo = originalRepo;
+  r.fixture.ownedWorkspaces = originalRoster;
+  assert.equal((await r.invoke('loom.cli.role', input)).availability, 'observed');
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
+
+test('managed production access requires the existing canonical evidence store before any CLI effect', async t => {
+  const r = await setup(t);
+  assert.throws(() => productionLegacyAccess(r.fixture), error => error instanceof LegacyError && error.code === 'unsupported-capability');
+  assert.equal(r.launches.length, 0);
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
+
+test('production managed binding rejects replaced captured store before legacy agent read or CLI launch', async t => {
+  const r = await setup(t);
+  const filename = path.join(r.driver.configurationRoot, 'fleet-db', 'runtime.json'), original = await fs.readFile(filename, 'utf8');
+  await fs.writeFile(filename, original.replace('999', '998'));
+  const result = await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId: 'E2E-WS', agentId: 'worker' } });
+  assert.equal(result.availability, 'error'); assert.equal(r.launches.length, 0);
+  await fs.writeFile(filename, original);
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
 
 test('canonical acquisition binds actual host driver to role, usage, all backend argv and serve generations', async t => {
   const r = await setup(t);
@@ -176,7 +263,7 @@ test('actual binding rejects incomplete product identities and unsafe plans befo
   const r = await setup(t); r.badAgents();
   const bad = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null });
   assert.equal(bad.availability, 'error'); assert.equal(r.launches.length, 0);
-  const access = productionLegacyAccess(r.fixture);
+  const access = productionLegacyAccess(r.fixture, r.evidenceStore);
   await assert.rejects(access.lease('foreign', new AbortController().signal), LegacyError);
   await assert.rejects(access.execute(r.leaseId, { binary: '/foreign', cwd: r.driver.workspaceRoot, argv: ['bash','-c','bad'], env: {}, stdin: '' }, new AbortController().signal), LegacyError);
   assert.equal(r.launches.length, 0);
@@ -206,7 +293,7 @@ test('configuration restores exact private bytes through lease cleanup after exp
 
 test('missing process registrations and unobservable scripted state fail before mutation', async t => {
   const r = await setup(t);
-  const access = productionLegacyAccess(r.fixture), signal = new AbortController().signal;
+  const access = productionLegacyAccess(r.fixture, r.evidenceStore), signal = new AbortController().signal;
   for (const target of ['scripted-backend','workspace:E2E-WS']) await assert.rejects(access.snapshot(r.leaseId, target, signal), LegacyError);
   await assert.rejects(access.snapshot(r.leaseId, 'fake-github', signal));
   await assert.rejects(access.validateSeedPath(r.leaseId, 'E2E-WS', 'worker', 'file', signal), LegacyError);
@@ -244,7 +331,7 @@ test('actual driver enrollment retains stderr and retires only proven no-start f
 
 test('generation is compared again at the actual restart effect', async t => {
   const r = await setup(t);
-  const access = productionLegacyAccess(r.fixture), signal = new AbortController().signal;
+  const access = productionLegacyAccess(r.fixture, r.evidenceStore), signal = new AbortController().signal;
   const lease = await access.lease(r.leaseId, signal, 'loom.runtime.stimulate'); const target = lease.processes[0]!;
   await r.driver.restartOwnedProcess('serve', target.generation, signal);
   await assert.rejects(access.stimulate(r.leaseId, target, 'serve-restart', null, signal));
@@ -366,7 +453,7 @@ test('canonical model script binding retains startup restoration and cleans up a
 
 test('baseline binding rejects foreign state, unknown targets, and stopped generations before POST', async t => {
   const r = await setup(t);
-  const access = productionLegacyAccess(r.fixture), signal = new AbortController().signal;
+  const access = productionLegacyAccess(r.fixture, r.evidenceStore), signal = new AbortController().signal;
   await access.lease(r.leaseId, signal, 'loom.fixture.configure');
   const snapshot = await access.snapshot(r.leaseId, 'fake-model', signal);
   await assert.rejects(access.restore(r.leaseId, 'fake-model', { target: 'fake-model', kind: 'startup-empty', generation: 'foreign' }, signal));
@@ -404,12 +491,12 @@ test('canonical GitHub script uses exact refs and source patch through the owned
 });
 
 test('actual registry discovers two owned legacy workspaces serially through the locked host API', async t => {
-  const r = await setup(t, { secondWorkspace: true });
+  const r = await setup(t);
   const role = await r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId: 'E2E-WS-2', operation: 'show', name: 'task' });
   assert.equal(role.availability, 'observed', JSON.stringify(role));
   assert.deepEqual(r.launches.map(command => command.argv), [
-    ['--workspace','E2E-WS','role','list','--json'],
     ['--workspace','E2E-WS-2','role','list','--json'],
+    ['--workspace','E2E-WS','role','list','--json'],
     ['--workspace','E2E-WS-2','role','show','task','--json'],
   ]);
   const usage = await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId: 'E2E-WS-2', agentId: 'worker' } });
@@ -418,7 +505,7 @@ test('actual registry discovers two owned legacy workspaces serially through the
 
 test('retained baseline generation reaches the host dispatch and rejects a replacement before POST', async t => {
   const r = await setup(t);
-  const access = productionLegacyAccess(r.fixture), signal = new AbortController().signal;
+  const access = productionLegacyAccess(r.fixture, r.evidenceStore), signal = new AbortController().signal;
   await access.lease(r.leaseId, signal, 'loom.fixture.configure');
   await access.snapshot(r.leaseId, 'fake-model', signal);
   const before = r.driver.processesById.get('fake-model')!.generation;
