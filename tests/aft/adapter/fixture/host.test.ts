@@ -15,6 +15,7 @@ import { getFixture } from '../ownership.js';
 import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin } from '@tysonthomas9/aft/capabilities';
 import { createFixtureProviders, productionFixtureOptions } from './providers.js';
 import type { RegisteredIdentity } from './descendants.js';
+import { HostWorkspaceRecords } from './workspace-records.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 async function setup(profile: string,registeredServices=false,nativeService=false,fixtureRunId?:string) {
@@ -277,6 +278,52 @@ test('legacy worktree reads use actual product resolution and exact source Git i
   r.onRun(async command=>{if(replace&&command.argv[0]==='symbolic-ref'){replace=false;await fs.rename(worktree,worktree+'-prior');await fs.mkdir(worktree);}});
   await assert.rejects(r.driver.resolveLegacyWorktree('E2E-WS','nova',signal));
   const before=r.runs.length;await assert.rejects(r.driver.resolveLegacyWorktree('foreign','nova',signal));assert.equal(r.runs.length,before);
+  await r.lifecycle.release(a.lease.id,r.request.runId);
+ }finally{await r.cleanup();}
+});
+
+test('multi-assigned beta diagnostic selects its actual physical source under the canonical fixture roster',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  const alpha=path.join(r.driver.runtimeRoot,'runtime','alpha'),beta=path.join(r.driver.runtimeRoot,'runtime','beta');
+  for(const repo of [alpha,beta])await fs.mkdir(path.join(repo,'.git'),{recursive:true});
+  // Exercise the production private creation recorder with successful fixed
+  // HTTP transport facts; native source factory provisioning is a separate gate.
+  const records=Reflect.get(r.driver,'workspaceRecords') as HostWorkspaceRecords;
+  const directory=path.join(r.driver.configurationRoot,'fleet-db'),stamp=await fs.lstat(directory);
+  const before={storeId:`${directory}#${stamp.dev}:${stamp.ino}`,storeGeneration:'actual-kernel-start'};
+  const created=await r.driver.requestOwnedHttp('api','POST','/api/workspaces',{name:'owned-multi',type:'empty',repos:[alpha,beta]},signal);
+  await records.captureCreated('OWNED-MULTI',[alpha,beta],created,before,signal);
+  const actual=(created.body as {data:{id:string;repos:{path:string;name:string;source_repo_id:string;groups:string[]}[]}}).data;
+  const actor={workspace_key:'OWNED-MULTI',name:'nova',repos:['alpha','beta'],repo_groups:[],created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T01:00:00Z'};
+  r.overrideResponse(relative=>relative==='/api/workspaces/OWNED-MULTI/agents'?{success:true,total:1,data:[actor]}:
+   relative==='/api/workspaces/OWNED-MULTI'?{success:true,data:actual}:undefined);
+  const owner={leaseId:a.lease.id,runId:r.request.runId,suiteId:'suite',scope:'case' as const,caseId:'case',profile:r.plan.profile};
+  const evidence=await createEvidenceStore(path.join(r.driver.runtimeRoot,'evidence'));
+  const fixture:OwnedFixture={...owner,workspaceId:a.workspaceId,repo:a.repo,
+   ownedWorkspaces:await r.driver.ownedWorkspaceRoster(owner,evidence,signal),roots:new Map(),agents:new Map(),secrets:[],
+   evidenceClass:'deterministic',expiresAtUtcMs:Number.MAX_SAFE_INTEGER,verify:abort=>r.driver.prepareObserve(abort),dispose:async()=>{},
+   readApi:async()=>{throw new Error('unused');},readFiles:async()=>{throw new Error('unused');},resolveAgent:async()=>{throw new Error('unused');},
+   readWorkspaceLegacyAgent:(ws,name,abort)=>r.driver.readWorkspaceLegacyAgent(owner,ws,name,abort)};
+  r.driver.bindOwnedFixture(fixture,evidence);
+  const worktree=path.join(r.driver.runtimeRoot,'runtime','actual-beta-worktree');await fs.mkdir(worktree);r.commonDir(worktree,path.join(beta,'.git'));
+  r.cliOutput({ok:true,workspace:{key:'OWNED-MULTI'},agents:[{name:'nova',worktree_path:worktree,worktree_ready:true}]});
+  const fact=await r.driver.readWorkspaceLegacyAgent(owner,'OWNED-MULTI','nova',signal);assert.equal(fact.repo,null);assert.equal(fact.commonDir,null);
+  const selected=await r.driver.resolveLegacyWorktree('OWNED-MULTI','nova',signal,'beta');
+  assert.equal(selected.root.path,worktree);assert.equal(selected.commonDir,path.join(beta,'.git'));
+  assert.equal(requireOwnedWorkspace(fixture,'OWNED-MULTI','nova','legacy-agent-name','beta').repo,beta);
+  assert.throws(()=>requireOwnedWorkspace(fixture,'OWNED-MULTI','nova','legacy-agent-name'));
+  actual.repos.reverse();assert.equal((await r.driver.resolveLegacyWorktree('OWNED-MULTI','nova',signal)).commonDir,path.join(beta,'.git'));
+  assert.equal(await r.driver.readLegacyWorktreeHead('OWNED-MULTI','nova',signal,'beta'),'a'.repeat(40));
+  await assert.rejects(r.driver.resolveLegacyWorktree('OWNED-MULTI','nova',signal,'alpha'));
+  actor.repos=['alpha'];await assert.rejects(r.driver.resolveLegacyWorktree('OWNED-MULTI','nova',signal));actor.repos=['alpha','beta'];
+  r.commonDir(worktree,path.join(r.driver.workspaceRoot,'.git'));await assert.rejects(r.driver.resolveLegacyWorktree('OWNED-MULTI','nova',signal));
+  r.commonDir(worktree,path.join(beta,'.git'));let change=true;
+  r.onRun(async command=>{if(change&&command.argv[0]==='symbolic-ref'){change=false;actor.repos=['alpha'];}});
+  await assert.rejects(r.driver.resolveLegacyWorktree('OWNED-MULTI','nova',signal));actor.repos=['alpha','beta'];
+  const launches=()=>r.runs.filter(command=>command.executable===r.config.loomBinary).length,beforeLaunches=launches();
+  actual.repos[0]!.groups=['reassigned'];await assert.rejects(r.driver.resolveLegacyWorktree('OWNED-MULTI','nova',signal));actual.repos[0]!.groups=[];assert.equal(launches(),beforeLaunches);
+  r.registration(999,{generation:'foreign-generation'});await assert.rejects(r.driver.resolveLegacyWorktree('OWNED-MULTI','nova',signal));r.registration(999,{});assert.equal(launches(),beforeLaunches);
   await r.lifecycle.release(a.lease.id,r.request.runId);
  }finally{await r.cleanup();}
 });
