@@ -7737,18 +7737,84 @@
             "coverage": "unresolved",
             "gap": {
               "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
-              "required": "Original teardown POST archive cancel:true with actual source RUN_ID+agent-id idempotency key,15000ms; only HTTP409 ignored, other failures reject. fixture.release resource cleanup alone is not original archive-operation proof",
+              "required": "Original literal POST archive {cancel:true}, actual source RUN_ID+agent-id stable key,15000ms; only HTTP409 ignored, other errors reject. Frozen product ignores cancel and defaults archive reason to done; never translate to reason:cancelled or claim cancellation/OS exit. fixture.release is not this actor.",
               "canonicalAttempt": "Existing typed file/API/DOM actions or fixture.release nearby are not exact full source-guard evidence",
               "missingObservation": "Exact authoritative source guard/measurement/cleanup operation and negative must map to canonical capability/admission/YAML or remain uncovered; no wrapper/source-only credit"
             },
-            "destination": []
+            "destination": [],
+            "productInterpretation": "See archiveWireProductSemantics: ignored cancel field -> default done; source literal and actual semantics both retained."
           }
         ],
         "originalSetupRequirements": {
           "source": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#/setup",
           "required": "Required original env keys/LOCALMODE/opencode and owned evidence directory; exact fixture/admission mapping still unvalidated, no new engine pin"
         },
-        "cleanupScope": "Original Python teardown cleanup runs even though not in207 test-body steps; archive-cancel/run-ID/foreign-agent/409 semantics must be retained separately. No archive mutation executed here."
+        "cleanupScope": "Original child-first captured-ID/name-run guard and literal archive {cancel:true}/stable actual RUN_ID key/15s/409-only handling are separate teardown obligations outside207 body steps. Frozen product defaults this ignored-field request to done; Visual reason:cancelled differs. No archive mutation executed.",
+        "archiveWireProductSemantics": {
+          "at": "2026-10-09T13:56:24.968037+00:00",
+          "evidenceClass": "read-only frozen product-source interpretation; no archive HTTP/runtime execution",
+          "frozenSourceRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+          "literalFilesWire": {
+            "body": {
+              "cancel": true
+            },
+            "idempotency": "cov-files-{actual source RUN_ID}-{captured agentId}-cleanup",
+            "timeoutMs": 15000,
+            "ignoredHttpStatuses": [
+              409
+            ],
+            "preservedSourceGroup": "files-cleanup-archive-cancel-idempotency"
+          },
+          "actualProductInterpretation": "ArchiveBody only declares reason. ReadJSON does not reject unknown fields, so cancel:true is ignored. Empty reason defaults to ArchiveDone=done. Preserve the literal source wire; replacing it with reason:cancelled changes behavior.",
+          "stateDependentFacts": "Default done rejects unfinished single_task as busy; persistent active/waiting transitions to stopping until turn/waiting work finishes; stopping is idempotent; finished/other settled paths call finishArchive and retireLaunch. HTTP409 may be suppressed by the caller. None establishes an observed cancellation, immediate process exit or native session teardown.",
+          "visualSeparateVariant": "Visual cleanup explicitly sends reason:cancelled and uses its source-case idempotency key; it is a separate source path.",
+          "sourceProof": [
+            {
+              "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+              "file": "internal/webui/handlers/agentsv1/wire.go",
+              "sha256": "9eaaa1c39875a6e5cf0fdc3a83d23aaa2c73048eb1091fff069d60b7e20e4961",
+              "lines": {
+                "start": 94,
+                "end": 98,
+                "text": "\n// ArchiveBody is the optional archive body; reason defaults to done.\ntype ArchiveBody struct {\n\tReason string `json:\"reason\"`\n}"
+              }
+            },
+            {
+              "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+              "file": "internal/webui/handlers/agentsv1/agentsv1.go",
+              "sha256": "67a27f1715a2f421c026c657db53e8d6cb628d422e8ee0d17dcacce2492ea2c3",
+              "lines": {
+                "start": 198,
+                "end": 213,
+                "text": "}\n\nfunc unarchive(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {\n\treturn archiving(w, r, s.Unarchive)\n}\n\nfunc archiving(w http.ResponseWriter, r *http.Request, op func(context.Context, loomagent.ArchiveRequest) error) (int, any, error) {\n\tvar body ArchiveBody\n\tid, err := envelope(w, r, &body)\n\tif err != nil {\n\t\treturn 0, nil, err\n\t}\n\treturn http.StatusNoContent, nil, op(r.Context(), loomagent.ArchiveRequest{\n\t\tEnvelope: loomagent.Envelope{RequestID: id}, AgentID: r.PathValue(\"id\"), Reason: body.Reason})\n}\n"
+              }
+            },
+            {
+              "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+              "file": "internal/webui/server/handler/request.go",
+              "sha256": "bb3d83c26d2a449a7fb3e4969ed7aa18cd0658a65626d5253daa169160c479c0",
+              "lines": {
+                "start": 28,
+                "end": 44,
+                "text": "func ReadJSON(w http.ResponseWriter, r *http.Request, dst any) error {\n\tr.Body = http.MaxBytesReader(w, r.Body, MaxRequestBody)\n\n\tdec := json.NewDecoder(r.Body)\n\tif err := dec.Decode(dst); err != nil {\n\t\tvar maxBytesErr *http.MaxBytesError\n\t\tif errors.As(err, &maxBytesErr) {\n\t\t\treturn service.ErrPayloadTooLarge(\"request body too large (max 1MB)\")\n\t\t}\n\t\treturn service.ErrValidation(\"invalid request body\")\n\t}\n\tif dec.More() {\n\t\treturn service.ErrValidation(\"request body contains trailing content\")\n\t}\n\treturn nil\n}\n"
+              }
+            },
+            {
+              "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+              "file": "internal/loomagent/lifecycle.go",
+              "sha256": "1538a0418433f3552ef8e5e5d998ff20aadc0b678c232c9428be75be6479e83b",
+              "lines": {
+                "start": 24,
+                "end": 100,
+                "text": "// its turn and waiting messages finish; the slot dispatcher then calls\n// finishArchive. Repeating Archive is safe.\nfunc (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {\n\tif req.Reason == \"\" {\n\t\treq.Reason = ArchiveDone\n\t}\n\tif req.Reason != ArchiveDone && req.Reason != ArchiveCancelled {\n\t\treturn invalid(\"archive reason \"+req.Reason, ArchiveDone, ArchiveCancelled)\n\t}\n\tdefer s.lockReady(ctx, req.AgentID)()\n\ta, err := s.live(ctx, req.AgentID)\n\tif err != nil {\n\t\treturn err\n\t}\n\tif a.State == StateArchived {\n\t\treturn s.finishArchive(ctx, a, deref(a.ArchiveReason))\n\t}\n\tif req.Reason == ArchiveCancelled {\n\t\tif a, err = s.stop(ctx, a, &archiveCols{reason: sp(req.Reason)}); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tif a.Mode == \"single_task\" {\n\t\t\tto := a.StateOf()\n\t\t\tto.Outcome = sp(ArchiveCancelled)\n\t\t\tif a, err = s.setState(ctx, a, to); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t}\n\t\treturn s.finishArchive(ctx, a, req.Reason)\n\t}\n\tswitch {\n\tcase a.Mode == \"single_task\" && a.State != StateFinished:\n\t\treturn &Error{Code: CodeAgentBusy, Message: \"single task is not finished; archive it as cancelled\"}\n\tcase a.State == StateActive || a.State == StateWaiting:\n\t\tto := a.StateOf()\n\t\tto.State = StateStopping\n\t\t_, err = s.changeState(ctx, a, to, &archiveCols{reason: sp(req.Reason)})\n\t\treturn err\n\tcase a.State == StateStopping:\n\t\treturn nil\n\t}\n\treturn s.finishArchive(ctx, a, req.Reason)\n}\n\n// finishArchive moves a through stopping to archived and starts the R29\n// clock. It keeps a's outcome. Each move records the archive reason in its\n// transaction, so a restart finishes a stopping done archive; the move to\n// archived also records the clock and agent.archived.\nfunc (s *Service) finishArchive(ctx context.Context, a loomstore.Agent, reason string) error {\n\tvar err error\n\tnow := time.Now()\n\tif a.State == StateArchived { // a repeat: keep the clock, save nothing new\n\t\terr = s.store.SetArchive(ctx, a.AgentID, sp(reason), &now)\n\t} else {\n\t\tif a.State != StateStopping {\n\t\t\tif a, err = s.changeState(ctx, a, loomstore.AgentState{State: StateStopping, Outcome: a.Outcome, Attempt: a.Attempt},\n\t\t\t\t&archiveCols{reason: sp(reason)}); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t}\n\t\ta, err = s.changeState(ctx, a, loomstore.AgentState{State: StateArchived, Outcome: a.Outcome, Attempt: a.Attempt},\n\t\t\t&archiveCols{reason: sp(reason), at: &now}, Event{AgentID: a.AgentID, Type: EventArchived, Reason: reason, Time: now})\n\t}\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn s.retireLaunch(ctx, a)\n}\n\n// retireLaunch runs the Retire hook for a, which is archived or deleted.\nfunc (s *Service) retireLaunch(ctx context.Context, a loomstore.Agent) error {\n\tif s.retire == nil {\n\t\treturn nil\n\t}\n\treturn s.retire(ctx, a)\n}\n"
+              }
+            }
+          ],
+          "coverage": "unresolved; source semantics clarified only",
+          "destination": [],
+          "missingCanonicalEvidence": "Closed fixed archive wire/header port, actual current name and immutable creation-incarnation facts under same AgentRef/store/lineage/serve generation, child-first captured ordering, exact source key/15s/outcome handling and declared actual lifecycle/retire effects remain pending. Existing fixture.release is not this actor.",
+          "strongerOwnershipChecks": "Any proposed creation-incarnation recheck beyond source name/run guard must be identified explicitly; mutable model/revision/name must not be treated as immutable whole-row identity."
+        }
       }
     },
     {
@@ -15039,7 +15105,7 @@
           },
           "original": {
             "wait": {
-              "fn": "(() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));\n  return row?.getAttribute('data-tray-row') && row.textContent?.includes(' · ') &&\n    row.textContent?.match(/(▸|💭)/); })()"
+              "fn": "(() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));\n  return row?.getAttribute('data-tray-row') && row.textContent?.includes(' \u00b7 ') &&\n    row.textContent?.match(/(\u25b8|\ud83d\udcad)/); })()"
             },
             "intent": "Screenshot the running child's current harmless tool or reasoning step and elapsed time (DF2)"
           },
@@ -15078,7 +15144,7 @@
             "end_line": 105
           },
           "original": {
-            "run": "set -eu\nid=\"$(cat \"$AFT_WORK_DIR/coverage-children-activity/repeat.id\")\"\nagent-browser --session \"$AFT_SESSION\" wait --fn \"(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\\\"$id\\\"]'); const running=row?.querySelector('[data-status=running]'); const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim() || ''; const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(▸|💭)/.test(result) && /[0-9]+m [0-9][0-9]s$/.test(elapsed); })()\"\nagent-browser --session \"$AFT_SESSION\" screenshot \"$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png\"\npython3 \"$AFT_TESTS_DIR/scripts/coverage-children-activity.py\" activity repeat\n",
+            "run": "set -eu\nid=\"$(cat \"$AFT_WORK_DIR/coverage-children-activity/repeat.id\")\"\nagent-browser --session \"$AFT_SESSION\" wait --fn \"(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\\\"$id\\\"]'); const running=row?.querySelector('[data-status=running]'); const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim() || ''; const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(\u25b8|\ud83d\udcad)/.test(result) && /[0-9]+m [0-9][0-9]s$/.test(elapsed); })()\"\nagent-browser --session \"$AFT_SESSION\" screenshot \"$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png\"\npython3 \"$AFT_TESTS_DIR/scripts/coverage-children-activity.py\" activity repeat\n",
             "intent": "Match the exact visible child row and its current step to a saved event in that same running turn"
           },
           "coverage": "unresolved",
@@ -20749,9 +20815,9 @@
               "source": {
                 "line": 1087,
                 "end_line": 1087,
-                "expression": "re.match('^(▸|💭)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
+                "expression": "re.match('^(\u25b8|\ud83d\udcad)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
                 "message": null,
-                "source": "assert re.match(r\"^(▸|💭)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
+                "source": "assert re.match(r\"^(\u25b8|\ud83d\udcad)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
                 "function": "reactivation_checkpoint_ok",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -20760,8 +20826,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "re.match('^(▸|💭)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
-                "evidence": "assert re.match(r\"^(▸|💭)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
+                "required": "re.match('^(\u25b8|\ud83d\udcad)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
+                "evidence": "assert re.match(r\"^(\u25b8|\ud83d\udcad)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
                 "sourceHelper": "tests/aft/scripts/coverage-children-activity.py",
                 "sourceLine": 1087,
                 "sourceFunction": "reactivation_checkpoint_ok",
@@ -22520,7 +22586,7 @@
                   "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/20"
                 ],
                 "sourceReason": "Fresh/reconnect fallback diagnostic may be unobserved; exact source only queries saved steps/asserts none and named screenshot when actual observed gate true",
-                "condition": "Actual API stateactive/nonemptyrunningTurn AND exact child DOM ID/running row/result Working…; only then assert no current-turn saved step_prefix. Otherwise record observedfalse without coverage.",
+                "condition": "Actual API stateactive/nonemptyrunningTurn AND exact child DOM ID/running row/result Working\u2026; only then assert no current-turn saved step_prefix. Otherwise record observedfalse without coverage.",
                 "bounds": {
                   "originalCallerMs": 30000,
                   "individualAgentApiRequestMs": 15000
@@ -25029,7 +25095,17 @@
           ],
           "required": "Exact manifest,Podman connection fingerprint,container-service ownership; native14 also declared_agents required by actual cov-child name. Unenumerated extra source predicate closure, not all1072 inventory."
         },
-        "runtime": "0; no helper executed,services or new consumer install; all coverage/unmapped assertions unchanged"
+        "runtime": "0; no helper executed,services or new consumer install; all coverage/unmapped assertions unchanged",
+        "acceptedCa73RawAdmission": {
+          "validationReceipt": "acceptedCa73ChildAdmission",
+          "rawSha256": "f17277bd00aff3b5147f862deac6155d2204279160d5c15971c83396dd75ba04",
+          "engine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+          "consumer": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+          "status": "ADMITTED canonical unchanged raw suite",
+          "effects": 0,
+          "runtime": 0,
+          "fullMobilePreservation": false
+        }
       },
       "completionBranchReview": {
         "at": "2026-10-09T11:33:26.860612+00:00",
@@ -25498,7 +25574,7 @@
             "sourceLines": {
               "start": 444,
               "end": 454,
-              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const markers=Array.from(document.querySelectorAll('[data-testid=started-marker]'));\n      const links=markers.flatMap(m=>Array.from(m.querySelectorAll('a[href]')));\n      const ids=links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''));\n      const names=links.map(a=>a.lastChild?.textContent?.trim()||'');\n      const colors=links.map(a=>a.querySelector('[data-agent-color]')?.getAttribute('data-agent-color')||'');\n      const toolCount=markers.reduce((n,m)=>n+Number(/^([0-9]+) tool calls?$/.exec(m.querySelector('button[aria-expanded]')?.textContent?.trim().replace(/›/g,'').trim()||'')?.[1]||0),0);\n      return {markerCount:markers.length,ids,names,colors,toolCount,\n        rawCode:markers.some(m=>/\\\\{\\\\s*[\"'](?:name|brief|agent_id)[\"']\\\\s*:|tools\\\\.loom\\\\.agent_create\\\\s*\\\\(/.test(m.textContent||'')),\n        expanded:markers.map(m=>m.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')||'')};\n    })())\"\"\")"
+              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const markers=Array.from(document.querySelectorAll('[data-testid=started-marker]'));\n      const links=markers.flatMap(m=>Array.from(m.querySelectorAll('a[href]')));\n      const ids=links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''));\n      const names=links.map(a=>a.lastChild?.textContent?.trim()||'');\n      const colors=links.map(a=>a.querySelector('[data-agent-color]')?.getAttribute('data-agent-color')||'');\n      const toolCount=markers.reduce((n,m)=>n+Number(/^([0-9]+) tool calls?$/.exec(m.querySelector('button[aria-expanded]')?.textContent?.trim().replace(/\u203a/g,'').trim()||'')?.[1]||0),0);\n      return {markerCount:markers.length,ids,names,colors,toolCount,\n        rawCode:markers.some(m=>/\\\\{\\\\s*[\"'](?:name|brief|agent_id)[\"']\\\\s*:|tools\\\\.loom\\\\.agent_create\\\\s*\\\\(/.test(m.textContent||'')),\n        expanded:markers.map(m=>m.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')||'')};\n    })())\"\"\")"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/15",
@@ -25508,7 +25584,7 @@
             "destination": [],
             "gap": {
               "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
-              "required": "All actual Started markers/links:decoded last href part,lastChild trimmed name,actual color; tool-call count regex after removing ›/trim;rawCode includes quoted name/brief/agent_id JSON OR tools.loom.agent_create(. Preserve all markers/links and measured expansion attrs.",
+              "required": "All actual Started markers/links:decoded last href part,lastChild trimmed name,actual color; tool-call count regex after removing \u203a/trim;rawCode includes quoted name/brief/agent_id JSON OR tools.loom.agent_create(. Preserve all markers/links and measured expansion attrs.",
               "canonicalAttempt": "Canonicalc71 CaptureSchema supports actual DOM text/attributes/rect/computed-style/focused observations and typed actions; exact closed composition/selection/source-data parsing not authored for this group. No provider scenario assertion or missing primitive inferred.",
               "missingObservation": "Actual selected DOM/geometry/styles/actor effects +same source/saved context and exact pure source projection must be bound and compared in YAML; no expected facts or generic eval fallback."
             }
@@ -25647,7 +25723,7 @@
             "sourceLines": {
               "start": 543,
               "end": 556,
-              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const id=%s;\n      const row=document.querySelector('[data-testid=agent-tray] li[data-tray-row=\"'+id+'\"]');\n      return {id:row?.dataset.trayRow||'',running:!!row?.querySelector('[data-status=running]'),\n        result:row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim()||''};\n    })())\"\"\" % json.dumps(child[\"agent_id\"]))\n    observed = (live[\"state\"] == \"active\" and bool(live[\"running_turn_id\"]) and\n                shot[\"id\"] == child[\"agent_id\"] and shot[\"running\"] and shot[\"result\"] == \"Working…\")\n    if observed:\n        current_steps = [e for e in events(child[\"agent_id\"]) if e.get(\"turn_id\") == live[\"running_turn_id\"] and step_prefix(e)]\n        assert not current_steps, \"Working fallback shown despite a saved current-turn step\"\n        browser(\"screenshot\", str(OUT / f\"working-{stage}-{child_label}.png\"))\n    save(f\"working-{stage}-{child_label}\", {\"observed\": observed, \"api_state\": live[\"state\"],\n                                               \"turn_id\": live[\"running_turn_id\"], \"ui\": shot})"
+              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const id=%s;\n      const row=document.querySelector('[data-testid=agent-tray] li[data-tray-row=\"'+id+'\"]');\n      return {id:row?.dataset.trayRow||'',running:!!row?.querySelector('[data-status=running]'),\n        result:row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim()||''};\n    })())\"\"\" % json.dumps(child[\"agent_id\"]))\n    observed = (live[\"state\"] == \"active\" and bool(live[\"running_turn_id\"]) and\n                shot[\"id\"] == child[\"agent_id\"] and shot[\"running\"] and shot[\"result\"] == \"Working\u2026\")\n    if observed:\n        current_steps = [e for e in events(child[\"agent_id\"]) if e.get(\"turn_id\") == live[\"running_turn_id\"] and step_prefix(e)]\n        assert not current_steps, \"Working fallback shown despite a saved current-turn step\"\n        browser(\"screenshot\", str(OUT / f\"working-{stage}-{child_label}.png\"))\n    save(f\"working-{stage}-{child_label}\", {\"observed\": observed, \"api_state\": live[\"state\"],\n                                               \"turn_id\": live[\"running_turn_id\"], \"ui\": shot})"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/16",
@@ -25657,7 +25733,7 @@
             "destination": [],
             "gap": {
               "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
-              "required": "APIactive/nonempty runningturn,exact DOM childid/running/result Working… define observed;whenfalse no event-step assertion and no working screenshot,only honest diagnostic;whentrue fresh same-turn saved step_prefix set mustempty,working-fresh-repeat.png orworking-reconnect-repeat.png.",
+              "required": "APIactive/nonempty runningturn,exact DOM childid/running/result Working\u2026 define observed;whenfalse no event-step assertion and no working screenshot,only honest diagnostic;whentrue fresh same-turn saved step_prefix set mustempty,working-fresh-repeat.png orworking-reconnect-repeat.png.",
               "canonicalAttempt": "Canonicalc71 CaptureSchema supports actual DOM text/attributes/rect/computed-style/focused observations and typed actions; exact closed composition/selection/source-data parsing not authored for this group. No provider scenario assertion or missing primitive inferred.",
               "missingObservation": "Actual selected DOM/geometry/styles/actor effects +same source/saved context and exact pure source projection must be bound and compared in YAML; no expected facts or generic eval fallback."
             }
@@ -25669,7 +25745,7 @@
             "sourceLines": {
               "start": 302,
               "end": 348,
-              "text": "def js_truncate(value, limit):\n    \"\"\"Match the tray's UTF-16 slice and ellipsis limit.\"\"\"\n    units = value.encode(\"utf-16-le\", \"surrogatepass\")\n    return value if len(units) // 2 <= limit else \\\n        units[:(limit - 1) * 2].decode(\"utf-16-le\", \"surrogatepass\") + \"…\"\n\n\ndef reasoning_first_line(text):\n    \"\"\"Mirror AgentChat timelineRows.firstLine for the saved reasoning title.\"\"\"\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\", 1)[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    return js_truncate(line.strip(), 120)\n\n\ndef step_prefix(event):\n    payload = event[\"payload\"]\n    if event[\"kind\"] != \"item.completed\":\n        return None\n    if payload.get(\"itemKind\") == \"reasoning\":\n        line = reasoning_first_line(payload.get(\"text\") or \"\")\n        if not line:\n            return None\n        return js_truncate(f\"💭 Thinking · {line}\", 60)\n    if payload.get(\"itemKind\") != \"tool\":\n        return None\n    name = (payload.get(\"tool\") or {}).get(\"name\", \"\").strip()\n    short = name.split(\"/\")[-1]\n    if re.search(r\"(?:^|[^a-z])execute$\", name, re.I):\n        action = \"Ran code\"\n    elif re.fullmatch(r\"read|view|cat|read_?file|notebook_?read|image_?view\", short, re.I):\n        action = \"Read file\"\n    elif re.fullmatch(r\"edit|write|multi_?edit|patch|apply_?patch|str_?replace\\w*|notebook_?edit|create_?file\", short, re.I):\n        action = \"Changed file\"\n    elif re.fullmatch(r\"bash|shell|command|exec(_?command)?|terminal|run\\w*\", short, re.I):\n        action = \"Ran command\"\n    elif re.fullmatch(r\"grep|glob|find|ls|list|codesearch|search_?code|rg\", short, re.I):\n        action = \"Searched code\"\n    elif re.fullmatch(r\"web_?search|web_?fetch|fetch|browse\", short, re.I):\n        action = \"Searched the web\"\n    else:\n        action = name[:1].upper() + name[1:] if name else \"Tool call\"\n    label = f\"▸ {action}\"\n    return f\"{label[:59]}…\" if len(label) > 60 else label"
+              "text": "def js_truncate(value, limit):\n    \"\"\"Match the tray's UTF-16 slice and ellipsis limit.\"\"\"\n    units = value.encode(\"utf-16-le\", \"surrogatepass\")\n    return value if len(units) // 2 <= limit else \\\n        units[:(limit - 1) * 2].decode(\"utf-16-le\", \"surrogatepass\") + \"\u2026\"\n\n\ndef reasoning_first_line(text):\n    \"\"\"Mirror AgentChat timelineRows.firstLine for the saved reasoning title.\"\"\"\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\", 1)[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    return js_truncate(line.strip(), 120)\n\n\ndef step_prefix(event):\n    payload = event[\"payload\"]\n    if event[\"kind\"] != \"item.completed\":\n        return None\n    if payload.get(\"itemKind\") == \"reasoning\":\n        line = reasoning_first_line(payload.get(\"text\") or \"\")\n        if not line:\n            return None\n        return js_truncate(f\"\ud83d\udcad Thinking \u00b7 {line}\", 60)\n    if payload.get(\"itemKind\") != \"tool\":\n        return None\n    name = (payload.get(\"tool\") or {}).get(\"name\", \"\").strip()\n    short = name.split(\"/\")[-1]\n    if re.search(r\"(?:^|[^a-z])execute$\", name, re.I):\n        action = \"Ran code\"\n    elif re.fullmatch(r\"read|view|cat|read_?file|notebook_?read|image_?view\", short, re.I):\n        action = \"Read file\"\n    elif re.fullmatch(r\"edit|write|multi_?edit|patch|apply_?patch|str_?replace\\w*|notebook_?edit|create_?file\", short, re.I):\n        action = \"Changed file\"\n    elif re.fullmatch(r\"bash|shell|command|exec(_?command)?|terminal|run\\w*\", short, re.I):\n        action = \"Ran command\"\n    elif re.fullmatch(r\"grep|glob|find|ls|list|codesearch|search_?code|rg\", short, re.I):\n        action = \"Searched code\"\n    elif re.fullmatch(r\"web_?search|web_?fetch|fetch|browse\", short, re.I):\n        action = \"Searched the web\"\n    else:\n        action = name[:1].upper() + name[1:] if name else \"Tool call\"\n    label = f\"\u25b8 {action}\"\n    return f\"{label[:59]}\u2026\" if len(label) > 60 else label"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/16",
@@ -25714,7 +25790,7 @@
             "sourceLines": {
               "start": 361,
               "end": 371,
-              "text": "def visible_step(child_id, prefix):\n    script = \"\"\"(() => {\n      const id = %s, prefix = %s;\n      const row = Array.from(document.querySelectorAll('[data-testid=agent-tray] [data-tray-row]'))\n        .find(x => x.dataset.trayRow === id);\n      const line = row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim() || '';\n      return !!row?.getClientRects().length && line.startsWith(prefix) &&\n        (line.length === prefix.length || line.slice(prefix.length).startsWith(' · '));\n    })()\"\"\" % (json.dumps(child_id), json.dumps(prefix))\n    output = subprocess.check_output([\"agent-browser\", \"--session\", os.environ[\"AFT_SESSION\"], \"eval\", script], text=True)\n    return bool(re.search(r\"\\btrue\\s*$\", output))"
+              "text": "def visible_step(child_id, prefix):\n    script = \"\"\"(() => {\n      const id = %s, prefix = %s;\n      const row = Array.from(document.querySelectorAll('[data-testid=agent-tray] [data-tray-row]'))\n        .find(x => x.dataset.trayRow === id);\n      const line = row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim() || '';\n      return !!row?.getClientRects().length && line.startsWith(prefix) &&\n        (line.length === prefix.length || line.slice(prefix.length).startsWith(' \u00b7 '));\n    })()\"\"\" % (json.dumps(child_id), json.dumps(prefix))\n    output = subprocess.check_output([\"agent-browser\", \"--session\", os.environ[\"AFT_SESSION\"], \"eval\", script], text=True)\n    return bool(re.search(r\"\\btrue\\s*$\", output))"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/26"
@@ -26212,7 +26288,7 @@
             "sourceLines": {
               "start": 921,
               "end": 964,
-              "text": "    geometry = browser_json(\"\"\"JSON.stringify((() => {\n      const id = %s;\n      const tray = document.querySelector('[data-testid=agent-tray]');\n      const header = tray?.querySelector('button[aria-expanded]');\n      const list = tray?.querySelector('ul');\n      const rows = Array.from(list?.querySelectorAll('li[data-tray-row]') || []);\n      const composer = document.querySelector('section[aria-label=\"Agent chat\"] form[data-chat-composer-form]');\n      const nav = document.querySelector('nav[aria-label=\"Primary\"]');\n      if (!tray || !header || !list || !composer || !nav) return {missing:true};\n      const box = el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };\n      const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);\n      const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));\n      const child = rows.find(row => row.dataset.trayRow === id);\n      const childRunning = !!child?.querySelector('[data-status=running]');\n      const childBox = child && box(child);\n      const childWhole = !!childBox && childBox.left >= clip.left-1 && childBox.right <= clip.right+1 &&\n        childBox.top >= clip.top-1 && childBox.bottom <= clip.bottom+1;\n      const hit = el => {\n        if (!el) return {x:null,y:null,hit:false,target:null};\n        const r=el.getBoundingClientRect(), x=(r.left+r.right)/2, y=(r.top+r.bottom)/2;\n        const target=document.elementFromPoint(x,y);\n        return {x,y,hit:!!target && (target===el || el.contains(target)),target:target?.tagName || null};\n      };\n      const headerHit = hit(header), childLinkHit = hit(child?.querySelector('a[href]'));\n      const visible = rowBoxes.filter(row => row.bottom > clip.top && row.top < clip.bottom);\n      const partial = visible.filter(row => row.top < clip.top-1 || row.bottom > clip.bottom+1);\n      const hidden = rowBoxes.filter(row => row.bottom <= clip.top || row.top >= clip.bottom);\n      const moreText = Array.from(tray.querySelectorAll('div[aria-hidden=true]'))\n        .find(x => /↓ [0-9]+ more/.test(x.textContent || ''))?.textContent || '';\n      const moreCount = Number(/([0-9]+) more/.exec(moreText)?.[1] || 0);\n      return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,\n        navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',\n        childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',\n        headerColors:Array.from(header.querySelectorAll('[data-agent-color]')).map(x=>x.dataset.agentColor),\n        rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,\n        childWhole,childRunning,headerHit,childLinkHit,\n        partialRows:partial.length,hiddenRows:hidden.length,moreCount,\n        horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,\n          tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,\n          ...rowBoxes.map(row=>Math.max(clip.left-row.left,row.right-clip.right))),\n        maxControlBottom:Math.max(header.getBoundingClientRect().bottom,...visible.map(row=>row.bottom)),\n        composerTop:composerBox.top,composerBottom:composerBox.bottom,navTop:navBox.top,\n        tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};\n    })())\"\"\" % json.dumps(child_id))"
+              "text": "    geometry = browser_json(\"\"\"JSON.stringify((() => {\n      const id = %s;\n      const tray = document.querySelector('[data-testid=agent-tray]');\n      const header = tray?.querySelector('button[aria-expanded]');\n      const list = tray?.querySelector('ul');\n      const rows = Array.from(list?.querySelectorAll('li[data-tray-row]') || []);\n      const composer = document.querySelector('section[aria-label=\"Agent chat\"] form[data-chat-composer-form]');\n      const nav = document.querySelector('nav[aria-label=\"Primary\"]');\n      if (!tray || !header || !list || !composer || !nav) return {missing:true};\n      const box = el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };\n      const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);\n      const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));\n      const child = rows.find(row => row.dataset.trayRow === id);\n      const childRunning = !!child?.querySelector('[data-status=running]');\n      const childBox = child && box(child);\n      const childWhole = !!childBox && childBox.left >= clip.left-1 && childBox.right <= clip.right+1 &&\n        childBox.top >= clip.top-1 && childBox.bottom <= clip.bottom+1;\n      const hit = el => {\n        if (!el) return {x:null,y:null,hit:false,target:null};\n        const r=el.getBoundingClientRect(), x=(r.left+r.right)/2, y=(r.top+r.bottom)/2;\n        const target=document.elementFromPoint(x,y);\n        return {x,y,hit:!!target && (target===el || el.contains(target)),target:target?.tagName || null};\n      };\n      const headerHit = hit(header), childLinkHit = hit(child?.querySelector('a[href]'));\n      const visible = rowBoxes.filter(row => row.bottom > clip.top && row.top < clip.bottom);\n      const partial = visible.filter(row => row.top < clip.top-1 || row.bottom > clip.bottom+1);\n      const hidden = rowBoxes.filter(row => row.bottom <= clip.top || row.top >= clip.bottom);\n      const moreText = Array.from(tray.querySelectorAll('div[aria-hidden=true]'))\n        .find(x => /\u2193 [0-9]+ more/.test(x.textContent || ''))?.textContent || '';\n      const moreCount = Number(/([0-9]+) more/.exec(moreText)?.[1] || 0);\n      return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,\n        navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',\n        childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',\n        headerColors:Array.from(header.querySelectorAll('[data-agent-color]')).map(x=>x.dataset.agentColor),\n        rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,\n        childWhole,childRunning,headerHit,childLinkHit,\n        partialRows:partial.length,hiddenRows:hidden.length,moreCount,\n        horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,\n          tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,\n          ...rowBoxes.map(row=>Math.max(clip.left-row.left,row.right-clip.right))),\n        maxControlBottom:Math.max(header.getBoundingClientRect().bottom,...visible.map(row=>row.bottom)),\n        composerTop:composerBox.top,composerBottom:composerBox.bottom,navTop:navBox.top,\n        tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};\n    })())\"\"\" % json.dumps(child_id))"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
@@ -26693,7 +26769,7 @@
             "sourceLines": {
               "start": 1018,
               "end": 1041,
-              "text": "        const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim()||'';\n        const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim()||'';\n        const group=Array.from(document.querySelectorAll('nav[aria-label=Agents] [role=group]'))\n          .find(x=>x.getAttribute('aria-label')===parentName+' children');\n        const links=Array.from(document.querySelectorAll('nav[aria-label=Agents] a[href]'))\n          .filter(x=>x.getAttribute('href')===childRoute);\n        const link=links[0];\n        const avatar=link?.querySelector('[data-agent-color][data-dot]');\n        const nested=!!group && !!link && group.contains(link);\n        if(rows.filter(r=>r.dataset.trayRow===id).length!==1 || !row?.getClientRects().length ||\n           !row.textContent?.includes(name) || chip!=='attempt 2' || !/^(▸|💭)/.test(result) ||\n           !/^\\\\d+m \\\\d{2}s$/.test(elapsed) || links.length!==1 || !nested ||\n           !link.getClientRects().length || link.querySelector('[data-testid=agent-list-name]')?.textContent?.trim()!==name ||\n           !link.querySelector('[role=img][aria-label=opencode]') ||\n           !avatar?.dataset.agentColor || avatar.dataset.dot!=='working') return;\n        state.capture={path:location.pathname,rowId:row.dataset.trayRow,rowVisible:true,running:true,\n          attemptChip:chip,result,elapsed,childName:name,linkId:id,nested,\n          exactLinkCount:links.length,logo:true,dot:'working',color:avatar.dataset.agentColor,capturedAt:Date.now()};\n        state.observer.disconnect();\n      };\n      state.observer=new MutationObserver(sample);\n      window.__aftChildReactivation=state;\n      state.observer.observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});\n      sample();"
+              "text": "        const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim()||'';\n        const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim()||'';\n        const group=Array.from(document.querySelectorAll('nav[aria-label=Agents] [role=group]'))\n          .find(x=>x.getAttribute('aria-label')===parentName+' children');\n        const links=Array.from(document.querySelectorAll('nav[aria-label=Agents] a[href]'))\n          .filter(x=>x.getAttribute('href')===childRoute);\n        const link=links[0];\n        const avatar=link?.querySelector('[data-agent-color][data-dot]');\n        const nested=!!group && !!link && group.contains(link);\n        if(rows.filter(r=>r.dataset.trayRow===id).length!==1 || !row?.getClientRects().length ||\n           !row.textContent?.includes(name) || chip!=='attempt 2' || !/^(\u25b8|\ud83d\udcad)/.test(result) ||\n           !/^\\\\d+m \\\\d{2}s$/.test(elapsed) || links.length!==1 || !nested ||\n           !link.getClientRects().length || link.querySelector('[data-testid=agent-list-name]')?.textContent?.trim()!==name ||\n           !link.querySelector('[role=img][aria-label=opencode]') ||\n           !avatar?.dataset.agentColor || avatar.dataset.dot!=='working') return;\n        state.capture={path:location.pathname,rowId:row.dataset.trayRow,rowVisible:true,running:true,\n          attemptChip:chip,result,elapsed,childName:name,linkId:id,nested,\n          exactLinkCount:links.length,logo:true,dot:'working',color:avatar.dataset.agentColor,capturedAt:Date.now()};\n        state.observer.disconnect();\n      };\n      state.observer=new MutationObserver(sample);\n      window.__aftChildReactivation=state;\n      state.observer.observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});\n      sample();"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/36",
@@ -26757,7 +26833,7 @@
             "sourceLines": {
               "start": 1092,
               "end": 1100,
-              "text": "def reactivation_event(history, child_id, after_seq, result):\n    started = [e for e in history if e[\"agent_id\"] == child_id and e[\"kind\"] == \"turn.started\" and e[\"seq\"] > after_seq]\n    assert len(started) == 1 and started[0].get(\"turn_id\"), \"exact second-attempt turn did not start after the pre-Send baseline\"\n    turn = started[0][\"turn_id\"]\n    steps = [e for e in history if e[\"agent_id\"] == child_id and e.get(\"turn_id\") == turn and\n             e[\"seq\"] > started[0][\"seq\"] and step_prefix(e)]\n    matches = [e for e in steps if result == step_prefix(e) or result.startswith(step_prefix(e) + \" · \")]\n    assert matches, \"captured attempt-two step lacks an exact saved current-turn tool or reasoning event\"\n    return matches[0]"
+              "text": "def reactivation_event(history, child_id, after_seq, result):\n    started = [e for e in history if e[\"agent_id\"] == child_id and e[\"kind\"] == \"turn.started\" and e[\"seq\"] > after_seq]\n    assert len(started) == 1 and started[0].get(\"turn_id\"), \"exact second-attempt turn did not start after the pre-Send baseline\"\n    turn = started[0][\"turn_id\"]\n    steps = [e for e in history if e[\"agent_id\"] == child_id and e.get(\"turn_id\") == turn and\n             e[\"seq\"] > started[0][\"seq\"] and step_prefix(e)]\n    matches = [e for e in steps if result == step_prefix(e) or result.startswith(step_prefix(e) + \" \u00b7 \")]\n    assert matches, \"captured attempt-two step lacks an exact saved current-turn tool or reasoning event\"\n    return matches[0]"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/40"
@@ -33538,9 +33614,9 @@
               "source": {
                 "line": 1761,
                 "end_line": 1764,
-                "expression": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('😀.' in rich_result['terminal'])",
+                "expression": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('\ud83d\ude00.' in rich_result['terminal'])",
                 "message": "'the real GFM/list/raw-HTML/emoji component projection changed'",
-                "source": "assert \"first bold item\" in rich_result[\"terminal\"] and \\\n        '<img src=x onerror=\"window.pwned=1\">' in rich_result[\"terminal\"] and \\\n        \"😀.\" in rich_result[\"terminal\"], \\\n        \"the real GFM/list/raw-HTML/emoji component projection changed\"",
+                "source": "assert \"first bold item\" in rich_result[\"terminal\"] and \\\n        '<img src=x onerror=\"window.pwned=1\">' in rich_result[\"terminal\"] and \\\n        \"\ud83d\ude00.\" in rich_result[\"terminal\"], \\\n        \"the real GFM/list/raw-HTML/emoji component projection changed\"",
                 "function": "self_test_markdown_projection",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -33549,7 +33625,7 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('😀.' in rich_result['terminal'])",
+                "required": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('\ud83d\ude00.' in rich_result['terminal'])",
                 "evidence": "'the real GFM/list/raw-HTML/emoji component projection changed'",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1761,
@@ -34578,9 +34654,9 @@
               "source": {
                 "line": 2581,
                 "end_line": 2581,
-                "expression": "js_utf16_length('A😀') == 3 and assert_motion_capture(emoji)[2] == -40",
+                "expression": "js_utf16_length('A\ud83d\ude00') == 3 and assert_motion_capture(emoji)[2] == -40",
                 "message": null,
-                "source": "assert js_utf16_length(\"A😀\") == 3 and assert_motion_capture(emoji)[2] == -40",
+                "source": "assert js_utf16_length(\"A\ud83d\ude00\") == 3 and assert_motion_capture(emoji)[2] == -40",
                 "function": "self_test_motion_assert",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -34589,8 +34665,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "js_utf16_length('A😀') == 3 and assert_motion_capture(emoji)[2] == -40",
-                "evidence": "assert js_utf16_length(\"A😀\") == 3 and assert_motion_capture(emoji)[2] == -40",
+                "required": "js_utf16_length('A\ud83d\ude00') == 3 and assert_motion_capture(emoji)[2] == -40",
+                "evidence": "assert js_utf16_length(\"A\ud83d\ude00\") == 3 and assert_motion_capture(emoji)[2] == -40",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2581,
                 "sourceFunction": "self_test_motion_assert",
@@ -36155,9 +36231,9 @@
               "source": {
                 "line": 3161,
                 "end_line": 3161,
-                "expression": "reasoning_preview('x' * 121) == 'x' * 119 + '…'",
+                "expression": "reasoning_preview('x' * 121) == 'x' * 119 + '\u2026'",
                 "message": null,
-                "source": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"…\"",
+                "source": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"\u2026\"",
                 "function": "self_test_reasoning",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -36166,8 +36242,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "reasoning_preview('x' * 121) == 'x' * 119 + '…'",
-                "evidence": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"…\"",
+                "required": "reasoning_preview('x' * 121) == 'x' * 119 + '\u2026'",
+                "evidence": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"\u2026\"",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3161,
                 "sourceFunction": "self_test_reasoning",
@@ -36954,9 +37030,9 @@
               "source": {
                 "line": 4061,
                 "end_line": 4062,
-                "expression": "isinstance(observed, str) and 'অপৰাহ্ন ১২.৫৯' in observed",
+                "expression": "isinstance(observed, str) and '\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef' in observed",
                 "message": "'BLOCKED: documented long time did not render on the owned Chat row'",
-                "source": "assert isinstance(observed, str) and \"অপৰাহ্ন ১২.৫৯\" in observed, \\\n        \"BLOCKED: documented long time did not render on the owned Chat row\"",
+                "source": "assert isinstance(observed, str) and \"\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef\" in observed, \\\n        \"BLOCKED: documented long time did not render on the owned Chat row\"",
                 "function": "require_locale_time",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -36965,7 +37041,7 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "isinstance(observed, str) and 'অপৰাহ্ন ১২.৫৯' in observed",
+                "required": "isinstance(observed, str) and '\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef' in observed",
                 "evidence": "'BLOCKED: documented long time did not render on the owned Chat row'",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4061,
@@ -48696,7 +48772,7 @@
             "sourceLines": {
               "start": 2932,
               "end": 2954,
-              "text": "def reasoning_preview(text):\n    # WorkRows uses timelineRows.firstLine: strip, first line, plain-text marks, 120-character cap.\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\")[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    line = line.strip()\n    return line if len(line) <= 120 else line[:119] + \"…\"\n\n\nREASONING_DOM = r\"\"\"(() => {\n  const rect=x=>{if(!x)return null;const r=x.getBoundingClientRect();\n    return {x:r.x,y:r.y,width:r.width,height:r.height};};\n  return [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]\n  .map(x => { const toggle=x.querySelector('[role=button]'), row=x.firstElementChild;\n    return {heading:x.querySelector('[class*=heading]')?.textContent||'',\n      preview:x.querySelector('[class*=preview]')?.textContent||'',\n      expanded:toggle?.getAttribute('aria-expanded')??null,\n      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null,\n      geometry:{row:rect(row),parent:rect(x),chevron:rect(row?.querySelector('[class*=chevron]')),\n        tabIndex:toggle?.tabIndex??null}}; });})()\"\"\""
+              "text": "def reasoning_preview(text):\n    # WorkRows uses timelineRows.firstLine: strip, first line, plain-text marks, 120-character cap.\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\")[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    line = line.strip()\n    return line if len(line) <= 120 else line[:119] + \"\u2026\"\n\n\nREASONING_DOM = r\"\"\"(() => {\n  const rect=x=>{if(!x)return null;const r=x.getBoundingClientRect();\n    return {x:r.x,y:r.y,width:r.width,height:r.height};};\n  return [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]\n  .map(x => { const toggle=x.querySelector('[role=button]'), row=x.firstElementChild;\n    return {heading:x.querySelector('[class*=heading]')?.textContent||'',\n      preview:x.querySelector('[class*=preview]')?.textContent||'',\n      expanded:toggle?.getAttribute('aria-expanded')??null,\n      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null,\n      geometry:{row:rect(row),parent:rect(x),chevron:rect(row?.querySelector('[class*=chevron]')),\n        tabIndex:toggle?.tabIndex??null}}; });})()\"\"\""
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -55067,18 +55143,16 @@
     "additionalUninventoriedVisualClipboardSourceGroups": 10
   },
   "dependencies": {
-    "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
-    "authoredCoreConsumption": "36bf343fa7a4a850898e47cd8da4e7055d349b31",
-    "approvalScope": "parent-approved deterministic interface consumption only",
+    "acceptedEngine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+    "authoredCoreConsumption": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+    "approvalScope": "Parent-approved coherent deterministic consumer; current child raw admission only, source obligations/runtime remain separate.",
     "pending": [
-      "symbolic template admission",
-      "resource history",
-      "synchronous multi-region DOM ledger",
-      "raw SSE replay",
-      "authenticated RAF/tree/arrival ledger and source projection",
-      "reachable helper branch translation and negative oracle preservation",
-      "Stop first truthy-completed selection",
-      "exact original marker helper whole-caller deadline/runtime receipt"
+      "Every reachable source helper predicate/actor/deadline translation and negative oracle",
+      "Original cleanup/clipboard/provisioning/Compose actor bindings",
+      "Full authenticated source-shaped motion consumer and shared retained budget",
+      "Exact original marker/native/Stop whole caller assertions and deadlines",
+      "Missing frozen original full inventory/env recovery",
+      "Actual public deterministic pilot runner chains and parent-owned original runtime acceptance"
     ],
     "approvedFactLeaves": {
       "fixtureRunId": "3418425b29896b221621ff7108c9ec3e8752f3f1",
@@ -55087,9 +55161,29 @@
     },
     "approvedScalarFilesystem": "36bf343fa7a4a850898e47cd8da4e7055d349b31",
     "geometryCompatibility": {
-      "engine": "fc67a57f1cd4f0c92008cb20a2f957646bb872a3",
-      "wholeHeadAccepted": false,
-      "scope": "Only parent-approved separate geometry delta used in isolated loader diagnostics; no maintained pin change or runtime authority credit."
+      "engine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+      "wholeHeadAccepted": true,
+      "consumer": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+      "scope": "Accepted canonical geometry field schema and current child raw admission only; no geometry source predicate/mobile actor preservation or runtime."
+    },
+    "historicalInitialDeclaration": {
+      "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+      "authoredCoreConsumption": "36bf343fa7a4a850898e47cd8da4e7055d349b31",
+      "pending": [
+        "symbolic template admission",
+        "resource history",
+        "synchronous multi-region DOM ledger",
+        "raw SSE replay",
+        "authenticated RAF/tree/arrival ledger and source projection",
+        "reachable helper branch translation and negative oracle preservation",
+        "Stop first truthy-completed selection",
+        "exact original marker helper whole-caller deadline/runtime receipt"
+      ],
+      "geometryCompatibility": {
+        "engine": "fc67a57f1cd4f0c92008cb20a2f957646bb872a3",
+        "wholeHeadAccepted": false,
+        "scope": "Only parent-approved separate geometry delta used in isolated loader diagnostics; no maintained pin change or runtime authority credit."
+      }
     }
   }
 }

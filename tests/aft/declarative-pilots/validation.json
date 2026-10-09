@@ -871,7 +871,7 @@
     "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
   },
   "currentPublication": {
-    "at": "2026-10-09T13:25:29.041596+00:00",
+    "at": "2026-10-09T13:56:24.968037+00:00",
     "status": "in-progress reviewable draft; not preservation-complete",
     "taskNoteId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
     "branch": "codex/aft-declarative-pilots",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "6a44a01e5d5c6f3e9ceaba1f5d47e9c42418e3edaff45cc63a00fbe195695694"
+        "sha256": "9912910b382fac763bede980ae5ce9d09d8e85f1f20c69d4d390a646d80148c0"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -917,22 +917,22 @@
         "scope": "Historical699 steps before new4geometry; new fullchild loader admitted on isolatedfc67 only. No revised699total claimed."
       },
       "latestFullLoaderAttempt": {
-        "engine": "fc67a57f1cd4f0c92008cb20a2f957646bb872a3",
-        "wholeEngineHeadApproved": false,
-        "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
-        "scope": "One changed child raw suite,isolated canonical geometry authored compatibility only",
+        "engine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+        "wholeEngineHeadApproved": true,
+        "adapterSource": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+        "scope": "Only current changed child raw suite",
         "fullAdmissionPassed": 1,
-        "maintained584RejectedChangedChild": 1,
         "other4RawByteUnchangedHistorical584Admissions": 4,
+        "other4CurrentCa73Admission": "unrun/not claimed",
         "effects": 0,
         "runtimeStarted": 0,
-        "receipt": "geometryCompatibilityAuthoring",
-        "selectionBasis": "NEW098ab03f actual changed5file selection+perversion actualpin/publicenv; not e34d or historical recovery"
+        "receipt": "acceptedCa73ChildAdmission",
+        "selectionBasis": "NEW098ab currentfive/perversionactualpin/publicenv; no historical recovery"
       },
-      "approvedCoherentConsumer": "49d1c50f83fb5b0726bc3ef8d61b88b1b2f94ee4",
+      "approvedCoherentConsumer": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
       "f377PilotChecksObtained": true,
       "f377Note": "Historical c71/f377 source-shaped timeout profile retained separately. New parent-approved584 source-built isolated f377 raw admission completes all5 unchanged files with no effects/runtime. No maintained root pin or preservation claim.",
-      "maintainedEngine": "58470a6df949158d72aa9500fe515ce3c5721be5"
+      "maintainedEngine": "ca73f637d46fa618e2a67f987b89698e914f21cd"
     },
     "sourceMapping": {
       "originalSteps": 207,
@@ -948,15 +948,15 @@
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
-      "Changed child geometry authored4steps has isolated unaccepted-wholefc admission only; maintained584 rejects current child. Full mobile case source predicates/actors unpreserved; source step27 remains unresolved.",
-      "Prior five exact raw hashes admitted on isolated584/f377; accepted maintained49d/584 available. New child hash has no maintained admission and public runtime chains remain unverified",
+      "Current changed child f172 raw admitted on acceptedca73/8dd; original four mobile contexts/real actors/source predicates remain unpreserved,source step27 unresolved.",
+      "Four other unchanged raw pilots retain historical584/f377 admission only; all five public runtime chains/provisioning/source preservation remain unverified.",
       "Files repeated identity predicates and exact helper branch denominator uncovered",
       "Stop whole30s chain bound, tool trim/failed normalization, Respond no-request history, recovery correlation and native desc-assistant/first-truthy/full200-prefix uncovered",
       "child synchronous pre-Send/reactivation/native/source predicates require final reviewed ledger and provisioning",
       "visual exact RAF/phase/source/delta/completion/Markdown/2word/300ms/12tick/180000ms preservation and receipt pipeline incomplete",
       "SSE full raw replay/cursor/header/payload/foreign exclusion and native restart provisioning incomplete"
     ],
-    "consumerWorkRemaining": "Consume exact reviewed canonical geometry/output/core-motion/provisioning contracts when available, author every uncovered source predicate and exercise actual public runner with declared deterministic transports. All5 raw admission now passed in isolated584/f377; preservation, maintained root adoption,original inventory recovery and runtime/bulk migration remain separate gates.",
+    "consumerWorkRemaining": "Author every uncovered source predicate and actor using accepted canonical contracts, actual deterministic public runner chains, original fixed clipboard/archive/provisioning/Compose bindings, full retained-capacity motion consumer, and inventory recovery. Current child raw schema gap closed only; all5 runtime skipped/unrun.",
     "publicationPolicy": "Publish current source independently of journal/provider completion; no executable wrappers, expected-return stubs, original campaign changes or runtime claim."
   },
   "rawLoaderTimeoutDiagnosis": {
@@ -2529,7 +2529,7 @@
         "status": "REJECTED canonical unchanged raw suite",
         "guardMs": 60000,
         "errors": [
-          "invalid suite /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:603:9: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), maxEntries: Required\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:605:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), kind: Invalid literal value, expected \"resources\"\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:607:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"sampling\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:608:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"regions\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:697:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxSamples\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:698:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxNodes\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs"
+          "invalid suite /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:603:9: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), maxEntries: Required\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:605:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), kind: Invalid literal value, expected \"resources\"\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:607:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"sampling\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:608:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"regions\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:697:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxSamples\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:698:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxNodes\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs"
         ],
         "rawUnchangedAfter": true
       },
@@ -2680,5 +2680,229 @@
       "49dmaintained584"
     ],
     "scope": "Parent scopedreviews,not pilotindependenttests. Stalewaitingflags mustnotblockconcretebindings;actualworkerAPIstop/exit remainsseparateopen. Frozenoldreceiptsnotrewritten."
+  },
+  "archiveWireSourceCorrection": {
+    "at": "2026-10-09T13:56:24.968037+00:00",
+    "evidenceClass": "read-only frozen product-source interpretation; no archive HTTP/runtime execution",
+    "frozenSourceRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+    "literalFilesWire": {
+      "body": {
+        "cancel": true
+      },
+      "idempotency": "cov-files-{actual source RUN_ID}-{captured agentId}-cleanup",
+      "timeoutMs": 15000,
+      "ignoredHttpStatuses": [
+        409
+      ],
+      "preservedSourceGroup": "files-cleanup-archive-cancel-idempotency"
+    },
+    "actualProductInterpretation": "ArchiveBody only declares reason. ReadJSON does not reject unknown fields, so cancel:true is ignored. Empty reason defaults to ArchiveDone=done. Preserve the literal source wire; replacing it with reason:cancelled changes behavior.",
+    "stateDependentFacts": "Default done rejects unfinished single_task as busy; persistent active/waiting transitions to stopping until turn/waiting work finishes; stopping is idempotent; finished/other settled paths call finishArchive and retireLaunch. HTTP409 may be suppressed by the caller. None establishes an observed cancellation, immediate process exit or native session teardown.",
+    "visualSeparateVariant": "Visual cleanup explicitly sends reason:cancelled and uses its source-case idempotency key; it is a separate source path.",
+    "sourceProof": [
+      {
+        "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "file": "internal/webui/handlers/agentsv1/wire.go",
+        "sha256": "9eaaa1c39875a6e5cf0fdc3a83d23aaa2c73048eb1091fff069d60b7e20e4961",
+        "lines": {
+          "start": 94,
+          "end": 98,
+          "text": "\n// ArchiveBody is the optional archive body; reason defaults to done.\ntype ArchiveBody struct {\n\tReason string `json:\"reason\"`\n}"
+        }
+      },
+      {
+        "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "file": "internal/webui/handlers/agentsv1/agentsv1.go",
+        "sha256": "67a27f1715a2f421c026c657db53e8d6cb628d422e8ee0d17dcacce2492ea2c3",
+        "lines": {
+          "start": 198,
+          "end": 213,
+          "text": "}\n\nfunc unarchive(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {\n\treturn archiving(w, r, s.Unarchive)\n}\n\nfunc archiving(w http.ResponseWriter, r *http.Request, op func(context.Context, loomagent.ArchiveRequest) error) (int, any, error) {\n\tvar body ArchiveBody\n\tid, err := envelope(w, r, &body)\n\tif err != nil {\n\t\treturn 0, nil, err\n\t}\n\treturn http.StatusNoContent, nil, op(r.Context(), loomagent.ArchiveRequest{\n\t\tEnvelope: loomagent.Envelope{RequestID: id}, AgentID: r.PathValue(\"id\"), Reason: body.Reason})\n}\n"
+        }
+      },
+      {
+        "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "file": "internal/webui/server/handler/request.go",
+        "sha256": "bb3d83c26d2a449a7fb3e4969ed7aa18cd0658a65626d5253daa169160c479c0",
+        "lines": {
+          "start": 28,
+          "end": 44,
+          "text": "func ReadJSON(w http.ResponseWriter, r *http.Request, dst any) error {\n\tr.Body = http.MaxBytesReader(w, r.Body, MaxRequestBody)\n\n\tdec := json.NewDecoder(r.Body)\n\tif err := dec.Decode(dst); err != nil {\n\t\tvar maxBytesErr *http.MaxBytesError\n\t\tif errors.As(err, &maxBytesErr) {\n\t\t\treturn service.ErrPayloadTooLarge(\"request body too large (max 1MB)\")\n\t\t}\n\t\treturn service.ErrValidation(\"invalid request body\")\n\t}\n\tif dec.More() {\n\t\treturn service.ErrValidation(\"request body contains trailing content\")\n\t}\n\treturn nil\n}\n"
+        }
+      },
+      {
+        "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "file": "internal/loomagent/lifecycle.go",
+        "sha256": "1538a0418433f3552ef8e5e5d998ff20aadc0b678c232c9428be75be6479e83b",
+        "lines": {
+          "start": 24,
+          "end": 100,
+          "text": "// its turn and waiting messages finish; the slot dispatcher then calls\n// finishArchive. Repeating Archive is safe.\nfunc (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {\n\tif req.Reason == \"\" {\n\t\treq.Reason = ArchiveDone\n\t}\n\tif req.Reason != ArchiveDone && req.Reason != ArchiveCancelled {\n\t\treturn invalid(\"archive reason \"+req.Reason, ArchiveDone, ArchiveCancelled)\n\t}\n\tdefer s.lockReady(ctx, req.AgentID)()\n\ta, err := s.live(ctx, req.AgentID)\n\tif err != nil {\n\t\treturn err\n\t}\n\tif a.State == StateArchived {\n\t\treturn s.finishArchive(ctx, a, deref(a.ArchiveReason))\n\t}\n\tif req.Reason == ArchiveCancelled {\n\t\tif a, err = s.stop(ctx, a, &archiveCols{reason: sp(req.Reason)}); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tif a.Mode == \"single_task\" {\n\t\t\tto := a.StateOf()\n\t\t\tto.Outcome = sp(ArchiveCancelled)\n\t\t\tif a, err = s.setState(ctx, a, to); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t}\n\t\treturn s.finishArchive(ctx, a, req.Reason)\n\t}\n\tswitch {\n\tcase a.Mode == \"single_task\" && a.State != StateFinished:\n\t\treturn &Error{Code: CodeAgentBusy, Message: \"single task is not finished; archive it as cancelled\"}\n\tcase a.State == StateActive || a.State == StateWaiting:\n\t\tto := a.StateOf()\n\t\tto.State = StateStopping\n\t\t_, err = s.changeState(ctx, a, to, &archiveCols{reason: sp(req.Reason)})\n\t\treturn err\n\tcase a.State == StateStopping:\n\t\treturn nil\n\t}\n\treturn s.finishArchive(ctx, a, req.Reason)\n}\n\n// finishArchive moves a through stopping to archived and starts the R29\n// clock. It keeps a's outcome. Each move records the archive reason in its\n// transaction, so a restart finishes a stopping done archive; the move to\n// archived also records the clock and agent.archived.\nfunc (s *Service) finishArchive(ctx context.Context, a loomstore.Agent, reason string) error {\n\tvar err error\n\tnow := time.Now()\n\tif a.State == StateArchived { // a repeat: keep the clock, save nothing new\n\t\terr = s.store.SetArchive(ctx, a.AgentID, sp(reason), &now)\n\t} else {\n\t\tif a.State != StateStopping {\n\t\t\tif a, err = s.changeState(ctx, a, loomstore.AgentState{State: StateStopping, Outcome: a.Outcome, Attempt: a.Attempt},\n\t\t\t\t&archiveCols{reason: sp(reason)}); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t}\n\t\ta, err = s.changeState(ctx, a, loomstore.AgentState{State: StateArchived, Outcome: a.Outcome, Attempt: a.Attempt},\n\t\t\t&archiveCols{reason: sp(reason), at: &now}, Event{AgentID: a.AgentID, Type: EventArchived, Reason: reason, Time: now})\n\t}\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn s.retireLaunch(ctx, a)\n}\n\n// retireLaunch runs the Retire hook for a, which is archived or deleted.\nfunc (s *Service) retireLaunch(ctx context.Context, a loomstore.Agent) error {\n\tif s.retire == nil {\n\t\treturn nil\n\t}\n\treturn s.retire(ctx, a)\n}\n"
+        }
+      }
+    ],
+    "coverage": "unresolved; source semantics clarified only",
+    "destination": [],
+    "missingCanonicalEvidence": "Closed fixed archive wire/header port, actual current name and immutable creation-incarnation facts under same AgentRef/store/lineage/serve generation, child-first captured ordering, exact source key/15s/outcome handling and declared actual lifecycle/retire effects remain pending. Existing fixture.release is not this actor.",
+    "strongerOwnershipChecks": "Any proposed creation-incarnation recheck beyond source name/run guard must be identified explicitly; mutable model/revision/name must not be treated as immutable whole-row identity."
+  },
+  "maintainedCa73ConsumerStatusUpdate": {
+    "at": "2026-10-09T13:56:24.968037+00:00",
+    "head": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+    "tree": "15b280e1ad34303faf9824b81bbb19c697297a3f",
+    "engine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+    "engineTree": "f08aaba11473fcf9e3c6961a4612c6601ac2af90",
+    "engineReceiptSha256": "951d364c296d28c900f7b351f4abd237ae967c8cf17628d5ead98f8b00dfd4ea",
+    "parentApproved": true,
+    "receipt": {
+      "path": "/private/tmp/loom-declarative-aft-276315dd/tests/aft/adapter/.adapter-dev/engine-ca73-combined-receipt.json",
+      "sha256": "473df933673b3d7fd9c9b66e1b4698848e66a067ae9f5e3ddee414ed5e79f76f",
+      "bytes": 24951
+    },
+    "verifiedByPilot": "Exact8dd committed package+lock preserved in own git-archive source; fresh npm ci/build and all116 actual installed emitted bytes matched immutable ca73; receipt473df933 rehashed. Parent438TS+12Python/type/build/lint acceptance reported separately, not rerun by pilot.",
+    "approvalLimit": "Deterministic coherent consumer and engine output-retention/geometry/registration interface only; no full capacity/browser/provider/runtime/campaign preservation."
+  },
+  "acceptedCa73ChildAdmission": {
+    "at": "2026-10-09T13:56:24.968037+00:00",
+    "scope": "Only changed child raw YAML full-loader admission on accepted coherent8dd/ca73; no effects/public runtime execution",
+    "consumer": {
+      "at": "2026-10-09T13:56:24.968037+00:00",
+      "head": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+      "tree": "15b280e1ad34303faf9824b81bbb19c697297a3f",
+      "engine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+      "engineTree": "f08aaba11473fcf9e3c6961a4612c6601ac2af90",
+      "engineReceiptSha256": "951d364c296d28c900f7b351f4abd237ae967c8cf17628d5ead98f8b00dfd4ea",
+      "parentApproved": true,
+      "receipt": {
+        "path": "/private/tmp/loom-declarative-aft-276315dd/tests/aft/adapter/.adapter-dev/engine-ca73-combined-receipt.json",
+        "sha256": "473df933673b3d7fd9c9b66e1b4698848e66a067ae9f5e3ddee414ed5e79f76f",
+        "bytes": 24951
+      },
+      "verifiedByPilot": "Exact8dd committed package+lock preserved in own git-archive source; fresh npm ci/build and all116 actual installed emitted bytes matched immutable ca73; receipt473df933 rehashed. Parent438TS+12Python/type/build/lint acceptance reported separately, not rerun by pilot.",
+      "approvalLimit": "Deterministic coherent consumer and engine output-retention/geometry/registration interface only; no full capacity/browser/provider/runtime/campaign preservation."
+    },
+    "rawOutcome": {
+      "purpose": "Accepted ca73 child raw admission only; no mobile preservation/runtime/capacity claim",
+      "engineHead": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+      "adapterSource": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+      "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/tests/aft/adapter",
+      "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+      "canonicalModuleResolutionVerified": true,
+      "selectionSha256": "098ab03f2dcfeafae6d09fd3922b12382ed3268e2857dcad6d367ac55b1b55d6",
+      "envFileSha256": "d872ee4a78ad47d46bef1917ab38ee17a4dd0870763dcae7d4b6fd1002752d71",
+      "envSha256": "5673d2b1b1b7d8d22ae42596f69708425516c35f064d263cd40af6550b0129f9",
+      "pinSha256": "034f8a8ed608ca08dc611fc1466fd3b7343872e59794c1790e1b5544428ebda2",
+      "manifestFiles": 2383,
+      "uniqueManifestBytes": 9078843,
+      "providers": 23,
+      "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml",
+      "rawSha256": "f17277bd00aff3b5147f862deac6155d2204279160d5c15971c83396dd75ba04",
+      "rawBytes": 39353,
+      "verifyCalls": 115,
+      "verifyReads": 2383,
+      "verifyBytes": 9078843,
+      "verifyMs": 827.2723319999982,
+      "elapsedMs": 897.9102080000002,
+      "effects": 0,
+      "runtimeStarted": 0,
+      "status": "ADMITTED canonical unchanged raw suite",
+      "guardMs": 60000,
+      "loadedSuites": 1,
+      "cases": [
+        {
+          "name": "repeated child attempts keep two keyed results and one final Lead summary",
+          "skipped": true,
+          "declaredSteps": 105
+        }
+      ],
+      "rawUnchangedAfter": true
+    },
+    "artifacts": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/preparation.json",
+        "sha256": "4893afdf4ab3e0d43ecf62ddfc5179bf5766e1428d0872b776cf6d722893936e",
+        "bytes": 552
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/adapter-source.tar",
+        "sha256": "5ab15c08e602e0ad4c90638e478e536dfd88b084c00ce4562100b37e7b6497f0",
+        "bytes": 3317760
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/diagnostic-selection.json",
+        "sha256": "098ab03f2dcfeafae6d09fd3922b12382ed3268e2857dcad6d367ac55b1b55d6",
+        "bytes": 1653
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/public-env-basis.json",
+        "sha256": "f3c77eebcf3b207432c32374e1078001b982ab4d96ce0170cc932e056537ef67",
+        "bytes": 1249
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/construct-public-env.mjs",
+        "sha256": "1e2f78078974e4fc7761738b19e7da00526161aa6313fdb87e79ed930c615f46",
+        "bytes": 1723
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/raw-compatibility.mjs",
+        "sha256": "61373a9dbdc8a40395fc67061d28cec86e9b16f88ff3d22eeaa763cdad90bbc6",
+        "bytes": 4139
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/ca73-public-env.json",
+        "sha256": "d872ee4a78ad47d46bef1917ab38ee17a4dd0870763dcae7d4b6fd1002752d71",
+        "bytes": 442315
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/ca73-child-receipt.json",
+        "sha256": "321ba07df6a47517e143834df7426d683cec3557d8b4e393064bd859f3e4ce34",
+        "bytes": 1672
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/installed-engine-byte-receipt.json",
+        "sha256": "4c0049bf97f30a91c9d8796d15ae38caba438c19a26db98f9692aacbb453feb9",
+        "bytes": 26417
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/immutable-engine-source-build-receipt.json",
+        "sha256": "951d364c296d28c900f7b351f4abd237ae967c8cf17628d5ead98f8b00dfd4ea",
+        "bytes": 45476
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/npm-ci.log",
+        "sha256": "12074ab5497f6cea85705ea6311777873564d9572d366d8c1be74642dc987207",
+        "bytes": 258
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/projections-ci.log",
+        "sha256": "b7cd8ab6cfbce1378f7b9529d377e6943f053243d03771767832ec1e76209b7f",
+        "bytes": 28
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/build.log",
+        "sha256": "b5644a9bcf54fb717ff2d7b31c12159c4da5d6424ddb28a18cc286f5199c7226",
+        "bytes": 51
+      }
+    ],
+    "newSelection": "098ab03f current five-file selection+actual perversion pin/full public env; not e34d/historical405554 inventory or5b473 env recovery",
+    "closureDifference": "Actual maintained8dd has23providers/2383files/9078843unique bytes; earlier f377 had22providers/2362files. No closure shrink/cache bypass; all original registry checks called unchanged.",
+    "otherFourCurrentCa73Outcomes": "Not rerun/not claimed; their byte-identical historical accepted584/f377 admission receipts remain separate.",
+    "allFiveRuntime": "skipped and unrun; no full source-predicate/mobile/clipboard/archive/Compose/capacity proof",
+    "geometryRemaining": "Source step27 still unresolved: four width/theme contexts and real theme/resize/restoration actors, before-after exact running turn, actual source geometry/clipping/More/color/status/1px assertions and screenshots not preserved by passive desktop measurement.",
+    "preservationAccepted": false,
+    "runtime": 0
+  },
+  "historicalGeometryLatestFullLoaderAttempt": {
+    "engine": "fc67a57f1cd4f0c92008cb20a2f957646bb872a3",
+    "wholeEngineHeadApproved": false,
+    "adapterSource": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+    "scope": "One changed child raw suite,isolated canonical geometry authored compatibility only",
+    "fullAdmissionPassed": 1,
+    "maintained584RejectedChangedChild": 1,
+    "other4RawByteUnchangedHistorical584Admissions": 4,
+    "effects": 0,
+    "runtimeStarted": 0,
+    "receipt": "geometryCompatibilityAuthoring",
+    "selectionBasis": "NEW098ab03f actual changed5file selection+perversion actualpin/publicenv; not e34d or historical recovery"
   }
 }
