@@ -36,7 +36,7 @@ export type { LegacyAccessFactory } from './legacy/providers.js';
 export { productionLegacyAccess } from './legacy/host-access.js';
 
 export const BindAgentInput = z.object({ leaseId: Id, workspaceId: Id, agentId: Id }).strict();
-export const BindAgentOutput = z.object({ fixtureLeaseId: Id, workspaceId: Id, agentId: Id,
+export const BindAgentOutput = z.object({ agentRef: AgentRef, fixtureLeaseId: Id, workspaceId: Id, agentId: Id,
   parentAgentId: Id.nullable(), rootAgentId: Id.nullable(), repo: Id, worktree: Id, branch: Id,
   nativeSessionId: Id, nativeRoot: z.string(), harness: z.literal('opencode'),
 }).strict();
@@ -73,7 +73,8 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
         fixture.agents.set(input.agentId, { ...agent, row });
         try { await getAgent(context, { fixtureLeaseId: fixture.leaseId, workspaceId: input.workspaceId, agentId: input.agentId }); }
         catch (error) { fixture.agents.delete(input.agentId); throw error; }
-        return { value: { fixtureLeaseId: fixture.leaseId, workspaceId: input.workspaceId, agentId: row.agent_id,
+        const agentRef = AgentRef.parse({ fixtureLeaseId: fixture.leaseId, workspaceId: row.workspace_id, agentId: row.agent_id });
+        return { value: { agentRef, ...agentRef,
           parentAgentId: row.parent_agent_id, rootAgentId: row.root_agent_id, repo: row.repo, worktree: row.worktree_path, branch: row.branch,
           nativeSessionId: row.harness_session_id, nativeRoot: row.harness_session_root, harness: row.harness },
           identity: identity(fixture, row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };

@@ -49,7 +49,7 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
   const testPin = calculateImplementationPin(sourceRoot, ['runner-contracts.test.ts'], 'runner-contracts.test.ts', 'test');
   const registry = new CapabilityRegistry(); const providers = createCoreProviders(pin);
   const evidence = await createEvidenceStore(await realpath(await mkdir(path.join(root, 'evidence')).then(() => path.join(root, 'evidence'))));
-  let cleanup = 0; const nativeInputs: string[] = []; const owners: CapabilityContext[] = [];
+  let cleanup = 0; let agentReads = 0; const nativeInputs: string[] = []; const owners: CapabilityContext[] = [];
   let expectedToken = '';
   const acquire = defineOperation({ id: 'test.ownedFixture', implementation: testPin, implementationSha256: testPin.sha256,
     inputSchema: z.object({}).strict(), outputSchema: z.object({ leaseId: z.string(), otherLease: z.string(),
@@ -66,7 +66,10 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
         const fixture: OwnedFixture = { leaseId, runId: context.runId, caseId: context.caseId, suiteId: context.suiteId, scope: context.scope,
           workspaceId: 'workspace', repo: row.repo, profile: 'deterministic', evidenceClass: 'deterministic', expiresAtUtcMs: Date.now() + 100000,
           roots: new Map(), agents: new Map(), syntheticProbe: probe, secrets: [], readApi: async () => ({status:404,body:{}}),
-          readFiles: async () => ({status:404,body:{}}), resolveAgent: async () => { throw new Error('not used'); }, verify: async () => {},
+          readFiles: async () => ({status:404,body:{}}), resolveAgent: async (agentId) => {
+            assert.equal(agentId, 'agt_bound'); agentReads++;
+            return {row: AgentRow.parse({...row,agent_id:agentId}),commonDir:'/owned/repo/.git'};
+          }, verify: async () => {},
           dispose: async () => { cleanup++; } };
         fixture.agents.set(row.agent_id, { row, commonDir: '/owned/repo/.git', native: {
           pinnedExecutable: '/owned/opencode',
@@ -113,6 +116,15 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
     exports:{agent:{data:{binding:'fixture',pointer:'/agent'}},otherAgent:{data:{binding:'fixture',pointer:'/otherAgent'}},lease:{resource:{binding:'fixture',pointer:'/leaseId'}},probe:{data:{binding:'fixture',pointer:'/probeHandle'}},
       otherLease:{data:{binding:'fixture',pointer:'/otherLease'}},otherProbe:{data:{binding:'fixture',pointer:'/otherProbe'}},runToken:{data:{binding:'fixture',pointer:'/runToken'}}},
     tests:[positive('first',0),positive('second',0),positive('independent wrong expectation',1),
+      {name:'bind reference chain',steps:[
+        {capability:{request:{id:'loom.agent.bind',version:1,input:{leaseId:ref('lease'),workspaceId:literal('workspace'),agentId:literal('agt_bound')}},as:'boundAgent'}},
+        {capability:{request:{id:'loom.agent.observe',version:1,input:{agent:ref('boundAgent','/agentRef')}},as:'observedAgent'}},
+        {assert:{op:'eq',args:[ref('observedAgent','/agentId'),literal('agt_bound')]}},
+        {assert:{op:'eq',args:[ref('boundAgent','/agentRef/fixtureLeaseId'),ref('lease')]}},
+      ]},
+      {name:'missing reference projection',steps:[{capability:{request:{id:'loom.agent.observe',version:1,input:{agent:ref('agent','/agentRef')}},as:'missing'}}]},
+      {name:'foreign reference identity',steps:[{capability:{request:{id:'loom.agent.observe',version:1,input:{agent:literal({fixtureLeaseId:'lease-A',workspaceId:'foreign',agentId:'agt_bound'})}},as:'foreign'}}]},
+      {name:'unexported reference scope',steps:[{capability:{request:{id:'loom.agent.bind',version:1,input:{leaseId:ref('otherLease'),workspaceId:literal('workspace'),agentId:literal('agt_bound')}},as:'unowned'}}]},
       {name:'cross fixture probe',steps:[native(ref('agent'),ref('otherProbe'))]},
       {name:'data grants no authority',steps:[native(ref('otherAgent'),ref('otherProbe'))]},
       {name:'cross run',steps:[{capability:{request:{id:foreignRun.id,version:1,input:{leaseId:ref('lease')}},as:'foreign'}}]},
@@ -121,12 +133,13 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
     screenshots:false,retries:0,stepTimeoutMs:500,pollIntervalMs:1,budgetWarn:0,budgets:{},reportDir:path.join(root,'reports'),a11y:false,
     a11yBaselines:path.join(root,'baselines'),a11yImpact:'serious',testidAttribute:'data-testid'};
   const result = await runFiles([suiteFile], options);
-  for (const name of ['first','second']) assert.equal(result.tests.find(item=>item.name===name)?.status,'passed',name);
-  for (const name of ['independent wrong expectation','cross fixture probe','data grants no authority','cross run'])
+  for (const name of ['first','second','bind reference chain']) assert.equal(result.tests.find(item=>item.name===name)?.status,'passed',name);
+  for (const name of ['independent wrong expectation','cross fixture probe','data grants no authority','cross run',
+    'missing reference projection','foreign reference identity','unexported reference scope'])
     assert.equal(result.tests.find(item=>item.name===name)?.status,'failed',name);
   assert.deepEqual(nativeInputs,[expectedToken,expectedToken,expectedToken]);
   const calls = (await readFile(commands,'utf8')).trim().split('\n').map(line=>JSON.parse(line) as string[]);
   assert.deepEqual(calls.filter(call=>call.includes('inserttext')).map(call=>call.at(-1)),[expectedToken,expectedToken,expectedToken]);
-  assert.equal(cleanup,2); assert.equal(owners.length,1);
+  assert.equal(agentReads,2); assert.equal(cleanup,2); assert.equal(owners.length,1);
   assert.equal(owners[0]!.resources.has('@loom/aft-adapter/fixtures/v1:lease-A'),false);
 });
