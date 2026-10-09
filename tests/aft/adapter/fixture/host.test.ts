@@ -18,7 +18,7 @@ import type { RegisteredIdentity } from './descendants.js';
 import { HostWorkspaceRecords } from './workspace-records.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
-async function setup(profile: string,registeredServices=false,nativeService=false,fixtureRunId?:string) {
+async function setup(profile: string,registeredServices=false,nativeService=false,fixtureRunId?:string,daemon=false) {
   const root = await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname), 'test-artifacts-'));
   const source = path.join(root, 'source'); const build = path.join(root, 'build');
   await fs.mkdir(source); await fs.mkdir(build); await fs.mkdir(path.join(root, 'locks')); await fs.mkdir(path.join(root, 'home'));
@@ -52,7 +52,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     connection: 'test', connectionFingerprint: 'c'.repeat(64), minimumFreeBytes: 1, attestedImages: false,fixtureRunId,
     loomBinary: path.join(build, 'loom'), fleetBinary: path.join(build, 'fleet'), nodeBinary: path.join(build, 'node'), gitBinary: path.join(build, 'git'),
     pinnedOpenCodeBinary: path.join(build, 'opencode'), realBinaries: Object.fromEntries(['codex', 'claude', 'cursor', 'opencode'].map(name => [name,
-      { executable: realBinary, sha256: hash('real-binary'), authRoot }])), daemon: false, fakeGitHub: false, maxBudgetUsd: '5.00',
+      { executable: realBinary, sha256: hash('real-binary'), authRoot }])), daemon, fakeGitHub: false, maxBudgetUsd: '5.00',
   };
   const plan: FixturePlan = { profile, loomRevision: revision, fleetRevision: revision, engineRevision: revision, adapterRevision: revision,
     model: profile === 'legacy-deterministic' ? 'aft/m' : profile === 'legacy-real-cursor' ? 'backend-default' : 'openai/real-model', maxCases: 10, caseCount: 1, selectionSha256: 'd'.repeat(64), leaseDurationMs: 10000 };
@@ -110,7 +110,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
   const registrationOverrides=new Map<number,Partial<RegisteredIdentity>>();let onCapture:((pid:number)=>Promise<void>)|undefined;
   const registeredPort={async capture(pid:number){
     const parent=[...handles.entries()].find(([name,handle])=>['serve','daemon'].includes(name)&&handle.pid===pid)?.[1];
-    assert.ok([999,1001,1002].includes(pid)||parent);captures.push(pid);registeredRunning.set(pid,true);
+    assert.ok([999,1001,1002].includes(pid)||parent||registrationOverrides.has(pid));captures.push(pid);registeredRunning.set(pid,true);
     const identity:RegisteredIdentity={pid,generation:pid===999?'actual-kernel-start':pid===1001?'actual-native-start':pid===1002?'actual-native-successor':`actual-parent-${pid}`,
       executable:pid===999?config.fleetBinary:parent?config.loomBinary:config.pinnedOpenCodeBinary,
       argvSha256:parent?hash(Buffer.from([config.loomBinary,...parent.argv].join('\0')+'\0')):pid===1002?hash(Buffer.from([config.pinnedOpenCodeBinary,'serve','--service'].join('\0')+'\0')):'a'.repeat(64),
@@ -192,6 +192,80 @@ test('host publishes creation receipts for both owned workspaces and enrolls onl
   await assert.rejects(r.driver.readWorkspaceLegacyAgent(owner,'foreign','nova',signal));assert.equal(r.requests.length,before);
   await r.lifecycle.release(a.lease.id,r.request.runId);
  }finally{await r.cleanup();}
+});
+
+async function setupBoundWorker(){
+ const r=await setup('legacy-deterministic',true,false,undefined,true),signal=new AbortController().signal;
+ const acquired=await r.lifecycle.acquire(r.request,signal);
+ const owner={leaseId:acquired.lease.id,runId:'test-run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:r.plan.profile};
+ const store=await createEvidenceStore(path.join(r.driver.runtimeRoot,'evidence'));
+ const roster=await r.driver.ownedWorkspaceRoster(owner,store,signal);
+ const actor={workspace_key:'E2E-WS',name:'nova',repos:[],repo_groups:[],created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T00:00:00Z'};
+ r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,data:[actor],total:1}:undefined);
+ const fixture:OwnedFixture={...owner,workspaceId:acquired.workspaceId,repo:acquired.repo,ownedWorkspaces:roster,secrets:[],
+  expiresAtUtcMs:Number.MAX_SAFE_INTEGER,evidenceClass:'deterministic',roots:new Map(),agents:new Map(),
+  verify:async()=>{},readApi:async()=>{throw Error('unused');},readFiles:async()=>{throw Error('unused');},
+  resolveAgent:async()=>{throw Error('unused');},dispose:async()=>{},
+  readWorkspaceLegacyAgent:(ws,name,abort)=>r.driver.readWorkspaceLegacyAgent(owner,ws,name,abort)};
+ r.driver.bindOwnedFixture(fixture,store);
+ const cwd=r.driver.workspaceRoot,worktree=path.join(r.driver.runtimeRoot,'runtime','worker-worktree');await fs.mkdir(worktree);
+ r.commonDir(worktree,path.join(cwd,'.git'));
+ const daemon=r.handles.get('daemon')!,directory=path.join(cwd,'actual-daemon-state');await fs.mkdir(directory);
+ const configDirectory=path.join(r.driver.configurationRoot,'workspaces','E2E-WS');await fs.mkdir(configDirectory,{recursive:true});
+ const row={worktree:'nova',role:'task',pid:1700,status:'running',worktree_path:worktree,current_backend:'codex',last_start:'2026-10-09T01:00:00Z'};
+ const stateFile=path.join(directory,'daemon-agents.json');
+ await fs.writeFile(path.join(configDirectory,'daemon.pid'),JSON.stringify({pid:daemon.pid,cwd,socket:path.join(directory,'daemon.sock'),started_at:'2026-10-09T00:30:00Z'}));
+ await fs.writeFile(stateFile,JSON.stringify({pid:daemon.pid,started_at:'2026-10-09T00:30:01Z',agents:[row]}));
+ r.registration(row.pid,{generation:'actual-worker-start',executable:r.config.loomBinary,parentPid:daemon.pid,
+  argvSha256:hash(Buffer.from([r.config.loomBinary,'task',worktree,'--auto','--daemon-mode','--backend','codex'].join('\0')+'\0'))});
+ return {...r,signal,acquired,actor,row,stateFile,daemon};
+}
+
+test('actual Host worker hook binds product metadata to canonical actor, worktree and kernel parent',async()=>{
+ const r=await setupBoundWorker();try{
+  const before=r.starts.length,facts=await r.driver.refreshOwnedProductProcesses(r.signal);
+  assert.equal(facts.length,1);assert.equal(facts[0]?.agentId,'nova');assert.equal(facts[0]?.generation,'actual-worker-start');
+  assert.equal(r.starts.length,before);assert.equal(r.captures.filter(pid=>pid===1700).length,1);
+  assert.deepEqual(await r.driver.refreshOwnedProductProcesses(r.signal),facts);
+  assert.equal((await r.driver.inspectOwnedProcess(facts[0]!.id,facts[0]!.generation,r.signal)).state,'running');
+  assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+ }finally{await r.cleanup();}
+});
+
+test('Host worker discovery serializes mutation, parent stop and cleanup across deferred kernel capture',async()=>{
+ const r=await setupBoundWorker();let entered!:()=>void,release!:()=>void;try{
+  const ready=new Promise<void>(resolve=>{entered=resolve;}),blocked=new Promise<void>(resolve=>{release=resolve;});
+  r.onCapture(async pid=>{if(pid===1700){entered();await blocked;}});
+  const refresh=r.driver.refreshOwnedProductProcesses(r.signal);await ready;
+  const requests=r.requests.length,stops=r.registeredStops.length;
+  await assert.rejects(r.driver.requestOwnedHttp('api','DELETE','/api/workspaces/E2E-WS',null,r.signal));
+  await assert.rejects(r.driver.stopOwnedProcess('daemon',r.daemon.generation,r.signal));
+  await assert.rejects(r.driver.prepareCleanup(r.signal));
+  assert.equal(r.requests.length,requests);assert.equal(r.registeredStops.length,stops);assert.equal(r.daemon.state(),'running');
+  release();assert.equal((await refresh).length,1);
+  assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+ }finally{release?.();await r.cleanup();}
+});
+
+test('Host worker hook denies foreign actor and parent before granting process authority',async()=>{
+ const r=await setupBoundWorker();try{
+  r.actor.workspace_key='foreign';await assert.rejects(r.driver.refreshOwnedProductProcesses(r.signal));
+  assert.equal(r.captures.includes(1700),false);r.actor.workspace_key='E2E-WS';
+  r.registration(1700,{parentPid:999});await assert.rejects(r.driver.refreshOwnedProductProcesses(r.signal));
+  assert.ok(r.abandoned.includes(1700));assert.equal(r.registeredStops.length,0);
+ }finally{await r.cleanup();}
+});
+
+test('Host cleanup reserves its operation before awaited inspection so worker capture cannot overlap',async()=>{
+ const r=await setupBoundWorker();let entered!:()=>void,release!:()=>void;try{
+  const ready=new Promise<void>(resolve=>{entered=resolve;}),blocked=new Promise<void>(resolve=>{release=resolve;});
+  const inspect=r.driver.inspect.bind(r.driver);
+  r.driver.inspect=async resource=>{if(resource.kind==='ports'){entered();await blocked;}return inspect(resource);};
+  const removal=r.driver.remove({id:'ports',kind:'ports',generation:r.acquired.lease.id});await ready;
+  await assert.rejects(r.driver.refreshOwnedProductProcesses(r.signal));assert.equal(r.captures.includes(1700),false);
+  release();await removal;r.driver.inspect=inspect;
+  assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+ }finally{release?.();await r.cleanup();}
 });
 test('canonical registry production binding retains both actual host workspaces and refuses foreign store reads',async()=>{
  const r=await setup('legacy-deterministic',true);try{
