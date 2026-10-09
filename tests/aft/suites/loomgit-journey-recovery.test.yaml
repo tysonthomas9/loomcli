@@ -1,0 +1,178 @@
+# Exact product baseline: 8267795e0168cef8b1c259f27588ac8d4cfd529f.
+# Needs reviewed runner overlay (__register fake forge); select with --suite,
+# never AFT_SUITES alone. --screenshots captures every checkpoint expect/wait.
+# This suite is authored/unrun. Actual serve/FleetDB/Git; stub AI, fake forge.
+# Missing proof, never counted as a passing/skipped journey: real backend
+# cancel/kill/restart, stale lease/fence takeover, interrupted Apply journal
+# replay, retention races/expiry and remote ref expiry. Retention is unresolved.
+# Mapping: A/D notes 57838328-e41e-4746-bd21-9c271b9bbf04 and
+# 0e3d1a10-71f1-4205-9333-d0541a88cccc. No dependent tasks/run-ahead policy.
+suite: loomgit-journey-recovery
+classification: { area: reviews, feature: recovery-safety, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" setup
+# Keep refused folders and receipts for the integrator's review. The launcher
+# owns service/process shutdown; never close a review task or bypass a guard.
+teardown: >-
+  bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" teardown hold;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" teardown incomplete;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" teardown delete;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" teardown foreign
+
+tests:
+  # E-P5.1.02, P2.6 unsaved-edit denial, A-P1.26.02 delivery-held state.
+  # API retry is explicit: baseline has no mounted held-Apply retry control.
+  - name: R1 unsaved edits hold approval and an API client retries without losing dirty work
+    intent: A local editor agent leaves staged and unstaged work; a human approves in Changes, sees Apply held, then an API client retries after the overlapping edit is saved; the human sees the same task recover
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" start hold
+        intent: The orchestration API client starts the fixture task through the actual local TaskRun workflow with stub AI
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" captured hold
+        intent: Read back the product-frozen revision and real commit, requiring a nonempty task in review
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-task hold
+        intent: Navigate the human browser to the exact product-created task ID
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: "Awaiting review" }
+      - wait:
+          fn: "!!document.querySelector('[data-testid=approve-create-pr]:not([disabled])')"
+        intent: Wait until the displayed task diff and its review control describe the same frozen revision
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" dirty hold
+        intent: The local editor agent changes the overlapping file and leaves an unrelated staged edit, unstaged edit, and untracked sentinel in the owned lead working area
+      - expect: { text: "Awaiting review" }
+        intent: "R1.before checkpoint — human sees the task awaiting review; hold-before.json records dirty bytes, staged entries, task/revision IDs and local/provider refs"
+      - click: { role: button, name: More approve options, exact: true }
+      - click: { role: menuitem, name: Approve only, exact: true }
+      - wait:
+          fn: "[...document.querySelectorAll('[data-testid=revisions-section] [role=alert]')].some(e => e.textContent.includes('apply_pending'))"
+        intent: "R1.held checkpoint — the mounted approval action reports apply_pending for overlapping unsaved work"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" held hold
+        intent: Require approval persisted but task stayed in code review; compare every dirty file, the complete staged index, lead/trunk/provider refs and empty PR list against the before receipt
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" save-overlap hold
+        intent: The local editor agent saves the overlapping edit to an owned review artifact and restores that file, preserving all other dirty work
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" retry-apply hold
+        intent: An API-client actor explicitly retries the already-approved exact revision through the product Apply endpoint; baseline has no mounted retry control for this held state
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" recovered hold
+        intent: Require the original task closes only after Apply, one revision remains, staged and unstaged bytes survive, the saved overlap remains exact, and trunk/provider refs and PRs never move
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-task hold
+        intent: The human reopens that same task to observe the recovered product state
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: Applied }
+      - expect: { text: Applied }
+        intent: "R1.recovered checkpoint — Changes reports Applied; hold-recovered.json and saved-unsaved-edit.txt prove identity, exactly one result, and preserved dirty work"
+
+  # A-P1.3.06 secret_suspect, A-P1.25.02 incomplete is never No changes.
+  - name: R2 incomplete TaskRun capture stays visible and cannot be approved or applied
+    intent: An orchestration API client starts a stub agent that writes a secret-pattern test marker; the human sees Incomplete capture with disabled review controls; API-client delivery attempts fail and the actual dirty task copy survives
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-task incomplete
+        intent: Navigate the human browser to the fixture task before any agent attempt has run
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: No revisions yet. }
+      - expect: { text: No revisions yet. }
+        intent: "R2.before checkpoint — the task has no revision before the product TaskRun starts"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" start incomplete
+        intent: The orchestration API client starts the actual TaskRun; stub AI writes server.pem as a non-secret test marker, not fabricated capture state
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" wait-revision incomplete
+        intent: The API observer waits for the actual frozen revision and saves its current fields and Git/provider refs before the mounted UI assertion
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-task incomplete
+        intent: The human opens the same task after its incomplete attempt has frozen
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: Incomplete capture }
+      - expect: { enabled: { testid: approve-create-pr, equals: false } }
+        intent: "R2.disabled checkpoint — Incomplete capture is visible and Approve and create PR is disabled"
+      - expect: { enabled: { testid: approve-menu-toggle, equals: false } }
+        intent: The incomplete revision also disables Approve only rather than allowing a menu bypass
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" captured incomplete
+        intent: Require a product-created incomplete revision, no_changes false, secret path absent from its Git tree and the exact dirty task copy still present
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" incomplete-denied incomplete
+        intent: An API-client actor tries approval and Apply and must receive capture_incomplete; verify retained copy bytes, index and HEAD plus unchanged revision, lead/trunk/provider refs and no PR
+      - expect: { text: Incomplete capture, notText: No changes }
+        intent: "R2.denied checkpoint — the human still sees the incomplete revision, never No changes; incomplete-denied.json and retained-copy.json prove preserved dirty work"
+
+  # A-P1.7.02 stale fingerprint and A-P1.7.07 confirmed secret capture refusal.
+  # Refusal retains this folder/row; no guessed expiry or successful delete.
+  - name: R3 a stale deletion preview and incomplete capture refuse unsafe removal
+    intent: A local editor agent leaves dirty secret-pattern work; the human confirms a stale preview and then a fresh preview through mounted workspace controls; both refusals keep the owned working area and task identity
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" start delete
+        intent: The orchestration API client runs the deletion fixture task through the product TaskRun
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" captured delete
+        intent: Require an actual task revision for identity and Git readback before the deletion journey
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" delete-dirty delete
+        intent: The local editor agent writes a dirty sentinel and non-secret server.pem test marker in the owned working area; preview is a public API readback
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-board hold
+        intent: Navigate the human to another owned workspace before removing the target through the mounted workspace switcher
+      - click: { selector: "button[aria-label^='Active workspace:']" }
+        intent: The human opens the mounted workspace switcher
+      - fill: { label: "Search workspaces", value: "e2e-ws-recovery-delete" }
+        intent: The human finds the exact owned deletion fixture
+      - click: { role: button, name: "Remove e2e-ws-recovery-delete", exact: true }
+        intent: The human requests its real deletion preview through the mounted switcher
+      - wait: { text: Remove workspace }
+      - expect: { text: server.pem, visible: { testid: confirm-dialog-overlay } }
+        intent: "R3.before checkpoint — the human sees the current preview name the dirty secret-pattern file before confirming removal"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" delete-stale delete
+        intent: The local editor agent changes the dirty sentinel and adds an owned untracked file after the mounted preview opens; public readback requires its work-list fingerprint to change without altering runtime records
+      - click: { testid: confirm-dialog-confirm }
+      - wait: { text: unsaved_work }
+      - expect: { text: unsaved_work }
+        intent: "R3.stale-denied checkpoint — the mounted removal action shows the stale work confirmation refusal"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" delete-stale-readback delete
+        intent: Verify the preview fingerprint changed and the workspace, task, file hashes, full staged index and local/provider refs are preserved
+      - click: { selector: "button[aria-label^='Active workspace:']" }
+        intent: The human reopens the mounted workspace switcher after the refusal
+      - fill: { label: "Search workspaces", value: "e2e-ws-recovery-delete" }
+      - click: { role: button, name: "Remove e2e-ws-recovery-delete", exact: true }
+        intent: The human requests a fresh preview for the same owned workspace
+      - wait: { text: Remove workspace }
+      - click: { testid: confirm-dialog-confirm }
+      - wait: { text: incomplete capture }
+      - expect: { text: incomplete capture }
+        intent: "R3.incomplete-denied checkpoint — even fresh confirmation cannot remove the folder whose actual product capture is incomplete"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" delete-incomplete-readback delete
+        intent: Require the same folder and workspace/task/revision survive with unchanged dirty bytes, index, lead/trunk/provider refs; retain them for review
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-task delete
+        intent: The human returns to the exact refused workspace and task, proving it remains navigable
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: Awaiting review }
+      - expect: { text: Awaiting review }
+        intent: "R3.retained checkpoint — the original task remains reviewable after both refused deletions; delete-incomplete-denied.json pairs this UI with retained folder/identity readback"
+
+  # P2.10 AC3 foreign PR movement guard variant; P2.4 SHA-bound review.
+  # Does not prove D.05.06 hidden capture mirror or r2 lease replacement.
+  # Actual local Git fast-forward, never hand-seeded publication/fence state.
+  - name: R4 stale review requests and foreign PR branch writes cannot overwrite newer work
+    intent: An API client submits a stale revision SHA, the human reviews the actual current version and creates its PR, then a foreign provider actor advances that owned bare branch; a republish attempt refuses and preserves the foreign commit
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" start foreign
+        intent: The orchestration API client starts the current task through the actual TaskRun in PR-per-task mode
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" captured foreign
+        intent: Require one complete product-created revision with a real immutable Git commit and task in review
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-task foreign
+        intent: Navigate the human to the exact task whose revision the stale request will target
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: Awaiting review }
+      - expect: { text: Awaiting review }
+        intent: "R4.before checkpoint — the current task diff awaits review; captured.json records its exact revision SHA and untouched provider refs"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" stale-verdict foreign
+        intent: An API-client actor submits the actual earlier trunk SHA and must receive stale_subject with no verdict, task/ref/index/file/provider mutation
+      - expect: { text: Awaiting review }
+        intent: "R4.stale-denied checkpoint — Changes still awaits review after the rejected stale request; stale-verdict-denied.json proves denial and unchanged identities"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=approve-create-pr]:not([disabled])')"
+        intent: The human can approve only when the currently displayed diff and review subject agree
+      - click: { testid: approve-create-pr }
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" published foreign
+        intent: Read back exactly one PR to trunk whose head is the approved task revision and exists in the actual local bare provider
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" open-task foreign
+        intent: The human reopens the exact published task after provider readback
+      - click: { role: tab, name: Changes, exact: true }
+      - wait:
+          fn: "!!document.querySelector('[data-testid=revision-pr]')"
+        intent: "R4.published checkpoint — the human sees the task's single open PR; foreign-published.json pairs its number/base/head with real Git"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" foreign-write foreign
+        intent: A foreign provider actor uses its own local clone to commit and fast-forward only this fixture's PR branch, without force or shared resource mutation
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-recovery.sh" foreign-publish-denied foreign
+        intent: An API-client actor retries Create PR and must receive diverged; prove the foreign commit/file and provider ref survive and no duplicate PR appears
+      - expect: { visible: { testid: revision-pr } }
+        intent: "R4.foreign-denied checkpoint — the original PR remains visible; foreign-denied.json and foreign-publish-denied.json prove refusal and the unchanged foreign provider tip, not a real GitHub or stale-fence claim"
