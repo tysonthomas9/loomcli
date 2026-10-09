@@ -58,8 +58,8 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     pinnedOpenCodeBinary: path.join(build, 'opencode'), realBinaries: options.liveClaude ? {
       claude: { executable: path.join(build, 'claude'), sha256: hash('claude'), authRoot: path.join(root, 'home') } } : {},
     daemon: false, fakeGitHub: options.fakeGitHub ?? false, maxBudgetUsd: '5.00' };
-  const plan: FixturePlan = { profile: options.liveClaude ? 'legacy-real-claude' : 'legacy-deterministic', loomRevision: revision, fleetRevision: revision, engineRevision: revision,
-    adapterRevision: revision, model: options.liveClaude ? 'configured-model' : 'aft/m', maxCases: 1, caseCount: 1, selectionSha256: 'd'.repeat(64), leaseDurationMs: 600000,
+  const plan: FixturePlan = { profile: options.liveClaude ? 'legacy-real-claude' : 'legacy-deterministic', loomRevision: { ...revision }, fleetRevision: { ...revision }, engineRevision: { ...revision },
+    adapterRevision: { ...revision }, model: options.liveClaude ? 'configured-model' : 'aft/m', maxCases: 1, caseCount: 1, selectionSha256: 'd'.repeat(64), leaseDurationMs: 600000,
     ...(options.liveClaude ? { liveProvider: { backend: 'claude', model: 'configured-model' } as const } : {}) };
   let count = 0, port = 4300; const launches: HostCommand[] = []; const stops: string[] = [];
   let badAgents = false, failLaunch: '' | 'proven' | 'uncertain' = '', badRoles = false, exitCode = 0, stderr = '';
