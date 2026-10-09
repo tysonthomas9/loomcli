@@ -658,7 +658,7 @@ async function gf1ArchiveRig(){
    {...r.request,runId:context.runId,loomRevision:{...r.request.loomRevision},fleetRevision:{...r.request.fleetRevision}},context);
   assert.equal(acquired.availability,'observed',JSON.stringify(acquired));
   const data=acquired.data as {lease:{id:string}},fixture=await getFixture(context,data.lease.id);
-  const input={agent:{fixtureLeaseId:data.lease.id,workspaceId:'LOCALMODE',agentId:'agt_editor-1'},
+  const input={fixtureLeaseId:data.lease.id,workspaceId:'LOCALMODE',agentId:'agt_editor-1',
    namePrefixes:['cov-files-af12345678-','cov-files-child-af12345678'],idempotencyKey:'cov-files-af12345678-agt_editor-1-cleanup'};
   const invoke=(value:unknown=input)=>registry.invoke({id:ArchiveAgentId,version:1,input:{}},value,context);
   return {...r,row,context,registry,fixture,input,invoke,reads,writes,deadlines,timers,
@@ -675,7 +675,7 @@ for(const status of [204,200,409,301,500])test(`GF1 public Compose archive prese
   assert.deepEqual(r.deadlines,[15000,15000]);
   assert.equal(r.calls.filter(call=>call.args.includes('exec')&&!call.args.at(-1)?.includes('runtime-identity')).length,0);
   if(status>=300&&status!==409)assert.equal(result.data,undefined);else{
-   assert.deepEqual(result.data,{agent:r.input.agent,observed:r.row,status,requestTimeoutMs:15000,
+   assert.deepEqual(result.data,{agent:{fixtureLeaseId:r.input.fixtureLeaseId,workspaceId:r.input.workspaceId,agentId:r.input.agentId},observed:r.row,status,requestTimeoutMs:15000,
     idempotencyKey:r.input.idempotencyKey,body:{cancel:true},responseJsonParsed:false,conflictIgnored:status===409});
    assert.equal(result.provenance.artifacts.length,1);
   }
