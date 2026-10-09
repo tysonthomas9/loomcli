@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
+import path from 'node:path';
 import { fixtureOwnerIdentity, type FixtureAuthorityOwner } from '../authority.js';
-import { createOwnedWorkspaceRoster, LegacyWorkspaceAgentFact, WorkspaceCreationFact, WorkspaceRepositoryFact, resolveLegacyRepositoryAssignments, type OwnedWorkspaceRoster, type OwnedWorkspaceRecord, type WorkspaceIdentityKind } from '../workspaces.js';
+import { createOwnedWorkspaceRoster, LegacyWorkspaceAgentFact, WorkspaceCreationFact, WorkspaceRepositoryFact, WorkspaceRepositoriesAddedFact, readWorkspaceRepositoriesAddedFact, resolveLegacyRepositoryAssignments, type OwnedWorkspaceRoster, type OwnedWorkspaceRecord, type WorkspaceIdentityKind } from '../workspaces.js';
 import type { EvidenceStore } from '../evidence.js';
 import { FixtureError } from './lifecycle.js';
 
@@ -23,7 +24,7 @@ export interface WorkspaceRecordPorts {
  * creation by the fixture can enter this collection; API discovery cannot. */
 export class HostWorkspaceRecords {
  private readonly created=new Map<string,{workspaceId:string;repo:string;commonDir:string;store:WorkspaceStoreIdentity;
-  repositories:NonNullable<OwnedWorkspaceRecord['repositories']>} >();
+  repositories:NonNullable<OwnedWorkspaceRecord['repositories']>;creationReceipt?:OwnedWorkspaceRecord['creationReceipt']} >();
  constructor(private readonly ports:WorkspaceRecordPorts,private readonly identityKind:WorkspaceIdentityKind='legacy-agent-name'){}
  has(workspaceId:string){return this.created.has(workspaceId);}
  async workspace(workspaceId:string,signal:AbortSignal){
@@ -47,12 +48,20 @@ export class HostWorkspaceRecords {
   }
   return facts.sort((a,b)=>a.repoName<b.repoName?-1:a.repoName>b.repoName?1:0);
  }
- async captureCreated(workspaceId:string,sourceRepo:string|readonly string[],response:{status:number;body:unknown},before:WorkspaceStoreIdentity,signal:AbortSignal){
+ /** Read-only startup preflight over the finite code-owned source set. */
+ async validateSourceRepositories(sources:readonly string[],signal:AbortSignal){
+  signal.throwIfAborted();check(sources.length>0&&sources.length<=32&&new Set(sources).size===sources.length&&
+   sources.every(source=>path.isAbsolute(source)&&path.normalize(source)===source));
+  const commons:string[]=[];
+  for(const source of sources)commons.push(await this.ports.commonDir(source,signal));
+  check(new Set(commons).size===commons.length&&commons.every(common=>path.isAbsolute(common)&&path.normalize(common)===common));
+  signal.throwIfAborted();return commons;
+ }
+ private async prepareCreated(workspaceId:string,sourceRepo:string|readonly string[],response:{status:number;body:unknown},before:WorkspaceStoreIdentity,signal:AbortSignal){
   check(!this.created.has(workspaceId)&&response.status===201);
   const sources=typeof sourceRepo==='string'?[sourceRepo]:[...sourceRepo];check(sources.length>0&&sources.length<=32&&new Set(sources).size===sources.length);
   const created=Envelope.parse(response.body).data;check(created.id===workspaceId&&created.repos.length===sources.length);
-  const repositories=await this.repositories(created,signal),commons:string[]=[];
-  for(const source of sources)commons.push(await this.ports.commonDir(source,signal));
+  const repositories=await this.repositories(created,signal),commons=await this.validateSourceRepositories(sources,signal);
   check(new Set(commons).size===commons.length&&repositories.every(repo=>commons.filter(common=>common===repo.commonDir).length===1));
   check(new Set(repositories.map(repo=>repo.commonDir)).size===repositories.length);
   // Retained workspace topology anchor only; actor affinity and physical
@@ -62,15 +71,37 @@ export class HostWorkspaceRecords {
   const current=Envelope.parse(read.body).data;
   check(current.id===workspaceId&&isDeepStrictEqual(await this.repositories(current,signal),repositories));
   await this.requireStore(before,signal);
-  this.created.set(workspaceId,Object.freeze({workspaceId,repo,commonDir,store:Object.freeze({...before}),
-   repositories:Object.freeze(repositories.map(value=>Object.freeze({...value,groups:Object.freeze([...value.groups])})))}));
-  return repo;
+  return Object.freeze({workspaceId,repo,commonDir,store:Object.freeze({...before}),
+   repositories:Object.freeze(repositories.map(value=>Object.freeze({...value,groups:Object.freeze([...value.groups])})))});
+ }
+ async captureCreated(workspaceId:string,sourceRepo:string|readonly string[],response:{status:number;body:unknown},before:WorkspaceStoreIdentity,signal:AbortSignal){
+  const record=await this.prepareCreated(workspaceId,sourceRepo,response,before,signal);
+  check(!this.created.has(workspaceId));this.created.set(workspaceId,record);return record.repo;
+ }
+ /** Only the native two-response setup calls this. The linked initial receipt
+  * is authenticated before this collection gains physical authority. */
+ async captureRepositoriesAdded(owner:FixtureAuthorityOwner,workspaceId:string,sources:readonly string[],response:{status:number;body:unknown},before:WorkspaceStoreIdentity,
+  initialCreationReceipt:OwnedWorkspaceRecord['creationReceipt'],store:EvidenceStore,signal:AbortSignal,verifyOwnership:(signal:AbortSignal)=>Promise<void>){
+  check(this.identityKind==='native-agent-id');
+  const record=await this.prepareCreated(workspaceId,sources,response,before,signal);
+  const fact=WorkspaceRepositoriesAddedFact.parse({kind:'workspace-repositories-added',...fixtureOwnerIdentity(owner),identityKind:this.identityKind,
+   workspaceId,httpStatus:response.status,repo:record.repo,commonDir:record.commonDir,...record.store,
+   repositories:record.repositories,agentIds:[],agentSources:[],initialCreationReceipt});
+  const receipt=await store.retain(JSON.stringify(fact));
+  await readWorkspaceRepositoriesAddedFact(owner,receipt,store);await this.requireStore(before,signal);
+  await verifyOwnership(signal);check(!this.created.has(workspaceId));
+  const retained=Object.freeze({...record,creationReceipt:receipt});this.created.set(workspaceId,retained);
+  try{const result=await this.creationRecord(owner,workspaceId,store,signal);await verifyOwnership(signal);return result;}
+  catch(error){if(this.created.get(workspaceId)===retained)this.created.delete(workspaceId);throw error;}
  }
  async creationRecord(owner:FixtureAuthorityOwner,workspaceId:string,store:EvidenceStore,signal:AbortSignal):Promise<OwnedWorkspaceRecord>{
    const record=await this.workspace(workspaceId,signal);
    const fact=WorkspaceCreationFact.parse({kind:'workspace-created',...fixtureOwnerIdentity(owner),identityKind:this.identityKind,
     workspaceId:record.workspaceId,repo:record.repo,commonDir:record.commonDir,...record.store,agentIds:[],repositories:record.repositories,agentSources:[]});
-   const receipt=await store.retain(JSON.stringify(fact));
+   const receipt=record.creationReceipt??await store.retain(JSON.stringify(fact));
+   if(record.creationReceipt){const linked=await readWorkspaceRepositoriesAddedFact(owner,receipt,store);
+    check(linked.workspaceId===record.workspaceId&&linked.repo===record.repo&&linked.commonDir===record.commonDir&&
+     linked.storeId===record.store.storeId&&linked.storeGeneration===record.store.storeGeneration&&isDeepStrictEqual(linked.repositories,record.repositories));}
    return {identityKind:fact.identityKind,workspaceId:fact.workspaceId,repo:fact.repo,commonDir:fact.commonDir,
     storeId:fact.storeId,storeGeneration:fact.storeGeneration,agentIds:[],repositories:fact.repositories,agentSources:[],enrollmentReceipts:[],creationReceipt:receipt};
  }

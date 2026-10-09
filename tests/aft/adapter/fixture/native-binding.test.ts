@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { captureNativeWorkspaceBinding } from './native-binding.js';
+import { captureNativeWorkspaceBinding, captureNativeEmptyWorkspaceSetup } from './native-binding.js';
 import { createEvidenceStore } from '../evidence.js';
 import { enrollOwnedWorkspaceAgent, requireOwnedWorkspace } from '../workspaces.js';
 import type { OwnedFixture } from '../ownership.js';
+import type { HostFixtureDriver } from './host.js';
 
 const signal=()=>new AbortController().signal;
 const owner={leaseId:'native-owned',runId:'run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:'agents-emulator'};
@@ -95,4 +96,56 @@ test('aborted queries and disposed captures cannot reuse a still-present databas
   const access=await r.binding.nativeAccess('NATIVE-WS',signal());await r.cleanups[0]!();
   await assert.rejects(access.rawAgent('agt_beta',signal()));assert.equal(r.closes(),1);
  }finally{await r.remove();}
+});
+
+test('production empty-setup factory binds separate fixed HTTP writes to descriptor-backed SQLite native enrollment',async()=>{
+ const r=await setup();const cleanups:(()=>Promise<void>)[]=[];try{
+  const database=new DatabaseSync(r.filename);database.exec('DELETE FROM agents');database.close();
+  const workspaceParent=path.join(r.root,'native-workspaces');await fs.mkdir(workspaceParent);
+  const parentStat=await fs.lstat(workspaceParent),workspacePath=path.join(workspaceParent,'native-ws');
+  const sources=[path.join(r.root,'source-alpha'),path.join(r.root,'source-beta')];
+  const configStat=await fs.lstat(r.config),evidence=await createEvidenceStore(path.join(r.root,'evidence'));
+  let added=false;const writes:string[]=[];
+  const driver:Pick<HostFixtureDriver,'requestOwnedHttp'>={async requestOwnedHttp(target,method,relative,body,abort,generation){
+   abort.throwIfAborted();assert.equal(target,'api');assert.equal(generation,'actual-source-serve-generation');
+   if(method==='POST'){
+    writes.push(relative);
+    if(relative==='/api/workspaces'){assert.deepEqual(body,{name:'native-ws',type:'empty',repos:[]});await fs.mkdir(workspacePath);}
+    else{assert.equal(relative,'/api/workspaces/NATIVE-WS/repos');assert.deepEqual(body,{repos:sources});added=true;}
+   }
+   if(relative.includes('/v1/agents')){
+    const db=new DatabaseSync(r.filename,{readOnly:true});
+    try{return {status:200,body:{agents:db.prepare('SELECT agent_id FROM agents WHERE workspace_id=?').all('NATIVE-WS'),next:''}};}
+    finally{db.close();}
+   }
+   if(method==='DELETE')return {status:200,body:{success:true}};
+   return {status:method==='POST'?201:200,body:{success:true,data:{id:'NATIVE-WS',path:workspacePath,agents:[],repos:added?r.repositories:[]}}};
+  }};
+  const binding=await captureNativeEmptyWorkspaceSetup({owner,configurationRoot:{path:r.config,device:configStat.dev,inode:configStat.ino},
+   pinnedExecutable:'/pinned/opencode',enrollCleanup:cleanup=>cleanups.push(cleanup),
+   processIdentity:async()=>{throw Error('No OS process lookup');},fetch:async()=>{throw Error('No HTTP/backend launch');}},
+   [{name:'native-ws',workspaceId:'NATIVE-WS',sources}],evidence,driver,'actual-source-serve-generation',async repo=>{
+    let index=sources.indexOf(repo);if(index<0)index=r.repositories.findIndex(value=>value.path===repo);
+    assert.ok(index>=0);return path.join(sources[index]!,'.git');
+   },{path:workspaceParent,device:parentStat.dev,inode:parentStat.ino},signal());
+  const record=await binding.provisionWorkspace('NATIVE-WS',signal());
+  assert.deepEqual(writes,['/api/workspaces','/api/workspaces/NATIVE-WS/repos']);
+  const update=new DatabaseSync(r.filename);
+  update.prepare('INSERT INTO agents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('agt_beta','NATIVE-WS',r.repositories[1]!.path,
+   path.join(r.root,'beta-worktree'),'loom/agent/beta','opencode','ses_beta','',null,null,'user','actual-user','lead',4,'idle',null,null,null,'observed/model',null);
+  update.close();
+  const roster=await binding.records.roster(owner,evidence,signal());assert.equal(roster[0]!.creationReceipt.sha256,record.creationReceipt.sha256);
+  const fixture:OwnedFixture={...owner,workspaceId:'NATIVE-WS',repo:record.repo,ownedWorkspaces:roster,
+   expiresAtUtcMs:Number.MAX_SAFE_INTEGER,evidenceClass:'deterministic',roots:new Map(),agents:new Map(),secrets:[],
+   verify:async()=>{},dispose:async()=>{},readApi:async()=>{throw Error('unused');},readFiles:async()=>{throw Error('unused');},
+   resolveAgent:async()=>{throw Error('unused');},readWorkspaceAgent:binding.readWorkspaceAgent};
+  await enrollOwnedWorkspaceAgent(fixture,'NATIVE-WS','agt_beta',signal(),evidence);
+  assert.equal(requireOwnedWorkspace(fixture,'NATIVE-WS','agt_beta').repo,r.repositories[1]!.path);
+  assert.equal((await binding.readWorkspaceAgent('NATIVE-WS','agt_beta',signal())).createdById,'actual-user');
+ }finally{
+  // Remove only this test's temporary SQLite row before private-directory
+  // disposal. This is not a product archive/cancel or backend-exit proof.
+  const db=new DatabaseSync(r.filename);db.exec('DELETE FROM agents');db.close();
+  for(const cleanup of cleanups.reverse())await cleanup();await r.remove();
+ }
 });
