@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { materializeRenderer } from './renderer-fixtures.test.js';
-import { prepareRenderer, bindRenderer } from './renderer.js';
+import { prepareRenderer, bindRenderer, writeRendererBuildReceipt } from './renderer.js';
 import type { RegisteredBuild } from './production.js';
 import { sha256 } from '../protocol.js';
 async function setup(){
@@ -38,4 +38,27 @@ test('renderer target using a different matching build is rejected; old receipt 
 });
 test('renderer missing manifest entry cannot be trusted through matching bytes alone',async()=>{
  const r=await setup();try{r.loom.build.entries=r.loom.build.entries.filter(e=>!e.relativePath.endsWith('react/package.json'));await assert.rejects(prepareRenderer(r.loom));}finally{await r.cleanup();}
+});
+test('production post-build writer reads a nested output closure and never replaces an existing receipt',async()=>{
+ const r=await setup();try{
+ await fs.unlink(path.join(r.loom.build.root,'renderer-build.json'));
+ await fs.mkdir(path.join(r.renderer.buildRoot,'assets'));const chunk=path.join(r.renderer.buildRoot,'assets/chunk.js');await fs.writeFile(chunk,'actual chunk bytes');
+ const input={...r.renderer,receiptRoot:r.loom.build.root,sourceManifestSha256:r.loom.revision.sourceManifestSha256};
+ const result=await writeRendererBuildReceipt(input);assert.equal(result.receipt.build.length,3);
+ assert.equal(result.receipt.build.find(f=>f.relativePath==='assets/chunk.js')?.sha256,await sha256(await fs.readFile(chunk)));
+ const filename=path.join(r.loom.build.root,result.relativePath),before=await fs.readFile(filename);assert.equal(result.sha256,await sha256(before));
+ assert.equal((await fs.stat(filename)).mode&0o777,0o600);await assert.rejects(writeRendererBuildReceipt(input));assert.deepEqual(await fs.readFile(filename),before);
+ }finally{await r.cleanup();}
+});
+for(const mismatch of ['source-missing','package-symlink','foreign-output','no-javascript','invalid-source-hash'])test(`post-build writer rejects ${mismatch} without creating a receipt`,async()=>{
+ const r=await setup();try{
+ await fs.unlink(path.join(r.loom.build.root,'renderer-build.json'));
+ const input={...r.renderer,receiptRoot:r.loom.build.root,sourceManifestSha256:r.loom.revision.sourceManifestSha256};
+ if(mismatch==='source-missing')await fs.unlink(path.join(r.renderer.sourceRoot,'package-lock.json'));
+ if(mismatch==='package-symlink'){const name=path.join(r.renderer.installedRoot,'react/package.json');await fs.unlink(name);await fs.symlink(path.join(r.renderer.installedRoot,'react-dom/package.json'),name);}
+ if(mismatch==='foreign-output')input.buildRoot=r.renderer.sourceRoot;
+ if(mismatch==='no-javascript')await fs.unlink(path.join(r.renderer.buildRoot,'app.js'));
+ if(mismatch==='invalid-source-hash')input.sourceManifestSha256='invented';
+ await assert.rejects(writeRendererBuildReceipt(input));await assert.rejects(fs.stat(path.join(r.loom.build.root,'renderer-build.json')));
+ }finally{await r.cleanup();}
 });
