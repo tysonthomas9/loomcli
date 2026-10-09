@@ -38,10 +38,11 @@ test('default public composition binds the managed host checkout and existing ev
   const config:HostConfig={loom:registered,fleet:registered,engine:registered,adapter:registered,tempParent:root,lockParent:locks,
     hostHome:home,toolPath:'/injected/toolchain',connection:'injected',connectionFingerprint:'e'.repeat(64),minimumFreeBytes:1,attestedImages:false,
     loomBinary:path.join(build,'loom'),fleetBinary:path.join(build,'fleet'),nodeBinary:path.join(build,'node'),gitBinary:path.join(build,'git'),
-    pinnedOpenCodeBinary:path.join(build,'opencode'),realBinaries:{},daemon:false,fakeGitHub:false,maxBudgetUsd:'5.00'};
+    pinnedOpenCodeBinary:path.join(build,'opencode'),realBinaries:{},daemon:false,fakeGitHub:false,maxBudgetUsd:'5.00',fixtureRunId:'original-host-token'};
   const plan:FixturePlan={profile:'legacy-deterministic',loomRevision:revision,fleetRevision:revision,engineRevision:revision,adapterRevision:revision,
     model:'aft/m',caseCount:1,maxCases:1,selectionSha256:'f'.repeat(64),leaseDurationMs:600000};
   let ordinal=0,port=4700,servePid=0;const launches:HostCommand[]=[],managed=new Map<string,{path:string;repo:string;source:string}>();
+  const started=new Map<number,{handle:OwnedProcess;command:HostCommand}>();
   const processes:HostProcesses={
     async run(command){
       if(command.argv[0]==='init'){await fs.mkdir(path.join(command.cwd,'.git'));return '';}
@@ -58,7 +59,7 @@ test('default public composition binds the managed host checkout and existing ev
             servePid=handle.pid;const directory=path.join(command.env.LOOM_CONFIG_DIR!,'fleet-db');await fs.mkdir(directory,{recursive:true});
             await fs.writeFile(path.join(directory,'runtime.json'),JSON.stringify({pid:999,url:'http://127.0.0.1:6001',started_at:'2026-10-09T00:00:00Z'}));
           }
-        },async stop(){alive=false;}};return handle;
+        },async stop(){alive=false;}};started.set(handle.pid,{handle,command});return handle;
     },
     launch(command,_stdin,generation){
       launches.push(command);let alive=true;
@@ -82,9 +83,12 @@ test('default public composition binds the managed host checkout and existing ev
     return {status:200,body:{success:true,data:{id,path:record!.path,repos:[{name:'repo',path:record!.repo}]}}};
   };
   const driver:HostFixtureDriver=new HostFixtureDriver(config,processes,fs,http,()=>`injected-${++ordinal}`,async()=>({port:port++,async release(){}}),undefined,
-    {async capture(pid){assert.equal(pid,999);let alive=true;const identity={pid,generation:'injected-store-generation',executable:config.fleetBinary,
-      argvSha256:'e'.repeat(64),parentPid:servePid,configurationRoot:driver.configurationRoot,state:'running' as const};
-      return {identity,async inspect(){return {...identity,state:alive?'running' as const:'exited' as const};},async stop(){alive=false;},async abandon(){assert.fail('owned store');}};}});
+    {async capture(pid){const parent=started.get(pid);assert.ok(pid===999||parent);let alive=true;
+      const identity={pid,generation:parent?`injected-parent-${pid}`:'injected-store-generation',executable:parent?config.loomBinary:config.fleetBinary,
+        argvSha256:parent?hash([config.loomBinary,...parent.handle.argv].join('\0')+'\0'):'e'.repeat(64),parentPid:servePid,
+        configurationRoot:driver.configurationRoot,...(parent?{fixtureRunId:parent.command.env.RUN_ID}:{}),state:'running' as const};
+      return {identity,async inspect(){return {...identity,state:alive&&(!parent||parent.handle.state()==='running')?'running' as const:'exited' as const};},
+        async stop(){alive=false;await parent?.handle.stop();},async abandon(){assert.fail('owned store/parent');}};}});
   const pin=await pinLoomImplementation(fileURLToPath(new URL('.',import.meta.url)),'source');
   const fixtures={...productionFixtureOptions(pin,pin.sha256,[plan],config,config),driver:()=>driver};
   // No legacyAccess override: exercise the public default factory itself.
@@ -94,6 +98,7 @@ test('default public composition binds the managed host checkout and existing ev
   const acquired=await invoke('loom.fixture.acquire',{runId:context.runId,profile:plan.profile,loomRevision:revision,fleetRevision:revision,
     model:plan.model,maxCases:1,selectionSha256:plan.selectionSha256});assert.equal(acquired.availability,'observed',JSON.stringify(acquired.error));
   const leaseId=AcquireOutput.parse(acquired.data).lease.id,fixture=await getFixture(context,leaseId);
+  assert.equal(AcquireOutput.parse(acquired.data).fixtureRunId,'original-host-token');assert.notEqual(fixture.runId,'original-host-token');
   cleanup=()=>invoke('loom.fixture.release',{leaseId});
   assert.notEqual(fixture.repo,driver.workspaceRoot);assert.equal(fixture.ownedWorkspaces!.length,2);
   const input={leaseId,workspaceId:'E2E-WS',operation:'show',name:'task'};
