@@ -227,7 +227,7 @@ test('canonical registry denies missing process effect before actual host factor
   const r = await setup(); t.after(r.cleanup);
   r.fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: r.fixture.leaseId, runId: r.fixture.runId,
     suiteId: r.fixture.suiteId, scope: r.fixture.scope, caseId: r.fixture.caseId, profile: r.fixture.profile },
-    { 'loom.cli.role': { evidenceClass: 'deterministic', effects: ['read-api'] } });
+    { 'loom.cli.role': { evidenceClass: 'deterministic', effects: ['read-api','read-filesystem'] } });
   const result = await r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId: 'E2E-WS', operation: 'list', name: null });
   assert.equal(result.availability, 'unsupported'); assert.equal(r.factories(), 0); assert.equal(r.launches.length, 0);
 });
@@ -236,7 +236,27 @@ test('real execution grant cannot reuse the deterministic task descriptor or sta
   const r = await setup(); t.after(r.cleanup);
   r.fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: r.fixture.leaseId, runId: r.fixture.runId,
     suiteId: r.fixture.suiteId, scope: r.fixture.scope, caseId: r.fixture.caseId, profile: r.fixture.profile },
-    { 'loom.cli.task': { evidenceClass: 'live-provider', effects: ['read-api','start-owned-process','external-provider'] } });
+    { 'loom.cli.task': { evidenceClass: 'live-provider', effects: [...LegacyOperationEffects['loom.cli.task'],'external-provider'] } });
   const result = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null });
   assert.equal(result.availability, 'error'); assert.equal(r.factories(), 0); assert.equal(r.launches.length, 0);
+});
+
+test('every bound action rejects a missing required effect before its host factory or transport', async t => {
+  const cases = [
+    { id: 'loom.cli.role', remove: 'start-owned-process', input: { workspaceId: 'E2E-WS', operation: 'list', name: null } },
+    { id: 'loom.cli.usage', remove: 'start-owned-process', input: { agent: { workspaceId: 'E2E-WS', agentId: 'worker' } } },
+    { id: 'loom.cli.task', remove: 'start-owned-process', input: { workspaceId: 'E2E-WS', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null } },
+    { id: 'loom.runtime.stimulate', remove: 'stop-owned-process', input: { targetId: 'serve', operation: 'serve-restart', expectedGeneration: 'unused' } },
+    { id: 'loom.fixture.seedWorktree', remove: 'write-fixture', input: { workspaceId: 'E2E-WS', agentName: 'worker', relativePath: 'proof.txt', content: 'fixture', commitMessage: 'fixture only' } },
+    { id: 'loom.fixture.configure', remove: 'write-fixture', input: { setting: 'provider-default', model: 'aft/m', harness: 'opencode' } },
+  ] as const;
+  for (const row of cases) {
+    const r = await setup(); t.after(r.cleanup);
+    r.fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: r.fixture.leaseId, runId: r.fixture.runId,
+      suiteId: r.fixture.suiteId, scope: r.fixture.scope, caseId: r.fixture.caseId, profile: r.fixture.profile },
+      { [row.id]: { evidenceClass: 'deterministic', effects: LegacyOperationEffects[row.id].filter(effect => effect !== row.remove) } });
+    const input = row.id === 'loom.cli.usage' ? { agent: { ...row.input.agent, fixtureLeaseId: r.leaseId } } : { ...row.input, leaseId: r.leaseId };
+    const result = await r.invoke(row.id, input);
+    assert.equal(result.availability, 'unsupported', row.id); assert.equal(r.factories(), 0, row.id); assert.equal(r.launches.length, 0, row.id);
+  }
 });
