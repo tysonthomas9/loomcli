@@ -30,6 +30,7 @@ export class NativeSessionPipe {
   private disposalRequested = false;
   private disposing?: Promise<void>;
   private pending?: Pending;
+  private shutdownComplete = false;
   constructor(enrollCleanup: (cleanup: () => Promise<void>) => void,
     private readonly guard: NativeSessionGuard = nativeSessionGuard) {
     this.closed = new Promise<void>(resolve => { this.markClosed = () => { this.exited = true; resolve(); }; });
@@ -64,7 +65,8 @@ export class NativeSessionPipe {
       child.once('exit', () => { this.exitObserved = true; });
       child.once('close', (code, signal) => {
         this.markClosed();
-        if (code !== 0 || signal != null || !this.pending?.shutdown || !this.pending.complete) this.fail();
+        if (code !== 0 || signal != null ||
+          (!this.shutdownComplete && !(this.pending?.shutdown && this.pending.complete))) this.fail();
       });
       child.on('error', () => { this.fail(); });
       if (!child.stdin || !child.stdout || !child.stderr) throw failure();
@@ -72,7 +74,7 @@ export class NativeSessionPipe {
       child.stdout.on('error', () => { this.fail(); });
       child.stderr.on('error', () => { this.fail(); });
       child.stdout.on('end', () => {
-        if (!this.pending?.shutdown || !this.pending.complete) this.fail();
+        if (!this.shutdownComplete && !(this.pending?.shutdown && this.pending.complete)) this.fail();
       });
       child.stdout.on('data', (chunk: Buffer) => {
         try {
@@ -119,6 +121,7 @@ export class NativeSessionPipe {
       const [bytes] = await this.wait(work, bounded.signal);
       bounded.signal.throwIfAborted();
       pending.frame.end(); this.budget.completeReply();
+      if (shutdown) this.shutdownComplete = true;
       return bytes;
     } catch {
       this.fail(); throw failure();

@@ -165,3 +165,23 @@ test('nonzero close cannot certify a pending shutdown response even after a full
   h.child.stdout.write(framed(payload({ closed: true }))); h.child.emit('close', 7, null); h.child.stdin.ack();
   await denied; assert.equal(h.owner.receipt().poisoned, true); await h.cleanup();
 });
+
+test('acknowledged complete shutdown stays complete through later normal EOF and close', async () => {
+  const h = harness(); h.start(); const closing = h.owner.exchange(payload({ close: true }), h.signal(), true);
+  h.child.stdin.ack(); h.child.stdout.write(framed(payload({ closed: true })));
+  assert.deepEqual(await closing, payload({ closed: true })); assert.equal(h.owner.receipt().poisoned, false);
+  h.child.stdout.emit('end'); h.child.close();
+  assert.equal(h.owner.receipt().poisoned, false); await h.cleanup(); assert.equal(h.child.kills, 0);
+});
+
+test('successful shutdown does not excuse late error, signal close, output or stderr overflow', async () => {
+  for (const kind of ['nonzero', 'signal', 'extra', 'stderr'] as const) {
+    const h = harness(); h.start(); const closing = h.owner.exchange(payload({ close: true }), h.signal(), true);
+    h.child.stdin.ack(); h.child.stdout.write(framed(payload({ closed: true }))); await closing;
+    if (kind === 'nonzero') h.child.emit('close', 7, null);
+    if (kind === 'signal') h.child.emit('close', null, 'SIGTERM');
+    if (kind === 'extra') h.child.stdout.write(framed(payload({ extra: true })));
+    if (kind === 'stderr') h.child.stderr.write(Buffer.alloc(NativeSessionLimits.stderr + 1));
+    assert.equal(h.owner.receipt().poisoned, true); await h.done();
+  }
+});
