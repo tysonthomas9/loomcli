@@ -100,3 +100,27 @@ test('revoked context cannot acquire new cleanup registration', () => {
   assert.throws(() => putCleanupFixture(h.context, h.owner));
   assert.equal(h.context.resources.size, 0);
 });
+
+for (const cancelled of [false, true]) test(`cleanup rejects a same-owner clone or another context's issued object before callbacks (cancelled=${cancelled})`, async () => {
+  for (const issuedElsewhere of [false, true]) {
+    let owned = 0, foreign = 0;
+    const h = setup(async () => { owned++; });
+    const original = putCleanupFixture(h.context, h.owner);
+    const elsewhere = createCapabilityContext(h.context.source, new CapabilityRegistry(), h.context.runId, h.context.caseId);
+    elsewhere.suiteId = h.context.suiteId;
+    const replacement = issuedElsewhere
+      ? putCleanupFixture(elsewhere, { ...h.owner, dispose: async () => { foreign++; } })
+      : Object.freeze({ ...original, dispose: async () => { foreign++; } });
+    h.context.resources.set(h.key, replacement);
+    if (cancelled) {
+      h.context.signal = AbortSignal.abort();
+      revokeCapabilityContext(h.context);
+    }
+    await assert.rejects(disposeFixtures(h.context));
+    assert.deepEqual([owned, foreign], [0, 0]);
+    assert.equal(h.context.resources.get(h.key), replacement);
+    h.context.resources.set(h.key, original);
+    await disposeFixtures(h.context);
+    assert.deepEqual([owned, foreign], [1, 0]);
+  }
+});
