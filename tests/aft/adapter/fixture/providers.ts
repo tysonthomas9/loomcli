@@ -80,7 +80,14 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
         const manager = new FixtureLifecycle(options.plans, () => { driver = options.driver(input.profile); return driver; },
           () => context.clock.epochUtcMs + context.clock.now());
         let acquired: z.infer<typeof ProvisionedOutput>;
+        let boundFixture: OwnedFixture | undefined;
         const registerIncomplete = async (leaseId: string) => {
+            const existing = context.resources.get(`${fixturesKey}:${leaseId}`);
+            if (existing) {
+              requireFact(existing === boundFixture, 'ownership-mismatch', 'Cannot replace fixture cleanup ownership');
+              boundFixture.expiresAtUtcMs = 0;
+              return;
+            }
             if (!context.resources.has(evidenceKey)) putEvidenceStore(context, await options.evidenceAfterFailure(driver!));
             // Cleanup-only registration is never an available fixture. It lets
             // canonical final disposal retry a failed partial acquisition.
@@ -118,13 +125,18 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
             },
           };
           privateFixtures.set(fixture, { manager, driver: driver! });
-          putFixture(context, fixture);
+          putFixture(context, fixture); boundFixture = fixture;
           if(driver instanceof HostFixtureDriver)driver.bindOwnedFixture(fixture,evidenceStore);
           return { value: { ...acquired,...(fixtureRunId?{fixtureRunId}:{}), syntheticProbeHandle: fixture.syntheticProbe!.handle, syntheticProbeRunId: fixture.syntheticProbe!.runId }, evidenceClass: fixture.evidenceClass,
             identity: { fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId } };
         } catch (error) {
-          const released = await manager.release(acquired.lease.id, input.runId);
-          if (!released.released && !context.resources.has(`${fixturesKey}:${acquired.lease.id}`)) await registerIncomplete(acquired.lease.id);
+          // Register the exact cleanup callback before any disposal awaits. A
+          // release receipt failure must not hide the original binding failure
+          // or strand the retained lifecycle ledger outside final disposal.
+          try { await registerIncomplete(acquired.lease.id); }
+          catch { /* Preserve the bind failure if cleanup registration is rejected. */ }
+          try { await manager.release(acquired.lease.id, input.runId); }
+          catch { /* The lifecycle retains failed cleanup for the registered callback. */ }
           throw error;
         }
       },

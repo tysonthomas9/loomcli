@@ -7,6 +7,7 @@ import { CapabilityRegistry, createCapabilityContext, getRegisteredResource, cal
 import { createEvidenceStore, putEvidenceStore } from '../evidence.js';
 import { getFixture, fixturesKey, disposeFixtures } from '../ownership.js';
 import { createFixtureProviders, type FixtureProviderOptions } from './providers.js';
+import { ObservationError } from '../protocol.js';
 import { type FixtureDriver, type FixturePlan, type Resource } from './lifecycle.js';
 
 async function setup(t: { after(fn: () => Promise<void>): void }) {
@@ -20,7 +21,8 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
   const revision = { repository: 'loom', commit: 'a'.repeat(40), tree: 'b'.repeat(40), sourceManifestSha256: 'c'.repeat(64), buildManifestSha256: 'd'.repeat(64) };
   const plan: FixturePlan = { profile: 'agents-real-opencode', loomRevision: { ...revision }, fleetRevision: { ...revision }, engineRevision: { ...revision }, adapterRevision: { ...revision },
     model: 'openai/model', caseCount: 1, maxCases: 10, selectionSha256: 'e'.repeat(64), leaseDurationMs: 10000 };
-  let driverCalls = 0; let provisionFails = false; let cleanupFails = false; let incomplete = false; let changed = false; let bindFails = false;
+  let driverCalls = 0; let provisionFails = false; let cleanupFails = false; let incomplete = false; let changed = false; let bindFails = false; let bindError: Error | undefined; let releaseArtifactFails = false;
+  let beforeRemove: (() => Promise<void>) | undefined;
   const calls: string[] = [];
   const driver: FixtureDriver = {
     async preflight() { calls.push('preflight'); }, async identity() { return !changed; },
@@ -31,12 +33,12 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
       return { apiOrigin: 'http://127.0.0.1:4100', filesOrigin: 'http://127.0.0.1:4101', workspaceId: 'workspace', repo: '/owned/source' };
     },
     async inspect(resource) { return { owned: true, complete: !incomplete, services: resource.kind === 'compose' ? [{ id: 'service', pid: 40, generation: 'owned-generation', state: 'running' }] : [] }; },
-    async remove(resource: Resource) { calls.push(`remove:${resource.id}`); if (cleanupFails) throw new Error('password=secret-cleanup-token'); },
-    async artifact(kind, value) { return { ...await store.retain(JSON.stringify({ kind, value })), redaction: 'sanitized' as const }; },
+    async remove(resource: Resource) { if (beforeRemove) await beforeRemove(); calls.push(`remove:${resource.id}`); if (cleanupFails) throw new Error('password=secret-cleanup-token'); },
+    async artifact(kind, value) { if (kind === 'release' && releaseArtifactFails) throw new Error('Bearer private-release-artifact-token'); return { ...await store.retain(JSON.stringify({ kind, value })), redaction: 'sanitized' as const }; },
   };
   const options: FixtureProviderOptions = { implementation: pin, implementationSha256: pin.sha256, plans: [plan],
     driver() { driverCalls++; return driver; }, evidenceAfterFailure: async () => store,
-    async bind() { if (bindFails) throw new Error("Bearer private-bind-token"); const stat = await lstat(evidenceRoot); return { fixtureRunId:'af12345678',evidenceClass: 'deterministic', evidenceStore: store,
+    async bind() { if (bindFails) throw bindError ?? new Error("Bearer private-bind-token"); const stat = await lstat(evidenceRoot); return { fixtureRunId:'af12345678',evidenceClass: 'deterministic', evidenceStore: store,
       roots: new Map([['runtime', { path: evidenceRoot, device: stat.dev, inode: stat.ino }]]), secrets: [],
       readApi: async () => ({ status: 200, body: {} }), readFiles: async () => ({ status: 200, body: {} }),
       resolveAgent: async () => { throw new Error('No test agent'); } }; },
@@ -47,7 +49,7 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
   const input = { runId: context.runId, profile: plan.profile, loomRevision: { ...revision }, fleetRevision: { ...revision }, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 };
   const invoke = (id: string, data: unknown, ctx: CapabilityContext = context) => registry.invoke({ id, version: 1, input: {} }, data, ctx);
   return { registry, context, input, invoke, store, options, calls, get driverCalls() { return driverCalls; },
-    failBind() { bindFails = true; }, failProvision() { provisionFails = true; }, failCleanup(value: boolean) { cleanupFails = value; }, incomplete() { incomplete = true; }, changeSource() { changed = true; } };
+    failBind(error?: Error) { bindFails = true; bindError = error; }, failReleaseArtifact(value: boolean) { releaseArtifactFails = value; }, beforeRemove(callback: () => Promise<void>) { beforeRemove = callback; }, failProvision() { provisionFails = true; }, failCleanup(value: boolean) { cleanupFails = value; }, incomplete() { incomplete = true; }, changeSource() { changed = true; } };
 }
 function leaseId(result: Awaited<ReturnType<CapabilityRegistry['invoke']>>) {
   assert.equal(result.availability, 'observed'); return (result.data as { lease: { id: string } }).lease.id;
@@ -133,4 +135,47 @@ test('failed transport binding retains a cleanup-only canonical lease when dispo
   const fixture = r.context.resources.get(owned[0]!) as { expiresAtUtcMs: number };
   assert.equal(fixture.expiresAtUtcMs, 0);
   r.failCleanup(false); await disposeFixtures(r.context); assert.equal(r.context.resources.has(owned[0]!), false);
+});
+
+
+test('binding failure survives failed release receipt and retries exact canonical disposal', async t => {
+  const r = await setup(t); r.failBind(new ObservationError('source-mismatch', 'Fixture binding source mismatch'));
+  r.failCleanup(true); r.failReleaseArtifact(true);
+  const result = await r.invoke('loom.fixture.acquire', r.input);
+  assert.equal(result.availability, 'error'); assert.equal(result.error?.code, 'source-mismatch');
+  assert.equal(JSON.stringify(result).includes('private-release-artifact-token'), false);
+  const keys = [...r.context.resources.keys()].filter(key => key.startsWith(fixturesKey + ':'));
+  assert.equal(keys.length, 1);
+  const id = keys[0]!.slice(fixturesKey.length + 1);
+  assert.equal(getRegisteredResource(r.context, keys[0]!, id), r.context.resources.get(keys[0]!));
+  assert.equal((await r.invoke('loom.fixture.observe', { leaseId: id })).availability, 'error');
+  r.failCleanup(false);
+  await assert.rejects(disposeFixtures(r.context));
+  assert.equal(r.context.resources.has(keys[0]!), true);
+  const removed = r.calls.filter(call => call.startsWith('remove:')).length;
+  r.failReleaseArtifact(false); await disposeFixtures(r.context);
+  assert.equal(r.context.resources.has(keys[0]!), false);
+  assert.equal(r.calls.filter(call => call.startsWith('remove:')).length, removed);
+});
+
+test('binding failure registers cleanup ownership before awaiting disposal and preserves foreign replacement', async t => {
+  const r = await setup(t); r.failBind();
+  let enter!: () => void; const entered = new Promise<void>(resolve => { enter = resolve; });
+  let finish!: () => void; const pending = new Promise<void>(resolve => { finish = resolve; });
+  r.beforeRemove(async () => { enter(); await pending; });
+  const acquisition = r.invoke('loom.fixture.acquire', r.input);
+  await entered;
+  try {
+    const keys = [...r.context.resources.keys()].filter(key => key.startsWith(fixturesKey + ':'));
+    assert.equal(keys.length, 1);
+    const original = r.context.resources.get(keys[0]!) as { runId: string; dispose(): Promise<void> };
+    let foreignDisposals = 0;
+    const replacement = { ...original, runId: 'foreign-run', dispose: async () => { foreignDisposals++; } };
+    r.context.resources.set(keys[0]!, replacement);
+    finish(); const result = await acquisition;
+    assert.equal(result.availability, 'error');
+    assert.equal(r.context.resources.get(keys[0]!), replacement);
+    await disposeFixtures(r.context); assert.equal(foreignDisposals, 0);
+    assert.equal(r.calls.filter(call => call === 'remove:compose').length, 1);
+  } finally { finish(); await acquisition; }
 });
