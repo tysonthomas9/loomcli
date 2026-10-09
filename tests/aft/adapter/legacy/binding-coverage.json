@@ -69,6 +69,64 @@
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "Approved fixture executionRouting plus source-supported exact-model/backend-default variant. Direct task inherits model/env; daemon supervisor may override role model. Cursor account/backend default original source has no exact model predicate.",
       "status": "Shared e3 FixtureModelSelection consumed. Direct fixed task.go once/auto/daemon uses effective inherited env, not unused role.Model. Cursor backend-default has no fabricated pin; OpenCode env precedence and config validated. Actual Host/public-registry original guard RED then direct matching-env/unused-role GREEN; applied effective-env mismatch denies task launch. No supervisor ownership or chosen-model proof inferred; actual supervisor-owned generation/effective-env hooks remain pending."
+    },
+    "scripted-configuration": {
+      "fixtureOwner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "translationOwner": "agent-ac5d7616-d39d-4b56-ac6c-3979cc039c75",
+      "status": "Fixture-dependent; byte ports available in approved paired5ddd+829, concrete native actor/config ownership and restoration hooks still required. No mutation/binding coverage claimed.",
+      "evidenceClass": "static pinned source contract only",
+      "sources": [
+        {
+          "path": "tests/aft/suites/agents-v1-ui.test.yaml",
+          "sha256": "ae44757c504e6276a8ff551f6d43f7fc9defb475020c50cf1b71afe6b3cebda1",
+          "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8"
+        },
+        {
+          "path": "tests/aft/suites/agents-v1-lead.test.yaml",
+          "sha256": "82f1cecdc7c0b39867d3e8e390c5d98133bcb44c3f10495f37caeca762ddef38",
+          "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8"
+        },
+        {
+          "path": "internal/harnessemu/emu.go",
+          "sha256": "a212e09ebbdb58c98d87b7b01e0212d4111c27f3b7b41a6f284401de62d2565c",
+          "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8"
+        }
+      ],
+      "reviewedWriterVariants": [
+        {
+          "source": "tests/aft/suites/agents-v1-ui.test.yaml:43-47",
+          "policy": "merge-agent-key",
+          "semantics": "Read existing JSON map or absent/empty map; replace selected agent key with [turn], preserve unrelated keys."
+        },
+        {
+          "source": "tests/aft/suites/agents-v1-lead.test.yaml:455-466",
+          "policy": "replace-map",
+          "semantics": "Write exactly {agent:[turn,think]}, removing previous map keys."
+        },
+        {
+          "source": "tests/aft/suites/agents-v1-lead.test.yaml:752-762",
+          "policy": "replace-map",
+          "semantics": "Write exactly {agent:turns}, removing previous map keys."
+        }
+      ],
+      "readerSemantics": {
+        "source": "internal/harnessemu/emu.go:229-241",
+        "identityOrder": [
+          "native-session-id",
+          "native-agent-id"
+        ],
+        "fallbackCondition": "Session key has nil turns; an explicit empty array suppresses AgentID fallback.",
+        "playedStateSource": "internal/harnessemu/emu.go:109,147-153,238-241",
+        "obligation": "Persisted Played is the next-turn index and increments on a scripted turn. Configuration rewrites must not fabricate/reset it or infer session identity from a legacy name."
+      },
+      "requiredProductionSeamChecks": [
+        "derive finite writer policy from each preserved source caller, not YAML or scenario-name dispatch",
+        "merge preserves unrelated keys; replace removes them using independent literal byte/payload oracles",
+        "native session ID precedes AgentID; empty vs missing session entry remains distinct",
+        "actual canonical native actor/fixture/config ownership checked before writes",
+        "failed exact-byte restoration keeps lease for retry; foreign ownership writes0",
+        "writes and cleanup use the same retained owned target identity; incomplete source state cannot prove absence"
+      ]
     }
   },
   "operations": [
