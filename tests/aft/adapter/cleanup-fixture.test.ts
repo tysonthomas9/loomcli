@@ -162,3 +162,16 @@ for (const cancelled of [false, true]) test(`foreign context without issuance ca
   assert.equal(disposed, 1);
   assert.equal(target.resources.get(h.key), fixture);
 });
+
+test('successful cleanup cannot reuse an engine handle or leave a failed new registration', async () => {
+  let disposed = 0;
+  const h = setup(async () => { disposed++; });
+  putCleanupFixture(h.context, h.owner);
+  await releaseFixture(h.context, h.owner.leaseId);
+  assert.equal(disposed, 1);
+  assert.equal(h.context.resources.size, 0);
+  assert.throws(() => putCleanupFixture(h.context, h.owner), /duplicate resource registration/);
+  assert.equal(h.context.resources.size, 0);
+  await disposeFixtures(h.context);
+  assert.equal(disposed, 1);
+});

@@ -64,6 +64,7 @@ const resourceKey = (leaseId: string) => `${fixturesKey}:${leaseId}`;
 // keep resources solely in the canonical context. Pins survive cancellation
 // and do not trust a replacement object's cleanupOnly metadata.
 const cleanupFixtureIdentities = new WeakMap<CapabilityContext, Map<string, WeakRef<OwnedFixture>>>();
+const cleanupFixtureIssuances = new WeakMap<OwnedFixture, { context: CapabilityContext; leaseId: string }>();
 function requireFixtureOwner(context: CapabilityContext, fixture: Pick<OwnedFixture, 'leaseId' | 'runId' | 'suiteId' | 'scope' | 'caseId'>): void {
   requireFact(fixture.runId === context.runId && fixture.suiteId === context.suiteId && fixture.scope === context.scope &&
     (fixture.scope === 'suite' || fixture.caseId === context.caseId) && fixture.leaseId && !context.resources.has(resourceKey(fixture.leaseId)),
@@ -95,6 +96,7 @@ export function putCleanupFixture(context: CapabilityContext,
   let identities = cleanupFixtureIdentities.get(context);
   if (!identities) { identities = new Map(); cleanupFixtureIdentities.set(context, identities); }
   identities.set(fixture.leaseId, new WeakRef(fixture));
+  cleanupFixtureIssuances.set(fixture, { context, leaseId: fixture.leaseId });
   return fixture;
 }
 export function putFixture(context: CapabilityContext, fixture: OwnedFixture): void {
@@ -128,7 +130,7 @@ export function getFixtureAuthority(context: CapabilityContext, leaseId: string)
   requireFact(fixture && fixture.runId === context.runId && fixture.suiteId === context.suiteId &&
     (fromSuite ? fixture.scope === 'suite' : fixture.scope === context.scope && (fixture.scope === 'suite' || fixture.caseId === context.caseId)),
     'ownership-mismatch', 'Fixture handle is missing or belongs to another scope');
-  requireFact(!cleanupFixtureIdentities.get(context)?.has(leaseId) && !fixture.cleanupOnly,
+  requireFact(!cleanupFixtureIdentities.get(context)?.has(leaseId) && !cleanupFixtureIssuances.has(fixture) && !fixture.cleanupOnly,
     'ownership-mismatch', 'Fixture acquisition is incomplete');
   requireFact(context.clock.epochUtcMs + context.clock.now() < fixture.expiresAtUtcMs,
     'ownership-mismatch', 'Fixture lease expired');
@@ -162,7 +164,9 @@ export async function releaseFixture(context: CapabilityContext, leaseId: string
   requireFact(fixture && fixture.runId === context.runId && fixture.suiteId === context.suiteId && fixture.scope === context.scope &&
     (fixture.scope === 'suite' || fixture.caseId === context.caseId), 'ownership-mismatch', 'Cannot release a foreign fixture');
   const cleanupIdentity = cleanupFixtureIdentities.get(context)?.get(leaseId);
-  if (cleanupIdentity || fixture.cleanupOnly) requireFact(cleanupIdentity?.deref() === fixture,
+  const cleanupIssuance = cleanupFixtureIssuances.get(fixture);
+  if (cleanupIdentity || cleanupIssuance || fixture.cleanupOnly) requireFact(cleanupIdentity?.deref() === fixture &&
+    cleanupIssuance?.context === context && cleanupIssuance.leaseId === leaseId,
     'ownership-mismatch', 'Cleanup fixture is not the exact issued owner');
   // Cleanup remains available after expiry or cancellation. Keep failed
   // disposals registered so final cleanup can retry the exact resources.
@@ -171,6 +175,7 @@ export async function releaseFixture(context: CapabilityContext, leaseId: string
     'ownership-mismatch', 'Cleanup fixture was replaced during disposal');
   context.resources.delete(resourceKey(leaseId));
   if (cleanupIdentity) {
+    cleanupFixtureIssuances.delete(fixture);
     const identities = cleanupFixtureIdentities.get(context)!;
     identities.delete(leaseId);
     if (!identities.size) cleanupFixtureIdentities.delete(context);
