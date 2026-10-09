@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "c076cf962d6d30fb233e41c005b1b571c5d02d8b752edf890495799a5f3aeec2"
+        "sha256": "465a67d9af8fd70cd4e15126962c273cfcf7857cc84a725f670e8c551acb9726"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -937,7 +937,7 @@
       "conservativeReachableCandidates": 467,
       "helperSelftestOrNegativeRecords": 213,
       "unrelatedBranchesOrCases": 392,
-      "exactReachablePredicateDenominator": "Stop40/Files24/Child57 frozen subsets individually selected; remaining Child101+6external guards, other pilots and43 extra source guard/selection groups/imports remain uncovered."
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child91 frozen subsets selected(includes2childconditional);remainingChild67+6external guards,otherpilots and56extra source guard/selection/actor groups/imports remain uncovered."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -1698,5 +1698,24 @@
     "fullPilotAdmissionCredit": false,
     "originalInventoryRecoveryCredit": false,
     "owners": "Engine/parent sent exact paths/hashes before any comparison; engine owns loader correction/proof,maintainedc71 unchanged."
+  },
+  "childStartedSelectedBranchReview": {
+    "at": "2026-10-09T11:46:56.082226+00:00",
+    "frozenHelperByteMatch": true,
+    "newInventoryDirect": 32,
+    "newInventoryConditional": 2,
+    "sourceGroupExtensionsUncovered": 13,
+    "remainingChildUnresolvedPythonPredicates": 67,
+    "externalRefGuardsUnresolved": 6,
+    "newYamlOrPreservationCredit": false
+  },
+  "unacceptedPerformanceOwnerReport": {
+    "head": "9a1d7cf55d3d4e86841ee897742afb2081e6609f",
+    "tree": "fac80b13338e99f96c97c27611d570b6ef7a5fd1",
+    "parent": "969e892c904f6dd47a8f5ebff84c11b66db940bd",
+    "status": "OWNERREPORTED UNAPPROVED ONLY;not installed/run/verified bypilot",
+    "newSelection": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+    "reportedCandidateStop": "unchangedde0fcf6e raw draft admitted1.045s/131verifycalls/2362actualreads,22providers,effects0/runtime0",
+    "evidenceBoundary": "No maintainedenginepin change,pilot gate or preservation credit;969document-race P1/otherreviewer holds open;parentreviewneeded."
   }
 }
