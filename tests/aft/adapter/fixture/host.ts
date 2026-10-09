@@ -36,6 +36,16 @@ export class HostFixtureDriver implements FixtureDriver {
   private leaseId = '';
   private readonly stamps = new Map<string, { dev: number; ino: number }>();
   private readonly handles = new Map<string, OwnedProcess>();
+  private readonly activeOperations = new Set<string>();
+  private async withServiceOperation<T>(id:string,operation:()=>Promise<T>):Promise<T>{
+    check(!this.activeOperations.has(id),'identity-mismatch');
+    this.activeOperations.add(id);
+    try{return await operation();}finally{this.activeOperations.delete(id);}
+  }
+  private requireHandle(id:string,generation:string){
+    const handle=this.handles.get(id);check(handle&&handle.generation===generation,'identity-mismatch');return handle!;
+  }
+  private requireCurrentHandle(id:string,handle:OwnedProcess){check(this.handles.get(id)===handle,'identity-mismatch');}
   private readonly commands = new Map<string, { command: HostCommand; readiness: string }>();
   private record?: (resource: Resource) => void;
   private readonly cleanups: (() => Promise<void>)[] = [];
@@ -49,7 +59,7 @@ export class HostFixtureDriver implements FixtureDriver {
   private readonly config: HostConfig;
   private readonly baselines=new StartupBaselines({generation:async(target,signal)=>{
     const handle=this.handles.get(target);check(handle?.state()==='running');await this.inspectOwnedProcess(target,handle!.generation,signal);return handle!.generation;
-  },request:(target,method,relative,signal)=>this.requestOwnedHttp(target,method,relative,null,signal)});
+  },request:(target,method,relative,signal,generation)=>this.requestOwnedHttp(target,method,relative,null,signal,generation)});
   constructor(config: HostConfig, private readonly processes: HostProcesses = nodeProcesses,
     private readonly files: typeof fs = fs, private readonly http: Http = readHttp,
     private readonly uuid: () => string = randomUUID, private readonly reserve: () => Promise<PortReservation> = reservePort,
@@ -109,28 +119,44 @@ export class HostFixtureDriver implements FixtureDriver {
     const completion = waitForExit ? await handle.completion(signal) : { exitCode: null, stdout: '', stderr: '', complete: false };
     return { id, generation, pid: handle.pid, completion };
   }
+  private async stopCapturedProcess(id:string,generation:string,signal:AbortSignal){
+    const handle=this.requireHandle(id,generation);
+    await this.inspectOwnedProcess(id,generation,signal);
+    signal.throwIfAborted();this.requireCurrentHandle(id,handle);
+    await handle.stop();this.requireCurrentHandle(id,handle);
+    check(handle.state()==='exited');
+    return {beforeGeneration:generation,afterGeneration:null,affectedIds:[id],complete:true as const};
+  }
   async stopOwnedProcess(id: string, generation: string, signal: AbortSignal) {
-    await this.inspectOwnedProcess(id, generation, signal); await this.handles.get(id)!.stop();
-    check(this.handles.get(id)!.state() === 'exited');
-    return { beforeGeneration: generation, afterGeneration: null, affectedIds: [id], complete: true as const };
+    return this.withServiceOperation(id,()=>this.stopCapturedProcess(id,generation,signal));
   }
   async restartOwnedProcess(id: string, generation: string, signal: AbortSignal) {
-    const saved = this.commands.get(id); check(saved && this.record, 'unsupported-capability');
-    await this.stopOwnedProcess(id, generation, signal);
-    await this.start(id, saved!.command, saved!.readiness, this.record!, signal);
-    const after = this.handles.get(id)!.generation; check(after !== generation, 'identity-mismatch');
-    return { beforeGeneration: generation, afterGeneration: after, affectedIds: [id], complete: true as const };
+    const result=await this.withServiceOperation(id,async()=>{
+      const saved=this.commands.get(id);check(saved&&this.record,'unsupported-capability');
+      const handle=this.requireHandle(id,generation);
+      await this.stopCapturedProcess(id,generation,signal);this.requireCurrentHandle(id,handle);
+      await this.start(id,saved!.command,saved!.readiness,this.record!,signal,false);
+      const after=this.handles.get(id)!.generation;check(after!==generation,'identity-mismatch');
+      return {beforeGeneration:generation,afterGeneration:after,affectedIds:[id],complete:true as const};
+    });
+    if(id==='fake-model'||id==='fake-github')await this.baselines.captureSuccessfulStart(id,result.afterGeneration,signal);
+    return result;
   }
-  async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relative: string, body: unknown, signal: AbortSignal) {
+  async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relative: string, body: unknown, signal: AbortSignal, expectedGeneration?:string) {
     signal.throwIfAborted(); check(this.ports.length === 5);
     check(target === 'api' ? relative.startsWith('/api/') : /^\/__(script|reset|fixture|state|requests)(\?|$)/.test(relative));
     check(target !== 'fake-model' || this.profile === 'legacy-deterministic', 'unsupported-capability');
     check(target !== 'fake-github' || this.config.fakeGitHub, 'unsupported-capability');
     const service = { api: 'serve', 'fake-model': 'fake-model', 'fake-github': 'fake-github' }[target];
-    const handle = this.handles.get(service); check(handle && handle.state() === 'running' && handle.pid > 0, 'ownership-mismatch');
-    await this.inspectOwnedProcess(service, handle!.generation, signal);
-    const index = { api: 0, 'fake-model': 2, 'fake-github': 4 }[target];
-    return this.http(`http://127.0.0.1:${this.ports[index]}`, method, relative, body, signal);
+    return this.withServiceOperation(service,async()=>{
+      const handle=this.handles.get(service);check(handle&&handle.state()==='running'&&handle.pid>0,'ownership-mismatch');
+      const generation=expectedGeneration??handle!.generation;check(handle!.generation===generation,'identity-mismatch');
+      const index={api:0,'fake-model':2,'fake-github':4}[target],origin=`http://127.0.0.1:${this.ports[index]}`;
+      await this.inspectOwnedProcess(service,generation,signal);
+      signal.throwIfAborted();this.requireCurrentHandle(service,handle!);check(handle!.state()==='running','identity-mismatch');
+      const response=await this.http(origin,method,relative,body,signal);
+      signal.throwIfAborted();this.requireCurrentHandle(service,handle!);check(handle!.state()==='running','identity-mismatch');return response;
+    });
   }
   private env(): Record<string, string> {
     const c = this.config; const runtime = path.join(this.root, 'runtime');
@@ -249,7 +275,7 @@ export class HostFixtureDriver implements FixtureDriver {
     await command(['init', '-q']);
     await command(['-c', 'user.name=Loom E2E', '-c', 'user.email=loom-e2e@example.test', 'commit', '--allow-empty', '-m', 'e2e seed', '-q']);
   }
-  private async start(id: string, command: HostCommand, readiness: string, record: (resource: Resource) => void, signal: AbortSignal) {
+  private async start(id: string, command: HostCommand, readiness: string, record: (resource: Resource) => void, signal: AbortSignal,captureBaseline=true) {
     const generation = this.uuid(); record({ id, kind: 'process', generation });
     let handle;
     try { handle = this.processes.start(command, readiness, generation); }
@@ -257,7 +283,7 @@ export class HostFixtureDriver implements FixtureDriver {
     this.handles.set(id, handle); this.commands.set(id, { command, readiness });
     check(handle.generation === generation, 'identity-mismatch');
     await handle.ready(signal); check(handle.pid > 0 && handle.state() === 'running', 'observation-failed');
-    if(id==='fake-model'||id==='fake-github')await this.baselines.captureSuccessfulStart(id,generation,signal);
+    if(captureBaseline&&(id==='fake-model'||id==='fake-github'))await this.baselines.captureSuccessfulStart(id,generation,signal);
   }
   async provision(_plan: FixturePlan, record: (resource: Resource) => void, signal: AbortSignal) {
     this.record = record;
@@ -331,7 +357,7 @@ export class HostFixtureDriver implements FixtureDriver {
   async remove(resource: Resource) {
     await this.inspect(resource);
     await this.drainCleanups();
-    if (resource.kind === 'process') { if (!this.unspawned.has(resource.id)) await this.handles.get(resource.id)!.stop(); return; }
+    if (resource.kind === 'process') { if (!this.unspawned.has(resource.id)) await this.stopOwnedProcess(resource.id,resource.generation,new AbortController().signal); return; }
     if (resource.kind === 'ports') { await this.closeSockets(); return; }
     if (resource.kind === 'lock') { await this.files.unlink(resource.id); return; }
     check([...this.handles.values()].every(handle => handle.state() === 'exited'));

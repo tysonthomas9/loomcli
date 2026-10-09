@@ -76,7 +76,10 @@ async function setup(profile: string) {
       handles.set(id, handle); return handle;
     },
   };
+  let onHttp:((method:string,relative:string)=>Promise<void>)|undefined;
+  const requests:{method:string;relative:string}[]=[];
   const http: Http = async (_origin, method, relative) => {
+    requests.push({method,relative});await onHttp?.(method,relative);
     if (failHttp) return { status: 503, body: { message: 'Bearer private-http-token' } };
     if(relative==='/__requests')return {status:200,body:{requests:[],queued:0}};
     if(relative==='/__reset')return {status:200,body:{ok:true}};
@@ -86,8 +89,9 @@ async function setup(profile: string) {
   const protocols:string[]=[];
   const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, fs, http, () => `fixture-${++count}`, async () => ({ port: port++, async release() {} }),async endpoint=>{protocols.push(endpoint);if(failService==='codex-protocol')throw new Error('private probe failure');});
   const lifecycle = new FixtureLifecycle([plan], () => driver, () => 1000, () => 'opaque-fixture');
-  return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle, protocols,
+  return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle, protocols, requests,
     request: { runId: 'test-run', profile, loomRevision: revision, fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
+    onHttp(callback:(method:string,relative:string)=>Promise<void>){onHttp=callback;},
     failSpawn() { spawnFails = true; }, failService(value: string) { failService = value; }, failStop(value: string) { failStop = value; }, failHttp() { failHttp = true; },
     async cleanup() { await fs.rm(root, { recursive: true }); } };
 }
@@ -134,8 +138,69 @@ test('host captures a retained startup baseline and refuses stale or stopped ser
  const fact=await r.driver.freshFixtureBaseline('fake-model',signal);assert.equal(fact.generation,r.driver.processesById.get('fake-model')!.generation);
  assert.deepEqual(await r.driver.resetFixtureBaseline('fake-model',fact.generation,signal),{status:200,body:{ok:true}});
  await assert.rejects(r.driver.resetFixtureBaseline('fake-model','foreign-generation',signal));
+ await assert.rejects(r.driver.requestOwnedHttp('fake-model','POST','/__reset',null,signal,'foreign-generation'));
  await r.driver.stopOwnedProcess('fake-model',fact.generation,signal);await assert.rejects(r.driver.freshFixtureBaseline('fake-model',signal));
  await r.lifecycle.release(acquired.lease.id,r.request.runId);
+ }finally{await r.cleanup();}
+});
+test('HTTP baseline mutation rejects a replacement during awaited process inspection before calling transport',async()=>{
+ const r=await setup('legacy-deterministic');try{
+ const acquired=await r.lifecycle.acquire(r.request,new AbortController().signal),signal=new AbortController().signal;
+ const fact=await r.driver.freshFixtureBaseline('fake-model',signal);const inspect=r.driver.inspectOwnedProcess.bind(r.driver);let armed=true;
+ r.driver.inspectOwnedProcess=async(id,generation,abort)=>{const result=await inspect(id,generation,abort);if(armed&&id==='fake-model'){armed=false;await r.driver.restartOwnedProcess(id,generation,abort);}return result;};
+ await assert.rejects(r.driver.requestOwnedHttp('fake-model','POST','/__reset',null,signal,fact.generation));
+ assert.equal(r.requests.filter(request=>request.method==='POST'&&request.relative==='/__reset').length,0);
+ assert.equal((await r.driver.freshFixtureBaseline('fake-model',signal)).generation,fact.generation);await r.lifecycle.release(acquired.lease.id,r.request.runId);
+ }finally{await r.cleanup();}
+});
+test('in-flight HTTP holds exact service authority and rejects concurrent stop and restart',async()=>{
+ const r=await setup('legacy-deterministic');try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),fact=await r.driver.freshFixtureBaseline('fake-model',signal);
+ let enter!:()=>void,leave!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{leave=resolve;});
+ r.onHttp(async(method,relative)=>{if(method==='POST'&&relative==='/__reset'){enter();await gate;}});
+ const pending=r.driver.requestOwnedHttp('fake-model','POST','/__reset',null,signal,fact.generation);await entered;
+ const starts=r.starts.length,stops=r.stopped.length;
+ await assert.rejects(r.driver.stopOwnedProcess('fake-model',fact.generation,signal));
+ await assert.rejects(r.driver.restartOwnedProcess('fake-model',fact.generation,signal));
+ assert.equal(r.starts.length,starts);assert.equal(r.stopped.length,stops);
+ leave();assert.deepEqual(await pending,{status:200,body:{ok:true}});
+ assert.deepEqual(await r.driver.resetFixtureBaseline('fake-model',fact.generation,signal),{status:200,body:{ok:true}});
+ await r.lifecycle.release(a.lease.id,r.request.runId);
+ }finally{await r.cleanup();}
+});
+test('replacement during deferred inspection never stops or restarts the replacement',async()=>{
+ for(const action of ['stopOwnedProcess','restartOwnedProcess'] as const){
+ const r=await setup('legacy-deterministic');try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),before=r.driver.processesById.get('serve')!;
+ let enter!:()=>void,leave!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{leave=resolve;});
+ const inspect=r.driver.inspectOwnedProcess.bind(r.driver);r.driver.inspectOwnedProcess=async(id,generation,abort)=>{const fact=await inspect(id,generation,abort);if(id==='serve'){enter();await gate;}return fact;};
+ let foreignStops=0;const foreign:OwnedProcess={...before,generation:'foreign',stop:async()=>{foreignStops++;}};
+ const pending=r.driver[action]('serve',before.generation,signal);await entered;
+ const starts=r.starts.length;(r.driver.processesById as Map<string,OwnedProcess>).set('serve',foreign);leave();
+ await assert.rejects(pending);assert.equal(foreignStops,0);assert.equal(r.starts.length,starts);
+ (r.driver.processesById as Map<string,OwnedProcess>).set('serve',before);r.driver.inspectOwnedProcess=inspect;
+ await r.lifecycle.release(a.lease.id,r.request.runId);
+ }finally{await r.cleanup();}}
+});
+test('deferred HTTP inspection rejects a replaced handle before any mutation dispatch',async()=>{
+ const r=await setup('legacy-deterministic');try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),before=r.driver.processesById.get('fake-model')!;
+ let enter!:()=>void,leave!:()=>void;const entered=new Promise<void>(resolve=>{enter=resolve;}),gate=new Promise<void>(resolve=>{leave=resolve;});
+ const inspect=r.driver.inspectOwnedProcess.bind(r.driver);r.driver.inspectOwnedProcess=async(id,generation,abort)=>{const fact=await inspect(id,generation,abort);if(id==='fake-model'){enter();await gate;}return fact;};
+ const pending=r.driver.requestOwnedHttp('fake-model','POST','/__reset',null,signal,before.generation);await entered;
+ (r.driver.processesById as Map<string,OwnedProcess>).set('fake-model',{...before,generation:'foreign'});leave();
+ await assert.rejects(pending);assert.equal(r.requests.filter(x=>x.method==='POST'&&x.relative==='/__reset').length,0);
+ (r.driver.processesById as Map<string,OwnedProcess>).set('fake-model',before);r.driver.inspectOwnedProcess=inspect;
+ await r.lifecycle.release(a.lease.id,r.request.runId);
+ }finally{await r.cleanup();}
+});
+test('HTTP response from a changed service is uncertain and cannot report success or retry',async()=>{
+ const r=await setup('legacy-deterministic');try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),before=r.driver.processesById.get('fake-model')!;
+ r.onHttp(async(method,relative)=>{if(method==='POST'&&relative==='/__reset')(r.driver.processesById as Map<string,OwnedProcess>).set('fake-model',{...before,generation:'replacement'});});
+ await assert.rejects(r.driver.requestOwnedHttp('fake-model','POST','/__reset',null,signal,before.generation));
+ assert.equal(r.requests.filter(x=>x.method==='POST'&&x.relative==='/__reset').length,1);
+ (r.driver.processesById as Map<string,OwnedProcess>).set('fake-model',before);r.onHttp(async()=>{});await r.lifecycle.release(a.lease.id,r.request.runId);
  }finally{await r.cleanup();}
 });
 test('partial host startup stops exact launched handle and preserves safe failure evidence', async () => {
