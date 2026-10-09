@@ -117,6 +117,7 @@ export async function verifyManifest(manifest: FileManifest, expected: string, s
   }
   check(hash(entries.map(entry => `${entry.sha256}  ${entry.relativePath}\n`).join('')) === expected, 'source-mismatch');
 }
+const sameImageId = (observed: unknown, expected: string) => typeof observed === 'string' && /^(?:sha256:)?[a-f0-9]{64}$/.test(observed) && observed.replace(/^sha256:/, '') === expected.replace(/^sha256:/, '');
 interface ObjectRecord { id: string; kind: 'container' | 'volume' | 'network'; generation: string; service: string; pid: number; state: string; startedAt?:string; healthy?: boolean; workVolume?: string; namespaceSha256?:string;networkIds?:readonly string[] }
 const SERVICES = ['redis', 'fleet-db', 'loom-local', 'ui-local'];
 const CLOUD_SERVICES = ['redis', 'fleet-auth-seed', 'fleet-db', 'loom-serve', 'worker', 'stub-upstream'];
@@ -352,7 +353,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
     await this.command('podman', ['--connection', this.config.connection, 'info', '--format', 'json'], signal);
     for (const imageId of Object.values(this.cloud ? this.stackImages : this.images)) {
       const observed = JSON.parse(await this.command('podman', ['--connection', this.config.connection, 'image', 'inspect', imageId], signal));
-      check(Array.isArray(observed) && observed.length === 1 && typeof observed[0].Id === 'string' && /^(?:sha256:)?[a-f0-9]{64}$/.test(observed[0].Id) && observed[0].Id.replace(/^sha256:/, '') === imageId.replace(/^sha256:/, ''), 'source-mismatch');
+      check(Array.isArray(observed) && observed.length === 1 && sameImageId(observed[0].Id, imageId), 'source-mismatch');
     }
   }
   private async stamp(filename: string) {
@@ -446,8 +447,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
           const mappings = value.NetworkSettings?.Ports?.['8080/tcp'];
           check(Array.isArray(mappings) && mappings.length > 0 && mappings.every((mapping: { HostPort: string }) => Number(mapping.HostPort) === this.ports[portIndex]));
         }
-        if (kind === 'container' && service === 'fleet-db') check(value.Image === this.images.fleet, 'source-mismatch');
-        if (kind === 'container' && service === 'loom-local') check(value.Image === this.images.loom, 'source-mismatch');
+        if (kind === 'container' && service === 'fleet-db') check(sameImageId(value.Image, this.images.fleet), 'source-mismatch');
+        if (kind === 'container' && service === 'loom-local') check(sameImageId(value.Image, this.images.loom), 'source-mismatch');
         let namespaceSha256:string|undefined,networkIds:string[]|undefined;
         if(kind==='container'&&service==='loom-local'){
           const adapter=value.Mounts?.filter((mount:{Destination:string})=>mount.Destination==='/opt/aft');
@@ -463,7 +464,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
           check(networkIds.length>0&&networkIds.length<=16&&new Set(networkIds).size===networkIds.length);
           namespaceSha256=hash(JSON.stringify({mounts,networkIds}));
         }
-        if (kind === 'container' && this.cloud && this.stackImages[service]) check(value.Image === this.stackImages[service], 'source-mismatch');
+        if (kind === 'container' && this.cloud && this.stackImages[service]) check(sameImageId(value.Image, this.stackImages[service]!), 'source-mismatch');
         let workVolume: string | undefined;
         if(kind==='container'&&service==='ui-local'){
           const frontend=value.Mounts?.filter((mount:{Destination:string})=>mount.Destination==='/srv');

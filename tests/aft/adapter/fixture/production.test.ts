@@ -72,7 +72,7 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
    const mappings:Record<string,number>=cloud?{'loom-serve':0,'fleet-db':1,'stub-upstream':2}:{'fleet-db':0,'loom-local':1,'ui-local':2};const index=mappings[service] ?? 0;
    const target=restarted&&service==='loom-local';
    const exited=change==='target-exit'&&service==='loom-local';
-   return JSON.stringify([container?{Id:id,Image:change==='wrong-image'?'sha256:'+'e'.repeat(64):image,Config:{Labels:labels},State:{StartedAt:change==='target-only-stale'&&service==='loom-local'?'later-generation':change==='stale'?'new':target&&restartMode!=='same-start'?'restarted':'generation',Pid:exited?0:target&&restartMode!=='same-pid'||change==='pid-only'&&service==='loom-local'?456:123,Status:service==='fleet-auth-seed'||exited?'exited':'running',ExitCode:0,Health:{Status:change==='unhealthy'?'unhealthy':'healthy'}},Mounts:[{Destination:'/work',Type:change==='hostbind'?'bind':'volume',Name:change==='foreign-volume'?'foreign':'volume-owned',RW:true},{Destination:'/home/node/.codex',Type:'bind',Source:auth,RW:change==='writable-auth'},{Destination:'/opt/aft',Type:'bind',Source:change==='foreign-adapter'?'/foreign':config.adapter.build.root,RW:false},{Destination:'/opt/webui',Type:'bind',Source:frontend,RW:false},{Destination:'/srv',Type:'bind',Source:frontend,RW:false}],NetworkSettings:{Networks:{owned:{NetworkID:change==='foreign-network'?'network-foreign':'network-owned'}},Ports:{'8080/tcp':[{HostPort:String(change==='wrong-port'?5999:5000+index)}]}}}:{Id:id,Name:id,Labels:labels,CreatedAt:'created'}]);
+   return JSON.stringify([container?{Id:id,Image:change==='wrong-image'?'sha256:'+'e'.repeat(64):change==='unprefixed-image'?image.slice(7):change==='different-container-image'?'e'.repeat(64):change==='short-container-image'?image.slice(7,19):image,Config:{Labels:labels},State:{StartedAt:change==='target-only-stale'&&service==='loom-local'?'later-generation':change==='stale'?'new':target&&restartMode!=='same-start'?'restarted':'generation',Pid:exited?0:target&&restartMode!=='same-pid'||change==='pid-only'&&service==='loom-local'?456:123,Status:service==='fleet-auth-seed'||exited?'exited':'running',ExitCode:0,Health:{Status:change==='unhealthy'?'unhealthy':'healthy'}},Mounts:[{Destination:'/work',Type:change==='hostbind'?'bind':'volume',Name:change==='foreign-volume'?'foreign':'volume-owned',RW:true},{Destination:'/home/node/.codex',Type:'bind',Source:auth,RW:change==='writable-auth'},{Destination:'/opt/aft',Type:'bind',Source:change==='foreign-adapter'?'/foreign':config.adapter.build.root,RW:false},{Destination:'/opt/webui',Type:'bind',Source:frontend,RW:false},{Destination:'/srv',Type:'bind',Source:frontend,RW:false}],NetworkSettings:{Networks:{owned:{NetworkID:change==='foreign-network'?'network-foreign':'network-owned'}},Ports:{'8080/tcp':[{HostPort:String(change==='wrong-port'?5999:5000+index)}]}}}:{Id:id,Name:id,Labels:labels,CreatedAt:'created'}]);
   }return '';
  };
  const files={...fs,statfs:async()=>({type:0,blocks:20*1024**3,bavail:20*1024**3,bfree:20*1024**3,bsize:1,files:1000,ffree:1000})} as unknown as typeof fs;
@@ -710,10 +710,12 @@ for(const phase of ['GET','POST'])test(`GF1 public Compose archive enforces inde
 });
 
  test('image inspection accepts the exact unprefixed digest and denies different or short IDs before startup',async()=>{
-  for(const value of ['unprefixed-image','different-image','short-image']){
-   const r=await setup();r.mutate(value);try{
+  for(const value of ['unprefixed-image','different-image','short-image','different-container-image','short-container-image']){
+   const r=await setup();r.mutate(value);let fleetReads=0;
+   if(value.endsWith('container-image'))r.onCommand(async call=>{if(call.args.at(-1)==='container-fleet-db'&&++fleetReads>1)r.mutate('');});
+   try{
     if(value==='unprefixed-image'){const acquired=await r.lifecycle.acquire(r.request,new AbortController().signal);assert.equal(acquired.workspaceId,'LOCALMODE');assert.equal((await r.lifecycle.release(acquired.lease.id,'run')).released,true);}
-    else {await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal));assert.equal(r.calls.some(call=>call.binary==='bash'||call.args.includes('up')),false);}
+    else {await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal));if(value.endsWith('container-image')){assert.ok(r.calls.some(call=>call.args.includes('up')));assert.ok(r.calls.some(call=>call.args.includes('down')));assert.ok(fleetReads>1);}else assert.equal(r.calls.some(call=>call.binary==='bash'||call.args.includes('up')),false);}
    }finally{await r.cleanup();}
   }
  });
