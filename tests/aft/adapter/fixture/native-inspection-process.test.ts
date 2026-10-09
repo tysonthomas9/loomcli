@@ -106,6 +106,21 @@ test('synchronous spawn abort observes raw rejection before later cleanup', asyn
   assert.equal(h.calls.length, 1); assert.equal(h.children.length, 0);
 });
 
+test('authority loss after intent enrollment but before spawn retires only empty intent', async () => {
+  let checks = 0;
+  const h = harness({ authorize: () => { if (++checks === 2) throw new Error('lost authority'); } });
+  await assert.rejects(h.owner.run(h.request())); await h.cleanup(); await h.cleanup();
+  assert.equal(checks, 2); assert.equal(h.calls.length, 0);
+});
+
+test('synchronous spawn abort with returned child observes rejection and retains exact cleanup handle', async () => {
+  const signal = new AbortController(); const h = harness({ onSpawn: () => signal.abort() });
+  await assert.rejects(h.owner.run(h.request({ signal: signal.signal })));
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(h.calls.length, 1); assert.equal(h.children[0]!.kills, 1);
+  const closing = h.cleanup(); h.children[0]!.close(1); await closing;
+});
+
 test('async child error retains exact handle, uncertain cleanup timeout and retry require actual close', async () => {
   const h = harness(); const denied = assert.rejects(h.owner.run(h.request()));
   const child = h.children[0]!; child.killResult = false;

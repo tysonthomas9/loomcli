@@ -153,6 +153,9 @@ export function createRetainedNativeInspectionRunner(binding: NativeInspectionBi
       return value;
     } catch {
       poisoned = true; rejectResult?.(failed());
+      // A predispatch authority/guard failure never returned a child handle.
+      // Retire that intent; actual returned handles still require close.
+      if (!intent.child) intent.markClosed();
       // Node's signal branch may already have sent termination. A separate
       // attempt addresses the same handle and remains uncertain until close.
       if (!intent.exited) terminate(intent);
