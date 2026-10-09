@@ -25,10 +25,11 @@ async function setup(exitObservation=false){
  const parent={id:'owned-daemon',identity:{...identity,pid:40,generation:'kernel-daemon-1'}};
  let current={...identity},parentGeneration=parent.identity.generation,captures=0,abandons=0,stops=0,count=0,apiStops=0;
  let onCapture:(()=>Promise<void>)|undefined,onActor:(()=>Promise<void>)|undefined;
+ let onInspect:((value:RegisteredIdentity)=>RegisteredIdentity)|undefined;
  const resources:Resource[]=[];const handles:RegisteredProcessHandle[]=[];
  const descendants=new OwnedDescendants({async capture(pid){captures++;assert.equal(resources.at(-1)?.generation,`unverified:${pid}`);
   await onCapture?.();const original={...current};let exited=false;
-  const handle={identity:original,async inspect(){return {...original,state:exited?'exited' as const:'running' as const};},
+  const handle={identity:original,async inspect(){const value={...original,state:exited?'exited' as const:'running' as const};return onInspect?.(value)??value;},
    async stop(){stops++;exited=true;},async abandon(){abandons++;},
    ...(exitObservation?{async awaitExit(){exited=true;}}:{})};handles.push(handle);return handle;
  }},resource=>resources.push(resource));
@@ -42,7 +43,8 @@ async function setup(exitObservation=false){
  return {root,config,stateRoot,stateFile,sidecarFile,sidecar,row,state,identity,parent,registry,descendants,resources,handles,write,
   setIdentity:(value:Partial<RegisteredIdentity>)=>{current={...current,...value};},
   replaceParent:()=>{parentGeneration='foreign-parent';},onCapture:(value:()=>Promise<void>)=>{onCapture=value;},
-  onActor:(value:()=>Promise<void>)=>{onActor=value;},apiStops:()=>apiStops,counts:()=>({captures,abandons,stops}),remove:()=>fs.rm(root,{recursive:true,force:true})};
+  onActor:(value:()=>Promise<void>)=>{onActor=value;},onInspect:(value:typeof onInspect)=>{onInspect=value;},
+  apiStops:()=>apiStops,counts:()=>({captures,abandons,stops}),remove:()=>fs.rm(root,{recursive:true,force:true})};
 }
 const signal=()=>new AbortController().signal;
 
@@ -143,5 +145,85 @@ test('product worker stop retains the API outcome and observed exit without invo
   assert.equal(result.response.status,202);assert.equal(result.transition.afterGeneration,null);
   assert.equal((await s.descendants.inspect(fact.id,fact.generation)).state,'exited');
   assert.equal(s.apiStops(),1);assert.equal(s.counts().stops,0);
+ }finally{await s.remove();}
+});
+
+test('retained reads require an already captured exact worker generation and do not discover one',async()=>{
+ const s=await setup();try{
+  await assert.rejects(s.registry.readRetained('registered-worker-1','kernel-worker-1',signal()));
+  assert.equal(s.counts().captures,0);
+  const fact=(await s.registry.refresh(signal()))[0]!;
+  await assert.rejects(s.registry.readRetained(fact.id,'foreign-generation',signal()));
+  const read=await s.registry.readRetained(fact.id,fact.generation,signal());
+  assert.deepEqual(read.fact,fact);assert.equal(read.before.pid,41);assert.equal(read.after.state,'running');
+  assert.ok(Object.isFrozen(read)&&Object.isFrozen(read.fact)&&Object.isFrozen(read.before)&&Object.isFrozen(read.after));
+  assert.ok(!JSON.stringify(read).includes('private-lease'));assert.equal(s.counts().captures,1);assert.equal(s.apiStops(),0);
+ }finally{await s.remove();}
+});
+
+test('retained predecessor reads survive a separately enrolled successor and inaccessible sidecars',async()=>{
+ const s=await setup(true);try{
+  const first=(await s.registry.refresh(signal()))[0]!;
+  await s.registry.stop(first.id,first.generation,'owned-serve',signal());
+  s.row.pid=42;s.row.last_start='2026-10-09T01:03:04Z';await s.write();s.setIdentity({pid:42,generation:'kernel-worker-2'});
+  const second=(await s.registry.refresh(signal()))[0]!;
+  await fs.unlink(s.stateFile);await fs.unlink(s.sidecarFile);
+  const prior=await s.registry.readRetained(first.id,first.generation,signal());
+  const next=await s.registry.readRetained(second.id,second.generation,signal());
+  assert.deepEqual(prior.fact,first);assert.equal(prior.before.pid,41);assert.equal(prior.after.state,'exited');
+  assert.deepEqual(next.fact,second);assert.equal(next.before.pid,42);assert.equal(next.after.state,'running');
+  assert.equal(s.counts().captures,2);assert.equal(s.apiStops(),1);assert.equal(s.counts().stops,0);
+ }finally{await s.remove();}
+});
+
+test('retained reads reject foreign or recreated actors and changed parent or worker identity',async()=>{
+ for(const mutate of [
+  (s:Awaited<ReturnType<typeof setup>>)=>s.onActor(async()=>{throw new Error('canonical actor incarnation changed');}),
+  (s:Awaited<ReturnType<typeof setup>>)=>s.onActor(async()=>s.replaceParent()),
+  (s:Awaited<ReturnType<typeof setup>>)=>s.onInspect(value=>({...value,generation:'foreign-generation'})),
+  (s:Awaited<ReturnType<typeof setup>>)=>s.onInspect(value=>({...value,parentPid:99})),
+  (s:Awaited<ReturnType<typeof setup>>)=>s.onActor(async()=>s.onInspect(value=>({...value,argvSha256:'a'.repeat(64)})))
+ ]){
+  const s=await setup();try{
+   const fact=(await s.registry.refresh(signal()))[0]!;mutate(s);
+   await assert.rejects(s.registry.readRetained(fact.id,fact.generation,signal()));
+   assert.equal(s.counts().captures,1);assert.equal(s.apiStops(),0);assert.equal(s.counts().stops,0);
+  }finally{await s.remove();}
+ }
+});
+
+test('retained reads serialize against discovery and stop, release after abort and never replay the actor',async()=>{
+ const s=await setup(true);let release!:()=>void;try{
+  const fact=(await s.registry.refresh(signal()))[0]!,controller=new AbortController();
+  let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve;}),blocked=new Promise<void>(resolve=>{release=resolve;});
+  s.onActor(async()=>{entered();await blocked;});
+  const read=s.registry.readRetained(fact.id,fact.generation,controller.signal);await ready;
+  await assert.rejects(s.registry.refresh(signal()));
+  await assert.rejects(s.registry.stop(fact.id,fact.generation,'owned-serve',signal()));
+  await assert.rejects(s.registry.readRetained(fact.id,fact.generation,signal()));
+  controller.abort();release();await assert.rejects(read);
+  s.onActor(async()=>{});assert.equal((await s.registry.readRetained(fact.id,fact.generation,signal())).after.state,'running');
+  assert.equal(s.counts().captures,1);assert.equal(s.apiStops(),0);assert.equal(s.counts().stops,0);
+ }finally{release?.();await s.remove();}
+});
+
+test('retained reads reject changed physical roots and cannot report an exited process as running again',async()=>{
+ const s=await setup(true);try{
+  const fact=(await s.registry.refresh(signal()))[0]!;await s.registry.stop(fact.id,fact.generation,'owned-serve',signal());
+  let inspections=0;s.onInspect(value=>++inspections===1?value:{...value,state:'running'});
+  await assert.rejects(s.registry.readRetained(fact.id,fact.generation,signal()));s.onInspect(undefined);
+  await fs.rename(s.config,s.config+'-retained');await fs.symlink(s.config+'-retained',s.config);
+  await assert.rejects(s.registry.readRetained(fact.id,fact.generation,signal()));
+  assert.equal(s.counts().captures,1);assert.equal(s.apiStops(),1);assert.equal(s.counts().stops,0);
+ }finally{await s.remove();}
+});
+
+test('unchanged worker registration cannot rebind its captured parent to a new kernel generation',async()=>{
+ const s=await setup();try{
+  const fact=(await s.registry.refresh(signal()))[0]!;
+  s.replaceParent();s.parent.identity.generation='foreign-parent';
+  await assert.rejects(s.registry.refresh(signal()));
+  await assert.rejects(s.registry.readRetained(fact.id,fact.generation,signal()));
+  assert.equal(s.counts().captures,1);assert.equal(s.apiStops(),0);assert.equal(s.counts().stops,0);
  }finally{await s.remove();}
 });

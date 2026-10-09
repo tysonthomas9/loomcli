@@ -30,11 +30,15 @@ export interface WorkerPorts {
  nextId():string;
  stop?(fact:Readonly<OwnedWorkerFact>,serveGeneration:string,signal:AbortSignal):Promise<{status:number;body:unknown}>;
 }
+interface RetainedWorker {
+ fact:Readonly<OwnedWorkerFact>;row:Readonly<z.infer<typeof Row>>;parent:Readonly<WorkerParent>;
+}
 /** Narrow builtin worker registration. No enumeration by PID/name, process
  * launch, force-stop actor, terminal exit or native-session association. */
 export class RegisteredBuiltinWorkers {
  private active=false;
- private readonly current=new Map<string,{id:string;row:z.infer<typeof Row>;generation:string}>();
+ private readonly current=new Map<string,string>();
+ private readonly retained=new Map<string,Readonly<RetainedWorker>>();
  private readonly pending=new Map<string,{id:string;row:z.infer<typeof Row>}>();
  private readonly stopAttempts=new Set<string>();
  constructor(private readonly coordinates:WorkerCoordinates,private readonly ports:WorkerPorts,
@@ -54,6 +58,30 @@ export class RegisteredBuiltinWorkers {
   signal.throwIfAborted();check(!this.active);this.active=true;
   try{return await this.refreshChecked(signal);}finally{this.active=false;}
  }
+ /** Reads an already captured generation, including an exited predecessor.
+  * Current sidecars cannot confer authority, select a successor or erase this
+  * history. The owning Host reservation must also exclude resource cleanup. */
+ async readRetained(id:string,generation:string,signal:AbortSignal){
+  signal.throwIfAborted();check(!this.active);this.active=true;
+  try{
+   const record=this.retained.get(id);check(record&&record.fact.generation===generation);
+   const {fact,row,parent}=record!;
+   check(row.worktree_path&&parent.identity.state==='running');
+   await this.verifyRoot(this.coordinates.configurationRoot);await this.verifyRoot(this.coordinates.runtimeRoot);
+   await this.ports.verifyParent(parent,signal);
+   const before=await this.descendants.inspect(id,generation);
+   check(before.parentPid===parent.identity.pid&&before.executable===this.coordinates.loomExecutable&&
+    before.configurationRoot===this.coordinates.configurationRoot.path);
+   signal.throwIfAborted();await this.ports.verifyActor(fact.agentId,row.worktree_path!,signal);
+   await this.ports.verifyParent(parent,signal);
+   const after=await this.descendants.inspect(id,generation);
+   check(after.parentPid===parent.identity.pid&&!(before.state==='exited'&&after.state!=='exited'));
+   await this.verifyRoot(this.coordinates.configurationRoot);await this.verifyRoot(this.coordinates.runtimeRoot);
+   await this.ports.verifyParent(parent,signal);signal.throwIfAborted();
+   check(this.retained.get(id)===record);
+   return Object.freeze({fact,before:Object.freeze(before),after:Object.freeze(after)});
+  }finally{this.active=false;}
+ }
  /** The product API actor and the kernel exit observation are separate facts.
   * No force-cleanup or saved-command restart substitutes for either one. */
  async stop(id:string,generation:string,serveGeneration:string,signal:AbortSignal){
@@ -72,7 +100,7 @@ export class RegisteredBuiltinWorkers {
    await this.descendants.awaitExit(id,generation);
    signal.throwIfAborted();check((await this.descendants.inspect(id,generation)).state==='exited');
    await this.ports.verifyParent(parent,signal);
-   const row=this.current.get(fact!.agentId);check(row?.id===id&&row.generation===generation&&row.row.worktree_path);
+   const row=this.retained.get(id);check(this.current.get(fact!.agentId)===id&&row?.fact.generation===generation&&row.row.worktree_path);
    await this.ports.verifyActor(fact!.agentId,row!.row.worktree_path!,signal);
    await this.ports.verifyParent(parent,signal);
    return {response,transition:{beforeGeneration:generation,afterGeneration:null,affectedIds:[id],complete:true as const}};
@@ -112,26 +140,32 @@ export class RegisteredBuiltinWorkers {
    if(row.current_backend)argv.push('--backend',row.current_backend);
    if(row.epic_id)argv.push('--parent',row.epic_id);
    const argvSha256=createHash('sha256').update(Buffer.from(argv.join('\0')+'\0')).digest('hex');
-   const previous=this.current.get(row.worktree);let id:string;
+   const currentId=this.current.get(row.worktree),previous=currentId===undefined?undefined:this.retained.get(currentId);let id:string;
    if(previous&&isDeepStrictEqual(previous.row,row)){
-    check((await this.descendants.inspect(previous.id,previous.generation)).state==='running');id=previous.id;
+    check((await this.descendants.inspect(previous.fact.id,previous.fact.generation)).state==='running');id=previous.fact.id;
    }else{
-    if(previous){check((await this.descendants.inspect(previous.id,previous.generation)).state==='exited'&&previous.row.last_start!==row.last_start);}
+    if(previous){check((await this.descendants.inspect(previous.fact.id,previous.fact.generation)).state==='exited'&&previous.row.last_start!==row.last_start);}
     const intent=this.pending.get(row.worktree);
     check(!intent||isDeepStrictEqual(intent.row,row));
+    check(this.retained.size<1000);
     id=intent?.id??`registered-worker-${this.ports.nextId()}`;
     if(!intent)this.pending.set(row.worktree,{id,row});
    }
    const identity=await this.descendants.enroll({id,pid:row.pid,executable:c.loomExecutable,configurationRoot:c.configurationRoot.path,
     argvSha256,parentPid:parent.identity.pid});
-   check(identity.generation!==previous?.generation||id===previous?.id);
+   check(identity.generation!==previous?.fact.generation||id===previous?.fact.id);
    await this.ports.verifyParent(parent,signal);
    await this.ports.verifyActor(row.worktree,row.worktree_path!,signal);
    const reread=await readState();check(isDeepStrictEqual(reread,before));
    check((await this.descendants.inspect(id,identity.generation)).state==='running');
-   this.current.set(row.worktree,{id,row,generation:identity.generation});this.pending.delete(row.worktree);
-   observed.push({id,generation:identity.generation,kind:'worker',identityKind:'legacy-agent-name',
+   const fact=Object.freeze({id,generation:identity.generation,kind:'worker' as const,identityKind:'legacy-agent-name' as const,
     workspaceId:c.workspaceId,agentId:row.worktree,sessionName:null});
+   const retained=this.retained.get(id);
+   if(retained)check(retained.parent.id===parent.id&&isDeepStrictEqual(retained.parent.identity,parent.identity));
+   else this.retained.set(id,Object.freeze({fact,row:Object.freeze({...row}),
+    parent:Object.freeze({id:parent.id,identity:Object.freeze({...parent.identity})})}));
+   this.current.set(row.worktree,id);this.pending.delete(row.worktree);
+   observed.push(fact);
   }
   check(isDeepStrictEqual(await readState(),before));
   check(isDeepStrictEqual(Sidecar.parse(await this.read(c.configurationRoot,sidecarPath)),sidecar));
