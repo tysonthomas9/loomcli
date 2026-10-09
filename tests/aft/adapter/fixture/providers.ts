@@ -14,6 +14,7 @@ import { FixtureLifecycle, FixtureError, type FixtureDriver, type FixturePlan, t
 import { HostFixtureDriver, readHttp, type HostConfig } from './host.js';
 import { ComposeFixtureDriver, type ProductionConfig } from './production.js';
 import { ContainerReadRequest } from './container-read.js';
+import { bindRenderer } from './renderer.js';
 import { createEvidenceStore, putEvidenceStore, evidenceKey, type EvidenceStore } from '../evidence.js';
 
 // Operation-specific schemas are owned here. General envelopes, artifact refs,
@@ -49,6 +50,7 @@ export interface FixtureProviderOptions {
     evidenceClass: EvidenceClass; roots: OwnedFixture['roots']; secrets: readonly string[];
     readApi: ReadTransport; readFiles: ReadTransport; resolveAgent: OwnedFixture['resolveAgent'];
     evidenceStore: EvidenceStore;
+    rendererTarget?: OwnedFixture['rendererTarget'];
   }>;
   evidenceAfterFailure(driver: FixtureDriver): Promise<EvidenceStore>;
 }
@@ -183,7 +185,7 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
       requireFact(driver instanceof ComposeFixtureDriver || driver instanceof HostFixtureDriver, 'ownership-mismatch', 'Fixture driver is not owned');
       return createEvidenceStore(path.join(driver.runtimeRoot, 'evidence'));
     },
-    async bind(driver, acquired, input) {
+    async bind(driver, acquired, input, context) {
       const isCompose = driver instanceof ComposeFixtureDriver;
       requireFact(isCompose || driver instanceof HostFixtureDriver, 'ownership-mismatch', 'Fixture transport is not a production driver');
       const runtimeRoot = driver.runtimeRoot;
@@ -194,7 +196,7 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
         const pinnedExecutable = input.profile === 'agents-emulator' ? '/opt/fixture/loom-harness-emu' : input.profile === 'legacy-real-codex-podman' ? '/usr/local/bin/codex' : '/usr/local/bin/opencode';
         const native = containerNative(driver, pinnedExecutable);
         const read: ContainerObservationRead = (request, signal) => driver.nativeRead(request, signal);
-        const managed = ContainerRootIdentity.parse(await read({ operation: 'filesystem-root', root: { kind: 'managed-repo' } }, new AbortController().signal));
+        const managed = ContainerRootIdentity.parse(await read({ operation: 'filesystem-root', root: { kind: 'managed-repo' } }, context.signal));
         roots.set('managed-repo', { ...managed, remoteObserve: containerFilesystemObserver(read, { kind: 'managed-repo' }, managed) });
         resolveAgent = async (agentId, signal): Promise<OwnedAgent> => {
           const row = await native.agent(agentId);
@@ -222,7 +224,8 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
           return { row, commonDir, native };
         };
       }
-      return { evidenceClass: input.profile.includes('real') ? 'real-native' : 'deterministic', roots, secrets: isCompose ? driver.fixtureSecrets : [],
+      const rendererTarget=await bindRenderer(isCompose?compose.loom:host.loom,acquired.lease.id,await driver.rendererRuntimeTarget(context.signal),path.join(runtimeRoot,'evidence'),roots);
+      return { evidenceClass: input.profile.includes('real') ? 'real-native' : 'deterministic', roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget,
         evidenceStore: await createEvidenceStore(path.join(runtimeRoot, 'evidence')),
         readApi: fixedRead(acquired.apiOrigin), readFiles: fixedRead(acquired.filesOrigin), resolveAgent };
     },

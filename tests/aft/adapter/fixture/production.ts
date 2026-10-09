@@ -8,6 +8,7 @@ import { reservePort, type PortReservation } from './process.js';
 import type { ContainerRead } from './container-read.js';
 import { readHttp, type Http } from './host.js';
 import { Json } from '../protocol.js';
+import { prepareRenderer, type PreparedRenderer } from './renderer.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
@@ -106,6 +107,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   private images = { loom: '', fleet: '' };
   private stackImages: Record<string, string> = {};
   private readonly cloudSecrets: Record<string, string> = {};
+  private renderer?: PreparedRenderer;
   private readonly config: ProductionConfig;
   private readonly cleanups: (() => Promise<void>)[] = [];
   constructor(config: ProductionConfig, private readonly run: ProcessRunner = runProcess,
@@ -115,6 +117,12 @@ export class ComposeFixtureDriver implements FixtureDriver {
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return '/root/.loom/workspaces/LOCALMODE'; }
   get fixtureSecrets() { return Object.values(this.cloudSecrets); }
+  async rendererRuntimeTarget(signal:AbortSignal) {
+    signal.throwIfAborted(); await this.inspect({id:this.project,kind:'compose',generation:this.leaseId});
+    const target=this.objects.find(object=>object.kind==='container'&&object.service===(this.cloud?'loom-serve':'ui-local'));
+    check(target?.state==='running'&&this.renderer,'identity-mismatch');
+    return {targetId:target!.id,generation:target!.generation,buildRoot:this.renderer!.buildRoot};
+  }
   private get cloud() { return this.profile === 'legacy-real-codex-podman'; }
   private get serviceNames() { return this.cloud ? CLOUD_SERVICES : SERVICES; }
   enrollCleanup(cleanup: () => Promise<void>) { check(this.root); this.cleanups.push(cleanup); }
@@ -200,9 +208,11 @@ export class ComposeFixtureDriver implements FixtureDriver {
     const storage = await this.files.statfs(this.config.tempParent);
     check(storage.bavail * storage.bsize >= Math.max(9 * 1024 ** 3, this.config.minimumFreeBytes), 'observation-failed');
     check(await this.identity(plan), 'source-mismatch');
+    this.renderer=await prepareRenderer(this.config.loom);
     check(this.config.attestedImages, 'source-mismatch');
     if (this.cloud) {
       const config = this.config.modecloud; check(config, 'source-mismatch');
+      check(config!.frontendDist===this.renderer.buildRoot,'source-mismatch');
       for (const dir of [config!.codexAuthRoot, config!.frontendDist]) check(await this.files.realpath(dir) === dir && (await this.files.lstat(dir)).isDirectory());
       check((await this.files.lstat(path.join(config!.codexAuthRoot, 'auth.json'))).isFile() && !(await this.files.lstat(path.join(config!.codexAuthRoot, 'auth.json'))).isSymbolicLink());
       const prefix = path.relative(this.config.loom.build.root, config!.frontendDist);
@@ -266,6 +276,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
       labels,
       ...(service === 'fleet-db' ? { build: { context: this.config.fleet.source.root }, environment: { FLEET_RATE_LIMIT_ENABLED: 'false' } } : {}),
       ...(service === 'loom-local' ? { volumes: [`${this.config.adapter.build.root}:/opt/aft:ro`] } : {}),
+      ...(service === 'ui-local' ? { volumes: [`${this.renderer!.buildRoot}:/srv:ro`] } : {}),
       ...(service === 'loom-local' && this.profile === 'agents-emulator' ? {
         environment: { LOOM_OPENCODE_BIN: '/opt/fixture/loom-harness-emu', LOOM_HARNESS_EMU: '1',
           LOOM_HARNESS_EMU_MODEL: 'http://127.0.0.1:4010/v1', LOOM_HARNESS_EMU_SCENARIOS: '/root/.loom/agents-opencode/emu-scenarios.json' },
@@ -320,6 +331,10 @@ export class ComposeFixtureDriver implements FixtureDriver {
         if (kind === 'container' && service === 'loom-local') check(value.Image === this.images.loom, 'source-mismatch');
         if (kind === 'container' && this.cloud && this.stackImages[service]) check(value.Image === this.stackImages[service], 'source-mismatch');
         let workVolume: string | undefined;
+        if(kind==='container'&&service==='ui-local'){
+          const frontend=value.Mounts?.filter((mount:{Destination:string})=>mount.Destination==='/srv');
+          check(frontend?.length===1&&frontend[0].RW===false&&frontend[0].Source===this.renderer!.buildRoot);
+        }
         if (kind === 'container' && this.cloud && service === 'loom-serve') {
           const mounts = value.Mounts?.filter((mount: { Destination: string }) => mount.Destination === '/work');
           check(Array.isArray(mounts) && mounts.length === 1 && mounts[0].Type === 'volume' && typeof mounts[0].Name === 'string'); workVolume = mounts[0].Name;

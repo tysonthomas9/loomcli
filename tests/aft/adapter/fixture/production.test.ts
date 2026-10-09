@@ -5,6 +5,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { ComposeFixtureDriver, type ProductionConfig, type ProcessRequest } from './production.js';
 import { FixtureLifecycle, FixtureError, type FixturePlan } from './lifecycle.js';
+import { materializeRenderer } from './renderer-fixtures.test.js';
 const hash = (v: string | Uint8Array) => createHash('sha256').update(v).digest('hex');
 async function setup(profile = 'agents-real-opencode') {
  const root = await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname), 'test-artifacts-'));
@@ -24,6 +25,13 @@ async function setup(profile = 'agents-real-opencode') {
  await fs.writeFile(path.join(build,'modecloud-images.json'),cloudReceipt);be.push({relativePath:'modecloud-images.json',sha256:hash(cloudReceipt)},{relativePath:'frontend/index.html',sha256:hash('built frontend')});
  const revision={repository:'compose-test',commit:'a'.repeat(40),tree:'b'.repeat(40),sourceManifestSha256:digest(se),buildManifestSha256:digest(be)};
  const registered={revision,source:{root:source,entries:se},build:{root:build,entries:be}};
+ await materializeRenderer(registered,'frontend');
+ for(const name of ['container-image.json','modecloud-images.json']){
+  const filename=path.join(build,name),data=JSON.parse(await fs.readFile(filename,'utf8'));data.sourceManifestSha256=revision.sourceManifestSha256;
+  if(name==='modecloud-images.json')data.fleetSourceManifestSha256=revision.sourceManifestSha256;
+  const bytes=JSON.stringify(data);await fs.writeFile(filename,bytes);be.find(e=>e.relativePath===name)!.sha256=hash(bytes);
+ }
+ revision.buildManifestSha256=digest(be);
  const connection={Identity:'/owned/key',Name:'owned',URI:'ssh://owned'};
  const config:ProductionConfig={loom:registered,fleet:registered,engine:registered,adapter:registered,tempParent:root,lockParent:path.join(root,'locks'),hostHome:path.join(root,'home'),toolPath:'/pinned/toolchain',connection:'owned',connectionFingerprint:hash(JSON.stringify([connection])),minimumFreeBytes:1,attestedImages:true,emulatorBinary:{path:path.join(build,'emulator'),sha256:hash(elf)},modecloud:{codexAuthRoot:auth,frontendDist:frontend}};
  const plan:FixturePlan={profile,loomRevision:revision,fleetRevision:revision,engineRevision:revision,adapterRevision:revision,model:profile==='agents-emulator'?'aft/m':'openai/m',maxCases:10,caseCount:1,selectionSha256:'d'.repeat(64),leaseDurationMs:10000};
@@ -31,7 +39,7 @@ async function setup(profile = 'agents-real-opencode') {
  const services=cloud?['redis','fleet-auth-seed','fleet-db','loom-serve','worker','stub-upstream']:['redis','fleet-db','loom-local','ui-local'];
  const run=async (r:ProcessRequest)=>{
   calls.push(r); const a=r.args;
-  if(r.binary==='git') return a[0]==='rev-parse'?(a[1]==='HEAD'?revision.commit:revision.tree):a[0]==='ls-files'?'tracked\0':'';
+  if(r.binary==='git') return a[0]==='rev-parse'?(a[1]==='HEAD'?revision.commit:revision.tree):a[0]==='ls-files'?se.map(e=>e.relativePath).join('\0')+'\0':'';
   project=r.env.LOCAL_MODE_COMPOSE_PROJECT||r.env.LOOM_STACK_PROJECT||project;
   if(r.binary==='bash') return '';
   if(a[0]==='system') return JSON.stringify([{...connection,URI:change==='connection'?'ssh://foreign':connection.URI}]);
@@ -45,7 +53,7 @@ async function setup(profile = 'agents-real-opencode') {
    const id=a.at(-1)!,container=id.startsWith('container-'),service=id.replace('container-','');
    const labels={'com.docker.compose.project':project,'io.loom.aft.lease':change==='foreign'?'foreign':'opaque-fixture','com.docker.compose.service':service};
    const mappings:Record<string,number>=cloud?{'loom-serve':0,'fleet-db':1,'stub-upstream':2}:{'fleet-db':0,'loom-local':1,'ui-local':2};const index=mappings[service] ?? 0;
-   return JSON.stringify([container?{Id:id,Image:change==='wrong-image'?'sha256:'+'e'.repeat(64):image,Config:{Labels:labels},State:{StartedAt:change==='stale'?'new':'generation',Pid:123,Status:service==='fleet-auth-seed'?'exited':'running',ExitCode:0,Health:{Status:change==='unhealthy'?'unhealthy':'healthy'}},Mounts:[{Destination:'/work',Type:change==='hostbind'?'bind':'volume',Name:'volume-owned'},{Destination:'/home/node/.codex',Source:auth,RW:change==='writable-auth'},{Destination:'/opt/webui',Source:frontend,RW:false}],NetworkSettings:{Ports:{'8080/tcp':[{HostPort:String(change==='wrong-port'?5999:5000+index)}]}}}:{Id:id,Name:id,Labels:labels,CreatedAt:'created'}]);
+   return JSON.stringify([container?{Id:id,Image:change==='wrong-image'?'sha256:'+'e'.repeat(64):image,Config:{Labels:labels},State:{StartedAt:change==='stale'?'new':'generation',Pid:123,Status:service==='fleet-auth-seed'?'exited':'running',ExitCode:0,Health:{Status:change==='unhealthy'?'unhealthy':'healthy'}},Mounts:[{Destination:'/work',Type:change==='hostbind'?'bind':'volume',Name:'volume-owned'},{Destination:'/home/node/.codex',Source:auth,RW:change==='writable-auth'},{Destination:'/opt/webui',Source:frontend,RW:false},{Destination:'/srv',Source:frontend,RW:false}],NetworkSettings:{Ports:{'8080/tcp':[{HostPort:String(change==='wrong-port'?5999:5000+index)}]}}}:{Id:id,Name:id,Labels:labels,CreatedAt:'created'}]);
   }return '';
  };
  const files={...fs,statfs:async()=>({type:0,blocks:20*1024**3,bavail:20*1024**3,bfree:20*1024**3,bsize:1,files:1000,ffree:1000})} as unknown as typeof fs;
