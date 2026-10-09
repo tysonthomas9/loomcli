@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { fixtureOwnerIdentity, type FixtureAuthorityOwner } from '../authority.js';
-import { createOwnedWorkspaceRoster, LegacyWorkspaceAgentFact, WorkspaceCreationFact, WorkspaceRepositoryFact, resolveLegacyRepositoryAssignments, type OwnedWorkspaceRoster, type OwnedWorkspaceRecord } from '../workspaces.js';
+import { createOwnedWorkspaceRoster, LegacyWorkspaceAgentFact, WorkspaceCreationFact, WorkspaceRepositoryFact, resolveLegacyRepositoryAssignments, type OwnedWorkspaceRoster, type OwnedWorkspaceRecord, type WorkspaceIdentityKind } from '../workspaces.js';
 import type { EvidenceStore } from '../evidence.js';
 import { FixtureError } from './lifecycle.js';
 
@@ -24,7 +24,7 @@ export interface WorkspaceRecordPorts {
 export class HostWorkspaceRecords {
  private readonly created=new Map<string,{workspaceId:string;repo:string;commonDir:string;store:WorkspaceStoreIdentity;
   repositories:NonNullable<OwnedWorkspaceRecord['repositories']>} >();
- constructor(private readonly ports:WorkspaceRecordPorts){}
+ constructor(private readonly ports:WorkspaceRecordPorts,private readonly identityKind:WorkspaceIdentityKind='legacy-agent-name'){}
  has(workspaceId:string){return this.created.has(workspaceId);}
  async workspace(workspaceId:string,signal:AbortSignal){
   const record=this.created.get(workspaceId);check(record);await this.requireStore(record!.store,signal);
@@ -68,7 +68,7 @@ export class HostWorkspaceRecords {
  }
  async creationRecord(owner:FixtureAuthorityOwner,workspaceId:string,store:EvidenceStore,signal:AbortSignal):Promise<OwnedWorkspaceRecord>{
    const record=await this.workspace(workspaceId,signal);
-   const fact=WorkspaceCreationFact.parse({kind:'workspace-created',...fixtureOwnerIdentity(owner),identityKind:'legacy-agent-name',
+   const fact=WorkspaceCreationFact.parse({kind:'workspace-created',...fixtureOwnerIdentity(owner),identityKind:this.identityKind,
     workspaceId:record.workspaceId,repo:record.repo,commonDir:record.commonDir,...record.store,agentIds:[],repositories:record.repositories,agentSources:[]});
    const receipt=await store.retain(JSON.stringify(fact));
    return {identityKind:fact.identityKind,workspaceId:fact.workspaceId,repo:fact.repo,commonDir:fact.commonDir,
@@ -80,6 +80,7 @@ export class HostWorkspaceRecords {
   return createOwnedWorkspaceRoster(owner,records.map(record=>({...record,agentIds:[...record.agentIds],enrollmentReceipts:[...record.enrollmentReceipts]})),store);
  }
  async legacyAgent(owner:FixtureAuthorityOwner,workspaceId:string,name:string,signal:AbortSignal){
+  check(this.identityKind==='legacy-agent-name');
   const record=await this.workspace(workspaceId,signal);
   const read=await this.ports.read(workspaceId,'legacy-agents',signal);check(read.status===200);
   const list=z.object({success:z.literal(true),data:z.array(Agent).max(1000),total:z.number().int().nonnegative()}).passthrough().parse(read.body);
