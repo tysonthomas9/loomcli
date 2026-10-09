@@ -52,6 +52,8 @@ export interface FixtureProviderOptions {
     evidenceStore: EvidenceStore;
     rendererTarget?: OwnedFixture['rendererTarget'];
     operationAuthority?: OwnedFixture['operationAuthority'];
+    ownedWorkspaces?: OwnedFixture['ownedWorkspaces'];
+    readWorkspaceLegacyAgent?: OwnedFixture['readWorkspaceLegacyAgent'];
     fixtureRunId?:string;
   }>;
   evidenceAfterFailure(driver: FixtureDriver): Promise<EvidenceStore>;
@@ -231,10 +233,14 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
           return { row, commonDir, native };
         };
       }
-      const route=driver.executionRouting,operationAuthority=driver.createOperationAuthority({leaseId:acquired.lease.id,runId:context.runId,suiteId:context.suiteId,scope:context.scope,caseId:context.caseId,profile:input.profile});
+      const owner={leaseId:acquired.lease.id,runId:context.runId,suiteId:context.suiteId,scope:context.scope,caseId:context.caseId,profile:input.profile};
+      const route=driver.executionRouting,operationAuthority=driver.createOperationAuthority(owner);
       const rendererTarget=await bindRenderer(isCompose?compose.loom:host.loom,acquired.lease.id,await driver.rendererRuntimeTarget(context.signal),path.join(runtimeRoot,'evidence'),roots);
+      const evidenceStore=await createEvidenceStore(path.join(runtimeRoot,'evidence'));
+      const workspaceBinding=isCompose?{}:{ownedWorkspaces:await driver.ownedWorkspaceRoster(owner,evidenceStore,context.signal),
+        readWorkspaceLegacyAgent:(workspaceId:string,name:string,signal:AbortSignal)=>driver.readWorkspaceLegacyAgent(owner,workspaceId,name,signal)};
       return { ...(isCompose?await driver.runtimeIdentity(context.signal):{}),evidenceClass: route.evidenceClass, roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget, operationAuthority,
-        evidenceStore: await createEvidenceStore(path.join(runtimeRoot, 'evidence')),
+        evidenceStore,...workspaceBinding,
         readApi: fixedRead(acquired.apiOrigin), readFiles: fixedRead(acquired.filesOrigin), resolveAgent };
     },
   };

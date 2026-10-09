@@ -11,6 +11,8 @@ import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
 import type { FixtureAuthorityOwner } from '../authority.js';
 import {OwnedDescendants,createRegisteredProcessPort,readRegisteredHostServices,type RegisteredProcessPort} from './descendants.js';
 import { StartupBaselines, type BaselineTarget } from './baseline.js';
+import { HostWorkspaceRecords } from './workspace-records.js';
+import type { EvidenceStore } from '../evidence.js';
 
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -40,6 +42,7 @@ export class HostFixtureDriver implements FixtureDriver {
   private readonly handles = new Map<string, OwnedProcess>();
   private descendants?:OwnedDescendants;
   private readonly retainedServiceRegistrations=new Map<string,unknown>();
+  private workspaceRecords?:HostWorkspaceRecords;
   private runtimeRemoved=false;
   private readonly activeOperations = new Set<string>();
   private async withServiceOperation<T>(id:string,operation:()=>Promise<T>):Promise<T>{
@@ -76,6 +79,34 @@ export class HostFixtureDriver implements FixtureDriver {
   get cliRegistration() { return { binary: this.config.loomBinary, cwd: this.workspaceRoot, env: this.env() }; }
   get executionRouting() { check(this.plan); return fixtureRouting(this.plan!); }
   createOperationAuthority(owner:FixtureAuthorityOwner) {check(this.plan);return fixtureOperationAuthority(owner,this.plan!);}
+  async ownedWorkspaceRoster(owner:FixtureAuthorityOwner,store:EvidenceStore,signal:AbortSignal){
+    check(owner.leaseId===this.leaseId&&owner.profile===this.profile&&this.workspaceRecords,'unsupported-capability');
+    return this.workspaceRecords!.roster(owner,store,signal);
+  }
+  async readWorkspaceLegacyAgent(owner:FixtureAuthorityOwner,workspaceId:string,name:string,signal:AbortSignal){
+    check(owner.leaseId===this.leaseId&&owner.profile===this.profile&&this.workspaceRecords,'unsupported-capability');
+    return this.workspaceRecords!.legacyAgent(owner,workspaceId,name,signal);
+  }
+  private async workspaceStoreIdentity(signal:AbortSignal){
+    await this.prepareObserve(signal);check(this.descendants?.has('registered-fleet-db'),'unsupported-capability');
+    const identity=this.descendants!.initial('registered-fleet-db');
+    check((await this.descendants!.inspect('registered-fleet-db',identity.generation)).state==='running');
+    const directory=path.join(this.configurationRoot,'fleet-db'),stat=await this.files.lstat(directory);
+    check(stat.isDirectory()&&!stat.isSymbolicLink()&&await this.files.realpath(directory)===directory);
+    return {storeId:`${directory}#${stat.dev}:${stat.ino}`,storeGeneration:identity.generation};
+  }
+  private async ownedCommonDir(repo:string,signal:AbortSignal){
+    check(repo.startsWith(path.join(this.root,'runtime')+path.sep)&&await this.files.realpath(repo)===repo);
+    const before=await this.files.lstat(repo);check(before.isDirectory()&&!before.isSymbolicLink());
+    const relative=(await this.processes.run({executable:this.config.gitBinary,argv:['rev-parse','--git-common-dir'],cwd:repo,
+      env:{PATH:this.config.toolPath,HOME:path.join(this.root,'runtime','home'),GIT_CONFIG_NOSYSTEM:'1'}},signal)).trim();
+    check(relative.length>0&&!relative.includes('\n'));
+    const candidate=path.resolve(repo,relative),commonDir=await this.files.realpath(candidate);
+    check(commonDir===candidate&&commonDir.startsWith(path.join(this.root,'runtime')+path.sep));
+    const stat=await this.files.lstat(commonDir),after=await this.files.lstat(repo);
+    check(stat.isDirectory()&&!stat.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino&&!after.isSymbolicLink());
+    return commonDir;
+  }
   freshFixtureBaseline(target:BaselineTarget,signal:AbortSignal){return this.baselines.freshFixtureBaseline(target,signal);}
   resetFixtureBaseline(target:BaselineTarget,generation:string,signal:AbortSignal){return this.baselines.resetFixtureBaseline(target,generation,signal);}
   async rendererRuntimeTarget(signal:AbortSignal) {
@@ -320,6 +351,9 @@ export class HostFixtureDriver implements FixtureDriver {
     this.record = record;
     const processPort=this.registeredPort??(this.config.registeredProcesses?createRegisteredProcessPort(this.config.registeredProcesses.pythonBinary,path.join(this.config.adapter.build.root,'fixture/kernel-process.py')):undefined);
     if(processPort)this.descendants=new OwnedDescendants(processPort,record);
+    if(this.descendants)this.workspaceRecords=new HostWorkspaceRecords({store:signal=>this.workspaceStoreIdentity(signal),
+      read:(workspaceId,view,signal)=>this.requestOwnedHttp('api','GET',`/api/workspaces/${encodeURIComponent(workspaceId)}${view==='legacy-agents'?'/agents':''}`,null,signal),
+      commonDir:(repo,signal)=>this.ownedCommonDir(repo,signal)});
     if (this.profile === 'legacy-real-codex') {
       const reservation = await this.reserve(); this.sockets.push(reservation);
       await reservation.release(); this.sockets.pop();
@@ -359,12 +393,14 @@ export class HostFixtureDriver implements FixtureDriver {
     check((await this.http(apiOrigin, 'GET', '/api/config', null, signal)).status === 200, 'observation-failed');
     await this.prepareObserve(signal);
     for (const [name, repo] of [['e2e-ws-2', second], ['e2e-ws', this.workspaceRoot]] as const) {
-      const created = await this.http(apiOrigin, 'POST', '/api/workspaces', { name, type: 'empty', repos: [repo] }, signal);
+      const store=this.workspaceRecords?await this.workspaceStoreIdentity(signal):undefined;
+      const created = await this.requestOwnedHttp('api', 'POST', '/api/workspaces', { name, type: 'empty', repos: [repo] }, signal);
       check(created.status === 200 || created.status === 201, 'identity-mismatch');
+      if(this.workspaceRecords)await this.workspaceRecords.captureCreated(name.toUpperCase(),repo,created,store!,signal);
     }
     const workspaces = await this.http(apiOrigin, 'GET', '/api/workspaces/E2E-WS', null, signal);
     const data = (workspaces.body as { data?: { id: string; repos: { path: string }[] } }).data;
-    check(workspaces.status === 200 && data?.id === 'E2E-WS' && data.repos.some(repo => repo.path === this.workspaceRoot), 'identity-mismatch');
+    check(workspaces.status === 200 && data?.id === 'E2E-WS' && data.repos.length===1&&data.repos[0]!.path.startsWith(path.join(this.root,'runtime')+path.sep), 'identity-mismatch');
     const frontend = path.join(this.config.loom.source.root, 'internal', 'webui', 'frontend');
     await this.start('frontend', { executable: this.config.nodeBinary,
       argv: [path.join(frontend, 'node_modules', 'vite', 'bin', 'vite.js'), 'preview', '--outDir', this.renderer!.buildRoot, '--port', String(this.ports[1]), '--strictPort', '--host', '127.0.0.1'],
@@ -374,7 +410,7 @@ export class HostFixtureDriver implements FixtureDriver {
     if (this.config.daemon) await this.start('daemon', { executable: this.config.loomBinary, argv: ['daemon'], cwd: this.workspaceRoot,
       env: { ...this.env(), LOOM_WORKSPACE: 'E2E-WS', LOOM_SERVER_URL: apiOrigin, LOOM_FLEET_DB_ACTOR: 'loom-aft-daemon' } },
     'Loom Agent Supervisor', record, signal);
-    return { apiOrigin, filesOrigin, workspaceId: 'E2E-WS', repo: this.workspaceRoot };
+    return { apiOrigin, filesOrigin, workspaceId: 'E2E-WS', repo: data!.repos[0]!.path };
   }
   async inspect(resource: Resource): Promise<Inventory> {
     if (resource.kind === 'process') {
