@@ -50,6 +50,17 @@ Case cleanup cannot dispose a suite lease. Owning cleanup remains enrolled after
 failure, abort, or expiration. Native credentials and private runtime lease data
 never enter observations or retained artifacts.
 
+`loom.agent.bind` returns a closed `agentRef` from its authenticated identity.
+Pass it to later observations as `{ref: {binding: boundAgent, pointer: /agentRef}}`.
+The reference identifies the agent; the declared fixture resource export still
+grants authority. A data export alone cannot authorize another fixture.
+
+Composition selects legacy task effects from trusted fixture plans. Deterministic
+tasks exclude external-provider effects; an authorized external route requires
+them. Mixed deterministic and external task routes require separate compositions.
+Backend and operation permissions are checked again against the owned fixture
+before transport creation. YAML cannot choose the execution class or permissions.
+
 Saved-event and native tool observations report sanitization paths explicitly.
 An omitted credential field differs from a source field that was absent; replaced
 text differs from text already redacted by the product. Only the code-owned,
