@@ -887,7 +887,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-        "sha256": "acc39721f43989fd02a41c153247aaf10dd314a3378f7ae5dc8cfdd25b7f3174"
+        "sha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c"
       },
       {
         "file": "tests/aft/declarative-pilots/predicate-mappings.json",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "bbd2d76bfa9a30c970032a640ff8bacbb2ed40cd16069af4b2a47470751982d8"
+        "sha256": "566a39e063b6d99d6f9458a365d9f807046fd4873f8e2812908b2292b9d519e6"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -932,7 +932,7 @@
       "f377PilotChecksObtained": true,
       "f377Note": "Historical c71/f377 source-shaped timeout profile retained separately. New parent-approved584 source-built isolated f377 raw admission completes all5 unchanged files with no effects/runtime. No maintained root pin or preservation claim.",
       "maintainedEngine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
-      "gf1CurrentRawStatus": "New public-claim-only GF1 raw acc39721f43989fd02a41c153247aaf10dd314a3378f7ae5dc8cfdd25b7f3174: canonical new-operation validation pending. Native binding omitted by parent source-scope decision; runner-owned stack and source archive teardown remain. skiptrue/runtime0."
+      "gf1CurrentRawStatus": "Current233step GF1 raw 4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c includes final archive; exact canonical admission pending reviewed flat callback/count correction. Prior acc397 admission immutable; skiptrue/runtime0."
     },
     "sourceMapping": {
       "originalSteps": 207,
@@ -5427,5 +5427,134 @@
     ],
     "receiptPath": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/bounded-diagnostic-receipt.json",
     "receiptSha256": "baa9dcedfeed121193a25722da33193406a3be04a0505c14d77a454f1edf23af"
+  },
+  "gf1FinalBodyArchiveAuthoring": {
+    "at": "2026-10-09T21:45:18.967Z",
+    "evidenceClass": "frozen-source and frozen-interface staged YAML authoring only; not public callback/run or full raw admission",
+    "parentHead": "64fb87c75afd4cb1c311d95ef96f9c13f3237109",
+    "sourceBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+    "sourceHelper": "tests/aft/scripts/coverage-git-files-evidence.py",
+    "sourceLines": [
+      461,
+      462,
+      463,
+      464,
+      465,
+      466,
+      467,
+      468,
+      469,
+      470,
+      471,
+      472,
+      473,
+      474,
+      475,
+      476,
+      477,
+      478,
+      479,
+      480
+    ],
+    "sourceHelperSha256": "a8b86238ea03769f9fbeef13777d3bde01d6b804d21e6c508db39431a38e96bf",
+    "frozenFlatContractHead": "ac9308f00b34a0ac84c838e16488eb791c65a788",
+    "frozenFlatContractSha256": "065fe0e1a8cf0562a988fa60c907297f7d9ca0e0e6958806bfaa5b33baf1490d",
+    "rawBeforeSha256": "acc39721f43989fd02a41c153247aaf10dd314a3378f7ae5dc8cfdd25b7f3174",
+    "rawAfterSha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c",
+    "bodyBefore": 232,
+    "bodyAfter": 233,
+    "destination": {
+      "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+      "path": [
+        "tests",
+        0,
+        "steps",
+        232
+      ],
+      "line": 2105
+    },
+    "operation": "loom.agent.archive@1",
+    "inputs": {
+      "fixtureLeaseId": "explicit suite RESOURCE lease binding",
+      "workspaceId": "AFT_WS",
+      "agentId": "actual UI route captured leadId",
+      "namePrefixes": [
+        "cov-files-${RUN_ID}-",
+        "cov-files-child-${RUN_ID}"
+      ],
+      "idempotencyKey": "cov-files-${RUN_ID}-${leadId}-cleanup"
+    },
+    "sourceSemantics": "fresh GET current name; prefix guard; literal cancel:true; each GET/POST15s; status-only nonJSON2xx success; only409 ignored; no mutation retry",
+    "ordering": "after source final53rd checkpoint and before suite fixture.release; GF1 has one claimed editor ID so source child-first ordering has one selected element",
+    "parentScopeDecision": "21:40 option3; no casecleanup/when/nativebind expansion",
+    "deviations": [
+      {
+        "source": "On failure after claim source suite cleanup archives claimed ID",
+        "declarative": "Body-tail archive is skipped; suite fixture.release/owned compose down runs. Archive unobserved on that failure path.",
+        "disposition": "Explicit coordinator-approved pilot scope deviation; exact failed-case parity deferred until after paired run."
+      },
+      {
+        "source": "Cleanup checks current name prefix only",
+        "declarative": "Fixed callback additionally checks exact ID/workspace/repo/harness and runner-owned origin/container reservation",
+        "disposition": "Stronger ownership checks; not original cleanup parity"
+      },
+      {
+        "source": "urllib follows3xx",
+        "declarative": "Fixed archive denies every3xx",
+        "disposition": "Unproved branch; any paired-run3xx is finding"
+      },
+      {
+        "source": "Source ID/prefix/key has no generic schema cap",
+        "declarative": "Closed512byteID/key and bounded GET body",
+        "disposition": "Explicit stronger contract bounds, not source-wide equivalence"
+      }
+    ],
+    "allOriginal53CheckpointsBodyStepsAndHooksUnchanged": true,
+    "remaining": [
+      "reviewed coherent flat callback integration and full raw admission of this new233step file",
+      "reviewed count capture escaping correction and original full editor chain controls",
+      "parent-authorized paired same-build original/declarative GF1 run; existing nested helper-read/branch gaps stay explicit"
+    ],
+    "runtimeExecuted": 0,
+    "preservationAccepted": false,
+    "artifacts": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-archive-preparation/author-final.mjs",
+        "sha256": "a5a807e683cf4332035a6dd15fa24dc3d90ad9f3c22b142d339d8d5eff6298fe"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-archive-preparation/frozen-archive-contract.ts",
+        "sha256": "065fe0e1a8cf0562a988fa60c907297f7d9ca0e0e6958806bfaa5b33baf1490d"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-archive-preparation/final-body-step.yaml",
+        "sha256": "39182be46d241cbfd31e85a2b684057677ef6007b135fe601943b8267380ea73"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-archive-preparation/authoring-receipt.json",
+        "sha256": "bb7d328f52f4494d6b824b1d4f9f126982cb4c10fe94e46baefa8b0dc3e52b64"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-archive-preparation/shape-integrity-receipt.json",
+        "sha256": "9678afe3c5f875228396ca4bc0f9998d75bf09ed6134f9145aa47a2095cfa876"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-archive-preparation/compact-map.txt",
+        "sha256": "fc908fe54e29c29f24e0bcd9f5c09566eeb0033c3e9281eb4e25f522b779efdf"
+      }
+    ],
+    "canonicalStepSchemaScope": {
+      "at": "2026-10-09T21:45:45.045Z",
+      "rawSha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c",
+      "engineSource": "ffff830b8762fa2670396edde2b5bfccc13d73df",
+      "scope": "actual canonical StepSchema parse ONLY; flat operation provider schema/full loader/dispatch not exercised here",
+      "stepSchemaParses": 241,
+      "bodySteps": 233,
+      "existingMappedLocationsPresent": 251,
+      "allPreviousBodyHooksAnd53ScreenshotsUnchanged": true,
+      "skipped": true,
+      "fullAdmission": "pending reviewed coherent flat consumer and corrected count package",
+      "runtime": 0
+    }
   }
 }

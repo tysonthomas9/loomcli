@@ -2102,3 +2102,29 @@ tests:
         intent: Confirm reloaded Diff still addresses the saved Lead ID
       - screenshot: files-save-reload-s53
         intent: Confirm reloaded Diff still addresses the saved Lead ID
+      - capability:
+          request:
+            id: loom.agent.archive
+            version: 1
+            input:
+              fixtureLeaseId:
+                ref:
+                  binding: lease
+              workspaceId:
+                literal: ${AFT_WS}
+              agentId:
+                ref:
+                  binding: leadId
+              namePrefixes:
+                literal:
+                  - cov-files-${RUN_ID}-
+                  - cov-files-child-${RUN_ID}
+              idempotencyKey:
+                op: concat
+                args:
+                  - literal: cov-files-${RUN_ID}-
+                  - ref:
+                      binding: leadId
+                  - literal: -cleanup
+          as: archivedLead
+        intent: Archive the claimed Lead through the original public HTTP cleanup after the successful GF1 body
