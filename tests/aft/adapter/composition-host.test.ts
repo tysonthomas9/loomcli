@@ -39,7 +39,7 @@ test('default public composition binds the managed host checkout and existing ev
     hostHome:home,toolPath:'/injected/toolchain',connection:'injected',connectionFingerprint:'e'.repeat(64),minimumFreeBytes:1,attestedImages:false,
     loomBinary:path.join(build,'loom'),fleetBinary:path.join(build,'fleet'),nodeBinary:path.join(build,'node'),gitBinary:path.join(build,'git'),
     pinnedOpenCodeBinary:path.join(build,'opencode'),realBinaries:{},daemon:false,fakeGitHub:false,maxBudgetUsd:'5.00',fixtureRunId:'original-host-token'};
-  const plan:FixturePlan={profile:'legacy-deterministic',loomRevision:revision,fleetRevision:revision,engineRevision:revision,adapterRevision:revision,
+  const plan:FixturePlan={profile:'legacy-deterministic',loomRevision:{...revision},fleetRevision:{...revision},engineRevision:{...revision},adapterRevision:{...revision},
     model:'aft/m',caseCount:1,maxCases:1,selectionSha256:'f'.repeat(64),leaseDurationMs:600000};
   let ordinal=0,port=4700,servePid=0;const launches:HostCommand[]=[],managed=new Map<string,{path:string;repo:string;source:string}>();
   const started=new Map<number,{handle:OwnedProcess;command:HostCommand}>();
@@ -74,13 +74,13 @@ test('default public composition binds the managed host checkout and existing ev
     if(method==='POST'&&route==='/api/workspaces') {
       const input=body as {name:string;repos:string[]},id=input.name.toUpperCase(),workspace=path.join(driver.runtimeRoot,'runtime/managed',id),repo=path.join(workspace,'repos/repo');
       await fs.mkdir(repo,{recursive:true});managed.set(id,{path:workspace,repo,source:input.repos[0]!});
-      return {status:201,body:{success:true,data:{id,path:workspace,repos:[{name:'repo',path:repo}]}}};
+      return {status:201,body:{success:true,data:{id,path:workspace,repos:[{name:'repo',path:repo,source_repo_id:`source_${id}`,groups:[]}]}}};
     }
     if(method==='POST')return {status:201,body:{}};
     const id=route.split('/')[3],record=managed.get(id!);
     if(route.endsWith('/agents'))return {status:200,body:{success:true,total:0,data:[]}};
     if(route.endsWith('/issues?limit=1000'))return {status:200,body:{success:true,data:[]}};
-    return {status:200,body:{success:true,data:{id,path:record!.path,repos:[{name:'repo',path:record!.repo}]}}};
+    return {status:200,body:{success:true,data:{id,path:record!.path,repos:[{name:'repo',path:record!.repo,source_repo_id:`source_${id}`,groups:[]}]}}};
   };
   const driver:HostFixtureDriver=new HostFixtureDriver(config,processes,fs,http,()=>`injected-${++ordinal}`,async()=>({port:port++,async release(){}}),undefined,
     {async capture(pid){const parent=started.get(pid);assert.ok(pid===999||parent);let alive=true;
@@ -95,7 +95,7 @@ test('default public composition binds the managed host checkout and existing ev
   const registry=registerLoomAdapter(new CapabilityRegistry(),{implementation:pin,fixtures});
   const context=createCapabilityContext({file:'default-host.test.yaml',line:1},registry);
   const invoke=(id:string,input:unknown)=>registry.invoke({id,version:1,input:{}},input,context);
-  const acquired=await invoke('loom.fixture.acquire',{runId:context.runId,profile:plan.profile,loomRevision:revision,fleetRevision:revision,
+  const acquired=await invoke('loom.fixture.acquire',{runId:context.runId,profile:plan.profile,loomRevision:{...revision},fleetRevision:{...revision},
     model:plan.model,maxCases:1,selectionSha256:plan.selectionSha256});assert.equal(acquired.availability,'observed',JSON.stringify(acquired.error));
   const leaseId=AcquireOutput.parse(acquired.data).lease.id,fixture=await getFixture(context,leaseId);
   assert.equal(AcquireOutput.parse(acquired.data).fixtureRunId,'original-host-token');assert.notEqual(fixture.runId,'original-host-token');
