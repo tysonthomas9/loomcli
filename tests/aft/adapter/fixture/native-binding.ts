@@ -8,6 +8,9 @@ import { FixtureError } from './lifecycle.js';
 import { NativeWorkspaceRecords } from './native-records.js';
 import { captureNativeStore } from './native-store.js';
 import type { WorkspaceRecordPorts } from './workspace-records.js';
+import type { EvidenceStore } from '../evidence.js';
+import type { HostFixtureDriver } from './host.js';
+import { NativeEmptyWorkspaceSetup, nativeWorkspaceHttp, type NativeWorkspacePlan } from './native-workspace.js';
 
 const check=(value:unknown)=>{if(!value)throw new FixtureError('identity-mismatch');};
 /** Trusted provisioning coordinates, never capability input. The enclosing
@@ -46,4 +49,22 @@ export async function captureNativeWorkspaceBinding(coordinates:CapturedNativeCo
  }},async(workspaceId,agentId,readSignal)=>(await nativeAccess(workspaceId,readSignal)).rawAgent(agentId,readSignal));
  return Object.freeze({records,store,nativeAccess,
   readWorkspaceAgent:(workspaceId:string,agentId:string,readSignal:AbortSignal)=>records.nativeAgent(owner,workspaceId,agentId,readSignal)});
+}
+
+/** Source-backed empty -> repositories provisioning with one captured store
+ * and one exact owning serve generation. This is a private launcher factory;
+ * it neither advertises a profile nor accepts suite-defined request code. */
+export async function captureNativeEmptyWorkspaceSetup(coordinates:CapturedNativeCoordinates,
+ plans:readonly NativeWorkspacePlan[],evidence:EvidenceStore,
+ driver:Pick<HostFixtureDriver,'requestOwnedHttp'>,serveGeneration:string,
+ commonDir:WorkspaceRecordPorts['commonDir'],workspaceParent:OwnedRoot,signal:AbortSignal,files:typeof fs=fs){
+ const api=nativeWorkspaceHttp(driver,serveGeneration);
+ const binding=await captureNativeWorkspaceBinding(coordinates,{commonDir,read:async(workspaceId,view,abort)=>{
+  check(view==='workspace');return api.readWorkspace(workspaceId,abort);
+ }},signal,files);
+ const setup=new NativeEmptyWorkspaceSetup(coordinates.owner,plans,binding.records,binding.store,evidence,api,workspaceParent,
+  cleanup=>coordinates.enrollCleanup(cleanup),files);
+ return Object.freeze({...binding,
+  provisionWorkspace:(workspaceId:string,abort:AbortSignal)=>setup.provision(workspaceId,abort),
+  provisioningDiagnostics:()=>setup.diagnostics()});
 }
