@@ -22,6 +22,7 @@ export const NativeOutput = z.discriminatedUnion('view', [
   }).strict()) }).strict(),
   z.object({ ...Base, view: z.literal('completed-models'), complete: z.boolean(), records: z.array(z.object({
     ...RecordIdentity, completedAt: z.union([z.string(), z.number()]), provider: Id, model: Id,
+    finish: Id, errorFieldPresent: z.boolean(), errorTruthy: z.boolean(),
   }).strict()) }).strict(),
   z.object({ ...Base, view: z.literal('tools'), complete: z.boolean(), records: z.array(z.object({
     ...RecordIdentity, itemId: Id, messageType: Id, name: Id, state: Id, input: Json, output: Json, outputPresent: z.boolean(), inputRedaction: RedactionFacts, outputRedaction: RedactionFacts,
@@ -42,7 +43,7 @@ export const NativeRegistrationOutput = NativeOutput.options[6];
 const Message = z.object({ id: Id, sessionID: Id, type: Id, time: z.object({
   created: z.union([z.string(), z.number()]).optional(), completed: z.union([z.string(), z.number()]).nullable().optional(),
 }).passthrough(), model: z.object({ providerID: Id, id: Id }).passthrough().optional(),
-  finish: Id.optional(), error: Json.optional(), content: z.array(Json).optional(),
+  finish: z.string().max(512).nullable().optional(), error: Json.optional(), content: z.array(Json).optional(),
   tokens: z.object({ input: z.number().nonnegative().optional(), output: z.number().nonnegative().optional(),
     reasoning: z.number().nonnegative().optional(), cache: z.object({ read: z.number().nonnegative().optional(), write: z.number().nonnegative().optional() }).passthrough().optional(),
   }).passthrough().optional(), cost: z.number().nonnegative().optional(),
@@ -141,9 +142,10 @@ export async function observeNative(input: z.infer<typeof NativeInput>, access: 
         createdAt: message.time.created ?? null,
       })) };
       else if (input.view === 'completed-models') output = { ...base, view: 'completed-models', complete,
-        records: records.filter(message => message.type === 'assistant' && message.time.completed != null && message.finish && !message.error).map(message => {
+        records: records.filter(message => message.type === 'assistant' && message.time.completed != null && typeof message.finish === 'string' && message.finish.length > 0 && !message.error).map(message => {
           requireFact(message.model, 'observation-failed', 'Completed native model is missing');
-          return { id: message.id, sessionId: message.sessionID, completedAt: message.time.completed!, provider: message.model.providerID, model: message.model.id };
+          return { id: message.id, sessionId: message.sessionID, completedAt: message.time.completed!, provider: message.model.providerID, model: message.model.id,
+            finish: message.finish!, errorFieldPresent: Object.hasOwn(message, 'error'), errorTruthy: Boolean(message.error) };
         }) };
       else if (input.view === 'usage') output = { ...base, view: 'usage', complete,
         records: records.filter(message => message.type === 'assistant' && message.time.completed != null && message.tokens).map(message => ({

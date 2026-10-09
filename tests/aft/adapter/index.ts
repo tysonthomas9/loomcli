@@ -48,10 +48,14 @@ const identity = (fixture: OwnedFixture, row?: Row): Omit<ObservationResult['pro
   } : {}),
 });
 const AgentObserveInput = z.object({ agent: AgentRef }).strict();
+const NullableAgentFact = z.object({ present:z.boolean(), value:z.string().max(4096).nullable() }).strict();
 const AgentObserveOutput = z.object({ agentId: Id, state: Id, runningTurnId: Id.nullable(),
   parentAgentId: Id.nullable(), rootAgentId: Id.nullable(), deletedAt: Id.nullable(), historyPurgedAt: Id.nullable(),
   revision: z.number().int().nonnegative(),
+  requestedModel: NullableAgentFact, outcome: NullableAgentFact,
 }).strict();
+const nullableAgentFact = (row:Row,key:'model'|'outcome') => Object.hasOwn(row,key)
+  ? {present:true,value:z.string().max(4096).nullable().parse(row[key])} : {present:false,value:null};
 
 export function createCoreProviders(implementation: ImplementationPin & { sha256: string }, gitReader?: GitReader): CapabilityProvider[] {
   const read = { effects: ['read-api' as const], retry: 'read-only-until-deadline' as const, cleanup: 'none' as const,
@@ -97,7 +101,8 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
           row.worktree_path === agent.row.worktree_path && row.branch === agent.row.branch && row.parent_agent_id === agent.row.parent_agent_id &&
           row.root_agent_id === agent.row.root_agent_id, 'identity-mismatch', 'Agent identity changed');
         return { value: { agentId: row.agent_id, state: row.state, runningTurnId: row.running_turn_id, parentAgentId: row.parent_agent_id,
-          rootAgentId: row.root_agent_id, deletedAt: row.deleted_at, historyPurgedAt: row.history_purged_at, revision: row.revision },
+          rootAgentId: row.root_agent_id, deletedAt: row.deleted_at, historyPurgedAt: row.history_purged_at, revision: row.revision,
+          requestedModel:nullableAgentFact(row,'model'),outcome:nullableAgentFact(row,'outcome') },
         identity: identity(fixture, row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),
