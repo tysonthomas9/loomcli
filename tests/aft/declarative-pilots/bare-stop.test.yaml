@@ -316,6 +316,131 @@ tests:
         intent: Show the owned Chat route
       - screenshot: bare-stop-s03
         intent: Show the owned Chat route
+      - api:
+          method: GET
+          path: /
+          as: marker3Actor
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/LOCALMODE/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Require the run-owned proposed command marker to be absent before the turn
+      - assert:
+          all:
+            - op: matches
+              args:
+                - ref:
+                    binding: leadId
+                - literal: ^agt_[A-Za-z0-9]+$
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3Actor
+                    pointer: /body/agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3Actor
+                    pointer: /body/name
+                - op: concat
+                  args:
+                    - literal: cov-controls-stop-
+                    - ref:
+                        binding: fixtureRunId
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3Actor
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3Actor
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3Actor
+                    pointer: /body/preset
+                - literal: pr-review-interactive
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3Actor
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3Actor
+                    pointer: /body/parent_agent_id
+                - literal: null
+        intent: Require the run-owned proposed command marker to be absent before the turn
+      - capability:
+          request:
+            id: loom.filesystem.observe
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              rootId:
+                literal: fixture-temporary
+              relativePath: &a1
+                op: concat
+                args:
+                  - literal: cov-controls-stop-effect-
+                  - ref:
+                      binding: fixtureRunId
+              view:
+                literal: presence
+              maxBytes:
+                literal: 1000
+              maxEntries:
+                literal: 1
+          as: marker3
+        intent: Require the run-owned proposed command marker to be absent before the turn
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: marker3
+                        pointer: /entries
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3
+                    pointer: /entries/0/relativePath
+                - *a1
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3
+                    pointer: /entries/0/exists
+                - literal: false
+            - op: eq
+              args:
+                - ref:
+                    binding: marker3
+                    pointer: /entries/0/kind
+                - literal: missing
+        intent: Require the run-owned proposed command marker to be absent before the turn
       - screenshot: bare-stop-s04
         intent: Require the run-owned proposed command marker to be absent before the turn
       - fill:
@@ -870,6 +995,126 @@ tests:
                         pointer: /payload/askId
                     - literal: ""
         intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - api:
+          method: GET
+          path: /
+          as: marker10Actor
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/LOCALMODE/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          all:
+            - op: matches
+              args:
+                - ref:
+                    binding: leadId
+                - literal: ^agt_[A-Za-z0-9]+$
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10Actor
+                    pointer: /body/agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10Actor
+                    pointer: /body/name
+                - op: concat
+                  args:
+                    - literal: cov-controls-stop-
+                    - ref:
+                        binding: fixtureRunId
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10Actor
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10Actor
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10Actor
+                    pointer: /body/preset
+                - literal: pr-review-interactive
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10Actor
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10Actor
+                    pointer: /body/parent_agent_id
+                - literal: null
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - capability:
+          request:
+            id: loom.filesystem.observe
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              rootId:
+                literal: fixture-temporary
+              relativePath: *a1
+              view:
+                literal: presence
+              maxBytes:
+                literal: 1000
+              maxEntries:
+                literal: 1
+          as: marker10
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: marker10
+                        pointer: /entries
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10
+                    pointer: /entries/0/relativePath
+                - *a1
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10
+                    pointer: /entries/0/exists
+                - literal: false
+            - op: eq
+              args:
+                - ref:
+                    binding: marker10
+                    pointer: /entries/0/kind
+                - literal: missing
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
       - screenshot: bare-stop-s11
         intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
       - reload: true
@@ -1248,6 +1493,126 @@ tests:
                         binding: reloadedAskIdentity2
                         pointer: /payload/askId
                     - literal: ""
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - api:
+          method: GET
+          path: /
+          as: marker13Actor
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/LOCALMODE/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          all:
+            - op: matches
+              args:
+                - ref:
+                    binding: leadId
+                - literal: ^agt_[A-Za-z0-9]+$
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13Actor
+                    pointer: /body/agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13Actor
+                    pointer: /body/name
+                - op: concat
+                  args:
+                    - literal: cov-controls-stop-
+                    - ref:
+                        binding: fixtureRunId
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13Actor
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13Actor
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13Actor
+                    pointer: /body/preset
+                - literal: pr-review-interactive
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13Actor
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13Actor
+                    pointer: /body/parent_agent_id
+                - literal: null
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - capability:
+          request:
+            id: loom.filesystem.observe
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              rootId:
+                literal: fixture-temporary
+              relativePath: *a1
+              view:
+                literal: presence
+              maxBytes:
+                literal: 1000
+              maxEntries:
+                literal: 1
+          as: marker13
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: marker13
+                        pointer: /entries
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13
+                    pointer: /entries/0/relativePath
+                - *a1
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13
+                    pointer: /entries/0/exists
+                - literal: false
+            - op: eq
+              args:
+                - ref:
+                    binding: marker13
+                    pointer: /entries/0/kind
+                - literal: missing
         intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
       - screenshot: bare-stop-s14
         intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
@@ -1778,6 +2143,126 @@ tests:
                     - ref:
                         binding: nativeFinishedRecord
                         pointer: /errorFieldPresent
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - api:
+          method: GET
+          path: /
+          as: marker17Actor
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/LOCALMODE/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          all:
+            - op: matches
+              args:
+                - ref:
+                    binding: leadId
+                - literal: ^agt_[A-Za-z0-9]+$
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17Actor
+                    pointer: /body/agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17Actor
+                    pointer: /body/name
+                - op: concat
+                  args:
+                    - literal: cov-controls-stop-
+                    - ref:
+                        binding: fixtureRunId
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17Actor
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17Actor
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17Actor
+                    pointer: /body/preset
+                - literal: pr-review-interactive
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17Actor
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17Actor
+                    pointer: /body/parent_agent_id
+                - literal: null
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - capability:
+          request:
+            id: loom.filesystem.observe
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              rootId:
+                literal: fixture-temporary
+              relativePath: *a1
+              view:
+                literal: presence
+              maxBytes:
+                literal: 1000
+              maxEntries:
+                literal: 1
+          as: marker17
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: marker17
+                        pointer: /entries
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17
+                    pointer: /entries/0/relativePath
+                - *a1
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17
+                    pointer: /entries/0/exists
+                - literal: false
+            - op: eq
+              args:
+                - ref:
+                    binding: marker17
+                    pointer: /entries/0/kind
+                - literal: missing
         intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
       - screenshot: bare-stop-s18
         intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model

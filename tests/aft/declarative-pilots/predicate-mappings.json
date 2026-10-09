@@ -1,6 +1,6 @@
 {
   "status": "authored-unvalidated",
-  "count": 15,
+  "count": 20,
   "records": [
     {
       "pilotId": "files-save-reload",
@@ -1239,9 +1239,9 @@
             "tests",
             0,
             "steps",
-            28
+            32
           ],
-          "line": 487
+          "line": 612
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1249,9 +1249,9 @@
             "tests",
             0,
             "steps",
-            29
+            33
           ],
-          "line": 506
+          "line": 631
         }
       ],
       "bounds": {
@@ -1323,9 +1323,9 @@
             "tests",
             0,
             "steps",
-            38
+            42
           ],
-          "line": 601
+          "line": 726
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1333,9 +1333,9 @@
             "tests",
             0,
             "steps",
-            60
+            68
           ],
-          "line": 965
+          "line": 1210
         }
       ],
       "bounds": {
@@ -1407,9 +1407,9 @@
             "tests",
             0,
             "steps",
-            42
+            46
           ],
-          "line": 674
+          "line": 799
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1417,9 +1417,9 @@
             "tests",
             0,
             "steps",
-            64
+            72
           ],
-          "line": 1038
+          "line": 1283
         }
       ],
       "bounds": {
@@ -1491,9 +1491,9 @@
             "tests",
             0,
             "steps",
-            42
+            46
           ],
-          "line": 674
+          "line": 799
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1501,9 +1501,9 @@
             "tests",
             0,
             "steps",
-            64
+            72
           ],
-          "line": 1038
+          "line": 1283
         }
       ],
       "bounds": {
@@ -1575,9 +1575,9 @@
             "tests",
             0,
             "steps",
-            46
+            50
           ],
-          "line": 747
+          "line": 872
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1585,9 +1585,9 @@
             "tests",
             0,
             "steps",
-            49
+            53
           ],
-          "line": 811
+          "line": 936
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1595,9 +1595,9 @@
             "tests",
             0,
             "steps",
-            68
+            76
           ],
-          "line": 1111
+          "line": 1356
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1605,9 +1605,9 @@
             "tests",
             0,
             "steps",
-            72
+            80
           ],
-          "line": 1190
+          "line": 1435
         }
       ],
       "bounds": {
@@ -1697,9 +1697,9 @@
             "tests",
             0,
             "steps",
-            43
+            47
           ],
-          "line": 705
+          "line": 830
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1707,9 +1707,9 @@
             "tests",
             0,
             "steps",
-            44
+            48
           ],
-          "line": 719
+          "line": 844
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1717,9 +1717,9 @@
             "tests",
             0,
             "steps",
-            45
+            49
           ],
-          "line": 733
+          "line": 858
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1727,9 +1727,9 @@
             "tests",
             0,
             "steps",
-            46
+            50
           ],
-          "line": 747
+          "line": 872
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1737,9 +1737,9 @@
             "tests",
             0,
             "steps",
-            65
+            73
           ],
-          "line": 1069
+          "line": 1314
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1747,9 +1747,9 @@
             "tests",
             0,
             "steps",
-            66
+            74
           ],
-          "line": 1083
+          "line": 1328
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1757,9 +1757,9 @@
             "tests",
             0,
             "steps",
-            67
+            75
           ],
-          "line": 1097
+          "line": 1342
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1767,9 +1767,9 @@
             "tests",
             0,
             "steps",
-            68
+            76
           ],
-          "line": 1111
+          "line": 1356
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1777,9 +1777,9 @@
             "tests",
             0,
             "steps",
-            88
+            100
           ],
-          "line": 1428
+          "line": 1793
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1787,9 +1787,9 @@
             "tests",
             0,
             "steps",
-            89
+            101
           ],
-          "line": 1442
+          "line": 1807
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1797,9 +1797,9 @@
             "tests",
             0,
             "steps",
-            90
+            102
           ],
-          "line": 1456
+          "line": 1821
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1807,9 +1807,9 @@
             "tests",
             0,
             "steps",
-            91
+            103
           ],
-          "line": 1470
+          "line": 1835
         }
       ],
       "bounds": {
@@ -1899,9 +1899,9 @@
             "tests",
             0,
             "steps",
-            48
+            52
           ],
-          "line": 780
+          "line": 905
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1909,9 +1909,9 @@
             "tests",
             0,
             "steps",
-            49
+            53
           ],
-          "line": 811
+          "line": 936
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1919,9 +1919,9 @@
             "tests",
             0,
             "steps",
-            50
+            54
           ],
-          "line": 842
+          "line": 967
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1929,9 +1929,9 @@
             "tests",
             0,
             "steps",
-            71
+            79
           ],
-          "line": 1159
+          "line": 1404
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1939,9 +1939,9 @@
             "tests",
             0,
             "steps",
-            72
+            80
           ],
-          "line": 1190
+          "line": 1435
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1949,9 +1949,9 @@
             "tests",
             0,
             "steps",
-            73
+            81
           ],
-          "line": 1221
+          "line": 1466
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1959,9 +1959,9 @@
             "tests",
             0,
             "steps",
-            94
+            106
           ],
-          "line": 1518
+          "line": 1883
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1969,9 +1969,9 @@
             "tests",
             0,
             "steps",
-            95
+            107
           ],
-          "line": 1549
+          "line": 1914
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1979,15 +1979,705 @@
             "tests",
             0,
             "steps",
-            96
+            108
           ],
-          "line": 1580
+          "line": 1945
         }
       ],
       "bounds": {
         "callerDefaultStepMs": 30000,
         "publicApiRequestMs": 15000,
         "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-effect.sh",
+      "source": {
+        "line": 9,
+        "source": "[[ \"$id\" =~ ^agt_[A-Za-z0-9]+$ ]] || exit 2",
+        "destination": "split admission invariant from visible YAML expectation; source preserved",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "unresolvedCallerOldStepIds": [],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              3
+            ],
+            "line": 16,
+            "column": 9,
+            "end_line": 18
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              17
+            ],
+            "line": 65,
+            "column": 9,
+            "end_line": 67
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            14
+          ],
+          "line": 335
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            56
+          ],
+          "line": 1014
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            83
+          ],
+          "line": 1513
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            116
+          ],
+          "line": 2163
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "filesystemStepMs": 30000,
+        "wholeCallerDeadline": "unvalidated across authored typed chain",
+        "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-effect.sh",
+      "source": {
+        "line": 11,
+        "source": "  || { echo 'owned Stop agent unavailable' >&2; exit 1; }",
+        "destination": "split admission invariant from visible YAML expectation; source preserved",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "unresolvedCallerOldStepIds": [],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              3
+            ],
+            "line": 16,
+            "column": 9,
+            "end_line": 18
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              17
+            ],
+            "line": 65,
+            "column": 9,
+            "end_line": 67
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            13
+          ],
+          "line": 319
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            55
+          ],
+          "line": 998
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            82
+          ],
+          "line": 1497
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            115
+          ],
+          "line": 2147
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "filesystemStepMs": 30000,
+        "wholeCallerDeadline": "unvalidated across authored typed chain",
+        "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-effect.sh",
+      "source": {
+        "line": 16,
+        "source": "  || { echo 'foreign Stop actor' >&2; exit 1; }",
+        "destination": "split admission invariant from visible YAML expectation; source preserved",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "unresolvedCallerOldStepIds": [],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              3
+            ],
+            "line": 16,
+            "column": 9,
+            "end_line": 18
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              17
+            ],
+            "line": 65,
+            "column": 9,
+            "end_line": 67
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            14
+          ],
+          "line": 335
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            56
+          ],
+          "line": 1014
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            83
+          ],
+          "line": 1513
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            116
+          ],
+          "line": 2163
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "filesystemStepMs": 30000,
+        "wholeCallerDeadline": "unvalidated across authored typed chain",
+        "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-effect.sh",
+      "source": {
+        "line": 22,
+        "source": "\"${compose[@]}\" exec -T loom-local test ! -e \"$marker\" \\",
+        "destination": "split admission invariant from visible YAML expectation; source preserved",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "unresolvedCallerOldStepIds": [],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              3
+            ],
+            "line": 16,
+            "column": 9,
+            "end_line": 18
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              17
+            ],
+            "line": 65,
+            "column": 9,
+            "end_line": 67
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            16
+          ],
+          "line": 415
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            58
+          ],
+          "line": 1089
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            85
+          ],
+          "line": 1588
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            118
+          ],
+          "line": 2238
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "filesystemStepMs": 30000,
+        "wholeCallerDeadline": "unvalidated across authored typed chain",
+        "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-effect.sh",
+      "source": {
+        "line": 23,
+        "source": "  || { echo 'proposed native shell marker exists' >&2; exit 1; }",
+        "destination": "split admission invariant from visible YAML expectation; source preserved",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "unresolvedCallerOldStepIds": [],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              3
+            ],
+            "line": 16,
+            "column": 9,
+            "end_line": 18
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              17
+            ],
+            "line": 65,
+            "column": 9,
+            "end_line": 67
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            16
+          ],
+          "line": 415
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            58
+          ],
+          "line": 1089
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            85
+          ],
+          "line": 1588
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            118
+          ],
+          "line": 2238
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "filesystemStepMs": 30000,
+        "wholeCallerDeadline": "unvalidated across authored typed chain",
+        "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
       }
     }
   ]

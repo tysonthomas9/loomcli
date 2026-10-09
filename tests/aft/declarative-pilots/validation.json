@@ -9,15 +9,15 @@
     "receipt": "/private/tmp/aft-interface-a43468f0/final-e8eee6bb/source-build-receipt.json"
   },
   "rawAdmission": {
-    "at": "2026-10-09T09:29:06.112Z",
+    "at": "2026-10-09T09:51:29.447Z",
     "status": "failed",
     "engine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
-    "adapterSource": "77ba247c0f85b86dd70c02651e2fed4b86127eb0",
-    "adapterImplementationSha256": "7ab7b5130f47c9d9777565f96d3f2426c2ccbe60fa47e2f532068f3715006848",
+    "adapterSource": "36bf343fa7a4a850898e47cd8da4e7055d349b31",
+    "adapterImplementationSha256": "1a659b3afb264d27348d8e960604fb454714a3defb1ef79c4d20caf1d4ffe687",
     "files": [
       {
         "file": "bare-stop.test.yaml",
-        "sha256": "b5cb1efdce6cff0bc0b46692542ac05f6e19de9bf6c56d16f555e7874897e467"
+        "sha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1"
       },
       {
         "file": "child-repeat.test.yaml",
@@ -48,12 +48,12 @@
     "rawSuiteAcceptance": false
   },
   "expandedStepSchema": {
-    "count": 683,
+    "count": 699,
     "errors": [],
     "files": [
       {
         "file": "bare-stop.test.yaml",
-        "sha256": "b5cb1efdce6cff0bc0b46692542ac05f6e19de9bf6c56d16f555e7874897e467"
+        "sha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1"
       },
       {
         "file": "child-repeat.test.yaml",
@@ -72,7 +72,7 @@
         "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d"
       }
     ],
-    "acceptance": "canonical individual StepSchema only; not loader/registry acceptance"
+    "acceptance": "canonical individual StepSchema only, not loader/preservation acceptance"
   },
   "deterministicInterface": {
     "evidenceClass": "deterministic adapter-interface controls; no pilot/UI/container/native/runtime proof",
@@ -333,7 +333,7 @@
     "at": "2026-10-09T09:26:40.703Z",
     "status": "authored-unvalidated",
     "file": "bare-stop.test.yaml",
-    "sha256": "b5cb1efdce6cff0bc0b46692542ac05f6e19de9bf6c56d16f555e7874897e467",
+    "sha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1",
     "approvedFactLeaves": {
       "fixtureRunId": "3418425b29896b221621ff7108c9ec3e8752f3f1",
       "native": "58696995caf6ae64c2c6d16e1cd1305483702392",
@@ -343,11 +343,25 @@
       "export actual fixtureRunId safeDATA; consume in actor name/idempotency, original prompt strings and marker display predicate",
       "assert native finish/error explicit facts; original truthy-completion first-record selection remains unresolved"
     ],
-    "acceptedRawGate": "Actual latest raw bytes rejected for all5 by accepted e8+approved77ba registry beforeeffects; updated fact-leaf coherent core consumption/public runner still unvalidated.",
+    "acceptedRawGate": "Latest actual e8+approved coherent36bf loader/registry: all5 rejected beforeeffects. New scalar marker/attested RUN_ID/native fact consumers still unvalidated in raw pilot execution.",
     "developmentRawGate": "Latest unchanged Stop and other four files rejected by committed unaccepted696 raw loader/registry; previous uncommitted phase2 receipt retained separately/historical.",
     "runtimeExecuted": 0,
-    "individualStepSchemaCount": 683,
-    "rawAttemptAt": "2026-10-09T09:29:06.112Z"
+    "individualStepSchemaCount": 699,
+    "rawAttemptAt": "2026-10-09T09:51:29.447Z",
+    "scalarMarker": {
+      "approvedCore": "36bf343fa7a4a850898e47cd8da4e7055d349b31",
+      "oldSteps": [
+        3,
+        10,
+        13,
+        17
+      ],
+      "status": "authored-unvalidated",
+      "actorReadback": true,
+      "pathConstruction": "concat(cov-controls-stop-effect-,fixtureRunId)",
+      "rootAlias": "fixture-temporary",
+      "unresolved": "whole-caller deadline and genuine container/runtime evidence"
+    }
   },
   "previousAcceptedRawAdmission": {
     "at": "2026-10-09T09:01:01.826Z",
@@ -447,13 +461,252 @@
     "engineEmittedMismatches": 0,
     "reviewState": "UNACCEPTED: parent review reports authority transplant, conflicting bind identity replacement, hook replacement and source frame omission; corrections pending.",
     "scope": "Exact committed candidate raw loader/registry diagnostic, task-owned dependencies, actual unchanged YAML, approved baseline77ba emitted adapter; no source overlays/materialization, no new fact-leaf integration or runtime evidence.",
-    "acceptedRuntimePin": "e8eee6bb6d8d5d2c8e65bae36154732a74742212"
+    "acceptedRuntimePin": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+    "currentStopBytesMatch": false
   },
   "coherentIntegrationCheck": {
-    "candidateCore": "0a184c105fdb66ec3ffde7758f8eb1b1d3721da6",
-    "native586Ancestor": true,
-    "fixture341Ancestor": false,
-    "method": "git merge-base --is-ancestor each approved leaf against core milestone",
-    "result": "Not used for new fact-leaf validation: requires coherent integrated SHA containing341 as well."
+    "approvedCore": "36bf343fa7a4a850898e47cd8da4e7055d349b31",
+    "precedingCore": "d269c9bee2dd32b418b62a27f714e14f210d2bd7",
+    "fixture341": true,
+    "native586": true,
+    "scalarPath": true,
+    "scope": "parent-approved deterministic interface; exact source snapshot and emitted build, no leaf cherry-picks"
+  },
+  "previous36bfAuthoringBaselineRaw": {
+    "at": "2026-10-09T09:29:06.112Z",
+    "status": "failed",
+    "engine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+    "adapterSource": "77ba247c0f85b86dd70c02651e2fed4b86127eb0",
+    "adapterImplementationSha256": "7ab7b5130f47c9d9777565f96d3f2426c2ccbe60fa47e2f532068f3715006848",
+    "files": [
+      {
+        "file": "bare-stop.test.yaml",
+        "sha256": "b5cb1efdce6cff0bc0b46692542ac05f6e19de9bf6c56d16f555e7874897e467"
+      },
+      {
+        "file": "child-repeat.test.yaml",
+        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112"
+      },
+      {
+        "file": "files-save-reload.test.yaml",
+        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954"
+      },
+      {
+        "file": "sse-cursor.test.yaml",
+        "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea"
+      },
+      {
+        "file": "stream-render-clock.test.yaml",
+        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d"
+      }
+    ],
+    "errors": [
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]"
+    ],
+    "effects": 0,
+    "skippedSuiteCount": 5,
+    "rawSuiteAcceptance": false,
+    "currentStopBytesMatch": false
+  },
+  "coherent36bfPublicRunner": {
+    "evidenceClass": "deterministic public runner with owned filesystem/native protocol transport doubles; generic scalar path consumer only, no fixture-temporary alias/production container attestation, pilot/UI/native/runtime proof",
+    "engine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+    "adapterBase": "36bf343fa7a4a850898e47cd8da4e7055d349b31",
+    "adapterImplementationSha256": "1a659b3afb264d27348d8e960604fb454714a3defb1ef79c4d20caf1d4ffe687",
+    "suiteSha256": "f55f12a9a3852338e4759aa6a78497c4e9a312fd69937dce4d04b47e607346dd",
+    "at": "2026-10-09T09:52:51.407Z",
+    "tests": [
+      {
+        "name": "[setup]",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "name": "captured fixture token differs from engine identity",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "name": "scalar exact owned marker exists",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "name": "scalar actual missing marker",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "name": "wrong marker expectation rejects",
+        "status": "failed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "failed",
+            "error": "structured expectation failed"
+          }
+        ]
+      },
+      {
+        "name": "foreign root rejects before read",
+        "status": "failed",
+        "steps": [
+          {
+            "status": "failed",
+            "error": "observation error: Filesystem root is not owned"
+          }
+        ]
+      },
+      {
+        "name": "captured native facts including zero-time diagnostic",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "name": "wrong native fact expectation rejects",
+        "status": "failed",
+        "steps": [
+          {
+            "status": "failed",
+            "error": "observation error: Foreign or duplicate agent binding"
+          },
+          {
+            "status": "skipped"
+          },
+          {
+            "status": "skipped"
+          },
+          {
+            "status": "skipped"
+          }
+        ]
+      },
+      {
+        "name": "[teardown]",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      "preflight",
+      "native:/api/info",
+      "native:/api/info",
+      "native:/api/info",
+      "native:/api/session/ses_owned",
+      "native:/api/session/ses_owned/message?order=asc&limit=200",
+      "native:/api/info",
+      "native:/api/info",
+      "native:/api/session/ses_owned",
+      "native:/api/info",
+      "remove"
+    ],
+    "acceptance": "deterministic interface controls only; no actual pilot or production container/native/browser/runtime preservation",
+    "positiveCaseCount": 4,
+    "expectedNegativeCaseCount": 2,
+    "uncoveredIntendedNegative": {
+      "name": "wrong native fact expectation rejects",
+      "actualFirstFailure": "Foreign or duplicate agent binding",
+      "assertionReached": false,
+      "credit": false
+    },
+    "overallStatus": "partial-scope;4positive and2expectednegative controls; intended native assertion negative uncovered",
+    "runtimeIdentitySource": "Owned runtime-identity transport-state file under lifecycle lease; NOT actual container RUN_ID attestation. Parent separate41/48 checks cover production seam, no runtime claim here."
+  },
+  "rawInterpolationFinding": {
+    "status": "source-confirmed distinct cause; correction pending",
+    "candidate": "696f8f12fb83c9dd1ecedb68208a69e7d6626331",
+    "source": "engine dist/runner.js:80-96",
+    "observation": "admitDocument before interpolation; setup/teardown preserved verbatim including declarative arrays, while rest interpolated. Bound literal revision/digest values therefore retain ${...} and fail regex. This is separate from historical invented unresolved-ref sampling failure.",
+    "envKeys": [
+      "AFT_LOOM_COMMIT",
+      "AFT_LOOM_SOURCE_MANIFEST_SHA256",
+      "AFT_LOOM_BUILD_MANIFEST_SHA256",
+      "AFT_FLEET_COMMIT",
+      "AFT_FLEET_SOURCE_MANIFEST_SHA256",
+      "AFT_FLEET_BUILD_MANIFEST_SHA256",
+      "AFT_SELECTION_SHA256"
+    ],
+    "rawCopiesMaterialized": false
   }
 }
