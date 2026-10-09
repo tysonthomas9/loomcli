@@ -12,7 +12,7 @@ export const ArchiveAgentEffects=Object.freeze(['read-api','read-filesystem','wr
   'start-owned-process','stop-owned-process','release-owned-resource'] as const satisfies readonly CapabilityEffect[]);
 const AgentId=z.string().regex(/^agt_[A-Za-z0-9_-]+$/).max(512);
 const Key=z.string().min(1).max(512).regex(/^[A-Za-z0-9._:-]+$/);
-export const ArchiveAgentInput=z.object({agent:AgentRef.extend({agentId:AgentId}),namePrefixes:z.array(Id).min(1).max(2),idempotencyKey:Key}).strict();
+export const ArchiveAgentInput=AgentRef.extend({agentId:AgentId,namePrefixes:z.array(Id).min(1).max(2),idempotencyKey:Key}).strict();
 export type ArchiveAgentInput=z.infer<typeof ArchiveAgentInput>;
 export const ArchiveAgentIdentity=AgentRow.pick({agent_id:true,workspace_id:true,repo:true,harness:true}).extend({name:Id}).strict();
 export type ArchiveAgentIdentity=z.infer<typeof ArchiveAgentIdentity>;
@@ -21,7 +21,8 @@ export type ArchiveAgentIdentity=z.infer<typeof ArchiveAgentIdentity>;
 export function archiveAgentIdentity(raw:unknown):ArchiveAgentIdentity {
   return ArchiveAgentIdentity.strip().parse(raw);
 }
-export const ArchiveAgentRequest=ArchiveAgentInput.extend({expectedRepo:Id,
+export const ArchiveAgentRequest=z.object({agent:AgentRef.extend({agentId:AgentId}),
+  namePrefixes:ArchiveAgentInput.shape.namePrefixes,idempotencyKey:Key,expectedRepo:Id,
   body:z.object({cancel:z.literal(true)}).strict(),requestTimeoutMs:z.literal(15000)}).strict();
 export type ArchiveAgentRequest=z.infer<typeof ArchiveAgentRequest>;
 export const ArchiveAgentFacts=z.object({agent:AgentRef,observed:ArchiveAgentIdentity,
@@ -44,15 +45,17 @@ export function assertArchiveAgentTarget(request:ArchiveAgentRequest,raw:unknown
 /** No generic HTTP escape or separate actor registry. The provisioner installs
  * a callback only on its actual runner-owned API/serve/container route. */
 export async function archiveAgent(context:CapabilityContext,input:ArchiveAgentInput) {
-  const guard=beginFixtureOperation(context,input.agent.fixtureLeaseId,ArchiveAgentId,ArchiveAgentEffects),{fixture,grant}=guard;
+  const guard=beginFixtureOperation(context,input.fixtureLeaseId,ArchiveAgentId,ArchiveAgentEffects),{fixture,grant}=guard;
   const producer=fixture.archiveAgent;
   requireFact(producer,'unsupported-capability','Owned archive route is unavailable');
-  requireFact(input.agent.workspaceId===fixture.workspaceId,'ownership-mismatch','Archive workspace is outside the fixture');
+  requireFact(input.workspaceId===fixture.workspaceId,'ownership-mismatch','Archive workspace is outside the fixture');
   const recheck=()=>{guard.recheck();requireFact(fixture.archiveAgent===producer,
     'ownership-mismatch','Archive callback changed');};
   const checked=async<T>(call:()=>Promise<T>)=>{recheck();const value=await call();recheck();return value;};
   recheck();
-  const request=ArchiveAgentRequest.parse({...input,expectedRepo:fixture.repo,body:{cancel:true},requestTimeoutMs:15000});
+  const request=ArchiveAgentRequest.parse({agent:AgentRef.parse({fixtureLeaseId:input.fixtureLeaseId,
+    workspaceId:input.workspaceId,agentId:input.agentId}),namePrefixes:input.namePrefixes,
+    idempotencyKey:input.idempotencyKey,expectedRepo:fixture.repo,body:{cancel:true},requestTimeoutMs:15000});
   Object.freeze(request.agent);Object.freeze(request.namePrefixes);
   Object.freeze(request.body);Object.freeze(request);
   requireFact(redact(JSON.stringify(request),fixture.secrets)===JSON.stringify(request),
