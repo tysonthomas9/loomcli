@@ -227,12 +227,14 @@ only_own_file() {
   ! grep -v -e "^$(file_of "$1")$" -e "^matrix-$case_name-$1-review" "$work/changed-$1.txt" | grep -q .
 }
 
-# Dependency policy, in one place. P1.26: a task in review blocks its dependents,
-# so a dependent starts only after its blocker's review is approved
-# (AFT_DEPENDENT_WAITS_FOR=review). If the product changes so a dependent waits
-# only for its blocker's run to finish, set it to "run" (and the generator's
-# DEPENDENT_WAITS_FOR) instead.
-dependent_waits_for="${AFT_DEPENDENT_WAITS_FOR:-review}"
+# Dependency policy, in one place. Tyson (2026-10-09): a dependent starts as
+# soon as its blocker's agent finishes, on the blocker's frozen, unreviewed
+# revision; Approve, Apply and Publish still follow dependency order, and
+# rejecting the blocker marks the dependent stale with a rebuild offer
+# (AFT_DEPENDENT_WAITS_FOR=run, being added to #943). The earlier P1.26 rule, a
+# dependent waits for its blocker's approved review, is AFT_DEPENDENT_WAITS_FOR=review
+# (and the generator's DEPENDENT_WAITS_FOR).
+dependent_waits_for="${AFT_DEPENDENT_WAITS_FOR:-run}"
 blocker_ready() { # blocker_ready <slot>: may a task blocked by <slot> start now?
   revisions "$1" 2> /dev/null || return 1
   case "$dependent_waits_for" in
@@ -387,6 +389,89 @@ open-task)
   open_task "$1"
   ;;
 
+
+chain)
+  # chain <case> <slot[:after][:FAIL]>...: one epic holding all the tasks, each
+  # dependent blocked by its "after" slot; the epic runner is started once, so a
+  # dependent runs when its blocker's agent finishes (no review in between).
+  python3 -c 'import json,sys; print(json.dumps({"title":sys.argv[1]+" chain epic","issue_type":"epic","priority":2}))' "matrix $case_name" |
+    curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$work/epic-chain.json"
+  epic="$(json "$work/epic-chain.json" 'print(v["data"]["id"])')"
+  for spec in "$@"; do
+    IFS=: read -r slot after red <<< "$spec"
+    file="$(file_of "$slot")"
+    if [[ "$forge" == fake ]]; then
+      design="STUB_CODEX_PATCH=$file"
+      [[ "$red" == FAIL ]] && design="$design STUB_CODEX_TEXT=FAIL"
+    else
+      line="$case_name $slot ok"
+      [[ "$red" == FAIL ]] && line="FAIL"
+      design="Create a new file named $file at the repository root whose entire contents are exactly the single line: $line. Do not create, modify or delete any other file. Do not run git commands."
+    fi
+    python3 -c 'import json,sys; print(json.dumps({"title":sys.argv[1],"issue_type":"task","priority":2,"parent":sys.argv[2],"design":sys.argv[3]}))' "matrix $case_name $slot" "$epic" "$design" |
+      curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$work/task-$slot.json"
+    json "$work/task-$slot.json" 'print(v["data"]["id"])' > "$work/task-$slot.id"
+    cp "$work/epic-chain.json" "$work/epic-$slot.json"
+    if [[ -n "$after" && "$after" != - ]]; then
+      curl -fsS -X POST "$api/issues/$(task_id "$slot")/dependencies" -H 'Content-Type: application/json' \
+        -d "{\"depends_on_id\":\"$(task_id "$after")\",\"dep_type\":\"blocks\"}" > /dev/null
+    fi
+  done
+  curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
+    -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$work/workflow-chain.json"
+  say "chain $* started in epic $epic (dependents wait for: $dependent_waits_for)"
+  ;;
+
+ran-before-approval)
+  # ran-before-approval <case> <slot> <blocker>: the dependent has its own
+  # revision while its blocker is still unreviewed, built on the blocker's
+  # frozen revision.
+  slot="$1" blocker="$2"
+  revisions "$blocker"
+  json "$work/rev-$blocker.json" 'assert not v.get("verdict"), "blocker already reviewed: %r" % v'
+  curl -fsS "$api/issues/$(task_id "$blocker")" > "$work/issue-$blocker.json"
+  json "$work/issue-$blocker.json" 'assert v["data"]["status"]=="review", v["data"]'
+  revisions "$slot"
+  bhead="$(rev_field "$blocker" head_sha)" shead="$(rev_field "$slot" head_sha)"
+  [[ -n "$shead" ]] || fail "dependent $slot has no revision while $blocker is unreviewed"
+  git -C "$repo" fetch -q origin 2> /dev/null || true
+  if git -C "$repo" cat-file -e "$shead^{commit}" 2> /dev/null && git -C "$repo" cat-file -e "$bhead^{commit}" 2> /dev/null; then
+    git -C "$repo" merge-base --is-ancestor "$bhead" "$shead" || fail "$slot's revision $shead is not built on $blocker's frozen revision $bhead"
+    say "$slot ($shead) ran on $blocker's unreviewed revision $bhead"
+  else
+    say "$slot has revision $shead while $blocker ($bhead) is unreviewed (revision objects not in the workspace clone; ancestry not checked)"
+  fi
+  ;;
+
+approve-waits)
+  # approve-waits <case> <slot> <blocker>: (the UI step approved <slot> first)
+  # the approval is recorded but waits for the blocker's approval; no PR.
+  slot="$1" blocker="$2"
+  waiting() { revisions "$slot"; json "$work/rev-$slot.json" 'assert v.get("verdict")=="approve", v'; grep -qi 'to be approved' "$work/rev-$slot.json"; }
+  wait_until 30 "$slot's approval waits for $blocker to be approved: $(cat "$work/rev-$slot.json" 2> /dev/null | head -c 600)" waiting
+  sleep $((5 * scale))
+  [[ -z "$(pull_field "$slot" number)" ]] || fail "$slot got a PR before its blocker $blocker was approved"
+  revisions "$blocker"
+  json "$work/rev-$blocker.json" 'assert not v.get("verdict"), v'
+  open_task "$slot"
+  browser wait --text 'to be approved' > /dev/null || fail "task $slot does not say it waits for $blocker to be approved"
+  browser screenshot "$work/approve-waits-$slot.png" > /dev/null
+  say "$slot's approval waits: $(json "$work/rev-$slot.json" 'print(v.get("publish_reason") or v.get("merge_reason") or "")')"
+  ;;
+
+stale)
+  # stale <case> <slot> <blocker>: after the blocker was rejected, the dependent's
+  # revision is stale and the task offers a rebuild; it has no PR.
+  slot="$1" blocker="$2"
+  is_stale() { revisions "$slot"; grep -qi 'stale' "$work/rev-$slot.json"; }
+  wait_until 30 "$slot is stale after $blocker was rejected: $(cat "$work/rev-$slot.json" 2> /dev/null | head -c 600)" is_stale
+  [[ -z "$(pull_field "$slot" number)" ]] || fail "stale $slot has a PR"
+  open_task "$slot"
+  rebuild() { browser eval "[...document.querySelectorAll('button')].some(b => /rebuild/i.test(b.textContent) && !b.disabled)" | grep -q true; }
+  wait_until 20 "task $slot offers a rebuild" rebuild
+  browser screenshot "$work/stale-$slot.png" > /dev/null
+  say "$slot is stale and offers a rebuild"
+  ;;
 
 lead-start)
   # lead-start <case>: the real tier launches the workspace's real codex Lead

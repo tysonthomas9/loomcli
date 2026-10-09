@@ -4,17 +4,18 @@
 The YAML is generated so every case uses the same step vocabulary; the real-GitHub
 copies differ only in their suite name and header.
 """
-import json, sys, pathlib
+import json, re, sys, pathlib
 
 S = 'bash "$AFT_TESTS_DIR/scripts/loomgit-matrix.sh"'
 
-# Dependency policy, in one place (P1.26): a task in review blocks its
-# dependents, so a dependent's task step is placed after its blocker's review is
-# approved. If dependents should only wait for the blocker's run to finish, set
-# "run": dependents then start right after the blocker's revision exists. The
-# driver asserts the same policy (AFT_DEPENDENT_WAITS_FOR) before it starts a
-# dependent, so a mismatch fails loudly.
-DEPENDENT_WAITS_FOR = "review"
+# Dependency policy, in one place. Tyson (2026-10-09): a dependent starts when
+# its blocker's agent finishes, on the blocker's unreviewed revision; Approve,
+# Apply and Publish still follow dependency order ("run", being added to #943).
+# "review" is the earlier P1.26 rule (a dependent starts only after its
+# blocker's review is approved). build() is the only place that orders runs and
+# reviews; the driver asserts the same policy (AFT_DEPENDENT_WAITS_FOR).
+DEPENDENT_WAITS_FOR = "run"
+NEEDS = " [needs #943 dependents run]"
 
 def run(args, intent):
     return [f"      - run: {json.dumps(S + ' ' + args)}", f"        intent: {json.dumps(intent)}"]
@@ -31,6 +32,27 @@ def task(case, slot, after="-", red=""):
     what = "writes a file containing FAIL, so its check is red" if red else "writes its own file"
     dep = f", blocked by task {after}" if after != "-" else ""
     return run(f"task {case} {slot} {after}{extra}", f"API client creates task {slot}{dep} in its own epic and starts its run; it {what}") + wait_rev(case, slot)
+
+def build(case, specs, reviewed):
+    """Run the tasks in specs [(slot, after|"-", "FAIL"|"")] and review them.
+
+    reviewed maps a slot to the steps that review it (approve, PR, merge...),
+    always taken in specs order. With "run" every task is created up front in
+    one epic and runs before any review; with "review" each task is created
+    only after the one below it has been reviewed.
+    """
+    if DEPENDENT_WAITS_FOR == "run":
+        spec = " ".join(slot + (f":{after}" if after != "-" or red else "") + (f":{red}" if red else "") for slot, after, red in specs)
+        st = run(f"chain {case} {spec}", "API client creates the tasks (" + spec + ") in one epic and starts it once; a dependent runs when its blocker's agent finishes")
+        for slot, _, _ in specs:
+            st += wait_rev(case, slot)
+        for slot, _, _ in specs:
+            st += reviewed.get(slot, [])
+        return st
+    st = []
+    for slot, after, red in specs:
+        st += task(case, slot, after, red) + reviewed.get(slot, [])
+    return st
 
 def open_changes(case, slot):
     return run(f"open-task {case} {slot}", f"Human opens task {slot}") + [
@@ -73,15 +95,21 @@ def setup(case, native=False):
     return run(f"setup {case}{' native' if native else ''}", "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)") + \
         run(f"lead-start {case}", "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up")
 
-def case(name, intent, steps):
+def case(name, intent, steps, needs=None):
+    if needs is None:
+        needs = DEPENDENT_WAITS_FOR == "run" and any(re.search(r'loomgit-matrix\.sh\\" chain \S+ [^"]*:', l) for l in steps)
+    if needs:
+        name += NEEDS
+        intent += " Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
     return [f"  - name: {json.dumps(name)}", f"    intent: {json.dumps(intent)}", "    steps:"] + steps
 
 def walk():
     c = "walk"
     st = setup(c, native=True) + settings(c, "stack", "on", "off")
-    st += task(c, "a") + human_create_pr(c, "a", "main") + run(f"ui {c} a open", "W1: task A shows PR A open, and keeps it after a reload")
-    st += task(c, "b", "a") + human_create_pr(c, "b", "a")
-    st += task(c, "c", "b") + human_create_pr(c, "c", "b") + run(f"ui {c} c open", "W2: task C shows its PR open on top of B's")
+    st += build(c, [("a", "-", ""), ("b", "a", ""), ("c", "b", "")], {
+        "a": human_create_pr(c, "a", "main") + run(f"ui {c} a open", "W1: task A shows PR A open, and keeps it after a reload"),
+        "b": human_create_pr(c, "b", "a"),
+        "c": human_create_pr(c, "c", "b") + run(f"ui {c} c open", "W2: task C shows its PR open on top of B's")})
     st += human_merge(c, "c") + run(f"merge-state {c} c waiting 'merges after #A, #B'", "W3: C's Approve and merge waits for the PRs below it") + \
         run(f"hold-open {c} 6 a b c", "W3: nothing merges") + run(f"ui {c} c open 'merges after #A, #B'", "W3: task C says it merges after #A, #B")
     st += human_merge(c, "a") + run(f"merged {c} a", "W4: A merges") + \
@@ -106,9 +134,8 @@ def settings_cases():
     out = []
     c = "s1"
     st = setup(c) + settings(c, "stack", "on", "off")
-    st += task(c, "a") + lead_create_pr(c, "a", "main")
-    st += task(c, "b", "a") + lead_create_pr(c, "b", "a")
-    st += task(c, "c", "b") + lead_create_pr(c, "c", "b")
+    st += build(c, [("a", "-", ""), ("b", "a", ""), ("c", "b", "")], {
+        "a": lead_create_pr(c, "a", "main"), "b": lead_create_pr(c, "b", "a"), "c": lead_create_pr(c, "c", "b")})
     st += lead(c, "merge", "a", "refused", "tries Approve and merge on A and is refused") + run(f"hold-open {c} 4 a b c", "Nothing merges")
     st += human_merge(c, "a") + run(f"merged {c} a", "A merges") + run(f"rebuilt {c} b main", "B is rebuilt on main") + run(f"rebuilt {c} c b", "C stays on B") + run(f"ui {c} b open", "Task B shows its PR open")
     out += case("S1 Stacked, lead may approve on, lead may merge off", "The lead's approvals open a stacked A-B-C; the lead cannot merge; a human Approve and merge on A merges it and B, C are rebuilt", st)
@@ -121,9 +148,10 @@ def settings_cases():
 
     c = "s3"
     st = setup(c) + settings(c, "stack", "on", "when_green")
-    st += task(c, "a") + lead_create_pr(c, "a", "main") + run(f"merged {c} a", "The lead merges green A by itself")
-    st += task(c, "b", "a", "FAIL") + lead_create_pr(c, "b", "main") + run(f"checks {c} b red", "B's required check is red")
-    st += task(c, "c", "b") + lead_create_pr(c, "c", "b") + run(f"hold-open {c} 10 b c", "The lead stops at red B; C waits")
+    st += build(c, [("a", "-", ""), ("b", "a", "FAIL"), ("c", "b", "")], {
+        "a": lead_create_pr(c, "a", "main") + run(f"merged {c} a", "The lead merges green A by itself"),
+        "b": lead_create_pr(c, "b", "main") + run(f"checks {c} b red", "B's required check is red"),
+        "c": lead_create_pr(c, "c", "b") + run(f"hold-open {c} 10 b c", "The lead stops at red B; C waits")})
     st += run(f"comment {c} b 'The check fails: remove the line FAIL from matrix-s3-b.txt and keep the rest.'", "A reviewer asks for B's fix") + \
         run(f"fixup {c} b green", "The feedback agent removes FAIL") + run(f"fixup-pushed {c} b c", "B's PR is updated and C replayed") + \
         run(f"merged {c} b c", "The lead merges B, then C") + run(f"ui {c} c merged", "Task C shows its PR merged")
@@ -131,26 +159,28 @@ def settings_cases():
 
     c = "s4"
     st = setup(c) + settings(c, "stack", "off", "when_green")
-    st += task(c, "a") + human_create_pr(c, "a", "main") + run(f"merged {c} a", "The lead merges green A without asking")
-    st += task(c, "b", "a") + human_create_pr(c, "b", "main") + run(f"merged {c} b", "The lead merges green B")
-    st += task(c, "c", "b") + human_create_pr(c, "c", "main") + run(f"merged {c} c", "The lead merges green C") + run(f"ui {c} c merged", "Task C shows its PR merged")
+    st += build(c, [("a", "-", ""), ("b", "a", ""), ("c", "b", "")], {
+        "a": human_create_pr(c, "a", "main") + run(f"merged {c} a", "The lead merges green A without asking"),
+        "b": human_create_pr(c, "b", "main") + run(f"merged {c} b", "The lead merges green B"),
+        "c": human_create_pr(c, "c", "main") + run(f"merged {c} c", "The lead merges green C") + run(f"ui {c} c merged", "Task C shows its PR merged")})
     out += case("S4 Stacked, lead may approve off, lead may merge when green", "A human opens each PR; the lead merges the green ones bottom-up without asking", st)
 
     c = "s5"
     st = setup(c) + settings(c, "trunk", "on", "off")
-    st += task(c, "a") + task(c, "b") + lead_create_pr(c, "a", "main") + lead_create_pr(c, "b", "main")
-    st += task(c, "c", "a") + lead(c, "approve", "c", "ok", "approves C, which depends on A") + \
-        run(f"no-pr {c} c 8", "C gets no PR while A is unmerged")
+    st += build(c, [("a", "-", ""), ("b", "-", ""), ("c", "a", "")], {
+        "a": lead_create_pr(c, "a", "main"), "b": lead_create_pr(c, "b", "main"),
+        "c": lead(c, "approve", "c", "ok", "approves C, which depends on A") + run(f"no-pr {c} c 8", "C gets no PR while A is unmerged")})
     st += human_merge(c, "a") + run(f"merged {c} a", "A lands") + run(f"pr {c} c main", "C now gets its own PR to main") + \
         run(f"rebuilt {c} c main", "C's PR changes only C") + run(f"ui {c} b open", "Task B shows its own PR")
     out += case("S5 PR per task, lead may approve on, lead may merge off", "Independent A and B get their own PRs to main; C, which depends on A, gets its PR once A lands", st)
 
     c = "s6"
     st = setup(c) + settings(c, "trunk", "on", "when_green")
-    st += task(c, "a") + task(c, "b", "-", "FAIL") + lead_create_pr(c, "a", "main") + run(f"merged {c} a", "A merges by itself")
-    st += lead_create_pr(c, "b", "main") + run(f"checks {c} b red", "B is red")
-    st += task(c, "c", "a") + lead_create_pr(c, "c", "main") + run(f"merged {c} c", "C merges by itself") + \
-        run(f"hold-open {c} 6 b", "Red B stays open and blocks nobody") + run(f"ui {c} b open", "Task B shows its PR open")
+    st += build(c, [("a", "-", ""), ("b", "-", "FAIL"), ("c", "a", "")], {
+        "a": lead_create_pr(c, "a", "main") + run(f"merged {c} a", "A merges by itself"),
+        "b": lead_create_pr(c, "b", "main") + run(f"checks {c} b red", "B is red"),
+        "c": lead_create_pr(c, "c", "main") + run(f"merged {c} c", "C merges by itself")})
+    st += run(f"hold-open {c} 6 b", "Red B stays open and blocks nobody") + run(f"ui {c} b open", "Task B shows its PR open")
     out += case("S6 PR per task, lead may approve on, lead may merge when green", "Green PRs merge by themselves; red B stays open and never blocks A or C", st)
 
     c = "s7"
@@ -160,13 +190,13 @@ def settings_cases():
 
     c = "s8"
     st = setup(c) + settings(c, "trunk", "off", "when_green")
-    st += task(c, "a") + task(c, "b") + human_create_pr(c, "a", "main") + human_create_pr(c, "b", "main") + \
+    st += build(c, [("a", "-", ""), ("b", "-", "")], {"a": human_create_pr(c, "a", "main"), "b": human_create_pr(c, "b", "main")}) + \
         run(f"merged {c} a b", "The lead merges both green PRs without asking") + run(f"ui {c} b merged", "Task B shows its PR merged")
     out += case("S8 PR per task, lead may approve off, lead may merge when green", "A human opens the PRs; the lead merges the green ones without stack order", st)
 
     c = "s9"
     st = setup(c) + settings(c, "stack", "on", "off")
-    st += task(c, "a") + human_create_pr(c, "a", "main") + task(c, "b", "a") + human_create_pr(c, "b", "a")
+    st += build(c, [("a", "-", ""), ("b", "a", "")], {"a": human_create_pr(c, "a", "main"), "b": human_create_pr(c, "b", "a")})
     st += run(f"snapshot {c} stack", "Record the open stack") + settings(c, "trunk", "on", "off")
     st += task(c, "d") + human_create_pr(c, "d", "main") + run(f"untouched {c} stack", "A and B are untouched") + run(f"ui {c} d open", "Task D shows its own PR")
     out += case("S9 Switching delivery mode", "With stack A-B open, switching to PR per task leaves it alone and new task D gets its own PR to main", st)
@@ -204,7 +234,7 @@ def variants():
 
     c = "n3"
     st = setup(c) + settings(c, "stack", "on", "off")
-    st += task(c, "a") + lead_create_pr(c, "a", "main") + task(c, "b", "a") + lead_create_pr(c, "b", "a")
+    st += build(c, [("a", "-", ""), ("b", "a", "")], {"a": lead_create_pr(c, "a", "main"), "b": lead_create_pr(c, "b", "a")})
     st += run(f"lead-request-merge {c} b", "The lead asks a human to merge the stack through B; the request is pending") + \
         run(f"hold-open {c} 6 a b", "Nothing merges before a human confirms") + \
         run(f"confirm-merge-request {c}", "A human confirms the lead's request (API: the UI has no confirm control)") + \
@@ -220,6 +250,35 @@ def variants():
     ] + run(f"reject {c} a", "Task A is open again, with a reject verdict and no PR") + run(f"rerun {c} a", "The epic runner runs A again") + \
         wait_rev(c, "a") + human_create_pr(c, "a", "main") + run(f"ui {c} a open", "Task A shows its PR")
     out += case("R1 Reject, rerun, approve", "A rejected task runs again and its new revision opens the PR", st)
+
+    c = "d1"
+    st = setup(c) + settings(c, "stack", "on", "off")
+    st += run(f"chain {c} a b:a", "API client creates A and B (blocked by A) in one epic and starts it") + wait_rev(c, "a") + wait_rev(c, "b") + \
+        run(f"ran-before-approval {c} b a", "B ran as soon as A's agent finished, on A's unreviewed revision; A is still in review") + \
+        human_create_pr(c, "a", "main") + human_create_pr(c, "b", "a") + run(f"ui {c} b open", "Task B shows its PR on top of A's")
+    out += case("D1 A dependent runs before its blocker is approved", "B runs on A's frozen revision before anyone reviews A; the PRs still open in dependency order", st, needs=True)
+
+    c = "d2"
+    st = setup(c) + settings(c, "stack", "off", "off")
+    st += run(f"chain {c} a b:a", "API client creates A and B (blocked by A) in one epic and starts it") + wait_rev(c, "a") + wait_rev(c, "b") + \
+        run(f"open-task {c} a", "Human opens task A") + [
+        "      - click:", "          testid: detail-reject-button", "        intent: Human clicks Reject on task A",
+        "      - fill: { testid: detail-reject-comment, value: \"Rejected by the matrix: B must be rebuilt.\" }", "        intent: Human writes why",
+        "      - click:", "          testid: detail-reject-submit", "        intent: Human sends the rejection",
+    ] + run(f"reject {c} a", "A is open again with a reject verdict and no PR") + \
+        run(f"stale {c} b a", "B, built on the rejected A, is stale, has no PR and offers a rebuild")
+    out += case("D2 Rejecting a blocker makes its dependent stale", "Rejecting A marks B, which ran on A's revision, stale with a rebuild offer", st, needs=True)
+
+    c = "d3"
+    st = setup(c) + settings(c, "stack", "off", "off")
+    st += run(f"chain {c} a b:a", "API client creates A and B (blocked by A) in one epic and starts it") + wait_rev(c, "a") + wait_rev(c, "b") + \
+        open_changes(c, "b") + [
+        "      - click:", "          testid: approve-create-pr", "        intent: Human clicks Approve and create PR on B before A is reviewed",
+    ] + run(f"approve-waits {c} b a", "B's approval waits with \"waiting for A to be approved\"; no PR opens") + \
+        human_create_pr(c, "a", "main") + run(f"pr {c} b a", "Once A is approved, B's waiting approval opens its PR on A's") + \
+        run(f"ui {c} b open", "Task B shows its PR")
+    out += case("D3 Approving a dependent before its blocker waits", "Approve on B before A waits for A; approving A then publishes A and B in order", st, needs=True)
+
     return out
 
 HEADER = """# PX.7 Git settings matrix{what}. Generated by tests/aft/scripts/gen-matrix-suites.py;
@@ -243,7 +302,7 @@ def main(root):
     real = "REAL tier: real GitHub sandbox repo + real codex; only via run-aft.sh --real-github."
     for suite, what, cases, body in (("matrix-walk", ": stacked PR walk-through W1-W8", ["walk"], walk()),
                                      ("matrix-settings", ": settings cases S1-S10", [f"s{i}" for i in range(1, 11)], settings_cases()),
-                                     ("matrix-variants", ": lead, negative and recovery variants L1, N1-N3, R1", ["l1", "n1", "n2", "n3", "r1"], variants())):
+                                     ("matrix-variants", ": lead, negative, recovery and dependent-run variants L1, N1-N3, R1, D1-D3", ["l1", "n1", "n2", "n3", "r1", "d1", "d2", "d3"], variants())):
         emit(root / "suites" / f"loomgit-{suite}.test.yaml", f"loomgit-{suite}", what, fake, cases, body)
         emit(root / "real-github-suites" / f"real-github-{suite}.test.yaml", f"real-github-{suite}", what, real, cases, body)
 

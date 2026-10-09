@@ -251,7 +251,8 @@ In real mode the harness also unsets `OPENAI_API_KEY`, defaults `AFT_TIMEOUT` to
 lead permissions) and `loomgit-matrix-variants` (L1 mid-session epic assignment
 to a running lead, N1 the lead's `loom git approve` with Lead may approve off,
 N2 Approve and merge on a red PR and its recovery, N3 the lead's merge request
-needing a human, R1 Reject → rerun → approve) run on the fake forge with every
+needing a human, R1 Reject → rerun → approve, D1–D3 dependents that run before
+their blocker's review) run on the fake forge with every
 `loomgit-*` run:
 
 ```bash
@@ -273,9 +274,15 @@ done
 # one case: add --filter "S7 PR per task, human does everything" (the cap still counts the whole file)
 ```
 
-Dependents wait for their blocker's review to be approved (P1.26). That policy
-lives in one place: `DEPENDENT_WAITS_FOR` in `scripts/gen-matrix-suites.py` and
-`AFT_DEPENDENT_WAITS_FOR` in `scripts/loomgit-matrix.sh` (`review` or `run`).
+A dependent starts as soon as its blocker's agent finishes, on the blocker's
+unreviewed revision; Approve, Apply and Publish still follow dependency order,
+and rejecting the blocker makes the dependent stale with a rebuild offer. So a
+chain's tasks all run first, then get reviewed. `D1`–`D3` in the variants suite
+cover this directly. Cases that need it are named `[needs #943 dependents run]`
+and fail on builds without that change. The policy lives in one place:
+`DEPENDENT_WAITS_FOR` in `scripts/gen-matrix-suites.py` (its `build()` orders
+runs and reviews) and `AFT_DEPENDENT_WAITS_FOR` in `scripts/loomgit-matrix.sh`
+(`run`, or `review` for the earlier P1.26 rule).
 
 - Each run creates a NEW private repo `tysonthomas9/loom-aft-git-<yyyymmdd-hhmm>`
   with the operator's `gh` login (needs `repo` and `workflow` scopes), seeds `main`
