@@ -162,6 +162,27 @@ test('canonical registry production binding retains both actual host workspaces 
   assert.equal((await registry.invoke({id:'loom.fixture.release',version:1,input:{}},{leaseId},context)).availability,'observed');
  }finally{await r.cleanup();}
 });
+test('finite legacy repository setup retains successful creation facts and cannot invent native setup semantics',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  const owner={leaseId:a.lease.id,runId:'test-run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:r.plan.profile};
+  const store=await createEvidenceStore(path.join(r.driver.runtimeRoot,'evidence'));
+  await r.driver.ownedWorkspaceRoster(owner,store,signal);
+  const before=r.runs.length,record=await r.driver.createOwnedWorkspaceFixture('legacy-e2e-repo','E2E-WS-AGENT','e2e-ws-agent',signal);
+  assert.equal(record.workspaceId,'E2E-WS-AGENT');assert.equal(record.identityKind,'legacy-agent-name');assert.deepEqual(record.agentIds,[]);
+  const fact=JSON.parse(await fs.readFile(await store.resolve(record.creationReceipt.id),'utf8'));
+  assert.equal(fact.storeGeneration,'actual-kernel-start');assert.equal(fact.repo,record.repo);assert.equal(fact.leaseId,a.lease.id);
+  assert.deepEqual(r.runs.slice(before).filter(c=>c.argv[0]==='init'||c.argv.includes('commit')).map(c=>c.argv),
+   [['init','-q'],['-c','user.email=e2e@x','-c','user.name=e2e','commit','--allow-empty','-m','init','-q']]);
+  assert.deepEqual(await fs.readdir(record.repo),['.git']);
+  const effects=r.runs.length,requests=r.requests.length;
+  for(const args of [['legacy-e2e-repo','E2E-WS-AGENT','e2e-ws-agent'],['legacy-e2e-repo','FOREIGN','e2e-ws-other'],
+    ['agent-api-source-repo','E2E-AGV1-UI','e2e-agv1-ui']] as const){await assert.rejects(r.driver.createOwnedWorkspaceFixture(args[0],args[1],args[2],signal));}
+  assert.equal(r.runs.length,effects);assert.equal(r.requests.length,requests);
+  assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);
+ }finally{await r.cleanup();}
+});
+
 test('production factory rejects missing store capture before host preflight, auth or allocation',async()=>{
  const r=await setup('legacy-real-codex');try{
   const root=path.dirname(path.dirname(new URL(import.meta.url).pathname));

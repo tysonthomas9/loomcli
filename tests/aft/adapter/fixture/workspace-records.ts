@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { fixtureOwnerIdentity, type FixtureAuthorityOwner } from '../authority.js';
-import { createOwnedWorkspaceRoster, LegacyWorkspaceAgentFact, WorkspaceCreationFact, type OwnedWorkspaceRoster } from '../workspaces.js';
+import { createOwnedWorkspaceRoster, LegacyWorkspaceAgentFact, WorkspaceCreationFact, type OwnedWorkspaceRoster, type OwnedWorkspaceRecord } from '../workspaces.js';
 import type { EvidenceStore } from '../evidence.js';
 import { FixtureError } from './lifecycle.js';
 
@@ -21,6 +21,7 @@ export interface WorkspaceRecordPorts {
 export class HostWorkspaceRecords {
  private readonly created=new Map<string,{workspaceId:string;repo:string;commonDir:string;store:WorkspaceStoreIdentity}>();
  constructor(private readonly ports:WorkspaceRecordPorts){}
+ has(workspaceId:string){return this.created.has(workspaceId);}
  async workspace(workspaceId:string,signal:AbortSignal){
   const record=this.created.get(workspaceId);check(record);await this.requireStore(record!.store,signal);
   const response=await this.ports.read(workspaceId,'workspace',signal);check(response.status===200);
@@ -46,17 +47,18 @@ export class HostWorkspaceRecords {
   this.created.set(workspaceId,Object.freeze({workspaceId,repo,commonDir,store:Object.freeze({...before})}));
   return repo;
  }
- async roster(owner:FixtureAuthorityOwner,store:EvidenceStore,signal:AbortSignal):Promise<OwnedWorkspaceRoster>{
-  check(this.created.size>0);const records=[];
-  for(const record of this.created.values()){
-   await this.requireStore(record.store,signal);
+ async creationRecord(owner:FixtureAuthorityOwner,workspaceId:string,store:EvidenceStore,signal:AbortSignal):Promise<OwnedWorkspaceRecord>{
+   const record=await this.workspace(workspaceId,signal);
    const fact=WorkspaceCreationFact.parse({kind:'workspace-created',...fixtureOwnerIdentity(owner),identityKind:'legacy-agent-name',
     workspaceId:record.workspaceId,repo:record.repo,commonDir:record.commonDir,...record.store,agentIds:[]});
    const receipt=await store.retain(JSON.stringify(fact));
-   records.push({identityKind:fact.identityKind,workspaceId:fact.workspaceId,repo:fact.repo,commonDir:fact.commonDir,
-    storeId:fact.storeId,storeGeneration:fact.storeGeneration,agentIds:[],creationReceipt:receipt});
-  }
-  return createOwnedWorkspaceRoster(owner,records,store);
+   return {identityKind:fact.identityKind,workspaceId:fact.workspaceId,repo:fact.repo,commonDir:fact.commonDir,
+    storeId:fact.storeId,storeGeneration:fact.storeGeneration,agentIds:[],enrollmentReceipts:[],creationReceipt:receipt};
+ }
+ async roster(owner:FixtureAuthorityOwner,store:EvidenceStore,signal:AbortSignal):Promise<OwnedWorkspaceRoster>{
+  check(this.created.size>0);const records=[];
+  for(const record of this.created.values())records.push(await this.creationRecord(owner,record.workspaceId,store,signal));
+  return createOwnedWorkspaceRoster(owner,records.map(record=>({...record,agentIds:[...record.agentIds],enrollmentReceipts:[...record.enrollmentReceipts]})),store);
  }
  async legacyAgent(owner:FixtureAuthorityOwner,workspaceId:string,name:string,signal:AbortSignal){
   const record=await this.workspace(workspaceId,signal);
