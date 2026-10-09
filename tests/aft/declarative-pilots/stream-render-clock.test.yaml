@@ -290,6 +290,22 @@ tests:
                     binding: leadId
                 - literal: agt_
         intent: Bind this journey to the actual saved Lead ID and repo
+      - capture:
+          source: url
+          view: pathname
+          as: leadExactPath
+        intent: Require the exact captured Lead Chat pathname
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadExactPath
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require the exact captured Lead Chat pathname
       - capability:
           request:
             id: loom.agent.bind

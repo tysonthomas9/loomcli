@@ -871,7 +871,7 @@
     "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
   },
   "currentPublication": {
-    "at": "2026-10-09T14:46:38.904469+00:00",
+    "at": "2026-10-09T15:01:35.034386+00:00",
     "status": "in-progress reviewable draft; not preservation-complete",
     "taskNoteId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
     "branch": "codex/aft-declarative-pilots",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "ebd007ca1b99e2cf3b6cc359f4216ccb464cfcae31adf05567fcb8535650a6ad"
+        "sha256": "663620b871661ad36322eebbb6a0258e0eee9c23caaa3cc808bd42bbfc5ccdc0"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -903,7 +903,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d"
+        "sha256": "6e2acb37cf18d077a661c5762cf5223d86304d300c536c18ef6bc8fe7c241247"
       }
     ],
     "rawPilots": {
@@ -914,20 +914,19 @@
         "count": 699,
         "errors": 0,
         "credit": "individual schema only",
-        "scope": "Historical699 steps before new4geometry; new fullchild loader admitted on isolatedfc67 only. No revised699total claimed."
+        "scope": "Historical699 steps before new4geometry+2pathname; no revised699schema-only count claimed. Currentstatic bodytotal664; fullchangedvisual andpriorchild rawadmission recorded separately."
       },
       "latestFullLoaderAttempt": {
         "engine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
         "wholeEngineHeadApproved": true,
         "adapterSource": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
-        "scope": "Only current changed child raw suite",
+        "scope": "Changed visual raw6e2acb37 only in this receipt; prior current childca73 receipt retained separately",
         "fullAdmissionPassed": 1,
-        "other4RawByteUnchangedHistorical584Admissions": 4,
-        "other4CurrentCa73Admission": "unrun/not claimed",
         "effects": 0,
         "runtimeStarted": 0,
-        "receipt": "acceptedCa73ChildAdmission",
-        "selectionBasis": "NEW098ab currentfive/perversionactualpin/publicenv; no historical recovery"
+        "receipt": "visualExactClaimPathAuthoring.admission",
+        "selectionBasis": "NEW60261776 currentfive/perversionactualpin/publicenv; not originalhistoricalrecovery",
+        "other4CurrentCa73Admission": "Currentchild priorca73admitted; Files/Stop/SSE unchanged historical584 only here"
       },
       "approvedCoherentConsumer": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
       "f377PilotChecksObtained": true,
@@ -946,10 +945,10 @@
       "unrelatedBranchesOrCases": 360,
       "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35;Visual boundary57+pacing46+render41+reasoning39+suitehook7+clipboard8+hover15+common13+arrival5.493staticselectedextractedrecords,219selftests/negative,360unrelated-excluded;156supplementalsourcegroupsuncovered. Noextractedbranch-unresolvedrecordsleft,butlogicalpredicate cardinality/dynamic/imported/provisioning/fulloriginalindex unresolved;not fullpreservation."
     },
-    "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
+    "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored. Visualclaim exact capturedpathname concat guard authored and fullraw admitted; not source atomiccallback/runtime proof.",
     "blockedCases": [
       "Current changed child f172 raw admitted on acceptedca73/8dd; original four mobile contexts/real actors/source predicates remain unpreserved,source step27 unresolved.",
-      "Four other unchanged raw pilots retain historical584/f377 admission only; all five public runtime chains/provisioning/source preservation remain unverified.",
+      "Current changedvisual6e2a andchildf172 each admitted separately on acceptedca73/8dd; Files/Stop/SSE retain unchanged historical584/f377 admission only. All five public runtime chains/provisioning/source preservation remain unverified.",
       "Files repeated identity predicates and exact helper branch denominator uncovered",
       "Stop whole30s chain bound, tool trim/failed normalization, Respond no-request history, recovery correlation and native desc-assistant/first-truthy/full200-prefix uncovered",
       "child synchronous pre-Send/reactivation/native/source predicates require final reviewed ledger and provisioning",
@@ -3959,5 +3958,264 @@
       }
     ],
     "acceptance": "18selectedrecords narrowed,1otherbranch excluded onlyforstaticfreshselectedrender case;13sourcegroups uncovered. Sourcehelpers runtimecallers corrected beyond installationstep2,not lost. All extractedbranch records now classified but 493candidate records are NOT fulllogicalpredicate denominator or preservation proof; dynamic/imported/provisioning/fulloriginalindex remain unresolved."
+  },
+  "visualExactClaimPathAuthoring": {
+    "at": "2026-10-09T15:01:35.034280+00:00",
+    "sourceBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+    "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+    "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+    "sourceLines": [
+      133,
+      134,
+      135
+    ],
+    "callerOldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/10",
+    "oldRawSha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d",
+    "rawSha256": "6e2acb37cf18d077a661c5762cf5223d86304d300c536c18ef6bc8fe7c241247",
+    "newDestination": [
+      {
+        "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          25
+        ],
+        "line": 293
+      },
+      {
+        "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          26
+        ],
+        "line": 298
+      }
+    ],
+    "unchangedIdentityDestinations": [
+      {
+        "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          21
+        ],
+        "line": 240
+      },
+      {
+        "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          22
+        ],
+        "line": 245
+      },
+      {
+        "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          23
+        ],
+        "line": 273
+      },
+      {
+        "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+        "path": [
+          "tests",
+          0,
+          "steps",
+          24
+        ],
+        "line": 280
+      }
+    ],
+    "coverage": "authored-unvalidated",
+    "preservationAccepted": false,
+    "runtimeExecuted": 0,
+    "limits": "Checks entire actual pathname against captured ID; existing Agent row/identity facts remain. Separate earlier path-segments and pathname captures are fail-closed on a changing route but not original atomic callback proof. Other repeated current-path calls, provisioning, screenshots and deadline ownership remain unverified.",
+    "mapRelocated": 97,
+    "receiptPending": false,
+    "evidenceClass": "compiler/full raw admission only; source subset authored/runtime unverified",
+    "admission": {
+      "purpose": "Accepted ca73 changed visual exact claim pathname raw admission only; no source preservation/runtime/capacity claim",
+      "engineHead": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+      "adapterSource": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+      "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/tests/aft/adapter",
+      "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+      "canonicalModuleResolutionVerified": true,
+      "selectionSha256": "60261776ab1f766da0f1c1aad2fbb7215c35179ebcb58209517963dae6e51a1f",
+      "envFileSha256": "829199b36acb0f1313b12324e87d86c543a5f31f7a2fdbbd7dec4e3d50ed7535",
+      "envSha256": "61554a813a33895f1ace9564cb43765da7b565e8f5368089d03d5c308eebc0ce",
+      "pinSha256": "034f8a8ed608ca08dc611fc1466fd3b7343872e59794c1790e1b5544428ebda2",
+      "manifestFiles": 2383,
+      "uniqueManifestBytes": 9078843,
+      "providers": 23,
+      "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+      "rawSha256": "6e2acb37cf18d077a661c5762cf5223d86304d300c536c18ef6bc8fe7c241247",
+      "rawBytes": 30227,
+      "verifyCalls": 109,
+      "verifyReads": 2383,
+      "verifyBytes": 9078843,
+      "verifyMs": 838.9794979999997,
+      "elapsedMs": 890.504625,
+      "effects": 0,
+      "runtimeStarted": 0,
+      "status": "ADMITTED canonical unchanged raw suite",
+      "guardMs": 60000,
+      "loadedSuites": 1,
+      "cases": [
+        {
+          "name": "real repo reply renders markdown tools motion and copy after reload",
+          "skipped": true,
+          "declaredSteps": 99
+        }
+      ],
+      "rawUnchangedAfter": true
+    },
+    "mappingIntegrity": {
+      "purpose": "Source mapping integrity and exact two-step insertion; not full predicate preservation",
+      "checkedYamlLocations": 741,
+      "originalStepRecords": 207,
+      "helperPredicateRecords": 1072,
+      "classifications": {
+        "selected-invocation-predicate-reachable": 440,
+        "unrelated-to-static-selected-call-closure": 334,
+        "helper-selftest-negative-requirement": 219,
+        "excluded-static-selected-invocation-branch": 22,
+        "selected-invocation-predicate-conditionally-reachable": 53,
+        "unrelated-external-helper-case": 4
+      },
+      "staticCases": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "profile": "declarative",
+          "cases": [
+            {
+              "name": "GF1 UI editor Save updates this Agent API checkout and survives every tab reload",
+              "skipped": true,
+              "bodySteps": 229
+            }
+          ]
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "profile": "declarative",
+          "cases": [
+            {
+              "name": "OC1 bare Chat Stop loses the native ask without executing it and permits a real next turn",
+              "skipped": true,
+              "bodySteps": 120
+            }
+          ]
+        },
+        {
+          "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+          "profile": "declarative",
+          "cases": [
+            {
+              "name": "repeated child attempts keep two keyed results and one final Lead summary",
+              "skipped": true,
+              "bodySteps": 105
+            }
+          ]
+        },
+        {
+          "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+          "profile": "declarative",
+          "cases": [
+            {
+              "name": "real repo reply renders markdown tools motion and copy after reload",
+              "skipped": true,
+              "bodySteps": 99
+            }
+          ]
+        },
+        {
+          "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
+          "profile": "declarative",
+          "cases": [
+            {
+              "name": "LIVE filtered SSE cursor reconnect matches paged events and full delivered text",
+              "skipped": true,
+              "bodySteps": 111
+            }
+          ]
+        }
+      ],
+      "oldBodySteps": 97,
+      "newBodySteps": 99,
+      "originalStepsPreservedAfterRemovingTwoNewSteps": true,
+      "namedScreenshotsUnchanged": true,
+      "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+      "fullPreservationAccepted": false,
+      "runtimeExecuted": 0
+    },
+    "artifacts": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/accepted-ca73-public-env.json",
+        "sha256": "829199b36acb0f1313b12324e87d86c543a5f31f7a2fdbbd7dec4e3d50ed7535",
+        "bytes": 442303
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/check-map.mjs",
+        "sha256": "7ef8cbe4d2f35bc329fcaab72c044ff954f2ec7d79f1b634675e31b62cf1a99d",
+        "bytes": 3411
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/construct-public-env.mjs",
+        "sha256": "1e2f78078974e4fc7761738b19e7da00526161aa6313fdb87e79ed930c615f46",
+        "bytes": 1723
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/diagnostic-selection.json",
+        "sha256": "60261776ab1f766da0f1c1aad2fbb7215c35179ebcb58209517963dae6e51a1f",
+        "bytes": 1910
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/installed-engine-byte-recheck.json",
+        "sha256": "513506d2fddcf981d9c98cfa6989c6dfdb349043850efa84cd1c150db2ab144c",
+        "bytes": 25717
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/mapping-integrity-receipt.json",
+        "sha256": "b0ce70041f7a792547b3c91e54e4ec2d383afa691d2334189034fba9515ccee3",
+        "bytes": 2427
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/public-env-basis.json",
+        "sha256": "f01a4656e81bba59f8b339b820f6ce9de99b337a2bb1e922a18ce6537a77ac3e",
+        "bytes": 1249
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/raw-compatibility.mjs",
+        "sha256": "b150ccdcd6afeae0d621f34f5f7f51a8eeef449c24d30bcf1d2f4ab6231766fb",
+        "bytes": 4169
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/update-map.mjs",
+        "sha256": "b8cd0ca0f7ec9c55baf2f9e0cfe9d000d5ebaa3f12a7695e30d07680b8626c17",
+        "bytes": 4167
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-exact-claim-route-20261009/visual-admission-receipt.json",
+        "sha256": "56d178ed04a56baf859d42053946e431711512e229e098f0256e0a60a52fc79f",
+        "bytes": 1695
+      }
+    ],
+    "checks": [
+      "Actual canonical loadSuiteFiles requiredProfile declarative: changed visual raw99steps admitted with owning accepted8dd/ca73 registry,23providers2383files,0effects",
+      "All116 installed engine emitted hashes match immutable acceptedca73 receipt",
+      "All741 stored YAML source locations resolve to their current actual CST lines; all207 original step records and1072 statichelper records retained",
+      "Removing exactly2new visual steps reproduces prior fullbody byte-independent YAML structure; screenshots unchanged; all5skip:true",
+      "No public runFiles/browser/driver/provider/native/container or paid runtime exercised"
+    ],
+    "remaining": "Full claim single-callback/captured-file identity and caller-bound runtime negative cases, every repeated current-path check and source helper predicates remain open. Admission does not prove assertion truth/preservation."
   }
 }

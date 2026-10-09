@@ -15105,7 +15105,7 @@
           },
           "original": {
             "wait": {
-              "fn": "(() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));\n  return row?.getAttribute('data-tray-row') && row.textContent?.includes(' \u00b7 ') &&\n    row.textContent?.match(/(\u25b8|\ud83d\udcad)/); })()"
+              "fn": "(() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));\n  return row?.getAttribute('data-tray-row') && row.textContent?.includes(' · ') &&\n    row.textContent?.match(/(▸|💭)/); })()"
             },
             "intent": "Screenshot the running child's current harmless tool or reasoning step and elapsed time (DF2)"
           },
@@ -15144,7 +15144,7 @@
             "end_line": 105
           },
           "original": {
-            "run": "set -eu\nid=\"$(cat \"$AFT_WORK_DIR/coverage-children-activity/repeat.id\")\"\nagent-browser --session \"$AFT_SESSION\" wait --fn \"(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\\\"$id\\\"]'); const running=row?.querySelector('[data-status=running]'); const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim() || ''; const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(\u25b8|\ud83d\udcad)/.test(result) && /[0-9]+m [0-9][0-9]s$/.test(elapsed); })()\"\nagent-browser --session \"$AFT_SESSION\" screenshot \"$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png\"\npython3 \"$AFT_TESTS_DIR/scripts/coverage-children-activity.py\" activity repeat\n",
+            "run": "set -eu\nid=\"$(cat \"$AFT_WORK_DIR/coverage-children-activity/repeat.id\")\"\nagent-browser --session \"$AFT_SESSION\" wait --fn \"(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\\\"$id\\\"]'); const running=row?.querySelector('[data-status=running]'); const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim() || ''; const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(▸|💭)/.test(result) && /[0-9]+m [0-9][0-9]s$/.test(elapsed); })()\"\nagent-browser --session \"$AFT_SESSION\" screenshot \"$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png\"\npython3 \"$AFT_TESTS_DIR/scripts/coverage-children-activity.py\" activity repeat\n",
             "intent": "Match the exact visible child row and its current step to a saved event in that same running turn"
           },
           "coverage": "unresolved",
@@ -16530,8 +16530,8 @@
                 },
                 "acceptance": "Source branch/caller only; coverage unresolved, no YAML/admission/runtime/preservation credit.",
                 "perInvocationConditions": {
-                  "16/20": "Only actual observed Working fallback",
                   "27": "Lead+child mandatory; diagnostic extra reads only on source failure branches",
+                  "16/20": "Only actual observed Working fallback",
                   "teardown": "Every captured .id final history; more rejects"
                 }
               }
@@ -20815,9 +20815,9 @@
               "source": {
                 "line": 1087,
                 "end_line": 1087,
-                "expression": "re.match('^(\u25b8|\ud83d\udcad)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
+                "expression": "re.match('^(▸|💭)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
                 "message": null,
-                "source": "assert re.match(r\"^(\u25b8|\ud83d\udcad)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
+                "source": "assert re.match(r\"^(▸|💭)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
                 "function": "reactivation_checkpoint_ok",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -20826,8 +20826,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "re.match('^(\u25b8|\ud83d\udcad)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
-                "evidence": "assert re.match(r\"^(\u25b8|\ud83d\udcad)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
+                "required": "re.match('^(▸|💭)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
+                "evidence": "assert re.match(r\"^(▸|💭)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
                 "sourceHelper": "tests/aft/scripts/coverage-children-activity.py",
                 "sourceLine": 1087,
                 "sourceFunction": "reactivation_checkpoint_ok",
@@ -22586,7 +22586,7 @@
                   "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/20"
                 ],
                 "sourceReason": "Fresh/reconnect fallback diagnostic may be unobserved; exact source only queries saved steps/asserts none and named screenshot when actual observed gate true",
-                "condition": "Actual API stateactive/nonemptyrunningTurn AND exact child DOM ID/running row/result Working\u2026; only then assert no current-turn saved step_prefix. Otherwise record observedfalse without coverage.",
+                "condition": "Actual API stateactive/nonemptyrunningTurn AND exact child DOM ID/running row/result Working…; only then assert no current-turn saved step_prefix. Otherwise record observedfalse without coverage.",
                 "bounds": {
                   "originalCallerMs": 30000,
                   "individualAgentApiRequestMs": 15000
@@ -25574,7 +25574,7 @@
             "sourceLines": {
               "start": 444,
               "end": 454,
-              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const markers=Array.from(document.querySelectorAll('[data-testid=started-marker]'));\n      const links=markers.flatMap(m=>Array.from(m.querySelectorAll('a[href]')));\n      const ids=links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''));\n      const names=links.map(a=>a.lastChild?.textContent?.trim()||'');\n      const colors=links.map(a=>a.querySelector('[data-agent-color]')?.getAttribute('data-agent-color')||'');\n      const toolCount=markers.reduce((n,m)=>n+Number(/^([0-9]+) tool calls?$/.exec(m.querySelector('button[aria-expanded]')?.textContent?.trim().replace(/\u203a/g,'').trim()||'')?.[1]||0),0);\n      return {markerCount:markers.length,ids,names,colors,toolCount,\n        rawCode:markers.some(m=>/\\\\{\\\\s*[\"'](?:name|brief|agent_id)[\"']\\\\s*:|tools\\\\.loom\\\\.agent_create\\\\s*\\\\(/.test(m.textContent||'')),\n        expanded:markers.map(m=>m.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')||'')};\n    })())\"\"\")"
+              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const markers=Array.from(document.querySelectorAll('[data-testid=started-marker]'));\n      const links=markers.flatMap(m=>Array.from(m.querySelectorAll('a[href]')));\n      const ids=links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''));\n      const names=links.map(a=>a.lastChild?.textContent?.trim()||'');\n      const colors=links.map(a=>a.querySelector('[data-agent-color]')?.getAttribute('data-agent-color')||'');\n      const toolCount=markers.reduce((n,m)=>n+Number(/^([0-9]+) tool calls?$/.exec(m.querySelector('button[aria-expanded]')?.textContent?.trim().replace(/›/g,'').trim()||'')?.[1]||0),0);\n      return {markerCount:markers.length,ids,names,colors,toolCount,\n        rawCode:markers.some(m=>/\\\\{\\\\s*[\"'](?:name|brief|agent_id)[\"']\\\\s*:|tools\\\\.loom\\\\.agent_create\\\\s*\\\\(/.test(m.textContent||'')),\n        expanded:markers.map(m=>m.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')||'')};\n    })())\"\"\")"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/15",
@@ -25584,7 +25584,7 @@
             "destination": [],
             "gap": {
               "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
-              "required": "All actual Started markers/links:decoded last href part,lastChild trimmed name,actual color; tool-call count regex after removing \u203a/trim;rawCode includes quoted name/brief/agent_id JSON OR tools.loom.agent_create(. Preserve all markers/links and measured expansion attrs.",
+              "required": "All actual Started markers/links:decoded last href part,lastChild trimmed name,actual color; tool-call count regex after removing ›/trim;rawCode includes quoted name/brief/agent_id JSON OR tools.loom.agent_create(. Preserve all markers/links and measured expansion attrs.",
               "canonicalAttempt": "Canonicalc71 CaptureSchema supports actual DOM text/attributes/rect/computed-style/focused observations and typed actions; exact closed composition/selection/source-data parsing not authored for this group. No provider scenario assertion or missing primitive inferred.",
               "missingObservation": "Actual selected DOM/geometry/styles/actor effects +same source/saved context and exact pure source projection must be bound and compared in YAML; no expected facts or generic eval fallback."
             }
@@ -25723,7 +25723,7 @@
             "sourceLines": {
               "start": 543,
               "end": 556,
-              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const id=%s;\n      const row=document.querySelector('[data-testid=agent-tray] li[data-tray-row=\"'+id+'\"]');\n      return {id:row?.dataset.trayRow||'',running:!!row?.querySelector('[data-status=running]'),\n        result:row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim()||''};\n    })())\"\"\" % json.dumps(child[\"agent_id\"]))\n    observed = (live[\"state\"] == \"active\" and bool(live[\"running_turn_id\"]) and\n                shot[\"id\"] == child[\"agent_id\"] and shot[\"running\"] and shot[\"result\"] == \"Working\u2026\")\n    if observed:\n        current_steps = [e for e in events(child[\"agent_id\"]) if e.get(\"turn_id\") == live[\"running_turn_id\"] and step_prefix(e)]\n        assert not current_steps, \"Working fallback shown despite a saved current-turn step\"\n        browser(\"screenshot\", str(OUT / f\"working-{stage}-{child_label}.png\"))\n    save(f\"working-{stage}-{child_label}\", {\"observed\": observed, \"api_state\": live[\"state\"],\n                                               \"turn_id\": live[\"running_turn_id\"], \"ui\": shot})"
+              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const id=%s;\n      const row=document.querySelector('[data-testid=agent-tray] li[data-tray-row=\"'+id+'\"]');\n      return {id:row?.dataset.trayRow||'',running:!!row?.querySelector('[data-status=running]'),\n        result:row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim()||''};\n    })())\"\"\" % json.dumps(child[\"agent_id\"]))\n    observed = (live[\"state\"] == \"active\" and bool(live[\"running_turn_id\"]) and\n                shot[\"id\"] == child[\"agent_id\"] and shot[\"running\"] and shot[\"result\"] == \"Working…\")\n    if observed:\n        current_steps = [e for e in events(child[\"agent_id\"]) if e.get(\"turn_id\") == live[\"running_turn_id\"] and step_prefix(e)]\n        assert not current_steps, \"Working fallback shown despite a saved current-turn step\"\n        browser(\"screenshot\", str(OUT / f\"working-{stage}-{child_label}.png\"))\n    save(f\"working-{stage}-{child_label}\", {\"observed\": observed, \"api_state\": live[\"state\"],\n                                               \"turn_id\": live[\"running_turn_id\"], \"ui\": shot})"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/16",
@@ -25733,7 +25733,7 @@
             "destination": [],
             "gap": {
               "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
-              "required": "APIactive/nonempty runningturn,exact DOM childid/running/result Working\u2026 define observed;whenfalse no event-step assertion and no working screenshot,only honest diagnostic;whentrue fresh same-turn saved step_prefix set mustempty,working-fresh-repeat.png orworking-reconnect-repeat.png.",
+              "required": "APIactive/nonempty runningturn,exact DOM childid/running/result Working… define observed;whenfalse no event-step assertion and no working screenshot,only honest diagnostic;whentrue fresh same-turn saved step_prefix set mustempty,working-fresh-repeat.png orworking-reconnect-repeat.png.",
               "canonicalAttempt": "Canonicalc71 CaptureSchema supports actual DOM text/attributes/rect/computed-style/focused observations and typed actions; exact closed composition/selection/source-data parsing not authored for this group. No provider scenario assertion or missing primitive inferred.",
               "missingObservation": "Actual selected DOM/geometry/styles/actor effects +same source/saved context and exact pure source projection must be bound and compared in YAML; no expected facts or generic eval fallback."
             }
@@ -25745,7 +25745,7 @@
             "sourceLines": {
               "start": 302,
               "end": 348,
-              "text": "def js_truncate(value, limit):\n    \"\"\"Match the tray's UTF-16 slice and ellipsis limit.\"\"\"\n    units = value.encode(\"utf-16-le\", \"surrogatepass\")\n    return value if len(units) // 2 <= limit else \\\n        units[:(limit - 1) * 2].decode(\"utf-16-le\", \"surrogatepass\") + \"\u2026\"\n\n\ndef reasoning_first_line(text):\n    \"\"\"Mirror AgentChat timelineRows.firstLine for the saved reasoning title.\"\"\"\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\", 1)[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    return js_truncate(line.strip(), 120)\n\n\ndef step_prefix(event):\n    payload = event[\"payload\"]\n    if event[\"kind\"] != \"item.completed\":\n        return None\n    if payload.get(\"itemKind\") == \"reasoning\":\n        line = reasoning_first_line(payload.get(\"text\") or \"\")\n        if not line:\n            return None\n        return js_truncate(f\"\ud83d\udcad Thinking \u00b7 {line}\", 60)\n    if payload.get(\"itemKind\") != \"tool\":\n        return None\n    name = (payload.get(\"tool\") or {}).get(\"name\", \"\").strip()\n    short = name.split(\"/\")[-1]\n    if re.search(r\"(?:^|[^a-z])execute$\", name, re.I):\n        action = \"Ran code\"\n    elif re.fullmatch(r\"read|view|cat|read_?file|notebook_?read|image_?view\", short, re.I):\n        action = \"Read file\"\n    elif re.fullmatch(r\"edit|write|multi_?edit|patch|apply_?patch|str_?replace\\w*|notebook_?edit|create_?file\", short, re.I):\n        action = \"Changed file\"\n    elif re.fullmatch(r\"bash|shell|command|exec(_?command)?|terminal|run\\w*\", short, re.I):\n        action = \"Ran command\"\n    elif re.fullmatch(r\"grep|glob|find|ls|list|codesearch|search_?code|rg\", short, re.I):\n        action = \"Searched code\"\n    elif re.fullmatch(r\"web_?search|web_?fetch|fetch|browse\", short, re.I):\n        action = \"Searched the web\"\n    else:\n        action = name[:1].upper() + name[1:] if name else \"Tool call\"\n    label = f\"\u25b8 {action}\"\n    return f\"{label[:59]}\u2026\" if len(label) > 60 else label"
+              "text": "def js_truncate(value, limit):\n    \"\"\"Match the tray's UTF-16 slice and ellipsis limit.\"\"\"\n    units = value.encode(\"utf-16-le\", \"surrogatepass\")\n    return value if len(units) // 2 <= limit else \\\n        units[:(limit - 1) * 2].decode(\"utf-16-le\", \"surrogatepass\") + \"…\"\n\n\ndef reasoning_first_line(text):\n    \"\"\"Mirror AgentChat timelineRows.firstLine for the saved reasoning title.\"\"\"\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\", 1)[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    return js_truncate(line.strip(), 120)\n\n\ndef step_prefix(event):\n    payload = event[\"payload\"]\n    if event[\"kind\"] != \"item.completed\":\n        return None\n    if payload.get(\"itemKind\") == \"reasoning\":\n        line = reasoning_first_line(payload.get(\"text\") or \"\")\n        if not line:\n            return None\n        return js_truncate(f\"💭 Thinking · {line}\", 60)\n    if payload.get(\"itemKind\") != \"tool\":\n        return None\n    name = (payload.get(\"tool\") or {}).get(\"name\", \"\").strip()\n    short = name.split(\"/\")[-1]\n    if re.search(r\"(?:^|[^a-z])execute$\", name, re.I):\n        action = \"Ran code\"\n    elif re.fullmatch(r\"read|view|cat|read_?file|notebook_?read|image_?view\", short, re.I):\n        action = \"Read file\"\n    elif re.fullmatch(r\"edit|write|multi_?edit|patch|apply_?patch|str_?replace\\w*|notebook_?edit|create_?file\", short, re.I):\n        action = \"Changed file\"\n    elif re.fullmatch(r\"bash|shell|command|exec(_?command)?|terminal|run\\w*\", short, re.I):\n        action = \"Ran command\"\n    elif re.fullmatch(r\"grep|glob|find|ls|list|codesearch|search_?code|rg\", short, re.I):\n        action = \"Searched code\"\n    elif re.fullmatch(r\"web_?search|web_?fetch|fetch|browse\", short, re.I):\n        action = \"Searched the web\"\n    else:\n        action = name[:1].upper() + name[1:] if name else \"Tool call\"\n    label = f\"▸ {action}\"\n    return f\"{label[:59]}…\" if len(label) > 60 else label"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/16",
@@ -25790,7 +25790,7 @@
             "sourceLines": {
               "start": 361,
               "end": 371,
-              "text": "def visible_step(child_id, prefix):\n    script = \"\"\"(() => {\n      const id = %s, prefix = %s;\n      const row = Array.from(document.querySelectorAll('[data-testid=agent-tray] [data-tray-row]'))\n        .find(x => x.dataset.trayRow === id);\n      const line = row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim() || '';\n      return !!row?.getClientRects().length && line.startsWith(prefix) &&\n        (line.length === prefix.length || line.slice(prefix.length).startsWith(' \u00b7 '));\n    })()\"\"\" % (json.dumps(child_id), json.dumps(prefix))\n    output = subprocess.check_output([\"agent-browser\", \"--session\", os.environ[\"AFT_SESSION\"], \"eval\", script], text=True)\n    return bool(re.search(r\"\\btrue\\s*$\", output))"
+              "text": "def visible_step(child_id, prefix):\n    script = \"\"\"(() => {\n      const id = %s, prefix = %s;\n      const row = Array.from(document.querySelectorAll('[data-testid=agent-tray] [data-tray-row]'))\n        .find(x => x.dataset.trayRow === id);\n      const line = row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim() || '';\n      return !!row?.getClientRects().length && line.startsWith(prefix) &&\n        (line.length === prefix.length || line.slice(prefix.length).startsWith(' · '));\n    })()\"\"\" % (json.dumps(child_id), json.dumps(prefix))\n    output = subprocess.check_output([\"agent-browser\", \"--session\", os.environ[\"AFT_SESSION\"], \"eval\", script], text=True)\n    return bool(re.search(r\"\\btrue\\s*$\", output))"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/26"
@@ -26288,7 +26288,7 @@
             "sourceLines": {
               "start": 921,
               "end": 964,
-              "text": "    geometry = browser_json(\"\"\"JSON.stringify((() => {\n      const id = %s;\n      const tray = document.querySelector('[data-testid=agent-tray]');\n      const header = tray?.querySelector('button[aria-expanded]');\n      const list = tray?.querySelector('ul');\n      const rows = Array.from(list?.querySelectorAll('li[data-tray-row]') || []);\n      const composer = document.querySelector('section[aria-label=\"Agent chat\"] form[data-chat-composer-form]');\n      const nav = document.querySelector('nav[aria-label=\"Primary\"]');\n      if (!tray || !header || !list || !composer || !nav) return {missing:true};\n      const box = el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };\n      const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);\n      const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));\n      const child = rows.find(row => row.dataset.trayRow === id);\n      const childRunning = !!child?.querySelector('[data-status=running]');\n      const childBox = child && box(child);\n      const childWhole = !!childBox && childBox.left >= clip.left-1 && childBox.right <= clip.right+1 &&\n        childBox.top >= clip.top-1 && childBox.bottom <= clip.bottom+1;\n      const hit = el => {\n        if (!el) return {x:null,y:null,hit:false,target:null};\n        const r=el.getBoundingClientRect(), x=(r.left+r.right)/2, y=(r.top+r.bottom)/2;\n        const target=document.elementFromPoint(x,y);\n        return {x,y,hit:!!target && (target===el || el.contains(target)),target:target?.tagName || null};\n      };\n      const headerHit = hit(header), childLinkHit = hit(child?.querySelector('a[href]'));\n      const visible = rowBoxes.filter(row => row.bottom > clip.top && row.top < clip.bottom);\n      const partial = visible.filter(row => row.top < clip.top-1 || row.bottom > clip.bottom+1);\n      const hidden = rowBoxes.filter(row => row.bottom <= clip.top || row.top >= clip.bottom);\n      const moreText = Array.from(tray.querySelectorAll('div[aria-hidden=true]'))\n        .find(x => /\u2193 [0-9]+ more/.test(x.textContent || ''))?.textContent || '';\n      const moreCount = Number(/([0-9]+) more/.exec(moreText)?.[1] || 0);\n      return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,\n        navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',\n        childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',\n        headerColors:Array.from(header.querySelectorAll('[data-agent-color]')).map(x=>x.dataset.agentColor),\n        rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,\n        childWhole,childRunning,headerHit,childLinkHit,\n        partialRows:partial.length,hiddenRows:hidden.length,moreCount,\n        horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,\n          tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,\n          ...rowBoxes.map(row=>Math.max(clip.left-row.left,row.right-clip.right))),\n        maxControlBottom:Math.max(header.getBoundingClientRect().bottom,...visible.map(row=>row.bottom)),\n        composerTop:composerBox.top,composerBottom:composerBox.bottom,navTop:navBox.top,\n        tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};\n    })())\"\"\" % json.dumps(child_id))"
+              "text": "    geometry = browser_json(\"\"\"JSON.stringify((() => {\n      const id = %s;\n      const tray = document.querySelector('[data-testid=agent-tray]');\n      const header = tray?.querySelector('button[aria-expanded]');\n      const list = tray?.querySelector('ul');\n      const rows = Array.from(list?.querySelectorAll('li[data-tray-row]') || []);\n      const composer = document.querySelector('section[aria-label=\"Agent chat\"] form[data-chat-composer-form]');\n      const nav = document.querySelector('nav[aria-label=\"Primary\"]');\n      if (!tray || !header || !list || !composer || !nav) return {missing:true};\n      const box = el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };\n      const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);\n      const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));\n      const child = rows.find(row => row.dataset.trayRow === id);\n      const childRunning = !!child?.querySelector('[data-status=running]');\n      const childBox = child && box(child);\n      const childWhole = !!childBox && childBox.left >= clip.left-1 && childBox.right <= clip.right+1 &&\n        childBox.top >= clip.top-1 && childBox.bottom <= clip.bottom+1;\n      const hit = el => {\n        if (!el) return {x:null,y:null,hit:false,target:null};\n        const r=el.getBoundingClientRect(), x=(r.left+r.right)/2, y=(r.top+r.bottom)/2;\n        const target=document.elementFromPoint(x,y);\n        return {x,y,hit:!!target && (target===el || el.contains(target)),target:target?.tagName || null};\n      };\n      const headerHit = hit(header), childLinkHit = hit(child?.querySelector('a[href]'));\n      const visible = rowBoxes.filter(row => row.bottom > clip.top && row.top < clip.bottom);\n      const partial = visible.filter(row => row.top < clip.top-1 || row.bottom > clip.bottom+1);\n      const hidden = rowBoxes.filter(row => row.bottom <= clip.top || row.top >= clip.bottom);\n      const moreText = Array.from(tray.querySelectorAll('div[aria-hidden=true]'))\n        .find(x => /↓ [0-9]+ more/.test(x.textContent || ''))?.textContent || '';\n      const moreCount = Number(/([0-9]+) more/.exec(moreText)?.[1] || 0);\n      return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,\n        navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',\n        childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',\n        headerColors:Array.from(header.querySelectorAll('[data-agent-color]')).map(x=>x.dataset.agentColor),\n        rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,\n        childWhole,childRunning,headerHit,childLinkHit,\n        partialRows:partial.length,hiddenRows:hidden.length,moreCount,\n        horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,\n          tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,\n          ...rowBoxes.map(row=>Math.max(clip.left-row.left,row.right-clip.right))),\n        maxControlBottom:Math.max(header.getBoundingClientRect().bottom,...visible.map(row=>row.bottom)),\n        composerTop:composerBox.top,composerBottom:composerBox.bottom,navTop:navBox.top,\n        tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};\n    })())\"\"\" % json.dumps(child_id))"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
@@ -26769,7 +26769,7 @@
             "sourceLines": {
               "start": 1018,
               "end": 1041,
-              "text": "        const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim()||'';\n        const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim()||'';\n        const group=Array.from(document.querySelectorAll('nav[aria-label=Agents] [role=group]'))\n          .find(x=>x.getAttribute('aria-label')===parentName+' children');\n        const links=Array.from(document.querySelectorAll('nav[aria-label=Agents] a[href]'))\n          .filter(x=>x.getAttribute('href')===childRoute);\n        const link=links[0];\n        const avatar=link?.querySelector('[data-agent-color][data-dot]');\n        const nested=!!group && !!link && group.contains(link);\n        if(rows.filter(r=>r.dataset.trayRow===id).length!==1 || !row?.getClientRects().length ||\n           !row.textContent?.includes(name) || chip!=='attempt 2' || !/^(\u25b8|\ud83d\udcad)/.test(result) ||\n           !/^\\\\d+m \\\\d{2}s$/.test(elapsed) || links.length!==1 || !nested ||\n           !link.getClientRects().length || link.querySelector('[data-testid=agent-list-name]')?.textContent?.trim()!==name ||\n           !link.querySelector('[role=img][aria-label=opencode]') ||\n           !avatar?.dataset.agentColor || avatar.dataset.dot!=='working') return;\n        state.capture={path:location.pathname,rowId:row.dataset.trayRow,rowVisible:true,running:true,\n          attemptChip:chip,result,elapsed,childName:name,linkId:id,nested,\n          exactLinkCount:links.length,logo:true,dot:'working',color:avatar.dataset.agentColor,capturedAt:Date.now()};\n        state.observer.disconnect();\n      };\n      state.observer=new MutationObserver(sample);\n      window.__aftChildReactivation=state;\n      state.observer.observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});\n      sample();"
+              "text": "        const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim()||'';\n        const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim()||'';\n        const group=Array.from(document.querySelectorAll('nav[aria-label=Agents] [role=group]'))\n          .find(x=>x.getAttribute('aria-label')===parentName+' children');\n        const links=Array.from(document.querySelectorAll('nav[aria-label=Agents] a[href]'))\n          .filter(x=>x.getAttribute('href')===childRoute);\n        const link=links[0];\n        const avatar=link?.querySelector('[data-agent-color][data-dot]');\n        const nested=!!group && !!link && group.contains(link);\n        if(rows.filter(r=>r.dataset.trayRow===id).length!==1 || !row?.getClientRects().length ||\n           !row.textContent?.includes(name) || chip!=='attempt 2' || !/^(▸|💭)/.test(result) ||\n           !/^\\\\d+m \\\\d{2}s$/.test(elapsed) || links.length!==1 || !nested ||\n           !link.getClientRects().length || link.querySelector('[data-testid=agent-list-name]')?.textContent?.trim()!==name ||\n           !link.querySelector('[role=img][aria-label=opencode]') ||\n           !avatar?.dataset.agentColor || avatar.dataset.dot!=='working') return;\n        state.capture={path:location.pathname,rowId:row.dataset.trayRow,rowVisible:true,running:true,\n          attemptChip:chip,result,elapsed,childName:name,linkId:id,nested,\n          exactLinkCount:links.length,logo:true,dot:'working',color:avatar.dataset.agentColor,capturedAt:Date.now()};\n        state.observer.disconnect();\n      };\n      state.observer=new MutationObserver(sample);\n      window.__aftChildReactivation=state;\n      state.observer.observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});\n      sample();"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/36",
@@ -26833,7 +26833,7 @@
             "sourceLines": {
               "start": 1092,
               "end": 1100,
-              "text": "def reactivation_event(history, child_id, after_seq, result):\n    started = [e for e in history if e[\"agent_id\"] == child_id and e[\"kind\"] == \"turn.started\" and e[\"seq\"] > after_seq]\n    assert len(started) == 1 and started[0].get(\"turn_id\"), \"exact second-attempt turn did not start after the pre-Send baseline\"\n    turn = started[0][\"turn_id\"]\n    steps = [e for e in history if e[\"agent_id\"] == child_id and e.get(\"turn_id\") == turn and\n             e[\"seq\"] > started[0][\"seq\"] and step_prefix(e)]\n    matches = [e for e in steps if result == step_prefix(e) or result.startswith(step_prefix(e) + \" \u00b7 \")]\n    assert matches, \"captured attempt-two step lacks an exact saved current-turn tool or reasoning event\"\n    return matches[0]"
+              "text": "def reactivation_event(history, child_id, after_seq, result):\n    started = [e for e in history if e[\"agent_id\"] == child_id and e[\"kind\"] == \"turn.started\" and e[\"seq\"] > after_seq]\n    assert len(started) == 1 and started[0].get(\"turn_id\"), \"exact second-attempt turn did not start after the pre-Send baseline\"\n    turn = started[0][\"turn_id\"]\n    steps = [e for e in history if e[\"agent_id\"] == child_id and e.get(\"turn_id\") == turn and\n             e[\"seq\"] > started[0][\"seq\"] and step_prefix(e)]\n    matches = [e for e in steps if result == step_prefix(e) or result.startswith(step_prefix(e) + \" · \")]\n    assert matches, \"captured attempt-two step lacks an exact saved current-turn tool or reasoning event\"\n    return matches[0]"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/40"
@@ -27231,7 +27231,7 @@
       ],
       "id": "stream-render-clock",
       "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-      "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d",
+      "sha256": "6e2acb37cf18d077a661c5762cf5223d86304d300c536c18ef6bc8fe7c241247",
       "skipped": true,
       "oldSteps": [
         {
@@ -27788,7 +27788,7 @@
                 "steps",
                 26
               ],
-              "line": 308
+              "line": 298
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -27798,7 +27798,27 @@
                 "steps",
                 27
               ],
+              "line": 309
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                28
+              ],
               "line": 324
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                29
+              ],
+              "line": 340
             }
           ],
           "checkpoint": {
@@ -27807,9 +27827,9 @@
               "tests",
               0,
               "steps",
-              28
+              30
             ],
-            "line": 389
+            "line": 405
           }
         },
         {
@@ -27845,29 +27865,29 @@
                 "tests",
                 0,
                 "steps",
-                29
-              ],
-              "line": 391
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                30
-              ],
-              "line": 398
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 31
               ],
+              "line": 407
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                32
+              ],
               "line": 414
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                33
+              ],
+              "line": 430
             }
           ],
           "checkpoint": {
@@ -27876,9 +27896,9 @@
               "tests",
               0,
               "steps",
-              32
+              34
             ],
-            "line": 429
+            "line": 445
           }
         },
         {
@@ -27914,9 +27934,9 @@
               "tests",
               0,
               "steps",
-              33
+              35
             ],
-            "line": 431
+            "line": 447
           }
         },
         {
@@ -27950,9 +27970,9 @@
                 "tests",
                 0,
                 "steps",
-                34
+                36
               ],
-              "line": 433
+              "line": 449
             }
           ],
           "checkpoint": {
@@ -27961,9 +27981,9 @@
               "tests",
               0,
               "steps",
-              35
+              37
             ],
-            "line": 437
+            "line": 453
           }
         },
         {
@@ -27994,9 +28014,9 @@
                 "tests",
                 0,
                 "steps",
-                36
+                38
               ],
-              "line": 439
+              "line": 455
             }
           ],
           "checkpoint": {
@@ -28005,9 +28025,9 @@
               "tests",
               0,
               "steps",
-              37
+              39
             ],
-            "line": 441
+            "line": 457
           }
         },
         {
@@ -28046,9 +28066,9 @@
               "tests",
               0,
               "steps",
-              38
+              40
             ],
-            "line": 443
+            "line": 459
           }
         },
         {
@@ -28084,9 +28104,9 @@
               "tests",
               0,
               "steps",
-              39
+              41
             ],
-            "line": 445
+            "line": 461
           }
         },
         {
@@ -28125,9 +28145,9 @@
                 "tests",
                 0,
                 "steps",
-                40
+                42
               ],
-              "line": 447
+              "line": 463
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28135,9 +28155,9 @@
                 "tests",
                 0,
                 "steps",
-                41
+                43
               ],
-              "line": 464
+              "line": 480
             }
           ],
           "checkpoint": {
@@ -28146,9 +28166,9 @@
               "tests",
               0,
               "steps",
-              42
+              44
             ],
-            "line": 481
+            "line": 497
           }
         },
         {
@@ -28184,9 +28204,9 @@
               "tests",
               0,
               "steps",
-              43
+              45
             ],
-            "line": 483
+            "line": 499
           }
         },
         {
@@ -28225,29 +28245,29 @@
                 "tests",
                 0,
                 "steps",
-                44
-              ],
-              "line": 485
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                45
-              ],
-              "line": 502
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 46
               ],
-              "line": 519
+              "line": 501
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                47
+              ],
+              "line": 518
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                48
+              ],
+              "line": 535
             }
           ],
           "checkpoint": {
@@ -28256,9 +28276,9 @@
               "tests",
               0,
               "steps",
-              47
+              49
             ],
-            "line": 536
+            "line": 552
           }
         },
         {
@@ -28294,9 +28314,9 @@
               "tests",
               0,
               "steps",
-              48
+              50
             ],
-            "line": 538
+            "line": 554
           }
         },
         {
@@ -28330,9 +28350,9 @@
                 "tests",
                 0,
                 "steps",
-                49
+                51
               ],
-              "line": 540
+              "line": 556
             }
           ],
           "checkpoint": {
@@ -28341,9 +28361,9 @@
               "tests",
               0,
               "steps",
-              50
+              52
             ],
-            "line": 557
+            "line": 573
           }
         },
         {
@@ -28379,9 +28399,9 @@
               "tests",
               0,
               "steps",
-              51
+              53
             ],
-            "line": 559
+            "line": 575
           }
         },
         {
@@ -28417,9 +28437,9 @@
               "tests",
               0,
               "steps",
-              52
+              54
             ],
-            "line": 561
+            "line": 577
           }
         },
         {
@@ -28455,9 +28475,9 @@
               "tests",
               0,
               "steps",
-              53
+              55
             ],
-            "line": 563
+            "line": 579
           }
         },
         {
@@ -28493,9 +28513,9 @@
               "tests",
               0,
               "steps",
-              54
+              56
             ],
-            "line": 565
+            "line": 581
           }
         },
         {
@@ -28528,9 +28548,9 @@
                 "tests",
                 0,
                 "steps",
-                55
+                57
               ],
-              "line": 567
+              "line": 583
             }
           ],
           "checkpoint": {
@@ -28539,9 +28559,9 @@
               "tests",
               0,
               "steps",
-              56
+              58
             ],
-            "line": 570
+            "line": 586
           }
         },
         {
@@ -28577,29 +28597,29 @@
                 "tests",
                 0,
                 "steps",
-                57
-              ],
-              "line": 572
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                58
-              ],
-              "line": 579
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 59
               ],
-              "line": 586
+              "line": 588
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                60
+              ],
+              "line": 595
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                61
+              ],
+              "line": 602
             }
           ],
           "checkpoint": {
@@ -28608,9 +28628,9 @@
               "tests",
               0,
               "steps",
-              60
+              62
             ],
-            "line": 594
+            "line": 610
           }
         },
         {
@@ -28645,9 +28665,9 @@
                 "tests",
                 0,
                 "steps",
-                61
+                63
               ],
-              "line": 596
+              "line": 612
             }
           ],
           "checkpoint": {
@@ -28656,9 +28676,9 @@
               "tests",
               0,
               "steps",
-              62
+              64
             ],
-            "line": 601
+            "line": 617
           }
         },
         {
@@ -28694,9 +28714,9 @@
                 "tests",
                 0,
                 "steps",
-                63
+                65
               ],
-              "line": 603
+              "line": 619
             }
           ],
           "checkpoint": {
@@ -28705,9 +28725,9 @@
               "tests",
               0,
               "steps",
-              64
+              66
             ],
-            "line": 610
+            "line": 626
           }
         },
         {
@@ -28743,9 +28763,9 @@
               "tests",
               0,
               "steps",
-              65
+              67
             ],
-            "line": 612
+            "line": 628
           }
         },
         {
@@ -28781,29 +28801,29 @@
                 "tests",
                 0,
                 "steps",
-                66
-              ],
-              "line": 614
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                67
-              ],
-              "line": 621
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 68
               ],
-              "line": 642
+              "line": 630
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                69
+              ],
+              "line": 637
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                70
+              ],
+              "line": 658
             }
           ],
           "checkpoint": {
@@ -28812,9 +28832,9 @@
               "tests",
               0,
               "steps",
-              69
+              71
             ],
-            "line": 657
+            "line": 673
           }
         },
         {
@@ -28845,9 +28865,9 @@
                 "tests",
                 0,
                 "steps",
-                70
+                72
               ],
-              "line": 659
+              "line": 675
             }
           ],
           "checkpoint": {
@@ -28856,9 +28876,9 @@
               "tests",
               0,
               "steps",
-              71
+              73
             ],
-            "line": 680
+            "line": 696
           }
         },
         {
@@ -28889,9 +28909,9 @@
                 "tests",
                 0,
                 "steps",
-                72
+                74
               ],
-              "line": 682
+              "line": 698
             }
           ],
           "checkpoint": {
@@ -28900,9 +28920,9 @@
               "tests",
               0,
               "steps",
-              73
+              75
             ],
-            "line": 684
+            "line": 700
           }
         },
         {
@@ -28940,29 +28960,29 @@
                 "tests",
                 0,
                 "steps",
-                74
-              ],
-              "line": 686
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                75
-              ],
-              "line": 703
-            },
-            {
-              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 76
               ],
-              "line": 720
+              "line": 702
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                77
+              ],
+              "line": 719
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                78
+              ],
+              "line": 736
             }
           ],
           "checkpoint": {
@@ -28971,9 +28991,9 @@
               "tests",
               0,
               "steps",
-              77
+              79
             ],
-            "line": 737
+            "line": 753
           }
         },
         {
@@ -29009,9 +29029,9 @@
               "tests",
               0,
               "steps",
-              78
+              80
             ],
-            "line": 739
+            "line": 755
           }
         },
         {
@@ -29047,9 +29067,9 @@
                 "tests",
                 0,
                 "steps",
-                79
+                81
               ],
-              "line": 741
+              "line": 757
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -29057,9 +29077,9 @@
                 "tests",
                 0,
                 "steps",
-                80
+                82
               ],
-              "line": 762
+              "line": 778
             }
           ],
           "checkpoint": {
@@ -29068,9 +29088,9 @@
               "tests",
               0,
               "steps",
-              81
+              83
             ],
-            "line": 772
+            "line": 788
           }
         },
         {
@@ -29106,9 +29126,9 @@
               "tests",
               0,
               "steps",
-              82
+              84
             ],
-            "line": 774
+            "line": 790
           }
         },
         {
@@ -29139,9 +29159,9 @@
                 "tests",
                 0,
                 "steps",
-                83
+                85
               ],
-              "line": 776
+              "line": 792
             }
           ],
           "checkpoint": {
@@ -29150,9 +29170,9 @@
               "tests",
               0,
               "steps",
-              84
+              86
             ],
-            "line": 780
+            "line": 796
           }
         },
         {
@@ -29190,9 +29210,9 @@
               "tests",
               0,
               "steps",
-              85
+              87
             ],
-            "line": 782
+            "line": 798
           }
         },
         {
@@ -29226,9 +29246,9 @@
                 "tests",
                 0,
                 "steps",
-                86
+                88
               ],
-              "line": 784
+              "line": 800
             }
           ],
           "checkpoint": {
@@ -29237,9 +29257,9 @@
               "tests",
               0,
               "steps",
-              87
+              89
             ],
-            "line": 788
+            "line": 804
           }
         },
         {
@@ -29270,9 +29290,9 @@
                 "tests",
                 0,
                 "steps",
-                88
+                90
               ],
-              "line": 790
+              "line": 806
             }
           ],
           "checkpoint": {
@@ -29281,9 +29301,9 @@
               "tests",
               0,
               "steps",
-              89
+              91
             ],
-            "line": 792
+            "line": 808
           }
         },
         {
@@ -29322,9 +29342,9 @@
                 "tests",
                 0,
                 "steps",
-                90
+                92
               ],
-              "line": 794
+              "line": 810
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -29332,9 +29352,9 @@
                 "tests",
                 0,
                 "steps",
-                91
+                93
               ],
-              "line": 811
+              "line": 827
             }
           ],
           "checkpoint": {
@@ -29343,9 +29363,9 @@
               "tests",
               0,
               "steps",
-              92
+              94
             ],
-            "line": 828
+            "line": 844
           }
         },
         {
@@ -29381,9 +29401,9 @@
               "tests",
               0,
               "steps",
-              93
+              95
             ],
-            "line": 830
+            "line": 846
           }
         },
         {
@@ -29422,9 +29442,9 @@
               "tests",
               0,
               "steps",
-              94
+              96
             ],
-            "line": 832
+            "line": 848
           }
         },
         {
@@ -29460,9 +29480,9 @@
               "tests",
               0,
               "steps",
-              95
+              97
             ],
-            "line": 834
+            "line": 850
           }
         },
         {
@@ -29498,9 +29518,9 @@
               "tests",
               0,
               "steps",
-              96
+              98
             ],
-            "line": 836
+            "line": 852
           }
         }
       ],
@@ -29947,16 +29967,17 @@
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
               "classification": "selected-invocation-predicate-reachable",
-              "coverage": "unresolved",
+              "coverage": "authored-unvalidated",
               "gap": {
-                "kind": "authoring-not-yet-translated",
-                "required": "match",
-                "evidence": "f'New Agent did not open Chat: {path!r}'",
+                "kind": "deterministic-runner-and-runtime-unverified",
+                "required": "Frozen claim full pathname match bound to actual captured Agent ID",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 135,
                 "sourceFunction": "claim",
-                "canonicalAttempt": "Source branch classification only. Strict AgentRef/API paging and captures are available; no actual source predicate YAML preservation/public runner proof supplied here.",
-                "missingObservation": "Exact source captured-ID/public-name/repo/harness/preset/user/parentnull/current-path or paged fulluniqueevent/seq/order/204 evidence,original15s caller and owned snapshot provenance remain unimplemented; expectedStatus branch retained outside fresh selected case."
+                "canonicalAttempt": "Actual typed URL path-segments capture establishes ws/workspace/chat/agt_ ID syntax, followed by pathname capture and pure concat equality before AgentRef bind. Full raw loader admission recorded separately.",
+                "missingObservation": "No public runtime execution or exact original single location.pathname callback/ID-file ownership proof. Separate captures must fail if route changes; they are not credited as the original atomic callback.",
+                "deadlineMs": 30000,
+                "sourceHttpBoundMs": 15000
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/10"
@@ -29964,10 +29985,72 @@
               "selectedInvocationReachability": {
                 "selectedCase": "render",
                 "selectedBranch": "Selected render identity/current/events/claim validation",
-                "sourceReviewOnly": true,
+                "sourceReviewOnly": false,
                 "preservationAccepted": false,
                 "actualFreshPlanAbsenceProven": null
-              }
+              },
+              "destination": [
+                {
+                  "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                  "path": [
+                    "tests",
+                    0,
+                    "steps",
+                    21
+                  ],
+                  "line": 240
+                },
+                {
+                  "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                  "path": [
+                    "tests",
+                    0,
+                    "steps",
+                    22
+                  ],
+                  "line": 245
+                },
+                {
+                  "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                  "path": [
+                    "tests",
+                    0,
+                    "steps",
+                    23
+                  ],
+                  "line": 273
+                },
+                {
+                  "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                  "path": [
+                    "tests",
+                    0,
+                    "steps",
+                    24
+                  ],
+                  "line": 280
+                },
+                {
+                  "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                  "path": [
+                    "tests",
+                    0,
+                    "steps",
+                    25
+                  ],
+                  "line": 293
+                },
+                {
+                  "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                  "path": [
+                    "tests",
+                    0,
+                    "steps",
+                    26
+                  ],
+                  "line": 298
+                }
+              ]
             },
             {
               "source": {
@@ -33691,9 +33774,9 @@
               "source": {
                 "line": 1761,
                 "end_line": 1764,
-                "expression": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('\ud83d\ude00.' in rich_result['terminal'])",
+                "expression": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('😀.' in rich_result['terminal'])",
                 "message": "'the real GFM/list/raw-HTML/emoji component projection changed'",
-                "source": "assert \"first bold item\" in rich_result[\"terminal\"] and \\\n        '<img src=x onerror=\"window.pwned=1\">' in rich_result[\"terminal\"] and \\\n        \"\ud83d\ude00.\" in rich_result[\"terminal\"], \\\n        \"the real GFM/list/raw-HTML/emoji component projection changed\"",
+                "source": "assert \"first bold item\" in rich_result[\"terminal\"] and \\\n        '<img src=x onerror=\"window.pwned=1\">' in rich_result[\"terminal\"] and \\\n        \"😀.\" in rich_result[\"terminal\"], \\\n        \"the real GFM/list/raw-HTML/emoji component projection changed\"",
                 "function": "self_test_markdown_projection",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -33702,7 +33785,7 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('\ud83d\ude00.' in rich_result['terminal'])",
+                "required": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('😀.' in rich_result['terminal'])",
                 "evidence": "'the real GFM/list/raw-HTML/emoji component projection changed'",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1761,
@@ -34731,9 +34814,9 @@
               "source": {
                 "line": 2581,
                 "end_line": 2581,
-                "expression": "js_utf16_length('A\ud83d\ude00') == 3 and assert_motion_capture(emoji)[2] == -40",
+                "expression": "js_utf16_length('A😀') == 3 and assert_motion_capture(emoji)[2] == -40",
                 "message": null,
-                "source": "assert js_utf16_length(\"A\ud83d\ude00\") == 3 and assert_motion_capture(emoji)[2] == -40",
+                "source": "assert js_utf16_length(\"A😀\") == 3 and assert_motion_capture(emoji)[2] == -40",
                 "function": "self_test_motion_assert",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -34742,8 +34825,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "js_utf16_length('A\ud83d\ude00') == 3 and assert_motion_capture(emoji)[2] == -40",
-                "evidence": "assert js_utf16_length(\"A\ud83d\ude00\") == 3 and assert_motion_capture(emoji)[2] == -40",
+                "required": "js_utf16_length('A😀') == 3 and assert_motion_capture(emoji)[2] == -40",
+                "evidence": "assert js_utf16_length(\"A😀\") == 3 and assert_motion_capture(emoji)[2] == -40",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2581,
                 "sourceFunction": "self_test_motion_assert",
@@ -36308,9 +36391,9 @@
               "source": {
                 "line": 3161,
                 "end_line": 3161,
-                "expression": "reasoning_preview('x' * 121) == 'x' * 119 + '\u2026'",
+                "expression": "reasoning_preview('x' * 121) == 'x' * 119 + '…'",
                 "message": null,
-                "source": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"\u2026\"",
+                "source": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"…\"",
                 "function": "self_test_reasoning",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -36319,8 +36402,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "reasoning_preview('x' * 121) == 'x' * 119 + '\u2026'",
-                "evidence": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"\u2026\"",
+                "required": "reasoning_preview('x' * 121) == 'x' * 119 + '…'",
+                "evidence": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"…\"",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3161,
                 "sourceFunction": "self_test_reasoning",
@@ -37107,9 +37190,9 @@
               "source": {
                 "line": 4061,
                 "end_line": 4062,
-                "expression": "isinstance(observed, str) and '\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef' in observed",
+                "expression": "isinstance(observed, str) and 'অপৰাহ্ন ১২.৫৯' in observed",
                 "message": "'BLOCKED: documented long time did not render on the owned Chat row'",
-                "source": "assert isinstance(observed, str) and \"\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef\" in observed, \\\n        \"BLOCKED: documented long time did not render on the owned Chat row\"",
+                "source": "assert isinstance(observed, str) and \"অপৰাহ্ন ১২.৫৯\" in observed, \\\n        \"BLOCKED: documented long time did not render on the owned Chat row\"",
                 "function": "require_locale_time",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -37118,7 +37201,7 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "isinstance(observed, str) and '\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef' in observed",
+                "required": "isinstance(observed, str) and 'অপৰাহ্ন ১২.৫৯' in observed",
                 "evidence": "'BLOCKED: documented long time did not render on the owned Chat row'",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4061,
@@ -49052,7 +49135,7 @@
             "sourceLines": {
               "start": 2932,
               "end": 2954,
-              "text": "def reasoning_preview(text):\n    # WorkRows uses timelineRows.firstLine: strip, first line, plain-text marks, 120-character cap.\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\")[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    line = line.strip()\n    return line if len(line) <= 120 else line[:119] + \"\u2026\"\n\n\nREASONING_DOM = r\"\"\"(() => {\n  const rect=x=>{if(!x)return null;const r=x.getBoundingClientRect();\n    return {x:r.x,y:r.y,width:r.width,height:r.height};};\n  return [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]\n  .map(x => { const toggle=x.querySelector('[role=button]'), row=x.firstElementChild;\n    return {heading:x.querySelector('[class*=heading]')?.textContent||'',\n      preview:x.querySelector('[class*=preview]')?.textContent||'',\n      expanded:toggle?.getAttribute('aria-expanded')??null,\n      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null,\n      geometry:{row:rect(row),parent:rect(x),chevron:rect(row?.querySelector('[class*=chevron]')),\n        tabIndex:toggle?.tabIndex??null}}; });})()\"\"\""
+              "text": "def reasoning_preview(text):\n    # WorkRows uses timelineRows.firstLine: strip, first line, plain-text marks, 120-character cap.\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\")[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    line = line.strip()\n    return line if len(line) <= 120 else line[:119] + \"…\"\n\n\nREASONING_DOM = r\"\"\"(() => {\n  const rect=x=>{if(!x)return null;const r=x.getBoundingClientRect();\n    return {x:r.x,y:r.y,width:r.width,height:r.height};};\n  return [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]\n  .map(x => { const toggle=x.querySelector('[role=button]'), row=x.firstElementChild;\n    return {heading:x.querySelector('[class*=heading]')?.textContent||'',\n      preview:x.querySelector('[class*=preview]')?.textContent||'',\n      expanded:toggle?.getAttribute('aria-expanded')??null,\n      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null,\n      geometry:{row:rect(row),parent:rect(x),chevron:rect(row?.querySelector('[class*=chevron]')),\n        tabIndex:toggle?.tabIndex??null}}; });})()\"\"\""
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
@@ -50770,6 +50853,88 @@
           }
         ],
         "acceptance": "18selectedrecords narrowed,1otherbranch excluded onlyforstaticfreshselectedrender case;13sourcegroups uncovered. Sourcehelpers runtimecallers corrected beyond installationstep2,not lost. All extractedbranch records now classified but 493candidate records are NOT fulllogicalpredicate denominator or preservation proof; dynamic/imported/provisioning/fulloriginalindex remain unresolved."
+      },
+      "exactClaimPathAuthoring": {
+        "at": "2026-10-09T14:58:26.743Z",
+        "sourceBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "sourceLines": [
+          133,
+          134,
+          135
+        ],
+        "callerOldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/10",
+        "oldRawSha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d",
+        "rawSha256": "6e2acb37cf18d077a661c5762cf5223d86304d300c536c18ef6bc8fe7c241247",
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              25
+            ],
+            "line": 293
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              26
+            ],
+            "line": 298
+          }
+        ],
+        "unchangedIdentityDestinations": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              21
+            ],
+            "line": 240
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              22
+            ],
+            "line": 245
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              23
+            ],
+            "line": 273
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              24
+            ],
+            "line": 280
+          }
+        ],
+        "coverage": "authored-unvalidated",
+        "preservationAccepted": false,
+        "runtimeExecuted": 0,
+        "limits": "Checks entire actual pathname against captured ID; existing Agent row/identity facts remain. Separate earlier path-segments and pathname captures are fail-closed on a changing route but not original atomic callback proof. Other repeated current-path calls, provisioning, screenshots and deadline ownership remain unverified."
       }
     },
     {
