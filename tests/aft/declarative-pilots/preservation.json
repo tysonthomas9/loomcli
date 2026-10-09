@@ -18441,7 +18441,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18456,7 +18456,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18469,7 +18482,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18484,7 +18497,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18497,7 +18523,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18512,7 +18538,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18525,7 +18564,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18540,7 +18579,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18553,7 +18605,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18568,7 +18620,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18864,7 +18929,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18878,7 +18943,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18891,7 +18968,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18905,7 +18982,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18918,7 +19007,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18932,7 +19021,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18945,7 +19046,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18959,7 +19060,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18972,7 +19085,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -18986,7 +19099,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -18999,7 +19124,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19013,7 +19138,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19026,7 +19163,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19040,7 +19177,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19053,7 +19202,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19067,7 +19216,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19080,7 +19241,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19094,7 +19255,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19107,7 +19280,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19121,7 +19294,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19134,7 +19319,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19148,7 +19333,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19161,7 +19358,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19175,7 +19372,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19188,7 +19397,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19202,7 +19411,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19215,7 +19436,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19229,7 +19450,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19242,7 +19475,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19256,7 +19489,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19269,7 +19514,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19283,7 +19528,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19296,7 +19553,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19310,7 +19567,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19323,7 +19592,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19337,7 +19606,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19350,7 +19631,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19364,7 +19645,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19377,7 +19670,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19391,7 +19684,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19404,7 +19709,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19418,7 +19723,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -19431,7 +19748,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -19445,7 +19762,19 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+                ],
+                "sourceReason": "Original step27 executes dark then light, each at390 then557 with height844, on the exact saved active child and same running turn; it then restores the actual original viewport/theme. Numeric and center-hit predicates use the same synchronous geometry snapshot. Hidden-row OR is evaluated exactly, without imposing a More count when hiddenRows is zero.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -20953,7 +21282,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20968,7 +21297,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -20981,7 +21323,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20996,7 +21338,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -21735,7 +22090,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -21750,7 +22105,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -21849,7 +22217,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -21864,7 +22232,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -21877,7 +22258,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -21892,7 +22273,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -21905,7 +22299,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -21920,7 +22314,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -21933,7 +22340,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -21948,7 +22355,20 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+                ],
+                "sourceReason": "Caller31 selects repeat:0; caller45 selects repeat:0 and repeat:1. Each saved keyed card must be focused and activated with real Enter, hydrate exact child Chat in the same owned target, then return to exact Lead Chat. Identity is assigned to the initial DOM card only after actual navigation proves it; no invented DOM agent-ID attribute.",
+                "bounds": {
+                  "originalCallerMs": 30000,
+                  "individualAgentApiRequestMs": 15000
+                },
+                "acceptance": "Selected source branch only; coverage remains unresolved. No authored YAML, admission, runtime or preservation credit."
+              }
             },
             {
               "source": {
@@ -24818,6 +25238,544 @@
         },
         "remainingChildSelectedPythonPredicates": 67,
         "acceptance": "No new YAML or runtime/source-preservation credit,source claims/negative branches only"
+      },
+      "cardMobileBranchReview": {
+        "at": "2026-10-09T11:58:39.971614+00:00",
+        "scope": "Selected repeat cards, owning tab, four running mobile captures and original restoration only. Other child reactivation/sidebar branches remain open.",
+        "frozenHelperByteMatch": true,
+        "inventoryPredicatesReviewed": [
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 561,
+            "function": "card_snapshot_ok",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 562,
+            "function": "card_snapshot_ok",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 596,
+            "function": "focus_exact_card",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 597,
+            "function": "focus_exact_card",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 603,
+            "function": "card_route_ok",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 800,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 801,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 802,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 803,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 804,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 805,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 806,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 807,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 808,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 809,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 810,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 811,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 812,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 813,
+            "function": "mobile_geometry_ok",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 869,
+            "function": "mobile",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 875,
+            "function": "mobile",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 876,
+            "function": "mobile",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 879,
+            "function": "mobile",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 881,
+            "function": "mobile",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 884,
+            "function": "mobile",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 969,
+            "function": "mobile",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 981,
+            "function": "mobile_restore",
+            "callers": [
+              27
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 1281,
+            "function": "sidebar_tab_result",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 1285,
+            "function": "sidebar_tab_result",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 569,
+            "function": "card_snapshot_ok",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 641,
+            "function": "cards_ui",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 642,
+            "function": "cards_ui",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 656,
+            "function": "cards_ui",
+            "callers": [
+              31,
+              45
+            ]
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "line": 668,
+            "function": "cards_ui",
+            "callers": [
+              31,
+              45
+            ]
+          }
+        ],
+        "newDirect": 34,
+        "additionalSourceGroups": [
+          {
+            "id": "child-card-exact-focus-actor",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 572,
+              "end": 598,
+              "text": "def focus_exact_card(name, attempt):\n    browser(\"wait\", \"--fn\", \"Array.from(document.querySelectorAll('[data-testid=completion-record]'))\" +\n            \".some(c=>c.dataset.attempt===\" + json.dumps(str(attempt)) +\n            \" && c.querySelector(':scope > span:nth-child(2)')?.textContent?.trim()===\" +\n            json.dumps(name) + \")\")\n    script = \"\"\"(() => {\n      const name=%s, attempt=%s;\n      const cards=Array.from(document.querySelectorAll('[data-testid=completion-record]'))\n        .filter(c=>c.dataset.attempt===attempt &&\n          c.querySelector(':scope > span:nth-child(2)')?.textContent?.trim()===name);\n      if(cards.length!==1) throw Error('exact card name and attempt missing or duplicated');\n      cards[0].scrollIntoView({block:'center'});\n      cards[0].focus();\n      const box=cards[0].getBoundingClientRect();\n      return {path:location.pathname,href:location.href,readyState:document.readyState,\n        count:cards.length,name:cards[0].querySelector(':scope > span:nth-child(2)')?.textContent?.trim()||'',\n        attempt:cards[0].dataset.attempt,color:cards[0].dataset.agentColor,\n        outcome:cards[0].dataset.outcome,delivery:cards[0].dataset.delivery,\n        role:cards[0].getAttribute('role'),tabIndex:cards[0].tabIndex,\n        focused:document.activeElement===cards[0],\n        visible:box.width>0 && box.height>0 && box.top>=0 && box.bottom<=innerHeight,\n        bounds:{top:box.top,bottom:box.bottom,height:box.height}};\n    })()\"\"\" % (json.dumps(name), json.dumps(str(attempt)))\n    shot = browser_json(f\"JSON.stringify({script})\")\n    assert shot[\"count\"] == 1 and shot[\"name\"] == name and shot[\"attempt\"] == str(attempt)\n    assert shot[\"role\"] == \"link\" and shot[\"tabIndex\"] == 0 and shot[\"focused\"] and shot[\"visible\"]\n    return shot"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Require exactly one card by actual saved name and attempt; scroll to center and focus that element. Preserve role link,tabIndex0,actual focused state and complete vertical visibility with positive width/height,top>=0,bottom<=actual innerHeight. Duplicate/missing target fails before Enter.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-card-initial-dom-and-raw-bubble",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 625,
+              "end": 634,
+              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => ({\n      cards:Array.from(document.querySelectorAll('[data-testid=completion-record]')).map(c=>({\n        name:c.querySelector(':scope > span:nth-child(2)')?.textContent?.trim()||'',\n        attempt:c.dataset.attempt,color:c.dataset.agentColor,\n        outcome:c.dataset.outcome,delivery:c.dataset.delivery})),\n      rawBubble:Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li[data-kind=user]'))\n        .some(x=>/task_completed:[^\\\\s]+:[0-9]+/.test(x.textContent||''))\n    }))())\"\"\")\n    save(f\"cards-initial-{lead_label}\", {\"lead\": lead[\"agent_id\"],\n                                          \"expected_children\": [{\"id\": kid[\"agent_id\"], \"name\": kid[\"name\"], \"attempt\": attempt}"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Capture all initial card name/attempt/color/outcome/delivery fields and raw task_completed user-bubble regex. Initial DOM snapshot has no agent ID field; do not fabricate one. Retain saved expected child/attempt IDs separately for later real-navigation correlation.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-card-keyboard-navigation-and-proven-id",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 637,
+              "end": 659,
+              "text": "        focused = focus_exact_card(kid[\"name\"], attempt)\n        tab_before = sidebar_tab()\n        save(f\"card-focus-{lead_label}-{kid['agent_id']}-{attempt}\", {\"expected_id\": kid[\"agent_id\"],\n                                                                      \"tab\": tab_before, \"ui\": focused})\n        assert focused[\"path\"] == f\"/ws/{quote(WS, safe='')}/chat/{quote(lead['agent_id'], safe='')}\"\n        assert tab_before[\"url_path\"] == focused[\"path\"]\n        browser(\"screenshot\", str(OUT / f\"card-focus-{lead_label}-{kid['agent_id']}-{attempt}.png\"))\n        browser(\"press\", \"Enter\")\n        expected_route = f\"/ws/{quote(WS, safe='')}/chat/{quote(kid['agent_id'], safe='')}\"\n        try:\n            browser(\"wait\", \"--fn\", \"location.pathname === \" + json.dumps(expected_route) +\n                    \" && document.querySelector('section[aria-label=\\\"Agent chat\\\"] header h2')?.textContent?.trim() === \" +\n                    json.dumps(kid[\"name\"]))\n        except subprocess.CalledProcessError:\n            save(f\"card-navigation-failed-{kid['agent_id']}-{attempt}\", card_route())\n            raise\n        navigated = card_route()\n        tab_child = sidebar_tab()\n        save(f\"card-navigation-{kid['agent_id']}-{attempt}\", {\"tab\": tab_child, \"ui\": navigated})\n        assert tab_child[\"target_id\"] == tab_before[\"target_id\"] and tab_child[\"url_path\"] == expected_route\n        card_route_ok(navigated, kid[\"agent_id\"], kid[\"name\"])\n        card = next(c for c in shot[\"cards\"] if c[\"name\"] == kid[\"name\"] and c[\"attempt\"] == str(attempt))\n        card[\"id\"] = kid[\"agent_id\"]"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Focus exact card on exact Lead route,read actual owned active tab,save named card-focus-Lead-child-attempt.png; real Enter then wait exact encoded child Chat path/header name. Require same actual target ID and opencode label. Only after navigation proves exact child assign that ID to the first initial card with the same name/attempt. Save failed navigation diagnostics and rethrow.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-card-return-and-final-snapshot",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 660,
+              "end": 672,
+              "text": "        browser(\"open\", os.environ[\"AFT_BASE_URL\"].rstrip(\"/\") + f\"/ws/{WS}/chat/{lead['agent_id']}\")\n        lead_route = f\"/ws/{quote(WS, safe='')}/chat/{quote(lead['agent_id'], safe='')}\"\n        browser(\"wait\", \"--fn\", \"location.pathname === \" + json.dumps(lead_route) +\n                \" && document.querySelector('section[aria-label=\\\"Agent chat\\\"] header h2')?.textContent?.trim() === \" +\n                json.dumps(lead[\"name\"]))\n        returned = card_route()\n        tab_return = sidebar_tab()\n        save(f\"card-return-{kid['agent_id']}-{attempt}\", {\"tab\": tab_return, \"ui\": returned})\n        assert tab_return[\"target_id\"] == tab_before[\"target_id\"] and tab_return[\"url_path\"] == lead_route\n        card_route_ok(returned, lead[\"agent_id\"], lead[\"name\"])\n    card_snapshot_ok(shot, children)\n    browser(\"screenshot\", str(OUT / f\"cards-{lead_label}-{'-'.join(specs)}.png\"))\n    save(f\"cards-{lead_label}-{'-'.join(specs)}\", shot)"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Open original Lead Chat through actual frontend base,wait exact Lead route/name,require same target ID and actual opencode harness,then assert entire original card snapshot count/unique identity-attempt/color/completed/delivered and no raw bubble. Preserve cards-repeat-lead-repeat:0.png and cards-repeat-lead-repeat:0-repeat:1.png.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-card-owning-tab-parser",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 1277,
+              "end": 1296,
+              "text": "def sidebar_tab_result(value):\n    data = value.get(\"data\", value) if isinstance(value, dict) else value\n    tabs = data.get(\"tabs\", []) if isinstance(data, dict) else data\n    active_id = data.get(\"activeTabId\") if isinstance(data, dict) else None\n    assert isinstance(tabs, list), \"browser tab list has no tab rows\"\n    active = [tab for tab in tabs if isinstance(tab, dict) and\n              (tab.get(\"active\") or tab.get(\"isActive\") or tab.get(\"selected\") or tab.get(\"current\") or\n              (active_id and active_id in (tab.get(\"id\"), tab.get(\"targetId\"))))]\n    assert len(active) == 1 and active[0].get(\"targetId\"), \"one owned active browser tab is required\"\n    tab = active[0]\n    parsed = urlsplit(tab.get(\"url\") or \"\")\n    return {\"session\": os.environ[\"AFT_SESSION\"], \"target_id\": tab[\"targetId\"],\n            \"tab_id\": tab.get(\"id\", \"\"), \"tab_count\": len(tabs),\n            \"url_path\": parsed.path if parsed.scheme in (\"http\", \"https\") else tab.get(\"url\", \"\")}\n\n\ndef sidebar_tab():\n    raw = subprocess.check_output([\"agent-browser\", \"--session\", os.environ[\"AFT_SESSION\"],\n                                   \"--json\", \"tab\", \"list\"], text=True)\n    return sidebar_tab_result(json.loads(raw))"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/31",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Read actual tab inventory in the owned AFT_SESSION. Unwrap data/tabs; active flags or activeTabId identify exactly one targetId. Preserve actual target/session/tab identity and URL normalization (http/https path,otherwise raw URL),not pathname alone or a literal expected target.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-mobile-source-loop-and-original-environment",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 867,
+              "end": 889,
+              "text": "def mobile(child_label, lead_label, width, theme):\n    width = int(width)\n    assert width in (390, 557) and theme in (\"dark\", \"light\")\n    if width == 390 and theme == \"dark\":\n        save(\"mobile-original\", browser_json(\"JSON.stringify({width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme})\"))\n    child, lead = load(child_label), load(lead_label)\n    child_id = child[\"agent_id\"]\n    live = agent(child_id)\n    assert live[\"name\"] == child[\"name\"] and live[\"parent_agent_id\"] == lead[\"agent_id\"]\n    assert live[\"worktree_path\"] == child[\"worktree_path\"]\n    lead_events = events(lead[\"agent_id\"])\n    created = [e for e in lead_events if e[\"kind\"] == \"child.created\" and e[\"payload\"].get(\"child\") == child_id]\n    assert len(created) == 1, \"mobile row has no real Lead-created child receipt\"\n    activity_proof = load(\"activity\")\n    assert activity_proof[\"child\"] == child_id\n    receipts = [e for e in events(child_id) if e[\"event_id\"] == activity_proof[\"event_id\"] and\n                e[\"turn_id\"] == activity_proof[\"turn_id\"]]\n    assert len(receipts) == 1, \"mobile row has no saved current-turn activity receipt\"\n    browser(\"set\", \"viewport\", str(width), \"844\")\n    current_theme = browser_json(\"JSON.stringify({value:document.documentElement.dataset.theme})\")[\"value\"]\n    if current_theme != theme:\n        browser(\"click\", f'button[aria-label=\"Switch to {theme} mode\"]')\n    browser(\"wait\", \"--fn\", f'document.documentElement.dataset.theme === {json.dumps(theme)}')"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Step27 loops dark/light and390/557 exactly. First390dark stores actual viewport/theme; authenticate exact child name,parent,worktree,unique saved Lead child.created event and exact saved activity event ID+turn. Set actual width x844,real theme click only when different,and wait actual theme.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-mobile-active-lifecycle-and-real-expansion",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 890,
+              "end": 920,
+              "text": "    dom = mobile_dom_lifecycle(child)\n    if live[\"state\"] != \"active\" or not live[\"running_turn_id\"] or not dom[\"tray_present\"]:\n        mobile_lifecycle_diagnostic(child, lead, live, width, theme, dom)\n        raise AssertionError(\"running child tray missing or child finished before mobile capture\")\n    if dom[\"tray_open\"] == \"false\":\n        if dom[\"header_expanded\"] != \"false\":\n            mobile_lifecycle_diagnostic(child, lead, live, width, theme, dom)\n            raise AssertionError(\"running child tray has no collapsed header\")\n        try:\n            browser(\"click\", \"[data-testid=agent-tray] button[aria-expanded=false]\")\n        except subprocess.CalledProcessError as exc:\n            mobile_lifecycle_diagnostic(child, lead, live, width, theme, mobile_dom_lifecycle(child))\n            raise AssertionError(\"running child tray disappeared before mobile click\") from exc\n    elif dom[\"tray_open\"] != \"true\" or dom[\"header_expanded\"] != \"true\":\n        mobile_lifecycle_diagnostic(child, lead, live, width, theme, dom)\n        raise AssertionError(\"running child tray has no expanded header\")\n    try:\n        browser(\"wait\", \"--fn\", \"(() => { const id=\" + json.dumps(child_id) + \"; return !!document.querySelector('[data-testid=agent-tray][data-open=true] [data-tray-row=\\\"' + id + '\\\"]'); })()\")\n    except subprocess.CalledProcessError as exc:\n        mobile_lifecycle_diagnostic(child, lead, live, width, theme, mobile_dom_lifecycle(child))\n        raise AssertionError(\"exact running child row disappeared before mobile geometry\") from exc\n    dom = mobile_dom_lifecycle(child)\n    current = agent(child_id)\n    if current[\"agent_id\"] != child_id or current[\"name\"] != child[\"name\"] or \\\n            current[\"parent_agent_id\"] != lead[\"agent_id\"] or \\\n            current[\"worktree_path\"] != child[\"worktree_path\"] or \\\n            current[\"state\"] != \"active\" or current[\"running_turn_id\"] != live[\"running_turn_id\"] or \\\n            dom[\"tray_open\"] != \"true\" or dom[\"header_expanded\"] != \"true\" or \\\n            dom[\"exact_child_row_count\"] != 1 or not dom[\"child_running\"]:\n        mobile_lifecycle_diagnostic(child, lead, live, width, theme, dom)\n        raise AssertionError(\"exact running child row missing or child finished before mobile geometry\")"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Actual child must be active with nonempty runningTurn and tray present before capture. Collapsed header must be false before real click; expanded state must be consistent. After waiting exact row, reread API and DOM: same ID/name/parent/worktree,active,SAME initial runningTurn,open/expanded true,exact row count1 and running marker. Disappearance/completion/inconsistent state fails; no waiting/completed-card fallback.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-mobile-synchronous-geometry",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 921,
+              "end": 964,
+              "text": "    geometry = browser_json(\"\"\"JSON.stringify((() => {\n      const id = %s;\n      const tray = document.querySelector('[data-testid=agent-tray]');\n      const header = tray?.querySelector('button[aria-expanded]');\n      const list = tray?.querySelector('ul');\n      const rows = Array.from(list?.querySelectorAll('li[data-tray-row]') || []);\n      const composer = document.querySelector('section[aria-label=\"Agent chat\"] form[data-chat-composer-form]');\n      const nav = document.querySelector('nav[aria-label=\"Primary\"]');\n      if (!tray || !header || !list || !composer || !nav) return {missing:true};\n      const box = el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };\n      const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);\n      const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));\n      const child = rows.find(row => row.dataset.trayRow === id);\n      const childRunning = !!child?.querySelector('[data-status=running]');\n      const childBox = child && box(child);\n      const childWhole = !!childBox && childBox.left >= clip.left-1 && childBox.right <= clip.right+1 &&\n        childBox.top >= clip.top-1 && childBox.bottom <= clip.bottom+1;\n      const hit = el => {\n        if (!el) return {x:null,y:null,hit:false,target:null};\n        const r=el.getBoundingClientRect(), x=(r.left+r.right)/2, y=(r.top+r.bottom)/2;\n        const target=document.elementFromPoint(x,y);\n        return {x,y,hit:!!target && (target===el || el.contains(target)),target:target?.tagName || null};\n      };\n      const headerHit = hit(header), childLinkHit = hit(child?.querySelector('a[href]'));\n      const visible = rowBoxes.filter(row => row.bottom > clip.top && row.top < clip.bottom);\n      const partial = visible.filter(row => row.top < clip.top-1 || row.bottom > clip.bottom+1);\n      const hidden = rowBoxes.filter(row => row.bottom <= clip.top || row.top >= clip.bottom);\n      const moreText = Array.from(tray.querySelectorAll('div[aria-hidden=true]'))\n        .find(x => /\u2193 [0-9]+ more/.test(x.textContent || ''))?.textContent || '';\n      const moreCount = Number(/([0-9]+) more/.exec(moreText)?.[1] || 0);\n      return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,\n        navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',\n        childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',\n        headerColors:Array.from(header.querySelectorAll('[data-agent-color]')).map(x=>x.dataset.agentColor),\n        rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,\n        childWhole,childRunning,headerHit,childLinkHit,\n        partialRows:partial.length,hiddenRows:hidden.length,moreCount,\n        horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,\n          tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,\n          ...rowBoxes.map(row=>Math.max(clip.left-row.left,row.right-clip.right))),\n        maxControlBottom:Math.max(header.getBoundingClientRect().bottom,...visible.map(row=>row.bottom)),\n        composerTop:composerBox.top,composerBottom:composerBox.bottom,navTop:navBox.top,\n        tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};\n    })())\"\"\" % json.dumps(child_id))"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "One synchronous callback reads list/tray/composer/nav/all row rectangles,actual viewport/theme/nav position,header colors,scrollWidth/clientWidth/document scroll width. Whole/partial/hidden rows and horizontal overflow preserve exact1px tolerances; visible membership uses strict overlap. More count comes from actual first matching aria-hidden div. Center elementFromPoint hit for header and exact child Open link must be target equality or actual descendant,not mere visibility.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-mobile-post-geometry-and-named-evidence",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 965,
+              "end": 976,
+              "text": "    if geometry.get(\"missing\") or not geometry.get(\"childRunning\"):\n        mobile_lifecycle_diagnostic(child, lead, live, width, theme, mobile_dom_lifecycle(child))\n        raise AssertionError(\"exact running child row missing or child finished during mobile geometry\")\n    mobile_geometry_ok(geometry, child_id, width, theme)\n    assert load(f\"color-{child_id}\")[\"value\"] in geometry[\"headerColors\"], \"tray avatar changed child color\"\n    shot = OUT / f\"mobile-tray-{width}-{theme}.png\"\n    browser(\"screenshot\", str(shot))\n    save(f\"mobile-tray-{width}-{theme}\", {\"child\": child_id, \"parent\": lead[\"agent_id\"],\n                                         \"child_state\": live[\"state\"], \"running_turn_id\": live[\"running_turn_id\"],\n                                         \"created_event_id\": created[0][\"event_id\"],\n                                         \"child_receipt_ids\": [e[\"event_id\"] for e in receipts],\n                                         \"screenshot\": str(shot), \"geometry\": geometry})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Missing geometry or absent running marker fails with diagnostic. Assert all14 numeric/identity/hit predicates and actual stored child color in header; retain mobile-tray-390-dark.png,557-dark.png,390-light.png,557-light.png with original initial active state/running turn,created event ID and matching activity receipt IDs.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-mobile-failure-diagnostic-bounds",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 816,
+              "end": 864,
+              "text": "def mobile_dom_lifecycle(child):\n    return browser_json(\"\"\"JSON.stringify((() => {\n      const id=%s, name=%s;\n      const tray=document.querySelector('[data-testid=agent-tray]');\n      const header=tray?.querySelector('button[aria-expanded]');\n      const rows=[...document.querySelectorAll('[data-testid=agent-tray] [data-tray-row]')];\n      const child=rows.find(r=>r.dataset.trayRow===id);\n      const cards=[...document.querySelectorAll('[data-testid=completion-record]')]\n        .filter(c=>c.textContent?.includes(name));\n      return {path:location.pathname,width:innerWidth,height:innerHeight,\n        theme:document.documentElement.dataset.theme,tray_present:!!tray,\n        tray_open:tray?.dataset.open??null,header_expanded:header?.getAttribute('aria-expanded')??null,\n        row_count:rows.length,row_ids:rows.slice(0,20).map(r=>r.dataset.trayRow||''),\n        exact_child_row_count:rows.filter(r=>r.dataset.trayRow===id).length,\n        child_running:!!child?.querySelector('[data-status=running]'),\n        card_count:cards.length,cards:cards.slice(0,10).map(c=>({\n          attempt:c.dataset.attempt||'',outcome:c.dataset.outcome||'',delivery:c.dataset.delivery||''}))};\n    })())\"\"\" % (json.dumps(child[\"agent_id\"]), json.dumps(child[\"name\"])))\n\n\ndef mobile_lifecycle_diagnostic(child, lead, initial, width, theme, dom):\n    \"\"\"Capture a missing running tray without transcript or native tool content.\"\"\"\n    def identity(value):\n        return value if isinstance(value, str) and len(value) <= 160 and \\\n            re.fullmatch(r\"[A-Za-z0-9_:/.-]+\", value) else \"<invalid>\"\n\n    def summary(agent_id):\n        history = [e for e in events(agent_id) if e.get(\"agent_id\") == agent_id]\n        return {\"count\": len(history), \"omitted\": max(0, len(history) - 40),\n                \"events\": [{\"event_id\": identity(e.get(\"event_id\")),\n                            \"seq\": e.get(\"seq\") if isinstance(e.get(\"seq\"), int) else None,\n                            \"kind\": identity(e.get(\"kind\")), \"turn_id\": identity(e.get(\"turn_id\"))}\n                           for e in history[-40:]]}\n\n    current = agent(child[\"agent_id\"])\n    receipt = {\"run_id\": RUN, \"child_id\": child[\"agent_id\"], \"parent_id\": lead[\"agent_id\"],\n               \"requested_width\": width, \"requested_theme\": theme,\n               \"captured_at_ms\": int(time.time() * 1000),\n               \"initial_api_state\": initial[\"state\"], \"initial_api_attempt\": initial[\"attempt\"],\n               \"initial_api_running_turn_id\": initial.get(\"running_turn_id\"),\n               \"api_agent_id\": current.get(\"agent_id\"), \"api_parent_id\": current.get(\"parent_agent_id\"),\n               \"api_state\": current[\"state\"], \"api_attempt\": current[\"attempt\"],\n               \"api_running_turn_id\": current.get(\"running_turn_id\"),\n               \"dom\": {key: dom.get(key) for key in (\n                   \"path\", \"width\", \"height\", \"theme\", \"tray_present\", \"tray_open\", \"header_expanded\",\n                   \"row_count\", \"row_ids\", \"exact_child_row_count\", \"child_running\",\n                   \"card_count\", \"cards\")},\n               \"child_events\": summary(child[\"agent_id\"]), \"parent_events\": summary(lead[\"agent_id\"])}\n    save(f\"mobile-lifecycle-{width}-{theme}\", receipt)"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Failure path records bounded actual DOM (row IDs first20,card facts first10) and exact child/parent saved event summaries last40,count+omitted,identity<=160 permitted characters,seq only actual integer. Preserve actual API state/attempt/runningTurn and capture time without transcript/native tool text. This is conditional diagnostic evidence,not a successful mobile oracle.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          },
+          {
+            "id": "child-mobile-restore-original",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 979,
+              "end": 986,
+              "text": "def mobile_restore():\n    original = load(\"mobile-original\")\n    assert original[\"width\"] > 0 and original[\"height\"] > 0 and original[\"theme\"] in (\"dark\", \"light\")\n    browser(\"set\", \"viewport\", str(original[\"width\"]), str(original[\"height\"]))\n    current = browser_json(\"JSON.stringify({value:document.documentElement.dataset.theme})\")[\"value\"]\n    if current != original[\"theme\"]:\n        browser(\"click\", f'button[aria-label=\"Switch to {original[\"theme\"]} mode\"]')\n    browser(\"wait\", \"--fn\", f'document.documentElement.dataset.theme === {json.dumps(original[\"theme\"])}')"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
+              "required": "Restore saved actual positive viewport width/height and original dark/light theme using real theme toggle only if different; wait actual theme. No nominal size/theme substituted.",
+              "canonicalAttempt": "Accepted c71 supports individual DOM rect/style/attributes/focus and URL capture. Exact atomic geometry, tab identity and source-derived selection composition has not been validated through authored YAML. DomFieldSchema lacks point-hit and scroll metrics; engine feasibility requested, no new primitive authorized.",
+              "missingObservation": "Bind the actual source-selected facts and actor results, retaining snapshot continuity and native/saved identity. Separate rectangle or visible captures do not prove point occlusion or a synchronous whole-layout snapshot."
+            }
+          }
+        ],
+        "remainingChildSelectedPythonPredicates": 33,
+        "canonicalEvidenceBoundary": {
+          "engine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+          "source": "dist/types.js CaptureSchema604-637 / DomFieldSchema669-688",
+          "missingSupportedObservation": "Atomic geometry with actual viewport/scroll metrics and elementFromPoint center hit has no admitted observation path demonstrated. Engine source-backed feasibility requested; no operation expansion authorized.",
+          "coverage": "unresolved"
+        },
+        "acceptance": "Source mapping only; no new YAML/preservation/runtime credit."
       }
     },
     {
@@ -45720,24 +46678,24 @@
     "originalSteps": 207,
     "helperInventoryEntries": 1072,
     "classificationCounts": {
-      "selected-invocation-predicate-reachable": 151,
+      "selected-invocation-predicate-reachable": 185,
       "unrelated-to-static-selected-call-closure": 380,
       "helper-selftest-negative-requirement": 213,
       "excluded-static-selected-invocation-branch": 8,
       "selected-invocation-predicate-conditionally-reachable": 4,
-      "selected-function-reachable-branch-unresolved": 278,
+      "selected-function-reachable-branch-unresolved": 244,
       "selected-external-helper-branch-unresolved": 34,
       "unrelated-external-helper-case": 4
     },
     "reachableCandidatePredicates": 467,
-    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved.",
+    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved.",
     "reviewedAuthoredUnvalidatedPredicates": 20,
     "partiallyMappedRepeatedPredicates": 3,
     "fullPreservationAcceptance": false,
     "additionalUninventoriedStopNativeGuards": 14,
     "ownershipImportedPredicateDenominator": "unresolved; excluded from1072 frozen extraction, included in required followup",
     "additionalUninventoriedFilesGuards": 6,
-    "additionalUninventoriedChildSourceGroups": 36
+    "additionalUninventoriedChildSourceGroups": 47
   },
   "dependencies": {
     "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",

@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "465a67d9af8fd70cd4e15126962c273cfcf7857cc84a725f670e8c551acb9726"
+        "sha256": "4d0d3197d5006a83075dc606491d658fa4398cc7c8c8accb5d4cc3780b271c8a"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -937,7 +937,7 @@
       "conservativeReachableCandidates": 467,
       "helperSelftestOrNegativeRecords": 213,
       "unrelatedBranchesOrCases": 392,
-      "exactReachablePredicateDenominator": "Stop40/Files24/Child91 frozen subsets selected(includes2childconditional);remainingChild67+6external guards,otherpilots and56extra source guard/selection/actor groups/imports remain uncovered."
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child125 frozen subsets selected (including2 conditional child entries); remaining Child33+6 external guards, other pilots and67 extra source guard/selection/actor groups/imports are uncovered."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -1717,5 +1717,124 @@
     "newSelection": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
     "reportedCandidateStop": "unchangedde0fcf6e raw draft admitted1.045s/131verifycalls/2362actualreads,22providers,effects0/runtime0",
     "evidenceBoundary": "No maintainedenginepin change,pilot gate or preservation credit;969document-race P1/otherreviewer holds open;parentreviewneeded."
+  },
+  "childCardMobileSelectedBranchReview": {
+    "at": "2026-10-09T11:58:39.971614+00:00",
+    "frozenHelperByteMatch": true,
+    "newInventoryDirect": 34,
+    "sourceGroupExtensionsUncovered": 11,
+    "remainingChildUnresolvedPythonPredicates": 33,
+    "externalRefGuardsUnresolved": 6,
+    "newYamlOrPreservationCredit": false
+  },
+  "parentVerifiedWipPerformanceDiagnostic": {
+    "at": "2026-10-09T11:58:39.971614+00:00",
+    "verification": "Parent independently verified receipts, actual per-version file pins/public environments and unchanged wrappers. Pilot rehashed three receipt bytes and unchanged Stop YAML, but did not execute loader or adopt candidate.",
+    "basis": "NEW selection e34d and public env snapshots; NOT historical inventory405554/env5b473 recovery.",
+    "candidateCodeRelationship": "Engine reports committed9a1d7cf5 after unapproved969. Diagnostic package was performance WIP; exact source/package/installed equivalence to committed head remains engine review work. No code acceptance inferred.",
+    "baselineEngine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+    "baselineAdapter": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+    "candidateStatus": "UNAPPROVED WIP; maintained c71 unchanged, two969 reviewer P1 defects open.",
+    "receipts": [
+      {
+        "path": "/private/tmp/aft-interface-a43468f0/verification-diagnostic-20261009T1140/baseline-minimal.json",
+        "sha256": "cb1da68597ae04c055e376ae63e8ad52167beef641151831ad4de5aa5384bd48",
+        "data": {
+          "purpose": "NEW admission-only selection comparison; not historical inventory/env recovery",
+          "label": "baseline",
+          "engine": "0.6.0",
+          "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+          "envSha256": "37209e50a44c99f42124998cfc0d9d8ca21837ec1fec2dc6644d2e2bff85816b",
+          "pinSha256": "be64b7ac1cd616a8e984ed947425105a1c5299833c715c43124b96ca9a6fc173",
+          "manifestFiles": 2362,
+          "uniqueManifestBytes": 8887167,
+          "providers": 22,
+          "rawFile": "/private/tmp/aft-interface-a43468f0/verification-diagnostic-20261009T1140/minimal.test.yaml",
+          "rawSha256": "e5c12bcdaddff2947a9627292a3853a72baf6e7c15be6d8dc07d8717412e5db0",
+          "verifyCalls": 3,
+          "verifyReads": 155892,
+          "verifyBytes": 586553022,
+          "verifyMs": 8529.573626000001,
+          "elapsedMs": 8535.00075,
+          "effects": 0,
+          "runtimeStarted": 0,
+          "status": "admitted canonical raw YAML",
+          "loaded": 1
+        }
+      },
+      {
+        "path": "/private/tmp/aft-interface-a43468f0/verification-diagnostic-20261009T1140/candidate-minimal.json",
+        "sha256": "80fa096260c24e5ac100d2ab81eac8abc70eee6c227e73674ef9c301a6110d4f",
+        "data": {
+          "purpose": "NEW admission-only selection comparison; not historical inventory/env recovery",
+          "label": "candidate",
+          "engine": "0.6.0",
+          "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+          "envSha256": "49a2b38f62ff8fbdc38f082203d41b5c68fd184edb39fb31a92d49a3941853be",
+          "pinSha256": "8bb3dd3185c59129a0eece179795eb57fc5a68fd082b1942ac296127be531ac2",
+          "manifestFiles": 2362,
+          "uniqueManifestBytes": 8887026,
+          "providers": 22,
+          "rawFile": "/private/tmp/aft-interface-a43468f0/verification-diagnostic-20261009T1140/minimal.test.yaml",
+          "rawSha256": "e5c12bcdaddff2947a9627292a3853a72baf6e7c15be6d8dc07d8717412e5db0",
+          "verifyCalls": 3,
+          "verifyReads": 2362,
+          "verifyBytes": 8887026,
+          "verifyMs": 1121.5397499999995,
+          "elapsedMs": 1126.2035839999999,
+          "effects": 0,
+          "runtimeStarted": 0,
+          "status": "admitted canonical raw YAML",
+          "loaded": 1
+        }
+      },
+      {
+        "path": "/private/tmp/aft-interface-a43468f0/verification-diagnostic-20261009T1140/candidate-stop.json",
+        "sha256": "ba3813eabae4d06dc71c61d9c1b40a154ce87de158a343371566a8da49137c2b",
+        "data": {
+          "purpose": "NEW admission-only selection comparison; not historical inventory/env recovery",
+          "label": "candidate",
+          "engine": "0.6.0",
+          "selectionSha256": "e34d19082d15384b7aeb09d61bff624cc976f9c9558decccb7d642980b8098be",
+          "envSha256": "49a2b38f62ff8fbdc38f082203d41b5c68fd184edb39fb31a92d49a3941853be",
+          "pinSha256": "8bb3dd3185c59129a0eece179795eb57fc5a68fd082b1942ac296127be531ac2",
+          "manifestFiles": 2362,
+          "uniqueManifestBytes": 8887026,
+          "providers": 22,
+          "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "rawSha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1",
+          "verifyCalls": 131,
+          "verifyReads": 2362,
+          "verifyBytes": 8887026,
+          "verifyMs": 865.5474519999916,
+          "elapsedMs": 1045.3942499999998,
+          "effects": 0,
+          "runtimeStarted": 0,
+          "status": "admitted canonical raw YAML",
+          "loaded": 1
+        }
+      }
+    ],
+    "manifestComparison": {
+      "providersEach": 22,
+      "filesEach": 2362,
+      "baselineUniqueBytes": 8887167,
+      "candidateUniqueBytes": 8887026,
+      "changedMembers": [
+        "package.json",
+        "package-lock.json"
+      ],
+      "totalByteDifference": 141,
+      "countsAreUniqueClosureBytes": true
+    },
+    "pilotOutcomes": {
+      "bare-stop": "Completed raw full admission on WIP/new environment only;1.045394s,131 verify calls,2362 actual reads. Still skipped/runtime0/preservation unverified.",
+      "files-save-reload": "unknown on this WIP/new environment",
+      "child-repeat": "unknown on this WIP/new environment",
+      "stream-render-clock": "unknown on this WIP/new environment",
+      "sse-cursor": "unknown on this WIP/new environment"
+    },
+    "preservationAcceptance": false,
+    "runtimeAcceptance": false
   }
 }
