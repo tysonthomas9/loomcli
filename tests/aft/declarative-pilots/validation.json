@@ -871,7 +871,7 @@
     "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
   },
   "currentPublication": {
-    "at": "2026-10-09T14:34:25.955903+00:00",
+    "at": "2026-10-09T14:46:38.904469+00:00",
     "status": "in-progress reviewable draft; not preservation-complete",
     "taskNoteId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
     "branch": "codex/aft-declarative-pilots",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "6f2ffb4a5ad8bb1d88fd79bdfe1614fcb3d4ce91c14840eae961d0b609f864eb"
+        "sha256": "ebd007ca1b99e2cf3b6cc359f4216ccb464cfcae31adf05567fcb8535650a6ad"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -941,10 +941,10 @@
       "reviewedPredicateMappings": 20,
       "fullPreservationAccepted": 0,
       "helperInventory": 1072,
-      "conservativeReachableCandidates": 494,
+      "conservativeReachableCandidates": 493,
       "helperSelftestOrNegativeRecords": 219,
-      "unrelatedBranchesOrCases": 359,
-      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35;Visual boundary57+pacing46+render41+reasoning39+suitehook7+clipboard8+hover15.143 supplemental sourcegroups uncovered;14Python/5external+dynamic/imported/provisioning unresolved.494 conservative candidates not final denominator;219selftests/negative and359unrelated-excluded,original fullindexmissing."
+      "unrelatedBranchesOrCases": 360,
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35;Visual boundary57+pacing46+render41+reasoning39+suitehook7+clipboard8+hover15+common13+arrival5.493staticselectedextractedrecords,219selftests/negative,360unrelated-excluded;156supplementalsourcegroupsuncovered. Noextractedbranch-unresolvedrecordsleft,butlogicalpredicate cardinality/dynamic/imported/provisioning/fulloriginalindex unresolved;not fullpreservation."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -3354,5 +3354,610 @@
       "initialDiagnosticErratum": "First diagnostic incorrectly nested arm instead of actual operation:arm. Initial false control retained separately; corrected exact canonical shape used here."
     },
     "acceptance": "15 extracted records narrowed,not preserved assertions;8 sourcegroups uncovered,oldstep25 onlyscreenshot. Exact atomically measured style/hover/focus shape needs source-backed feasibility triage; no new operation/engine expansion/runtime."
+  },
+  "visualIdentityArrivalSelectedBranchReview": {
+    "at": "2026-10-09T14:46:38.904469+00:00",
+    "scope": "Remaining visual shared identity/event/request and arrival installation/runtime guard classification only",
+    "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+    "externalSha256": "71377f518413c805fbe6d2df33621839bd04311cbf10a789e3b74ed8270599c8",
+    "frozenBytesMatch": true,
+    "selectedExtractedRecords": [
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 91,
+        "function": "agent_id",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 107,
+        "function": "events",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 108,
+        "function": "events",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 115,
+        "function": "current",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 116,
+        "function": "current",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 132,
+        "function": "claim",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 135,
+        "function": "claim",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 139,
+        "function": "claim",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 140,
+        "function": "claim",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 141,
+        "function": "claim",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 142,
+        "function": "claim",
+        "classification": "selected-invocation-predicate-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 103,
+        "function": "events",
+        "classification": "selected-invocation-predicate-conditionally-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 57,
+        "function": "request",
+        "classification": "selected-invocation-predicate-conditionally-reachable"
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "line": 8,
+        "function": "prime|bind|snapshot|markFrame|close",
+        "classification": "selected-invocation-predicate-reachable",
+        "actualCallerSteps": [
+          2
+        ]
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "line": 72,
+        "function": "prime|bind|snapshot|markFrame|close",
+        "classification": "selected-invocation-predicate-reachable",
+        "actualCallerSteps": [
+          12
+        ]
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "line": 79,
+        "function": "prime|bind|snapshot|markFrame|close",
+        "classification": "selected-invocation-predicate-reachable",
+        "actualCallerSteps": [
+          20
+        ]
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "line": 89,
+        "function": "prime|bind|snapshot|markFrame|close",
+        "classification": "selected-invocation-predicate-reachable",
+        "actualCallerSteps": [
+          12,
+          20
+        ]
+      },
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "line": 93,
+        "function": "prime|bind|snapshot|markFrame|close",
+        "classification": "selected-invocation-predicate-reachable",
+        "actualCallerSteps": [
+          20
+        ]
+      }
+    ],
+    "direct": 16,
+    "conditional": 2,
+    "excludedOtherSourceBranch": [
+      {
+        "helperId": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "line": 54,
+        "function": "request",
+        "classification": "excluded-static-selected-invocation-branch"
+      }
+    ],
+    "sourceRequestCallArguments": [
+      {
+        "function": "self_test_request_204",
+        "line": 70,
+        "source": "request(f\"{PREFIX}/agt_self_test/archive\", \"POST\", {\"reason\": \"cancelled\"})",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "events",
+        "line": 98,
+        "source": "request(f\"{PREFIX}/{agent_id(case)}/events?after={after}&limit=500\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "preflight",
+        "line": 123,
+        "source": "request(f\"/api/workspaces/{urllib.parse.quote(WS, safe='')}\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "preflight",
+        "line": 126,
+        "source": "request(f\"/api/workspaces/{urllib.parse.quote(WS, safe='')}/v1/harnesses/opencode\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "claim",
+        "line": 138,
+        "source": "request(f\"{PREFIX}/{match[1]}\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "snapshot",
+        "line": 148,
+        "source": "request(f\"{PREFIX}/{agent_id(case)}\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "rename",
+        "line": 467,
+        "source": "request(f\"{PREFIX}/{agent_id(case)}\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "rename_reloaded",
+        "line": 477,
+        "source": "request(f\"{PREFIX}/{agent_id(case)}\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "rename_restored",
+        "line": 485,
+        "source": "request(f\"{PREFIX}/{agent_id(case)}\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "rename_restored_reloaded",
+        "line": 494,
+        "source": "request(f\"{PREFIX}/{agent_id(case)}\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "workspace_data",
+        "line": 950,
+        "source": "request(path)",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "create_mobile_roster",
+        "line": 970,
+        "source": "request(\"/api/workspaces\", \"POST\", {\"name\": name, \"type\": \"empty\"}, expected_status=201)",
+        "explicitExpectedStatus": "201"
+      },
+      {
+        "function": "cleanup_agents",
+        "line": 4237,
+        "source": "request(f\"{PREFIX}/{agent_id(case)}\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "cleanup_agents",
+        "line": 4242,
+        "source": "request(f\"{PREFIX}/{a['agent_id']}/archive\", \"POST\", {\"reason\": \"cancelled\"}, f\"cov-visual-{RUN}-{case}-archive\")",
+        "explicitExpectedStatus": null
+      },
+      {
+        "function": "cleanup_mobile_workspaces",
+        "line": 4362,
+        "source": "request(f\"/api/workspaces/{urllib.parse.quote(row['id'], safe='')}\", \"DELETE\", expected_status=200)",
+        "explicitExpectedStatus": "200"
+      }
+    ],
+    "freshSelectedPlanAbsence": "Source branch assumption only,not actualprovisioning proof; fullcampaign/staleplan/negative/imported ownership obligations retained.",
+    "additionalSourceGroups": [
+      {
+        "id": "visual-common-owned-env-and-import-root",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "sourceLines": {
+          "start": 22,
+          "end": 40,
+          "text": "def required(name):\n    value = os.environ.get(name, \"\")\n    if not value:\n        raise ValueError(f\"{name} is required\")\n    return value\n\n\nWORK = Path(required(\"AFT_WORK_DIR\")) / \"chat-visual\"\nWS = required(\"AFT_WS\")\nRUN = required(\"RUN_ID\")\nAPI = required(\"AFT_API_URL\").rstrip(\"/\")\nPREFIX = f\"/api/workspaces/{urllib.parse.quote(WS, safe='')}/v1/agents\"\n_disclosure_spec = importlib.util.spec_from_file_location(\"chat_disclosures\", Path(__file__).with_name(\"coverage-chat-disclosures.py\"))\ndisclosures = importlib.util.module_from_spec(_disclosure_spec)\n_disclosure_spec.loader.exec_module(disclosures)\n\nNAMES = {case: f\"aft-{RUN}-cov-visual-{case}\" for case in (\"render\", \"input\")}\nMOBILE_WS_NAMES = [f\"aft-{RUN}-visual-ws-{index}\" for index in range(1, 4)]\n"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/2",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/10",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Original required WORK/WS/RUN/API and quotedAgentAPIprefix,disclosures import and exact render name derive actual source run. Missing env errors remain negative requirements outside extracted assertions. Bind actual fixture RUN token/ownedworkroot,never engineUUID or copiedprivateenvironment; original fullimport/provisioning closure unresolved.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {}
+      },
+      {
+        "id": "visual-common-http-json-and-status-body",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "sourceLines": {
+          "start": 43,
+          "end": 60,
+          "text": "    headers = {\"Accept\": \"application/json\"}\n    data = None\n    if body is not None:\n        headers[\"Content-Type\"] = \"application/json\"\n        data = json.dumps(body).encode()\n    if key:\n        headers[\"Idempotency-Key\"] = key\n    with urllib.request.urlopen(\n        urllib.request.Request(API + path, data=data, headers=headers, method=method), timeout=15\n    ) as response:\n        if expected_status is not None:\n            assert response.status == expected_status, (method, path, response.status)\n        raw = response.read()\n        if response.status == 204:\n            assert not raw, \"204 response unexpectedly carried a body\"\n            return None\n        return json.loads(raw)\n"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/10",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/32",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Original GET/JSON reads and fixed teardown POST use AcceptJSON,Content-Type only body,stable sourceIdempotency whenprovided,15s urllibrequest; optional expectedstatus assertion applies otherbranches,selectedfreshrender leavesNone. Any204 mustactualemptybody; otherresponses actualJSON,errors propagate. No arbitrary mutatingAPI/header escape.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {
+          "perRequestTimeoutMs": 15000,
+          "emptyBodyOnlyStatus": 204,
+          "expectedStatusSelectedFreshCase": null
+        }
+      },
+      {
+        "id": "visual-common-captured-id-and-current-route",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "sourceLines": {
+          "start": 89,
+          "end": 116,
+          "text": "def agent_id(case):\n    value = (WORK / f\"{case}.id\").read_text().strip()\n    assert re.fullmatch(r\"agt_[A-Za-z0-9_-]+\", value), value\n    return value\n\n\ndef events(case):\n    result, after = [], 0\n    while True:\n        page = request(f\"{PREFIX}/{agent_id(case)}/events?after={after}&limit=500\")\n        result.extend(page[\"events\"])\n        if not page[\"more\"]:\n            break\n        new = page[\"next\"]\n        assert new > after, \"saved event cursor did not advance\"\n        after = new\n    ids = [e[\"event_id\"] for e in result]\n    seqs = [e[\"seq\"] for e in result]\n    assert len(ids) == len(set(ids)) and len(seqs) == len(set(seqs)), \"duplicate saved event\"\n    assert seqs == sorted(seqs), \"saved event order changed\"\n    return result\n\n\ndef current(case):\n    path = evaluate(\"location.pathname\")\n    match = re.fullmatch(rf\"/ws/{re.escape(WS)}/chat/(agt_[A-Za-z0-9_-]+)\", path)\n    assert match, f\"current page is not this workspace's Chat: {path!r}\"\n    assert match[1] == agent_id(case), f\"Chat changed agents: {match[1]} != {agent_id(case)}\""
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/10",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/18",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/24",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/25",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/30",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/32",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Original captured render.id strip mustfullmatchagt_ token. Actual pathname mustexact /ws/WS/chat/capturedAgent anchoredregex; substring urlwait or guessednativeID/name is not equality. Agent incarnation/fixture authority and later mutable displayname remain distinct.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {}
+      },
+      {
+        "id": "visual-common-all-pages-order-and-uniqueness",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "sourceLines": {
+          "start": 95,
+          "end": 109,
+          "text": "def events(case):\n    result, after = [], 0\n    while True:\n        page = request(f\"{PREFIX}/{agent_id(case)}/events?after={after}&limit=500\")\n        result.extend(page[\"events\"])\n        if not page[\"more\"]:\n            break\n        new = page[\"next\"]\n        assert new > after, \"saved event cursor did not advance\"\n        after = new\n    ids = [e[\"event_id\"] for e in result]\n    seqs = [e[\"seq\"] for e in result]\n    assert len(ids) == len(set(ids)) and len(seqs) == len(set(seqs)), \"duplicate saved event\"\n    assert seqs == sorted(seqs), \"saved event order changed\"\n    return result"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/32",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Fetch ALL actual saved pages after0,limit500;page.more controls cursoradvance strictlynext>after. Across complete accumulated events both eventIDs ANDseqs unique,seqs equal sortedseqs; no sorting/dedup/firstpage/truncation repair. Source has no maxpage bound; canonical workcaps need actualsource-shaped completeness proof.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {
+          "sourcePageSize": 500,
+          "firstCursor": 0,
+          "sourceMaximumPages": null,
+          "advanceWhenMore": "strict next>after"
+        }
+      },
+      {
+        "id": "visual-common-claim-render-public-row",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "sourceLines": {
+          "start": 131,
+          "end": 144,
+          "text": "def claim(case):\n    assert case in NAMES, case\n    path = evaluate(\"location.pathname\")\n    match = re.fullmatch(rf\"/ws/{re.escape(WS)}/chat/(agt_[A-Za-z0-9_-]+)\", path)\n    assert match, f\"New Agent did not open Chat: {path!r}\"\n    WORK.mkdir(parents=True, exist_ok=True)\n    (WORK / f\"{case}.id\").write_text(match[1] + \"\\n\")\n    a = request(f\"{PREFIX}/{match[1]}\")\n    assert a[\"name\"] == NAMES[case] and a[\"agent_id\"] == match[1], a\n    assert a[\"repo\"] == required(\"AFT_AGENT_FLOW_REPO\") and a[\"harness\"] == \"opencode\", a\n    assert a[\"preset\"] == \"lead\" and a[\"created_by_kind\"] == \"user\", a\n    assert a[\"parent_agent_id\"] is None, a\n    write(f\"{case}-identity.json\", a)\n"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/10"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Actual current exactChat route yields ID BEFORE publicGET then actualname=NAMESrender andagent_id samecapturedID; repo exactoriginalpath,harnessopencode,presetlead,created_by_kinduser,parentNULL. Render key in NAMES validated. All facts/assertions belongsource/YAML,not hidden adapter scenarios; immutable creationincarnation ownership may be stronger separately.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {}
+      },
+      {
+        "id": "visual-common-owned-snapshot-and-checkpoint",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "sourceLines": {
+          "start": 147,
+          "end": 155,
+          "text": "    current(case)\n    write(f\"{case}-{stage}.json\", {\"agent\": request(f\"{PREFIX}/{agent_id(case)}\"), \"events\": events(case)})\n\n\ndef shot(case, stage):\n    current(case)\n    WORK.mkdir(parents=True, exist_ok=True)\n    browser(\"screenshot\", str(WORK / f\"chat-visual-{case}-{stage}.png\"))\n"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/18",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/24",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/32",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Snapshot checks currentcapturedChat then writes actual publicrow+ALLsaved events to exact owned sourcecase-stage artifact; shot checkscurrentagain and writes chat-visual-case-stage.png via original browser. No fixture.release/scalarAPIcall/renamedgenericcheckpoint equivalence or later-event repair.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {}
+      },
+      {
+        "id": "visual-arrival-prime-route-and-own-installation",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "sourceHelperSha256": "71377f518413c805fbe6d2df33621839bd04311cbf10a789e3b74ed8270599c8",
+        "sourceLines": {
+          "start": 1,
+          "end": 18,
+          "text": "(() => {\n  const workspace = __WS_JSON__;\n  const run = __RUN_JSON__;\n  const expectedPath = __PATH_JSON__;\n  const chatPrefix = __CHAT_PREFIX_JSON__;\n  const chatRoute = agentId => chatPrefix.endsWith(\"/\") ? chatPrefix + agentId : chatPrefix;\n  if (location.pathname !== expectedPath || Object.hasOwn(window, \"__aftChatVisualArrival\"))\n    throw Error(\"arrival-prime-route-or-duplicate\");\n  const NativeEventSource = window.EventSource;\n  const eventPath = `/api/workspaces/${encodeURIComponent(workspace)}/v1/events`;\n  const sources = [];\n  const arrivals = [];\n  const completions = [];\n  let bound = null;\n  let closed = false;\n  let error = null;\n  let phase = 0;\n  const mark = () => ({ mono: performance.now(), at: Date.now(), phase: ++phase });"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/2"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Prime on authored expectedAgents pathname before UI creation; reject own duplicate property; actual NativeEventSource captured,observer recordbound to source workspace/run/install route and original chatPrefix. Private installation identity/physicalclock authority must be authenticated; alias/URL/literalJSON notauthority.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {}
+      },
+      {
+        "id": "visual-arrival-actual-source-construction-and-query",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "sourceHelperSha256": "71377f518413c805fbe6d2df33621839bd04311cbf10a789e3b74ed8270599c8",
+        "sourceLines": {
+          "start": 19,
+          "end": 32,
+          "text": "  class ObservedEventSource extends NativeEventSource {\n    constructor(url, options) {\n      super(url, options);\n      const target = new URL(String(url), location.href);\n      if (target.origin !== location.origin || target.pathname !== eventPath ||\n          target.searchParams.get(\"deltas\") !== \"true\") return;\n      const agents = (target.searchParams.get(\"agents\") || \"\").split(\",\");\n      const source = { id: sources.length + 1, ...mark(), agents };\n      if (sources.length >= 20) { error = \"too-many-event-sources\"; return; }\n      sources.push(source);\n      this.addEventListener(\"event\", event => {\n        if (!bound || closed || error || !source.agents.includes(bound.agentId)) return;\n        let body;\n        try { body = JSON.parse(event.data); }"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/2",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Observe actual EventSource constructor BEFOREbind on sameorigin exact workspace /v1/events,firstURLSearchParams deltas=true and first agents comma list. Ignore unrelatedsources;retain actualsourceid/mono/at/phase+agentlist with20cap,errorsticky. Constructor(source)cannotbeinferredfrombind orreplay.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {
+          "maxSources": 20,
+          "queryDuplicateRule": "URLSearchParams.get first value",
+          "sourcePath": "sameorigin workspace /v1/events"
+        }
+      },
+      {
+        "id": "visual-arrival-completion-and-delta-selection",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "sourceHelperSha256": "71377f518413c805fbe6d2df33621839bd04311cbf10a789e3b74ed8270599c8",
+        "sourceLines": {
+          "start": 33,
+          "end": 58,
+          "text": "        catch { error = \"invalid-event-json\"; return; }\n        if (body.agent_id !== bound.agentId) return;\n        if ((body.kind === \"item.completed\" && body.payload?.itemKind === \"message\") ||\n            body.kind === \"agent.turn_completed\") {\n          if (completions.length >= 100) { error = \"too-many-completions\"; return; }\n          completions.push({ ...mark(), sourceId: source.id, agentId: body.agent_id,\n            turnId: body.turn_id, kind: body.kind, seq: body.seq,\n            eventId: body.event_id, itemId: body.payload?.itemId ?? null });\n          return;\n        }\n        if (body.seq !== 0 || body.kind !== \"delta\" ||\n            body.payload?.itemKind !== \"message\") return;\n        const itemId = body.payload.itemId;\n        const text = body.payload.text;\n        if (typeof itemId !== \"string\" || !itemId || typeof text !== \"string\" ||\n            typeof body.turn_id !== \"string\" || !body.turn_id) {\n          error = \"invalid-message-delta\";\n          return;\n        }\n        if (arrivals.length >= 5000) { error = \"too-many-message-deltas\"; return; }\n        arrivals.push({ ...mark(), sourceId: source.id, agentId: body.agent_id,\n          turnId: body.turn_id, itemId, text });\n      });\n    }\n  }\n  window.EventSource = ObservedEventSource;"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Only observedsource agentlist includingboundID andpayloadagent sameID. ParseJSONerrorsticky; messageitem.completed oragent.turn_completed retains source/agent/turn/eventID/seq/itemID with100cap; onlyseq0 delta itemKindmessage retains actualitem/turn nonemptystrings+textstring (emptytextallowed),5000cap. Otherkinds/foreignagents ignored,nevercoalescedexpectedtext.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {
+          "maxCompletions": 100,
+          "maxMessageDeltas": 5000,
+          "deltaSeq": 0,
+          "emptyDeltaTextAllowed": true
+        }
+      },
+      {
+        "id": "visual-arrival-ready-and-bind-real-connection",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "sourceHelperSha256": "71377f518413c805fbe6d2df33621839bd04311cbf10a789e3b74ed8270599c8",
+        "sourceLines": {
+          "start": 59,
+          "end": 76,
+          "text": "  const observer = Object.freeze({\n    version: 1, workspace, run, installedPath: expectedPath,\n    constructor: ObservedEventSource,\n    ready(agentId) {\n      return !closed && !error && window.EventSource === ObservedEventSource &&\n        sources.some(source => source.agents.length === 1 && source.agents[0] === agentId);\n    },\n    bind(agentId, route) {\n      if (closed || bound || error || !/^[A-Za-z0-9_-]+$/.test(agentId) ||\n          route !== chatRoute(agentId) ||\n          location.pathname !== route ||\n          window.EventSource !== ObservedEventSource ||\n          !sources.some(source => source.agents.length === 1 && source.agents[0] === agentId))\n        throw Error(\"arrival-bind-identity-or-source\");\n      bound = { agentId, route, ...mark() };\n      return { version: 1, workspace, run, agentId, route, sourceCount: sources.length };\n    },\n    snapshot() {"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "ready requiresnotclosed/error,exactownEventSourcehook andACTUALsource withsingleagentarray equalcapturedID. bind deniesalreadybound/closed/error/badtoken,wrong actualpathname/chatroute,foreignhook andmissingexactsingle-agent source. Bind stamp isactual sharedmark aftersourceconstructor; no retrospectively fabricatedsource.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {}
+      },
+      {
+        "id": "visual-arrival-snapshot-copy-and-continuity",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "sourceHelperSha256": "71377f518413c805fbe6d2df33621839bd04311cbf10a789e3b74ed8270599c8",
+        "sourceLines": {
+          "start": 77,
+          "end": 85,
+          "text": "      if (!bound || closed || location.pathname !== bound.route ||\n          window.EventSource !== ObservedEventSource)\n        throw Error(\"arrival-snapshot-identity\");\n      return { version: 1, workspace, run, bound: { ...bound },\n        sources: sources.map(source => ({ ...source, agents: [...source.agents] })),\n        arrivals: arrivals.map(arrival => ({ ...arrival })),\n        completions: completions.map(completion => ({ ...completion })),\n        phase, error };\n    },"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Snapshot deniesmissingbound/closed/wrongactualChatpath/foreignhook; copies bound,sources(agentarrays),arrivals,completions+phase/error under sameactual workspace/run. Earliercaptured snapshot immutable; error!=null/incomplete/overflow cannotbe success,ownership not granted by copiedDATA.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {}
+      },
+      {
+        "id": "visual-arrival-frame-and-close-own-hook",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-arrivals.js",
+        "sourceHelperSha256": "71377f518413c805fbe6d2df33621839bd04311cbf10a789e3b74ed8270599c8",
+        "sourceLines": {
+          "start": 86,
+          "end": 106,
+          "text": "    markFrame() {\n      if (closed || !bound || location.pathname !== bound.route ||\n          window.EventSource !== ObservedEventSource)\n        throw Error(\"arrival-frame-identity\");\n      return mark();\n    },\n    close() {\n      if (closed || window.EventSource !== ObservedEventSource) throw Error(\"arrival-close-identity\");\n      closed = true;\n      window.EventSource = NativeEventSource;\n      return { closed: true, arrivalCount: arrivals.length,\n        completionCount: completions.length, phase, error };\n    },\n  });\n  Object.defineProperty(window, \"__aftChatVisualArrival\", {\n    value: observer, enumerable: false, writable: false, configurable: false,\n  });\n  return { version: 1, workspace, run, path: expectedPath };\n})()"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12",
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Every actual frame mark checks notclosed/bound/actualroute/ownhook and increments commonphase. Close deniesrepeat/foreignhook,setsclosed,restores EXACTNativeEventSource,returns counts/phase/error WITHOUTnewphase; installed nonconfigurableobserver property remains. Closing observer vsretained evidence lifecycle requires exactcanonical continuity and cleanup,not countdefaults.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {}
+      },
+      {
+        "id": "visual-arrival-python-bind-freeze-and-close-seal",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "sourceLines": {
+          "start": 1378,
+          "end": 1412,
+          "text": "    replies = [e for e in evs if e[\"kind\"] == \"item.completed\" and e[\"payload\"].get(\"itemKind\") == \"message\" and delivered[0][\"seq\"] < e[\"seq\"] < end[0][\"seq\"]]\n    assert replies, \"real turn saved no assistant message\"\n    reply_items = [e[\"payload\"][\"itemId\"] for e in replies]\n    assert all(isinstance(item, str) and item for item in reply_items) and \\\n        len(reply_items) == len(set(reply_items)), \"saved reply item IDs are missing or duplicated\"\n    owned_turn = replies[-1][\"turn_id\"]\n    assert all(e[\"turn_id\"] == owned_turn for e in replies), \"saved reply items cross native turns\"\n    browser(\"wait\", \"--fn\", \"(() => {const p=window.__aftChatVisual,\" +\n            \"r=window.__aftChatVisualArrival?.snapshot(),\" +\n            \"a=r?.arrivals?.filter(x=>x.agentId===\" + json.dumps(agent_id(case)) +\n            \"&&x.turnId===\" + json.dumps(owned_turn) +\n            \"&&\" + json.dumps(reply_items) + \".includes(x.itemId));\" +\n            \"return !!p&&!p.stopped&&r?.error===null&&a?.length>0&&\" +\n            \"p.tickMeta.at(-1)?.mono>=Math.max(...a.map(x=>x.mono))+300;})()\")\n    probe = evaluate(\"\"\"(() => { const p=window.__aftChatVisual; if(!p)throw Error('motion probe missing');\n      const observer=window.__aftChatVisualArrival;\n      const before=observer?.snapshot();\n      const own=before?.arrivals?.filter(a=>a.agentId===__AID__&&a.turnId===__TURN__&&__ITEMS__.includes(a.itemId));\n      if(!own?.length||before.error!==null||p.tickMeta.at(-1)?.mono<Math.max(...own.map(a=>a.mono))+300)\n        throw Error('owned arrival horizon changed before freeze');\n      const finalSignal=p.captureState();\n      p.signals.push({at:finalSignal.at,mono:finalSignal.mono,phase:finalSignal.phase,tickIndex:null,\n        caret:finalSignal.caret,\n        working:finalSignal.working,stop:finalSignal.stop});\n      p.stopped=true; clearInterval(p.timer); p.observer?.takeRecords().forEach(p.recordShift);\n      p.observer?.disconnect(); p.liveObserver?.disconnect();\n      const arrival=observer.snapshot();\n      const arrivalClosed=observer.close();\n      if(arrival.error!==null||arrival.arrivals.length!==before.arrivals.length||\n         arrival.completions.length!==before.completions.length||\n         arrivalClosed.error!==null||arrivalClosed.arrivalCount!==arrival.arrivals.length||\n         arrivalClosed.completionCount!==arrival.completions.length||\n         arrivalClosed.phase!==arrival.phase)\n        throw Error('owned arrival changed across frozen observer close');\n      const c=document.querySelector('[data-testid=chat-transcript]');"
+        },
+        "callerOldStepIds": [
+          "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20"
+        ],
+        "coverage": "unresolved",
+        "destination": [],
+        "gap": {
+          "kind": "source-identity-protocol-or-lifecycle-untranslated",
+          "required": "Actual savedownedturn/replyitems determine selectedarrivalset; requireerrornull and full>=300ms observedRAFhorizon beforefreeze. FinalcaptureState mark precedes signals/stopped/interval+observer cleanup,then actual arrivalsnapshot+close counts/completions/phase mustunchanged/errornull. No laterliveevents or fabricatedfinalmark canrepairmissing earliest seal.",
+          "canonicalAttempt": "Existing acceptedca73 typed binding/paging/sourceMatch/bind/mark/retained-observation APIs available at interface level; exact source-defined composition/assertions/actors not yet authored or exercised in public pilot runner. No independent schema or wrapper fallback.",
+          "missingObservation": "Actual canonical owned original source identity/event/phase/continuity facts and exact YAML assertion/negative/deadline mapping; source-only classification is not evidence satisfaction."
+        },
+        "bounds": {
+          "arrivalHorizonMs": 300,
+          "closePhase": "same as capturedsnapshot"
+        }
+      }
+    ],
+    "acceptance": "18selectedrecords narrowed,1otherbranch excluded onlyforstaticfreshselectedrender case;13sourcegroups uncovered. Sourcehelpers runtimecallers corrected beyond installationstep2,not lost. All extractedbranch records now classified but 493candidate records are NOT fulllogicalpredicate denominator or preservation proof; dynamic/imported/provisioning/fulloriginalindex remain unresolved."
   }
 }
