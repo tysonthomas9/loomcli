@@ -571,3 +571,26 @@ test('canonical bind and observation preserve native cross-repository child line
   }
   h.fixture.agents.set('agt_owned',parent);
 });
+
+test('canonical public native prefix exposes first original message on full200 without history-completeness claim',async t=>{
+  const h=await setup(t),agent=h.fixture.agents.get('agt_owned')!,row=agent.row,routes:string[]=[];
+  let messages:Json[]=Array.from({length:200},(_,i)=>({id:`message_${i}`,sessionID:'ses_owned',type:'assistant',time:{completed:1},finish:'stop',
+    model:{providerID:'provider',id:i===0?'first-actual':'later-target'}}));
+  agent.native={pinnedExecutable:'/owned/opencode',registration:async()=>({url:'http://127.0.0.1:4123/',password:'private-password',pid:42,generation:'generation',endpointId:'endpoint'}),
+    process:async()=>({pid:42,generation:'generation',executable:'/owned/opencode',argv:['/owned/opencode','serve','--service']}),agent:async()=>row,
+    sessions:async()=>[{agent_id:row.agent_id,harness:'opencode',native_id:'ses_owned',native_root:''}],
+    read:async(route):Promise<HttpResponse>=>{routes.push(route);return {status:200,body:route==='/api/info'?{pid:42}:route.includes('/message?')?{data:messages}:
+      {data:{id:'ses_owned',metadata:{agent_id:'agt_owned'},location:{directory:'/owned/tree'},model:{variant:'actual-effort'}}}};}};
+  const request={agent:input.agent,view:'assistant-prefix',nativeSessionId:'ses_owned',nativeRoot:'',expectedGeneration:'generation',maxMessages:200};
+  const result=await h.invoke('loom.native.observe',request);assert.equal(result.availability,'observed');
+  const data=NativeOutput.parse(result.data);assert.equal(data.view,'assistant-prefix');if(data.view!=='assistant-prefix')throw Error('wrong view');
+  assert.equal(data.prefix.returnedCount,200);assert.equal(data.prefix.selected?.index,0);
+  assert.deepEqual(data.prefix.selected?.message,{id:'message_0',sessionID:'ses_owned',type:'assistant',time:{completed:1},finish:'stop',model:{providerID:'provider',id:'first-actual'}});
+  assert.equal(data.prefix.observedModel,'provider/first-actual');
+  assert.equal(data.nativeEffort,'actual-effort');assert.equal(Object.hasOwn(data,'complete'),false);
+  assert.ok(routes.includes('/api/session/ses_owned/message?type=assistant&order=desc&limit=200'));
+  messages=[];const empty=NativeOutput.parse((await h.invoke('loom.native.observe',request)).data);
+  assert.equal(empty.view,'assistant-prefix');if(empty.view==='assistant-prefix')assert.equal(empty.prefix.selected,null);
+  messages=Array.from({length:201},()=>null);const overflow=await h.invoke('loom.native.observe',request);
+  assert.equal(overflow.availability,'error');assert.equal(overflow.data,undefined);
+});

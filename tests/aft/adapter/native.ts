@@ -4,7 +4,7 @@ import { RedactionFacts, redactionFacts } from './redaction.js';
 import { AgentRef, AgentRow, Id, Json, NativeRef, ServiceRegistration, nativeRegistrationIdentity, requireFact, sha256, type NativeAccess } from './protocol.js';
 
 export const NativeInput = z.object({ agent: AgentRef, view: z.enum([
-  'session', 'inputs', 'completed-models', 'tools', 'usage', 'presence', 'registrations',
+  'session', 'inputs', 'completed-models', 'tools', 'usage', 'presence', 'registrations', 'assistant-prefix',
 ]), nativeSessionId: Id, nativeRoot: z.string(), expectedGeneration: Id,
   probeHandle: Id.nullable().optional(), expectedEndpointId: Id.optional(), expectedServicePid: z.number().int().positive().optional(),
   maxMessages: z.number().int().min(1).max(200), maxRegistrations: z.number().int().min(1).max(1000).optional(),
@@ -12,6 +12,33 @@ export const NativeInput = z.object({ agent: AgentRef, view: z.enum([
 const Base = { agentId: Id, nativeSessionId: Id, nativeRoot: z.string(), servicePid: z.number().int().positive(),
   serviceGeneration: Id, registeredEndpointId: Id };
 const RecordIdentity = { id: Id, sessionId: Id };
+/** Bounded source prefix, not a complete-history receipt. Index order is untouched. */
+export const NativeAssistantPrefix = z.object({ order: z.literal('desc'), messageType: z.literal('assistant'),
+  requestedLimit: z.literal(200), returnedCount: z.number().int().min(0).max(200),
+  eligibleIndices: z.array(z.number().int().min(0).max(199)).max(200),
+  selected: z.object({ index: z.number().int().min(0).max(199), message: Json }).strict().nullable(),
+  observedModel: z.string().nullable(),
+}).strict();
+export function projectNativeAssistantPrefix(raw: unknown): z.infer<typeof NativeAssistantPrefix> {
+  const response = z.object({ data: z.array(Json).max(200) }).passthrough().parse(Json.parse(raw));
+  const eligibleIndices: number[] = [];
+  response.data.forEach((message, index) => {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return;
+    const time = message.time;
+    if (message.type === 'assistant' && time && typeof time === 'object' && !Array.isArray(time) &&
+      time.completed && message.finish && !message.error) eligibleIndices.push(index);
+  });
+  const first = eligibleIndices[0];
+  const selected = first === undefined ? null : response.data[first];
+  const model = selected && typeof selected === 'object' && !Array.isArray(selected) ? selected.model : null;
+  const observedModel = model && typeof model === 'object' && !Array.isArray(model) && model.providerID && model.id ?
+    String(model.providerID) + '/' + String(model.id) : null;
+  return NativeAssistantPrefix.parse({ order: 'desc', messageType: 'assistant', requestedLimit: 200,
+    returnedCount: response.data.length, eligibleIndices,
+    selected: first === undefined ? null : { index: first, message: response.data[first] },
+    observedModel,
+  });
+}
 export const NativeOutput = z.discriminatedUnion('view', [
   z.object({ ...Base, view: z.literal('session'), directory: Id, metadataAgentId: Id,
     selectedModel: z.object({ provider: Id, model: Id }).strict().nullable() }).strict(),
@@ -35,6 +62,7 @@ export const NativeOutput = z.discriminatedUnion('view', [
   z.object({ ...Base, view: z.literal('registrations'), currentNativeSessionId: Id, currentNativeRoot: z.string(),
     complete: z.literal(true), records: z.array(z.object({agentId: Id,harness:z.literal('opencode'),nativeSessionId:Id,nativeRoot:z.string()}).strict()),
   }).strict(),
+  z.object({ ...Base, view: z.literal('assistant-prefix'), prefix: NativeAssistantPrefix, nativeEffort: Json }).strict(),
 ]);
 export const NativeRegistrationInput = z.object({agent: AgentRef,
   maxRegistrations: z.number().int().min(1).max(1000),
@@ -76,6 +104,8 @@ export async function observeNativeRegistration(input: z.infer<typeof NativeRegi
 }
 export async function observeNative(input: z.infer<typeof NativeInput>, access: NativeAccess,
   owned: AgentRow, signal: AbortSignal, probe?: SyntheticProbe, secrets: readonly string[] = []): Promise<z.infer<typeof NativeOutput>> {
+  requireFact(input.view !== 'assistant-prefix' || input.maxMessages === 200,
+    'unsupported-capability', 'Native assistant prefix requires its fixed source bound');
   requireFact(!input.probeHandle || (input.view === 'tools' && probe?.handle === input.probeHandle), 'ownership-mismatch', 'Native synthetic probe is not bound');
   const before = await verifyNativeService(access, input.expectedGeneration, signal);
   requireFact((input.expectedEndpointId === undefined || before.endpointId===input.expectedEndpointId) &&
@@ -110,15 +140,27 @@ export async function observeNative(input: z.infer<typeof NativeInput>, access: 
   } else {
     requireFact(response.status === 200, 'observation-failed', 'Native session is unreadable');
     const session = z.object({ data: z.object({ id: Id, metadata: z.object({ agent_id: Id }).passthrough(),
-      location: z.object({ directory: Id }).passthrough(), model: z.object({ providerID: Id, id: Id }).passthrough().nullable().optional(),
+      location: z.object({ directory: Id }).passthrough(), model: Json.optional(),
     }).passthrough() }).passthrough().safeParse(response.body);
     requireFact(session.success && session.data.data.id === input.nativeSessionId && session.data.data.metadata.agent_id === row.agent_id &&
       session.data.data.location.directory === row.worktree_path, 'identity-mismatch', 'Foreign native session or location');
+    const selectedModel = input.view === 'assistant-prefix' ? undefined :
+      z.object({ providerID: Id, id: Id }).passthrough().nullable().optional().parse(session.data.data.model);
     if (input.view === 'presence') output = { ...base, view: 'presence', present: true, nativeStatus: 200, nativeErrorName: null, nativeErrorSessionId: null };
     else if (input.view === 'session') output = { ...base, view: 'session', directory: session.data.data.location.directory,
       metadataAgentId: session.data.data.metadata.agent_id,
-      selectedModel: session.data.data.model ? { provider: session.data.data.model.providerID, model: session.data.data.model.id } : null };
-    else {
+      selectedModel: selectedModel ? { provider: selectedModel.providerID, model: selectedModel.id } : null };
+    else if (input.view === 'assistant-prefix') {
+      const messages = await access.read(`/api/session/${encodeURIComponent(input.nativeSessionId)}/message?type=assistant&order=desc&limit=200`, signal);
+      requireFact(messages.status === 200, 'observation-failed', 'Native assistant prefix is unreadable');
+      const rows = z.object({ data: z.array(Json).max(200) }).passthrough().parse(messages.body).data;
+      requireFact(rows.every(message => !message || typeof message !== 'object' || Array.isArray(message) ||
+        !Object.hasOwn(message, 'sessionID') || message.sessionID === input.nativeSessionId),
+      'identity-mismatch', 'Native assistant prefix contains a foreign message');
+      const model = session.data.data.model;
+      output = { ...base, view: 'assistant-prefix', prefix: projectNativeAssistantPrefix(messages.body),
+        nativeEffort: model && typeof model === 'object' && !Array.isArray(model) ? model.variant || null : null };
+    } else {
       const params = new URLSearchParams({ order: 'asc', limit: String(input.maxMessages) });
       const messages = await access.read(`/api/session/${encodeURIComponent(input.nativeSessionId)}/message?${params}`, signal);
       requireFact(messages.status === 200, 'observation-failed', 'Native messages are unreadable');

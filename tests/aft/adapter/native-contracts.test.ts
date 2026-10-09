@@ -129,7 +129,10 @@ test('native host reads owned SQLite and fixed authenticated routes with determi
   assert.equal(await access.log!('ses_owned', new AbortController().signal), log([first]));
   for (const route of ['/api/workspaces/foreign', '/api/session/..', '/api/session/%2E%2E', '/api/session/%2fsecret', 'https://foreign/'])
     await assert.rejects(access.read(route, new AbortController().signal));
-  assert.equal(calls.length, 2);
+  assert.equal((await access.read('/api/session/ses_owned/message?type=assistant&order=desc&limit=200', new AbortController().signal)).status, 200);
+  for (const route of ['/api/session/ses_owned/message?type=assistant&order=desc&limit=199', '/api/session/ses_owned/message?type=user&order=desc&limit=200'])
+    await assert.rejects(access.read(route,new AbortController().signal));
+  assert.equal(calls.length, 3);
   await assert.rejects(access.agent('foreign'));
   await unlink(registration); await symlink('/etc/hosts', registration);
   await assert.rejects(access.registration());

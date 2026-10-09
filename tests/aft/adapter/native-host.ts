@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { OwnedRoot } from './ownership.js';
 import type { OwnedWorkspaceRecord } from './workspaces.js';
-import { AgentRow, AgentHistory, NativeRef, ServiceRegistration, Json, ObservationError, requireFact,
+import { AgentRow, NativeAgentIdentity, AgentHistory, NativeRef, ServiceRegistration, Json, ObservationError, requireFact,
   type NativeAccess, type ProcessIdentity } from './protocol.js';
 
 export interface NativeHostOptions {
@@ -119,6 +119,14 @@ export function createNativeHostAccess(options: NativeHostOptions): NativeHostAc
     registration: privateRegistration,
     process: async () => processIdentity((await privateRegistration()).pid),
     rawAgent,
+    async agentIdentity(agentId, signal) {
+      const rows = await query('SELECT agent_id, workspace_id, name, created_at, repo, worktree_path, branch, harness, harness_session_id, harness_session_root, parent_agent_id, root_agent_id, created_by_kind, created_by_id, preset, revision, state, running_turn_id, deleted_at, history_purged_at, model, outcome FROM agents WHERE agent_id=? AND workspace_id=? LIMIT 2', [agentId, options.workspaceId], signal);
+      requireFact(rows.length === 1, 'identity-mismatch', 'Native agent identity is missing or duplicated');
+      const row = NativeAgentIdentity.parse(rows[0]);
+      requireFact(row.agent_id === agentId && row.workspace_id === options.workspaceId && repositories.some(repository => repository.repo === row.repo),
+        'ownership-mismatch', 'Native agent identity belongs to another repository or workspace');
+      return row;
+    },
     agent: agentId => rawAgent(agentId, ownedSignal),
     async history(agentId) {
       const rows = await query('SELECT a.agent_id, a.workspace_id, a.repo, a.revision, a.deleted_at, a.history_purged_at, (SELECT COUNT(*) FROM agent_events e WHERE e.agent_id=a.agent_id) AS saved_event_count FROM agents a WHERE a.agent_id=? AND a.workspace_id=?', [agentId,options.workspaceId]);
@@ -154,7 +162,7 @@ export function createNativeHostAccess(options: NativeHostOptions): NativeHostAc
     async read(route, signal) {
       // All paths come from fixed adapter implementations; reject even internal
       // mistakes that could turn this private credential into generic HTTP.
-      requireFact(route === '/api/info' || /^\/api\/session\/[A-Za-z0-9_%.-]+(?:\/message\?(?:order=asc&limit=\d+))?$/.test(route),
+      requireFact(route === '/api/info' || /^\/api\/session\/[A-Za-z0-9_%.-]+(?:\/message\?(?:order=asc&limit=\d+|type=assistant&order=desc&limit=200))?$/.test(route),
         'ownership-mismatch', 'Native route is outside the read protocol');
       const registration = await privateRegistration();
       const base = new URL(registration.url);

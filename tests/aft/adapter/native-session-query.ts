@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { ContainerRootIdentity } from './container-observations.js';
 import { WorkspaceRepositoryFact } from './workspaces.js';
 import type { NativeHostAccess } from './native-host.js';
-import { AgentRow, HttpResponse, Id, Json, NativeRef, NativeRegistrationIdentity, ProcessIdentitySchema, ServiceRegistration,
+import { AgentRow, NativeAgentIdentity, HttpResponse, Id, Json, NativeRef, NativeRegistrationIdentity, ProcessIdentitySchema, ServiceRegistration,
   nativeRegistrationIdentity, redact, requireFact } from './protocol.js';
 
 const Binding = { workspaceBindingId: Id };
@@ -13,6 +13,7 @@ const Limit = z.number().int().min(1).max(200);
  * belong to the fixture session owner; no request chooses SQL, paths or code. */
 export const NativeSessionQuery = z.discriminatedUnion('operation', [
   z.object({ ...Binding, operation: z.literal('raw-agent'), agentId: AgentId }).strict(),
+  z.object({ ...Binding, operation: z.literal('agent-identity'), agentId: AgentId }).strict(),
   z.object({ ...Binding, operation: z.literal('sessions'), agentId: AgentId,
     maxRegistrations: z.number().int().min(1).max(1000) }).strict(),
   z.object({ ...Binding, operation: z.literal('registration-identity') }).strict(),
@@ -22,6 +23,8 @@ export const NativeSessionQuery = z.discriminatedUnion('operation', [
     nativeSessionId: SessionId, nativeRoot: NativeRef.shape.native_root }).strict(),
   z.object({ ...Binding, operation: z.literal('native-messages'), agentId: AgentId,
     nativeSessionId: SessionId, nativeRoot: NativeRef.shape.native_root, limit: Limit }).strict(),
+  z.object({ ...Binding, operation: z.literal('native-assistant-prefix'), agentId: AgentId,
+    nativeSessionId: SessionId, nativeRoot: NativeRef.shape.native_root }).strict(),
   z.object({ ...Binding, operation: z.literal('source-physical'), sourceKey: Id }).strict(),
   z.object({ ...Binding, operation: z.literal('agent-physical'), agentId: AgentId }).strict(),
 ]);
@@ -33,12 +36,14 @@ export const NativeSessionPhysicalSource = z.object({ repository: WorkspaceRepos
 export const NativeSessionPhysicalAgent = z.object({ agentId: AgentId, root: ContainerRootIdentity, commonDir: Id }).strict();
 export const NativeSessionQueryReply = z.discriminatedUnion('operation', [
   z.object({ ...Binding, operation: z.literal('raw-agent'), data: AgentRow }).strict(),
+  z.object({ ...Binding, operation: z.literal('agent-identity'), data: NativeAgentIdentity }).strict(),
   z.object({ ...Binding, operation: z.literal('sessions'), data: z.array(NativeRef).max(1000) }).strict(),
   z.object({ ...Binding, operation: z.literal('registration-identity'), data: NativeRegistrationIdentity }).strict(),
   z.object({ ...Binding, operation: z.literal('native-process'), data: ProcessIdentitySchema }).strict(),
   z.object({ ...Binding, operation: z.literal('native-info'), data: HttpResponse }).strict(),
   z.object({ ...Binding, operation: z.literal('native-session'), data: HttpResponse }).strict(),
   z.object({ ...Binding, operation: z.literal('native-messages'), data: HttpResponse }).strict(),
+  z.object({ ...Binding, operation: z.literal('native-assistant-prefix'), data: HttpResponse }).strict(),
   z.object({ ...Binding, operation: z.literal('source-physical'), data: NativeSessionPhysicalSource }).strict(),
   z.object({ ...Binding, operation: z.literal('agent-physical'), data: NativeSessionPhysicalAgent }).strict(),
 ]);
@@ -71,6 +76,7 @@ export function createNativeSessionQueryMapper(binding: NativeSessionQueryBindin
   const access = binding.access, verify = binding.verify.bind(binding);
   const rawAgent = access.rawAgent.bind(access), sessions = access.sessions.bind(access), registration = access.registration.bind(access);
   const process = access.process.bind(access), read = access.read.bind(access);
+  const agentIdentity = access.agentIdentity?.bind(access);
   const sourcePhysical = binding.physical.source.bind(binding.physical), agentPhysical = binding.physical.agent.bind(binding.physical);
   const secrets = [...binding.secrets];
   const ownedCall = async <T>(signal: AbortSignal, call: () => Promise<T>): Promise<T> => {
@@ -117,6 +123,24 @@ export function createNativeSessionQueryMapper(binding: NativeSessionQueryBindin
       let data: unknown;
       switch (request.operation) {
         case 'raw-agent': data = await ownedRow(request.agentId, signal); break;
+        case 'agent-identity': {
+          requireFact(agentIdentity, 'unsupported-capability', 'Native actual identity read is unavailable');
+          const row = await ownedRow(request.agentId, signal);
+          const actual = NativeAgentIdentity.parse(await ownedCall(signal, () => agentIdentity(request.agentId, signal)));
+          requireFact(actual.agent_id === row.agent_id && actual.workspace_id === row.workspace_id && actual.repo === row.repo &&
+            actual.worktree_path === row.worktree_path && actual.branch === row.branch && actual.parent_agent_id === row.parent_agent_id &&
+            actual.root_agent_id === row.root_agent_id && actual.created_by_kind === row.created_by_kind && actual.created_by_id === row.created_by_id &&
+            actual.harness_session_id === row.harness_session_id && actual.harness_session_root === row.harness_session_root,
+          'identity-mismatch', 'Native actual identity differs from the retained row');
+          const after = NativeAgentIdentity.parse(await ownedCall(signal, () => agentIdentity(request.agentId, signal)));
+          requireFact(after.agent_id === actual.agent_id && after.workspace_id === actual.workspace_id && after.repo === actual.repo &&
+            after.worktree_path === actual.worktree_path && after.name === actual.name && after.created_at === actual.created_at &&
+            after.branch === actual.branch && after.parent_agent_id === actual.parent_agent_id && after.root_agent_id === actual.root_agent_id &&
+            after.created_by_kind === actual.created_by_kind && after.created_by_id === actual.created_by_id &&
+            after.harness_session_id === actual.harness_session_id && after.harness_session_root === actual.harness_session_root,
+          'identity-mismatch', 'Native actual identity changed during the read');
+          data = actual; break;
+        }
         case 'sessions': {
           await ownedRow(request.agentId, signal);
           const refs = z.array(NativeRef).max(request.maxRegistrations).parse(await ownedCall(signal, () => sessions(request.agentId)));
@@ -129,9 +153,11 @@ export function createNativeSessionQueryMapper(binding: NativeSessionQueryBindin
         case 'native-process': data = ProcessIdentitySchema.parse(await ownedCall(signal, process)); break;
         case 'native-info': data = await nativeRead('/api/info'); break;
         case 'native-session':
-        case 'native-messages': {
+        case 'native-messages':
+        case 'native-assistant-prefix': {
           await ownedSession(request.agentId, request.nativeSessionId, request.nativeRoot, signal);
-          const suffix = request.operation === 'native-messages' ? `/message?order=asc&limit=${request.limit}` : '';
+          const suffix = request.operation === 'native-messages' ? `/message?order=asc&limit=${request.limit}` :
+            request.operation === 'native-assistant-prefix' ? '/message?type=assistant&order=desc&limit=200' : '';
           data = await nativeRead(`/api/session/${encodeURIComponent(request.nativeSessionId)}${suffix}`);
           await ownedSession(request.agentId, request.nativeSessionId, request.nativeRoot, signal);
           break;
