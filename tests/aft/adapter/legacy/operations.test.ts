@@ -110,6 +110,28 @@ test('inactive and foreign run leases fail before any action', async () => {
   await assert.rejects(s.ops.role({ leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }, s.call()), reject('ownership-mismatch'));
   assert.equal(s.commands.length, 0);
 });
+test('canonical evidence labels match exactly and mismatches fail before every effect', async () => {
+  let snapshots = 0;
+  const s = setup({ snapshot: async () => { snapshots++; return { complete: true, previous: null, restoreState: null }; } });
+  const mismatched = createLegacyOperations(s.access, 'real-native');
+  await assert.rejects(mismatched.role({ leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }, s.call()), reject('source-mismatch'));
+  await assert.rejects(mismatched.usage({ agent: { fixtureLeaseId: 'lease', workspaceId: 'WS', agentId: 'agt_1' } }, s.call()), reject('source-mismatch'));
+  await assert.rejects(mismatched.task(task, s.call()), reject('source-mismatch'));
+  await assert.rejects(mismatched.seedWorktree(seed, s.call()), reject('source-mismatch'));
+  await assert.rejects(mismatched.stimulate({ leaseId: 'lease', targetId: 'serve', expectedGeneration: 'gen-1', operation: 'serve-restart' }, s.call()), reject('source-mismatch'));
+  await assert.rejects(mismatched.configure({ leaseId: 'lease', setting: 'provider-default', model: 'aft/m', harness: 'opencode' }, s.call()), reject('source-mismatch'));
+  assert.equal(s.commands.length + s.requests.length + s.transitions.length + s.writes.length + s.cleanups.length + snapshots, 0);
+  // Injected envelope tests preserve the canonical metadata labels; they do
+  // not establish real-native or live-provider execution.
+  for (const evidence of ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const) {
+    s.lease.evidence = evidence;
+    const ops = createLegacyOperations(s.access, evidence);
+    const result = await ops.task(task, s.call()); assert.equal(result.receipt.evidence, evidence);
+  }
+  s.lease.evidence = 'static';
+  await assert.rejects(createLegacyOperations(s.access, 'static').task(task, s.call()), reject('source-mismatch'));
+  assert.equal(s.commands.length, 4);
+});
 test('seed uses stdin and TESTSUPPORT through CLI; it never claims actor activity', async () => {
   const s = setup(); s.setResult({ processId: 'seed', generation: 'seed-gen', exitCode: 0, complete: true,
     stdout: 'seeded worktree: ws=WS agent=worker repos=repo-a\n', stderr: '' });
@@ -124,7 +146,7 @@ test('seed rejects traversal, Git internals, options, controls and symlink escap
     await assert.rejects(s.ops.seedWorktree({ ...seed, relativePath }, s.call()), reject('invalid-input'));
   const escaped = setup({ validateSeedPath: async () => { throw new LegacyError('ownership-mismatch', 'Symlink escape'); } });
   await assert.rejects(escaped.ops.seedWorktree(seed, escaped.call()), reject('ownership-mismatch')); assert.equal(escaped.commands.length, 0);
-  s.lease.evidence = 'live'; await assert.rejects(s.ops.seedWorktree(seed, s.call()), reject('unsupported-capability')); assert.equal(s.commands.length, 0);
+  s.lease.evidence = 'live-provider'; await assert.rejects(s.ops.seedWorktree(seed, s.call()), reject('unsupported-capability')); assert.equal(s.commands.length, 0);
 });
 test('all finite stimuli match independent source goldens, including every parameterized payload', async () => {
   const s = setup();
@@ -210,7 +232,7 @@ test('configuration ownership, acknowledgments and restoration fail closed', asy
     parameters: { headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40) } }, forge.call()), reject('response-invalid'));
   const s = setup(); await s.ops.configure(input, s.call()); s.lease.runId = 'foreign';
   await assert.rejects(s.cleanups[0]!(), reject('cleanup-failed')); assert.equal(s.restores.length, 0);
-  const live = setup(); live.lease.evidence = 'live'; await assert.rejects(live.ops.configure(input, live.call()), reject('unsupported-capability'));
+  const live = setup(); live.lease.evidence = 'live-provider'; await assert.rejects(live.ops.configure(input, live.call()), reject('unsupported-capability'));
   assert.equal(live.requests.length, 0);
 });
 test('configuration mutations serialize without sleeps and restoration is enrolled before writes', async () => {

@@ -4,11 +4,11 @@ import type { EvidenceClass } from '@tysonthomas9/aft/types';
 import { defineOperation } from '../operation.js';
 import { getFixture, disposeFixtures, type OwnedFixture } from '../ownership.js';
 import { Id, Json, HttpResponse, ObservationError } from '../protocol.js';
-import { createLegacyOperations, LegacyError, RuntimeInput, RoleInput, UsageInput, TaskInput, SeedInput, ConfigureInput,
+import { createLegacyOperations, LegacyError, LegacyEvidenceClasses, RuntimeInput, RoleInput, UsageInput, TaskInput, SeedInput, ConfigureInput,
   type LegacyAccess, type Invocation } from './operations.js';
 
 const Receipt = z.object({ operation: Id, leaseId: Id, runId: Id, invocationId: Id,
-  evidence: z.enum(['deterministic', 'real', 'live']), actor: z.enum(['loom-cli', 'runtime', 'fixture']), facts: Json }).strict();
+  evidence: z.enum(LegacyEvidenceClasses), actor: z.enum(['loom-cli', 'runtime', 'fixture']), facts: Json }).strict();
 export const RoleOutput = z.object({ exitCode: z.number().int().nonnegative(), body: Json, receipt: Receipt }).strict();
 export const UsageOutput = RoleOutput;
 export const RuntimeOutput = z.object({ beforeGeneration: Id, afterGeneration: Id.nullable(), affectedIds: z.array(Id),
@@ -27,23 +27,22 @@ export function createLegacyProviders(implementation: ImplementationPin, impleme
   // This is an operation-state cache keyed by the canonical private fixture,
   // not a second ownership registry. Suite/case access always goes through getFixture.
   const stores = new WeakMap<OwnedFixture, { operations: ReturnType<typeof createLegacyOperations>; sequence: number }>();
-  const common = { implementation, implementationSha256, retry: 'never' as const, evidenceClasses: ['deterministic', 'persisted-public-api', 'live-provider'] as EvidenceClass[] };
+  const common = { implementation, implementationSha256, retry: 'never' as const, evidenceClasses: [...LegacyEvidenceClasses] };
   async function invoke<K extends keyof ReturnType<typeof createLegacyOperations>>(method: K, input: unknown,
     context: CapabilityContext, leaseId: string, workspaceId?: string) {
     const fixture = await getFixture(context, leaseId);
     if (workspaceId !== undefined && workspaceId !== fixture.workspaceId) throw new ObservationError('ownership-mismatch', 'Legacy workspace differs from canonical fixture');
     let store = stores.get(fixture);
-    if (!store) { store = { operations: createLegacyOperations(accessFactory(context, fixture)), sequence: 0 }; stores.set(fixture, store); }
+    if (!store) { store = { operations: createLegacyOperations(accessFactory(context, fixture), fixture.evidenceClass), sequence: 0 }; stores.set(fixture, store); }
     const call: Invocation = { runId: context.runId, invocationId: `${context.caseId}:${store.sequence++}`, signal: context.signal };
     try {
       const value = await store.operations[method](input, call);
-      const declared: EvidenceClass = value.receipt.evidence === 'deterministic' ? 'deterministic' : value.receipt.evidence === 'real' ? 'persisted-public-api' : 'live-provider';
-      if (declared !== fixture.evidenceClass) throw new ObservationError('source-mismatch', 'Legacy evidence differs from canonical fixture');
+      if (value.receipt.evidence !== fixture.evidenceClass) throw new ObservationError('source-mismatch', 'Legacy evidence changed during observation');
       return { value, evidenceClass: fixture.evidenceClass,
         identity: { fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId }, secrets: fixture.secrets };
     } catch (error) {
       if (!(error instanceof LegacyError)) throw error;
-      const code: ObservationError['code'] = error.code === 'ownership-mismatch' ? 'ownership-mismatch' :
+      const code: ObservationError['code'] = error.code === 'source-mismatch' ? 'source-mismatch' : error.code === 'ownership-mismatch' ? 'ownership-mismatch' :
         error.code === 'stale-generation' ? 'identity-mismatch' : error.code === 'unsupported-capability' ? 'unsupported-capability' : 'observation-failed';
       throw new ObservationError(code, `${error.code}: ${error.message}`);
     }
