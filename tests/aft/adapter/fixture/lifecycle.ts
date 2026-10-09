@@ -36,6 +36,8 @@ export interface FixtureDriver {
     apiOrigin: string; filesOrigin: string; workspaceId: string; repo: string;
   }>;
   inspect(resource: Resource): Promise<Inventory>;
+  prepareObserve?(signal:AbortSignal):Promise<void>;
+  prepareCleanup?(signal:AbortSignal):Promise<void>;
   remove(resource: Resource): Promise<void>;
   artifact(kind: 'acquire' | 'release' | 'observe' | 'failure', value: unknown): Promise<Artifact>;
 }
@@ -140,6 +142,12 @@ export class FixtureLifecycle {
   private async cleanup(lease: { driver: FixtureDriver; resources: Resource[]; released: boolean }) {
     const remaining: Resource[] = [];
     const failures: { id: string; reason: string }[] = [];
+    // Discover and enroll product-registered children before taking the reverse
+    // cleanup snapshot. A failed discovery cannot authorize stopping parents or
+    // releasing paths that may still contain unverified detached resources.
+    try { await lease.driver.prepareCleanup?.(new AbortController().signal); }
+    catch { return {released:false,remainingOwnedResources:lease.resources.map(resource=>resource.id),
+      failures:[{id:'product-registrations',reason:'cleanup-unverified'}]}; }
     // If compose teardown fails, keep runtime directories/locks/ports. Releasing
     // them would permit a second run to reuse live or unverified resources.
     let retain = false;
@@ -175,6 +183,7 @@ export class FixtureLifecycle {
       const sourceMatches = await lease.driver.identity(plan);
       fail(sourceMatches, 'source-mismatch');
       const services: Inventory['services'] = [];
+      await lease.driver.prepareObserve?.(new AbortController().signal);
       for (const resource of lease.resources) {
         const observed = await lease.driver.inspect(resource);
         fail(observed.complete && observed.owned, 'ownership-mismatch');
