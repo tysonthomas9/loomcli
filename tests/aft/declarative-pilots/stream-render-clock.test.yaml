@@ -1,0 +1,837 @@
+# Staged authoring draft. Original campaign is unchanged.
+# skip guards unresolved preservation gaps; it is never validation evidence.
+suite: declarative-pilot-stream-render-clock
+profile: declarative
+baseUrl: ${AFT_BASE_URL}
+timeoutMs: 30000
+setup:
+  - bind:
+      as: run
+      value:
+        literal: ${RUN_ID}
+  - bind:
+      as: loomRevision
+      value:
+        literal:
+          repository: loomcli
+          commit: ${AFT_LOOM_COMMIT}
+          tree: ${AFT_LOOM_TREE}
+          sourceManifestSha256: ${AFT_LOOM_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_LOOM_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: fleetRevision
+      value:
+        literal:
+          repository: fleet-db
+          commit: ${AFT_FLEET_COMMIT}
+          tree: ${AFT_FLEET_TREE}
+          sourceManifestSha256: ${AFT_FLEET_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_FLEET_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: selectionDigest
+      value:
+        literal: ${AFT_SELECTION_SHA256}
+  - capability:
+      request:
+        id: loom.fixture.acquire
+        version: 1
+        input:
+          runId:
+            ref:
+              binding: run
+          profile:
+            literal: agents-real-opencode
+          loomRevision:
+            ref:
+              binding: loomRevision
+          fleetRevision:
+            ref:
+              binding: fleetRevision
+          model:
+            literal: ${AFT_REAL_MODEL}
+          maxCases:
+            literal: 1
+          selectionSha256:
+            ref:
+              binding: selectionDigest
+      as: fixture
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /workspaceId
+            - literal: ${AFT_WS}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /filesOrigin
+            - literal: ${AFT_BASE_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /apiOrigin
+            - literal: ${AFT_API_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /repo
+            - literal: ${AFT_AGENT_FLOW_REPO}
+exports:
+  lease:
+    resource:
+      binding: fixture
+      pointer: /lease/id
+  ownedRun:
+    data:
+      binding: run
+  apiOrigin:
+    data:
+      binding: fixture
+      pointer: /apiOrigin
+  filesOrigin:
+    data:
+      binding: fixture
+      pointer: /filesOrigin
+  repo:
+    data:
+      binding: fixture
+      pointer: /repo
+teardown:
+  - capability:
+      request:
+        id: loom.fixture.release
+        version: 1
+        input:
+          leaseId:
+            ref:
+              binding: fixture
+              pointer: /lease/id
+      as: released
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /released
+            - literal: true
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /remainingOwnedResources
+            - literal: []
+tests:
+  - name: real repo reply renders markdown tools motion and copy after reload
+    intent: Person creates Lead/selects model and sends grounded prompt; engine passively observes actual browser stream and frames before navigation/Send. Authoring draft; unresolved preservation obligations are recorded in preservation.json.
+    skip: true
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: Open the owned workspace's Agents page
+      - screenshot: stream-render-clock-s01
+        intent: Open the owned workspace's Agents page
+      - expect:
+          count:
+            role: button
+            name: + Add agent
+            exact: true
+            equals: 1
+        intent: Wait for New Agent
+      - screenshot: stream-render-clock-s02
+        intent: Wait for New Agent
+      - screenshot: stream-render-clock-s03
+        intent: Passively observe the future owned Chat EventSource before UI navigation, without sending an event
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+        intent: Open the New Agent form
+      - screenshot: stream-render-clock-s04
+        intent: Open the New Agent form
+      - click:
+          testid: create-agent-template-lead
+        intent: Choose the Lead template
+      - screenshot: stream-render-clock-s05
+        intent: Choose the Lead template
+      - fill:
+          testid: create-agent-name
+          value: aft-${RUN_ID}-cov-visual-render
+        intent: Name this run's rendering Lead
+      - screenshot: stream-render-clock-s06
+        intent: Name this run's rendering Lead
+      - select:
+          testid: create-agent-backend
+          value: ${AFT_REAL_BACKEND}
+        intent: Select the real OpenCode backend
+      - screenshot: stream-render-clock-s07
+        intent: Select the real OpenCode backend
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-repo-chips] button"
+            view: count
+            as: visualRepoCount
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: visualRepoCount
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Confirm the owned Slack-clone repo is selected
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-repo-chips] button"
+            view: text
+            as: visualRepoName
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: visualRepoName
+              - literal: source-repo
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Confirm the owned Slack-clone repo is selected
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-repo-chips] button"
+            view: attributes
+            as: visualRepoPressed
+            fields:
+              - aria-pressed
+          satisfies:
+            all:
+              - op: eq
+                args:
+                  - ref:
+                      binding: visualRepoPressed
+                      pointer: /aria-pressed
+                  - literal: "true"
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Confirm the owned Slack-clone repo is selected
+      - screenshot: stream-render-clock-s08
+        intent: Confirm the owned Slack-clone repo is selected
+      - click:
+          testid: create-agent-submit
+        intent: Create the Lead through the UI
+      - screenshot: stream-render-clock-s09
+        intent: Create the Lead through the UI
+      - wait:
+          url: /ws/${AFT_WS}/chat/agt_
+        intent: Wait for its real Chat route
+      - screenshot: stream-render-clock-s10
+        intent: Wait for its real Chat route
+      - capture:
+          source: url
+          view: path-segments
+          as: leadSegments
+        intent: Bind this journey to the actual saved Lead ID and repo
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: leadSegments
+                - literal: 4
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /0
+                - literal: ws
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /1
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /2
+                - literal: chat
+        intent: Bind this journey to the actual saved Lead ID and repo
+      - bind:
+          as: leadId
+          value:
+            ref:
+              binding: leadSegments
+              pointer: /3
+        intent: Bind this journey to the actual saved Lead ID and repo
+      - assert:
+          all:
+            - op: matches
+              args:
+                - ref:
+                    binding: leadId
+                - literal: ^agt_[A-Za-z0-9_-]*$
+            - op: ne
+              args:
+                - ref:
+                    binding: leadId
+                - literal: agt_
+        intent: Bind this journey to the actual saved Lead ID and repo
+      - capability:
+          request:
+            id: loom.agent.bind
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              workspaceId:
+                literal: ${AFT_WS}
+              agentId:
+                ref:
+                  binding: leadId
+          as: leadBound
+        intent: Bind this journey to the actual saved Lead ID and repo
+      - api:
+          method: GET
+          path: /
+          as: leadRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Bind this journey to the actual saved Lead ID and repo
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/name
+                - literal: aft-${RUN_ID}-cov-visual-render
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/workspace_id
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/preset
+                - literal: lead
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/parent_agent_id
+                - literal: null
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/root_agent_id
+                - literal: null
+            - op: ne
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/worktree_path
+                - literal: ""
+        intent: Bind this journey to the actual saved Lead ID and repo
+      - screenshot: stream-render-clock-s11
+        intent: Bind this journey to the actual saved Lead ID and repo
+      - capture:
+          source: dom
+          locator:
+            selector: "[data-chat-provider-model-picker=true]"
+          view: text
+          as: leadModelButton
+        intent: Select and read back the declared real model in the current Chat
+      - api:
+          method: GET
+          path: /
+          as: leadModelRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Select and read back the declared real model in the current Chat
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: leadModelRow
+                    pointer: /body/model
+                - literal: ${AFT_REAL_MODEL}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadModelRow
+                    pointer: /body/model_unverified
+                - literal: false
+        intent: Select and read back the declared real model in the current Chat
+      - screenshot: stream-render-clock-s12
+        intent: Select and read back the declared real model in the current Chat
+      - screenshot: stream-render-clock-s13
+        intent: Arm bounded 100ms and rendered-frame observers before the real send
+      - fill:
+          label: Message
+          value: "VISUAL_RENDER_${RUN_ID}. Use your real file tools: read README.md, package.json, and BACKLOG.md, then attempt to read visual-missing-${RUN_ID}.txt; do not create it and let the missing-file error stand. From the three successful files, write between 650 and 750 words in six labeled sections of about 105 to 125 words each: setup, scripts, ticket routes, test coverage, missing-read result, and operational summary. Explain each of the six independent BACKLOG.md tickets using only the files read. Include a GFM table with a README.md row giving the test command and a package.json row giving its test script. Include a fenced json code block with the actual test script from package.json. Explain the missing read. Cite only facts from those reads. Before finishing, count your words and add source-grounded detail if fewer than 400. Do not edit files. End with the exact text VISUAL_END_${RUN_ID}."
+        intent: Ask for a long repository-grounded answer, real tool calls and a benign failed read
+      - screenshot: stream-render-clock-s14
+        intent: Ask for a long repository-grounded answer, real tool calls and a benign failed read
+      - press: Enter
+        intent: Send the request through Chat
+      - screenshot: stream-render-clock-s15
+        intent: Send the request through Chat
+      - screenshot: stream-render-clock-s16
+        intent: Wait for the pre-send DOM observer to capture an actual simultaneous running tool, Working row and Stop control
+      - screenshot: stream-render-clock-s17
+        intent: Read back the observed live state and capture its possibly completed transition; compare the later saved tool by time and file
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] li[data-kind=agent] [data-streaming-caret]"
+            view: count
+            as: streamCaret
+          satisfies:
+            op: gt
+            args:
+              - ref:
+                  binding: streamCaret
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Observe real streamed reply text and its active caret
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: form button[title="Stop the running turn"]
+            view: count
+            as: streamStop
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: streamStop
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Observe real streamed reply text and its active caret
+      - screenshot: stream-render-clock-s18
+        intent: Observe real streamed reply text and its active caret
+      - screenshot: stream-render-clock-s19
+        intent: Capture the named streaming frame while the real turn is active
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: text
+            as: visualEnd
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: visualEnd
+              - literal: VISUAL_END_${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Wait for the saved real turn to finish, flush text and remove caret and working row
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: form button[title="Stop the running turn"]
+            view: count
+            as: visualNoStop
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: visualNoStop
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Wait for the saved real turn to finish, flush text and remove caret and working row
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] [data-streaming-caret], [data-testid=chat-transcript] [data-testid=working-row]"
+            view: count
+            as: visualNoMotion
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: visualNoMotion
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Wait for the saved real turn to finish, flush text and remove caret and working row
+      - screenshot: stream-render-clock-s20
+        intent: Wait for the saved real turn to finish, flush text and remove caret and working row
+      - screenshot: stream-render-clock-s21
+        intent: Freeze the first turn's final frame, saved events and caret state at the original checkpoint; motion validation remains pending
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] [data-testid=chat-codeblock][data-language=json] code span"
+            view: count
+            as: jsonTokens
+          satisfies:
+            op: gt
+            args:
+              - ref:
+                  binding: jsonTokens
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Wait for completed JSON code highlighting before reading its token spans
+      - screenshot: stream-render-clock-s22
+        intent: Wait for completed JSON code highlighting before reading its token spans
+      - screenshot: stream-render-clock-s23
+        intent: Freeze actual saved reasoning EventIDs and raw text, including null, with compact Thinking disclosures and an explicit nonexpandable empty-text explanation; available text expands exactly; original reasoning validation remains pending
+      - screenshot: stream-render-clock-s24
+        intent: Expand through UI clicks and compare table, highlighted code and all tool bodies with actual saved events
+      - screenshot: stream-render-clock-s25
+        intent: Capture the expanded real tool input, output and failure
+      - screenshot: stream-render-clock-s26
+        intent: Require copy and time hidden at rest, visible on reply hover or keyboard focus, below the full reply and onscreen without shifting layout; capture both themes
+      - click:
+          selector: "[data-testid=chat-transcript] [data-testid=chat-codeblock][data-language=json] button[aria-label='Copy code']"
+        intent: Copy the rendered code through its UI action
+      - screenshot: stream-render-clock-s27
+        intent: Copy the rendered code through its UI action
+      - capture:
+          source: clipboard
+          origin:
+            ref:
+              binding: filesOrigin
+          as: codeClipboard
+        intent: Read back the actual browser clipboard and Copied feedback for code
+      - capture:
+          source: dom
+          locator:
+            selector: "[data-testid=chat-transcript] [data-testid=chat-codeblock][data-language=json] code"
+          view: text
+          as: renderedCode
+        intent: Read back the actual browser clipboard and Copied feedback for code
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: codeClipboard
+            - ref:
+                binding: renderedCode
+        intent: Read back the actual browser clipboard and Copied feedback for code
+      - screenshot: stream-render-clock-s28
+        intent: Read back the actual browser clipboard and Copied feedback for code
+      - click:
+          role: button
+          name: Copy as Markdown
+          exact: true
+        intent: Copy the rendered GFM table through its UI action
+      - screenshot: stream-render-clock-s29
+        intent: Copy the rendered GFM table through its UI action
+      - capture:
+          source: clipboard
+          origin:
+            ref:
+              binding: filesOrigin
+          as: tableClipboard
+        intent: Read back the actual browser clipboard and Copied feedback for the table
+      - screenshot: stream-render-clock-s30
+        intent: Read back the actual browser clipboard and Copied feedback for the table
+      - screenshot: stream-render-clock-s31
+        intent: Copy the completed assistant message through its UI action
+      - capture:
+          source: clipboard
+          origin:
+            ref:
+              binding: filesOrigin
+          as: messageClipboard
+        intent: Compare clipboard bytes with the saved assistant message
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 2
+              maxPages:
+                literal: 1000
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: visualCopyHistory
+        intent: Compare clipboard bytes with the saved assistant message
+      - bind:
+          as: visualMessages
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - ref:
+                      binding: visualCopyHistory
+                      pointer: /events
+                  - literal: /kind
+                  - literal: item.completed
+              - literal: /payload/itemKind
+              - literal: message
+        intent: Compare clipboard bytes with the saved assistant message
+      - screenshot: stream-render-clock-s32
+        intent: Compare clipboard bytes with the saved assistant message
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 2
+              maxPages:
+                literal: 1000
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: visualBeforeReload
+        intent: Save exact event IDs before reload
+      - screenshot: stream-render-clock-s33
+        intent: Save exact event IDs before reload
+      - reload: true
+        intent: Reload the same Lead Chat
+      - screenshot: stream-render-clock-s34
+        intent: Reload the same Lead Chat
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: text
+            as: restoredVisualEnd
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: restoredVisualEnd
+              - literal: VISUAL_END_${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Wait for persisted table, code and final answer
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] table"
+            view: count
+            as: restoredTable
+          satisfies:
+            op: gt
+            args:
+              - ref:
+                  binding: restoredTable
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Wait for persisted table, code and final answer
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] [data-testid=chat-codeblock]"
+            view: count
+            as: restoredCode
+          satisfies:
+            op: gt
+            args:
+              - ref:
+                  binding: restoredCode
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Wait for persisted table, code and final answer
+      - screenshot: stream-render-clock-s35
+        intent: Wait for persisted table, code and final answer
+      - screenshot: stream-render-clock-s36
+        intent: Freeze actual saved reasoning and collapsed/expanded Thinking DOM after reload without treating absent or null text as a pass
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 2
+              maxPages:
+                literal: 1000
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: visualAfterReload
+        intent: Compare exact saved event IDs and rendered tool/table/code after reload
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: visualAfterReload
+                pointer: /events
+            - ref:
+                binding: visualBeforeReload
+                pointer: /events
+        intent: Compare exact saved event IDs and rendered tool/table/code after reload
+      - screenshot: stream-render-clock-s37
+        intent: Compare exact saved event IDs and rendered tool/table/code after reload
+      - screenshot: stream-render-clock-s38
+        intent: Check compact Thinking disclosures at 800 and 390px in both themes; expand saved text and close via keyboard, or show the nonexpandable empty-text explanation; keep the original reasoning-text requirement separate
+      - context:
+          colorScheme: light
+          reducedMotion: reduce
+        intent: Switch this owned browser session to reduced motion for a separate real turn
+      - screenshot: stream-render-clock-s39
+        intent: Switch this owned browser session to reduced motion for a separate real turn
+      - screenshot: stream-render-clock-s40
+        intent: Confirm the browser's reduced-motion preference is active
+      - fill:
+          label: Message
+          value: VISUAL_REDUCED_${RUN_ID}. Use a real tool to reread README.md, then write at least 120 words explaining what test command it documents and how to run it. Name README.md and the command in the answer. Do not edit files.
+        intent: Ask the same real Lead for a second grounded streaming turn under reduced motion
+      - screenshot: stream-render-clock-s41
+        intent: Ask the same real Lead for a second grounded streaming turn under reduced motion
+      - press: Enter
+        intent: Send the reduced-motion request through Chat
+      - screenshot: stream-render-clock-s42
+        intent: Send the reduced-motion request through Chat
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] li[data-kind=agent] [data-streaming-caret]"
+            view: count
+            as: reducedCaret
+          satisfies:
+            op: gt
+            args:
+              - ref:
+                  binding: reducedCaret
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Observe an actual streaming answer under reduced motion
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: form button[title="Stop the running turn"]
+            view: count
+            as: reducedStop
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: reducedStop
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Observe an actual streaming answer under reduced motion
+      - screenshot: stream-render-clock-s43
+        intent: Observe an actual streaming answer under reduced motion
+      - screenshot: stream-render-clock-s44
+        intent: Require no fresh-word fade or caret/working animation in the real reduced-motion frame
+      - screenshot: stream-render-clock-s45
+        intent: Wait for the actual reduced-motion reply to complete
+      - screenshot: stream-render-clock-s46
+        intent: Compare the second real reply to its saved turn and capture the final reduced-motion frame
+      - screenshot: stream-render-clock-s47
+        intent: Independently validate both sealed reasoning checkpoints and original first-turn motion thresholds; record both verdicts and fail if either fails

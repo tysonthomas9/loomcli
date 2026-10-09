@@ -1,0 +1,2030 @@
+# Staged authoring draft. Original campaign is unchanged.
+# skip guards unresolved preservation gaps; it is never validation evidence.
+suite: declarative-pilot-files-save-reload
+profile: declarative
+baseUrl: ${AFT_BASE_URL}
+timeoutMs: 30000
+setup:
+  - bind:
+      as: run
+      value:
+        literal: ${RUN_ID}
+  - bind:
+      as: loomRevision
+      value:
+        literal:
+          repository: loomcli
+          commit: ${AFT_LOOM_COMMIT}
+          tree: ${AFT_LOOM_TREE}
+          sourceManifestSha256: ${AFT_LOOM_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_LOOM_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: fleetRevision
+      value:
+        literal:
+          repository: fleet-db
+          commit: ${AFT_FLEET_COMMIT}
+          tree: ${AFT_FLEET_TREE}
+          sourceManifestSha256: ${AFT_FLEET_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_FLEET_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: selectionDigest
+      value:
+        literal: ${AFT_SELECTION_SHA256}
+  - capability:
+      request:
+        id: loom.fixture.acquire
+        version: 1
+        input:
+          runId:
+            ref:
+              binding: run
+          profile:
+            literal: agents-real-opencode
+          loomRevision:
+            ref:
+              binding: loomRevision
+          fleetRevision:
+            ref:
+              binding: fleetRevision
+          model:
+            literal: ${AFT_REAL_MODEL}
+          maxCases:
+            literal: 1
+          selectionSha256:
+            ref:
+              binding: selectionDigest
+      as: fixture
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /workspaceId
+            - literal: ${AFT_WS}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /filesOrigin
+            - literal: ${AFT_BASE_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /apiOrigin
+            - literal: ${AFT_API_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /repo
+            - literal: ${AFT_AGENT_FLOW_REPO}
+exports:
+  lease:
+    resource:
+      binding: fixture
+      pointer: /lease/id
+  ownedRun:
+    data:
+      binding: run
+  apiOrigin:
+    data:
+      binding: fixture
+      pointer: /apiOrigin
+  filesOrigin:
+    data:
+      binding: fixture
+      pointer: /filesOrigin
+  repo:
+    data:
+      binding: fixture
+      pointer: /repo
+teardown:
+  - capability:
+      request:
+        id: loom.fixture.release
+        version: 1
+        input:
+          leaseId:
+            ref:
+              binding: fixture
+              pointer: /lease/id
+      as: released
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /released
+            - literal: true
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /remainingOwnedResources
+            - literal: []
+tests:
+  - name: GF1 UI editor Save updates this Agent API checkout and survives every tab reload
+    intent: Person creates Lead, edits CodeMirror and clicks Save in UI; API readback only. No shell/API write substitutes. Authoring draft; unresolved preservation obligations are recorded in preservation.json.
+    skip: true
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: Open Agents in the owned fixture
+      - screenshot: files-save-reload-s01
+        intent: Open Agents in the owned fixture
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+        intent: Open New Agent
+      - screenshot: files-save-reload-s02
+        intent: Open New Agent
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-overlay]"
+            view: count
+            as: overlay
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: overlay
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the Lead template
+      - screenshot: files-save-reload-s03
+        intent: Show the Lead template
+      - click:
+          testid: create-agent-template-lead
+        intent: Choose Lead
+      - screenshot: files-save-reload-s04
+        intent: Choose Lead
+      - fill:
+          testid: create-agent-name
+          value: cov-files-${RUN_ID}-editor
+        intent: Name the owned editor Lead
+      - screenshot: files-save-reload-s05
+        intent: Name the owned editor Lead
+      - select:
+          testid: create-agent-backend
+          value: ${AFT_REAL_BACKEND}
+        intent: Choose real OpenCode
+      - screenshot: files-save-reload-s06
+        intent: Choose real OpenCode
+      - click:
+          testid: create-agent-submit
+        intent: Create the Lead in the UI
+      - screenshot: files-save-reload-s07
+        intent: Create the Lead in the UI
+      - wait:
+          url: /ws/${AFT_WS}/chat/agt_
+        intent: Show the actual Agent API Chat route
+      - screenshot: files-save-reload-s08
+        intent: Show the actual Agent API Chat route
+      - capture:
+          source: url
+          view: path-segments
+          as: leadSegments
+        intent: Bind the route to the saved Lead ID and canonical repo
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: leadSegments
+                - literal: 4
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /0
+                - literal: ws
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /1
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /2
+                - literal: chat
+        intent: Bind the route to the saved Lead ID and canonical repo
+      - bind:
+          as: leadId
+          value:
+            ref:
+              binding: leadSegments
+              pointer: /3
+        intent: Bind the route to the saved Lead ID and canonical repo
+      - assert:
+          all:
+            - op: matches
+              args:
+                - ref:
+                    binding: leadId
+                - literal: ^agt_[A-Za-z0-9_-]*$
+            - op: ne
+              args:
+                - ref:
+                    binding: leadId
+                - literal: agt_
+        intent: Bind the route to the saved Lead ID and canonical repo
+      - capability:
+          request:
+            id: loom.agent.bind
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              workspaceId:
+                literal: ${AFT_WS}
+              agentId:
+                ref:
+                  binding: leadId
+          as: leadBound
+        intent: Bind the route to the saved Lead ID and canonical repo
+      - api:
+          method: GET
+          path: /
+          as: leadRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Bind the route to the saved Lead ID and canonical repo
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/name
+                - literal: cov-files-${RUN_ID}-editor
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/workspace_id
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/preset
+                - literal: lead
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/parent_agent_id
+                - literal: null
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/root_agent_id
+                - literal: null
+            - op: ne
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/worktree_path
+                - literal: ""
+        intent: Bind the route to the saved Lead ID and canonical repo
+      - screenshot: files-save-reload-s09
+        intent: Bind the route to the saved Lead ID and canonical repo
+      - click:
+          selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(5)"
+        intent: Open this Lead's Files tab
+      - screenshot: files-save-reload-s10
+        intent: Open this Lead's Files tab
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutefiles1
+        intent: Find this Lead's checkout root on its own Files route
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles1
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Find this Lead's checkout root on its own Files route
+      - capture:
+          source: url
+          view: search
+          as: leadRoutefiles1Search
+        intent: Find this Lead's checkout root on its own Files route
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles1Search
+            - literal: ?tab=files
+        intent: Find this Lead's checkout root on its own Files route
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: count
+          as: initialRootCount
+        intent: Find this Lead's checkout root on its own Files route
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: initialRootCount
+            - literal: 1
+        intent: Find this Lead's checkout root on its own Files route
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: attributes
+          as: initialRoot
+          fields:
+            - data-root-key
+            - aria-expanded
+        intent: Find this Lead's checkout root on its own Files route
+      - assert:
+          all:
+            - op: startsWith
+              args:
+                - ref:
+                    binding: initialRoot
+                    pointer: /data-root-key
+                - op: concat
+                  args:
+                    - literal: "agent:"
+                    - ref:
+                        binding: leadId
+                    - literal: ":"
+            - any:
+                - op: eq
+                  args:
+                    - ref:
+                        binding: initialRoot
+                        pointer: /aria-expanded
+                    - literal: "true"
+                - op: eq
+                  args:
+                    - ref:
+                        binding: initialRoot
+                        pointer: /aria-expanded
+                    - literal: "false"
+        intent: Find this Lead's checkout root on its own Files route
+      - screenshot: files-save-reload-s11
+        intent: Find this Lead's checkout root on its own Files route
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: count
+          as: beforeExpand11Count
+        intent: Expand this Lead's real checkout root
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: beforeExpand11Count
+            - literal: 1
+        intent: Expand this Lead's real checkout root
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: attributes
+          as: beforeExpand11
+          fields:
+            - data-root-key
+            - aria-expanded
+        intent: Expand this Lead's real checkout root
+      - assert:
+          all:
+            - op: startsWith
+              args:
+                - ref:
+                    binding: beforeExpand11
+                    pointer: /data-root-key
+                - op: concat
+                  args:
+                    - literal: "agent:"
+                    - ref:
+                        binding: leadId
+                    - literal: ":"
+            - any:
+                - op: eq
+                  args:
+                    - ref:
+                        binding: beforeExpand11
+                        pointer: /aria-expanded
+                    - literal: "true"
+                - op: eq
+                  args:
+                    - ref:
+                        binding: beforeExpand11
+                        pointer: /aria-expanded
+                    - literal: "false"
+        intent: Expand this Lead's real checkout root
+      - focus:
+          selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+        intent: Expand this Lead's real checkout root
+      - expect:
+          count:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+            equals: 1
+        intent: Expand this Lead's real checkout root
+      - press: ArrowRight
+        intent: Expand this Lead's real checkout root
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: count
+          as: expandedRoot11Count
+        intent: Expand this Lead's real checkout root
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: expandedRoot11Count
+            - literal: 1
+        intent: Expand this Lead's real checkout root
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: attributes
+          as: expandedRoot11
+          fields:
+            - data-root-key
+            - aria-expanded
+        intent: Expand this Lead's real checkout root
+      - assert:
+          all:
+            - op: startsWith
+              args:
+                - ref:
+                    binding: expandedRoot11
+                    pointer: /data-root-key
+                - op: concat
+                  args:
+                    - literal: "agent:"
+                    - ref:
+                        binding: leadId
+                    - literal: ":"
+            - op: eq
+              args:
+                - ref:
+                    binding: expandedRoot11
+                    pointer: /aria-expanded
+                - literal: "true"
+        intent: Expand this Lead's real checkout root
+      - screenshot: files-save-reload-s12
+        intent: Expand this Lead's real checkout root
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutefiles2
+        intent: Show the owned README after the checkout root expands
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles2
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Show the owned README after the checkout root expands
+      - capture:
+          source: url
+          view: search
+          as: leadRoutefiles2Search
+        intent: Show the owned README after the checkout root expands
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles2Search
+            - literal: ?tab=files
+        intent: Show the owned README after the checkout root expands
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: count
+          as: readmeRootCount
+        intent: Show the owned README after the checkout root expands
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: readmeRootCount
+            - literal: 1
+        intent: Show the owned README after the checkout root expands
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: attributes
+          as: readmeRoot
+          fields:
+            - data-root-key
+            - aria-expanded
+        intent: Show the owned README after the checkout root expands
+      - assert:
+          all:
+            - op: startsWith
+              args:
+                - ref:
+                    binding: readmeRoot
+                    pointer: /data-root-key
+                - op: concat
+                  args:
+                    - literal: "agent:"
+                    - ref:
+                        binding: leadId
+                    - literal: ":"
+            - op: eq
+              args:
+                - ref:
+                    binding: readmeRoot
+                    pointer: /aria-expanded
+                - literal: "true"
+        intent: Show the owned README after the checkout root expands
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="README.md"]'
+            view: count
+            as: readme
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: readme
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the owned README after the checkout root expands
+      - screenshot: files-save-reload-s13
+        intent: Show the owned README after the checkout root expands
+      - click:
+          selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tab][aria-label='Changes 0']"
+        intent: Open Changes before the edit
+      - screenshot: files-save-reload-s14
+        intent: Open Changes before the edit
+      - click:
+          selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tab][title^='Uncommitted changes']"
+        intent: Select uncommitted changes for the exact checkout
+      - screenshot: files-save-reload-s15
+        intent: Select uncommitted changes for the exact checkout
+      - click:
+          selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tab][aria-label=Files]"
+        intent: Return to Files while the Working tree lens remains selected
+      - screenshot: files-save-reload-s16
+        intent: Return to Files while the Working tree lens remains selected
+      - api:
+          method: GET
+          path: /
+          as: baseline
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /api/workspaces/${AFT_WS}/files?scope=agent&target=
+              - ref:
+                  binding: leadId
+              - literal: "&repo=source-repo&path=README.md"
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: baseline
+                    pointer: /body/path
+                - literal: README.md
+            - op: eq
+              args:
+                - ref:
+                    binding: baseline
+                    pointer: /body/binary
+                - literal: false
+            - op: eq
+              args:
+                - ref:
+                    binding: baseline
+                    pointer: /body/truncated
+                - literal: false
+            - op: ne
+              args:
+                - ref:
+                    binding: baseline
+                    pointer: /body/content
+                - literal: ""
+            - op: matches
+              args:
+                - ref:
+                    binding: baseline
+                    pointer: /body/content
+                - literal: |-
+                    
+                    $
+            - op: ne
+              args:
+                - ref:
+                    binding: baseline
+                    pointer: /body/version
+                - literal: ""
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - bind:
+          as: expectedEdit
+          value:
+            op: concat
+            args:
+              - ref:
+                  binding: baseline
+                  pointer: /body/content
+              - literal: COV_FILES_${RUN_ID}_EDITOR
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - screenshot: files-save-reload-s17
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - click:
+          selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label='README.md']"
+        intent: Open the checked-in README in the real editor
+      - screenshot: files-save-reload-s18
+        intent: Open the checked-in README in the real editor
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]"
+            view: count
+            as: editable
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: editable
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show editable CodeMirror and Save before typing
+      - expect:
+          count:
+            role: button
+            name: Save
+            exact: true
+            within:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+            equals: 1
+        intent: Show editable CodeMirror and Save before typing
+      - screenshot: files-save-reload-s19
+        intent: Show editable CodeMirror and Save before typing
+      - replace:
+          locator:
+            selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]"
+          value:
+            ref:
+              binding: expectedEdit
+        intent: Insert the exact multiline text through the focused CodeMirror editor without Markdown Enter shortcuts
+      - screenshot: files-save-reload-s20
+        intent: Insert the exact multiline text through the focused CodeMirror editor without Markdown Enter shortcuts
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutefiles3
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles3
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - capture:
+          source: url
+          view: search
+          as: leadRoutefiles3Search
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles3Search
+            - literal: ?tab=files
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - capture:
+          source: dom
+          locator:
+            selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]"
+          view: editable-text
+          as: editorText
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: editorText
+            - ref:
+                binding: expectedEdit
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - screenshot: files-save-reload-s21
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]"
+            view: text
+            as: unsaved
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: unsaved
+              - literal: COV_FILES_${RUN_ID}_EDITOR
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the unsaved text and enabled Save control
+      - expect:
+          enabled:
+            role: button
+            name: Save
+            exact: true
+            within:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+        intent: Show the unsaved text and enabled Save control
+      - screenshot: files-save-reload-s22
+        intent: Show the unsaved text and enabled Save control
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutefiles4
+        intent: Save using Files, not an API or shell write
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles4
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Save using Files, not an API or shell write
+      - capture:
+          source: url
+          view: search
+          as: leadRoutefiles4Search
+        intent: Save using Files, not an API or shell write
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles4Search
+            - literal: ?tab=files
+        intent: Save using Files, not an API or shell write
+      - expect:
+          count:
+            role: button
+            name: Save
+            exact: true
+            within:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+            equals: 1
+        intent: Save using Files, not an API or shell write
+      - expect:
+          enabled:
+            role: button
+            name: Save
+            exact: true
+            within:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+        intent: Save using Files, not an API or shell write
+      - click:
+          role: button
+          name: Save
+          exact: true
+          within:
+            selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+        intent: Save using Files, not an API or shell write
+      - screenshot: files-save-reload-s23
+        intent: Save using Files, not an API or shell write
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) button[role=tab][aria-label="Changes 1"]'
+            view: count
+            as: changesOne
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: changesOne
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show Changes 1 without a page reload after Save
+      - screenshot: files-save-reload-s24
+        intent: Show Changes 1 without a page reload after Save
+      - api:
+          method: GET
+          path: /
+          as: fileSaved
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /api/workspaces/${AFT_WS}/files?scope=agent&target=
+              - ref:
+                  binding: leadId
+              - literal: "&repo=source-repo&path=README.md"
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: fileSaved
+                    pointer: /body/path
+                - literal: README.md
+            - op: eq
+              args:
+                - ref:
+                    binding: fileSaved
+                    pointer: /body/content
+                - ref:
+                    binding: expectedEdit
+            - op: eq
+              args:
+                - ref:
+                    binding: fileSaved
+                    pointer: /body/binary
+                - literal: false
+            - op: eq
+              args:
+                - ref:
+                    binding: fileSaved
+                    pointer: /body/truncated
+                - literal: false
+            - op: eq
+              args:
+                - ref:
+                    binding: fileSaved
+                    pointer: /body/size
+                - op: utf8Bytes
+                  args:
+                    - ref:
+                        binding: expectedEdit
+            - op: eq
+              args:
+                - ref:
+                    binding: fileSaved
+                    pointer: /body/version
+                - op: concat
+                  args:
+                    - literal: "sha256:"
+                    - op: sha256
+                      args:
+                        - ref:
+                            binding: expectedEdit
+            - op: ne
+              args:
+                - ref:
+                    binding: fileSaved
+                    pointer: /body/version
+                - ref:
+                    binding: baseline
+                    pointer: /body/version
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - api:
+          method: GET
+          path: /
+          as: statSaved
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /api/workspaces/${AFT_WS}/files/stat?scope=agent&target=
+              - ref:
+                  binding: leadId
+              - literal: "&repo=source-repo&path=README.md"
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: statSaved
+                    pointer: /body/path
+                - literal: README.md
+            - op: eq
+              args:
+                - ref:
+                    binding: statSaved
+                    pointer: /body/version
+                - ref:
+                    binding: fileSaved
+                    pointer: /body/version
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - api:
+          method: GET
+          path: /
+          as: gitSaved
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /api/workspaces/${AFT_WS}/files/git-status?scope=agent&target=
+              - ref:
+                  binding: leadId
+              - literal: "&repo=source-repo&path="
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - assert:
+          op: exists
+          args:
+            - ref:
+                binding: gitSaved
+                pointer: /body/status/README.md
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - api:
+          method: GET
+          path: /
+          as: checkoutsSaved
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /api/workspaces/${AFT_WS}/files/checkouts
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - bind:
+          as: checkoutMatchSaved
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - op: filter
+                    args:
+                      - ref:
+                          binding: checkoutsSaved
+                          pointer: /body/checkouts
+                      - literal: /kind
+                      - literal: agent
+                  - literal: /agent
+                  - ref:
+                      binding: leadId
+              - literal: /repo
+              - literal: source-repo
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: checkoutMatchSaved
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: checkoutMatchSaved
+                    pointer: /0/change_count
+                - literal: 1
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - screenshot: files-save-reload-s25
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - click:
+          selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tab][aria-label='Changes 1']"
+        intent: Open the live Changes lens
+      - screenshot: files-save-reload-s26
+        intent: Open the live Changes lens
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="Open diff for README.md (Modified)"]'
+            view: count
+            as: diffLink
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: diffLink
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the exact README in this agent's Working tree
+      - screenshot: files-save-reload-s27
+        intent: Show the exact README in this agent's Working tree
+      - click:
+          selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label='Open diff for README.md (Modified)']"
+        intent: Open the changed file's patch
+      - screenshot: files-save-reload-s28
+        intent: Open the changed file's patch
+      - capture:
+          source: dom
+          locator:
+            selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-type=add]"
+          view: text
+          as: addedLines
+        intent: Show the added marker line in the visible Files diff
+      - screenshot: files-save-reload-s29
+        intent: Show the added marker line in the visible Files diff
+      - reload: true
+        intent: Reload the Files route
+      - screenshot: files-save-reload-s30
+        intent: Reload the Files route
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutefiles5
+        intent: Confirm reloaded Files still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles5
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Confirm reloaded Files still addresses the saved Lead ID
+      - capture:
+          source: url
+          view: search
+          as: leadRoutefiles5Search
+        intent: Confirm reloaded Files still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles5Search
+            - literal: ?tab=files
+        intent: Confirm reloaded Files still addresses the saved Lead ID
+      - screenshot: files-save-reload-s31
+        intent: Confirm reloaded Files still addresses the saved Lead ID
+      - api:
+          method: GET
+          path: /
+          as: fileReloaded
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /api/workspaces/${AFT_WS}/files?scope=agent&target=
+              - ref:
+                  binding: leadId
+              - literal: "&repo=source-repo&path=README.md"
+        intent: Read the same saved content and strong version immediately after reload
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: fileReloaded
+                    pointer: /body/path
+                - literal: README.md
+            - op: eq
+              args:
+                - ref:
+                    binding: fileReloaded
+                    pointer: /body/content
+                - ref:
+                    binding: expectedEdit
+            - op: eq
+              args:
+                - ref:
+                    binding: fileReloaded
+                    pointer: /body/binary
+                - literal: false
+            - op: eq
+              args:
+                - ref:
+                    binding: fileReloaded
+                    pointer: /body/truncated
+                - literal: false
+            - op: eq
+              args:
+                - ref:
+                    binding: fileReloaded
+                    pointer: /body/size
+                - op: utf8Bytes
+                  args:
+                    - ref:
+                        binding: expectedEdit
+            - op: eq
+              args:
+                - ref:
+                    binding: fileReloaded
+                    pointer: /body/version
+                - op: concat
+                  args:
+                    - literal: "sha256:"
+                    - op: sha256
+                      args:
+                        - ref:
+                            binding: expectedEdit
+            - op: ne
+              args:
+                - ref:
+                    binding: fileReloaded
+                    pointer: /body/version
+                - ref:
+                    binding: baseline
+                    pointer: /body/version
+        intent: Read the same saved content and strong version immediately after reload
+      - api:
+          method: GET
+          path: /
+          as: statReloaded
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /api/workspaces/${AFT_WS}/files/stat?scope=agent&target=
+              - ref:
+                  binding: leadId
+              - literal: "&repo=source-repo&path=README.md"
+        intent: Read the same saved content and strong version immediately after reload
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: statReloaded
+                    pointer: /body/path
+                - literal: README.md
+            - op: eq
+              args:
+                - ref:
+                    binding: statReloaded
+                    pointer: /body/version
+                - ref:
+                    binding: fileReloaded
+                    pointer: /body/version
+        intent: Read the same saved content and strong version immediately after reload
+      - api:
+          method: GET
+          path: /
+          as: gitReloaded
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /api/workspaces/${AFT_WS}/files/git-status?scope=agent&target=
+              - ref:
+                  binding: leadId
+              - literal: "&repo=source-repo&path="
+        intent: Read the same saved content and strong version immediately after reload
+      - assert:
+          op: exists
+          args:
+            - ref:
+                binding: gitReloaded
+                pointer: /body/status/README.md
+        intent: Read the same saved content and strong version immediately after reload
+      - api:
+          method: GET
+          path: /
+          as: checkoutsReloaded
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /api/workspaces/${AFT_WS}/files/checkouts
+        intent: Read the same saved content and strong version immediately after reload
+      - bind:
+          as: checkoutMatchReloaded
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - op: filter
+                    args:
+                      - ref:
+                          binding: checkoutsReloaded
+                          pointer: /body/checkouts
+                      - literal: /kind
+                      - literal: agent
+                  - literal: /agent
+                  - ref:
+                      binding: leadId
+              - literal: /repo
+              - literal: source-repo
+        intent: Read the same saved content and strong version immediately after reload
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: checkoutMatchReloaded
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: checkoutMatchReloaded
+                    pointer: /0/change_count
+                - literal: 1
+        intent: Read the same saved content and strong version immediately after reload
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: fileReloaded
+                pointer: /body/version
+            - ref:
+                binding: fileSaved
+                pointer: /body/version
+        intent: Read the same saved content and strong version immediately after reload
+      - screenshot: files-save-reload-s32
+        intent: Read the same saved content and strong version immediately after reload
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutefiles6
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles6
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - capture:
+          source: url
+          view: search
+          as: leadRoutefiles6Search
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles6Search
+            - literal: ?tab=files
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - expect:
+          count:
+            selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+            equals: 1
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - expect:
+          count:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tablist][aria-label="File explorer lens"] [role=tab][aria-label="Files"]'
+            equals: 1
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tablist][aria-label="File explorer lens"] [role=tab][aria-label="Files"]'
+          view: attributes
+          as: filesLens
+          fields:
+            - aria-selected
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - assert:
+          any:
+            - op: eq
+              args:
+                - ref:
+                    binding: filesLens
+                    pointer: /aria-selected
+                - literal: "true"
+            - op: eq
+              args:
+                - ref:
+                    binding: filesLens
+                    pointer: /aria-selected
+                - literal: "false"
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - click:
+          selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tablist][aria-label="File explorer lens"] [role=tab][aria-label="Files"]'
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - screenshot: files-save-reload-s33
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [role=tablist][aria-label="File explorer lens"] [role=tab][aria-label="Files"]'
+            view: attributes
+            as: selectedLens
+            fields:
+              - aria-selected
+          satisfies:
+            all:
+              - op: eq
+                args:
+                  - ref:
+                      binding: selectedLens
+                      pointer: /aria-selected
+                  - literal: "true"
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Find the saved Lead's checkout in the selected Files lens after reload
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: count
+          as: reloadedLensRootCount
+        intent: Find the saved Lead's checkout in the selected Files lens after reload
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: reloadedLensRootCount
+            - literal: 1
+        intent: Find the saved Lead's checkout in the selected Files lens after reload
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: attributes
+          as: reloadedLensRoot
+          fields:
+            - data-root-key
+            - aria-expanded
+        intent: Find the saved Lead's checkout in the selected Files lens after reload
+      - assert:
+          all:
+            - op: startsWith
+              args:
+                - ref:
+                    binding: reloadedLensRoot
+                    pointer: /data-root-key
+                - op: concat
+                  args:
+                    - literal: "agent:"
+                    - ref:
+                        binding: leadId
+                    - literal: ":"
+            - any:
+                - op: eq
+                  args:
+                    - ref:
+                        binding: reloadedLensRoot
+                        pointer: /aria-expanded
+                    - literal: "true"
+                - op: eq
+                  args:
+                    - ref:
+                        binding: reloadedLensRoot
+                        pointer: /aria-expanded
+                    - literal: "false"
+        intent: Find the saved Lead's checkout in the selected Files lens after reload
+      - screenshot: files-save-reload-s34
+        intent: Find the saved Lead's checkout in the selected Files lens after reload
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: count
+          as: beforeExpand34Count
+        intent: Expand the same checkout after reload if needed
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: beforeExpand34Count
+            - literal: 1
+        intent: Expand the same checkout after reload if needed
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: attributes
+          as: beforeExpand34
+          fields:
+            - data-root-key
+            - aria-expanded
+        intent: Expand the same checkout after reload if needed
+      - assert:
+          all:
+            - op: startsWith
+              args:
+                - ref:
+                    binding: beforeExpand34
+                    pointer: /data-root-key
+                - op: concat
+                  args:
+                    - literal: "agent:"
+                    - ref:
+                        binding: leadId
+                    - literal: ":"
+            - any:
+                - op: eq
+                  args:
+                    - ref:
+                        binding: beforeExpand34
+                        pointer: /aria-expanded
+                    - literal: "true"
+                - op: eq
+                  args:
+                    - ref:
+                        binding: beforeExpand34
+                        pointer: /aria-expanded
+                    - literal: "false"
+        intent: Expand the same checkout after reload if needed
+      - focus:
+          selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+        intent: Expand the same checkout after reload if needed
+      - expect:
+          count:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+            equals: 1
+        intent: Expand the same checkout after reload if needed
+      - press: ArrowRight
+        intent: Expand the same checkout after reload if needed
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: count
+          as: expandedRoot34Count
+        intent: Expand the same checkout after reload if needed
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: expandedRoot34Count
+            - literal: 1
+        intent: Expand the same checkout after reload if needed
+      - capture:
+          source: dom
+          locator:
+            selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-root-key^="agent:"]'
+          view: attributes
+          as: expandedRoot34
+          fields:
+            - data-root-key
+            - aria-expanded
+        intent: Expand the same checkout after reload if needed
+      - assert:
+          all:
+            - op: startsWith
+              args:
+                - ref:
+                    binding: expandedRoot34
+                    pointer: /data-root-key
+                - op: concat
+                  args:
+                    - literal: "agent:"
+                    - ref:
+                        binding: leadId
+                    - literal: ":"
+            - op: eq
+              args:
+                - ref:
+                    binding: expandedRoot34
+                    pointer: /aria-expanded
+                - literal: "true"
+        intent: Expand the same checkout after reload if needed
+      - screenshot: files-save-reload-s35
+        intent: Expand the same checkout after reload if needed
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutefiles7
+        intent: Show the same README persisted after reload
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles7
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Show the same README persisted after reload
+      - capture:
+          source: url
+          view: search
+          as: leadRoutefiles7Search
+        intent: Show the same README persisted after reload
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutefiles7Search
+            - literal: ?tab=files
+        intent: Show the same README persisted after reload
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: '[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label="README.md"]'
+            view: count
+            as: reloadedReadme
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: reloadedReadme
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the same README persisted after reload
+      - screenshot: files-save-reload-s36
+        intent: Show the same README persisted after reload
+      - click:
+          selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(3)"
+        intent: Open this Lead's Git tab
+      - screenshot: files-save-reload-s37
+        intent: Open this Lead's Git tab
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+            view: text
+            as: gitPanel
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: gitPanel
+              - literal: Git history
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the correct branch and visible Create PR control without publishing
+      - capture:
+          source: dom
+          locator:
+            selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+          view: text
+          as: gitText
+        intent: Show the correct branch and visible Create PR control without publishing
+      - assert:
+          op: contains
+          args:
+            - ref:
+                binding: gitText
+            - op: concat
+              args:
+                - literal: loom/agent/
+                - ref:
+                    binding: leadId
+        intent: Show the correct branch and visible Create PR control without publishing
+      - expect:
+          visible:
+            role: button
+            name: Create PR
+            within:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+        intent: Show the correct branch and visible Create PR control without publishing
+      - screenshot: files-save-reload-s38
+        intent: Show the correct branch and visible Create PR control without publishing
+      - reload: true
+        intent: Reload Git on the same Agent API URL
+      - screenshot: files-save-reload-s39
+        intent: Reload Git on the same Agent API URL
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutegit8
+        intent: Confirm reloaded Git still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutegit8
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Confirm reloaded Git still addresses the saved Lead ID
+      - capture:
+          source: url
+          view: search
+          as: leadRoutegit8Search
+        intent: Confirm reloaded Git still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutegit8Search
+            - literal: ?tab=git
+        intent: Confirm reloaded Git still addresses the saved Lead ID
+      - screenshot: files-save-reload-s40
+        intent: Confirm reloaded Git still addresses the saved Lead ID
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutegit9
+        intent: Show Git persisted across reload
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutegit9
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Show Git persisted across reload
+      - capture:
+          source: url
+          view: search
+          as: leadRoutegit9Search
+        intent: Show Git persisted across reload
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutegit9Search
+            - literal: ?tab=git
+        intent: Show Git persisted across reload
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+            view: text
+            as: reloadedGit
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: reloadedGit
+              - literal: Git history
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show Git persisted across reload
+      - screenshot: files-save-reload-s41
+        intent: Show Git persisted across reload
+      - click:
+          selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(2)"
+        intent: Open this Lead's Info
+      - screenshot: files-save-reload-s42
+        intent: Open this Lead's Info
+      - capture:
+          source: url
+          view: pathname
+          as: leadRouteinfo10
+        intent: Show Info bound to the same Lead
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRouteinfo10
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Show Info bound to the same Lead
+      - capture:
+          source: url
+          view: search
+          as: leadRouteinfo10Search
+        intent: Show Info bound to the same Lead
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRouteinfo10Search
+            - literal: ?tab=info
+        intent: Show Info bound to the same Lead
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+            view: text
+            as: info
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: info
+              - literal: cov-files-${RUN_ID}-editor
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show Info bound to the same Lead
+      - screenshot: files-save-reload-s43
+        intent: Show Info bound to the same Lead
+      - reload: true
+        intent: Reload Info
+      - screenshot: files-save-reload-s44
+        intent: Reload Info
+      - capture:
+          source: url
+          view: pathname
+          as: leadRouteinfo11
+        intent: Confirm reloaded Info still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRouteinfo11
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Confirm reloaded Info still addresses the saved Lead ID
+      - capture:
+          source: url
+          view: search
+          as: leadRouteinfo11Search
+        intent: Confirm reloaded Info still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRouteinfo11Search
+            - literal: ?tab=info
+        intent: Confirm reloaded Info still addresses the saved Lead ID
+      - screenshot: files-save-reload-s45
+        intent: Confirm reloaded Info still addresses the saved Lead ID
+      - click:
+          selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(1)"
+        intent: Return to the same Lead's Chat
+      - screenshot: files-save-reload-s46
+        intent: Return to the same Lead's Chat
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutechat12
+        intent: Show Chat on the same Agent ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutechat12
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Show Chat on the same Agent ID
+      - capture:
+          source: url
+          view: search
+          as: leadRoutechat12Search
+        intent: Show Chat on the same Agent ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutechat12Search
+            - literal: ""
+        intent: Show Chat on the same Agent ID
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-testid=chat-transcript]"
+            view: count
+            as: chatTranscript
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: chatTranscript
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show Chat on the same Agent ID
+      - screenshot: files-save-reload-s47
+        intent: Show Chat on the same Agent ID
+      - reload: true
+        intent: Reload Chat
+      - screenshot: files-save-reload-s48
+        intent: Reload Chat
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutechat13
+        intent: Confirm reloaded Chat still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutechat13
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Confirm reloaded Chat still addresses the saved Lead ID
+      - capture:
+          source: url
+          view: search
+          as: leadRoutechat13Search
+        intent: Confirm reloaded Chat still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutechat13Search
+            - literal: ""
+        intent: Confirm reloaded Chat still addresses the saved Lead ID
+      - screenshot: files-save-reload-s49
+        intent: Confirm reloaded Chat still addresses the saved Lead ID
+      - click:
+          selector: "[data-testid=agent-api-page] [data-testid=agent-editor-groups] button[draggable]:nth-of-type(4)"
+        intent: Open this Lead's Diff
+      - screenshot: files-save-reload-s50
+        intent: Open this Lead's Diff
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutediff14
+        intent: Show Diff bound to the same Agent ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutediff14
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Show Diff bound to the same Agent ID
+      - capture:
+          source: url
+          view: search
+          as: leadRoutediff14Search
+        intent: Show Diff bound to the same Agent ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutediff14Search
+            - literal: ?tab=diff
+        intent: Show Diff bound to the same Agent ID
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+            view: count
+            as: diffPanel
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: diffPanel
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show Diff bound to the same Agent ID
+      - screenshot: files-save-reload-s51
+        intent: Show Diff bound to the same Agent ID
+      - reload: true
+        intent: Reload Diff
+      - screenshot: files-save-reload-s52
+        intent: Reload Diff
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutediff15
+        intent: Confirm reloaded Diff still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutediff15
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Confirm reloaded Diff still addresses the saved Lead ID
+      - capture:
+          source: url
+          view: search
+          as: leadRoutediff15Search
+        intent: Confirm reloaded Diff still addresses the saved Lead ID
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutediff15Search
+            - literal: ?tab=diff
+        intent: Confirm reloaded Diff still addresses the saved Lead ID
+      - screenshot: files-save-reload-s53
+        intent: Confirm reloaded Diff still addresses the saved Lead ID

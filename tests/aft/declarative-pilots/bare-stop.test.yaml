@@ -1,0 +1,1698 @@
+# Staged authoring draft. Original campaign is unchanged.
+# skip guards unresolved preservation gaps; it is never validation evidence.
+suite: declarative-pilot-bare-stop
+profile: declarative
+baseUrl: ${AFT_BASE_URL}
+timeoutMs: 30000
+setup:
+  - bind:
+      as: run
+      value:
+        literal: ${RUN_ID}
+  - bind:
+      as: loomRevision
+      value:
+        literal:
+          repository: loomcli
+          commit: ${AFT_LOOM_COMMIT}
+          tree: ${AFT_LOOM_TREE}
+          sourceManifestSha256: ${AFT_LOOM_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_LOOM_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: fleetRevision
+      value:
+        literal:
+          repository: fleet-db
+          commit: ${AFT_FLEET_COMMIT}
+          tree: ${AFT_FLEET_TREE}
+          sourceManifestSha256: ${AFT_FLEET_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_FLEET_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: selectionDigest
+      value:
+        literal: ${AFT_SELECTION_SHA256}
+  - capability:
+      request:
+        id: loom.fixture.acquire
+        version: 1
+        input:
+          runId:
+            ref:
+              binding: run
+          profile:
+            literal: agents-real-opencode
+          loomRevision:
+            ref:
+              binding: loomRevision
+          fleetRevision:
+            ref:
+              binding: fleetRevision
+          model:
+            literal: ${AFT_REAL_MODEL}
+          maxCases:
+            literal: 1
+          selectionSha256:
+            ref:
+              binding: selectionDigest
+      as: fixture
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /workspaceId
+            - literal: ${AFT_WS}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /filesOrigin
+            - literal: ${AFT_BASE_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /apiOrigin
+            - literal: ${AFT_API_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /repo
+            - literal: ${AFT_AGENT_FLOW_REPO}
+exports:
+  lease:
+    resource:
+      binding: fixture
+      pointer: /lease/id
+  ownedRun:
+    data:
+      binding: run
+  apiOrigin:
+    data:
+      binding: fixture
+      pointer: /apiOrigin
+  filesOrigin:
+    data:
+      binding: fixture
+      pointer: /filesOrigin
+  repo:
+    data:
+      binding: fixture
+      pointer: /repo
+teardown:
+  - capability:
+      request:
+        id: loom.fixture.release
+        version: 1
+        input:
+          leaseId:
+            ref:
+              binding: fixture
+              pointer: /lease/id
+      as: released
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /released
+            - literal: true
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /remainingOwnedResources
+            - literal: []
+tests:
+  - name: OC1 bare Chat Stop loses the native ask without executing it and permits a real next turn
+    intent: Explicit public API creates reviewer-style ask-policy agent; person triggers real shell ask, clicks bare Chat Stop, reloads and sends recovery question. No Decline/Cancel/Respond substitute. Authoring draft; unresolved preservation obligations are recorded in preservation.json.
+    skip: true
+    steps:
+      - api:
+          method: POST
+          path: /
+          as: created
+          status: 201
+          deadlineMs: 30000
+          body:
+            preset: pr-review-interactive
+            name: cov-controls-stop-${RUN_ID}
+            repo: ${AFT_AGENT_FLOW_REPO}
+            base_ref: main
+            overrides:
+              harness: opencode
+              model: ${AFT_REAL_MODEL}
+          headers:
+            Idempotency-Key: cov-controls-stop-${RUN_ID}-create
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents
+        intent: Create an owned production ask-policy Agent API actor with the real model
+      - bind:
+          as: leadId
+          value:
+            ref:
+              binding: created
+              pointer: /body/agent_id
+        intent: Create an owned production ask-policy Agent API actor with the real model
+      - capability:
+          request:
+            id: loom.agent.bind
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              workspaceId:
+                literal: ${AFT_WS}
+              agentId:
+                ref:
+                  binding: leadId
+          as: leadBound
+        intent: Create an owned production ask-policy Agent API actor with the real model
+      - api:
+          method: GET
+          path: /
+          as: leadRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Create an owned production ask-policy Agent API actor with the real model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/name
+                - literal: cov-controls-stop-${RUN_ID}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/preset
+                - literal: pr-review-interactive
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/model
+                - literal: ${AFT_REAL_MODEL}
+        intent: Create an owned production ask-policy Agent API actor with the real model
+      - screenshot: bare-stop-s01
+        intent: Create an owned production ask-policy Agent API actor with the real model
+      - open: /
+        resolve:
+          /open:
+            op: concat
+            args:
+              - ref:
+                  binding: filesOrigin
+              - literal: /ws/${AFT_WS}/chat/
+              - ref:
+                  binding: leadId
+        intent: Open the actor's actual Agent API Chat
+      - screenshot: bare-stop-s02
+        intent: Open the actor's actual Agent API Chat
+      - capture:
+          source: url
+          view: pathname
+          as: leadRoutechat16
+        intent: Show the owned Chat route
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutechat16
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Show the owned Chat route
+      - capture:
+          source: url
+          view: search
+          as: leadRoutechat16Search
+        intent: Show the owned Chat route
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadRoutechat16Search
+            - literal: ""
+        intent: Show the owned Chat route
+      - screenshot: bare-stop-s03
+        intent: Show the owned Chat route
+      - screenshot: bare-stop-s04
+        intent: Require the run-owned proposed command marker to be absent before the turn
+      - fill:
+          label: Message
+          value: "BARE_STOP_${RUN_ID}: use your shell tool to run exactly printf 'STOP_EFFECT_${RUN_ID}\\n' > /tmp/cov-controls-stop-effect-${RUN_ID}, then report its output."
+        intent: Trigger the real pr-review-interactive bash ask for an exact harmless owned command
+      - screenshot: bare-stop-s05
+        intent: Trigger the real pr-review-interactive bash ask for an exact harmless owned command
+      - press: Enter
+        intent: Send the real native-tool request
+      - screenshot: bare-stop-s06
+        intent: Send the real native-tool request
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=ask-card]"
+            view: text
+            as: askCard
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: askCard
+              - literal: cov-controls-stop-effect-${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show the actual native permission ask while the composer still has Stop
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: form button[title="Stop the running turn"]
+            view: count
+            as: stopButton
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: stopButton
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show the actual native permission ask while the composer still has Stop
+      - screenshot: bare-stop-s07
+        intent: Show the actual native permission ask while the composer still has Stop
+      - api:
+          method: GET
+          path: /
+          as: pendingRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: pendingRow
+                        pointer: /body/open_asks
+                - literal: 1
+            - op: ne
+              args:
+                - ref:
+                    binding: pendingRow
+                    pointer: /body/running_turn_id
+                - literal: null
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - bind:
+          as: askId
+          value:
+            ref:
+              binding: pendingRow
+              pointer: /body/open_asks/0/id
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - bind:
+          as: turnId
+          value:
+            ref:
+              binding: pendingRow
+              pointer: /body/running_turn_id
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 500
+              maxPages:
+                literal: 20
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: pendingHistory
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - bind:
+          as: opened
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - ref:
+                      binding: pendingHistory
+                      pointer: /events
+                  - literal: /kind
+                  - literal: ask.opened
+              - literal: /payload/askId
+              - ref:
+                  binding: askId
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: opened
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: opened
+                    pointer: /0/turnId
+                - ref:
+                    binding: turnId
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - op: filter
+                      args:
+                        - ref:
+                            binding: pendingHistory
+                            pointer: /events
+                        - literal: /kind
+                        - literal: ask.resolved
+                    - literal: /payload/askId
+                    - ref:
+                        binding: askId
+            - literal: 0
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - op: filter
+                      args:
+                        - ref:
+                            binding: pendingHistory
+                            pointer: /events
+                        - literal: /kind
+                        - literal: ask.lost
+                    - literal: /payload/askId
+                    - ref:
+                        binding: askId
+            - literal: 0
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - screenshot: bare-stop-s08
+        intent: Save the exact native ask and turn while no answer or loss exists
+      - click:
+          selector: form button[title="Stop the running turn"]
+        intent: Click Chat Stop directly, without Decline, Cancel or Respond
+      - screenshot: bare-stop-s09
+        intent: Click Chat Stop directly, without Decline, Cancel or Respond
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=ask-card]"
+            view: count
+            as: stoppedAsk
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: stoppedAsk
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show that the native ask and running turn have ended
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: text
+            as: cancelled
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: cancelled
+              - literal: Turn cancelled
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show that the native ask and running turn have ended
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: form button[title="Stop the running turn"]
+            view: count
+            as: stoppedButton
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: stoppedButton
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show that the native ask and running turn have ended
+      - screenshot: bare-stop-s10
+        intent: Show that the native ask and running turn have ended
+      - api:
+          method: GET
+          path: /
+          as: stoppedRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: stoppedRow
+                    pointer: /body/running_turn_id
+                - literal: null
+            - op: eq
+              args:
+                - ref:
+                    binding: stoppedRow
+                    pointer: /body/open_asks
+                - literal: []
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 500
+              maxPages:
+                literal: 20
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: stoppedHistory
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - bind:
+          as: stoppedEnds
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - ref:
+                      binding: stoppedHistory
+                      pointer: /events
+                  - literal: /kind
+                  - literal: agent.turn_completed
+              - literal: /turnId
+              - ref:
+                  binding: turnId
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - bind:
+          as: stoppedLost
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - op: filter
+                    args:
+                      - ref:
+                          binding: stoppedHistory
+                          pointer: /events
+                      - literal: /kind
+                      - literal: ask.lost
+                  - literal: /payload/askId
+                  - ref:
+                      binding: askId
+              - literal: /turnId
+              - ref:
+                  binding: turnId
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: stoppedEnds
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: stoppedEnds
+                    pointer: /0/payload/stopReason
+                - literal: cancelled
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: stoppedLost
+                - literal: 1
+            - op: gt
+              args:
+                - ref:
+                    binding: stoppedLost
+                    pointer: /0/seq
+                - ref:
+                    binding: stoppedEnds
+                    pointer: /0/seq
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - ref:
+                        binding: stoppedHistory
+                        pointer: /events
+                    - literal: /kind
+                    - literal: ask.opened
+            - literal: 1
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - ref:
+                        binding: stoppedHistory
+                        pointer: /events
+                    - literal: /kind
+                    - literal: ask.resolved
+            - literal: 0
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - ref:
+                        binding: stoppedHistory
+                        pointer: /events
+                    - literal: /kind
+                    - literal: ask.lost
+            - literal: 1
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - op: filter
+                      args:
+                        - ref:
+                            binding: stoppedHistory
+                            pointer: /events
+                        - literal: /kind
+                        - literal: ask.resolved
+                    - literal: /payload/askId
+                    - ref:
+                        binding: askId
+            - literal: 0
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - bind:
+          as: stoppedAsks
+          value:
+            op: sortBy
+            args:
+              - op: filter
+                args:
+                  - ref:
+                      binding: stoppedHistory
+                      pointer: /events
+                  - literal: /kind
+                  - literal: ask.opened
+              - literal: /seq
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          every:
+            collection:
+              op: filter
+              args:
+                - ref:
+                    binding: stoppedHistory
+                    pointer: /events
+                - literal: /kind
+                - literal: ask.opened
+            as: stoppedAskIdentity0
+            satisfies:
+              all:
+                - op: startsWith
+                  args:
+                    - ref:
+                        binding: stoppedAskIdentity0
+                        pointer: /eventId
+                    - literal: "ask.opened:"
+                - op: exists
+                  args:
+                    - ref:
+                        binding: stoppedAskIdentity0
+                        pointer: /payload/askId
+                - op: ne
+                  args:
+                    - ref:
+                        binding: stoppedAskIdentity0
+                        pointer: /payload/askId
+                    - literal: ""
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          every:
+            collection:
+              op: filter
+              args:
+                - ref:
+                    binding: stoppedHistory
+                    pointer: /events
+                - literal: /kind
+                - literal: ask.resolved
+            as: stoppedAskIdentity1
+            satisfies:
+              all:
+                - op: startsWith
+                  args:
+                    - ref:
+                        binding: stoppedAskIdentity1
+                        pointer: /eventId
+                    - literal: "ask.resolved:"
+                - op: exists
+                  args:
+                    - ref:
+                        binding: stoppedAskIdentity1
+                        pointer: /payload/askId
+                - op: ne
+                  args:
+                    - ref:
+                        binding: stoppedAskIdentity1
+                        pointer: /payload/askId
+                    - literal: ""
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - assert:
+          every:
+            collection:
+              op: filter
+              args:
+                - ref:
+                    binding: stoppedHistory
+                    pointer: /events
+                - literal: /kind
+                - literal: ask.lost
+            as: stoppedAskIdentity2
+            satisfies:
+              all:
+                - op: startsWith
+                  args:
+                    - ref:
+                        binding: stoppedAskIdentity2
+                        pointer: /eventId
+                    - literal: "ask.lost:"
+                - op: exists
+                  args:
+                    - ref:
+                        binding: stoppedAskIdentity2
+                        pointer: /payload/askId
+                - op: ne
+                  args:
+                    - ref:
+                        binding: stoppedAskIdentity2
+                        pointer: /payload/askId
+                    - literal: ""
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - screenshot: bare-stop-s11
+        intent: Require one cancelled turn, one ask.lost, no Respond or executed command, and no owned marker
+      - reload: true
+        intent: Reload the real Chat after the bare Stop
+      - screenshot: bare-stop-s12
+        intent: Reload the real Chat after the bare Stop
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: count
+            as: reloadTranscript
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: reloadTranscript
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show preserved Chat with no stale pending ask or running turn
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: text
+            as: reloadCancelled
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: reloadCancelled
+              - literal: Turn cancelled
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show preserved Chat with no stale pending ask or running turn
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=ask-card]"
+            view: count
+            as: reloadAsk
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: reloadAsk
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show preserved Chat with no stale pending ask or running turn
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: form button[title="Stop the running turn"]
+            view: count
+            as: reloadStop
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: reloadStop
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show preserved Chat with no stale pending ask or running turn
+      - screenshot: bare-stop-s13
+        intent: Show preserved Chat with no stale pending ask or running turn
+      - api:
+          method: GET
+          path: /
+          as: reloadedRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: reloadedRow
+                    pointer: /body/running_turn_id
+                - literal: null
+            - op: eq
+              args:
+                - ref:
+                    binding: reloadedRow
+                    pointer: /body/open_asks
+                - literal: []
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 500
+              maxPages:
+                literal: 20
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: reloadedHistory
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - bind:
+          as: reloadedEnds
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - ref:
+                      binding: reloadedHistory
+                      pointer: /events
+                  - literal: /kind
+                  - literal: agent.turn_completed
+              - literal: /turnId
+              - ref:
+                  binding: turnId
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - bind:
+          as: reloadedLost
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - op: filter
+                    args:
+                      - ref:
+                          binding: reloadedHistory
+                          pointer: /events
+                      - literal: /kind
+                      - literal: ask.lost
+                  - literal: /payload/askId
+                  - ref:
+                      binding: askId
+              - literal: /turnId
+              - ref:
+                  binding: turnId
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: reloadedEnds
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: reloadedEnds
+                    pointer: /0/payload/stopReason
+                - literal: cancelled
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: reloadedLost
+                - literal: 1
+            - op: gt
+              args:
+                - ref:
+                    binding: reloadedLost
+                    pointer: /0/seq
+                - ref:
+                    binding: reloadedEnds
+                    pointer: /0/seq
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - ref:
+                        binding: reloadedHistory
+                        pointer: /events
+                    - literal: /kind
+                    - literal: ask.opened
+            - literal: 1
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - ref:
+                        binding: reloadedHistory
+                        pointer: /events
+                    - literal: /kind
+                    - literal: ask.resolved
+            - literal: 0
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - ref:
+                        binding: reloadedHistory
+                        pointer: /events
+                    - literal: /kind
+                    - literal: ask.lost
+            - literal: 1
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - op: filter
+                      args:
+                        - ref:
+                            binding: reloadedHistory
+                            pointer: /events
+                        - literal: /kind
+                        - literal: ask.resolved
+                    - literal: /payload/askId
+                    - ref:
+                        binding: askId
+            - literal: 0
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - bind:
+          as: reloadedAsks
+          value:
+            op: sortBy
+            args:
+              - op: filter
+                args:
+                  - ref:
+                      binding: reloadedHistory
+                      pointer: /events
+                  - literal: /kind
+                  - literal: ask.opened
+              - literal: /seq
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: reloadedAsks
+                - ref:
+                    binding: stoppedAsks
+            - op: eq
+              args:
+                - ref:
+                    binding: reloadedLost
+                - ref:
+                    binding: stoppedLost
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          every:
+            collection:
+              op: filter
+              args:
+                - ref:
+                    binding: reloadedHistory
+                    pointer: /events
+                - literal: /kind
+                - literal: ask.opened
+            as: reloadedAskIdentity0
+            satisfies:
+              all:
+                - op: startsWith
+                  args:
+                    - ref:
+                        binding: reloadedAskIdentity0
+                        pointer: /eventId
+                    - literal: "ask.opened:"
+                - op: exists
+                  args:
+                    - ref:
+                        binding: reloadedAskIdentity0
+                        pointer: /payload/askId
+                - op: ne
+                  args:
+                    - ref:
+                        binding: reloadedAskIdentity0
+                        pointer: /payload/askId
+                    - literal: ""
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          every:
+            collection:
+              op: filter
+              args:
+                - ref:
+                    binding: reloadedHistory
+                    pointer: /events
+                - literal: /kind
+                - literal: ask.resolved
+            as: reloadedAskIdentity1
+            satisfies:
+              all:
+                - op: startsWith
+                  args:
+                    - ref:
+                        binding: reloadedAskIdentity1
+                        pointer: /eventId
+                    - literal: "ask.resolved:"
+                - op: exists
+                  args:
+                    - ref:
+                        binding: reloadedAskIdentity1
+                        pointer: /payload/askId
+                - op: ne
+                  args:
+                    - ref:
+                        binding: reloadedAskIdentity1
+                        pointer: /payload/askId
+                    - literal: ""
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - assert:
+          every:
+            collection:
+              op: filter
+              args:
+                - ref:
+                    binding: reloadedHistory
+                    pointer: /events
+                - literal: /kind
+                - literal: ask.lost
+            as: reloadedAskIdentity2
+            satisfies:
+              all:
+                - op: startsWith
+                  args:
+                    - ref:
+                        binding: reloadedAskIdentity2
+                        pointer: /eventId
+                    - literal: "ask.lost:"
+                - op: exists
+                  args:
+                    - ref:
+                        binding: reloadedAskIdentity2
+                        pointer: /payload/askId
+                - op: ne
+                  args:
+                    - ref:
+                        binding: reloadedAskIdentity2
+                        pointer: /payload/askId
+                    - literal: ""
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - screenshot: bare-stop-s14
+        intent: Compare the full saved ask history after reload and confirm the proposed effect remains absent
+      - fill:
+          label: Message
+          value: "STOP_RECOVER_${RUN_ID}: use your read tool to read README.md and cite its test command."
+        intent: Ask a new real repository question on the same agent
+      - screenshot: bare-stop-s15
+        intent: Ask a new real repository question on the same agent
+      - press: Enter
+        intent: Send a fresh native turn after Stop
+      - screenshot: bare-stop-s16
+        intent: Send a fresh native turn after Stop
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] li[data-kind=agent]"
+            view: text
+            as: recoveryAnswer
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: recoveryAnswer
+              - literal: README.md
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show a completed real answer while the composer is reusable
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: form button[title="Stop the running turn"]
+            view: count
+            as: recoveryStop
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: recoveryStop
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show a completed real answer while the composer is reusable
+      - screenshot: bare-stop-s17
+        intent: Show a completed real answer while the composer is reusable
+      - api:
+          method: GET
+          path: /
+          as: reusedRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: reusedRow
+                    pointer: /body/running_turn_id
+                - literal: null
+            - op: eq
+              args:
+                - ref:
+                    binding: reusedRow
+                    pointer: /body/open_asks
+                - literal: []
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 500
+              maxPages:
+                literal: 20
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: reusedHistory
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - bind:
+          as: reusedEnds
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - ref:
+                      binding: reusedHistory
+                      pointer: /events
+                  - literal: /kind
+                  - literal: agent.turn_completed
+              - literal: /turnId
+              - ref:
+                  binding: turnId
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - bind:
+          as: reusedLost
+          value:
+            op: filter
+            args:
+              - op: filter
+                args:
+                  - op: filter
+                    args:
+                      - ref:
+                          binding: reusedHistory
+                          pointer: /events
+                      - literal: /kind
+                      - literal: ask.lost
+                  - literal: /payload/askId
+                  - ref:
+                      binding: askId
+              - literal: /turnId
+              - ref:
+                  binding: turnId
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: reusedEnds
+                - literal: 1
+            - op: eq
+              args:
+                - ref:
+                    binding: reusedEnds
+                    pointer: /0/payload/stopReason
+                - literal: cancelled
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: reusedLost
+                - literal: 1
+            - op: gt
+              args:
+                - ref:
+                    binding: reusedLost
+                    pointer: /0/seq
+                - ref:
+                    binding: reusedEnds
+                    pointer: /0/seq
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - ref:
+                        binding: reusedHistory
+                        pointer: /events
+                    - literal: /kind
+                    - literal: ask.opened
+            - literal: 1
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - ref:
+                        binding: reusedHistory
+                        pointer: /events
+                    - literal: /kind
+                    - literal: ask.resolved
+            - literal: 0
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - ref:
+                        binding: reusedHistory
+                        pointer: /events
+                    - literal: /kind
+                    - literal: ask.lost
+            - literal: 1
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - op: filter
+                  args:
+                    - op: filter
+                      args:
+                        - ref:
+                            binding: reusedHistory
+                            pointer: /events
+                        - literal: /kind
+                        - literal: ask.resolved
+                    - literal: /payload/askId
+                    - ref:
+                        binding: askId
+            - literal: 0
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - bind:
+          as: reusedAsks
+          value:
+            op: sortBy
+            args:
+              - op: filter
+                args:
+                  - ref:
+                      binding: reusedHistory
+                      pointer: /events
+                  - literal: /kind
+                  - literal: ask.opened
+              - literal: /seq
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: reusedAsks
+                - ref:
+                    binding: stoppedAsks
+            - op: eq
+              args:
+                - ref:
+                    binding: reusedLost
+                - ref:
+                    binding: stoppedLost
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          every:
+            collection:
+              op: filter
+              args:
+                - ref:
+                    binding: reusedHistory
+                    pointer: /events
+                - literal: /kind
+                - literal: ask.opened
+            as: reusedAskIdentity0
+            satisfies:
+              all:
+                - op: startsWith
+                  args:
+                    - ref:
+                        binding: reusedAskIdentity0
+                        pointer: /eventId
+                    - literal: "ask.opened:"
+                - op: exists
+                  args:
+                    - ref:
+                        binding: reusedAskIdentity0
+                        pointer: /payload/askId
+                - op: ne
+                  args:
+                    - ref:
+                        binding: reusedAskIdentity0
+                        pointer: /payload/askId
+                    - literal: ""
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          every:
+            collection:
+              op: filter
+              args:
+                - ref:
+                    binding: reusedHistory
+                    pointer: /events
+                - literal: /kind
+                - literal: ask.resolved
+            as: reusedAskIdentity1
+            satisfies:
+              all:
+                - op: startsWith
+                  args:
+                    - ref:
+                        binding: reusedAskIdentity1
+                        pointer: /eventId
+                    - literal: "ask.resolved:"
+                - op: exists
+                  args:
+                    - ref:
+                        binding: reusedAskIdentity1
+                        pointer: /payload/askId
+                - op: ne
+                  args:
+                    - ref:
+                        binding: reusedAskIdentity1
+                        pointer: /payload/askId
+                    - literal: ""
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          every:
+            collection:
+              op: filter
+              args:
+                - ref:
+                    binding: reusedHistory
+                    pointer: /events
+                - literal: /kind
+                - literal: ask.lost
+            as: reusedAskIdentity2
+            satisfies:
+              all:
+                - op: startsWith
+                  args:
+                    - ref:
+                        binding: reusedAskIdentity2
+                        pointer: /eventId
+                    - literal: "ask.lost:"
+                - op: exists
+                  args:
+                    - ref:
+                        binding: reusedAskIdentity2
+                        pointer: /payload/askId
+                - op: ne
+                  args:
+                    - ref:
+                        binding: reusedAskIdentity2
+                        pointer: /payload/askId
+                    - literal: ""
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - capability:
+          request:
+            id: loom.native.registration
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              maxRegistrations:
+                literal: 200
+          as: recoveredNativeModelsRegistration
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: recoveredNativeModelsRegistration
+                    pointer: /agentId
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: recoveredNativeModelsRegistration
+                    pointer: /currentNativeSessionId
+                - ref:
+                    binding: leadBound
+                    pointer: /nativeSessionId
+            - op: eq
+              args:
+                - ref:
+                    binding: recoveredNativeModelsRegistration
+                    pointer: /currentNativeRoot
+                - ref:
+                    binding: leadBound
+                    pointer: /nativeRoot
+            - op: eq
+              args:
+                - ref:
+                    binding: recoveredNativeModelsRegistration
+                    pointer: /complete
+                - literal: true
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - capability:
+          request:
+            id: loom.native.observe
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              view:
+                literal: completed-models
+              nativeSessionId:
+                ref:
+                  binding: recoveredNativeModelsRegistration
+                  pointer: /currentNativeSessionId
+              nativeRoot:
+                ref:
+                  binding: recoveredNativeModelsRegistration
+                  pointer: /currentNativeRoot
+              expectedGeneration:
+                ref:
+                  binding: recoveredNativeModelsRegistration
+                  pointer: /serviceGeneration
+              expectedEndpointId:
+                ref:
+                  binding: recoveredNativeModelsRegistration
+                  pointer: /registeredEndpointId
+              expectedServicePid:
+                ref:
+                  binding: recoveredNativeModelsRegistration
+                  pointer: /servicePid
+              maxMessages:
+                literal: 200
+              maxRegistrations:
+                literal: 200
+          as: recoveredNativeModels
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: recoveredNativeModels
+                    pointer: /agentId
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: recoveredNativeModels
+                    pointer: /serviceGeneration
+                - ref:
+                    binding: recoveredNativeModelsRegistration
+                    pointer: /serviceGeneration
+            - op: eq
+              args:
+                - ref:
+                    binding: recoveredNativeModels
+                    pointer: /servicePid
+                - ref:
+                    binding: recoveredNativeModelsRegistration
+                    pointer: /servicePid
+            - op: eq
+              args:
+                - ref:
+                    binding: recoveredNativeModels
+                    pointer: /registeredEndpointId
+                - ref:
+                    binding: recoveredNativeModelsRegistration
+                    pointer: /registeredEndpointId
+            - op: eq
+              args:
+                - ref:
+                    binding: recoveredNativeModels
+                    pointer: /complete
+                - literal: true
+            - op: gt
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: recoveredNativeModels
+                        pointer: /records
+                - literal: 0
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          op: eq
+          args:
+            - op: concat
+              args:
+                - ref:
+                    binding: recoveredNativeModels
+                    pointer: /records/0/provider
+                - literal: /
+                - ref:
+                    binding: recoveredNativeModels
+                    pointer: /records/0/model
+            - literal: ${AFT_REAL_MODEL}
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - screenshot: bare-stop-s18
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model

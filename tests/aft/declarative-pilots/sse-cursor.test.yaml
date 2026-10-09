@@ -1,0 +1,1132 @@
+# Staged authoring draft. Original campaign is unchanged.
+# skip guards unresolved preservation gaps; it is never validation evidence.
+suite: declarative-pilot-sse-cursor
+profile: declarative
+baseUrl: ${AFT_BASE_URL}
+timeoutMs: 30000
+setup:
+  - bind:
+      as: run
+      value:
+        literal: ${RUN_ID}
+  - bind:
+      as: loomRevision
+      value:
+        literal:
+          repository: loomcli
+          commit: ${AFT_LOOM_COMMIT}
+          tree: ${AFT_LOOM_TREE}
+          sourceManifestSha256: ${AFT_LOOM_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_LOOM_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: fleetRevision
+      value:
+        literal:
+          repository: fleet-db
+          commit: ${AFT_FLEET_COMMIT}
+          tree: ${AFT_FLEET_TREE}
+          sourceManifestSha256: ${AFT_FLEET_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_FLEET_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: selectionDigest
+      value:
+        literal: ${AFT_SELECTION_SHA256}
+  - capability:
+      request:
+        id: loom.fixture.acquire
+        version: 1
+        input:
+          runId:
+            ref:
+              binding: run
+          profile:
+            literal: agents-real-opencode
+          loomRevision:
+            ref:
+              binding: loomRevision
+          fleetRevision:
+            ref:
+              binding: fleetRevision
+          model:
+            literal: ${AFT_REAL_MODEL}
+          maxCases:
+            literal: 1
+          selectionSha256:
+            ref:
+              binding: selectionDigest
+      as: fixture
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /workspaceId
+            - literal: ${AFT_WS}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /filesOrigin
+            - literal: ${AFT_BASE_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /apiOrigin
+            - literal: ${AFT_API_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /repo
+            - literal: ${AFT_AGENT_FLOW_REPO}
+exports:
+  lease:
+    resource:
+      binding: fixture
+      pointer: /lease/id
+  ownedRun:
+    data:
+      binding: run
+  apiOrigin:
+    data:
+      binding: fixture
+      pointer: /apiOrigin
+  filesOrigin:
+    data:
+      binding: fixture
+      pointer: /filesOrigin
+  repo:
+    data:
+      binding: fixture
+      pointer: /repo
+teardown:
+  - capability:
+      request:
+        id: loom.fixture.release
+        version: 1
+        input:
+          leaseId:
+            ref:
+              binding: fixture
+              pointer: /lease/id
+      as: released
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /released
+            - literal: true
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /remainingOwnedResources
+            - literal: []
+tests:
+  - name: LIVE filtered SSE cursor reconnect matches paged events and full delivered text
+    intent: Person creates two Leads and sends actual messages; API client subscribes/reconnects; runtime actor restarts only owned serve. Authoring draft; unresolved preservation obligations are recorded in preservation.json.
+    skip: true
+    steps:
+      - screenshot: sse-cursor-s01
+        intent: Confirm this run owns the serve restart and real-model selector
+      - open: /ws/${AFT_WS}/agents
+        intent: Original step 2
+      - screenshot: sse-cursor-s02
+        intent: Original unnamed checkpoint 2
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+        intent: Original step 3
+      - screenshot: sse-cursor-s03
+        intent: Original unnamed checkpoint 3
+      - click:
+          testid: create-agent-template-lead
+        intent: Original step 4
+      - screenshot: sse-cursor-s04
+        intent: Original unnamed checkpoint 4
+      - fill:
+          testid: create-agent-name
+          value: coverage-rs-stream-${RUN_ID}
+        intent: Original step 5
+      - screenshot: sse-cursor-s05
+        intent: Original unnamed checkpoint 5
+      - select:
+          testid: create-agent-backend
+          value: opencode
+        intent: Original step 6
+      - screenshot: sse-cursor-s06
+        intent: Original unnamed checkpoint 6
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-repo-chips] button"
+            view: count
+            as: streamRepoCount
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: streamRepoCount
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the canonical source repo selected
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-repo-chips] button"
+            view: text
+            as: streamRepoName
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: streamRepoName
+              - literal: source-repo
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the canonical source repo selected
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-repo-chips] button"
+            view: attributes
+            as: streamRepoPressed
+            fields:
+              - aria-pressed
+          satisfies:
+            all:
+              - op: eq
+                args:
+                  - ref:
+                      binding: streamRepoPressed
+                      pointer: /aria-pressed
+                  - literal: "true"
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the canonical source repo selected
+      - screenshot: sse-cursor-s07
+        intent: Show the canonical source repo selected
+      - click:
+          testid: create-agent-submit
+        intent: Original step 8
+      - screenshot: sse-cursor-s08
+        intent: Original unnamed checkpoint 8
+      - wait:
+          url: /ws/${AFT_WS}/chat/agt_
+        intent: Original step 9
+      - screenshot: sse-cursor-s09
+        intent: Original unnamed checkpoint 9
+      - capture:
+          source: url
+          view: path-segments
+          as: leadSegments
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: leadSegments
+                - literal: 4
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /0
+                - literal: ws
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /1
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /2
+                - literal: chat
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - bind:
+          as: leadId
+          value:
+            ref:
+              binding: leadSegments
+              pointer: /3
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - assert:
+          all:
+            - op: matches
+              args:
+                - ref:
+                    binding: leadId
+                - literal: ^agt_[A-Za-z0-9_-]*$
+            - op: ne
+              args:
+                - ref:
+                    binding: leadId
+                - literal: agt_
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - capability:
+          request:
+            id: loom.agent.bind
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              workspaceId:
+                literal: ${AFT_WS}
+              agentId:
+                ref:
+                  binding: leadId
+          as: leadBound
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - api:
+          method: GET
+          path: /
+          as: leadRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/name
+                - literal: coverage-rs-stream-${RUN_ID}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/workspace_id
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/preset
+                - literal: lead
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/parent_agent_id
+                - literal: null
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/root_agent_id
+                - literal: null
+            - op: ne
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/worktree_path
+                - literal: ""
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - capture:
+          source: dom
+          locator:
+            selector: "[data-chat-provider-model-picker=true]"
+          view: text
+          as: leadModelButton
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - api:
+          method: GET
+          path: /
+          as: leadModelRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: leadModelRow
+                    pointer: /body/model
+                - literal: ${AFT_REAL_MODEL}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadModelRow
+                    pointer: /body/model_unverified
+                - literal: false
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - screenshot: sse-cursor-s10
+        intent: Bind the primary UI-created Agent ID and selected real model
+      - fill:
+          label: Message
+          value: "STREAM_ONE-${RUN_ID}: use a tool to read README.md, then name its documented test command with the file citation."
+        intent: Send a real repository question to the primary Lead
+      - screenshot: sse-cursor-s11
+        intent: Send a real repository question to the primary Lead
+      - press: Enter
+        intent: Original step 12
+      - screenshot: sse-cursor-s12
+        intent: Original unnamed checkpoint 12
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: text
+            as: firstUser
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: firstUser
+              - literal: STREAM_ONE-${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show a real answer and the primary Lead idle
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] li[data-kind=agent]"
+            view: text
+            as: firstReadme
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: firstReadme
+              - literal: README.md
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show a real answer and the primary Lead idle
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: section[aria-label="Agent chat"] header
+            view: text
+            as: firstIdle
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: firstIdle
+              - literal: idle
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show a real answer and the primary Lead idle
+      - screenshot: sse-cursor-s13
+        intent: Show a real answer and the primary Lead idle
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 2
+              maxPages:
+                literal: 1000
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: streamFirst
+        intent: Save exact EventIDs and full delivered text from paged ListEvents and filtered SSE before restart
+      - bind:
+          as: streamFirstDelivered
+          value:
+            op: filter
+            args:
+              - ref:
+                  binding: streamFirst
+                  pointer: /events
+              - literal: /kind
+              - literal: message.delivered
+        intent: Save exact EventIDs and full delivered text from paged ListEvents and filtered SSE before restart
+      - bind:
+          as: streamFirstRequested
+          value:
+            op: filter
+            args:
+              - ref:
+                  binding: streamFirstDelivered
+              - literal: /payload/text
+              - literal: "STREAM_ONE-${RUN_ID}: use a tool to read README.md, then name its documented test command with the file citation."
+        intent: Save exact EventIDs and full delivered text from paged ListEvents and filtered SSE before restart
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - ref:
+                    binding: streamFirstRequested
+            - literal: 1
+        intent: Save exact EventIDs and full delivered text from paged ListEvents and filtered SSE before restart
+      - screenshot: sse-cursor-s14
+        intent: Save exact EventIDs and full delivered text from paged ListEvents and filtered SSE before restart
+      - open: /ws/${AFT_WS}/agents
+        intent: Original step 15
+      - screenshot: sse-cursor-s15
+        intent: Original unnamed checkpoint 15
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+        intent: Original step 16
+      - screenshot: sse-cursor-s16
+        intent: Original unnamed checkpoint 16
+      - click:
+          testid: create-agent-template-lead
+        intent: Original step 17
+      - screenshot: sse-cursor-s17
+        intent: Original unnamed checkpoint 17
+      - fill:
+          testid: create-agent-name
+          value: coverage-rs-other-${RUN_ID}
+        intent: Original step 18
+      - screenshot: sse-cursor-s18
+        intent: Original unnamed checkpoint 18
+      - select:
+          testid: create-agent-backend
+          value: opencode
+        intent: Original step 19
+      - screenshot: sse-cursor-s19
+        intent: Original unnamed checkpoint 19
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-repo-chips] button"
+            view: count
+            as: otherRepoCount
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: otherRepoCount
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the same owned source repo for a distinct Lead
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-repo-chips] button"
+            view: text
+            as: otherRepoName
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: otherRepoName
+              - literal: source-repo
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the same owned source repo for a distinct Lead
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-repo-chips] button"
+            view: attributes
+            as: otherRepoPressed
+            fields:
+              - aria-pressed
+          satisfies:
+            all:
+              - op: eq
+                args:
+                  - ref:
+                      binding: otherRepoPressed
+                      pointer: /aria-pressed
+                  - literal: "true"
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the same owned source repo for a distinct Lead
+      - screenshot: sse-cursor-s20
+        intent: Show the same owned source repo for a distinct Lead
+      - click:
+          testid: create-agent-submit
+        intent: Original step 21
+      - screenshot: sse-cursor-s21
+        intent: Original unnamed checkpoint 21
+      - wait:
+          url: /ws/${AFT_WS}/chat/agt_
+        intent: Original step 22
+      - screenshot: sse-cursor-s22
+        intent: Original unnamed checkpoint 22
+      - capture:
+          source: url
+          view: path-segments
+          as: otherSegments
+        intent: Bind the independent UI-created Lead and selected real model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: otherSegments
+                - literal: 4
+            - op: eq
+              args:
+                - ref:
+                    binding: otherSegments
+                    pointer: /0
+                - literal: ws
+            - op: eq
+              args:
+                - ref:
+                    binding: otherSegments
+                    pointer: /1
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: otherSegments
+                    pointer: /2
+                - literal: chat
+        intent: Bind the independent UI-created Lead and selected real model
+      - bind:
+          as: otherId
+          value:
+            ref:
+              binding: otherSegments
+              pointer: /3
+        intent: Bind the independent UI-created Lead and selected real model
+      - assert:
+          all:
+            - op: matches
+              args:
+                - ref:
+                    binding: otherId
+                - literal: ^agt_[A-Za-z0-9_-]*$
+            - op: ne
+              args:
+                - ref:
+                    binding: otherId
+                - literal: agt_
+        intent: Bind the independent UI-created Lead and selected real model
+      - capability:
+          request:
+            id: loom.agent.bind
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              workspaceId:
+                literal: ${AFT_WS}
+              agentId:
+                ref:
+                  binding: otherId
+          as: otherBound
+        intent: Bind the independent UI-created Lead and selected real model
+      - api:
+          method: GET
+          path: /
+          as: otherRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: otherId
+        intent: Bind the independent UI-created Lead and selected real model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/agent_id
+                - ref:
+                    binding: otherId
+            - op: eq
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/name
+                - literal: coverage-rs-other-${RUN_ID}
+            - op: eq
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/workspace_id
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/preset
+                - literal: lead
+            - op: eq
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/parent_agent_id
+                - literal: null
+            - op: eq
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/root_agent_id
+                - literal: null
+            - op: ne
+              args:
+                - ref:
+                    binding: otherRow
+                    pointer: /body/worktree_path
+                - literal: ""
+        intent: Bind the independent UI-created Lead and selected real model
+      - capture:
+          source: dom
+          locator:
+            selector: "[data-chat-provider-model-picker=true]"
+          view: text
+          as: otherModelButton
+        intent: Bind the independent UI-created Lead and selected real model
+      - api:
+          method: GET
+          path: /
+          as: otherModelRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: otherId
+        intent: Bind the independent UI-created Lead and selected real model
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: otherModelRow
+                    pointer: /body/model
+                - literal: ${AFT_REAL_MODEL}
+            - op: eq
+              args:
+                - ref:
+                    binding: otherModelRow
+                    pointer: /body/model_unverified
+                - literal: false
+        intent: Bind the independent UI-created Lead and selected real model
+      - assert:
+          op: ne
+          args:
+            - ref:
+                binding: otherId
+            - ref:
+                binding: leadId
+        intent: Bind the independent UI-created Lead and selected real model
+      - screenshot: sse-cursor-s23
+        intent: Bind the independent UI-created Lead and selected real model
+      - fill:
+          label: Message
+          value: OTHER_AGENT-${RUN_ID} is only a test marker, not an agent name. In this existing chat, use your own built-in read tool to read README.md and give its exact filename in one sentence. Do not create or delegate to another agent.
+        intent: Create a real foreign-agent event oracle
+      - screenshot: sse-cursor-s24
+        intent: Create a real foreign-agent event oracle
+      - press: Enter
+        intent: Original step 25
+      - screenshot: sse-cursor-s25
+        intent: Original unnamed checkpoint 25
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: text
+            as: otherUser
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: otherUser
+              - literal: OTHER_AGENT-${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show the second Agent's separate real reply
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] li[data-kind=agent]"
+            view: count
+            as: otherReply
+          satisfies:
+            op: gt
+            args:
+              - ref:
+                  binding: otherReply
+              - literal: 0
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show the second Agent's separate real reply
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: section[aria-label="Agent chat"] header
+            view: text
+            as: otherIdle
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: otherIdle
+              - literal: idle
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show the second Agent's separate real reply
+      - screenshot: sse-cursor-s26
+        intent: Show the second Agent's separate real reply
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: otherBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 2
+              maxPages:
+                literal: 1000
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: otherFirst
+        intent: Save the foreign Agent's EventIDs, then restart only the run-owned loom-local service
+      - assert:
+          op: gt
+          args:
+            - op: count
+              args:
+                - ref:
+                    binding: otherFirst
+                    pointer: /events
+            - literal: 0
+        intent: Save the foreign Agent's EventIDs, then restart only the run-owned loom-local service
+      - screenshot: sse-cursor-s27
+        intent: Save the foreign Agent's EventIDs, then restart only the run-owned loom-local service
+      - open: /ws/${AFT_WS}/agents
+        intent: Original step 28
+      - screenshot: sse-cursor-s28
+        intent: Original unnamed checkpoint 28
+      - click:
+          role: link
+          name: coverage-rs-stream-${RUN_ID}
+        intent: Reopen the primary Lead through the Agents UI
+      - screenshot: sse-cursor-s29
+        intent: Reopen the primary Lead through the Agents UI
+      - wait:
+          url: /ws/${AFT_WS}/chat/agt_
+        intent: Original step 30
+      - screenshot: sse-cursor-s30
+        intent: Original unnamed checkpoint 30
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: text
+            as: restoredStreamUser
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: restoredStreamUser
+              - literal: STREAM_ONE-${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show the primary history after service reconnect
+      - screenshot: sse-cursor-s31
+        intent: Show the primary history after service reconnect
+      - fill:
+          label: Message
+          value: "STREAM_TWO-${RUN_ID}: again use a tool to read README.md and name its documented test command with a file citation."
+        intent: Send a second real request after restart
+      - screenshot: sse-cursor-s32
+        intent: Send a second real request after restart
+      - press: Enter
+        intent: Original step 33
+      - screenshot: sse-cursor-s33
+        intent: Original unnamed checkpoint 33
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: text
+            as: bothFirst
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: bothFirst
+              - literal: STREAM_ONE-${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show both real exchanges in the restored Chat
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript]"
+            view: text
+            as: bothSecond
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: bothSecond
+              - literal: STREAM_TWO-${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show both real exchanges in the restored Chat
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] li[data-kind=agent]"
+            view: count
+            as: bothReplies
+          satisfies:
+            op: gte
+            args:
+              - ref:
+                  binding: bothReplies
+              - literal: 2
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show both real exchanges in the restored Chat
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: section[aria-label="Agent chat"] header
+            view: text
+            as: bothIdle
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: bothIdle
+              - literal: idle
+          deadline:
+            clockId: host
+            withinMs: 180000
+        intent: Show both real exchanges in the restored Chat
+      - screenshot: sse-cursor-s34
+        intent: Show both real exchanges in the restored Chat
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 2
+              maxPages:
+                literal: 1000
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: streamSecond
+        intent: Compare cursor replay after restart to exact paged EventIDs, filtered kinds/Agent ID, and persisted full text
+      - assert:
+          every:
+            collection:
+              ref:
+                binding: streamFirst
+                pointer: /events
+            as: priorEvent
+            satisfies:
+              op: contains
+              args:
+                - ref:
+                    binding: streamSecond
+                    pointer: /events
+                - ref:
+                    binding: priorEvent
+        intent: Compare cursor replay after restart to exact paged EventIDs, filtered kinds/Agent ID, and persisted full text
+      - screenshot: sse-cursor-s35
+        intent: Compare cursor replay after restart to exact paged EventIDs, filtered kinds/Agent ID, and persisted full text
+      - reload: true
+        intent: Reload the primary Chat once more
+      - screenshot: sse-cursor-s36
+        intent: Reload the primary Chat once more
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=chat-transcript] li[data-kind=agent]"
+            view: count
+            as: finalReplies
+          satisfies:
+            op: gte
+            args:
+              - ref:
+                  binding: finalReplies
+              - literal: 2
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Show one copy of each request and retained replies after a fresh UI reload
+      - screenshot: sse-cursor-s37
+        intent: Show one copy of each request and retained replies after a fresh UI reload
+      - capability:
+          request:
+            id: loom.api.savedEvents
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: leadBound
+                  pointer: /agentRef
+              after:
+                literal: 0
+              pageSize:
+                literal: 2
+              maxPages:
+                literal: 1000
+              maxRecords:
+                literal: 10000
+              kinds:
+                literal: []
+          as: streamReloaded
+        intent: Verify exact saved event prefix matches final visible Chat history
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: streamReloaded
+                pointer: /events
+            - ref:
+                binding: streamSecond
+                pointer: /events
+        intent: Verify exact saved event prefix matches final visible Chat history
+      - screenshot: sse-cursor-s38
+        intent: Verify exact saved event prefix matches final visible Chat history

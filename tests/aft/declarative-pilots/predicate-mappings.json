@@ -1,0 +1,1862 @@
+{
+  "status": "authored-unvalidated",
+  "count": 15,
+  "records": [
+    {
+      "pilotId": "files-save-reload",
+      "helper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+      "source": {
+        "line": 65,
+        "end_line": 65,
+        "expression": "re.fullmatch('agt_[A-Za-z0-9_-]+', agent_id)",
+        "message": "agent_id",
+        "source": "assert re.fullmatch(r\"agt_[A-Za-z0-9_-]+\", agent_id), agent_id",
+        "function": "identity",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              8
+            ],
+            "line": 36,
+            "column": 9,
+            "end_line": 38
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              16
+            ],
+            "line": 60,
+            "column": 9,
+            "end_line": 64
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              20
+            ],
+            "line": 81,
+            "column": 9,
+            "end_line": 85
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              24
+            ],
+            "line": 99,
+            "column": 9,
+            "end_line": 103
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              30
+            ],
+            "line": 117,
+            "column": 9,
+            "end_line": 119
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              31
+            ],
+            "line": 119,
+            "column": 9,
+            "end_line": 123
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              32
+            ],
+            "line": 123,
+            "column": 9,
+            "end_line": 125
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              39
+            ],
+            "line": 147,
+            "column": 9,
+            "end_line": 149
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              44
+            ],
+            "line": 161,
+            "column": 9,
+            "end_line": 163
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              48
+            ],
+            "line": 171,
+            "column": 9,
+            "end_line": 173
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              52
+            ],
+            "line": 181,
+            "column": 9,
+            "end_line": 185
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            19
+          ],
+          "line": 231
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "files-save-reload",
+      "helper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+      "source": {
+        "line": 67,
+        "end_line": 67,
+        "expression": "agent['agent_id'] == agent_id",
+        "message": null,
+        "source": "assert agent[\"agent_id\"] == agent_id",
+        "function": "identity",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              8
+            ],
+            "line": 36,
+            "column": 9,
+            "end_line": 38
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              16
+            ],
+            "line": 60,
+            "column": 9,
+            "end_line": 64
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              20
+            ],
+            "line": 81,
+            "column": 9,
+            "end_line": 85
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              24
+            ],
+            "line": 99,
+            "column": 9,
+            "end_line": 103
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              30
+            ],
+            "line": 117,
+            "column": 9,
+            "end_line": 119
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              31
+            ],
+            "line": 119,
+            "column": 9,
+            "end_line": 123
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              32
+            ],
+            "line": 123,
+            "column": 9,
+            "end_line": 125
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              39
+            ],
+            "line": 147,
+            "column": 9,
+            "end_line": 149
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              44
+            ],
+            "line": 161,
+            "column": 9,
+            "end_line": 163
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              48
+            ],
+            "line": 171,
+            "column": 9,
+            "end_line": 173
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              52
+            ],
+            "line": 181,
+            "column": 9,
+            "end_line": 185
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            22
+          ],
+          "line": 275
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "files-save-reload",
+      "helper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+      "source": {
+        "line": 68,
+        "end_line": 68,
+        "expression": "agent['workspace_id'] == WS and agent['repo'] == REPO",
+        "message": "agent",
+        "source": "assert agent[\"workspace_id\"] == WS and agent[\"repo\"] == REPO, agent",
+        "function": "identity",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              8
+            ],
+            "line": 36,
+            "column": 9,
+            "end_line": 38
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              16
+            ],
+            "line": 60,
+            "column": 9,
+            "end_line": 64
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              20
+            ],
+            "line": 81,
+            "column": 9,
+            "end_line": 85
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              24
+            ],
+            "line": 99,
+            "column": 9,
+            "end_line": 103
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              30
+            ],
+            "line": 117,
+            "column": 9,
+            "end_line": 119
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              31
+            ],
+            "line": 119,
+            "column": 9,
+            "end_line": 123
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              32
+            ],
+            "line": 123,
+            "column": 9,
+            "end_line": 125
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              39
+            ],
+            "line": 147,
+            "column": 9,
+            "end_line": 149
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              44
+            ],
+            "line": 161,
+            "column": 9,
+            "end_line": 163
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              48
+            ],
+            "line": 171,
+            "column": 9,
+            "end_line": 173
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              52
+            ],
+            "line": 181,
+            "column": 9,
+            "end_line": 185
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            22
+          ],
+          "line": 275
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "files-save-reload",
+      "helper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+      "source": {
+        "line": 69,
+        "end_line": 69,
+        "expression": "agent['harness'] == env('AFT_REAL_BACKEND')",
+        "message": "agent",
+        "source": "assert agent[\"harness\"] == env(\"AFT_REAL_BACKEND\"), agent",
+        "function": "identity",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              8
+            ],
+            "line": 36,
+            "column": 9,
+            "end_line": 38
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              16
+            ],
+            "line": 60,
+            "column": 9,
+            "end_line": 64
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              20
+            ],
+            "line": 81,
+            "column": 9,
+            "end_line": 85
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              24
+            ],
+            "line": 99,
+            "column": 9,
+            "end_line": 103
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              30
+            ],
+            "line": 117,
+            "column": 9,
+            "end_line": 119
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              31
+            ],
+            "line": 119,
+            "column": 9,
+            "end_line": 123
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              32
+            ],
+            "line": 123,
+            "column": 9,
+            "end_line": 125
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              39
+            ],
+            "line": 147,
+            "column": 9,
+            "end_line": 149
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              44
+            ],
+            "line": 161,
+            "column": 9,
+            "end_line": 163
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              48
+            ],
+            "line": 171,
+            "column": 9,
+            "end_line": 173
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              52
+            ],
+            "line": 181,
+            "column": 9,
+            "end_line": 185
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            22
+          ],
+          "line": 275
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "files-save-reload",
+      "helper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+      "source": {
+        "line": 85,
+        "end_line": 85,
+        "expression": "match",
+        "message": "f'expected Agent API Chat route, got {path!r}'",
+        "source": "assert match, f\"expected Agent API Chat route, got {path!r}\"",
+        "function": "claim",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              8
+            ],
+            "line": 36,
+            "column": 9,
+            "end_line": 38
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            19
+          ],
+          "line": 231
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "files-save-reload",
+      "helper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+      "source": {
+        "line": 89,
+        "end_line": 89,
+        "expression": "agent['name'] == f'cov-files-{RUN}-{label}'",
+        "message": "agent",
+        "source": "assert agent[\"name\"] == f\"cov-files-{RUN}-{label}\", agent",
+        "function": "claim",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              8
+            ],
+            "line": 36,
+            "column": 9,
+            "end_line": 38
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            22
+          ],
+          "line": 275
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "files-save-reload",
+      "helper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+      "source": {
+        "line": 90,
+        "end_line": 90,
+        "expression": "agent['preset'] == 'lead' and agent['created_by_kind'] == 'user'",
+        "message": "agent",
+        "source": "assert agent[\"preset\"] == \"lead\" and agent[\"created_by_kind\"] == \"user\", agent",
+        "function": "claim",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              8
+            ],
+            "line": 36,
+            "column": 9,
+            "end_line": 38
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            22
+          ],
+          "line": 275
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "files-save-reload",
+      "helper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+      "source": {
+        "line": 91,
+        "end_line": 91,
+        "expression": "not agent.get('parent_agent_id') and agent['worktree_path']",
+        "message": "agent",
+        "source": "assert not agent.get(\"parent_agent_id\") and agent[\"worktree_path\"], agent",
+        "function": "claim",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              8
+            ],
+            "line": 36,
+            "column": 9,
+            "end_line": 38
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            22
+          ],
+          "line": 275
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop.py",
+      "source": {
+        "line": 24,
+        "end_line": 25,
+        "expression": "not [e for e in rows if e['kind'] in ('ask.resolved', 'ask.lost') and e['payload'].get('askId') == identity['ask_id']]",
+        "message": "'ask was answered before bare Stop'",
+        "source": "assert not [e for e in rows if e[\"kind\"] in (\"ask.resolved\", \"ask.lost\") and\n                e[\"payload\"].get(\"askId\") == identity[\"ask_id\"]], \"ask was answered before bare Stop\"",
+        "function": "pending",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              7
+            ],
+            "line": 30,
+            "column": 9,
+            "end_line": 32
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            28
+          ],
+          "line": 437
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            29
+          ],
+          "line": 456
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop.py",
+      "source": {
+        "line": 31,
+        "end_line": 31,
+        "expression": "a['running_turn_id'] is None and (not a['open_asks'])",
+        "message": "'Stop left an ask or turn active'",
+        "source": "assert a[\"running_turn_id\"] is None and not a[\"open_asks\"], \"Stop left an ask or turn active\"",
+        "function": "stopped",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            38
+          ],
+          "line": 551
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            60
+          ],
+          "line": 915
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop.py",
+      "source": {
+        "line": 34,
+        "end_line": 35,
+        "expression": "len(ends) == 1 and ends[0]['payload'].get('stopReason') == 'cancelled'",
+        "message": "'bare Stop did not save one cancelled native turn'",
+        "source": "assert len(ends) == 1 and ends[0][\"payload\"].get(\"stopReason\") == \"cancelled\", \\\n        \"bare Stop did not save one cancelled native turn\"",
+        "function": "stopped",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            42
+          ],
+          "line": 624
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            64
+          ],
+          "line": 988
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop.py",
+      "source": {
+        "line": 38,
+        "end_line": 38,
+        "expression": "len(lost) == 1 and lost[0]['seq'] > ends[0]['seq']",
+        "message": "'bare Stop did not lose the exact ask once'",
+        "source": "assert len(lost) == 1 and lost[0][\"seq\"] > ends[0][\"seq\"], \"bare Stop did not lose the exact ask once\"",
+        "function": "stopped",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            42
+          ],
+          "line": 624
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            64
+          ],
+          "line": 988
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop.py",
+      "source": {
+        "line": 39,
+        "end_line": 40,
+        "expression": "not [e for e in rows if e['kind'] == 'ask.resolved' and e['payload'].get('askId') == identity['ask_id']]",
+        "message": "'Stop silently answered the ask'",
+        "source": "assert not [e for e in rows if e[\"kind\"] == \"ask.resolved\" and\n                e[\"payload\"].get(\"askId\") == identity[\"ask_id\"]], \"Stop silently answered the ask\"",
+        "function": "stopped",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            46
+          ],
+          "line": 697
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            49
+          ],
+          "line": 761
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            68
+          ],
+          "line": 1061
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            72
+          ],
+          "line": 1140
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls.py",
+      "source": {
+        "line": 414,
+        "end_line": 415,
+        "expression": "[sum((e['kind'] == kind for e in rows)) for kind in kinds] == wanted",
+        "message": "'saved ask history has the wrong opened/resolved/lost counts'",
+        "source": "assert [sum(e[\"kind\"] == kind for e in rows) for kind in kinds] == wanted, \\\n        \"saved ask history has the wrong opened/resolved/lost counts\"",
+        "function": "ask_history",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              17
+            ],
+            "line": 65,
+            "column": 9,
+            "end_line": 67
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            43
+          ],
+          "line": 655
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            44
+          ],
+          "line": 669
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            45
+          ],
+          "line": 683
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            46
+          ],
+          "line": 697
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            65
+          ],
+          "line": 1019
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            66
+          ],
+          "line": 1033
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            67
+          ],
+          "line": 1047
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            68
+          ],
+          "line": 1061
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            88
+          ],
+          "line": 1370
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            89
+          ],
+          "line": 1384
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            90
+          ],
+          "line": 1398
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            91
+          ],
+          "line": 1412
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    },
+    {
+      "pilotId": "bare-stop",
+      "helper": "campaign:tests/aft/scripts/coverage-chat-controls.py",
+      "source": {
+        "line": 416,
+        "end_line": 417,
+        "expression": "all((e['event_id'].startswith(e['kind'] + ':') and e['payload'].get('askId') for e in rows))",
+        "message": "'saved ask event identity/content missing'",
+        "source": "assert all(e[\"event_id\"].startswith(e[\"kind\"] + \":\") and\n               e[\"payload\"].get(\"askId\") for e in rows), \"saved ask event identity/content missing\"",
+        "function": "ask_history",
+        "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
+        "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
+      },
+      "callerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "callers": [
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              10
+            ],
+            "line": 41,
+            "column": 9,
+            "end_line": 43
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              13
+            ],
+            "line": 52,
+            "column": 9,
+            "end_line": 54
+          },
+          "deadlineMs": 30000
+        },
+        {
+          "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17",
+          "source": {
+            "file_id": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              17
+            ],
+            "line": 65,
+            "column": 9,
+            "end_line": 67
+          },
+          "deadlineMs": 30000
+        }
+      ],
+      "destination": [
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            48
+          ],
+          "line": 730
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            49
+          ],
+          "line": 761
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            50
+          ],
+          "line": 792
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            71
+          ],
+          "line": 1109
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            72
+          ],
+          "line": 1140
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            73
+          ],
+          "line": 1171
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            94
+          ],
+          "line": 1460
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            95
+          ],
+          "line": 1491
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "path": [
+            "tests",
+            0,
+            "steps",
+            96
+          ],
+          "line": 1522
+        }
+      ],
+      "bounds": {
+        "callerDefaultStepMs": 30000,
+        "publicApiRequestMs": 15000,
+        "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+      }
+    }
+  ]
+}

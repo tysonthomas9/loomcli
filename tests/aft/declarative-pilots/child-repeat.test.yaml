@@ -1,0 +1,964 @@
+# Staged authoring draft. Original campaign is unchanged.
+# skip guards unresolved preservation gaps; it is never validation evidence.
+suite: declarative-pilot-child-repeat
+profile: declarative
+baseUrl: ${AFT_BASE_URL}
+timeoutMs: 30000
+setup:
+  - bind:
+      as: run
+      value:
+        literal: ${RUN_ID}
+  - bind:
+      as: loomRevision
+      value:
+        literal:
+          repository: loomcli
+          commit: ${AFT_LOOM_COMMIT}
+          tree: ${AFT_LOOM_TREE}
+          sourceManifestSha256: ${AFT_LOOM_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_LOOM_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: fleetRevision
+      value:
+        literal:
+          repository: fleet-db
+          commit: ${AFT_FLEET_COMMIT}
+          tree: ${AFT_FLEET_TREE}
+          sourceManifestSha256: ${AFT_FLEET_SOURCE_MANIFEST_SHA256}
+          buildManifestSha256: ${AFT_FLEET_BUILD_MANIFEST_SHA256}
+  - bind:
+      as: selectionDigest
+      value:
+        literal: ${AFT_SELECTION_SHA256}
+  - capability:
+      request:
+        id: loom.fixture.acquire
+        version: 1
+        input:
+          runId:
+            ref:
+              binding: run
+          profile:
+            literal: agents-real-opencode
+          loomRevision:
+            ref:
+              binding: loomRevision
+          fleetRevision:
+            ref:
+              binding: fleetRevision
+          model:
+            literal: ${AFT_REAL_MODEL}
+          maxCases:
+            literal: 1
+          selectionSha256:
+            ref:
+              binding: selectionDigest
+      as: fixture
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /workspaceId
+            - literal: ${AFT_WS}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /filesOrigin
+            - literal: ${AFT_BASE_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /apiOrigin
+            - literal: ${AFT_API_URL}
+        - op: eq
+          args:
+            - ref:
+                binding: fixture
+                pointer: /repo
+            - literal: ${AFT_AGENT_FLOW_REPO}
+exports:
+  lease:
+    resource:
+      binding: fixture
+      pointer: /lease/id
+  ownedRun:
+    data:
+      binding: run
+  apiOrigin:
+    data:
+      binding: fixture
+      pointer: /apiOrigin
+  filesOrigin:
+    data:
+      binding: fixture
+      pointer: /filesOrigin
+  repo:
+    data:
+      binding: fixture
+      pointer: /repo
+teardown:
+  - capability:
+      request:
+        id: loom.fixture.release
+        version: 1
+        input:
+          leaseId:
+            ref:
+              binding: fixture
+              pointer: /lease/id
+      as: released
+  - assert:
+      all:
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /released
+            - literal: true
+        - op: eq
+          args:
+            - ref:
+                binding: released
+                pointer: /remainingOwnedResources
+            - literal: []
+tests:
+  - name: repeated child attempts keep two keyed results and one final Lead summary
+    intent: Person sends Lead request; real Lead agent_create/agent_send tools create/reuse task child; UI actions open tray/cards/sidebar. Adapter cannot create children on its behalf. Authoring draft; unresolved preservation obligations are recorded in preservation.json.
+    skip: true
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: Original step 1
+      - screenshot: child-repeat-s01
+        intent: Original unnamed checkpoint 1
+      - click:
+          role: button
+          name: + Add agent
+          exact: true
+        intent: Original step 2
+      - screenshot: child-repeat-s02
+        intent: Original unnamed checkpoint 2
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=create-agent-overlay]"
+            view: count
+            as: childOverlay
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: childOverlay
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Wait for the actual Lead creation form
+      - screenshot: child-repeat-s03
+        intent: Wait for the actual Lead creation form
+      - click:
+          testid: create-agent-template-lead
+        intent: Original step 4
+      - screenshot: child-repeat-s04
+        intent: Original unnamed checkpoint 4
+      - fill:
+          testid: create-agent-name
+          value: cov-child-repeat-lead-${RUN_ID}
+        intent: Original step 5
+      - screenshot: child-repeat-s05
+        intent: Original unnamed checkpoint 5
+      - select:
+          testid: create-agent-backend
+          value: opencode
+        intent: Original step 6
+      - screenshot: child-repeat-s06
+        intent: Original unnamed checkpoint 6
+      - click:
+          testid: create-agent-submit
+        intent: Original step 7
+      - screenshot: child-repeat-s07
+        intent: Original unnamed checkpoint 7
+      - wait:
+          url: /ws/${AFT_WS}/chat/
+        intent: Original step 8
+      - screenshot: child-repeat-s08
+        intent: Original unnamed checkpoint 8
+      - screenshot: child-repeat-s09
+        intent: Show the selected real model before the first user Send
+      - capture:
+          source: url
+          view: path-segments
+          as: leadSegments
+        intent: Bind the UI Lead to an exact saved Agent API ID
+      - assert:
+          all:
+            - op: eq
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: leadSegments
+                - literal: 4
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /0
+                - literal: ws
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /1
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadSegments
+                    pointer: /2
+                - literal: chat
+        intent: Bind the UI Lead to an exact saved Agent API ID
+      - bind:
+          as: leadId
+          value:
+            ref:
+              binding: leadSegments
+              pointer: /3
+        intent: Bind the UI Lead to an exact saved Agent API ID
+      - assert:
+          all:
+            - op: matches
+              args:
+                - ref:
+                    binding: leadId
+                - literal: ^agt_[A-Za-z0-9_-]*$
+            - op: ne
+              args:
+                - ref:
+                    binding: leadId
+                - literal: agt_
+        intent: Bind the UI Lead to an exact saved Agent API ID
+      - capability:
+          request:
+            id: loom.agent.bind
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              workspaceId:
+                literal: ${AFT_WS}
+              agentId:
+                ref:
+                  binding: leadId
+          as: leadBound
+        intent: Bind the UI Lead to an exact saved Agent API ID
+      - api:
+          method: GET
+          path: /
+          as: leadRow
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Bind the UI Lead to an exact saved Agent API ID
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/name
+                - literal: cov-child-repeat-lead-${RUN_ID}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/workspace_id
+                - literal: ${AFT_WS}
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/harness
+                - literal: opencode
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/preset
+                - literal: lead
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/created_by_kind
+                - literal: user
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/parent_agent_id
+                - literal: null
+            - op: eq
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/root_agent_id
+                - literal: null
+            - op: ne
+              args:
+                - ref:
+                    binding: leadRow
+                    pointer: /body/worktree_path
+                - literal: ""
+        intent: Bind the UI Lead to an exact saved Agent API ID
+      - screenshot: child-repeat-s10
+        intent: Bind the UI Lead to an exact saved Agent API ID
+      - fill:
+          label: Message
+          value: Before delegating, use your OpenCode execute tool to run exactly `return Object.keys(tools.loom)` and let that read-only runtime result list the installed Loom tools. Do not call any tool or HTTP for this inventory, and do not infer names from this request. Then use Loom agent_create to delegate one task child named cov-child-repeat-${RUN_ID}. Brief it to inspect README.md, BACKLOG.md, package.json, server.js, app.js, and app.test.js in its assigned worktree, then run `node --test app.test.js` once there before creating only aft-child-fixtures/${RUN_ID}/first.txt with the words first complete, git add and commit that file on its assigned branch, and report its result. Do not push. When its task_completed notice reaches you, give only one brief acknowledgement naming first; do not use agent_get. I will ask you to reopen the same child after that acknowledgement.
+        intent: Original step 11
+      - screenshot: child-repeat-s11
+        intent: Original unnamed checkpoint 11
+      - press: Enter
+        intent: Original step 12
+      - screenshot: child-repeat-s12
+        intent: Original unnamed checkpoint 12
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=started-marker]"
+            view: text
+            as: startedName
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: startedName
+              - literal: cov-child-repeat-${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Screenshot the real Started header without raw bridge JSON (CL4)
+      - capture:
+          source: dom
+          locator:
+            selector: "[data-testid=started-marker]"
+          view: text
+          as: startedHeaderText
+        intent: Screenshot the real Started header without raw bridge JSON (CL4)
+      - assert:
+          not:
+            op: contains
+            args:
+              - ref:
+                  binding: startedHeaderText
+              - literal: '"agent_id"'
+        intent: Screenshot the real Started header without raw bridge JSON (CL4)
+      - screenshot: child-repeat-s13
+        intent: Screenshot the real Started header without raw bridge JSON (CL4)
+      - api:
+          method: GET
+          path: /
+          as: childrenPage
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents?include_archived=true&limit=500&parent=
+              - ref:
+                  binding: leadId
+        intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - assert:
+          any:
+            - op: eq
+              args:
+                - ref:
+                    binding: childrenPage
+                    pointer: /body/next
+                - literal: null
+            - op: eq
+              args:
+                - ref:
+                    binding: childrenPage
+                    pointer: /body/next
+                - literal: ""
+        intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - bind:
+          as: selectedChild
+          value:
+            op: filter
+            args:
+              - ref:
+                  binding: childrenPage
+                  pointer: /body/agents
+              - literal: /name
+              - literal: cov-child-repeat-${RUN_ID}
+        intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - assert:
+          op: eq
+          args:
+            - op: count
+              args:
+                - ref:
+                    binding: selectedChild
+            - literal: 1
+        intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - bind:
+          as: childId
+          value:
+            ref:
+              binding: selectedChild
+              pointer: /0/agent_id
+        intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - capability:
+          request:
+            id: loom.agent.bind
+            version: 1
+            input:
+              leaseId:
+                ref:
+                  binding: lease
+              workspaceId:
+                literal: ${AFT_WS}
+              agentId:
+                ref:
+                  binding: childId
+          as: childBound
+        intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/preset
+                - literal: task
+            - op: eq
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/created_by_kind
+                - literal: agent
+            - op: eq
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/created_by_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/parent_agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/root_agent_id
+                - ref:
+                    binding: leadId
+            - op: eq
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/repo
+                - ref:
+                    binding: repo
+            - op: eq
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/harness
+                - literal: opencode
+            - op: ne
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/worktree_path
+                - ref:
+                    binding: leadRow
+                    pointer: /body/worktree_path
+            - op: ne
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/worktree_path
+                - literal: ""
+            - op: eq
+              args:
+                - ref:
+                    binding: selectedChild
+                    pointer: /0/base_ref
+                - ref:
+                    binding: leadRow
+                    pointer: /body/branch
+        intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - screenshot: child-repeat-s14
+        intent: Prove the child was created by the Lead tool with one parent and distinct worktree
+      - screenshot: child-repeat-s15
+        intent: Require the installed Loom namespace names from the Lead's saved native execute output in its delegation turn
+      - screenshot: child-repeat-s16
+        intent: Compare the exact Started child link, name, color, native create count and collapsed input boundary
+      - screenshot: child-repeat-s17
+        intent: Record a genuine fresh Working fallback only if this exact child has no saved current-turn step
+      - reload: true
+        intent: Original step 18
+      - screenshot: child-repeat-s18
+        intent: Original unnamed checkpoint 18
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=started-marker] button[aria-expanded=false]"
+            view: count
+            as: collapsedStarted
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: collapsedStarted
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Restore the saved Started marker after a genuine Chat reconnect
+      - screenshot: child-repeat-s19
+        intent: Restore the saved Started marker after a genuine Chat reconnect
+      - screenshot: child-repeat-s20
+        intent: Recheck the same Started child ID and badge color after reconnect
+      - screenshot: child-repeat-s21
+        intent: Record a genuine reconnect Working fallback only if this exact child has no saved current-turn step
+      - click:
+          selector: "[data-testid=started-marker] button[aria-expanded]"
+        intent: Expand the real bridge call while preserving the short Started header
+      - screenshot: child-repeat-s22
+        intent: Expand the real bridge call while preserving the short Started header
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=started-marker] button[aria-expanded=true]"
+            view: count
+            as: expandedStarted
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: expandedStarted
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Screenshot the expanded delegation details (CL4)
+      - screenshot: child-repeat-s23
+        intent: Screenshot the expanded delegation details (CL4)
+      - screenshot: child-repeat-s24
+        intent: Require the supported expanded Started bridge label while raw tool input stays hidden
+      - click:
+          selector: "[data-testid=agent-tray] button[aria-expanded]"
+        intent: Expand the live task child tray
+      - screenshot: child-repeat-s25
+        intent: Expand the live task child tray
+      - screenshot: child-repeat-s26
+        intent: Screenshot the running child's current harmless tool or reasoning step and elapsed time (DF2)
+      - screenshot: child-repeat-s27
+        intent: Match the exact visible child row and its current step to a saved event in that same running turn
+      - screenshot: child-repeat-s28
+        intent: Capture numeric bounds and named screenshots of the authentic child tray at both mobile widths and themes
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=completion-record]"
+            view: count
+            as: firstCard
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: firstCard
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Screenshot the first delivered completion card
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=completion-record]"
+            view: attributes
+            as: firstOutcome
+            fields:
+              - data-outcome
+              - data-delivery
+          satisfies:
+            all:
+              - op: eq
+                args:
+                  - ref:
+                      binding: firstOutcome
+                      pointer: /data-outcome
+                  - literal: completed
+              - op: eq
+                args:
+                  - ref:
+                      binding: firstOutcome
+                      pointer: /data-delivery
+                  - literal: delivered
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Screenshot the first delivered completion card
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=completion-record]"
+            view: text
+            as: firstCardName
+          satisfies:
+            op: contains
+            args:
+              - ref:
+                  binding: firstCardName
+              - literal: cov-child-repeat-${RUN_ID}
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Screenshot the first delivered completion card
+      - screenshot: child-repeat-s29
+        intent: Screenshot the first delivered completion card
+      - screenshot: child-repeat-s30
+        intent: Screenshot exactly one brief Lead acknowledgement after attempt zero
+      - screenshot: child-repeat-s31
+        intent: Save attempt-zero completion and delivered event IDs, one acknowledgement, and zero saved agent_get calls
+      - screenshot: child-repeat-s32
+        intent: Match the first visible card and color to the saved completion and reject a raw task_completed user bubble
+      - reload: true
+        intent: Original step 33
+      - screenshot: child-repeat-s33
+        intent: Original unnamed checkpoint 33
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=completion-record]"
+            view: count
+            as: restoredFirstCard
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: restoredFirstCard
+              - literal: 1
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Screenshot one first-attempt card after reload
+      - screenshot: child-repeat-s34
+        intent: Screenshot one first-attempt card after reload
+      - screenshot: child-repeat-s35
+        intent: Confirm the exact same child is finished before the Lead reopens it
+      - replace:
+          locator:
+            selector: textarea[aria-label=Message]
+          value:
+            op: concat
+            args:
+              - literal: "Use Loom agent_send once to your existing finished child "
+              - ref:
+                  binding: childId
+              - literal: . Ask it to git switch -c cov-child-switched-${RUN_ID} in its own worktree, create only aft-child-fixtures/${RUN_ID}/second.txt with the words second complete, git add and commit it on that switched branch, and report the outcome. Do not create another child. After the new task_completed notice, give one final summary with the words first and second, without agent_get.
+        intent: Put the exact saved child ID into the person's Lead Chat request
+      - screenshot: child-repeat-s36
+        intent: Put the exact saved child ID into the person's Lead Chat request
+      - screenshot: child-repeat-s37
+        intent: Arm an exact saved-ID observer before Send to witness the attempt-two running tray and nested sidebar together
+      - press: Enter
+        intent: Original step 38
+      - screenshot: child-repeat-s38
+        intent: Original unnamed checkpoint 38
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=agent-tray]"
+            view: attributes
+            as: runningTray
+            fields:
+              - data-open
+          satisfies:
+            all:
+              - op: eq
+                args:
+                  - ref:
+                      binding: runningTray
+                      pointer: /data-open
+                  - literal: "false"
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Await the genuine running child header while the saved-ID observer remains armed
+      - capture:
+          source: dom
+          locator:
+            selector: "[data-testid=agent-tray] button[aria-expanded=false]"
+          view: attributes
+          as: trayRunningLabel
+          fields:
+            - aria-label
+        intent: Await the genuine running child header while the saved-ID observer remains armed
+      - assert:
+          op: matches
+          args:
+            - ref:
+                binding: trayRunningLabel
+                pointer: /aria-label
+            - literal: 1 running
+        intent: Await the genuine running child header while the saved-ID observer remains armed
+      - screenshot: child-repeat-s39
+        intent: Await the genuine running child header while the saved-ID observer remains armed
+      - screenshot: child-repeat-s40
+        intent: Open the collapsed Lead tray through its real header during the saved second child turn
+      - screenshot: child-repeat-s41
+        intent: Require captured attempt-two running tray and nested sidebar activity with a matching saved current-turn event; cards alone are diagnostic
+      - screenshot: child-repeat-s42
+        intent: Recheck the same child ID and attempt under its parent against the captured running sidebar witness
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=completion-record]"
+            view: count
+            as: secondCards
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: secondCards
+              - literal: 2
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Screenshot two delivered completion cards for the same child ID and two attempts
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=completion-record][data-outcome=completed][data-delivery=delivered]"
+            view: count
+            as: secondValidCards
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: secondValidCards
+              - literal: 2
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Screenshot two delivered completion cards for the same child ID and two attempts
+      - screenshot: child-repeat-s43
+        intent: Screenshot two delivered completion cards for the same child ID and two attempts
+      - screenshot: child-repeat-s44
+        intent: Screenshot one final combined Lead narration after attempt one
+      - screenshot: child-repeat-s45
+        intent: Match two exact keyed completions and deliveries to one child, real switched worktree ref and commit, and zero saved agent_get calls
+      - screenshot: child-repeat-s46
+        intent: Require two keyed visible cards for the same saved child and no raw completion user bubble
+      - capability:
+          request:
+            id: loom.native.registration
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: childBound
+                  pointer: /agentRef
+              maxRegistrations:
+                literal: 200
+          as: childNativeModelsRegistration
+        intent: Save separate requested, native session, and completed-answer model evidence for the task child
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: childNativeModelsRegistration
+                    pointer: /agentId
+                - ref:
+                    binding: childId
+            - op: eq
+              args:
+                - ref:
+                    binding: childNativeModelsRegistration
+                    pointer: /currentNativeSessionId
+                - ref:
+                    binding: childBound
+                    pointer: /nativeSessionId
+            - op: eq
+              args:
+                - ref:
+                    binding: childNativeModelsRegistration
+                    pointer: /currentNativeRoot
+                - ref:
+                    binding: childBound
+                    pointer: /nativeRoot
+            - op: eq
+              args:
+                - ref:
+                    binding: childNativeModelsRegistration
+                    pointer: /complete
+                - literal: true
+        intent: Save separate requested, native session, and completed-answer model evidence for the task child
+      - capability:
+          request:
+            id: loom.native.observe
+            version: 1
+            input:
+              agent:
+                ref:
+                  binding: childBound
+                  pointer: /agentRef
+              view:
+                literal: completed-models
+              nativeSessionId:
+                ref:
+                  binding: childNativeModelsRegistration
+                  pointer: /currentNativeSessionId
+              nativeRoot:
+                ref:
+                  binding: childNativeModelsRegistration
+                  pointer: /currentNativeRoot
+              expectedGeneration:
+                ref:
+                  binding: childNativeModelsRegistration
+                  pointer: /serviceGeneration
+              expectedEndpointId:
+                ref:
+                  binding: childNativeModelsRegistration
+                  pointer: /registeredEndpointId
+              expectedServicePid:
+                ref:
+                  binding: childNativeModelsRegistration
+                  pointer: /servicePid
+              maxMessages:
+                literal: 200
+              maxRegistrations:
+                literal: 200
+          as: childNativeModels
+        intent: Save separate requested, native session, and completed-answer model evidence for the task child
+      - assert:
+          all:
+            - op: eq
+              args:
+                - ref:
+                    binding: childNativeModels
+                    pointer: /agentId
+                - ref:
+                    binding: childId
+            - op: eq
+              args:
+                - ref:
+                    binding: childNativeModels
+                    pointer: /serviceGeneration
+                - ref:
+                    binding: childNativeModelsRegistration
+                    pointer: /serviceGeneration
+            - op: eq
+              args:
+                - ref:
+                    binding: childNativeModels
+                    pointer: /servicePid
+                - ref:
+                    binding: childNativeModelsRegistration
+                    pointer: /servicePid
+            - op: eq
+              args:
+                - ref:
+                    binding: childNativeModels
+                    pointer: /registeredEndpointId
+                - ref:
+                    binding: childNativeModelsRegistration
+                    pointer: /registeredEndpointId
+            - op: eq
+              args:
+                - ref:
+                    binding: childNativeModels
+                    pointer: /complete
+                - literal: true
+            - op: gt
+              args:
+                - op: count
+                  args:
+                    - ref:
+                        binding: childNativeModels
+                        pointer: /records
+                - literal: 0
+        intent: Save separate requested, native session, and completed-answer model evidence for the task child
+      - screenshot: child-repeat-s47
+        intent: Save separate requested, native session, and completed-answer model evidence for the task child
+      - reload: true
+        intent: Original step 48
+      - screenshot: child-repeat-s48
+        intent: Original unnamed checkpoint 48
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=completion-record]"
+            view: count
+            as: restoredSecondCards
+          satisfies:
+            op: eq
+            args:
+              - ref:
+                  binding: restoredSecondCards
+              - literal: 2
+          deadline:
+            clockId: host
+            withinMs: 30000
+        intent: Screenshot both attempt cards still present once after reload
+      - screenshot: child-repeat-s49
+        intent: Screenshot both attempt cards still present once after reload
+      - screenshot: child-repeat-s50
+        intent: Recheck exact completion and delivery keys after reload
+      - screenshot: child-repeat-s51
+        intent: Check exact child chips and separate tool-count controls at 800 and 390px in both themes, with real keyboard expansion and unchanged saved history after the Lead settles

@@ -1,0 +1,234 @@
+{
+  "status": "incomplete-raw-admission-failed",
+  "at": "2026-10-09T08:59:11.898Z",
+  "evidenceClass": "static source mapping plus deterministic adapter-interface controls only",
+  "engineBuild": {
+    "head": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+    "emittedFilesCompared": 98,
+    "mismatched": 0,
+    "receipt": "/private/tmp/aft-interface-a43468f0/final-e8eee6bb/source-build-receipt.json"
+  },
+  "rawAdmission": {
+    "at": "2026-10-09T08:56:27.065Z",
+    "status": "failed",
+    "engine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+    "adapterSource": "77ba247c0f85b86dd70c02651e2fed4b86127eb0",
+    "adapterImplementationSha256": "7ab7b5130f47c9d9777565f96d3f2426c2ccbe60fa47e2f532068f3715006848",
+    "files": [
+      {
+        "file": "bare-stop.test.yaml",
+        "sha256": "94ca1dae9323661576f30173e7ab9047808df5558eff4870797ba6f65f3879ff"
+      },
+      {
+        "file": "child-repeat.test.yaml",
+        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112"
+      },
+      {
+        "file": "files-save-reload.test.yaml",
+        "sha256": "b4d548e783266ee02c6c50c420b9ce2b2a497c3cf032c8dd7687dfd0d967c5a9"
+      },
+      {
+        "file": "sse-cursor.test.yaml",
+        "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea"
+      },
+      {
+        "file": "stream-render-clock.test.yaml",
+        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d"
+      }
+    ],
+    "errors": [
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]"
+    ],
+    "effects": 0,
+    "skippedSuiteCount": 5,
+    "rawSuiteAcceptance": false
+  },
+  "expandedStepSchema": {
+    "count": 681,
+    "errors": [],
+    "files": [
+      {
+        "file": "bare-stop.test.yaml",
+        "sha256": "94ca1dae9323661576f30173e7ab9047808df5558eff4870797ba6f65f3879ff"
+      },
+      {
+        "file": "child-repeat.test.yaml",
+        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112"
+      },
+      {
+        "file": "files-save-reload.test.yaml",
+        "sha256": "b4d548e783266ee02c6c50c420b9ce2b2a497c3cf032c8dd7687dfd0d967c5a9"
+      },
+      {
+        "file": "sse-cursor.test.yaml",
+        "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea"
+      },
+      {
+        "file": "stream-render-clock.test.yaml",
+        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d"
+      }
+    ],
+    "acceptance": "canonical individual StepSchema only; not loader/registry acceptance"
+  },
+  "deterministicInterface": {
+    "evidenceClass": "deterministic adapter-interface controls; no pilot/UI/container/native/runtime proof",
+    "engine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+    "adapterBase": "b675d0803a9e04f0eab06f6b5aa2ef1e1cad8eb0",
+    "adapterImplementationSha256": "3eebcbe0b062211853f803581b679523ea041831c6511b07e4be820178916611",
+    "suiteSha256": "08cfaaeb57e6c4a56dde172ef27b607582cdea5fdb19f5c0e91b50f3c665dfd9",
+    "at": "2026-10-09T08:50:32.405Z",
+    "tests": [
+      {
+        "name": "[setup]",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "name": "actual owned bytes",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "name": "successful owned missing stat",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "name": "wrong expectation rejects",
+        "status": "failed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "failed",
+            "error": "structured expectation failed"
+          }
+        ]
+      },
+      {
+        "name": "foreign lease rejects",
+        "status": "failed",
+        "steps": [
+          {
+            "status": "failed",
+            "error": "observation error: Fixture handle is missing or belongs to another scope"
+          }
+        ]
+      },
+      {
+        "name": "authored AgentRef chain diagnostic",
+        "status": "failed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "failed",
+            "error": "missing JSON pointer /agentRef"
+          }
+        ]
+      },
+      {
+        "name": "[teardown]",
+        "status": "passed",
+        "steps": [
+          {
+            "status": "passed"
+          },
+          {
+            "status": "passed"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      "preflight",
+      "remove"
+    ],
+    "expectedStatuses": {
+      "[setup]": "passed",
+      "actual owned bytes": "passed",
+      "successful owned missing stat": "passed",
+      "wrong expectation rejects": "failed",
+      "foreign lease rejects": "failed",
+      "authored AgentRef chain diagnostic": "failed",
+      "[teardown]": "passed"
+    },
+    "acceptance": "controls meet expected polarity; historical b675 AgentRef missing-pointer reproduced. Candidate77ba chain has parent independent approval, not executed in this control receipt. No pilot preservation credit."
+  },
+  "materializedDiagnostic": {
+    "status": "terminated-per-parent-direction",
+    "originalBoundRevisionsMaterialized": true,
+    "scope": "Task-owned copies changed only setup revision inputs, both source and copy bytes retained separately.",
+    "files": [
+      {
+        "file": "bare-stop.test.yaml",
+        "sha256": "a390b25441380eb327fe718a02fe8d7c285bc1de23489816ab22968209964722"
+      },
+      {
+        "file": "child-repeat.test.yaml",
+        "sha256": "4d001188331d3aecd853e059692ad20f516ebc49a15b880b61c8d18489094122"
+      },
+      {
+        "file": "files-save-reload.test.yaml",
+        "sha256": "0aa6ee685503c9ab4f3062a58f151a6789f93d51ffe2a3370a55d081bdcbf8a8"
+      },
+      {
+        "file": "sse-cursor.test.yaml",
+        "sha256": "786e04f9e01c2eb2baf4184becba8ce61cab5aafea48c2159ec6bfa0e2fc69d3"
+      },
+      {
+        "file": "stream-render-clock.test.yaml",
+        "sha256": "51bc60d93e413170df009e745bfa9aba92c3ebfb0c1a677089a20ddad7c65c31"
+      }
+    ],
+    "completedFullLoaderSuites": 0,
+    "fullLoaderGate": "unvalidated",
+    "partialGate": "none credited",
+    "retainedHarness": "/private/tmp/loom-aft-pilot-validation-16e28787/load-diagnostic.mjs",
+    "acceptance": false
+  },
+  "runtime": {
+    "skippedPilotCount": 5,
+    "executedPilotCount": 0,
+    "browser": false,
+    "loomServices": false,
+    "podman": false,
+    "providers": false,
+    "paidRuns": false,
+    "acceptance": "parent-gated-unrun"
+  },
+  "knownBaseFailures": {
+    "base": "b675d0803a9e04f0eab06f6b5aa2ef1e1cad8eb0",
+    "githubCheckRuns": [],
+    "ciCommand": "gh api repos/tysonthomas9/loomcli/commits/b675d0803a9e04f0eab06f6b5aa2ef1e1cad8eb0/check-runs",
+    "ciResult": "No check runs returned; no base CI failure link available. Earlier eight legacy renderer-acquisition failures are historical adapter evidence, superseded by parent accepted full254/254 at77ba; no current full-adapter-green claim from this task."
+  },
+  "retainedTaskDirectory": "/private/tmp/loom-aft-pilot-validation-16e28787"
+}
