@@ -11,6 +11,7 @@ import { LegacyError, LegacyEvidenceClasses, type LegacyAccess, type LegacyLease
 import { getFixtureOperationAuthority, type LoomAuthorizedOperation } from '../authority.js';
 import { LegacyOperationEffects } from './effects.js';
 import { requireOwnedWorkspace } from '../workspaces.js';
+import { checkConfiguredModel } from './model-selection.js';
 
 const Name = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 // These projections follow ops.WorkspaceData and domain.Agent, not AgentRow.
@@ -19,7 +20,7 @@ const Workspace = z.object({ success: z.literal(true), data: z.object({ id: Name
 const Agents = z.object({ success: z.literal(true), total: z.number().int().nonnegative(),
   data: z.array(z.object({ workspace_key: Name, name: Name, role_name: Name, updated_at: z.string().min(1) }).passthrough()) }).passthrough();
 const Issues = z.object({ success: z.literal(true), data: z.array(z.object({ id: Name }).passthrough()).max(999) }).passthrough();
-const Roles = z.array(z.object({ name: Name }).passthrough());
+const Roles = z.array(z.object({ name: Name, model: z.string().optional() }).passthrough()).max(1000);
 const unsupported = (): never => { throw new LegacyError('unsupported-capability', 'Fixture has no concrete owned hook for this legacy target'); };
 const requireOwned = (ok: unknown): void => { if (!ok) throw new LegacyError('ownership-mismatch', 'Legacy fixture identity changed'); };
 
@@ -37,6 +38,7 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
     fixture.profile.startsWith('legacy-real-') && fixture.evidenceClass === 'real-native');
   requireOwned(driver.workspaceRoot === fixture.repo && driver.configurationRoot === path.join(fixture.repo, '.loom-config'));
   let cached: LegacyLease | undefined;
+  const roleModels = new Map<string, string | undefined>();
   const identity = (id: string) => requireOwned(id === fixture.leaseId);
   const evidenceFor = (operation: LoomAuthorizedOperation) => {
     const route = driver.executionRouting;
@@ -105,6 +107,12 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
             throw new LegacyError('process-failed', 'Owned role discovery CLI failed');
           roles = Roles.parse(JSON.parse(roleResult.completion.stdout));
           requireOwned(new Set(roles.map(row => row.name)).size === roles.length);
+          if (operation === 'loom.cli.task') {
+            for (const agent of agents.data.filter(row => record.agentIds.includes(row.name))) {
+              const role = roles.find(row => row.name === agent.role_name); requireOwned(role);
+              roleModels.set(`${record.workspaceId}\0${agent.name}`, role!.model);
+            }
+          }
         }
         const issues = Issues.parse(await api(`${prefix}/issues?limit=1000`, signal)).data;
         requireOwned(new Set(issues.map(row => row.id)).size === issues.length);
@@ -136,9 +144,14 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
         const route = driver.executionRouting;
         requireOwned(route.allowedTaskBackends.includes(command.argv[3]!));
         if (route.evidenceClass !== 'deterministic' && (!route.externalProvider || evidence !== 'live-provider')) return unsupported();
-        // Direct task.go inherits these exact code-owned environment settings;
-        // supervisor role overrides belong to enrolled worker registrations.
-        requireOwned(command.env.LOOM_AGENT_MODEL === route.model && command.env.LOOM_OPENCODE_MODEL === route.model);
+        if (route.modelSelection.kind === 'exact-model') requireOwned(route.modelSelection.model === route.model);
+        let configuredModel: string | undefined;
+        if (route.modelSelection.kind === 'exact-model' && route.modelSelection.selector === 'opencode-config' && command.argv[3] === 'opencode') {
+          const snapshot = await access.snapshot(id, 'provider-default', signal);
+          configuredModel = z.object({ model: z.string() }).passthrough().parse(snapshot.previous).model;
+        }
+        checkConfiguredModel(route.modelSelection, command.argv[3]!, command.env,
+          roleModels.get(`${workspaceId}\0${actor}`), configuredModel);
       }
       const result = await driver.launchOwnedCli(plan.argv, plan.envOverrides, plan.stdin, plan.waitForExit, signal);
       const registered = await driver.inspectOwnedProcess(result.id, result.generation, signal);
