@@ -133,10 +133,14 @@ test('two child cases use only exported suite fixture handles; case cleanup cann
   putEvidenceStore(suiteContext, harness.evidenceStore);
   const suiteFixture = { ...harness.fixture, scope: 'suite' as const, leaseId: 'suite-lease' };
   putFixture(suiteContext, suiteFixture);
-  const child = (caseId: string, handles: string[]) => ({ ...harness.context, caseId, resources: new Map<string, unknown>(),
-    suite: { id: suiteContext.suiteId, handles, getResource(key: string, handle: string) {
+  const child = (caseId: string, handles: string[]) => {
+    const context = createCapabilityContext(harness.context.source, harness.registry, harness.context.runId, caseId);
+    context.suiteId = suiteContext.suiteId;
+    context.suite = { id: suiteContext.suiteId, handles, getResource(key: string, handle: string) {
       assert.equal(handle, 'suite-lease'); assert.ok(handles.includes(handle)); return getRegisteredResource(suiteContext, key, handle);
-    } } });
+    } };
+    return context;
+  };
   const one = child('one', ['suite-lease']); const two = child('two', ['suite-lease']);
   assert.equal(await getFixture(one, 'suite-lease'), suiteFixture);
   assert.equal(await getFixture(two, 'suite-lease'), suiteFixture);
