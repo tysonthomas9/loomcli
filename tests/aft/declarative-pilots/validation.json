@@ -871,7 +871,7 @@
     "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
   },
   "currentPublication": {
-    "at": "2026-10-09T13:56:24.968037+00:00",
+    "at": "2026-10-09T14:13:47.542241+00:00",
     "status": "in-progress reviewable draft; not preservation-complete",
     "taskNoteId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
     "branch": "codex/aft-declarative-pilots",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "9912910b382fac763bede980ae5ce9d09d8e85f1f20c69d4d390a646d80148c0"
+        "sha256": "e026e863c0ccbe8c405ea379ff0b16642ead48868e6c25dd6ffe92e5e34247d4"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -2924,5 +2924,77 @@
       "diffCheck": "PASS",
       "initialCheckErratum": "Initial diagnostic harness asserted existing fullPreservationAccepted count0 is booleanFalse; Python identity rejected int0. Corrected equality check passes; no source/receipt evidence failure and no preservation credit added."
     }
+  },
+  "sseRestartReceiptRequirementsReview": {
+    "at": "2026-10-09T14:13:47.542241+00:00",
+    "evidenceClass": "read-only frozen-source compatibility requirements; proposed fixture operation unreviewed,not consumed",
+    "source": {
+      "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+      "file": "tests/aft/scripts/agent-flows-restart-serve.sh",
+      "sha256": "eedce3f74c6ce6a11e4b760be9424e6baba61b51286de55054b92bf1c5fbedeb",
+      "lineRange": [
+        7,
+        30
+      ]
+    },
+    "caller": {
+      "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+      "sourceLine": 70,
+      "requiredOrder": "capture other first completes before AFT_RESTART_SERVE; subsequent real UI Agents->primary Chat reopen precedes saved history and next request/replay checks",
+      "currentYaml": "Only saved otherFirst capture/nonempty-events assertion and screenshot. No restart capability invoked; oldstep26 remains unresolved.",
+      "explicitOuterBudgetInSource": false,
+      "mappedDefaultDeadlineMs": 30000,
+      "originalRunnerDefaultVerified": false,
+      "outerDeadlineGap": "Source launcher readiness180s begins after compose restart. Existing translated default30000ms is not proof of original outer run timeout or a valid new whole-effect budget; reconcile exact original runner policy before effect authoring."
+    },
+    "requiredMeasuredFacts": [
+      {
+        "sourceLines": [
+          7,
+          11
+        ],
+        "required": "Actual source manifest/build and owning project/container validation before effect; four source compose files and owned fleet override select only loom-local."
+      },
+      {
+        "sourceLines": [
+          12,
+          17
+        ],
+        "required": "Actual old initPID positive,old StartedAt nonempty and before process pid/comm inventory; scope is container serve plus colocated OpenCode."
+      },
+      {
+        "sourceLines": [
+          18,
+          23
+        ],
+        "required": "Exactly one owned compose restart loom-local; bounded /api/config successful read,180000ms readiness interval starts after restart,each source curl max3000ms; no authored sleep/poll/script fallback."
+      },
+      {
+        "sourceLines": [
+          24,
+          30
+        ],
+        "required": "Actual after container revalidation,new initPID positive and different,new StartedAt nonempty and different,after pid/comm inventory retained. A diagnostic inventory is not a source assertion that an OpenCode PID independently changed."
+      }
+    ],
+    "strongerProposalChecks": [
+      {
+        "check": "Reject new container IDs/adoption",
+        "sourceDifference": "Original rereads new_container and authenticates ownership; source does not assert identical container ID. Explicitly label stricter ownership policy,not source predicate equivalence."
+      },
+      {
+        "check": "Successful additional API read plus health signal",
+        "sourceDifference": "Original requires successful /api/config curl only; additional read may strengthen readiness but cannot replace exact /api/config evidence."
+      },
+      {
+        "check": "Unchanged other resources,operation lock,no retry/uncertain outcome handling",
+        "sourceDifference": "Proposed ownership/safety contracts require their own typed receipts/negative tests; do not invent original explicit assertions or credit source runtime."
+      }
+    ],
+    "canonicalContractPending": "Fixture author reports restartOwnedServe authored/gating but supplies no reviewed public YAML operation/input/output checkpoint yet. Consume exact accepted canonical schema after parent review; no independent pilot schema or native TERM substitute.",
+    "coverage": "unresolved",
+    "destination": [],
+    "runtime": 0,
+    "preservationAccepted": false
   }
 }

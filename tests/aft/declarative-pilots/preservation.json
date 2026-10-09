@@ -51157,6 +51157,15 @@
               83
             ],
             "line": 922
+          },
+          "deadlineOriginClarification": {
+            "explicitSourceBudget": false,
+            "mappedDefaultMs": 30000,
+            "verifiedOriginalOuterRunnerBudget": false,
+            "sourceReadinessMs": 180000,
+            "sourceReadinessStarts": "after compose restart",
+            "sourcePerConfigRequestMaxMs": 3000,
+            "coverage": "unresolved; do not claim translated whole-caller deadline preservation"
           }
         },
         {
@@ -55103,13 +55112,85 @@
             "gap": {
               "kind": "required-source-provisioning-and-effect-scope",
               "required": "Original restart is exact owned loom-local container,therefore serve plus colocatedOpenCode; verify manifest/container before/after,actual old/new initPID+StartedAt distinct,public /api/config readiness within180s(eachrequest3s),retain process inventory/log. Native helper SIGTERM restart is a different unselected case. Replace source poll/sleep with genuine bounded signal,not authored sleep or arbitrary shell.",
-              "canonicalAttempt": "Existing serve-restart private fixture/process operation requires exact producer scope review; process-only or standalone harness restart is not credited as the source container restart. Parent/legacy owner notified, no new operation authorized.",
+              "canonicalAttempt": "Fixture owner reports exact owned Compose restart authored/gating,not yet reviewed/consumed. Receipt requirements/source timing/stronger-policy distinctions recorded in restartReceiptRequirements. Current YAML has no restart call; native TERM/standalone serve alias not equivalent.",
               "missingObservation": "Exact container/generation restart producer and before/after identity/readiness evidence under same owned fixture,while preserving saved histories and primary UI reopen."
             }
           }
         ],
         "nativeHelperDirectCalls": "none in original selected test; four native-helper inventory entries remain unrelated-external-helper-case. Real model selector/imported ownership source closure still required.",
-        "acceptance": "35 selected extracted obligations (3 conditional),10 extra source groups uncovered; no new YAML/source-preservation/runtime proof."
+        "acceptance": "35 selected extracted obligations (3 conditional),10 extra source groups uncovered; no new YAML/source-preservation/runtime proof.",
+        "restartReceiptRequirements": {
+          "at": "2026-10-09T14:13:47.542241+00:00",
+          "evidenceClass": "read-only frozen-source compatibility requirements; proposed fixture operation unreviewed,not consumed",
+          "source": {
+            "gitRef": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "file": "tests/aft/scripts/agent-flows-restart-serve.sh",
+            "sha256": "eedce3f74c6ce6a11e4b760be9424e6baba61b51286de55054b92bf1c5fbedeb",
+            "lineRange": [
+              7,
+              30
+            ]
+          },
+          "caller": {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/receipts-stream-sse.test.yaml#tests/0/steps/26",
+            "sourceLine": 70,
+            "requiredOrder": "capture other first completes before AFT_RESTART_SERVE; subsequent real UI Agents->primary Chat reopen precedes saved history and next request/replay checks",
+            "currentYaml": "Only saved otherFirst capture/nonempty-events assertion and screenshot. No restart capability invoked; oldstep26 remains unresolved.",
+            "explicitOuterBudgetInSource": false,
+            "mappedDefaultDeadlineMs": 30000,
+            "originalRunnerDefaultVerified": false,
+            "outerDeadlineGap": "Source launcher readiness180s begins after compose restart. Existing translated default30000ms is not proof of original outer run timeout or a valid new whole-effect budget; reconcile exact original runner policy before effect authoring."
+          },
+          "requiredMeasuredFacts": [
+            {
+              "sourceLines": [
+                7,
+                11
+              ],
+              "required": "Actual source manifest/build and owning project/container validation before effect; four source compose files and owned fleet override select only loom-local."
+            },
+            {
+              "sourceLines": [
+                12,
+                17
+              ],
+              "required": "Actual old initPID positive,old StartedAt nonempty and before process pid/comm inventory; scope is container serve plus colocated OpenCode."
+            },
+            {
+              "sourceLines": [
+                18,
+                23
+              ],
+              "required": "Exactly one owned compose restart loom-local; bounded /api/config successful read,180000ms readiness interval starts after restart,each source curl max3000ms; no authored sleep/poll/script fallback."
+            },
+            {
+              "sourceLines": [
+                24,
+                30
+              ],
+              "required": "Actual after container revalidation,new initPID positive and different,new StartedAt nonempty and different,after pid/comm inventory retained. A diagnostic inventory is not a source assertion that an OpenCode PID independently changed."
+            }
+          ],
+          "strongerProposalChecks": [
+            {
+              "check": "Reject new container IDs/adoption",
+              "sourceDifference": "Original rereads new_container and authenticates ownership; source does not assert identical container ID. Explicitly label stricter ownership policy,not source predicate equivalence."
+            },
+            {
+              "check": "Successful additional API read plus health signal",
+              "sourceDifference": "Original requires successful /api/config curl only; additional read may strengthen readiness but cannot replace exact /api/config evidence."
+            },
+            {
+              "check": "Unchanged other resources,operation lock,no retry/uncertain outcome handling",
+              "sourceDifference": "Proposed ownership/safety contracts require their own typed receipts/negative tests; do not invent original explicit assertions or credit source runtime."
+            }
+          ],
+          "canonicalContractPending": "Fixture author reports restartOwnedServe authored/gating but supplies no reviewed public YAML operation/input/output checkpoint yet. Consume exact accepted canonical schema after parent review; no independent pilot schema or native TERM substitute.",
+          "coverage": "unresolved",
+          "destination": [],
+          "runtime": 0,
+          "preservationAccepted": false
+        }
       }
     }
   ],
