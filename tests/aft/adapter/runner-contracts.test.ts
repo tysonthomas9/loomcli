@@ -11,6 +11,8 @@ import { createCoreProviders, defineOperation, createSyntheticProbe, createEvide
 import { SavedCaptureInput, rereadSavedCapture } from './saved-capture.js';
 import { SavedEventsOutput } from './events.js';
 import type { RunnerOptions } from '@tysonthomas9/aft/runner';
+import { createFixtureOperationAuthority } from './authority.js';
+import { NativeOperationEffects } from './native-operation-effects.js';
 
 const literal = (value: unknown) => ({ literal: value });
 const ref = (binding: string, pointer?: string) => ({ ref: { binding, ...(pointer ? { pointer } : {}) } });
@@ -94,6 +96,9 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
               {data:{id:'ses_owned',metadata:{agent_id:row.agent_id},location:{directory:row.worktree_path}}}};
           },
         } });
+        // Explicit injected TEST route; no production profile authority.
+        fixture.operationAuthority=createFixtureOperationAuthority(fixture,Object.fromEntries(
+          Object.entries(NativeOperationEffects).map(([id,effects])=>[id,{evidenceClass:'deterministic',effects:[...effects]}])));
         putFixture(context, fixture); return fixture;
       });
       const a = fixtures[0]!; const b = fixtures[1]!; expectedToken = a.syntheticProbe!.value;

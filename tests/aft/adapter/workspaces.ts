@@ -248,14 +248,18 @@ export async function appendCreatedWorkspaces(fixture:OwnedFixture,records:reado
 
 /** Resolves a requested new actor only through the provisioner's fixed private
  * store port, never an ambient/global API listing. Enrollment grants no effect. */
-export async function enrollOwnedWorkspaceAgent(fixture:OwnedFixture,workspaceId:string,agentId:string,signal:AbortSignal,store:EvidenceStore):Promise<void> {
+export async function enrollOwnedWorkspaceAgent(fixture:OwnedFixture,workspaceId:string,agentId:string,signal:AbortSignal,store:EvidenceStore,
+  recheck:()=>void=()=>signal.throwIfAborted()):Promise<void> {
+  recheck();
   requireOwnedWorkspaceRecord(fixture,workspaceId);
   const roster=fixture.ownedWorkspaces;
   requireFact(roster&&fixture.readWorkspaceAgent,'unsupported-capability','Owned workspace enrollment is unavailable');
   const record=roster.find(record=>record.workspaceId===workspaceId&&record.identityKind==='native-agent-id')!;
   if(record.agentIds.includes(agentId))return;
   signal.throwIfAborted();await fixture.verify(signal);
+  recheck();
   const fact=WorkspaceAgentFact.parse(await fixture.readWorkspaceAgent(workspaceId,agentId,signal));
+  recheck();
   requireFact(fact.agentId===agentId&&fact.workspaceId===workspaceId&&fact.storeId===record.storeId&&fact.storeGeneration===record.storeGeneration&&
     Object.entries(fixtureOwnerIdentity(fixture)).every(([key,value])=>fact[key as keyof FixtureAuthorityOwner]===value),
     'identity-mismatch','Requested actor belongs to another owned workspace/store');
@@ -264,20 +268,24 @@ export async function enrollOwnedWorkspaceAgent(fixture:OwnedFixture,workspaceId
     requireFact(record.agentIds.includes(fact.parentAgentId),'ownership-mismatch','Requested actor parent is not enrolled');
     const parentSource=requireOwnedWorkspace(fixture,workspaceId,fact.parentAgentId);
     const parent=WorkspaceAgentFact.parse(await fixture.readWorkspaceAgent(workspaceId,fact.parentAgentId,signal));
+    recheck();
     requireFact(parent.agentId===fact.parentAgentId&&parent.workspaceId===workspaceId&&parent.repo===parentSource.repo&&
       parent.commonDir===parentSource.commonDir&&parent.storeId===record.storeId&&parent.storeGeneration===record.storeGeneration&&
       Object.entries(fixtureOwnerIdentity(fixture)).every(([key,value])=>parent[key as keyof FixtureAuthorityOwner]===value)&&
       fact.rootAgentId===(parent.rootAgentId??parent.agentId),'identity-mismatch','Requested actor lineage differs from owned parent');
   }
   signal.throwIfAborted();await fixture.verify(signal);
+  recheck();
   requireFact(fixture.ownedWorkspaces===roster,'identity-mismatch','Workspace roster changed during enrollment');
   const serialized=JSON.stringify(fact);
   requireFact(redact(serialized,fixture.secrets)===serialized,'observation-failed','Agent enrollment fact contains private material');
   const receipt=await store.retain(serialized);
+  recheck();
   const next=await createOwnedWorkspaceRoster(fixture,roster.map(value=>({...value,agentIds:[...value.agentIds,...(value===record?[agentId]:[])],
     enrollmentReceipts:[...value.enrollmentReceipts,...(value===record?[receipt]:[])],
     ...(value.agentSources?{agentSources:[...value.agentSources,...(value===record?[{agentId,repoNames:repoNames!}]:[])]}:{})})),store);
   requireFact(fixture.ownedWorkspaces===roster,'identity-mismatch','Workspace roster changed during enrollment');
+  recheck();
   signal.throwIfAborted();
   fixture.ownedWorkspaces=next;current.set(fixture,next);
 }
