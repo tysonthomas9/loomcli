@@ -7,11 +7,12 @@ import { privateFixtureDriver } from '../fixture/providers.js';
 import { HostFixtureDriver } from '../fixture/host.js';
 import { HttpResponse, Json } from '../protocol.js';
 import { checkedCliPlan } from './cli-plan.js';
-import { LegacyError, LegacyEvidenceClasses, type LegacyAccess, type LegacyLease } from './operations.js';
+import { LegacyError, LegacyEvidenceClasses, type LegacyAccess, type LegacyLease, type ConfigurationSnapshot } from './operations.js';
 import { getFixtureOperationAuthority, type LoomAuthorizedOperation } from '../authority.js';
 import { LegacyOperationEffects } from './effects.js';
 import { requireOwnedWorkspace } from '../workspaces.js';
 import { checkConfiguredModel } from './model-selection.js';
+import type { BaselineTarget } from '../fixture/baseline.js';
 
 const Name = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 // These projections follow ops.WorkspaceData and domain.Agent, not AgentRow.
@@ -20,7 +21,7 @@ const Workspace = z.object({ success: z.literal(true), data: z.object({ id: Name
 const Agents = z.object({ success: z.literal(true), total: z.number().int().nonnegative(),
   data: z.array(z.object({ workspace_key: Name, name: Name, role_name: Name, updated_at: z.string().min(1) }).passthrough()) }).passthrough();
 const Issues = z.object({ success: z.literal(true), data: z.array(z.object({ id: Name }).passthrough()).max(999) }).passthrough();
-const Roles = z.array(z.object({ name: Name, model: z.string().optional() }).passthrough()).max(1000);
+const Roles = z.array(z.object({ name: Name }).passthrough()).max(1000);
 const unsupported = (): never => { throw new LegacyError('unsupported-capability', 'Fixture has no concrete owned hook for this legacy target'); };
 const requireOwned = (ok: unknown): void => { if (!ok) throw new LegacyError('ownership-mismatch', 'Legacy fixture identity changed'); };
 
@@ -38,7 +39,7 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
     fixture.profile.startsWith('legacy-real-') && fixture.evidenceClass === 'real-native');
   requireOwned(driver.workspaceRoot === fixture.repo && driver.configurationRoot === path.join(fixture.repo, '.loom-config'));
   let cached: LegacyLease | undefined;
-  const roleModels = new Map<string, string | undefined>();
+  const baselines = new Map<BaselineTarget, string>();
   const identity = (id: string) => requireOwned(id === fixture.leaseId);
   const evidenceFor = (operation: LoomAuthorizedOperation) => {
     const route = driver.executionRouting;
@@ -76,14 +77,18 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       identity(id); signal.throwIfAborted();
       // Restoration uses the last attested facts, without re-opening authority
       // or depending on an expired capability context's signal.
-      if (cached && Date.now() >= fixture.expiresAtUtcMs) return { ...cached, active: false };
+      if (cached && (!operation || Date.now() >= fixture.expiresAtUtcMs))
+        return { ...structuredClone(cached), active: Date.now() < fixture.expiresAtUtcMs };
       if (!operation) return unsupported();
       const evidence = evidenceFor(operation);
       await verify(id, signal);
       const records = fixture.ownedWorkspaces?.filter(row => row.identityKind === 'legacy-agent-name');
       requireOwned(records?.length);
       const cli = driver.cliRegistration;
-      const metadata = await Promise.all(records!.map(async record => {
+      // The owned service port rejects overlapping operations. Discovery is
+      // bounded by the authenticated roster and serializes without retries.
+      const metadata = [];
+      for (const record of records!) {
         const owned = requireOwnedWorkspace(fixture, record.workspaceId, undefined, 'legacy-agent-name');
         requireOwned(owned.repo.startsWith(driver.runtimeRoot + path.sep) && await realpath(owned.repo) === owned.repo);
         const prefix = `/api/workspaces/${encodeURIComponent(record.workspaceId)}`;
@@ -107,27 +112,27 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
             throw new LegacyError('process-failed', 'Owned role discovery CLI failed');
           roles = Roles.parse(JSON.parse(roleResult.completion.stdout));
           requireOwned(new Set(roles.map(row => row.name)).size === roles.length);
-          if (operation === 'loom.cli.task') {
-            for (const agent of agents.data.filter(row => record.agentIds.includes(row.name))) {
-              const role = roles.find(row => row.name === agent.role_name); requireOwned(role);
-              roleModels.set(`${record.workspaceId}\0${agent.name}`, role!.model);
-            }
-          }
         }
         const issues = Issues.parse(await api(`${prefix}/issues?limit=1000`, signal)).data;
         requireOwned(new Set(issues.map(row => row.id)).size === issues.length);
-        return { agents: agents.data.filter(row => record.agentIds.includes(row.name)).map(row => ({ workspaceId: row.workspace_key,
+        metadata.push({ agents: agents.data.filter(row => record.agentIds.includes(row.name)).map(row => ({ workspaceId: row.workspace_key,
           id: row.name, name: row.name, generation: row.updated_at })), repos,
           roles: roles.map(row => ({ workspaceId: record.workspaceId, name: row.name })),
-          issues: issues.map(row => ({ workspaceId: record.workspaceId, id: row.id })) };
-      }));
+          issues: issues.map(row => ({ workspaceId: record.workspaceId, id: row.id })) });
+      }
       const serve = driver.processesById.get('serve'); requireOwned(serve);
+      const fixtures: string[] = fixture.profile === 'legacy-deterministic' ? ['provider-default'] : [];
+      for (const target of ['fake-model', 'fake-github'] as const) {
+        if (driver.processesById.has(target)) {
+          await driver.freshFixtureBaseline(target, signal); fixtures.push(target);
+        }
+      }
       cached = { id, runId: fixture.runId, active: Date.now() < fixture.expiresAtUtcMs, evidence: fixture.evidenceClass,
         secrets: fixture.secrets, binary: cli.binary, cwd: cli.cwd, env: cli.env, workspaces: records!.map(row => row.workspaceId),
         agents: metadata.flatMap(row => row.agents), roles: metadata.flatMap(row => row.roles),
         issues: metadata.flatMap(row => row.issues), repos: metadata.flatMap(row => row.repos),
         processes: [{ id: 'serve', kind: 'serve', generation: serve!.generation, workspaceId: null, agentName: null, sessionName: null }],
-        fixtures: fixture.profile === 'legacy-deterministic' ? ['provider-default'] : [] };
+        fixtures };
       return { ...structuredClone(cached), evidence };
     },
     async execute(id, command, signal) {
@@ -150,8 +155,7 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
           const snapshot = await access.snapshot(id, 'provider-default', signal);
           configuredModel = z.object({ model: z.string() }).passthrough().parse(snapshot.previous).model;
         }
-        checkConfiguredModel(route.modelSelection, command.argv[3]!, command.env,
-          roleModels.get(`${workspaceId}\0${actor}`), configuredModel);
+        checkConfiguredModel(route.modelSelection, command.argv[3]!, command.env, configuredModel);
       }
       const result = await driver.launchOwnedCli(plan.argv, plan.envOverrides, plan.stdin, plan.waitForExit, signal);
       const registered = await driver.inspectOwnedProcess(result.id, result.generation, signal);
@@ -166,11 +170,27 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       const transition = await driver.restartOwnedProcess(process.id, process.generation, signal);
       return { transition, response: null };
     },
-    async request() { return unsupported(); },
+    async request(id, target, method, relative, body, signal) {
+      await verify(id, signal);
+      if ((target !== 'fake-model' && target !== 'fake-github') || method !== 'POST' ||
+        !['/__reset', target === 'fake-model' ? '/__script' : '/__fixture'].includes(relative)) return unsupported();
+      const generation = baselines.get(target); requireOwned(generation);
+      const baseline = await driver.freshFixtureBaseline(target, signal); requireOwned(baseline.generation === generation);
+      if (relative === '/__reset') return HttpResponse.parse(await driver.resetFixtureBaseline(target, generation!, signal));
+      return HttpResponse.parse(await driver.requestOwnedHttp(target, method, relative, Json.parse(body), signal, generation));
+    },
     async validateSeedPath() { return unsupported(); },
     async seedCommit() { return unsupported(); },
-    async snapshot(id, target, signal) {
+    async snapshot(id, target, signal): Promise<ConfigurationSnapshot> {
       await verify(id, signal);
+      if (target === 'fake-model' || target === 'fake-github') {
+        if (fixture.evidenceClass !== 'deterministic') return unsupported();
+        const baseline = await driver.freshFixtureBaseline(target, signal);
+        const previousGeneration = baselines.get(target); requireOwned(!previousGeneration || previousGeneration === baseline.generation);
+        baselines.set(target, baseline.generation);
+        return { complete: true, previous: { restorationPoint: baseline.restore, generation: baseline.generation },
+          restoreState: { target, generation: baseline.generation, kind: baseline.restore.kind } };
+      }
       if (target !== 'provider-default' || fixture.evidenceClass !== 'deterministic') return unsupported();
       const file = await configuration(signal);
       try {
@@ -182,7 +202,13 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       } finally { await file.close(); }
     },
     async restore(id, target, state, signal) {
-      identity(id); if (target !== 'provider-default') return unsupported();
+      identity(id);
+      if (target === 'fake-model' || target === 'fake-github') {
+        const saved = z.object({ target: z.enum(['fake-model','fake-github']), generation: z.string().min(1), kind: z.literal('startup-empty') }).strict().parse(state);
+        requireOwned(saved.target === target && baselines.get(target) === saved.generation);
+        await driver.resetFixtureBaseline(target, saved.generation, signal); return;
+      }
+      if (target !== 'provider-default') return unsupported();
       const saved = z.object({ bytes: z.string().max(65536) }).strict().parse(state);
       const file = await configuration(signal);
       try { await file.truncate(0); await file.writeFile(saved.bytes); } finally { await file.close(); }
