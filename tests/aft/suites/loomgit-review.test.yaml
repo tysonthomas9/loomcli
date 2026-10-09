@@ -16,6 +16,18 @@ teardown: >-
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW" >/dev/null || true
 
 tests:
+  - name: workspace deletion without a current work fingerprint is rejected
+    intent: The deletion guard refuses an unconfirmed workspace removal and leaves its registered repository available
+    steps:
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/delete/preview" > "$AFT_WORK_DIR/review-delete-preview.json";
+          python3 -c 'import json,sys; assert len(json.load(open(sys.argv[1]))["fingerprint"]) == 64' "$AFT_WORK_DIR/review-delete-preview.json";
+          status="$(curl -s -o "$AFT_WORK_DIR/review-delete-denied.json" -w '%{http_code}' -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW")";
+          test "$status" = 409;
+          grep -q 'unsaved_work' "$AFT_WORK_DIR/review-delete-denied.json";
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW" | grep -q 'E2E-WS-REVIEW'
+        intent: Preview is read-only, and a missing confirmation cannot delete the workspace
+
   - name: operator approves a real task revision from the task detail panel
     intent: An agent edits a task repo through a TaskRun, then an operator approves the recorded head SHA in the Revisions section
     steps:
@@ -69,7 +81,16 @@ tests:
         intent: "Open the recorded task through the same browser session using its runtime ID"
       - wait: { text: Revisions }
       - expect: { visible: { testid: revisions-section } }
-      - click: { role: button, name: Approve, exact: true }
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/reviewTaskId")";
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/issues/$task/revisions" > "$AFT_WORK_DIR/review-before-verdict.json";
+          change="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["change_id"])' "$AFT_WORK_DIR/review-before-verdict.json")";
+          status="$(curl -s -o "$AFT_WORK_DIR/review-unapproved-apply.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/git/apply" -H 'Content-Type: application/json' -d "{\"change\":\"$change\",\"revision\":1,\"lead\":\"lead\"}")";
+          test "$status" = 409;
+          grep -q 'review_required' "$AFT_WORK_DIR/review-unapproved-apply.json"
+        intent: "An unapproved revision is refused by the HTTP Apply gate before any working-area swap"
+      - click: { role: button, name: More approve options, exact: true }
+      - click: { role: menuitem, name: Approve only, exact: true }
       - api:
           method: "GET"
           path: "/api/workspaces/E2E-WS-REVIEW/issues/${var:reviewTaskId}/revisions"
@@ -77,3 +98,128 @@ tests:
             - path: "data.0.verdict"
               equals: "approve"
         intent: "An operator confirms that the UI action persisted approval for the recorded revision"
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/reviewTaskId")";
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/issues/$task/revisions" > "$AFT_WORK_DIR/review-revisions.json";
+          python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; assert item["verdict"] == "approve"; assert len(item["head_sha"]) == 40; assert item["change_id"]; assert item["number"] > 0' "$AFT_WORK_DIR/review-revisions.json";
+          git -C "$AFT_WORK_DIR/review-repo" cat-file -e "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["head_sha"])' "$AFT_WORK_DIR/review-revisions.json")^{commit}"
+        intent: "An operator verifies the approved revision names a real commit in the workspace repository"
+      - run: >-
+          read change revision < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"], item["number"])' "$AFT_WORK_DIR/review-revisions.json");
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/changes/$change/revisions/$revision/diff?repo=review-repo" > "$AFT_WORK_DIR/review-diff.json";
+          grep -q 'review-output.txt' "$AFT_WORK_DIR/review-diff.json"
+        intent: "The revision diff API names the file produced by the task runner"
+
+  - name: legacy branch Push is rejected without moving the workspace branch
+    intent: An API client tries the removed branch Push route and checks that the workspace branch remains unchanged
+    steps:
+      - run: >-
+          before="$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)";
+          status="$(curl -s -o "$AFT_WORK_DIR/review-legacy-push.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/agents/lead/git/push" -H 'Content-Type: application/json' -d '{}')";
+          test "$status" = 400;
+          grep -q 'branch Push is unavailable' "$AFT_WORK_DIR/review-legacy-push.json";
+          after="$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)";
+          test "$before" = "$after"
+        intent: "The client sees the P2.8 validation error and confirms the local Git ref did not advance"
+
+  - name: P2.14 approved Apply advances only the lead working area
+    intent: An operator applies an approved revision over HTTP and sees the working area advance without a provider push
+    steps:
+      - run: >-
+          test -s "$AFT_WORK_DIR/review-revisions.json";
+          git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main > "$AFT_WORK_DIR/apply-trunk-before"
+        intent: "Record the trunk ref before the operator applies the approved revision"
+      - run: >-
+          read change revision < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"], item["number"])' "$AFT_WORK_DIR/review-revisions.json");
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/git/apply"
+          -H 'Content-Type: application/json'
+          -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}"
+          > "$AFT_WORK_DIR/review-applied.json";
+          grep -q '"success":true' "$AFT_WORK_DIR/review-applied.json"
+        intent: "The approved revision joins the local working area through the product Apply route"
+      - run: >-
+          test "$(cat "$AFT_WORK_DIR/apply-trunk-before")" = "$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/main)"
+        intent: "Confirm that applying the layer did not advance trunk"
+      - run: >-
+          expected="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["head_sha"])' "$AFT_WORK_DIR/review-revisions.json")";
+          actual="$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/loom/ws/E2E-WS-REVIEW/interactive/lead)";
+          test "$actual" = "$expected"
+        intent: "Confirm the approved revision, not trunk, is the lead working area's new head"
+
+  - name: P2.16 no-area approval offers Apply in the UI
+    skip: true
+    intent: A fresh product workspace and interactive lead both create working areas, so no supported product path reaches approved_waiting_for_working_area without modifying journal state; activate when one exists
+    steps:
+      - run: >-
+          python3 -c 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1],timeout=10); assert db.execute("select count(*) from working_areas where workspace=? and lead=?",("E2E-WS-REVIEW","lead")).fetchone()[0] == 0' "$AFT_LOOM_CONFIG_DIR/loomgit/store.db"
+        intent: Require a real product-created workspace with a lead but no working area
+      - wait: { text: "Approved: Apply to create the lead working area" }
+      - click: { role: button, name: Apply, exact: true }
+      - wait: { text: Applied }
+
+  - name: unsaved lead edits hold an approved Apply without moving its ref
+    intent: An operator cannot swap an approved layer over an unsaved edit to the same file
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues"
+          body:
+            title: "pending epic $RUN_ID"
+            issue_type: "epic"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "pendingEpicId"
+        intent: "Create a separate epic so the second TaskRun cannot reuse the prior run"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues"
+          body:
+            title: "pending task $RUN_ID"
+            issue_type: "task"
+            priority: 2
+            parent: "${var:pendingEpicId}"
+            design: "STUB_CODEX_PATCH=review-output.txt"
+          save:
+            - from: "data.id"
+              as: "pendingTaskId"
+        intent: "Create a task whose agent edits the same file as the first approved layer"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/workflows/epic-runner"
+          body:
+            epicId: "${var:pendingEpicId}"
+            runner: "local-task-runner"
+        intent: "Start the real deterministic TaskRun workflow for the conflicting layer"
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/pendingTaskId")";
+          for attempt in $(seq 1 45); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/issues/$task/revisions" > "$AFT_WORK_DIR/pending-revisions.json";
+            grep -q '"head_sha"' "$AFT_WORK_DIR/pending-revisions.json" && exit 0;
+            sleep 2;
+          done;
+          echo "TaskRun did not record a pending-case revision"; exit 1
+        intent: "Wait for a second genuine TaskRun revision of the same file"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-REVIEW/issues/$(cat "$AFT_WORK_DIR/pendingTaskId")"
+        intent: "Open the second task in the review UI"
+      - wait: { text: Revisions }
+      - click: { role: button, name: More approve options, exact: true }
+      - click: { role: menuitem, name: Approve only, exact: true }
+      - run: >-
+          repo="$AFT_WORK_DIR/review-repo";
+          git -C "$repo" rev-parse refs/heads/loom/ws/E2E-WS-REVIEW/interactive/lead > "$AFT_WORK_DIR/pending-lead-before";
+          lead="$(git -C "$repo" worktree list --porcelain | awk '/^worktree / {path=substr($0,10)} /^branch refs\/heads\/loom\/ws\/E2E-WS-REVIEW\/interactive\/lead$/ {print path}')";
+          test -n "$lead";
+          printf 'unsaved operator edit\n' >> "$lead/review-output.txt";
+          printf '%s\n' "$lead" > "$AFT_WORK_DIR/pending-lead-path"
+        intent: "Leave an unsaved operator edit in the lead working area and record its ref"
+      - run: >-
+          read change revision < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"], item["number"])' "$AFT_WORK_DIR/pending-revisions.json");
+          status="$(curl -s -o "$AFT_WORK_DIR/pending-apply.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-REVIEW/git/apply" -H 'Content-Type: application/json' -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}")";
+          test "$status" = 409;
+          grep -q 'apply_pending' "$AFT_WORK_DIR/pending-apply.json";
+          test "$(cat "$AFT_WORK_DIR/pending-lead-before")" = "$(git -C "$AFT_WORK_DIR/review-repo" rev-parse refs/heads/loom/ws/E2E-WS-REVIEW/interactive/lead)";
+          grep -q 'unsaved operator edit' "$(cat "$AFT_WORK_DIR/pending-lead-path")/review-output.txt"
+        intent: "Apply reports apply_pending, preserves the dirty file, and leaves the lead ref unchanged"

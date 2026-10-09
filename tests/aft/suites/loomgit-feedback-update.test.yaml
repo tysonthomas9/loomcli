@@ -1,0 +1,30 @@
+suite: loomgit-feedback-update
+classification: { area: reviews, feature: feedback-updates-pr, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: >-
+  for c in loom trunk; do bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" teardown "$c" || true; done
+tests:
+  - name: Loom stack - a review fix-up updates the open PR without Approve, cancels merge-after, and is held on conflict
+    intent: A fix-up revision of a task whose stacked PR is open replaces its layer and is pushed with no Approve, the PR above is rebuilt on it, a pending "merge after #N" is cancelled because the code changed, and a fix-up that conflicts with the layer above is held and the lead told
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" setup loom
+        intent: Create a disposable repository, workspace and lead through the product API
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" run loom open
+        intent: Run two stacked tasks and approve each, opening one stacked PR per task
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" run loom push
+        intent: A reviewer requests changes on A's PR; the fix-up is pushed to A's PR with no Approve and B's PR is rebuilt on it
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" run loom cancel
+        intent: B is approved to merge after A; B's fix-up is pushed and cancels that approval
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" run loom held
+        intent: A fix-up of A that conflicts with B is held, neither PR moves, and the lead is told once
+  - name: PR per task - a review fix-up updates the task's own PR; a secret-pattern path is never pushed
+    intent: In trunk mode a fix-up revision is pushed to the task's own PR with no Approve; a fix-up adding a secret-pattern path is not pushed and the lead is told
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" setup trunk
+        intent: Create a disposable repository, workspace and lead through the product API
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" run trunk open
+        intent: Switch to PR per task, run one task and approve it to its own PR
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" run trunk push
+        intent: A reviewer requests changes; the fix-up is pushed to the PR with no Approve
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-feedback-update.sh" run trunk secret
+        intent: A fix-up adding config/.env is not pushed, the PR stays, and the task says why

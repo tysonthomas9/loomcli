@@ -1,0 +1,48 @@
+suite: loomgit-forge
+classification: { area: reviews, feature: git-publish, surface: api, purpose: harness }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  remote="$AFT_WORK_DIR/forge-origin.git"
+  repo="$AFT_WORK_DIR/forge-repo"
+  git init -q --bare "$remote"
+  git init -q -b main "$repo"
+  printf 'base\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.name=AFT -c user.email=aft@example.test commit -q -m base
+  git -C "$repo" config core.sshCommand "sh $AFT_TESTS_DIR/fixtures/fake-github/git-ssh-bridge.sh $remote"
+  git -C "$repo" remote add origin git@github.com:owner/repo.git
+  git -C "$repo" push -q origin main
+  curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null
+
+tests:
+  - name: local fake forge records published and merged pull without GitHub egress
+    intent: A GitHub-shaped origin maps only through an explicit local Git transport, while the fake API records the PR and merge
+    steps:
+      - run: >-
+          repo="$AFT_WORK_DIR/forge-repo";
+          git -C "$repo" checkout -q -b loom/ws/W/change/C;
+          printf 'layer\n' >> "$repo/README.md";
+          git -C "$repo" add README.md;
+          git -C "$repo" -c user.name=AFT -c user.email=aft@example.test commit -q -m layer;
+          git -C "$repo" push -q origin loom/ws/W/change/C;
+          git --git-dir="$AFT_WORK_DIR/forge-origin.git" rev-parse refs/heads/loom/ws/W/change/C > "$AFT_WORK_DIR/forge-head"
+        intent: "Push a real change branch to the local bare remote through the fake SSH transport"
+      - run: >-
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/repos/owner/repo/pulls"
+          -H 'Content-Type: application/json'
+          -d '{"head":"loom/ws/W/change/C","base":"main","title":"change C","body":"Loom-Change-Id: C\n"}'
+          > "$AFT_WORK_DIR/forge-pr.json";
+          grep -q '"number":1' "$AFT_WORK_DIR/forge-pr.json";
+          curl -sf "$AFT_FAKE_GH_BASE/repos/owner/repo/pulls?state=all" | grep -q 'loom/ws/W/change/C'
+        intent: "The fake GitHub REST API creates an owned PR for the pushed branch"
+      - run: >-
+          git -C "$AFT_WORK_DIR/forge-repo" push -q origin loom/ws/W/change/C:main;
+          sha="$(cat "$AFT_WORK_DIR/forge-head")";
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/__merge"
+          -H 'Content-Type: application/json'
+          -d "{\"number\":1,\"sha\":\"$sha\"}" >/dev/null;
+          test "$(git --git-dir="$AFT_WORK_DIR/forge-origin.git" rev-parse refs/heads/main)" = "$sha";
+          curl -sf "$AFT_FAKE_GH_BASE/repos/owner/repo/commits/$sha/pulls" | grep -q '"merged_at"';
+          curl -sf "$AFT_FAKE_GH_BASE/repos/owner/repo/pulls/1" | grep -q '"state":"closed"'
+        intent: "Merge advances only the local bare trunk and makes the owned PR visible to landing queries"

@@ -29,6 +29,18 @@ tests/aft/run-aft.sh --record ...  # or call the harness directly with any aft f
 
 Extra aft flags go through `AFT_ARGS`, e.g.
 `make test-aft AFT_ARGS="--screenshots --record-all"`.
+Use `make test-aft AFT_ARGS="--suite 'loomgit-*'"` to select matching
+product suites. This wrapper flag selects YAML filenames under `suites/` and
+`forge-suites/` and
+cannot be combined with `AFT_SUITES` or the live backend tier.
+The `loomgit-*` selection starts an isolated fake GitHub REST forge and gives
+serve a fixture-only token and the existing `LOOM_CONNECTOR_GITHUB_BASE_URL`.
+It also supplies a run-scoped Git user config; the trunk identity case removes
+that identity to test the failure path.
+The forge contract case lives outside the default suite directory so unrelated
+degraded-credential cases keep their original environment. `loomgit-forge` checks
+its local bare Git transport and PR/merge API contract;
+it does not claim that product Publish or landing has run.
 
 ## Loom Git deterministic journeys
 
