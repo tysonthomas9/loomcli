@@ -13,8 +13,24 @@ import (
 // D29) has a finished agent and a frozen revision, so its dependents start on
 // that revision instead of waiting for the review (Tyson, 2026-10-09). FleetDB
 // counts every blocker that is not closed as open, so this backend moves a
-// task whose only open direct blockers are in code review from Blocked to
-// Ready. A task blocked through its parent stays blocked.
+// task from Blocked to Ready when its only open direct blocker is in code
+// review and is the task's base in its stack: the task gets local lineage on
+// that blocker's frozen revision. A dependent in another stack (another epic,
+// or no epic) cannot be built on the blocker's code, so it keeps waiting until
+// the blocker closes. A task blocked through its parent stays blocked.
+
+// StackBaseLookup returns the task a task is based on in its stack in
+// workspace, or "" when it is in no stack or is a stack root.
+type StackBaseLookup func(ctx context.Context, workspace, taskID string) (string, error)
+
+var stackBase StackBaseLookup
+
+// SetStackBaseLookup registers the stack lookup (the stack store registers
+// itself). Without one no task starts behind code review.
+func SetStackBaseLookup(lookup StackBaseLookup) { stackBase = lookup }
+
+// RegisteredStackBase returns the registered stack lookup, nil if none.
+func RegisteredStackBase() StackBaseLookup { return stackBase }
 
 // codeReviewListLimit bounds the code-review lookup; it matches the review
 // settle loop's own listing.
@@ -41,6 +57,10 @@ func (b *FleetBackend) codeReviewTasks(ctx context.Context) (map[string]bool, er
 // of their open direct blockers is in code review. It reports nothing when no
 // task is in code review, so the common case costs one list call.
 func (b *FleetBackend) startableBehindReview(ctx context.Context) ([]backend.IssueData, error) {
+	lookup := stackBase
+	if lookup == nil {
+		return nil, nil
+	}
 	inReview, err := b.codeReviewTasks(ctx)
 	if err != nil || len(inReview) == 0 {
 		return nil, err
@@ -55,7 +75,15 @@ func (b *FleetBackend) startableBehindReview(ctx context.Context) ([]backend.Iss
 	}
 	var startable []backend.IssueData
 	for _, issue := range blocked {
-		if startsBehindReview(issue, inReview, blockedIDs, reviewReadyNow()) {
+		if !startsBehindReview(issue, inReview, blockedIDs, reviewReadyNow()) {
+			continue
+		}
+		// Only its stack base: then it is built on that blocker's code.
+		base, err := lookup(ctx, b.workspaceID, issue.ID)
+		if err != nil {
+			return nil, err
+		}
+		if base == issue.BlockedBy[0] {
 			startable = append(startable, issue)
 		}
 	}
@@ -63,11 +91,12 @@ func (b *FleetBackend) startableBehindReview(ctx context.Context) ([]backend.Iss
 }
 
 // startsBehindReview is FleetDB's ready rule (open, not an epic, not deferred
-// to the future) with code-review blockers counted as satisfied. FleetDB
+// to the future) with one open blocker, in code review, counted as satisfied:
+// a task has one base in its stack, so a second open blocker waits. FleetDB
 // lists a task blocked only through its parent with no direct blockers, and a
 // task whose parent is itself blocked keeps waiting.
 func startsBehindReview(issue backend.IssueData, inReview, blocked map[string]bool, now time.Time) bool {
-	if issue.Status != "open" || issue.IssueType == "epic" || len(issue.BlockedBy) == 0 {
+	if issue.Status != "open" || issue.IssueType == "epic" || len(issue.BlockedBy) != 1 {
 		return false
 	}
 	if issue.Parent != "" && blocked[issue.Parent] {

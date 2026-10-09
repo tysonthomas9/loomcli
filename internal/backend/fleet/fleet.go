@@ -30,6 +30,7 @@ const maxResponseBody = 50 << 20
 // server's REST API. It is safe for concurrent use.
 type FleetBackend struct {
 	client           *http.Client
+	workspaceID      string // the stack store's workspace key, for code-review readiness
 	baseWorkspaceURL string // e.g., "http://host/api/v1/ws1"
 	baseWorkspaceV2  string // e.g., "http://host/api/v2/ws1"
 
@@ -76,6 +77,7 @@ func New(cfg Config) (*FleetBackend, error) {
 
 	return &FleetBackend{
 		client:           httpClient,
+		workspaceID:      cfg.WorkspaceID,
 		baseWorkspaceURL: baseURL + "/api/v1/" + url.PathEscape(cfg.WorkspaceID),
 		baseWorkspaceV2:  baseURL + "/api/v2/" + url.PathEscape(cfg.WorkspaceID),
 		authToken:        cfg.AuthToken,
