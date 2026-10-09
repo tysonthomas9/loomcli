@@ -25,6 +25,7 @@ export * from './synthetic-probe.js';
 export * from './projection.js';
 export * from './container-observations.js';
 export * from './renderer-target.js';
+export * from './renderer-contract.js';
 export * from './composition.js';
 export * from './redaction.js';
 export * from './authority.js';

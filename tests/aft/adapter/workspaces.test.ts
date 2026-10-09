@@ -8,7 +8,7 @@ import { createOwnedWorkspaceRoster, requireOwnedWorkspace, type OwnedWorkspaceR
 import type { FixtureAuthorityOwner } from './authority.js';
 import type { OwnedFixture } from './ownership.js';
 const owner:FixtureAuthorityOwner={leaseId:'lease',runId:'run',suiteId:'suite',scope:'suite',caseId:'setup',profile:'deterministic'};
-const fields={workspaceId:'workspace',repo:'/owned/source',commonDir:'/owned/source/.git',storeId:'store',storeGeneration:'generation',agentIds:['agt_primary']};
+const fields={identityKind:'native-agent-id' as const,workspaceId:'workspace',repo:'/owned/source',commonDir:'/owned/source/.git',storeId:'store',storeGeneration:'generation',agentIds:['agt_primary']};
 function makeFixture(ownedWorkspaces:OwnedWorkspaceRoster):OwnedFixture {
   const unused=async():Promise<never>=>{throw new Error('Unused deterministic workspace port');};
   return {...owner,workspaceId:'workspace',repo:fields.repo,ownedWorkspaces,verify:async()=>{},expiresAtUtcMs:Infinity,evidenceClass:'deterministic',
@@ -57,7 +57,7 @@ test('later product-created actors enroll through exact owned store and stale au
   const {store,record}=await setup(t);const initial=await createOwnedWorkspaceRoster(owner,[await record(),await record({workspaceId:'E2E-WS-AGENT',agentIds:[]})],store);
   const fixture=makeFixture(initial);
   let wrong=false;let reads=0;
-  fixture.readWorkspaceAgent=async(workspaceId,agentId)=>{reads++;return {kind:'agent-enrolled',...owner,workspaceId,agentId,repo:fields.repo,
+  fixture.readWorkspaceAgent=async(workspaceId,agentId)=>{reads++;return {kind:'agent-enrolled',identityKind:'native-agent-id',...owner,workspaceId,agentId,repo:fields.repo,
     commonDir:fields.commonDir,storeId:wrong?'foreign-store':fields.storeId,storeGeneration:fields.storeGeneration,parentAgentId:null,rootAgentId:null,
     createdByKind:'user',createdById:'observed-user',revision:1};};
   assert.throws(()=>requireOwnedWorkspace(fixture,'E2E-WS-AGENT','nova'));
@@ -79,7 +79,7 @@ test('later child enrollment checks actual parent/root lineage and cross-store s
   const ownedWorkspaces=await createOwnedWorkspaceRoster(owner,[await record()],store);
   const fixture=makeFixture(ownedWorkspaces);
   let corrupt='';
-  fixture.readWorkspaceAgent=async(workspaceId,agentId)=>({kind:'agent-enrolled',...owner,workspaceId,agentId,repo:corrupt==='source'?'/foreign':fields.repo,
+  fixture.readWorkspaceAgent=async(workspaceId,agentId)=>({kind:'agent-enrolled',identityKind:'native-agent-id',...owner,workspaceId,agentId,repo:corrupt==='source'?'/foreign':fields.repo,
     commonDir:fields.commonDir,storeId:fields.storeId,storeGeneration:corrupt==='generation'?'foreign':fields.storeGeneration,
     parentAgentId:agentId==='agt_primary'?null:'agt_primary',rootAgentId:agentId==='agt_primary'?null:corrupt==='root'?'foreign':'agt_primary',
     createdByKind:agentId==='agt_primary'?'user':'agent',createdById:agentId==='agt_primary'?null:'agt_primary',revision:1});
@@ -125,4 +125,18 @@ test('legacy lineage uses actual scoped Parent observations without synthesized 
   parent='lead';parentParent='worker';await assert.rejects(enrollOwnedLegacyAgent(f,'legacy','worker',new AbortController().signal,store));
   parentParent=null;await enrollOwnedLegacyAgent(f,'legacy','worker',new AbortController().signal,store);
   assert.equal(requireOwnedWorkspace(f,'legacy','worker','legacy-agent-name').workspaceId,'legacy');
+});
+
+test('missing serialized identity kind fails before receipt lookup and cannot grant native authority',async t=>{
+  const {WorkspaceCreationFact,WorkspaceAgentFact}=await import('./workspaces.js');const {store,record}=await setup(t);
+  const first=await record();const missing={...first};Reflect.deleteProperty(missing,'identityKind');let reads=0;
+  await assert.rejects(createOwnedWorkspaceRoster(owner,[missing],{retain:store.retain,resolve:async id=>{reads++;return store.resolve(id);}}));
+  assert.equal(reads,0);
+  const withoutKind={kind:'workspace-created',...owner,...fields};Reflect.deleteProperty(withoutKind,'identityKind');
+  assert.equal(WorkspaceCreationFact.safeParse(withoutKind).success,false);
+  const creationReceipt=await store.retain(JSON.stringify(withoutKind));
+  await assert.rejects(createOwnedWorkspaceRoster(owner,[{...first,creationReceipt}],store));
+  assert.equal(WorkspaceAgentFact.safeParse({kind:'agent-enrolled',...owner,workspaceId:'workspace',agentId:'agt_new',repo:fields.repo,
+    commonDir:fields.commonDir,storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentAgentId:null,rootAgentId:null,
+    createdByKind:'user',createdById:'observed-user',revision:1}).success,false);
 });

@@ -3,17 +3,12 @@ import path from 'node:path';
 import { z } from 'zod';
 import { calculateImplementationPin, type ImplementationPin } from '@tysonthomas9/aft/capabilities';
 import { defineOperation } from './operation.js';
-import { measureFixtureProjection, RendererTargetIdentity } from './renderer-target.js';
+import { RENDERER_SOURCE_PATHS as sources, RENDERER_DEPENDENCIES as dependencies, RendererTargetIdentity } from './renderer-contract.js';
+import { measureFixtureProjection } from './renderer-target.js';
 import { containedPath } from './filesystem.js';
 import { Digest, Id, requireFact, sha256 } from './protocol.js';
 import { projectMarkdown, validateProjectionIdentity, type ProjectionIdentity } from './projections/index.js';
 
-const dependencies = ['react', 'react-dom', 'react-markdown', 'remark-gfm', 'rehype-sanitize', 'esbuild', 'jsdom'] as const;
-const sources = {
-  chatMarkdownSha256: 'src/components/AgentChat/ChatMarkdown.tsx', longTextSha256: 'src/components/AgentChat/LongText.tsx',
-  codeHighlightSha256: 'src/components/AgentChat/codeHighlight.ts', messageCopySha256: 'src/components/AgentChat/MessageCopyButton.tsx',
-  cssSha256: 'src/components/AgentChat/ChatMarkdown.module.css', lockSha256: 'package-lock.json',
-} as const;
 const ProjectionIdentitySchema = z.object({ chatMarkdownSha256: Digest, longTextSha256: Digest, codeHighlightSha256: Digest,
   messageCopySha256: Digest, cssSha256: Digest, lockSha256: Digest,
   dependencies: z.object({ react: Id, 'react-dom': Id, 'react-markdown': Id, 'remark-gfm': Id, 'rehype-sanitize': Id, esbuild: Id, jsdom: Id }).strict(),
