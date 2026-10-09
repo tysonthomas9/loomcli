@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CapabilityRegistry,createCapabilityContext,calculateImplementationPin,revokeCapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { loadSuiteFiles } from '@tysonthomas9/aft/runner';
-import { createEvidenceStore,putEvidenceStore } from './evidence.js';
+import { createEvidenceStore,putEvidenceStore,getFixtureEvidenceStore } from './evidence.js';
 import { createFixtureOperationAuthority } from './authority.js';
 import { putFixture,type OwnedFixture } from './ownership.js';
 import { createCoreProviders } from './index.js';
@@ -79,6 +79,20 @@ test('worker-state denies missing effect authority before private producer gette
   assert.equal((await h.invoke()).availability,'unsupported');assert.equal(getters,0);assert.deepEqual(h.counts(),{verifies:0,reads:0});
   assert.equal((await h.invoke({view:'parents',leaseId:h.fixture.leaseId})).availability,'unsupported');
   assert.equal(getters,0);assert.deepEqual(h.counts(),{verifies:0,reads:0});
+});
+for(const missing of ['write-fixture','stop-owned-process'] as const) test(`worker-state missing only ${missing} denies state and parents before getter, verification and artifacts`,async t=>{
+  const h=await setup(t);
+  const complete=['read-api','read-filesystem','start-owned-process','write-fixture','stop-owned-process'] as const;
+  h.fixture.operationAuthority=createFixtureOperationAuthority(h.fixture,{[FixtureWorkerStateId]:{
+    evidenceClass:'deterministic',effects:complete.filter(effect=>effect!==missing)}});
+  const producer=h.fixture.observeWorkerState;let getters=0,writes=0;
+  Object.defineProperty(h.fixture,'observeWorkerState',{get(){getters++;return producer;}});
+  const store=getFixtureEvidenceStore(h.context,h.fixture.leaseId),retain=store.retain;
+  store.retain=async bytes=>{writes++;return retain.call(store,bytes);};
+  for(const request of [h.input,{view:'parents',leaseId:h.fixture.leaseId}]) {
+    assert.equal((await h.invoke(request)).availability,'unsupported');
+    assert.equal(getters,0);assert.equal(writes,0);assert.deepEqual(h.counts(),{verifies:0,reads:0});
+  }
 });
 test('worker-state rejects unsupported route and malformed selector before transport',async t=>{
   const h=await setup(t);delete h.fixture.observeWorkerState;
