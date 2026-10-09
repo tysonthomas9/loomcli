@@ -6,6 +6,7 @@ import { createFixtureProviders, type FixtureProviderOptions } from './fixture/p
 import { fixtureRouting } from './fixture/routing.js';
 import type { FixturePlan } from './fixture/lifecycle.js';
 import { productionLegacyAccess } from './legacy/host-access.js';
+import { getFixtureEvidenceStore } from './evidence.js';
 import { createLegacyProviders, type LegacyAccessFactory } from './legacy/providers.js';
 import type { LegacyProviderOptions } from './legacy/effects.js';
 import { createProjectionProvider, pinProjectionImplementation } from './projection.js';
@@ -45,7 +46,8 @@ export function createLoomProviders(options: LoomCompositionOptions) {
   return [
     ...createCoreProviders(pin, options.gitReader),
     ...createFixtureProviders({ ...options.fixtures, plans, implementation: pin, implementationSha256: pin.sha256 }),
-    ...createLegacyProviders(pin, pin.sha256, options.legacyAccess ?? ((_context, fixture) => productionLegacyAccess(fixture)), legacyOptions),
+    ...createLegacyProviders(pin, pin.sha256, options.legacyAccess ?? ((context, fixture) =>
+      productionLegacyAccess(fixture, getFixtureEvidenceStore(context, fixture.leaseId))), legacyOptions),
     createProjectionProvider(pin),
   ];
 }
