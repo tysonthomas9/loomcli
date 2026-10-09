@@ -56,8 +56,8 @@ export interface ProductionConfig {
 export type ComposeRead = (origin: string, relative: string, signal: AbortSignal) => Promise<unknown>;
 // Fixed internal readiness port: no caller path, predicate or executable.
 export type ComposeReadiness = (origin:string,signal:AbortSignal)=>Promise<{status:number;complete:true}>;
-export interface ReadinessClock { now():number; nextAttempt(signal:AbortSignal):Promise<void>; }
-const readinessClock:ReadinessClock={now:()=>performance.now(),nextAttempt:signal=>new Promise<void>((resolve,reject)=>{
+export interface ReadinessClock { now():number; monotonicNow?():number; nextAttempt(signal:AbortSignal):Promise<void>; }
+const readinessClock:ReadinessClock={now:()=>Date.now(),monotonicNow:()=>performance.now(),nextAttempt:signal=>new Promise<void>((resolve,reject)=>{
   signal.throwIfAborted();
   const abort=()=>{clearTimeout(timer);reject(new FixtureError('observation-failed'));};
   const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},1000);
@@ -497,6 +497,9 @@ export class ComposeFixtureDriver implements FixtureDriver {
    * it is unrelated to the native registered-service SIGTERM actor. */
   async restartOwnedServe(expectedContainerId:string,expectedGeneration:string,signal:AbortSignal){
     signal.throwIfAborted();check(this.profile==='agents-real-opencode','unsupported-capability');
+    const invocationStart=this.readinessTime.now();check(Number.isFinite(invocationStart),'observation-failed');
+    let lastClock=invocationStart;
+    const now=()=>{const value=this.readinessTime.now();check(Number.isFinite(value)&&value>=lastClock,'observation-failed');lastClock=value;return value;};
     return this.withContainerOperation(async()=>{
       check(this.plan&&!this.retryRestartAttestation,'identity-mismatch');
       await verifyManifest(this.config.loom.source,this.plan!.loomRevision.sourceManifestSha256);
@@ -550,38 +553,48 @@ export class ComposeFixtureDriver implements FixtureDriver {
         const dispatch=AbortSignal.any([signal,AbortSignal.timeout(60000)]);
         await this.command('podman',[...this.composeArgs(),'restart','loom-local'],dispatch);
         dispatch.throwIfAborted();
-        const bounded=AbortSignal.any([signal,AbortSignal.timeout(180000)]);
-        const readinessStart=this.readinessTime.now();check(Number.isFinite(readinessStart),'observation-failed');
-        after=await adopt(bounded);
+        // Frozen Bash SECONDS subtracts the invocation's integer epoch second.
+        // Floor each absolute timestamp BEFORE subtraction, preserving its
+        // subsecond phase. The deadline is checked ONLY after curl fails:
+        // a request begun after the final sleep can still succeed. The timeout
+        // guard is therefore failure-only, never a successful-response veto.
+        const failureWindow=AbortSignal.timeout(180000),readinessStart=now();
+        const invocationSecond=Math.floor(invocationStart/1000);
+        const failureDeadlineSeconds=Math.floor(readinessStart/1000)-invocationSecond+180;
+        after=await adopt(signal);
         check(after.state==='running'&&Number.isInteger(after.pid)&&after.pid>0&&after.pid!==before.pid&&after.startedAt!==before.startedAt,'identity-mismatch');
         let readyStatus:number|undefined,elapsedMs=0;
         for(let attempt=0;attempt<181;attempt++){
-          bounded.throwIfAborted();elapsedMs=this.readinessTime.now()-readinessStart;
-          check(Number.isFinite(elapsedMs)&&elapsedMs>=0&&elapsedMs<180000,'observation-failed');
-          await adopt(bounded,after);
-          const request=AbortSignal.any([bounded,AbortSignal.timeout(3000)]);let response:{status:number;complete:true}|undefined;
+          signal.throwIfAborted();elapsedMs=now()-readinessStart;
+          await adopt(signal,after);
+          const requestNow=()=>this.readinessTime.monotonicNow?.()??this.readinessTime.now();
+          const requestStart=requestNow();check(Number.isFinite(requestStart),'observation-failed');
+          const request=AbortSignal.any([signal,AbortSignal.timeout(3000)]);let response:{status:number;complete:true}|undefined;
           try{request.throwIfAborted();response=await this.readiness(`http://127.0.0.1:${this.ports[1]}`,request);request.throwIfAborted();
+            const requestElapsed=requestNow()-requestStart;
+            check(Number.isFinite(requestElapsed)&&requestElapsed>=0&&requestElapsed<=3000,'observation-failed');
             check(response.complete===true&&Number.isInteger(response.status)&&response.status>=100&&response.status<=599,'observation-failed');}
           catch{response=undefined;}
-          bounded.throwIfAborted();elapsedMs=this.readinessTime.now()-readinessStart;
-          check(Number.isFinite(elapsedMs)&&elapsedMs>=0&&elapsedMs<180000,'observation-failed');
-          await adopt(bounded,after);
+          signal.throwIfAborted();elapsedMs=now()-readinessStart;
+          await adopt(signal,after);
           readinessAttempts.push({...(response?{status:response.status}:{}),complete:!!response,elapsedMs});
           if(response&&response.status>=200&&response.status<400){readyStatus=response.status;break;}
-          await this.readinessTime.nextAttempt(bounded);
+          check(Math.floor((readinessStart+elapsedMs)/1000)-invocationSecond<failureDeadlineSeconds,'observation-failed');
+          failureWindow.throwIfAborted();await this.readinessTime.nextAttempt(signal);
         }
         check(readyStatus!==undefined,'observation-failed');
-        const afterTop=await this.command('podman',['--connection',this.config.connection,'top',after.id,'pid','comm'],bounded);
-        await this.verifyContainer(after,bounded);
+        const afterTop=await this.command('podman',['--connection',this.config.connection,'top',after.id,'pid','comm'],signal);
+        await this.verifyContainer(after,signal);
         await verifyManifest(this.config.loom.source,this.plan!.loomRevision.sourceManifestSha256);
         await verifyManifest(this.config.loom.build,this.plan!.loomRevision.buildManifestSha256);
-        bounded.throwIfAborted();
+        signal.throwIfAborted();
         const fact={scope:'loom-local-plus-OpenCode' as const,
           before:{containerId:before.id,initPid:before.pid,startedAt:before.startedAt,generation:before.generation},
           after:{containerId:after.id,initPid:after.pid,startedAt:after.startedAt!,generation:after.generation},
           readiness:{path:'/api/config' as const,status:readyStatus!,complete:true as const,attempts:readinessAttempts.length,elapsedMs,
             windowMs:180000 as const,requestTimeoutMs:3000 as const}};
         const receipt=await this.artifact('observe',{operation:'compose-restarted',intent,fact,
+          readinessClock:{policy:'deadline-after-failed-request',invocationStartMs:invocationStart,readinessStartMs:readinessStart,failureDeadlineSeconds},
           successor:{namespaceSha256:after.namespaceSha256,predecessorContainerId:before.id,containerIdChanged:after.id!==before.id},readinessAttempts,
           processListing:{value:redact(afterTop,this.fixtureSecrets),redaction:redactionFacts(afterTop,this.fixtureSecrets)}});return {...fact,receipt};
       }catch{
