@@ -65,7 +65,7 @@ export class HostFixtureDriver implements FixtureDriver {
     this.activeOperations.add(id);
     try{return await operation();}finally{this.activeOperations.delete(id);}
   }
-  private requireWorkerRegistrationIdle(){check(!this.activeOperations.has('worker-registration'),'identity-mismatch');}
+  private requireWorkerRegistrationIdle(){check(!['worker-registration','cli-launch'].some(id=>this.activeOperations.has(id)),'identity-mismatch');}
   private requireHandle(id:string,generation:string){
     const handle=this.handles.get(id);check(handle&&handle.generation===generation,'identity-mismatch');return handle!;
   }
@@ -146,7 +146,7 @@ export class HostFixtureDriver implements FixtureDriver {
   async refreshOwnedProductProcesses(signal:AbortSignal):Promise<readonly OwnedWorkerFact[]>{
     signal.throwIfAborted();
     check(this.workspaceFixture&&this.workspaceOwner&&this.workspaceEvidence&&this.workspaceRecords&&this.descendants,'unsupported-capability');
-    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
+    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','cli-launch'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
     const daemon=this.handles.get('daemon');check(daemon?.state()==='running','unsupported-capability');
     return this.withServiceOperation('worker-registration',async()=>{
       if(!this.workerRegistrations){
@@ -316,6 +316,8 @@ export class HostFixtureDriver implements FixtureDriver {
   async launchOwnedCli(argv: readonly string[], envOverrides: Readonly<Record<string, string>>, stdin: string,
     waitForExit: boolean, signal: AbortSignal): Promise<{ id: string; generation: string; pid: number; completion: CliCompletion }> {
     signal.throwIfAborted();this.requireWorkerRegistrationIdle(); check(this.record && this.processes.launch, 'unsupported-capability');
+    check(!['registered-services','cleanup-preparation','cleanup-resource'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
+    return this.withServiceOperation('cli-launch',async()=>{
     check(argv.length > 0 && argv.length <= 128 && argv.every(arg => typeof arg === 'string' && arg.length <= 1024 * 1024 && !arg.includes('\0')));
     const seed = argv.length === 12 && argv[0] === 'daemon' && argv[1] === 'seed-worktree' && argv[2] === '--workspace' &&
       argv[4] === '--agent' && argv[6] === '--file' && argv[8] === '--content' && argv[9] === '-' && argv[10] === '--message' && this.profile === 'legacy-deterministic';
@@ -337,6 +339,7 @@ export class HostFixtureDriver implements FixtureDriver {
     check(handle.generation === generation && handle.pid > 0); await handle.ready(signal);
     const completion = waitForExit ? await handle.completion(signal) : { exitCode: null, stdout: '', stderr: '', complete: false };
     return { id, generation, pid: handle.pid, completion };
+    });
   }
   private async stopCapturedProcess(id:string,generation:string,signal:AbortSignal){
     if(this.descendants?.has(id)){await this.descendants.inspect(id,generation);signal.throwIfAborted();await this.descendants.stop(id,generation);return {beforeGeneration:generation,afterGeneration:null,affectedIds:[id],complete:true as const};}
