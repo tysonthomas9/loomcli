@@ -245,7 +245,7 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
     async stimulate(id, process, operation, request, signal) {
       await verify(id, signal);
       if (operation !== 'serve-restart' || process.id !== 'serve' || process.kind !== 'serve' || request !== null) return unsupported();
-      getFixtureOperationAuthority(fixture, 'loom.runtime.stimulate', ['stop-owned-process','restart-owned-service']);
+      getFixtureOperationAuthority(fixture, 'loom.runtime.stimulate', [...LegacyOperationEffects['loom.runtime.stimulate'], 'restart-owned-service']);
       const transition = await driver.restartOwnedProcess(process.id, process.generation, signal);
       return { transition, response: null };
     },
