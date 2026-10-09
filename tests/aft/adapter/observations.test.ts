@@ -150,3 +150,54 @@ test('saved-event pre-redaction occurrence facts cannot conceal a product leak',
   assert.equal(actual.events[0]!.probe!.payloadOccurrences, 1);
   await assert.rejects(collectSavedEvents({ ...eventsInput, probeHandle: 'foreign' }, async () => ({ status: 200, body: {} }), signal, probe));
 });
+
+test('native registrations preserve all historically owned identities and exact deletion semantics', async () => {
+  const native = access(present); const read = native.read;
+  native.sessions = async () => [
+    {agent_id:ref.agentId,harness:'opencode',native_root:'',native_id:'ses_owned'},
+    {agent_id:ref.agentId,harness:'opencode',native_root:'',native_id:'ses_historical'},
+  ];
+  const registered = await observeNative({...nativeInput,view:'registrations'},native,row,signal);
+  assert.ok(registered.view==='registrations'); assert.equal(registered.currentNativeSessionId,'ses_owned');
+  assert.deepEqual(registered.records.map(record=>record.nativeSessionId),['ses_historical','ses_owned']);
+  native.read = async(route,abort)=>route==='/api/session/ses_historical' ? {status:404,body:{_tag:'SessionNotFoundError',sessionID:'ses_historical',message:'Session not found: ses_historical'}} : read(route,abort);
+  const old = await observeNative({...nativeInput,nativeSessionId:'ses_historical'},native,row,signal);
+  assert.ok(old.view==='presence'); assert.equal(old.present,false); assert.equal(old.nativeSessionId,'ses_historical');
+  await assert.rejects(observeNative({...nativeInput,nativeSessionId:'ses_foreign'},native,row,signal));
+});
+test('registration observations reject incomplete bounds, missing current owner and duplicate historical identity', async () => {
+  const native = access(present);
+  native.sessions = async () => [
+    {agent_id:ref.agentId,harness:'opencode',native_root:'',native_id:'ses_owned'},
+    {agent_id:ref.agentId,harness:'opencode',native_root:'',native_id:'ses_old'},
+  ];
+  await assert.rejects(observeNative({...nativeInput,view:'registrations',maxRegistrations:1},native,row,signal),/bound reached/);
+  native.sessions = async () => [{agent_id:ref.agentId,harness:'opencode',native_root:'',native_id:'ses_old'}];
+  await assert.rejects(observeNative({...nativeInput,view:'registrations'},native,row,signal),/current registration/);
+  native.sessions = async () => [{agent_id:ref.agentId,harness:'opencode',native_root:'',native_id:'ses_owned'},
+    {agent_id:ref.agentId,harness:'opencode',native_root:'',native_id:'ses_old'},{agent_id:ref.agentId,harness:'opencode',native_root:'',native_id:'ses_old'}];
+  await assert.rejects(observeNative({...nativeInput,view:'registrations'},native,row,signal),/duplicated/);
+});
+
+test('captured historical selectors reject current-only omission, wrong root and changed endpoint/process', async () => {
+  const native = access(present);
+  const prior = [
+    {agent_id:ref.agentId,harness:'opencode' as const,native_root:'',native_id:'ses_owned'},
+    {agent_id:ref.agentId,harness:'opencode' as const,native_root:'',native_id:'ses_old'},
+  ];
+  native.sessions = async()=>prior;
+  const captured = await observeNative({...nativeInput,view:'registrations'},native,row,signal);
+  assert.ok(captured.view==='registrations');
+  const selected = {...nativeInput,nativeSessionId:captured.records[0]!.nativeSessionId,nativeRoot:captured.records[0]!.nativeRoot,
+    expectedEndpointId:captured.registeredEndpointId,expectedServicePid:captured.servicePid};
+  native.sessions = async()=>[prior[0]!];
+  await assert.rejects(observeNative(selected,native,row,signal),/registration is missing/);
+  native.sessions = async()=>[prior[0]!,{...prior[1]!,native_root:'foreign-root'}];
+  await assert.rejects(observeNative(selected,native,row,signal),/registration is missing/);
+  native.sessions = async()=>prior;
+  await assert.rejects(observeNative({...selected,expectedEndpointId:'changed'},native,row,signal),/captured endpoint/);
+  await assert.rejects(observeNative({...selected,expectedServicePid:43},native,row,signal),/captured endpoint/);
+  await assert.rejects(observeNative({...selected,expectedGeneration:'changed'},native,row,signal),/process changed/);
+  native.sessions = async()=>[{...prior[0]!,agent_id:'agt_foreign'},prior[1]!];
+  await assert.rejects(observeNative(selected,native,row,signal),/current registration/);
+});
