@@ -6,7 +6,7 @@ import { RedactionFacts, redactionFacts } from '../redaction.js';
 import { defineOperation } from '../operation.js';
 import { getFixture, disposeFixtures, type OwnedFixture } from '../ownership.js';
 import { Id, Json, HttpResponse, ObservationError } from '../protocol.js';
-import { requireOwnedWorkspace, enrollOwnedLegacyAgent } from '../workspaces.js';
+import { requireOwnedWorkspace, requireOwnedWorkspaceRecord, enrollOwnedLegacyAgent } from '../workspaces.js';
 import { getFixtureEvidenceStore } from '../evidence.js';
 import { LegacyOperationEffects, legacyTaskEffects, type LegacyProviderOptions } from './effects.js';
 export { LegacyOperationEffects, legacyTaskEffects, type LegacyProviderOptions } from './effects.js';
@@ -65,12 +65,20 @@ export function createLegacyProviders(implementation: ImplementationPin, impleme
       if (grant.evidenceClass === 'live-provider') grant = getFixtureOperationAuthority(fixture, operation, ['start-owned-process', 'external-provider']);
     }
     if (workspaceId !== undefined) {
-      requireOwnedWorkspace(fixture, workspaceId, undefined, 'legacy-agent-name');
+      // Role and usage actors do not choose a physical repository. Authenticate
+      // their workspace/store without inventing a primary repository selection.
+      requireOwnedWorkspaceRecord(fixture, workspaceId, 'legacy-agent-name');
       const actor = method === 'usage' ? UsageInput.parse(input).agent.agentId : method === 'task' ? TaskInput.parse(input).agentName :
         method === 'seedWorktree' ? SeedInput.parse(input).agentName : undefined;
       if (actor !== undefined) {
         await enrollOwnedLegacyAgent(fixture, workspaceId, actor, context.signal, getFixtureEvidenceStore(context, leaseId));
-        requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name');
+        const record = requireOwnedWorkspaceRecord(fixture, workspaceId, 'legacy-agent-name');
+        if (!record?.agentIds.includes(actor)) throw new ObservationError('ownership-mismatch', 'Legacy actor is absent from retained enrollment');
+        if (method === 'task') {
+          const repoName = TaskInput.parse(input).repoName;
+          if (repoName !== null) requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name', repoName);
+        }
+        if (method === 'seedWorktree') requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name');
       }
     }
     let store = stores.get(fixture);
