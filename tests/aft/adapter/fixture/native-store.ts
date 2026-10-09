@@ -24,11 +24,18 @@ export async function captureNativeStore(configurationRoot:OwnedRoot,
  const config=Object.freeze({path:configurationRoot.path,device:configurationRoot.device,inode:configurationRoot.inode});
  check(path.isAbsolute(config.path)&&path.normalize(config.path)===config.path);
  const filename=path.join(config.path,'agents.db');
- let handle:fs.FileHandle|undefined,closed=false;
+ let handle:fs.FileHandle|undefined,opening:Promise<fs.FileHandle>|undefined,closing:Promise<void>|undefined;
+ let closed=false,disposeRequested=false;
  const close=async()=>{
+  disposeRequested=true;
   if(closed)return;
-  if(handle)await handle.close();
-  closed=true;
+  if(closing)return closing;
+  closing=(async()=>{
+   if(opening){try{handle??=await opening;}catch{/* No descriptor was returned. */}}
+   if(handle)await handle.close();
+   closed=true;
+  })().finally(()=>{closing=undefined;});
+  return closing;
  };
  enrollCleanup(close);
  const verifyConfig=async()=>{
@@ -40,12 +47,14 @@ export async function captureNativeStore(configurationRoot:OwnedRoot,
   await verifyConfig();signal.throwIfAborted();
   const before=await files.lstat(filename);
   check(before.isFile()&&!before.isSymbolicLink()&&await files.realpath(filename)===filename);
-  handle=await files.open(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
+  check(!disposeRequested);
+  opening=files.open(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
+  handle=await opening;
   const opened=await handle.stat();
   check(opened.isFile()&&opened.dev===before.dev&&opened.ino===before.ino);
   const root=Object.freeze({path:filename,device:opened.dev,inode:opened.ino});
   const verify=async(readSignal:AbortSignal)=>{
-   readSignal.throwIfAborted();check(!closed&&handle);
+   readSignal.throwIfAborted();check(!closed&&!disposeRequested&&handle);
    await verifyConfig();
    const retained=await handle!.stat(),named=await files.lstat(filename);
    check(retained.isFile()&&named.isFile()&&!named.isSymbolicLink()&&
