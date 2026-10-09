@@ -21,6 +21,9 @@ import { testLegacyRoster } from './test-roster.js';
 import { materializeRenderer } from '../fixture/renderer-fixtures.test.js';
 import type { RegisteredProcessPort } from '../fixture/descendants.js';
 import { ObservationError } from '../protocol.js';
+import { HostWorkspaceRecords } from '../fixture/workspace-records.js';
+import { appendCreatedWorkspaces, requireOwnedWorkspace } from '../workspaces.js';
+import { fixtureOwnerIdentity } from '../authority.js';
 
 const hash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
 async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; onRoot?: (root: string) => void } = {}) {
@@ -63,17 +66,23 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
   let restoredBytes: string | undefined;
   let queued = 0, malformedReset = false;
   const fixtureRequests: { method: string; route: string; body: unknown }[] = [];
-  const managed = new Map<string, { source: string; path: string; repo: string }>();
+  type Repo = { name: string; path: string; source_repo_id: string; groups: string[]; source: string };
+  const managed = new Map<string, { source: string; path: string; repo: string; repositories: Repo[] }>();
+  const actors = new Map<string, { name: string; repos: string[]; repo_groups: string[] }[]>();
   const worktrees = new Map<string, string>();
   let seedHead = revision.commit, seedExit = 0;
   const handles: OwnedProcess[] = [];
   const startedCommands = new Map<number, HostCommand>();
   const parentTokenOverrides = new Map<number, string | undefined>();
+  let storeGeneration = 'injected-captured-store';
   const processes: HostProcesses = {
     async run(command) {
       if (command.argv[0] === 'init') { await fs.mkdir(path.join(command.cwd, '.git')); return ''; }
-      if (command.argv[0] === 'rev-parse' && command.argv[1] === '--git-common-dir')
-        return path.join([...managed.entries()].find(([ws, row]) => row.repo === command.cwd || worktrees.get(ws) === command.cwd)?.[1].source ?? command.cwd, '.git');
+      if (command.argv[0] === 'rev-parse' && command.argv[1] === '--git-common-dir') {
+        const repo = [...managed.values()].flatMap(row => row.repositories).find(row => row.path === command.cwd);
+        const worktree = [...managed.entries()].find(([ws]) => worktrees.get(ws) === command.cwd)?.[1];
+        return path.join(repo?.source ?? worktree?.source ?? command.cwd, '.git');
+      }
       if (command.argv[0] === 'symbolic-ref') return 'agents/worker';
       if (command.argv[0] === 'rev-parse' && command.argv[1] === 'HEAD' && [...worktrees.values()].includes(command.cwd)) return seedHead;
       if (command.argv[0] === 'rev-parse') return command.argv[1] === 'HEAD' ? revision.commit : revision.tree;
@@ -114,7 +123,7 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
               seedHead = 'f'.repeat(40);
             }
             return { exitCode: seedExit, stderr: seedExit ? 'injected seed failure' : '', complete: true,
-              stdout: `seeded worktree: ws=${workspaceId} agent=${agentName} repos=repo\n` };
+              stdout: `seeded worktree: ws=${workspaceId} agent=${agentName} repos=${managed.get(workspaceId)!.repositories.length}\n` };
           }
           return { exitCode, stderr, complete: true, stdout:
           command.argv[2] === 'role' ? badRoles ? 'not JSON' : '[{"name":"task","model":"unused-role-model"}]' : '{"agent":"worker","cost":0}' }; } };
@@ -131,18 +140,24 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     }
     if (method === 'POST' && route === '/api/workspaces') {
       const input = body as { name: string; repos: string[] }, workspaceId = input.name.toUpperCase();
-      const workspace = path.join(driver.runtimeRoot, 'runtime', 'managed', workspaceId), repo = path.join(workspace, 'repos', 'repo');
-      await fs.mkdir(repo, { recursive: true });
-      managed.set(workspaceId, { source: input.repos[0]!, path: workspace, repo });
-      return { status: 201, body: { success: true, data: { id: workspaceId, path: workspace, repos: [{ name: 'repo', path: repo }] } } };
+      const workspace = path.join(driver.runtimeRoot, 'runtime', 'managed', workspaceId);
+      const repositories = input.repos.map(source => ({ name: path.basename(source), path: path.join(workspace, path.basename(source)),
+        source_repo_id: path.basename(source), groups: [] as string[], source }));
+      for (const repo of repositories) await fs.mkdir(repo.path, { recursive: true });
+      managed.set(workspaceId, { source: input.repos[0]!, path: workspace, repo: repositories[0]!.path, repositories });
+      actors.set(workspaceId, [{ name: 'worker', repos: [], repo_groups: [] }]);
+      return { status: 201, body: { success: true, data: { id: workspaceId, path: workspace,
+        repos: repositories.map(repo => ({ name: repo.name, path: repo.path, source_repo_id: repo.source_repo_id, groups: repo.groups })) } } };
     }
     if (method === 'POST') return { status: 201, body: {} };
     const workspaceId = route.split('/')[3];
     const repo = managed.get(workspaceId!)?.repo ?? (workspaceId === 'E2E-WS' ? driver.workspaceRoot : path.join(driver.runtimeRoot, 'runtime/e2e-workspace-2'));
     if (route === `/api/workspaces/${workspaceId}`) return { status: 200, body: { success: true,
-      data: { id: workspaceId, path: managed.get(workspaceId!)?.path ?? repo, repos: [{ name: 'repo', path: repo }] } } };
-    if (route.endsWith('/agents')) return { status: 200, body: { success: true, total: badAgents ? 2 : 1,
-      data: [{ name: 'worker', workspace_key: workspaceId, role_name: 'task', parent: '', created_at: '2026-10-09T00:00:00Z', updated_at: '2026-10-09T00:00:00Z' }] } };
+      data: { id: workspaceId, path: managed.get(workspaceId!)?.path ?? repo,
+        repos: managed.get(workspaceId!)!.repositories.map(repo => ({ name: repo.name, path: repo.path, source_repo_id: repo.source_repo_id, groups: repo.groups })) } } };
+    if (route.endsWith('/agents')) return { status: 200, body: { success: true, total: actors.get(workspaceId!)!.length + (badAgents ? 1 : 0),
+      data: actors.get(workspaceId!)!.map(actor => ({ ...actor, workspace_key: workspaceId, role_name: 'task', parent: '',
+        created_at: '2026-10-09T00:00:00Z', updated_at: '2026-10-09T00:00:00Z' })) } };
     if (route.endsWith('/issues?limit=1000')) return { status: 200, body: { success: true, data: [{ id: 'issue' }] } };
     return { status: 200, body: {} };
   };
@@ -160,6 +175,7 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
       configurationRoot: pid === 999 ? driver.configurationRoot : command!.env.LOOM_CONFIG_DIR!,
       ...(pid === 999 ? {} : { fixtureRunId: command!.env.RUN_ID }), state: 'running' as const };
     return { identity, async inspect() { return { ...identity,
+      ...(pid === 999 ? { generation: storeGeneration } : {}),
       ...(parentTokenOverrides.has(pid) ? { fixtureRunId: parentTokenOverrides.get(pid) } : {}),
       state: alive && (!parent || parent.state() === 'running') ? 'running' as const : 'exited' as const }; },
       async stop() { alive = false; if (parent) await parent.stop(); }, async abandon() { assert.fail('Owned captured process must stay enrolled'); } };
@@ -195,6 +211,24 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     await fs.mkdir(worktree, { recursive: true }); worktrees.set(workspaceId, worktree);
   }
   return { root, driver, fixture, evidenceStore: getFixtureEvidenceStore(context, leaseId), leaseId, invoke, launches, stops, factories: () => factories,
+    repoName: (workspaceId = 'E2E-WS') => managed.get(workspaceId)!.repositories[0]!.name,
+    changeStoreGeneration(value: string) { storeGeneration = value; },
+    async addMultiWorkspace() {
+      const signal = new AbortController().signal, sourceRepos = ['alpha', 'beta'].map(name => path.join(driver.runtimeRoot, 'runtime', 'source-repos', name));
+      for (const source of sourceRepos) await fs.mkdir(path.join(source, '.git'), { recursive: true });
+      // Retain the actual successful injected HTTP creation in the production
+      // private recorder. Finite native factory provisioning remains separate.
+      const response = await driver.requestOwnedHttp('api', 'POST', '/api/workspaces', { name: 'owned-multi', type: 'empty', repos: sourceRepos }, signal);
+      const directory = path.join(driver.configurationRoot, 'fleet-db'), stat = await fs.lstat(directory);
+      const records = Reflect.get(driver, 'workspaceRecords') as HostWorkspaceRecords;
+      await records.captureCreated('OWNED-MULTI', sourceRepos, response,
+        { storeId: `${directory}#${stat.dev}:${stat.ino}`, storeGeneration: 'injected-captured-store' }, signal);
+      const store = getFixtureEvidenceStore(context, leaseId);
+      const record = await records.creationRecord(fixtureOwnerIdentity(fixture), 'OWNED-MULTI', store, signal);
+      await appendCreatedWorkspaces(fixture, [record], signal, store);
+      actors.get('OWNED-MULTI')!.push({ name: 'beta-worker', repos: ['beta'], repo_groups: [] });
+      return { repos: managed.get('OWNED-MULTI')!.repositories, actors: actors.get('OWNED-MULTI')! };
+    },
     changeParentToken(value: string | undefined) {
       parentTokenOverrides.set(driver.processesById.get('serve')!.pid, value);
     },
@@ -204,6 +238,52 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     processFailure: () => { exitCode = 17; stderr = 'exact process diagnostic'; }, restored: () => restoredBytes,
     async cleanup() { await fs.rm(root, { recursive: true, force: true }); } };
 }
+
+test('actual Host and public legacy registry preserve unselected multi-repository membership and exact task selectors', async t => {
+  const r = await setup(t), topology = await r.addMultiWorkspace();
+  const task = (agentName: string, repoName: string | null) => r.invoke('loom.cli.task', {
+    leaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentName, backend: 'codex', mode: 'once', issueId: null, repoName });
+  for (const request of [
+    () => r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId: 'FOREIGN', operation: 'list', name: null }),
+    () => r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId: 'OWNED-MULTI', agentId: 'foreign' } }),
+    () => task('beta-worker', 'alpha'), () => task('worker', 'missing'),
+  ]) {
+    assert.equal((await request()).availability, 'error'); assert.equal(r.factories(), 0); assert.equal(r.launches.length, 0);
+  }
+  const role = await r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId: 'OWNED-MULTI', operation: 'list', name: null });
+  assert.equal(role.availability, 'observed', JSON.stringify(role));
+  assert.deepEqual(r.launches.at(-1)!.argv, ['--workspace', 'OWNED-MULTI', 'role', 'list', '--json']);
+  for (const workspaceId of ['E2E-WS', 'OWNED-MULTI']) {
+    const usage = await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId, agentId: 'worker' } });
+    assert.equal(usage.availability, 'observed', JSON.stringify(usage));
+    assert.deepEqual(r.launches.at(-1)!.argv, ['usage', '--format', 'json', '--agent', 'worker']);
+    assert.equal(r.launches.at(-1)!.env.LOOM_WORKSPACE_ID, workspaceId);
+  }
+  const fact = await r.driver.readWorkspaceLegacyAgent(fixtureOwnerIdentity(r.fixture), 'OWNED-MULTI', 'worker', new AbortController().signal);
+  assert.equal(fact.repo, null); assert.equal(fact.commonDir, null);
+  assert.throws(() => requireOwnedWorkspace(r.fixture, 'OWNED-MULTI', 'worker', 'legacy-agent-name'), /selection/);
+  const beta = topology.repos.find(repo => repo.name === 'beta')!;
+  for (const [agentName, repoName, sourcePath] of [['worker', null, ''], ['worker', 'beta', beta.path], ['beta-worker', 'beta', beta.path]] as const) {
+    const result = await task(agentName, repoName); assert.equal(result.availability, 'observed', JSON.stringify(result));
+    assert.deepEqual(r.launches.at(-1)!.argv, ['--workspace', 'OWNED-MULTI', '--backend', 'codex', 'task', agentName]);
+    assert.equal(r.launches.at(-1)!.env.LOOM_WORKSPACE_ID, 'OWNED-MULTI');
+    assert.equal(r.launches.at(-1)!.env.LOOM_SOURCE_REPOS, sourcePath);
+    assert.equal(r.launches.at(-1)!.env.LOOM_ASSIGNED_TASK_ID, '');
+  }
+  topology.repos.reverse(); assert.equal((await task('worker', 'beta')).availability, 'observed');
+  assert.equal(r.launches.at(-1)!.env.LOOM_SOURCE_REPOS, beta.path);
+  const before = r.launches.length;
+  topology.actors.find(actor => actor.name === 'beta-worker')!.repos = ['alpha'];
+  assert.equal((await task('beta-worker', 'beta')).availability, 'error'); assert.equal(r.launches.length, before);
+  topology.actors.find(actor => actor.name === 'beta-worker')!.repos = ['beta'];
+  beta.groups = ['reassigned']; assert.equal((await task('worker', 'beta')).availability, 'error');
+  assert.equal(r.launches.length, before); beta.groups = [];
+  const sourceId = beta.source_repo_id; beta.source_repo_id = 'foreign-source';
+  assert.equal((await task('worker', 'beta')).availability, 'error'); assert.equal(r.launches.length, before); beta.source_repo_id = sourceId;
+  r.changeStoreGeneration('foreign-kernel-generation');
+  assert.equal((await task('worker', 'beta')).availability, 'error'); assert.equal(r.launches.length, before);
+  r.changeStoreGeneration('injected-captured-store');
+});
 
 test('canonical host binding refuses changed or missing captured serve RUN_ID before CLI effects', async t => {
   const r = await setup(t);
@@ -231,7 +311,7 @@ test('production host binding preserves managed workspace and source/config iden
     assert.equal((await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId, agentId: 'worker' } })).availability, 'observed');
     for (const backend of ['codex', 'claude', 'cursor', 'opencode']) for (const mode of ['once', 'auto', 'daemon']) {
       const result = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId, agentName: 'worker', backend, mode,
-        issueId: mode === 'daemon' ? 'issue' : null, repoName: 'repo' });
+        issueId: mode === 'daemon' ? 'issue' : null, repoName: r.repoName(workspaceId) });
       assert.equal(result.availability, 'observed', JSON.stringify(result.error));
       const command = r.launches.at(-1)!;
       assert.equal(command.cwd, r.driver.workspaceRoot);
@@ -373,7 +453,7 @@ test('canonical acquisition binds actual host driver to role, usage, all backend
   assert.equal((await r.invoke('loom.cli.usage', { agent: { fixtureLeaseId: r.leaseId, workspaceId: 'E2E-WS', agentId: 'worker' } })).availability, 'observed');
   for (const backend of ['codex','claude','cursor','opencode']) for (const mode of ['once','auto','daemon']) {
     const result = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker', backend,
-      mode, issueId: mode === 'daemon' ? 'issue' : null, repoName: 'repo' });
+      mode, issueId: mode === 'daemon' ? 'issue' : null, repoName: r.repoName() });
     assert.equal(result.availability, 'observed');
     assert.equal((result.data as { complete: boolean }).complete, false);
     const command = r.launches.at(-1)!;
@@ -530,7 +610,7 @@ test('direct once, auto and daemon CLI actors keep matching effective env despit
   const r = await setup(t, { liveClaude: true });
   for (const mode of ['once', 'auto', 'daemon']) {
     const result = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker', backend: 'claude',
-      mode, issueId: mode === 'daemon' ? 'issue' : null, repoName: 'repo' });
+      mode, issueId: mode === 'daemon' ? 'issue' : null, repoName: r.repoName() });
     assert.equal(result.availability, 'observed', JSON.stringify(result));
     const command = r.launches.at(-1)!;
     assert.equal(command.env.LOOM_AGENT_MODEL, 'configured-model');
@@ -548,7 +628,7 @@ test('an override actually applied to the host environment rejects before the ta
   Object.defineProperty(r.driver, 'env', { value: () => ({ ...inherited, LOOM_AGENT_MODEL: 'applied-override' }) });
   for (const mode of ['once', 'auto', 'daemon']) {
     const result = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker', backend: 'claude',
-      mode, issueId: mode === 'daemon' ? 'issue' : null, repoName: 'repo' });
+      mode, issueId: mode === 'daemon' ? 'issue' : null, repoName: r.repoName() });
     assert.equal(result.availability, 'error');
   }
   assert.equal(r.launches.filter(command => command.argv[4] === 'task').length, 0);
