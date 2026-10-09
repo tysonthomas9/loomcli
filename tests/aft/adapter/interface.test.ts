@@ -43,6 +43,27 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
   return { registry, context, fixture, invoke, evidenceStore, get reads() { return reads; }, get disposed() { return disposed; }, setPayload(value: Json) { payload = value; } };
 }
 const input = { agent: { fixtureLeaseId: 'lease', workspaceId: 'workspace', agentId: 'agt_owned' }, after: 0, pageSize: 2, maxPages: 2, maxRecords: 10, kinds: [] };
+test('agent observations distinguish missing requested model/outcome from actual nullable and completed values', async t => {
+  const harness = await setup(t);
+  const missing = await harness.invoke('loom.agent.observe',{agent:input.agent});
+  assert.equal(missing.availability,'observed');
+  assert.ok(missing.data && typeof missing.data==='object' && !Array.isArray(missing.data));
+  assert.deepEqual(missing.data.requestedModel,{present:false,value:null});
+  assert.deepEqual(missing.data.outcome,{present:false,value:null});
+  const row = harness.fixture.agents.get('agt_owned')!.row;
+  row.model='requested/provider';row.outcome='completed';row.state='finished';
+  const observed = await harness.invoke('loom.agent.observe',{agent:input.agent});
+  assert.ok(observed.data && typeof observed.data==='object' && !Array.isArray(observed.data));
+  assert.equal(observed.data.state,'finished');
+  assert.deepEqual(observed.data.requestedModel,{present:true,value:'requested/provider'});
+  assert.deepEqual(observed.data.outcome,{present:true,value:'completed'});
+  row.model=null;row.outcome=null;
+  const nullable = await harness.invoke('loom.agent.observe',{agent:input.agent});
+  assert.ok(nullable.data && typeof nullable.data==='object' && !Array.isArray(nullable.data));
+  assert.deepEqual(nullable.data.requestedModel,{present:true,value:null});
+  row.outcome={malformed:true};
+  assert.equal((await harness.invoke('loom.agent.observe',{agent:input.agent})).availability,'error');
+});
 test('canonical registry pins captured saved-event snapshot before reread and rejects later tail substitution', async t => {
   const harness = await setup(t);
   const capture = SavedEventsOutput.parse((await harness.invoke('loom.api.savedEvents',input)).data);
@@ -160,6 +181,29 @@ test('native model and deletion evidence rejects foreign/stale/duplicate proofs 
   assert.equal(models.availability, 'observed');
   assert.equal(schema.parse(models.data).records[0]!.model, 'actual-model');
   assert.notEqual(schema.parse(models.data).records[0]!.model, 'expected-model');
+  assert.equal(schema.parse(models.data).records[0]!.finish,'stop');
+  assert.equal(schema.parse(models.data).records[0]!.errorFieldPresent,false);
+  assert.equal(schema.parse(models.data).records[0]!.errorTruthy,false);
+  const completed = {id:'msg_1',sessionID:'ses_owned',type:'assistant',time:{completed:1},finish:'stop',model:{providerID:'provider',id:'actual-model'}};
+  messages={data:[completed,
+    {...completed,id:'msg_unfinished',finish:''},
+    {...completed,id:'msg_null',finish:null},
+    {...completed,id:'msg_failed',error:{name:'failed',message:'private-password'}},
+    {...completed,id:'msg_other',error:null,model:{providerID:'provider',id:'different-model'}},
+  ]};
+  const allCompleted = await harness.invoke('loom.native.observe',nativeInput);
+  assert.equal(allCompleted.availability,'observed');
+  const completedFacts = schema.parse(allCompleted.data);
+  assert.deepEqual(completedFacts.records.map(record=>[record.id,record.finish,record.errorFieldPresent,record.errorTruthy,record.model]),
+    [['msg_1','stop',false,false,'actual-model'],['msg_other','stop',true,false,'different-model']]);
+  assert.ok(!JSON.stringify(allCompleted).includes('private-password'));
+  messages={data:[{...completed,id:'msg_failed',error:{name:'failed'}},{...completed,id:'msg_unfinished',finish:''}]};
+  assert.deepEqual(schema.parse((await harness.invoke('loom.native.observe',nativeInput)).data).records,[]);
+  const selected = await harness.invoke('loom.native.observe',{...nativeInput,view:'session'});
+  assert.equal(NativeOutput.options[0].parse(selected.data).selectedModel,null);
+  body={data:{id:'ses_owned',metadata:{agent_id:row.agent_id},location:{directory:row.worktree_path},model:{providerID:'provider',id:'selected-model'}}};
+  const selectedFact = await harness.invoke('loom.native.observe',{...nativeInput,view:'session'});
+  assert.deepEqual(NativeOutput.options[0].parse(selectedFact.data).selectedModel,{provider:'provider',model:'selected-model'});
   agent.native.sessions = async () => [
     {agent_id:row.agent_id,harness:'opencode',native_root:'',native_id:'ses_owned'},
     {agent_id:row.agent_id,harness:'opencode',native_root:'',native_id:'ses_old'},

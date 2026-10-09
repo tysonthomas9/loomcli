@@ -88,7 +88,7 @@ export function createNativeHostAccess(options: NativeHostOptions): NativeAccess
     registration: privateRegistration,
     process: async () => processIdentity((await privateRegistration()).pid),
     async agent(agentId) {
-      const rows = await query('SELECT agent_id, workspace_id, repo, worktree_path, branch, harness, harness_session_id, harness_session_root, parent_agent_id, root_agent_id, created_by_kind, created_by_id, preset, revision, state, running_turn_id, deleted_at, history_purged_at FROM agents WHERE agent_id=? AND workspace_id=?', [agentId, options.workspaceId]);
+      const rows = await query('SELECT agent_id, workspace_id, repo, worktree_path, branch, harness, harness_session_id, harness_session_root, parent_agent_id, root_agent_id, created_by_kind, created_by_id, preset, revision, state, running_turn_id, deleted_at, history_purged_at, model, outcome FROM agents WHERE agent_id=? AND workspace_id=?', [agentId, options.workspaceId]);
       requireFact(rows.length === 1, 'identity-mismatch', 'Native agent row is missing or duplicated');
       const row = AgentRow.parse(rows[0]);
       requireFact(row.repo === options.repo, 'ownership-mismatch', 'Native agent belongs to another repository');

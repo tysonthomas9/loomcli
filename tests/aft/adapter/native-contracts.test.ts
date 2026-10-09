@@ -81,11 +81,11 @@ test('native host reads owned SQLite and fixed authenticated routes with determi
   const db = new DatabaseSync(path.join(root, 'agents.db'));
   db.exec(`CREATE TABLE agents (agent_id TEXT, workspace_id TEXT, repo TEXT, worktree_path TEXT, branch TEXT, harness TEXT,
     harness_session_id TEXT, harness_session_root TEXT, parent_agent_id TEXT, root_agent_id TEXT, created_by_kind TEXT, created_by_id TEXT,
-    preset TEXT, revision INTEGER, state TEXT, running_turn_id TEXT, deleted_at TEXT, history_purged_at TEXT);
+    preset TEXT, revision INTEGER, state TEXT, running_turn_id TEXT, deleted_at TEXT, history_purged_at TEXT, model TEXT, outcome TEXT);
     CREATE TABLE agent_native_sessions (agent_id TEXT, harness TEXT, native_root TEXT, native_id TEXT);
     CREATE TABLE agent_events (agent_id TEXT, event_id TEXT);`);
-  db.prepare('INSERT INTO agents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('agt_owned', 'workspace', '/owned/source', '/owned/tree',
-    'loom/agent/owned', 'opencode', 'ses_owned', '', null, null, 'user', null, 'lead', 1, 'idle', null, null, null);
+  db.prepare('INSERT INTO agents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('agt_owned', 'workspace', '/owned/source', '/owned/tree',
+    'loom/agent/owned', 'opencode', 'ses_owned', '', null, null, 'user', null, 'lead', 1, 'idle', null, null, null, 'requested/model', 'completed');
   db.prepare('INSERT INTO agent_native_sessions VALUES (?,?,?,?)').run('agt_owned', 'opencode', '', 'ses_owned');
   db.exec("INSERT INTO agent_events VALUES ('agt_owned','evt1'),('agt_owned','evt2'),('foreign','evt3');"); db.close();
   const calls: string[] = [];
@@ -99,6 +99,8 @@ test('native host reads owned SQLite and fixed authenticated routes with determi
         new Response('{"pid":42}', { headers: { 'content-type': 'application/json' } });
     } });
   assert.equal((await access.agent('agt_owned')).harness_session_root, '');
+  assert.equal((await access.agent('agt_owned')).model,'requested/model');
+  assert.equal((await access.agent('agt_owned')).outcome,'completed');
   assert.equal((await access.history!('agt_owned')).savedEventCount,2);
   await assert.rejects(access.history!('foreign'));
   const update=new DatabaseSync(path.join(root,'agents.db'));
