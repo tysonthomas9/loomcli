@@ -15,6 +15,7 @@ import { HostWorkspaceRecords } from './workspace-records.js';
 import { seedOwnedRepository } from './repository.js';
 import { RegisteredBuiltinWorkers, type OwnedWorkerFact } from './workers.js';
 import type { EvidenceStore } from '../evidence.js';
+import { FixtureWorkersOutput } from '../fixture-workers.js';
 import { fixtureOwnerIdentity } from '../authority.js';
 import { z } from 'zod';
 import type { OwnedRoot,OwnedFixture } from '../ownership.js';
@@ -144,12 +145,36 @@ export class HostFixtureDriver implements FixtureDriver {
   }
   /** Returns only concretely registered builtin workers. Native harness and
    * terminal metadata are separate contracts; this is not their absence proof. */
-  async refreshOwnedProductProcesses(signal:AbortSignal):Promise<readonly OwnedWorkerFact[]>{
+  private requireWorkerObservationIdle(signal:AbortSignal){
     signal.throwIfAborted();
     check(this.workspaceFixture&&this.workspaceOwner&&this.workspaceEvidence&&this.workspaceRecords&&this.descendants,'unsupported-capability');
-    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','cli-launch','worker-action','worker-log'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
-    const daemon=this.handles.get('daemon');check(daemon?.state()==='running','unsupported-capability');
+    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','cli-launch','worker-action','worker-log','http-mutation'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
+    check(this.handles.get('daemon')?.state()==='running','unsupported-capability');
+  }
+  async refreshOwnedProductProcesses(signal:AbortSignal):Promise<readonly OwnedWorkerFact[]>{
+    this.requireWorkerObservationIdle(signal);
+    return this.withServiceOperation('worker-registration',()=>this.refreshRegisteredWorkers(signal));
+  }
+  /** One operation reservation covers the actual serve handle/kernel identity,
+   * worker discovery and final revalidation. It grants no unregistered-process
+   * absence or physical exit facts. */
+  async observeWorkers(signal:AbortSignal){
+    this.requireWorkerObservationIdle(signal);
     return this.withServiceOperation('worker-registration',async()=>{
+      const serve=this.handles.get('serve');check(serve&&serve.state()==='running'&&serve.pid>0,'identity-mismatch');
+      const parents=await this.registeredParents(signal),record=this.parentHandles.get('serve');
+      check(record&&record.handle===serve&&parents.some(parent=>parent.id===record.id),'identity-mismatch');
+      await this.verifyRegisteredParents(parents,signal);
+      this.requireCurrentHandle('serve',serve!);
+      const workers=await this.refreshRegisteredWorkers(signal);
+      await this.verifyRegisteredParents(parents,signal);
+      this.requireCurrentHandle('serve',serve!);check(serve!.state()==='running','identity-mismatch');
+      signal.throwIfAborted();
+      return FixtureWorkersOutput.parse({fixtureLeaseId:this.leaseId,coverage:'registered-builtin-running-workers',
+        serve:{id:'serve',pid:serve!.pid,generation:serve!.generation,state:'running'},workers});
+    });
+  }
+  private async refreshRegisteredWorkers(signal:AbortSignal):Promise<readonly OwnedWorkerFact[]>{
       if(!this.workerRegistrations){
         const root=this.stamps.get(this.root),config=this.stamps.get(this.configurationRoot);check(root&&config);
         this.workerRegistrations=new RegisteredBuiltinWorkers({runtimeRoot:{path:this.root,device:root!.dev,inode:root!.ino},
@@ -175,7 +200,6 @@ export class HostFixtureDriver implements FixtureDriver {
             `/api/workspaces/${encodeURIComponent(fact.workspaceId)}/agents/${encodeURIComponent(fact.agentId)}/stop`,undefined,abort,generation)},this.descendants!,this.files);
       }
       return this.workerRegistrations.refresh(signal);
-    });
   }
   async stopRegisteredWorker(id:string,generation:string,expectedServeGeneration:string,signal:AbortSignal){
     signal.throwIfAborted();this.requireWorkerRegistrationIdle();

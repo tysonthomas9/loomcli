@@ -44,3 +44,17 @@ test('Cursor exposes backend-default selection; a named model cannot be attested
  assert.deepEqual(fixtureRouting(plan).modelSelection,{kind:'exact-model',model:plan.model,selector:'agent-env'});
  assert.deepEqual(fixtureRouting({...plan,profile:'legacy-real-opencode'}).modelSelection,{kind:'exact-model',model:plan.model,selector:'opencode-env'});
 });
+
+test('worker discovery grants use the shared helper effects only for owned Host profiles',()=>{
+ const effects=['read-api','read-filesystem','start-owned-process'] as const;
+ for(const profile of ['legacy-deterministic','legacy-real-codex','legacy-real-claude','legacy-real-opencode','legacy-real-cursor']){
+  const owned={...owner,profile},configured={...plan,profile,model:profile==='legacy-real-cursor'?'backend-default':plan.model};
+  const fixture={...owned,operationAuthority:fixtureOperationAuthority(owned,configured)} as OwnedFixture;
+  assert.deepEqual(getFixtureOperationAuthority(fixture,'loom.fixture.observeWorkers',effects).effects,effects);
+  assert.throws(()=>getFixtureOperationAuthority(fixture,'loom.fixture.observeWorkers',['external-provider']));
+ }
+ for(const profile of ['agents-real-opencode','agents-emulator','legacy-real-codex-podman']){
+  const owned={...owner,profile},fixture={...owned,operationAuthority:fixtureOperationAuthority(owned,{...plan,profile})} as OwnedFixture;
+  assert.throws(()=>getFixtureOperationAuthority(fixture,'loom.fixture.observeWorkers',effects));
+ }
+});
