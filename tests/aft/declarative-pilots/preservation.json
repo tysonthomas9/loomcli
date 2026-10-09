@@ -8383,7 +8383,7 @@
             },
             {
               "gap": "native-completed-finish-error",
-              "reason": "Original native helper selects completed assistant with nonempty finish and no error. Canonical completed-model records omit finish/error and cannot establish selected subset equivalence; exact first valid completion/model and child all-consistency remain unresolved."
+              "reason": "Approved core77ba247 native.ts:144 already selects assistant messages with completed time, nonempty finish and no error; source inspection confirms this eligibility filter. Output schema/native.ts:23-25 and projection:146 omit explicit finish/error facts for YAML assertions. Exact original first-valid-completion/model and child all-record consistency mappings remain unauthored/unvalidated; no runtime or raw-suite preservation credit."
             },
             {
               "gap": "native-session-model-requested-facts",
@@ -12964,7 +12964,7 @@
           },
           "original": {
             "wait": {
-              "fn": "(() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));\n  return row?.getAttribute('data-tray-row') && row.textContent?.includes(' · ') &&\n    row.textContent?.match(/(▸|💭)/); })()"
+              "fn": "(() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));\n  return row?.getAttribute('data-tray-row') && row.textContent?.includes(' \u00b7 ') &&\n    row.textContent?.match(/(\u25b8|\ud83d\udcad)/); })()"
             },
             "intent": "Screenshot the running child's current harmless tool or reasoning step and elapsed time (DF2)"
           },
@@ -13003,7 +13003,7 @@
             "end_line": 105
           },
           "original": {
-            "run": "set -eu\nid=\"$(cat \"$AFT_WORK_DIR/coverage-children-activity/repeat.id\")\"\nagent-browser --session \"$AFT_SESSION\" wait --fn \"(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\\\"$id\\\"]'); const running=row?.querySelector('[data-status=running]'); const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim() || ''; const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(▸|💭)/.test(result) && /[0-9]+m [0-9][0-9]s$/.test(elapsed); })()\"\nagent-browser --session \"$AFT_SESSION\" screenshot \"$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png\"\npython3 \"$AFT_TESTS_DIR/scripts/coverage-children-activity.py\" activity repeat\n",
+            "run": "set -eu\nid=\"$(cat \"$AFT_WORK_DIR/coverage-children-activity/repeat.id\")\"\nagent-browser --session \"$AFT_SESSION\" wait --fn \"(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\\\"$id\\\"]'); const running=row?.querySelector('[data-status=running]'); const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim() || ''; const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(\u25b8|\ud83d\udcad)/.test(result) && /[0-9]+m [0-9][0-9]s$/.test(elapsed); })()\"\nagent-browser --session \"$AFT_SESSION\" screenshot \"$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png\"\npython3 \"$AFT_TESTS_DIR/scripts/coverage-children-activity.py\" activity repeat\n",
             "intent": "Match the exact visible child row and its current step to a saved event in that same running turn"
           },
           "coverage": "unresolved",
@@ -13877,7 +13877,7 @@
           "gaps": [
             {
               "gap": "native-completed-finish-error",
-              "reason": "Original native helper selects completed assistant with nonempty finish and no error. Canonical completed-model records omit finish/error and cannot establish selected subset equivalence; exact first valid completion/model and child all-consistency remain unresolved."
+              "reason": "Approved core77ba247 native.ts:144 already selects assistant messages with completed time, nonempty finish and no error; source inspection confirms this eligibility filter. Output schema/native.ts:23-25 and projection:146 omit explicit finish/error facts for YAML assertions. Exact original first-valid-completion/model and child all-record consistency mappings remain unauthored/unvalidated; no runtime or raw-suite preservation credit."
             },
             {
               "gap": "native-session-model-requested-facts",
@@ -17193,9 +17193,9 @@
               "source": {
                 "line": 1087,
                 "end_line": 1087,
-                "expression": "re.match('^(▸|💭)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
+                "expression": "re.match('^(\u25b8|\ud83d\udcad)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
                 "message": null,
-                "source": "assert re.match(r\"^(▸|💭)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
+                "source": "assert re.match(r\"^(\u25b8|\ud83d\udcad)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
                 "function": "reactivation_checkpoint_ok",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -17204,8 +17204,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "re.match('^(▸|💭)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
-                "evidence": "assert re.match(r\"^(▸|💭)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
+                "required": "re.match('^(\u25b8|\ud83d\udcad)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
+                "evidence": "assert re.match(r\"^(\u25b8|\ud83d\udcad)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
                 "sourceHelper": "tests/aft/scripts/coverage-children-activity.py",
                 "sourceLine": 1087,
                 "sourceFunction": "reactivation_checkpoint_ok",
@@ -26449,9 +26449,9 @@
               "source": {
                 "line": 1761,
                 "end_line": 1764,
-                "expression": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('😀.' in rich_result['terminal'])",
+                "expression": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('\ud83d\ude00.' in rich_result['terminal'])",
                 "message": "'the real GFM/list/raw-HTML/emoji component projection changed'",
-                "source": "assert \"first bold item\" in rich_result[\"terminal\"] and \\\n        '<img src=x onerror=\"window.pwned=1\">' in rich_result[\"terminal\"] and \\\n        \"😀.\" in rich_result[\"terminal\"], \\\n        \"the real GFM/list/raw-HTML/emoji component projection changed\"",
+                "source": "assert \"first bold item\" in rich_result[\"terminal\"] and \\\n        '<img src=x onerror=\"window.pwned=1\">' in rich_result[\"terminal\"] and \\\n        \"\ud83d\ude00.\" in rich_result[\"terminal\"], \\\n        \"the real GFM/list/raw-HTML/emoji component projection changed\"",
                 "function": "self_test_markdown_projection",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -26460,7 +26460,7 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('😀.' in rich_result['terminal'])",
+                "required": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('\ud83d\ude00.' in rich_result['terminal'])",
                 "evidence": "'the real GFM/list/raw-HTML/emoji component projection changed'",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1761,
@@ -27337,9 +27337,9 @@
               "source": {
                 "line": 2581,
                 "end_line": 2581,
-                "expression": "js_utf16_length('A😀') == 3 and assert_motion_capture(emoji)[2] == -40",
+                "expression": "js_utf16_length('A\ud83d\ude00') == 3 and assert_motion_capture(emoji)[2] == -40",
                 "message": null,
-                "source": "assert js_utf16_length(\"A😀\") == 3 and assert_motion_capture(emoji)[2] == -40",
+                "source": "assert js_utf16_length(\"A\ud83d\ude00\") == 3 and assert_motion_capture(emoji)[2] == -40",
                 "function": "self_test_motion_assert",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -27348,8 +27348,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "js_utf16_length('A😀') == 3 and assert_motion_capture(emoji)[2] == -40",
-                "evidence": "assert js_utf16_length(\"A😀\") == 3 and assert_motion_capture(emoji)[2] == -40",
+                "required": "js_utf16_length('A\ud83d\ude00') == 3 and assert_motion_capture(emoji)[2] == -40",
+                "evidence": "assert js_utf16_length(\"A\ud83d\ude00\") == 3 and assert_motion_capture(emoji)[2] == -40",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2581,
                 "sourceFunction": "self_test_motion_assert",
@@ -28517,9 +28517,9 @@
               "source": {
                 "line": 3161,
                 "end_line": 3161,
-                "expression": "reasoning_preview('x' * 121) == 'x' * 119 + '…'",
+                "expression": "reasoning_preview('x' * 121) == 'x' * 119 + '\u2026'",
                 "message": null,
-                "source": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"…\"",
+                "source": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"\u2026\"",
                 "function": "self_test_reasoning",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -28528,8 +28528,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "reasoning_preview('x' * 121) == 'x' * 119 + '…'",
-                "evidence": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"…\"",
+                "required": "reasoning_preview('x' * 121) == 'x' * 119 + '\u2026'",
+                "evidence": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"\u2026\"",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3161,
                 "sourceFunction": "self_test_reasoning",
@@ -29258,9 +29258,9 @@
               "source": {
                 "line": 4061,
                 "end_line": 4062,
-                "expression": "isinstance(observed, str) and 'অপৰাহ্ন ১২.৫৯' in observed",
+                "expression": "isinstance(observed, str) and '\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef' in observed",
                 "message": "'BLOCKED: documented long time did not render on the owned Chat row'",
-                "source": "assert isinstance(observed, str) and \"অপৰাহ্ন ১২.৫৯\" in observed, \\\n        \"BLOCKED: documented long time did not render on the owned Chat row\"",
+                "source": "assert isinstance(observed, str) and \"\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef\" in observed, \\\n        \"BLOCKED: documented long time did not render on the owned Chat row\"",
                 "function": "require_locale_time",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -29269,7 +29269,7 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "isinstance(observed, str) and 'অপৰাহ্ন ১২.৫৯' in observed",
+                "required": "isinstance(observed, str) and '\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef' in observed",
                 "evidence": "'BLOCKED: documented long time did not render on the owned Chat row'",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4061,

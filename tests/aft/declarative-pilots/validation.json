@@ -230,5 +230,14 @@
     "ciCommand": "gh api repos/tysonthomas9/loomcli/commits/b675d0803a9e04f0eab06f6b5aa2ef1e1cad8eb0/check-runs",
     "ciResult": "No check runs returned; no base CI failure link available. Earlier eight legacy renderer-acquisition failures are historical adapter evidence, superseded by parent accepted full254/254 at77ba; no current full-adapter-green claim from this task."
   },
-  "retainedTaskDirectory": "/private/tmp/loom-aft-pilot-validation-16e28787"
+  "retainedTaskDirectory": "/private/tmp/loom-aft-pilot-validation-16e28787",
+  "nativeGapCorrection": {
+    "at": "2026-10-09T09:14:08.392335+00:00",
+    "adapterSource": "77ba247c0f85b86dd70c02651e2fed4b86127eb0",
+    "source": "tests/aft/adapter/native.ts",
+    "eligibilityFilterLine": 144,
+    "outputProjectionLine": 146,
+    "correctedGapCount": 2,
+    "result": "Source-confirmed completed/nonempty-finish/no-error eligibility filter already exists; explicit output facts and authored original selection/model predicates remain unvalidated. No gates rerun; YAML bytes and prior raw receipts unchanged."
+  }
 }
