@@ -36,6 +36,10 @@
     {
       "path": "test/local-mode/docker-compose.agents-real.yml",
       "sha256": "6f0faeda309310401572711d6fca0eb7bc18ab5f290229eeff936490d0d3f156"
+    },
+    {
+      "path": "tests/aft/scripts/live-close-agent-tab.sh",
+      "sha256": "82253319f090318c3c8b044a203c0430b08ec5b5ee06656be6e97fedfd6916bd"
     }
   ],
   "profileContracts": {
@@ -3376,7 +3380,7 @@
       "originalContractSha256": "6cc913bd20e73d0fdbfb5a652cb13827c0f996d516941c7574abba131a99f8c7",
       "suite": "agents-v1-children",
       "name": "T8 agent tray - children started at different times show in the tray while working, a result waits with the unread dot during a Lead turn, and the tray empties once every result is delivered",
-      "intent": "An operator asks an OpenCode lead for one child and later a second; the tray above the composer lists the working children by wave with a \"+1 new\" chip, the second child's result shows \"done · waiting for Lead\" with the unread dot while the Lead's turn runs, the dot clears and the child leaves the tray once the Lead reads it, the tray disappears when every result is delivered, and no raw task_completed text ever shows (DF1)",
+      "intent": "An operator asks an OpenCode lead for one child and later a second; the tray above the composer lists the working children by wave with a \"+1 new\" chip, the second child's result shows \"done \u00b7 waiting for Lead\" with the unread dot while the Lead's turn runs, the dot clears and the child leaves the tray once the Lead reads it, the tray disappears when every result is delivered, and no raw task_completed text ever shows (DF1)",
       "tier": "suites",
       "profiles": [
         "legacy-deterministic"
@@ -30568,5 +30572,59 @@
     }
   ],
   "documentCount": 82,
-  "graphPathCount": 20
+  "graphPathCount": 20,
+  "oracleClarifications": [
+    {
+      "source": "tests/aft/scripts/live-close-agent-tab.sh",
+      "sourceSha256": "82253319f090318c3c8b044a203c0430b08ec5b5ee06656be6e97fedfd6916bd",
+      "lines": [
+        1,
+        61
+      ],
+      "commentIntent": "Close live tabs to prove that no billed process is left attached.",
+      "executedOracle": {
+        "surface": "terminal-tab metadata API",
+        "read": "Reachable initial GET and list-shaped response; capture tabs with exact agent_id and nonempty session_name.",
+        "actor": "DELETE each captured exact session, retaining each HTTP success/failure; do not accept arbitrary supplied session authority.",
+        "after": "Reachable final GET and list-shaped response with same actor filter.",
+        "assertions": [
+          "zero remaining matching tabs",
+          "zero DELETE failures"
+        ],
+        "incomplete": "Unreachable API or invalid response never satisfies absence or cardinality."
+      },
+      "excludedInference": "Neither metadata disappearance nor successful DELETE demonstrates a PID, kernel generation, process exit or afterGeneration=null.",
+      "productEvidence": "internal/webui/terminal/service_tabs.go:145-165 removes tab metadata, then best-effort Kill logs failures.",
+      "callers": [
+        {
+          "path": "tests/aft/live-interactive-suites/li-custom-prompt.test.yaml",
+          "lines": [
+            49,
+            269
+          ],
+          "caseCallMustSucceed": true,
+          "teardown": "set +e backstop; later commands can mask helper failure"
+        },
+        {
+          "path": "tests/aft/live-interactive-suites/ll-lead-assignment.test.yaml",
+          "lines": [
+            41,
+            240
+          ],
+          "caseCallMustSucceed": true,
+          "teardown": "set +e backstop; later commands can mask helper failure"
+        },
+        {
+          "path": "tests/aft/live-pr-review-suites/lp-pr-review.test.yaml",
+          "lines": [
+            117,
+            503
+          ],
+          "caseCallMustSucceed": true,
+          "teardown": "explicit || true backstop; in-test close is load-bearing"
+        }
+      ],
+      "coverage": "Preserve these original executable predicates; actual paid-process exit remains additional unverified runtime evidence. Other terminal callers require their own source mapping."
+    }
+  ]
 }
