@@ -33,3 +33,27 @@ test('cancelled completion keeps exact launched handle available for owned clean
 test('a completed parent with uncertain surviving group cannot be called cleaned up or guessed killed',async()=>{
  const r=rig();const p=r.processes.launch!(command,'','registered');r.child.emit('spawn');r.finish();r.linger();await assert.rejects(p.stop());assert.deepEqual(r.signals,[]);
 });
+
+test('owned service transport retains independent bounded log bytes without claiming a running prefix is closed',async()=>{
+ const r=rig(),p=r.processes.start(command,'ready','registered');
+ r.child.stdout.write('ready\n');await p.ready(new AbortController().signal);
+ const bytes=Buffer.from('agent stopped via control socket worktree=nova café\n');
+ r.child.stderr.write(bytes.subarray(0,bytes.length-3));r.child.stderr.write(bytes.subarray(bytes.length-3));
+ assert.deepEqual(p.output!(),{stdout:'ready\n',stderr:bytes.toString('utf8'),stdoutComplete:true,stderrComplete:true,closed:false});
+ r.finish();assert.equal(p.output!().closed,true);await p.stop();assert.deepEqual(r.signals,[]);
+});
+
+for(const stream of ['stdout','stderr'] as const)test(`owned service ${stream} overflow marks incomplete without killing or repairing output`,async()=>{
+ const r=rig(),p=r.processes.start(command,'ready','registered');
+ r.child[stream].write('ready\n');await p.ready(new AbortController().signal);
+ r.child[stream].write(Buffer.alloc(4*1024*1024+1));
+ assert.equal(p.output!()[`${stream}Complete`],false);assert.equal(p.output!()[stream],'ready\n');
+ assert.equal(p.state(),'running');assert.deepEqual(r.signals,[]);r.finish();await p.stop();
+});
+
+test('owned service transport error cannot turn discarded or unfinished logs into a complete empty snapshot',async()=>{
+ const r=rig(undefined),p=r.processes.start(command,'ready','registered');
+ r.child.emit('error',new Error('private transport error'));
+ await assert.rejects(p.ready(new AbortController().signal));
+ assert.deepEqual(p.output!(),{stdout:'',stderr:'',stdoutComplete:false,stderrComplete:false,closed:false});
+});
