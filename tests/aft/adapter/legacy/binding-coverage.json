@@ -52,18 +52,23 @@
     "operation-authority": {
       "owner": "agent-0f30e493-e8b6-4f7c-bb49-c320a3725a17",
       "request": "canonical per-operation expected evidence and permitted effects from private provisioning/backend/model authority",
-      "status": "Bound exact canonical404998 grants before factory; mixed read/live-task class and backend/model denial tested through registry; actual production grants still fixture-owned."
+      "status": "Single immutable legacy/effects.ts contract; exact actual discovery+actor effects admitted before factory. Lazy role CLI absent from configure/runtime. Deterministic descriptor omits external-provider; declared live grant cannot reuse it. Production routing/actual model policy fixture followup required."
     },
     "engine-final": {
       "owner": "agent-a43468f0-1931-41df-92fc-9a50f0dfc1d5",
       "request": "accepted final engine context/cleanup/retry/stream contract",
-      "status": "Unmodified correction3a043624 package used for focused tests; independent final pin/acceptance remains parent-owned."
+      "status": "Focused checks consume unmodified accepted e8eee6bb package SHA614e539333db04cf917ad177be8981fb77cc59d48d1c6310cc265864e9e8a78e."
     },
     "owned-workspaces": {
       "owner": "agent-0f30e493-e8b6-4f7c-bb49-c320a3725a17",
       "fixtureOwner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "Canonical owned fixture workspace records plus actual creation receipts for E2E-WS-AGENT/nova and E2E-AGV1-*; discovery never grants ownership",
-      "status": "Required; current published fixture binds only initialworkspace"
+      "status": "Consumes explicit legacy-agent-name core b675 authority before factory; host enumerates only retained legacy records, filters discovery to enrolled members, exact workspace provenance and dynamic parent enrollment tested. Actual fixture creation/read hooks remain required."
+    },
+    "operation-routing": {
+      "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
+      "request": "Approved fixture executionRouting plus source-supported exact-model/backend-default variant. Direct task inherits model/env; daemon supervisor may override role model. Cursor account/backend default original source has no exact model predicate.",
+      "status": "Dependency1bb requires missing approved renderer prerequisiteea05; consumption aborted clean on three shared conflicts, awaiting exact fixture prerequisite. No copied routing or invented selected model."
     }
   },
   "operations": [
