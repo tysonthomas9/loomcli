@@ -26,6 +26,41 @@ function resource(verify = async () => {}, dispose = async () => {}) {
   const value: NativeSessionOwnedResource = { verify, dispose }; return value;
 }
 
+test('synchronous verification abort observes rejected raw work before enrolled cleanup', async () => {
+  const signal = new AbortController(); let closes = 0;
+  const { guard } = manualGuard();
+  const owner = new RetainedNativeSession(async (_signal, retain) => retain(resource(() => {
+    signal.abort(); return Promise.reject(new Error('actual verify rejection'));
+  }, async () => { closes++; })), () => {}, guard);
+  await assert.rejects(owner.acquire(signal.signal));
+  await new Promise<void>(resolve => setImmediate(resolve));
+  await owner.dispose(); await owner.dispose(); assert.equal(closes, 1);
+});
+
+test('already aborted opening guard observes raw rejection without dispatching factory', async () => {
+  let starts = 0;
+  const guard: NativeSessionGuard = { begin() {
+    const controller = new AbortController(); controller.abort();
+    return { signal: controller.signal, release() {} };
+  } };
+  const owner = new RetainedNativeSession(async () => { starts++; }, () => {}, guard);
+  await assert.rejects(owner.acquire(new AbortController().signal));
+  await new Promise<void>(resolve => setImmediate(resolve)); assert.equal(starts, 0);
+});
+
+test('already aborted cleanup guard retains original rejected close work for fresh retry', async () => {
+  let guards = 0, closes = 0;
+  const guard: NativeSessionGuard = { begin(signal) {
+    if (++guards === 2) { const c = new AbortController(); c.abort(); signal = c.signal; }
+    return { signal, release() {} };
+  } };
+  const owner = new RetainedNativeSession(async (_signal, retain) => retain(resource(undefined,
+    async () => { closes++; })), () => {}, guard);
+  await owner.acquire(new AbortController().signal); await assert.rejects(owner.dispose());
+  await new Promise<void>(resolve => setImmediate(resolve)); assert.equal(closes, 0);
+  await owner.dispose(); assert.equal(closes, 1);
+});
+
 test('length header and body may be fragmented; bytes and UTF8 content are exact', () => {
   const expected = body({ text: '😀\uFFFD\uFEFF', sequence: 1 });
   const bytes = frame(expected), decoder = new NativeReplyFrame();

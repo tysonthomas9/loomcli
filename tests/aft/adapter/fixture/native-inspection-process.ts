@@ -67,6 +67,9 @@ export function createRetainedNativeInspectionRunner(binding: NativeInspectionBi
     try { child.kill(); } catch { /* Keep the handle; only close retires it. */ }
   };
   async function awaitBound<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+    // A synchronous spawn/cleanup callback can abort before this guard begins.
+    // Observe rejection without replacing the retained original promise.
+    void work.catch(() => undefined);
     signal.throwIfAborted(); let abort!: () => void;
     const cancelled = new Promise<never>((_yes, reject) => {
       abort = () => reject(failed()); signal.addEventListener('abort', abort, { once: true });

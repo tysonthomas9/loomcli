@@ -25,7 +25,7 @@ class Child extends EventEmitter {
   exit(code = 0) { this.exitCode = code; this.emit('exit', code, null); }
   close(code = 0) { this.exit(code); this.emit('close', code, null); }
 }
-function harness(options: { throwSpawn?: boolean; authorize?: () => void } = {}) {
+function harness(options: { throwSpawn?: boolean; authorize?: () => void; onSpawn?: () => void } = {}) {
   const children: Child[] = [], calls: Parameters<typeof spawn>[] = [], timers: AbortController[] = [];
   let cleanup!: () => Promise<void>;
   const guard: NativeSessionGuard = { begin(signal) {
@@ -34,6 +34,7 @@ function harness(options: { throwSpawn?: boolean; authorize?: () => void } = {})
   } };
   const spawnChild = ((...args: Parameters<typeof spawn>) => {
     assert.equal(typeof cleanup, 'function'); calls.push(args);
+    options.onSpawn?.();
     if (options.throwSpawn) throw new Error('secret spawn error');
     const child = new Child(); children.push(child); return child as unknown as ChildProcess;
   }) as typeof spawn;
@@ -95,6 +96,14 @@ test('synchronous spawn throw retires proven-not-spawned intent without exposing
   const h = harness({ throwSpawn: true });
   await assert.rejects(h.owner.run(h.request()), error => !String(error).includes('secret'));
   await h.cleanup(); await h.cleanup(); assert.equal(h.children.length, 0); assert.equal(h.calls.length, 1);
+});
+
+test('synchronous spawn abort observes raw rejection before later cleanup', async () => {
+  const signal = new AbortController();
+  const h = harness({ throwSpawn: true, onSpawn: () => signal.abort() });
+  await assert.rejects(h.owner.run(h.request({ signal: signal.signal })));
+  await new Promise<void>(resolve => setImmediate(resolve)); await h.cleanup();
+  assert.equal(h.calls.length, 1); assert.equal(h.children.length, 0);
 });
 
 test('async child error retains exact handle, uncertain cleanup timeout and retry require actual close', async () => {

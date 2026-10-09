@@ -126,6 +126,9 @@ export const nativeSessionGuard: NativeSessionGuard = {
   begin(signal) { return { signal: AbortSignal.any([signal, AbortSignal.timeout(NativeSessionLimits.guardMs)]), release() {} }; },
 };
 async function guarded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  // Work already exists and may have synchronously aborted the caller. Observe
+  // its rejection even on the early exit; keep the original for cleanup joins.
+  void work.catch(() => undefined);
   signal.throwIfAborted();
   let abort!: () => void;
   const cancelled = new Promise<never>((_resolve, reject) => {
