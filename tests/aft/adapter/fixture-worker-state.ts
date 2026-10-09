@@ -5,8 +5,8 @@ import { Id, Digest, ProcessIdentitySchema, requireFact, redact, sha256 } from '
 import { RedactionFacts, redactionFacts } from './redaction.js';
 import { LegacyWorkspaceAgentFact } from './workspaces.js';
 import { RegisteredWorkerFact } from './fixture-workers.js';
-import { getFixtureAuthority } from './ownership.js';
-import { getFixtureOperationAuthority, fixtureOwnerIdentity } from './authority.js';
+import { fixtureOwnerIdentity } from './authority.js';
+import { beginFixtureOperation } from './native-operation-authority.js';
 
 export const FixtureWorkerStateId = 'loom.fixture.observeWorkerState' as const;
 // Verification retains lifecycle artifacts and may terminate an owned helper
@@ -100,16 +100,15 @@ function sameKernel(before:WorkerStateKernelFact,after:WorkerStateKernelFact):bo
 /** Callback installed only by a supported owning fixture. No lookup by current
  * name/PID, rediscovery, stop retry or new successor enrollment belongs here. */
 export async function observeFixtureWorkerState(context:CapabilityContext,input:FixtureWorkerStateInput) {
-  const fixture=getFixtureAuthority(context,input.leaseId);
-  const grant=getFixtureOperationAuthority(fixture,FixtureWorkerStateId,FixtureWorkerStateEffects);
+  const guard=beginFixtureOperation(context,input.leaseId,FixtureWorkerStateId,FixtureWorkerStateEffects),{fixture,grant}=guard;
   const producer=fixture.observeWorkerState;
   requireFact(producer,'unsupported-capability','Owned worker-state producer is unavailable');
-  await fixture.verify(context.signal);
-  const recheck=()=>requireFact(getFixtureAuthority(context,input.leaseId)===fixture&&fixture.observeWorkerState===producer&&
-    getFixtureOperationAuthority(fixture,FixtureWorkerStateId,FixtureWorkerStateEffects)===grant,
-    'ownership-mismatch','Worker-state producer authority changed');
-  recheck();context.signal.throwIfAborted();
-  const value=FixtureWorkerStateOutput.parse(await producer.call(fixture,input,context.signal));
+  const recheck=()=>{guard.recheck();requireFact(fixture.observeWorkerState===producer,
+    'ownership-mismatch','Worker-state producer authority changed');};
+  const checked=async<T>(call:()=>Promise<T>)=>{recheck();const value=await call();recheck();return value;};
+  const retention={recheck,retain:(serialized:string)=>checked(()=>guard.retain(serialized))};
+  await checked(()=>guard.verify());
+  const value=FixtureWorkerStateOutput.parse(await checked(()=>producer.call(fixture,input,context.signal)));
   context.signal.throwIfAborted();recheck();
   requireFact(value.fixtureLeaseId===fixture.leaseId,'ownership-mismatch','Worker-state observation belongs to a different fixture');
   if(input.view==='parents') {
@@ -119,7 +118,7 @@ export async function observeFixtureWorkerState(context:CapabilityContext,input:
       'identity-mismatch','Parent handle or kernel binding changed during observation');
     requireFact(redact(JSON.stringify(value),fixture.secrets)===JSON.stringify(value),
       'incomplete-pages','Parent binding contains private material');
-    recheck();context.signal.throwIfAborted();return {fixture,grant,value};
+    recheck();context.signal.throwIfAborted();return {fixture,grant,value,retention};
   }
   requireFact(value.coverage==='retained-builtin-worker-state',
     'identity-mismatch','Worker state returned another view');
@@ -144,7 +143,7 @@ export async function observeFixtureWorkerState(context:CapabilityContext,input:
   requireFact(sameKernel(value.before.daemon,value.stderr.captureProcess)&&sameKernel(value.stderr.captureProcess,value.after.daemon),
     'identity-mismatch','Stderr snapshot belongs to a different daemon');
   for(const sample of [value.before,value.after])for(const process of Object.values(sample))
-    requireFact(await sha256([process.executable,...process.argv].join('\0')+'\0')===process.argvSha256,
+    requireFact(await checked(()=>sha256([process.executable,...process.argv].join('\0')+'\0'))===process.argvSha256,
       'identity-mismatch','Worker-state process arguments differ from captured digest');
   requireFact(value.api.rows.every(row=>row.name===input.agentName),'identity-mismatch','Worker-state API rows belong to another actor');
   requireFact(value.stderr.redaction.omittedPaths.length===0&&value.stderr.redaction.replacedTextPaths.length===0&&
@@ -156,5 +155,5 @@ export async function observeFixtureWorkerState(context:CapabilityContext,input:
   requireFact(redact(JSON.stringify(value),fixture.secrets)===JSON.stringify(value),
     'incomplete-pages','Worker-state identity contains private material');
   recheck();context.signal.throwIfAborted();
-  return {fixture,grant,value};
+  return {fixture,grant,value,retention};
 }

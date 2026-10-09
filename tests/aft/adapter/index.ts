@@ -82,23 +82,23 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     defineOperation({...common,id:FixtureComposeServeId,effects:[...FixtureComposeServeEffects],retry:'never',
       inputSchema:FixtureComposeServeInput,outputSchema:FixtureComposeServeOutput,
       async run(input,context) {
-        const {fixture,grant,value}=await observeComposeServe(context,input,implementation.sha256);
-        return {value,identity:identity(fixture),evidenceClass:grant.evidenceClass,secrets:fixture.secrets};
+        const {fixture,grant,value,retention}=await observeComposeServe(context,input,implementation.sha256);
+        return {value,identity:identity(fixture),evidenceClass:grant.evidenceClass,secrets:fixture.secrets,retention};
       },
     }),
     defineOperation({...common,id:RestartComposeServeId,effects:[...RestartComposeServeEffects],retry:'never',
       inputSchema:RestartComposeServeInput,outputSchema:RestartComposeServeOutput,
       async run(input,context) {
-        const {fixture,grant,value}=await restartComposeServe(context,input,implementation.sha256);
-        return {value,identity:identity(fixture),evidenceClass:grant.evidenceClass,secrets:fixture.secrets};
+        const {fixture,grant,value,retention}=await restartComposeServe(context,input,implementation.sha256);
+        return {value,identity:identity(fixture),evidenceClass:grant.evidenceClass,secrets:fixture.secrets,retention};
       },
     }),
     defineOperation({...common,id:FixtureWorkerStateId,effects:[...FixtureWorkerStateEffects],retry:'never',
       inputSchema:FixtureWorkerStateInput,outputSchema:FixtureWorkerStateOutput,
       async run(input,context) {
-        const {fixture,grant,value}=await observeFixtureWorkerState(context,input);
+        const {fixture,grant,value,retention}=await observeFixtureWorkerState(context,input);
         return {value,identity:{...identity(fixture),...(input.view==='state'?{workspaceId:input.workspaceId,agentId:input.agentName}:{})},
-          evidenceClass:grant.evidenceClass,secrets:fixture.secrets};
+          evidenceClass:grant.evidenceClass,secrets:fixture.secrets,retention};
       },
     }),
     defineOperation({...common,id:FixtureWorkersId,effects:[...FixtureWorkersEffects],retry:'never',
