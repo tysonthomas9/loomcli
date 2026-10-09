@@ -142,6 +142,9 @@ function RepoChanges({
 }): JSX.Element {
   const [showHistory, setShowHistory] = useState(false);
   const [viewing, setViewing] = useState<ReviewRevision | null>(null);
+  const shown = revisions.find(
+    (r) => r.change_id === newest.change_id && r.number === diff?.revision,
+  );
 
   return (
     <section
@@ -216,7 +219,7 @@ function RepoChanges({
             </ul>
           )}
           {diff ? (
-            <DiffFiles files={diff.files} />
+            <DiffFiles files={diff.files} incomplete={shown?.incomplete} />
           ) : (
             <div className={styles.message}>
               {diffsLoaded ? "No diff for this repo yet." : "Loading diff…"}
@@ -259,7 +262,7 @@ function RevisionDiffView({
       </div>
     );
   if (!diff) return <div className={styles.message}>Loading diff…</div>;
-  return <DiffFiles files={diff.files} />;
+  return <DiffFiles files={diff.files} incomplete={revision.incomplete} />;
 }
 
 type DiffFile = RevisionDiff["files"][number];
@@ -274,10 +277,24 @@ function lineStats(patch: string): { additions: number; deletions: number } {
   return { additions, deletions };
 }
 
-function DiffFiles({ files }: { files: DiffFile[] }): JSX.Element {
+function DiffFiles({
+  files,
+  incomplete,
+}: {
+  files: DiffFile[];
+  incomplete?: boolean | undefined;
+}): JSX.Element {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   if (files.length === 0) {
-    return <div className={styles.message}>No changes</div>;
+    // An incomplete capture left work out (e.g. a secret-pattern file, D18),
+    // so an empty diff never means the attempt changed nothing.
+    return (
+      <div className={styles.message}>
+        {incomplete
+          ? "Nothing was captured. This capture is incomplete: the files it left out stay in the task copy."
+          : "No changes"}
+      </div>
+    );
   }
   const selected = files.find((f) => f.path === selectedPath) ?? files[0];
   return (
