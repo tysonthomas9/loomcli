@@ -196,9 +196,10 @@ export async function enrollOwnedWorkspaceAgent(fixture:OwnedFixture,workspaceId
   const repoNames=factSources(record,fact);
   if(fact.parentAgentId!==null) {
     requireFact(record.agentIds.includes(fact.parentAgentId),'ownership-mismatch','Requested actor parent is not enrolled');
+    const parentSource=requireOwnedWorkspace(fixture,workspaceId,fact.parentAgentId);
     const parent=WorkspaceAgentFact.parse(await fixture.readWorkspaceAgent(workspaceId,fact.parentAgentId,signal));
-    requireFact(parent.agentId===fact.parentAgentId&&parent.workspaceId===workspaceId&&parent.repo===fact.repo&&
-      parent.commonDir===fact.commonDir&&parent.storeId===record.storeId&&parent.storeGeneration===record.storeGeneration&&
+    requireFact(parent.agentId===fact.parentAgentId&&parent.workspaceId===workspaceId&&parent.repo===parentSource.repo&&
+      parent.commonDir===parentSource.commonDir&&parent.storeId===record.storeId&&parent.storeGeneration===record.storeGeneration&&
       Object.entries(fixtureOwnerIdentity(fixture)).every(([key,value])=>parent[key as keyof FixtureAuthorityOwner]===value)&&
       fact.rootAgentId===(parent.rootAgentId??parent.agentId),'identity-mismatch','Requested actor lineage differs from owned parent');
   }

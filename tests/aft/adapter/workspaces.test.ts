@@ -168,6 +168,7 @@ test('repository ambiguity, changed source, missing associations and same actor 
     {...initial,repositories:[repositories[0]!,{...repositories[1]!,repoName:'alpha'}]},
     {...initial,repositories:[repositories[0]!,{...repositories[1]!,repo:fields.repo}]},
     {...initial,repositories:[repositories[0]!,{...repositories[1]!,commonDir:'/foreign/.git'}]},
+    {...initial,repositories:[repositories[0]!,{...repositories[1]!,groups:['changed']}]},
     {...initial,agentSources:undefined},
     {...initial,agentSources:[{agentId:'agt_primary',repoNames:['foreign']}]},
     {...initial,agentSources:[{agentId:'agt_primary',repoNames:['alpha','beta']}]},
@@ -220,5 +221,28 @@ test('legacy groups restrict actual sources and never turn empty explicit Repos 
   assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','grouped','legacy-agent-name','alpha'));
   assignedRepos=['alpha'];groups=['shared'];await enrollOwnedLegacyAgent(fixture,'workspace','union',signal,store);
   assert.deepEqual(fixture.ownedWorkspaces![0]!.agentSources!.find(value=>value.agentId==='union')!.repoNames,['alpha','beta']);
+  groups=[];repo=fields.repo;await enrollOwnedLegacyAgent(fixture,'workspace','named-only',signal,store);
+  assert.equal(requireOwnedWorkspace(fixture,'workspace','named-only','legacy-agent-name').repoName,'alpha');
+  assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','named-only','legacy-agent-name','beta'));
   assert.ok(Object.isFrozen(fixture.ownedWorkspaces![0]!.repositories![0]!.groups));
+});
+
+test('native child may use another owned repository while parent retains its own exact source',async t=>{
+  const {enrollOwnedWorkspaceAgent}=await import('./workspaces.js');const {store}=await setup(t);
+  const initial={...fields,repositories,agentSources:[{agentId:'agt_primary',repoNames:['alpha']}]};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...initial}));
+  const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[{...initial,creationReceipt}],store));
+  let parentRepo=fields.repo,parentCommon=fields.commonDir,childRepo='/owned/beta',childCommon='/owned/beta/.git';
+  fixture.readWorkspaceAgent=async(workspaceId,agentId)=>({kind:'agent-enrolled',identityKind:'native-agent-id',...owner,workspaceId,agentId,
+    repo:agentId==='agt_primary'?parentRepo:childRepo,commonDir:agentId==='agt_primary'?parentCommon:childCommon,
+    storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentAgentId:agentId==='agt_primary'?null:'agt_primary',
+    rootAgentId:agentId==='agt_primary'?null:'agt_primary',createdByKind:agentId==='agt_primary'?'user':'agent',createdById:agentId==='agt_primary'?'actual-user':'agt_primary',revision:1});
+  const signal=new AbortController().signal;
+  parentRepo='/foreign';await assert.rejects(enrollOwnedWorkspaceAgent(fixture,'workspace','child',signal,store));
+  parentRepo='/owned/beta';parentCommon='/owned/beta/.git';await assert.rejects(enrollOwnedWorkspaceAgent(fixture,'workspace','child',signal,store));
+  parentRepo=fields.repo;parentCommon=fields.commonDir;childRepo='/foreign';await assert.rejects(enrollOwnedWorkspaceAgent(fixture,'workspace','child',signal,store));
+  childRepo='/owned/beta';await enrollOwnedWorkspaceAgent(fixture,'workspace','cross-repo-child',signal,store);
+  assert.equal(requireOwnedWorkspace(fixture,'workspace','cross-repo-child').repo,'/owned/beta');
+  childRepo=fields.repo;childCommon=fields.commonDir;await enrollOwnedWorkspaceAgent(fixture,'workspace','same-repo-child',signal,store);
+  assert.equal(requireOwnedWorkspace(fixture,'workspace','same-repo-child').repo,fields.repo);
 });
