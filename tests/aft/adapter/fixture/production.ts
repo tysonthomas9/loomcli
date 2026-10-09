@@ -437,7 +437,14 @@ export class ComposeFixtureDriver implements FixtureDriver {
         const values = JSON.parse(await this.command('podman', ['--connection', this.config.connection, ...(kind === 'container' ? [] : [kind]), 'inspect', id], signal));
         check(Array.isArray(values) && values.length === 1);
         const value = values[0];
-        const labels = kind === 'container' ? value.Config?.Labels : value.Labels;
+        const network = kind === 'network' ? {
+          labels: Object.hasOwn(value, 'labels') ? value.labels : value.Labels,
+          id: Object.hasOwn(value, 'id') ? value.id : value.Id ?? value.ID,
+          name: Object.hasOwn(value, 'name') ? value.name : value.Name,
+          created: Object.hasOwn(value, 'created') ? value.created : value.CreatedAt ?? value.Created,
+        } : undefined;
+        if (network) check([network.id, network.name, network.created].every(field => typeof field === 'string' && field.length > 0));
+        const labels = kind === 'container' ? value.Config?.Labels : network ? network.labels : value.Labels;
         check(labels?.['com.docker.compose.project'] === this.project && labels?.['io.loom.aft.lease'] === this.leaseId);
         const service = kind === 'container' ? labels['com.docker.compose.service'] : kind;
         check(kind !== 'container' || this.serviceNames.includes(service));
@@ -479,8 +486,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
           check(frontend?.length === 1 && frontend[0].RW === false && frontend[0].Source === this.config.modecloud!.frontendDist);
         }
         if (kind === 'container' && service === 'fleet-auth-seed') check(value.State?.Status !== 'exited' || value.State.ExitCode === 0, 'observation-failed');
-        records.push({ id: kind === 'volume' ? value.Name : value.Id ?? value.ID, kind, service,
-          generation: kind === 'container' ? `${value.Id}:${value.State?.StartedAt}` : `${value.Name ?? value.Id ?? value.ID}:${value.CreatedAt ?? value.Created}`,
+        records.push({ id: kind === 'volume' ? value.Name : network ? network.id : value.Id ?? value.ID, kind, service,
+          generation: kind === 'container' ? `${value.Id}:${value.State?.StartedAt}` : network ? `${network.name}:${network.created}` : `${value.Name ?? value.Id ?? value.ID}:${value.CreatedAt ?? value.Created}`,
           pid: kind === 'container' ? value.State?.Pid ?? 0 : 0, state: kind === 'container' ? value.State?.Status ?? 'unknown' : 'allocated',
           ...(kind === 'container' ? {startedAt:value.State?.StartedAt, healthy: value.State?.Health?.Status === 'healthy' } : {}), ...(workVolume ? { workVolume } : {}),...(namespaceSha256?{namespaceSha256,networkIds}:{}) });
       }
