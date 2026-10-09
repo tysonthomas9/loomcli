@@ -181,7 +181,9 @@
       "canonicalOperation": "loom.runtime.detachTerminal",
       "actor": "Reachable tabs GET, fresh matching agent_id/nonempty session_name list, DELETE every captured matching session in original order, final reachable matching list. DELETE attempts best-effort Kill but metadata removal never proves process exit.",
       "facts": "Captured sessions, each actual HTTP status or uncertain transport attempt, final remaining sessions, exact owned serve generation. YAML owns all-success and zero-remaining predicates. Overflow/partial listings are incomplete before mutation.",
-      "status": "Typed leaf algorithm/closed schemas/production Host endpoint binding implemented; old terminal-close process transition rejects before transport. New canonical authority ID, trusted fixture grant, default root registration and actual serve generation binding to caller still require exact shared checkpoints and public registry/Host integration tests. No runtime or terminal process exit proof."
+      "status": "Typed leaf algorithm/closed schemas/production Host endpoint binding implemented; old terminal-close process transition rejects before transport. New canonical authority ID, trusted fixture grant, default root registration and actual serve generation binding to caller still require exact shared checkpoints and public registry/Host integration tests. No runtime or terminal process exit proof.",
+      "originalIntermediateFailureGap": "Frozen for session in $(sessions_for_agent) masks intermediate enumeration failure; a reachable initial GET, malformed enumeration, and valid empty final enumeration can exit zero.",
+      "intentionalSafetyCorrection": "Typed detach rejects unavailable/malformed intermediate enumeration before mutation. This closes an original fail-open gap rather than claiming the original helper already enforced that predicate."
     }
   },
   "operations": [
