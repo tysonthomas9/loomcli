@@ -12,6 +12,7 @@ export interface RegisteredProcessHandle {
  identity:RegisteredIdentity;
  inspect():Promise<RegisteredIdentity>;
  stop():Promise<void>;
+ terminateGracefully?():Promise<void>;
  abandon():Promise<void>;
 }
 export interface RegisteredProcessPort { capture(pid:number):Promise<RegisteredProcessHandle>; }
@@ -32,7 +33,7 @@ export function createRegisteredProcessPort(pythonBinary:string,helperFile:strin
     tail+=bytes.toString('utf8');if(Buffer.byteLength(tail)>65536){fail();child.kill();return;}
     let index;while((index=tail.indexOf('\n'))>=0){const line=tail.slice(0,index);tail=tail.slice(index+1);
       try{const raw=JSON.parse(line);
-        if(z.object({error:z.literal('cleanup-unverified')}).strict().safeParse(raw).success&&pending){const saved=pending;pending=undefined;saved.reject(new FixtureError('observation-failed'));continue;}
+        if(z.object({error:z.enum(['cleanup-unverified','unsupported-capability'])}).strict().safeParse(raw).success&&pending){const saved=pending;pending=undefined;saved.reject(new FixtureError(raw.error==='unsupported-capability'?'unsupported-capability':'observation-failed'));continue;}
         const value=Identity.parse(raw);check(value.pid===pid&&pending);const saved=pending!;pending=undefined;saved.resolve(value);}
       catch{fail();child.kill();}
     }
@@ -41,7 +42,7 @@ export function createRegisteredProcessPort(pythonBinary:string,helperFile:strin
   const timeout=setTimeout(()=>{fail();child.kill();},15000);
   let initial:RegisteredIdentity;
   try{initial=await first;}catch(error){child.kill();throw error;}finally{clearTimeout(timeout);}
-  const command=async(operation:'inspect'|'stop')=>{
+  const command=async(operation:'inspect'|'stop'|'terminate-gracefully')=>{
     check(!failed&&!pending);const result=response();try{child.stdin!.write(JSON.stringify({operation})+'\n');}catch{fail();}
     const deadline=setTimeout(()=>{fail();child.kill();},20000);
     try{const value=await result;check(value.generation===initial.generation&&value.executable===initial.executable&&value.argvSha256===initial.argvSha256&&value.configurationRoot===initial.configurationRoot);return value;}
@@ -54,7 +55,10 @@ export function createRegisteredProcessPort(pythonBinary:string,helperFile:strin
     const deadline=setTimeout(()=>child.kill(),20000);
     try{child.stdin!.end(JSON.stringify({operation})+'\n');await closed;}finally{clearTimeout(deadline);}
   };
-  return {identity:Object.freeze(initial),async inspect(){return stopped?{...initial,state:'exited'}:command('inspect');},async abandon(){await close('abandon');},async stop(){
+  return {identity:Object.freeze(initial),async terminateGracefully(){
+    if(stopped)return;const value=await command('terminate-gracefully');check(value.state==='exited');
+    await close('close');stopped=true;
+  },async inspect(){return stopped?{...initial,state:'exited'}:command('inspect');},async abandon(){await close('abandon');},async stop(){
     if(stopped)return;
     const value=await command('stop');check(value.state==='exited');
     await close('close');stopped=true;
@@ -77,6 +81,8 @@ export class OwnedDescendants {
  }
  async inspect(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);const current=Identity.parse(await handle!.inspect());check(['pid','generation','executable','argvSha256','configurationRoot'].every(key=>current[key as keyof RegisteredIdentity]===handle!.identity[key as keyof RegisteredIdentity]));return current;}
  async stop(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);await handle!.stop();}
+ async terminateGracefully(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);
+  if(!handle!.terminateGracefully)throw new FixtureError('unsupported-capability');await this.inspect(id,generation);await handle!.terminateGracefully();}
  has(id:string){return this.handles.has(id);}
  initial(id:string){const handle=this.handles.get(id);check(handle);return handle!.identity;}
 }
