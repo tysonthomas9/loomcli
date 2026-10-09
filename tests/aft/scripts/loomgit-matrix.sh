@@ -105,7 +105,11 @@ file_at() { # file_at <ref> <path>
 # --- Loom helpers --------------------------------------------------------------
 
 task_id() { cat "$work/task-$1.id"; }
-file_of() { printf 'matrix-%s-%s.txt' "$case_name" "$1"; }
+file_of() { # the file a slot's task writes: its own, or another slot's (chain's 4th field)
+  local slot="$1"
+  [[ -f "$work/writes-$slot" ]] && slot="$(cat "$work/writes-$slot")"
+  printf 'matrix-%s-%s.txt' "$case_name" "$slot"
+}
 
 revisions() { # revisions <slot>: newest revision row into $work/rev-<slot>.json
   curl -fsS --max-time 10 "$api/issues/$(task_id "$1")/revisions" > "$work/revisions-$1.json"
@@ -267,6 +271,15 @@ lead_terminal_text() {
   browser eval "Array.from(document.querySelectorAll('[data-testid=terminal-wrapper] .term-row')).map(e => e.textContent).join('\\n')" > "$work/lead-terminal.txt" 2> /dev/null || true
 }
 
+lead_mark() { lead_terminal_text; grep -cE "$1" "$work/lead-terminal.txt" > "$work/lead-mark.count" || true; }
+lead_refused() { # the real lead ran the command and Loom's refusal is in its transcript
+  local want="$1" before
+  before="$(cat "$work/lead-mark.count" 2> /dev/null || echo 0)"
+  seen() { lead_terminal_text; (( $(grep -cE "$want" "$work/lead-terminal.txt" || true) > before )); }
+  wait_until $((90 * scale)) "the lead's transcript shows Loom refusing it (/$want/): $(tail -c 800 "$work/lead-terminal.txt" 2> /dev/null)" seen
+  cp "$work/lead-terminal.txt" "$work/lead-refusal-$(date +%s).txt"
+}
+
 verdict_by_lead() { revisions "$1"; json "$work/rev-$1.json" 'assert v.get("verdict")=="policy", v'; }
 
 # --- phases --------------------------------------------------------------------
@@ -391,14 +404,15 @@ open-task)
 
 
 chain)
-  # chain <case> <slot[:after][:FAIL]>...: one epic holding all the tasks, each
+  # chain <case> <slot[:after][:FAIL][:writes-slot]>...: one epic holding all the tasks, each
   # dependent blocked by its "after" slot; the epic runner is started once, so a
   # dependent runs when its blocker's agent finishes (no review in between).
   python3 -c 'import json,sys; print(json.dumps({"title":sys.argv[1]+" chain epic","issue_type":"epic","priority":2}))' "matrix $case_name" |
     curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$work/epic-chain.json"
   epic="$(json "$work/epic-chain.json" 'print(v["data"]["id"])')"
   for spec in "$@"; do
-    IFS=: read -r slot after red <<< "$spec"
+    IFS=: read -r slot after red writes <<< "$spec"
+    [[ -n "$writes" ]] && printf '%s\n' "$writes" > "$work/writes-$slot"
     file="$(file_of "$slot")"
     if [[ "$forge" == fake ]]; then
       design="STUB_CODEX_PATCH=$file"
@@ -406,7 +420,11 @@ chain)
     else
       line="$case_name $slot ok"
       [[ "$red" == FAIL ]] && line="FAIL"
-      design="Create a new file named $file at the repository root whose entire contents are exactly the single line: $line. Do not create, modify or delete any other file. Do not run git commands."
+      if [[ -n "$writes" ]]; then
+        design="Replace the entire contents of the existing file $file at the repository root with exactly the single line: $line. Do not create, modify or delete any other file. Do not run git commands."
+      else
+        design="Create a new file named $file at the repository root whose entire contents are exactly the single line: $line. Do not create, modify or delete any other file. Do not run git commands."
+      fi
     fi
     python3 -c 'import json,sys; print(json.dumps({"title":sys.argv[1],"issue_type":"task","priority":2,"parent":sys.argv[2],"design":sys.argv[3]}))' "matrix $case_name $slot" "$epic" "$design" |
       curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$work/task-$slot.json"
@@ -511,6 +529,14 @@ lead-do)
     *) fail "unknown lead action $action" ;;
   esac
   settings_json > "$work/settings-before-$action.json"
+  case "$action" in
+    approve) refusal='review_required|\b409\b' ;;
+    merge) refusal='\b409\b|not authori[sz]ed|review_required' ;;
+    set-approve | set-merge) refusal='\b403\b|forbidden|human' ;;
+    cli-approve) refusal='review_required|not allowed|refus|forbidden|denied|not authori[sz]ed|409|403' ;;
+    *) refusal='' ;;
+  esac
+  [[ "$forge" == github && -n "$refusal" ]] && lead_mark "$refusal"
   if [[ "$forge" == fake ]]; then
     if [[ "$action" == cli-approve ]]; then
       set +e
@@ -527,6 +553,10 @@ lead-do)
     else
       lead_say "Loom test harness: as the lead, run exactly this one command and report the HTTP status it prints: curl -sS -w '%{http_code}' -X $method '$url' -H 'Content-Type: application/json' -d '$body'"
     fi
+  fi
+  [[ "$forge" == github && "$want" == refused ]] && lead_refused "$refusal"
+  if [[ "$forge" == fake && "$action" == cli-approve && "$want" == refused ]]; then
+    [[ "$code" != 0 ]] || fail "loom git approve run as the lead succeeded with Lead may approve off: $(cat "$work/lead-$action.out")"
   fi
   case "$action:$want" in
     approve:ok)
@@ -836,23 +866,45 @@ fixup-pushed)
   ;;
 
 hand-push)
-  # hand-push <case> <slot>: someone pushes a commit to the task's PR by hand.
+  # hand-push <case> <slot> [file-slot text]: someone pushes a commit to the
+  # task's PR by hand: a new file, or <file-slot>'s file rewritten to <text>.
   slot="$1"
   ref="$(pull_field "$slot" head)"
   seen="$(pull_field "$slot" sha)"
+  path="matrix-$case_name-hand.txt" text="pushed by hand"
+  [[ -n "${2:-}" ]] && path="$(file_of "$2")" text="${3:-pushed by hand}"
   if [[ "$forge" == fake ]]; then
-    blob="$(printf 'pushed by hand\n' | git --git-dir="$remote" hash-object -w --stdin)"
-    tree="$( (git --git-dir="$remote" ls-tree "$seen"; printf '100644 blob %s\tmatrix-%s-hand.txt\n' "$blob" "$case_name") | git --git-dir="$remote" mktree)"
+    blob="$(printf '%s\n' "$text" | git --git-dir="$remote" hash-object -w --stdin)"
+    tree="$( (git --git-dir="$remote" ls-tree "$seen" | awk -F '\t' -v p="$path" '$2 != p'; printf '100644 blob %s\t%s\n' "$blob" "$path") | git --git-dir="$remote" mktree)"
     foreign="$(git --git-dir="$remote" -c user.name=Someone -c user.email=someone@example.test commit-tree -p "$seen" -m "pushed by hand" "$tree")"
     git --git-dir="$remote" update-ref "refs/heads/$ref" "$foreign" "$seen"
   else
-    gh_api -X PUT "repos/$forge_repo/contents/matrix-$case_name-hand.txt" -f message="pushed by hand" \
-      -f content="$(printf 'pushed by hand\n' | base64)" -f branch="$ref" > "$work/hand-push.json"
+    blob_sha="$(gh_api "repos/$forge_repo/contents/$path?ref=$ref" --jq .sha 2> /dev/null || true)"
+    gh_api -X PUT "repos/$forge_repo/contents/$path" -f message="pushed by hand" \
+      -f content="$(printf '%s\n' "$text" | base64)" -f branch="$ref" ${blob_sha:+-f sha="$blob_sha"} > "$work/hand-push.json"
     foreign="$(json "$work/hand-push.json" 'print(v["commit"]["sha"])')"
   fi
   printf '%s\n' "$foreign" > "$work/foreign-$slot.sha"
   wait_until $((20 * scale)) "forge shows the hand push" eq "$foreign" pull_field "$slot" sha
   say "hand-pushed $foreign onto PR of $slot"
+  ;;
+
+outside-merge)
+  # outside-merge <case> <slot>: someone squash-merges the task's PR on the forge,
+  # outside Loom (its current head, hand pushes included).
+  slot="$1"
+  number="$(pull_field "$slot" number)" head="$(pull_field "$slot" sha)"
+  if [[ "$forge" == fake ]]; then
+    main="$(git --git-dir="$remote" rev-parse refs/heads/main)"
+    squash="$(git --git-dir="$remote" -c user.name=Someone -c user.email=someone@example.test commit-tree -p "$main" -m "Merged #$number outside Loom" "$head^{tree}")"
+    git --git-dir="$remote" update-ref refs/heads/main "$squash" "$main"
+    curl -fsS -X POST "$AFT_FAKE_GH_BASE/__merge" -H 'Content-Type: application/json' -d "{\"number\":$number,\"sha\":\"$squash\"}" > /dev/null
+  else
+    gh_api -X PUT "repos/$forge_repo/pulls/$number/merge" -f merge_method=squash > "$work/outside-merge.json" ||
+      fail "the forge refused the outside merge of #$number: $(cat "$work/outside-merge.json")"
+  fi
+  wait_until $((20 * scale)) "PR of $slot merged on the forge" eq True pull_field "$slot" merged
+  say "PR #$number of $slot merged outside Loom"
   ;;
 
 not-overwritten)
@@ -873,11 +925,13 @@ snapshot)
   ;;
 
 untouched)
-  # untouched <case> <name>: the PRs in the snapshot are unchanged.
+  # untouched <case> <name> [min-open]: the PRs in the snapshot are unchanged
+  # (and at least <min-open> of them were open when it was taken).
   pulls
-  python3 - "$work/snapshot-$1.json" "$work/pulls.json" <<'PY'
+  python3 - "$work/snapshot-$1.json" "$work/pulls.json" "${2:-0}" <<'PY'
 import json, sys
 before, after = json.load(open(sys.argv[1])), {p["number"]: p for p in json.load(open(sys.argv[2]))}
+assert sum(p["state"] == "open" for p in before) >= int(sys.argv[3]), ("too few open PRs in the snapshot", before)
 for p in before:
     q = after[p["number"]]
     assert (q["state"], q["merged"], q["base"], q["head"], q["sha"]) == (p["state"], p["merged"], p["base"], p["head"], p["sha"]), (p, q)

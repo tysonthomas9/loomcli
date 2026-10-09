@@ -42,15 +42,17 @@ def build(case, specs, reviewed):
     only after the one below it has been reviewed.
     """
     if DEPENDENT_WAITS_FOR == "run":
-        spec = " ".join(slot + (f":{after}" if after != "-" or red else "") + (f":{red}" if red else "") for slot, after, red in specs)
+        specs = [tuple(x) + ("",) * (4 - len(x)) for x in specs]
+        spec = " ".join(slot + (f":{after}:{red}:{writes}" if writes else (f":{after}" if after != "-" or red else "") + (f":{red}" if red else "")) for slot, after, red, writes in specs)
         st = run(f"chain {case} {spec}", "API client creates the tasks (" + spec + ") in one epic and starts it once; a dependent runs when its blocker's agent finishes")
-        for slot, _, _ in specs:
+        for slot, *_ in specs:
             st += wait_rev(case, slot)
-        for slot, _, _ in specs:
+        for slot, *_ in specs:
             st += reviewed.get(slot, [])
         return st
     st = []
-    for slot, after, red in specs:
+    for slot, after, red, *writes in specs:
+        assert not writes, "a task that rewrites another's file needs DEPENDENT_WAITS_FOR = run (chain)"
         st += task(case, slot, after, red) + reviewed.get(slot, [])
     return st
 
@@ -112,23 +114,29 @@ def walk():
         "c": human_create_pr(c, "c", "b") + run(f"ui {c} c open", "W2: task C shows its PR open on top of B's")})
     st += human_merge(c, "c") + run(f"merge-state {c} c waiting 'merges after #A, #B'", "W3: C's Approve and merge waits for the PRs below it") + \
         run(f"hold-open {c} 6 a b c", "W3: nothing merges") + run(f"ui {c} c open 'merges after #A, #B'", "W3: task C says it merges after #A, #B")
-    st += human_merge(c, "a") + run(f"merged {c} a", "W4: A merges") + \
-        run(f"rebuilt {c} b main", "W4: B's PR is rebuilt on main") + run(f"rebuilt {c} c b", "W4: C's PR still sits on B's and changes only C") + \
-        run(f"ui {c} a merged", "W4: task A shows its PR merged")
-    st += run(f"comment {c} b 'Please rename: add a file matrix-walk-b-review.txt that says renamed by review.'", "W5: a reviewer comments on B's PR (on GitHub in the real tier); the signed webhook brings it to Loom") + \
+    # W5 before W4: B holds a merge-after permission when its review fix-up lands.
+    st += human_merge(c, "b") + run(f"merge-state {c} b waiting 'merges after #A'", "W5: B gets Approve and merge first; it waits for A") + \
+        run(f"comment {c} b 'Please rename: add a file matrix-walk-b-review.txt that says renamed by review.'", "W5: a reviewer comments on B's PR (on GitHub in the real tier); the signed webhook brings it to Loom") + \
         run(f"fixup {c} b rename", "W5: the feedback agent (real codex in the real tier) writes the fix-up in the task copy and completes it") + \
         run(f"fixup-pushed {c} b c", "W5: B's PR is updated without an Approve, and C is replayed on it") + \
-        run(f"no-merge-approval {c} b", "W5: B has no pending Approve and merge") + \
+        run(f"merge-state {c} b cancelled 'approve it again'", "W5: the fix-up cancels B's Approve and merge") + \
         run(f"merge-state {c} c waiting", "W5: C's Approve and merge still waits after the clean replay")
-    st += human_merge(c, "b") + run(f"merged {c} b", "W6: B merges") + run(f"merged {c} c", "W6: C merges by itself after its clean rebuild") + \
+    st += human_merge(c, "a") + run(f"merged {c} a", "W4: A merges") + \
+        run(f"rebuilt {c} b main", "W4: B's PR is rebuilt on main") + run(f"rebuilt {c} c b", "W4: C's PR still sits on B's and changes only C") + \
+        run(f"hold-open {c} 6 b c", "W4: B, whose approval the fix-up cancelled, does not merge; nor does C above it") + \
+        run(f"ui {c} a merged", "W4: task A shows its PR merged")
+    st += human_merge(c, "b") + run(f"merged {c} b", "W6: B merges after its new Approve and merge") + run(f"merged {c} c", "W6: C merges by itself after its clean rebuild") + \
         run(f"ui {c} c merged", "W6: task C shows its PR merged")
-    st += run(f"snapshot {c} stack", "Record the stack's PRs") + settings(c, "trunk", "on", "off")
-    st += task(c, "d") + human_create_pr(c, "d", "main") + run(f"untouched {c} stack", "W8: the old stack's PRs are untouched") + \
-        run(f"ui {c} d open", "W8: task D shows its own PR to main")
-    st += run(f"hand-push {c} d", "W7: someone pushes a commit to D's PR by hand") + human_merge(c, "d") + \
-        run(f"merge-state {c} d stale_subject 'someone else pushed'", "W7: Loom refuses to merge the PR someone else pushed to") + \
-        run(f"not-overwritten {c} d 8", "W7: Loom never overwrites the hand-pushed commit")
-    return case("W1-W8 stacked PR walk-through", "Stacked PRs with Lead may approve on and Lead may merge off: a human builds A, B, C as one stack, merges it bottom-up through a review fix-up, switches to PR per task and meets a hand push", st)
+    # W8 with the old mode's PRs still open: a second stack E-F stays open across the switch.
+    st += build(c, [("e", "-", ""), ("f", "e", "")], {"e": human_create_pr(c, "e", "main"), "f": human_create_pr(c, "f", "e")})
+    st += run(f"snapshot {c} stack", "W8: record the open stack E-F") + settings(c, "trunk", "on", "off")
+    st += task(c, "d") + human_create_pr(c, "d", "main") + run(f"untouched {c} stack 2", "W8: the still-open stacked PRs E and F are untouched by the switch") + \
+        run(f"ui {c} d open", "W8: task D shows its own PR to main") + run(f"ui {c} f open", "W8: task F still shows its stacked PR open")
+    # W7 on a stacked PR: a hand push makes E diverge from the stack (F no longer sits on E's head).
+    st += run(f"hand-push {c} e", "W7: someone pushes a commit to stacked PR E by hand, so E diverges from its stack") + human_merge(c, "e") + \
+        run(f"merge-state {c} e stale_subject 'someone else pushed'", "W7: Loom refuses to merge the stacked PR someone else pushed to") + \
+        run(f"not-overwritten {c} e 8", "W7: Loom never overwrites the hand-pushed commit") + run(f"ui {c} e open 'someone else pushed'", "W7: task E says someone else pushed")
+    return case("W1-W8 stacked PR walk-through", "Stacked PRs with Lead may approve on and Lead may merge off: a human builds A, B, C as one stack, gives B merge permission before its review fix-up cancels it, merges bottom-up, switches to PR per task with stack E-F still open, and meets a hand push on stacked E", st)
 
 def settings_cases():
     out = []
@@ -279,6 +287,28 @@ def variants():
         run(f"ui {c} b open", "Task B shows its PR")
     out += case("D3 Approving a dependent before its blocker waits", "Approve on B before A waits for A; approving A then publishes A and B in order", st, needs=True)
 
+    c = "x1"
+    st = setup(c) + settings(c, "stack", "off", "off")
+    st += build(c, [("a", "-", ""), ("b", "a", "", "a")], {"a": human_create_pr(c, "a", "main"), "b": human_create_pr(c, "b", "a")})
+    st += human_merge(c, "b") + run(f"merge-state {c} b waiting 'merges after #A'", "B's Approve and merge waits for A") + \
+        run(f"hand-push {c} a a 'changed outside Loom'", "Someone rewrites A's file on A's PR by hand") + run(f"checks {c} a green", "A's check is green") + \
+        run(f"outside-merge {c} a", "Someone merges A on the forge, outside Loom") + \
+        run(f"merge-state {c} b reapproval_required 'not clean'", "B's rebuild on main does not apply cleanly, so its approval asks to approve again") + \
+        run(f"hold-open {c} 6 b", "B does not merge") + run(f"ui {c} b open 'approve again'", "Task B asks to approve again")
+    out += case("X1 A rebuild that does not apply cleanly needs approving again", "When A lands with different content, B's rebuild conflicts and B's Approve and merge asks for a new approval", st)
+
+    c = "x2"
+    st = setup(c) + settings(c, "stack", "off", "off")
+    st += build(c, [("a", "-", ""), ("b", "a", "")], {"a": human_create_pr(c, "a", "main"), "b": human_create_pr(c, "b", "a")})
+    st += human_merge(c, "b") + run(f"merge-state {c} b waiting 'merges after #A'", "B's Approve and merge waits for A") + \
+        run(f"open-task {c} b", "Human opens task B") + [
+        "      - wait:", "          fn: \"!!document.querySelector('[data-testid=cancel-auto-merge]:not([disabled])')\"", "        intent: Cancel merge after is offered",
+        "      - click:", "          testid: cancel-auto-merge", "        intent: Human cancels B's merge after",
+    ] + run(f"merge-state {c} b cancelled", "B's Approve and merge is cancelled") + \
+        human_merge(c, "a") + run(f"merged {c} a", "A merges") + run(f"rebuilt {c} b main", "B is rebuilt on main") + \
+        run(f"hold-open {c} 8 b", "B, whose merge after was cancelled, does not merge") + run(f"ui {c} b open", "Task B shows its PR open")
+    out += case("X2 Cancelling merge after by hand", "A human cancels B's waiting Approve and merge; A merges and B stays open", st)
+
     return out
 
 HEADER = """# PX.7 Git settings matrix{what}. Generated by tests/aft/scripts/gen-matrix-suites.py;
@@ -302,7 +332,7 @@ def main(root):
     real = "REAL tier: real GitHub sandbox repo + real codex; only via run-aft.sh --real-github."
     for suite, what, cases, body in (("matrix-walk", ": stacked PR walk-through W1-W8", ["walk"], walk()),
                                      ("matrix-settings", ": settings cases S1-S10", [f"s{i}" for i in range(1, 11)], settings_cases()),
-                                     ("matrix-variants", ": lead, negative, recovery and dependent-run variants L1, N1-N3, R1, D1-D3", ["l1", "n1", "n2", "n3", "r1", "d1", "d2", "d3"], variants())):
+                                     ("matrix-variants", ": lead, negative, recovery and dependent-run variants L1, N1-N3, R1, D1-D3, X1-X2", ["l1", "n1", "n2", "n3", "r1", "d1", "d2", "d3", "x1", "x2"], variants())):
         emit(root / "suites" / f"loomgit-{suite}.test.yaml", f"loomgit-{suite}", what, fake, cases, body)
         emit(root / "real-github-suites" / f"real-github-{suite}.test.yaml", f"real-github-{suite}", what, real, cases, body)
 
