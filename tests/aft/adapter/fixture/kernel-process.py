@@ -126,7 +126,10 @@ class RegisteredProcess:
                 result = self.mach.task_terminate(self.task.value)
                 if result != 0 and self.inspect()['state'] != 'exited':
                     raise RuntimeError('cleanup unavailable')
-                self.exited = bool(self.queue.control(None, 1, 15))
+                # inspect above may consume the one-shot exit notification.
+                # Terminal state is monotonic; never read it away on retry.
+                if not self.exited:
+                    self.exited = bool(self.queue.control(None, 1, 15))
         if not self.exited:
             raise RuntimeError('cleanup incomplete')
         return self.inspect()
