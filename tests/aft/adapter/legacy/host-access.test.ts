@@ -195,8 +195,9 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     { taskExecution: options.liveClaude ? 'live-provider' : 'deterministic' })) registry.register(provider);
   const context = createCapabilityContext({ file: 'injected-host.yaml', line: 1 }, registry); Object.assign(context, { runId: 'binding-run' });
   const invoke = (id: string, input: unknown) => registry.invoke({ id, version: 1, input: {} }, input, context);
-  const acquired = await invoke('loom.fixture.acquire', { runId: 'binding-run', profile: plan.profile, loomRevision: revision,
-    fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 });
+  // YAML/JSON wire values have distinct revision objects, not shared JS references.
+  const acquired = await invoke('loom.fixture.acquire', { runId: 'binding-run', profile: plan.profile, loomRevision: { ...revision },
+    fleetRevision: { ...revision }, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 });
   if (acquired.availability !== 'observed') {
     const directory = fileURLToPath(new URL('.verification/', import.meta.url)); await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(path.join(directory, `acquire-failure-${path.basename(root)}.json`),
