@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { fixtureOwnerIdentity, type FixtureAuthorityOwner } from '../authority.js';
-import { createOwnedWorkspaceRoster, LegacyWorkspaceAgentFact, WorkspaceCreationFact, WorkspaceRepositoryFact, type OwnedWorkspaceRoster, type OwnedWorkspaceRecord } from '../workspaces.js';
+import { createOwnedWorkspaceRoster, LegacyWorkspaceAgentFact, WorkspaceCreationFact, WorkspaceRepositoryFact, resolveLegacyRepositoryAssignments, type OwnedWorkspaceRoster, type OwnedWorkspaceRecord } from '../workspaces.js';
 import type { EvidenceStore } from '../evidence.js';
 import { FixtureError } from './lifecycle.js';
 
@@ -55,6 +55,8 @@ export class HostWorkspaceRecords {
   for(const source of sources)commons.push(await this.ports.commonDir(source,signal));
   check(new Set(commons).size===commons.length&&repositories.every(repo=>commons.filter(common=>common===repo.commonDir).length===1));
   check(new Set(repositories.map(repo=>repo.commonDir)).size===repositories.length);
+  // Retained workspace topology anchor only; actor affinity and physical
+  // selection are resolved independently from actual assignments/diagnostics.
   const {repo,commonDir}=repositories[0]!;
   const read=await this.ports.read(workspaceId,'workspace',signal);check(read.status===200);
   const current=Envelope.parse(read.body).data;
@@ -83,14 +85,24 @@ export class HostWorkspaceRecords {
   const list=z.object({success:z.literal(true),data:z.array(Agent).max(1000),total:z.number().int().nonnegative()}).passthrough().parse(read.body);
   check(list.total===list.data.length&&list.data.every(row=>row.workspace_key===workspaceId));
   const matches=list.data.filter(row=>row.name===name);check(matches.length===1);
-  const row=matches[0]!;check(new Set(row.repos).size===row.repos.length&&new Set(row.repo_groups).size===row.repo_groups.length);
-  check(row.repos.every(name=>record.repositories.some(repo=>repo.repoName===name))&&
-   row.repo_groups.every(group=>record.repositories.some(repo=>repo.groups.includes(group))));
-  const selected=row.repos.length||row.repo_groups.length?record.repositories.filter(repo=>row.repos.includes(repo.repoName)||repo.groups.some(group=>row.repo_groups.includes(group))):record.repositories;
-  check(selected.length>0);const source=selected.find(repo=>repo.repo===record.repo)??(selected.length===1?selected[0]:undefined);check(source);
+  const row=matches[0]!;
+  const names=resolveLegacyRepositoryAssignments(record.repositories,row.repos,row.repo_groups);
+  const source=names.length===1?record.repositories.find(repo=>repo.repoName===names[0]):null;
+  check(names.length!==1||source);
   await this.workspace(workspaceId,signal);
   return LegacyWorkspaceAgentFact.parse({kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...fixtureOwnerIdentity(owner),
-   workspaceId,name:row.name,repo:source!.repo,commonDir:source!.commonDir,...record!.store,
+   workspaceId,name:row.name,repo:source?.repo??null,commonDir:source?.commonDir??null,...record!.store,
    assignedRepos:row.repos,assignedRepoGroups:row.repo_groups,parentName:row.parent||null,createdAt:row.created_at,updatedAt:row.updated_at});
+ }
+ /** A fixed product diagnostic supplies the observed common directory. Actor
+  * membership alone never selects a physical worktree or the topology anchor. */
+ async legacyPhysicalSource(owner:FixtureAuthorityOwner,workspaceId:string,name:string,commonDir:string,signal:AbortSignal,repoName?:string){
+  const actor=await this.legacyAgent(owner,workspaceId,name,signal),record=await this.workspace(workspaceId,signal);
+  const names=resolveLegacyRepositoryAssignments(record.repositories,actor.assignedRepos,actor.assignedRepoGroups);
+  const matches=record.repositories.filter(repo=>repo.commonDir===commonDir&&names.includes(repo.repoName));
+  check(matches.length===1);const selected=matches[0]!;
+  check((repoName===undefined||repoName===selected.repoName)&&
+   (actor.repo===null||(actor.repo===selected.repo&&actor.commonDir===selected.commonDir)));
+  return selected;
  }
 }

@@ -60,6 +60,7 @@ test('named multi-repository creation retains actual source IDs and groups, then
   assert.equal(selected.repo,'/managed/beta');assert.equal(selected.commonDir,'/sources/beta/.git');assert.equal(selected.sourceRepoId,'actual-source-beta');
   assert.throws(()=>requireOwnedWorkspace(fixture,'OWNED','nova','legacy-agent-name','alpha'));
   agent.repos=[];agent.repo_groups=['frontend'];assert.equal((await record.legacyAgent(owner,'OWNED','nova',signal)).repo,'/managed/beta');
+  agent.repos=['beta'];agent.repo_groups=['unmatched-group'];assert.equal((await record.legacyAgent(owner,'OWNED','nova',signal)).repo,'/managed/beta');
   for(const assignment of [{repos:['foreign'],repo_groups:[]},{repos:[],repo_groups:['foreign']},{repos:['beta','beta'],repo_groups:[]}]){
    Object.assign(agent,assignment);await assert.rejects(record.legacyAgent(owner,'OWNED','nova',signal));
   }
@@ -85,4 +86,32 @@ test('multi-repository ownership rejects missing fields, duplicate physical sour
  const r=setup();await r.record.captureCreated('OWNED','/source',r.created,r.store,signal);
  r.list({success:true,total:1,data:[{workspace_key:'OWNED',name:'nova',created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T01:00:00Z'}]});
  await assert.rejects(r.record.legacyAgent({leaseId:'lease',runId:'run',suiteId:'suite',scope:'case',caseId:'case',profile:'legacy-deterministic'},'OWNED','nova',signal));
+});
+
+test('multi-assigned membership has no invented selected source, regardless of topology order',async()=>{
+ const directory=await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname),'test-artifacts-'));
+ try{
+  const owner={leaseId:'lease',runId:'run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:'legacy-deterministic'},identity={storeId:'actual-store',storeGeneration:'actual-generation'};
+  const repositories=[{name:'alpha',path:'/managed/alpha',source_repo_id:'source-alpha',groups:['shared']},
+   {name:'beta',path:'/managed/beta',source_repo_id:'source-beta',groups:['shared']}];
+  const store=await createEvidenceStore(directory);
+  for(const reverse of [false,true])for(const assignment of [{repos:['alpha','beta'],repo_groups:[]},{repos:[],repo_groups:['shared']},{repos:[],repo_groups:[]}]){
+   const data={id:'OWNED',repos:reverse?[...repositories].reverse():repositories},agent={workspace_key:'OWNED',name:'nova',...assignment,created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T01:00:00Z'};
+   const record=new HostWorkspaceRecords({store:async()=>identity,
+    read:async(_ws,view)=>({status:200,body:view==='workspace'?{success:true,data}:{success:true,total:1,data:[agent]}}),
+    commonDir:async repo=>repo.endsWith('alpha')?'/sources/alpha/.git':'/sources/beta/.git'});
+   await record.captureCreated('OWNED',['/sources/alpha','/sources/beta'],{status:201,body:{success:true,data}},identity,signal);
+   const fact=await record.legacyAgent(owner,'OWNED','nova',signal);
+   assert.equal(fact.repo,null);assert.equal(fact.commonDir,null);
+   assert.deepEqual(fact.assignedRepos,assignment.repos);assert.deepEqual(fact.assignedRepoGroups,assignment.repo_groups);
+   const fixture:OwnedFixture={...owner,workspaceId:'OWNED',repo:'/managed/alpha',
+    ownedWorkspaces:await record.roster(owner,store,signal),roots:new Map(),agents:new Map(),secrets:[],expiresAtUtcMs:Number.MAX_SAFE_INTEGER,evidenceClass:'deterministic',
+    verify:async()=>{await record.workspace('OWNED',signal);},dispose:async()=>{},
+    readApi:async()=>{throw new Error('unused');},readFiles:async()=>{throw new Error('unused');},resolveAgent:async()=>{throw new Error('unused');},
+    readWorkspaceLegacyAgent:(ws,name,abort)=>record.legacyAgent(owner,ws,name,abort)};
+   await enrollOwnedLegacyAgent(fixture,'OWNED','nova',signal,store);
+   assert.throws(()=>requireOwnedWorkspace(fixture,'OWNED','nova','legacy-agent-name'));
+   assert.equal(requireOwnedWorkspace(fixture,'OWNED','nova','legacy-agent-name','beta').repo,'/managed/beta');
+  }
+ }finally{await fs.rm(directory,{recursive:true});}
 });
