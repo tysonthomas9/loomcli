@@ -6,6 +6,8 @@ import { FixtureId, FixtureParameters, ScenarioId, scenario } from './catalog.js
 import { redactionFacts } from '../redaction.js';
 import type { LoomAuthorizedOperation } from '../authority.js';
 
+export type LegacyAuthorizedOperation = Exclude<LoomAuthorizedOperation, 'loom.runtime.detachTerminal'>;
+
 const Arg = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 export const LegacyEvidenceClasses = ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const satisfies readonly EvidenceClass[];
 const LeaseWorkspace = { leaseId: Id, workspaceId: Arg };
@@ -80,7 +82,7 @@ export interface ConfigurationSnapshot { complete: true; previous: Json; restore
 // suite values. Mutating drivers must atomically compare the passed generation
 // with the owned process immediately before their side effect.
 export interface LegacyAccess {
-  lease(id: string, signal: AbortSignal, operation?: LoomAuthorizedOperation): Promise<LegacyLease>;
+  lease(id: string, signal: AbortSignal, operation?: LegacyAuthorizedOperation): Promise<LegacyLease>;
   // execute enrolls the process under the lease BEFORE spawn/return, including
   // failed/incomplete responses; registerProcess attests that existing binding.
   execute(leaseId: string, command: CliCommand, signal: AbortSignal): Promise<ProcessResult>;
@@ -102,14 +104,14 @@ export interface LegacyReceipt {
   facts: Json;
   factsRedaction: ReturnType<typeof redactionFacts>;
 }
-export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: EvidenceClass | ((operation: LoomAuthorizedOperation) => EvidenceClass)) {
+export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: EvidenceClass | ((operation: LegacyAuthorizedOperation) => EvidenceClass)) {
   const claimed = new Set<string>();
   const configurations = new Map<string, ConfigurationSnapshot>();
   const configurationLocks = new Set<string>();
   const receipt = (op: string, lease: LegacyLease, call: Invocation, actor: LegacyReceipt['actor'], facts: Json): LegacyReceipt =>
     ({ operation: op, leaseId: lease.id, runId: call.runId, invocationId: call.invocationId, evidence: lease.evidence,
       actor, facts: redact(facts, lease.secrets), factsRedaction: redactionFacts(facts, lease.secrets) });
-  async function owned(id: string, call: Invocation, operation: LoomAuthorizedOperation) {
+  async function owned(id: string, call: Invocation, operation: LegacyAuthorizedOperation) {
     call.signal.throwIfAborted();
     const lease = await access.lease(id, call.signal, operation);
     fact(lease.active && lease.id === id && lease.runId === call.runId, 'ownership-mismatch', 'Fixture lease is inactive or foreign');
@@ -209,7 +211,9 @@ export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: 
       return { commit, receipt: receipt('loom.fixture.seedWorktree', lease, call, 'fixture', { commit, actorActivity: false }) };
     },
     async stimulate(raw: unknown, call: Invocation) {
-      const input = parse(RuntimeInput, raw); const lease = await owned(input.leaseId, call, 'loom.runtime.stimulate');
+      const input = parse(RuntimeInput, raw);
+      fact(input.operation !== 'terminal-close', 'unsupported-capability', 'Tab metadata deletion cannot establish a process generation transition');
+      const lease = await owned(input.leaseId, call, 'loom.runtime.stimulate');
       const targets = lease.processes.filter(row => row.id === input.targetId);
       fact(targets.length === 1, 'ownership-mismatch', 'Runtime target is foreign or ambiguous'); const target = targets[0]!;
       fact(target.generation === input.expectedGeneration, 'stale-generation', 'Runtime target generation changed');
@@ -217,13 +221,11 @@ export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: 
       fact(target.kind === kind, 'ownership-mismatch', 'Runtime target kind differs');
       if (target.workspaceId !== null) workspace(lease, target.workspaceId);
       let request: RuntimeRequest | null = null;
-      if (input.operation === 'worker-stop' || input.operation === 'terminal-close') {
+      if (input.operation === 'worker-stop') {
         fact(target.workspaceId !== null && target.agentName !== null, 'ownership-mismatch', 'Lifecycle target lacks agent identity');
         agent(lease, target.workspaceId, target.agentName);
         const prefix = `/api/workspaces/${encodeURIComponent(target.workspaceId)}`;
-        if (input.operation === 'terminal-close') fact(target.sessionName && Arg.safeParse(target.sessionName).success, 'ownership-mismatch', 'Terminal session identity is invalid');
-        request = { method: input.operation === 'worker-stop' ? 'POST' : 'DELETE',
-          path: input.operation === 'worker-stop' ? `${prefix}/agents/${encodeURIComponent(target.agentName)}/stop` : `${prefix}/terminal/tabs/${encodeURIComponent(target.sessionName!)}`, body: null };
+        request = { method: 'POST', path: `${prefix}/agents/${encodeURIComponent(target.agentName)}/stop`, body: null };
       }
       once(lease, call);
       let observed: Awaited<ReturnType<LegacyAccess['stimulate']>>;
@@ -238,7 +240,7 @@ export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: 
         result.data.affectedIds.every(id => lease.processes.some(row => row.id === id)), 'response-invalid', 'Runtime transition identities differ');
       fact(result.data.afterGeneration !== input.expectedGeneration, 'response-invalid', 'Runtime target did not transition');
       if (input.operation === 'serve-restart') fact(result.data.afterGeneration !== null, 'response-invalid', 'Serve restart has no replacement');
-      if (input.operation === 'worker-stop' || input.operation === 'terminal-close') fact(result.data.afterGeneration === null, 'response-invalid', 'Stopped target still has a generation');
+      if (input.operation === 'worker-stop') fact(result.data.afterGeneration === null, 'response-invalid', 'Stopped target still has a generation');
       return { ...result.data, response: wire, receipt: receipt('loom.runtime.stimulate', lease, call, 'runtime', { ...result.data, response: wire }) };
     },
     async configure(raw: unknown, call: Invocation) {
