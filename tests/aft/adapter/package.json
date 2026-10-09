@@ -14,7 +14,8 @@
     "setup:projections": "npm ci --prefix projections --ignore-scripts --no-audit --no-fund"
   },
   "dependencies": {
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "@tysonthomas9/aft": "git+https://github.com/tysonthomas9/aft.git#1f2a17de321a6a92f318d2f660ce5ae49968baf6"
   },
   "devDependencies": {
     "@types/node": "24.10.0",
@@ -29,13 +30,5 @@
     "tsx": "4.20.6",
     "typescript": "5.9.3",
     "typescript-eslint": "8.46.1"
-  },
-  "peerDependencies": {
-    "@tysonthomas9/aft": ">=0.6.0"
-  },
-  "peerDependenciesMeta": {
-    "@tysonthomas9/aft": {
-      "optional": true
-    }
   }
 }
