@@ -36337,7 +36337,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -36346,14 +36346,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3747,
                 "sourceFunction": "clipboard_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical584 capture sourceclipboard performs actualread butusesgrantPermissions clipboardReadWrite andreset,not source setPermission clipboard-read owned-default contract. Currentstagedcodeeq ispartial;table/messagesaved-window/feedback/focus/ownership unpreserved.",
+                "missingObservation": "Actual lastassistant-firstJSONcode/firsttabletrimmedcells/savedVISUAL_RENDER-lastmessage expectedbyteprojection,exact equality+Copiedfeedback withrealoriginalactor,allsourcebrowserprofile/defaultcontext/primaryPID/CDP/sourceownership/permissionreceipt/closebounds. No weaker stringcontains/expectedMarkdown/token stub."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+                ],
+                "sourceReason": "Source clipboard_check kind=code27/table29/message31;ALL require actualsavedfirstturnmessage; nested verify_copy callback executed in with_owned_clipboard_read verify(),requires exactclipboardbytes andactualCopiedfeedback",
+                "acceptance": "Source branch narrowing only;coverage unresolved. Currentcapture/partialassert doesnot preserve full oracle or actor."
+              }
             },
             {
               "source": {
@@ -36366,7 +36376,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -36375,12 +36385,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3778,
                 "sourceFunction": "copy_message",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical584 capture sourceclipboard performs actualread butusesgrantPermissions clipboardReadWrite andreset,not source setPermission clipboard-read owned-default contract. Currentstagedcodeeq ispartial;table/messagesaved-window/feedback/focus/ownership unpreserved.",
+                "missingObservation": "Actual lastassistant-firstJSONcode/firsttabletrimmedcells/savedVISUAL_RENDER-lastmessage expectedbyteprojection,exact equality+Copiedfeedback withrealoriginalactor,allsourcebrowserprofile/defaultcontext/primaryPID/CDP/sourceownership/permissionreceipt/closebounds. No weaker stringcontains/expectedMarkdown/token stub."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/30"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/30"
+                ],
+                "sourceReason": "Actual copy_message30 selects LASTassistant/FIRSTCopybutton,focus+scroll realDOM,requires actualfocusedreturn beforeopacitywait thenLASTrealbuttonclick.",
+                "acceptance": "Source branch narrowing only;coverage unresolved. Currentcapture/partialassert doesnot preserve full oracle or actor."
+              }
             },
             {
               "source": {
@@ -39894,7 +39912,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39903,14 +39921,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3762,
                 "sourceFunction": "clipboard_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical584 capture sourceclipboard performs actualread butusesgrantPermissions clipboardReadWrite andreset,not source setPermission clipboard-read owned-default contract. Currentstagedcodeeq ispartial;table/messagesaved-window/feedback/focus/ownership unpreserved.",
+                "missingObservation": "Actual lastassistant-firstJSONcode/firsttabletrimmedcells/savedVISUAL_RENDER-lastmessage expectedbyteprojection,exact equality+Copiedfeedback withrealoriginalactor,allsourcebrowserprofile/defaultcontext/primaryPID/CDP/sourceownership/permissionreceipt/closebounds. No weaker stringcontains/expectedMarkdown/token stub."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+                ],
+                "sourceReason": "Source clipboard_check kind=code27/table29/message31;ALL require actualsavedfirstturnmessage; nested verify_copy callback executed in with_owned_clipboard_read verify(),requires exactclipboardbytes andactualCopiedfeedback",
+                "acceptance": "Source branch narrowing only;coverage unresolved. Currentcapture/partialassert doesnot preserve full oracle or actor."
+              }
             },
             {
               "source": {
@@ -39923,7 +39951,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39932,14 +39960,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3764,
                 "sourceFunction": "clipboard_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical584 capture sourceclipboard performs actualread butusesgrantPermissions clipboardReadWrite andreset,not source setPermission clipboard-read owned-default contract. Currentstagedcodeeq ispartial;table/messagesaved-window/feedback/focus/ownership unpreserved.",
+                "missingObservation": "Actual lastassistant-firstJSONcode/firsttabletrimmedcells/savedVISUAL_RENDER-lastmessage expectedbyteprojection,exact equality+Copiedfeedback withrealoriginalactor,allsourcebrowserprofile/defaultcontext/primaryPID/CDP/sourceownership/permissionreceipt/closebounds. No weaker stringcontains/expectedMarkdown/token stub."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+                ],
+                "sourceReason": "Source clipboard_check kind=code27/table29/message31;ALL require actualsavedfirstturnmessage; nested verify_copy callback executed in with_owned_clipboard_read verify(),requires exactclipboardbytes andactualCopiedfeedback",
+                "acceptance": "Source branch narrowing only;coverage unresolved. Currentcapture/partialassert doesnot preserve full oracle or actor."
+              }
             },
             {
               "source": {
@@ -41108,7 +41146,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -41117,14 +41155,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3752,
                 "sourceFunction": "clipboard_check",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical584 capture sourceclipboard performs actualread butusesgrantPermissions clipboardReadWrite andreset,not source setPermission clipboard-read owned-default contract. Currentstagedcodeeq ispartial;table/messagesaved-window/feedback/focus/ownership unpreserved.",
+                "missingObservation": "Actual lastassistant-firstJSONcode/firsttabletrimmedcells/savedVISUAL_RENDER-lastmessage expectedbyteprojection,exact equality+Copiedfeedback withrealoriginalactor,allsourcebrowserprofile/defaultcontext/primaryPID/CDP/sourceownership/permissionreceipt/closebounds. No weaker stringcontains/expectedMarkdown/token stub."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29"
+                ],
+                "sourceReason": "Source clipboard_check kind=table ONLY29,nonemptyactualfirsttable",
+                "acceptance": "Source branch narrowing only;coverage unresolved. Currentcapture/partialassert doesnot preserve full oracle or actor."
+              }
             },
             {
               "source": {
@@ -44088,7 +44132,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44097,14 +44141,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-clipboard.mjs",
                 "sourceLine": 6,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical584capture clipboard/readPageClipboard existingmethod differs sourcepermissionmode/defaultcontext/runnerprofile proof;not reportedasnewprimitive before ownertriage.",
+                "missingObservation": "Exact same-ownedsource browser/profile/PID/DevToolsActivePort/page/context/origin/route,read-onlypermission mode,grantreceipt and boundedclose,includingmalformed/foreign/ambiguous/denial/errors. No arbitrary authoredCDP/script/process."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+                ],
+                "sourceReason": "Shared fail dispatch occurs only after actual invalid input/ownership/CDP/close condition. Extracted declaration isnot fullpredicate or positivepass;ALL reachable guard bodies retainedin sourcegroups.",
+                "acceptance": "Sourceonly;no actualbrowser/permissionholder executionorengine-equivalence credit."
+              }
             },
             {
               "source": {
@@ -44113,7 +44167,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44122,14 +44176,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-clipboard.mjs",
                 "sourceLine": 18,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical584capture clipboard/readPageClipboard existingmethod differs sourcepermissionmode/defaultcontext/runnerprofile proof;not reportedasnewprimitive before ownertriage.",
+                "missingObservation": "Exact same-ownedsource browser/profile/PID/DevToolsActivePort/page/context/origin/route,read-onlypermission mode,grantreceipt and boundedclose,includingmalformed/foreign/ambiguous/denial/errors. No arbitrary authoredCDP/script/process."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+                ],
+                "sourceReason": "Normalhold invokes assertTargets before actualsetPermission,retaining exactpage/defaultcontext checks. Extracted declaration/call isnot completeguarddenominator;bodychecks retainedas sourcegroups.",
+                "acceptance": "Sourceonly;no actualbrowser/permissionholder executionorengine-equivalence credit."
+              }
             },
             {
               "source": {
@@ -44138,7 +44202,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44147,14 +44211,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-clipboard.mjs",
                 "sourceLine": 83,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical584capture clipboard/readPageClipboard existingmethod differs sourcepermissionmode/defaultcontext/runnerprofile proof;not reportedasnewprimitive before ownertriage.",
+                "missingObservation": "Exact same-ownedsource browser/profile/PID/DevToolsActivePort/page/context/origin/route,read-onlypermission mode,grantreceipt and boundedclose,includingmalformed/foreign/ambiguous/denial/errors. No arbitrary authoredCDP/script/process."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+                ],
+                "sourceReason": "Normalhold invokes assertTargets before actualsetPermission,retaining exactpage/defaultcontext checks. Extracted declaration/call isnot completeguarddenominator;bodychecks retainedas sourcegroups.",
+                "acceptance": "Sourceonly;no actualbrowser/permissionholder executionorengine-equivalence credit."
+              }
             },
             {
               "source": {
@@ -44163,7 +44237,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "helper-selftest-negative-requirement",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44175,11 +44249,12 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "selftest-not-selected-holder-body",
+                "sourceReason": "Only explicit CLI self-test executes these literalfixture targetchecks;normal selected code/table/message path invokes hold. Preserve deterministicpositive/negative requirements separately,not pilotruntime predicates or passingresults.",
+                "acceptance": "Sourceclassification only;not executed/ported bypilot."
+              }
             },
             {
               "source": {
@@ -44188,7 +44263,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "helper-selftest-negative-requirement",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44200,11 +44275,12 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "selftest-not-selected-holder-body",
+                "sourceReason": "Only explicit CLI self-test executes these literalfixture targetchecks;normal selected code/table/message path invokes hold. Preserve deterministicpositive/negative requirements separately,not pilotruntime predicates or passingresults.",
+                "acceptance": "Sourceclassification only;not executed/ported bypilot."
+              }
             },
             {
               "source": {
@@ -44213,7 +44289,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "helper-selftest-negative-requirement",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44225,11 +44301,12 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "selftest-not-selected-holder-body",
+                "sourceReason": "Only explicit CLI self-test executes these literalfixture targetchecks;normal selected code/table/message path invokes hold. Preserve deterministicpositive/negative requirements separately,not pilotruntime predicates or passingresults.",
+                "acceptance": "Sourceclassification only;not executed/ported bypilot."
+              }
             },
             {
               "source": {
@@ -44238,7 +44315,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "helper-selftest-negative-requirement",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44250,11 +44327,12 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "selftest-not-selected-holder-body",
+                "sourceReason": "Only explicit CLI self-test executes these literalfixture targetchecks;normal selected code/table/message path invokes hold. Preserve deterministicpositive/negative requirements separately,not pilotruntime predicates or passingresults.",
+                "acceptance": "Sourceclassification only;not executed/ported bypilot."
+              }
             },
             {
               "source": {
@@ -44263,7 +44341,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "helper-selftest-negative-requirement",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44275,11 +44353,12 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "selftest-not-selected-holder-body",
+                "sourceReason": "Only explicit CLI self-test executes these literalfixture targetchecks;normal selected code/table/message path invokes hold. Preserve deterministicpositive/negative requirements separately,not pilotruntime predicates or passingresults.",
+                "acceptance": "Sourceclassification only;not executed/ported bypilot."
+              }
             },
             {
               "source": {
@@ -44288,7 +44367,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "helper-selftest-negative-requirement",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44300,11 +44379,12 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
-              ]
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "selftest-not-selected-holder-body",
+                "sourceReason": "Only explicit CLI self-test executes these literalfixture targetchecks;normal selected code/table/message path invokes hold. Preserve deterministicpositive/negative requirements separately,not pilotruntime predicates or passingresults.",
+                "acceptance": "Sourceclassification only;not executed/ported bypilot."
+              }
             }
           ]
         },
@@ -48976,6 +49056,401 @@
           }
         ],
         "acceptance": "7 formerlyunrelated sourceguards recovered;4newuncovered sourcegroups.11 secondcase planbranchguards excludedONLY fresh selectednamespace,actualabsence not proven. Genericfixture.release never counts sourcearchive cleanup."
+      },
+      "clipboardSelectedBranchReview": {
+        "at": "2026-10-09T13:43:16.317319+00:00",
+        "scope": "Selectedcode27/table29/message31 byteoracles andrealcopyaction30;externalhold protocolvs6selftestrecords kept separate",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "externalSha256": "d1b4b15935a0413dd5d12fd4b1c33445dc44c60cc430712b6d6d14f2a59d4d45",
+        "frozenBytesMatch": true,
+        "selectedExtractedRecords": [
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "function": "clipboard_check",
+            "line": 3747,
+            "endLine": 3747,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "conditional": false,
+            "sourceReason": "Source clipboard_check kind=code27/table29/message31;ALL require actualsavedfirstturnmessage; nested verify_copy callback executed in with_owned_clipboard_read verify(),requires exactclipboardbytes andactualCopiedfeedback"
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "function": "copy_message",
+            "line": 3778,
+            "endLine": 3780,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/30"
+            ],
+            "conditional": false,
+            "sourceReason": "Actual copy_message30 selects LASTassistant/FIRSTCopybutton,focus+scroll realDOM,requires actualfocusedreturn beforeopacitywait thenLASTrealbuttonclick."
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "function": "clipboard_check",
+            "line": 3762,
+            "endLine": 3762,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "conditional": false,
+            "sourceReason": "Source clipboard_check kind=code27/table29/message31;ALL require actualsavedfirstturnmessage; nested verify_copy callback executed in with_owned_clipboard_read verify(),requires exactclipboardbytes andactualCopiedfeedback"
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "function": "clipboard_check",
+            "line": 3764,
+            "endLine": 3764,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "conditional": false,
+            "sourceReason": "Source clipboard_check kind=code27/table29/message31;ALL require actualsavedfirstturnmessage; nested verify_copy callback executed in with_owned_clipboard_read verify(),requires exactclipboardbytes andactualCopiedfeedback"
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "function": "clipboard_check",
+            "line": 3752,
+            "endLine": 3752,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29"
+            ],
+            "conditional": false,
+            "sourceReason": "Source clipboard_check kind=table ONLY29,nonemptyactualfirsttable"
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-visual-clipboard.mjs",
+            "line": 6,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "conditional": true,
+            "sourceReason": "Shared fail dispatch occurs only after actual invalid input/ownership/CDP/close condition. Extracted declaration isnot fullpredicate or positivepass;ALL reachable guard bodies retainedin sourcegroups."
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-visual-clipboard.mjs",
+            "line": 18,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "conditional": false,
+            "sourceReason": "Normalhold invokes assertTargets before actualsetPermission,retaining exactpage/defaultcontext checks. Extracted declaration/call isnot completeguarddenominator;bodychecks retainedas sourcegroups."
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-visual-clipboard.mjs",
+            "line": 83,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "conditional": false,
+            "sourceReason": "Normalhold invokes assertTargets before actualsetPermission,retaining exactpage/defaultcontext checks. Extracted declaration/call isnot completeguarddenominator;bodychecks retainedas sourcegroups."
+          }
+        ],
+        "direct": 7,
+        "conditionalFailureDispatch": 1,
+        "externalSelftestRecords": [
+          {
+            "line": 109,
+            "source": "  if (assertTargets([owned, tab], [], page) !== 'target_1') fail('owned-target-rejected');",
+            "kind": "positive-control",
+            "previousClassification": "selected-external-helper-branch-unresolved"
+          },
+          {
+            "line": 119,
+            "source": "  rejects(() => assertTargets([{ ...owned, url: `${origin}/other` }], [], page), 'foreign-page');",
+            "kind": "negative-rejection",
+            "previousClassification": "selected-external-helper-branch-unresolved"
+          },
+          {
+            "line": 120,
+            "source": "  rejects(() => assertTargets([owned, { ...tab, url: 'http://foreign.example/' }], [], page), 'foreign-page');",
+            "kind": "negative-rejection",
+            "previousClassification": "selected-external-helper-branch-unresolved"
+          },
+          {
+            "line": 121,
+            "source": "  rejects(() => assertTargets([owned, { ...tab, browserContextId: 'other' }], [], page), 'ambiguous-browser-context');",
+            "kind": "negative-rejection",
+            "previousClassification": "selected-external-helper-branch-unresolved"
+          },
+          {
+            "line": 122,
+            "source": "  rejects(() => assertTargets([owned], ['default_1'], page), 'ambiguous-browser-context');",
+            "kind": "negative-rejection",
+            "previousClassification": "selected-external-helper-branch-unresolved"
+          },
+          {
+            "line": 123,
+            "source": "  rejects(() => assertTargets([owned, { ...owned, targetId: 'target_3' }], [], page), 'foreign-page');",
+            "kind": "negative-rejection",
+            "previousClassification": "selected-external-helper-branch-unresolved"
+          }
+        ],
+        "selftestCount": 6,
+        "additionalSourceGroups": [
+          {
+            "id": "visual-copy-last-assistant-first-table-code-fields",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2841,
+              "end": 2848,
+              "text": "RENDER_DOM = r\"\"\"(() => { const c=document.querySelector('[data-testid=chat-transcript]');\n  const a=[...(c?.querySelectorAll('li[data-kind=agent]')||[])].at(-1);\n  const table=a?.querySelector('table');\n  return {answer:a?.querySelector('[data-testid=chat-markdown]')?.textContent||'',\n    showAll:!![...(a?.querySelectorAll('button')||[])].find(b=>b.textContent.startsWith('Show all')),\n    table:table?[...table.querySelectorAll('tr')].map(r=>[...r.querySelectorAll('th,td')].map(x=>x.textContent.trim())):[],\n    code:[...(a?.querySelectorAll('[data-testid=chat-codeblock]')||[])].map(x=>({language:x.dataset.language,\n      text:x.querySelector('code')?.textContent||'', tokenSpans:x.querySelectorAll('code span').length})),"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "RENDER_DOM LASTagent,itsFIRSTtable orderedTR/TH/TD trimmedtext,allitscodeblocks actuallanguage/codeText (missingcode->empty). codeexpectedFIRSTmatchingjson inorderedarray;tableexpectedsourcefirsttable,not global arbitrarytable/Markdown/source-onlyexpectedrendering.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "Samecapture sourcefield order/cardinality/scoping withsourcecodefirstmatch,tablecelltrim/rowboundaryandpipeescaping;currentglobalcodecaptureeq ispartial."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-three-copy-expected-byte-oracles",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3741,
+              "end": 3760,
+              "text": "def clipboard_check(kind):\n    current(\"render\")\n    dom = evaluate(RENDER_DOM)\n    _, _, between = turn_events(\"render\", \"VISUAL_RENDER\")\n    replies = [e[\"payload\"].get(\"text\", \"\") for e in between\n               if e[\"kind\"] == \"item.completed\" and e[\"payload\"].get(\"itemKind\") == \"message\"]\n    assert replies, \"no saved assistant message to copy\"\n    if kind == \"code\":\n        expected = next(c[\"text\"] for c in dom[\"code\"] if c[\"language\"] == \"json\")\n    elif kind == \"table\":\n        rows = dom[\"table\"]\n        assert rows, \"no rendered table to copy\"\n        expected = \"\\n\".join(\"| \" + \" | \".join(c.replace(\"|\", \"\\\\|\") for c in row) + \" |\" for row in rows[:1])\n        expected += \"\\n| \" + \" | \".join(\"---\" for _ in rows[0]) + \" |\"\n        expected += \"\".join(\"\\n| \" + \" | \".join(c.replace(\"|\", \"\\\\|\") for c in row) + \" |\" for row in rows[1:])\n    elif kind == \"message\":\n        expected = replies[-1]\n    else:\n        raise ValueError(kind)\n    def verify_copy():"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "currentrender exactChat route;actualturn_events VISUAL_RENDER firstturn bound;ALLkinds require savedmessage list. CodeFIRSTactualjsoncodeText;tableactualtrimmedcellrows -> GFMpipeescaping/headerseparator/deliberatenewlines;messageLASTsavedmessage text inthatwindow,not lastagentfulltext orotherturn.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "Typed rawfactprojection and exactbyteexpectations remain missing;currentmessagecapture+visualMessagesfilter has no actualeq,tablecapture hasnoexpectedcomparison. Unknownkind rejects."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-copy-actual-equality-feedback-blocked-state",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3761,
+              "end": 3773,
+              "text": "        actual = evaluate(\"navigator.clipboard.readText()\")\n        assert actual == expected, f\"{kind} copy bytes differ from actual rendered/saved source\"\n        copied = evaluate(\"!!document.querySelector('[data-testid=chat-transcript] button[aria-label=Copied]') || !![...document.querySelectorAll('[data-testid=chat-transcript] button')].find(b=>b.textContent==='Copied')\")\n        assert copied, f\"{kind} copy showed no success feedback\"\n        return actual, copied\n\n    try:\n        actual, copied = with_owned_clipboard_read(kind, verify_copy)\n    except (PermissionError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:\n        write(f\"clipboard-{kind}-blocked.json\", {\"status\": \"blocked\",\n              \"prerequisite\": \"owned browser clipboard-read permission\", \"failure_type\": type(exc).__name__})\n        raise AssertionError(\"BLOCKED: owned browser clipboard readback unavailable\") from exc\n    write(f\"clipboard-{kind}.json\", {\"expected\": expected, \"actual\": actual, \"feedback\": copied})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "Actualnavigator.clipboard.readText() EXACTequals sourceexpected,actualDOMCopiedaria/buttontext feedback required;ownedpermission holder invokesverify callback. PermissionError/process/JSONerrors writeblocked andthrowcapabilityprerequisite. Neverpassedempty/inaccessible read orfailedfeedback.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "No clipboard read countedfulloracle withoutsameactorfeedback/sourceownership. Sourceimmediateasserts cannotbe weakened to unboundedeventualpass;no returnedexpecteddata."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-copy-message-focus-opacity-real-action",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3776,
+              "end": 3784,
+              "text": "def copy_message():\n    current(\"render\")\n    assert evaluate(\"\"\"(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);\n      const b=r?.querySelector('[data-testid=message-actions] button[aria-label=\"Copy message\"]');\n      if(!b)throw Error('reply copy missing');b.focus();b.scrollIntoView({block:'center'});return document.activeElement===b;})()\"\"\")\n    browser(\"wait\", \"--fn\", \"\"\"(() => {const r=[...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]')].at(-1);\n      const p=r?.querySelector('[data-testid=message-actions]');return !!p&&getComputedStyle(p).opacity==='1';})()\"\"\")\n    browser(\"find\", \"last\", \"[data-testid=chat-transcript] li[data-kind=agent] [data-testid=message-actions] button[aria-label='Copy message']\", \"click\")\n"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/30"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "Sourcefocusandscroll LASTagent/FIRSTmessageactionsCopybutton inonecallback;missingbuttonthrows,actualactiveElementequalsbutton;waititsmessageactionsopacity1;realLASTmatchingCopymessagebuttonclick.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "Currentsource30 onlyscreenshotcheckpoint hasnoactor. Exactfocus/scroll/readback/opacityandrealclick mustbeauthored;do not substitute APIcopy/programmaticclipboardwrite."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-clipboard-actual-run-profile-native-preflight",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3339,
+              "end": 3430,
+              "text": "\ndef clipboard_primary_pids(profile, processes):\n    profile_flag = f\"--user-data-dir={profile}\"\n    primary = []\n    for line in processes:\n        match = re.match(r\"\\s*([0-9]+)\\s+(.*)\", line)\n        if not match:\n            continue\n        command = match[2]\n        if re.search(rf\"(?:^|\\s){re.escape(profile_flag)}(?:\\s|$)\", command) and \\\n           re.search(r\"(?:^|\\s)--remote-debugging-port=[0-9]+(?:\\s|$)\", command) and \\\n           not re.search(r\"(?:^|\\s)--type=\", command):\n            primary.append(int(match[1]))\n    return primary\n\n\ndef clipboard_owned_config(manifest, env, origin, route, endpoint, devtools_lines, processes, wrapper, case=\"render\"):\n    evidence = Path(env[\"AFT_WORK_DIR\"])\n    run_root = evidence.parent\n    session = env[\"AFT_SESSION\"]\n    profile_root = Path(env[\"AFT_BROWSER_PROFILES\"])\n    profile = profile_root / session\n    tests_dir = Path(env[\"AFT_TESTS_DIR\"])\n    owned = manifest[\"owned\"]\n    if not re.fullmatch(r\"aft-live-chat-visual-[0-9]+\", session) or \\\n       not re.fullmatch(r\"/private/tmp/aft-agent-flows\\.[A-Za-z0-9]{8}\", str(run_root)) or \\\n       evidence != run_root / \"evidence\" or evidence.resolve() != evidence or \\\n       profile_root != run_root / \"profiles\" or profile_root.resolve() != profile_root or \\\n       not profile.is_dir() or profile.is_symlink() or profile.resolve() != profile or \\\n       manifest[\"run_id\"] != RUN or manifest[\"selection\"][\"batch\"] != \"chat-visual\" or \\\n       owned[\"evidence_dir\"] != str(evidence) or owned[\"ui_url\"] != env[\"AFT_BASE_URL\"] or \\\n       owned[\"browser_socket_dir\"] != env[\"AGENT_BROWSER_SOCKET_DIR\"] or \\\n       env[\"AFT_BROWSER_SOCKET_RECEIPT\"] != str(evidence / \"browser-socket.json\") or \\\n       manifest[\"browser_binary\"] != env[\"AFT_BROWSER_BIN\"] or \\\n       tests_dir != Path(manifest[\"source_root\"]) / \"tests/aft\" or \\\n       wrapper != run_root / \"bin/agent-browser\" or \\\n       wrapper.resolve() != tests_dir / \"scripts/agent-flows-browser\":\n        raise PermissionError(\"foreign clipboard runner identity\")\n    if origin != env[\"AFT_BASE_URL\"] or not re.fullmatch(r\"http://127\\.0\\.0\\.1:[0-9]+\", origin) or \\\n       route != f\"/ws/{WS}/chat/{agent_id(case)}\":\n        raise PermissionError(\"foreign clipboard Chat origin or route\")\n    url = urllib.parse.urlsplit(endpoint)\n    if url.scheme != \"ws\" or url.hostname != \"127.0.0.1\" or not url.port or \\\n       not re.fullmatch(r\"/devtools/browser/[A-Za-z0-9-]+\", url.path) or \\\n       url.username or url.password or url.query or url.fragment or \\\n       devtools_lines != [str(url.port), url.path]:\n        raise PermissionError(\"foreign clipboard CDP endpoint\")\n    primary = clipboard_primary_pids(profile, processes)\n    if len(primary) != 1:\n        raise PermissionError(\"ambiguous owned Chrome primary process\")\n    return {\"endpoint\": endpoint, \"profile\": str(profile), \"origin\": origin,\n            \"route\": route, \"pid\": primary[0]}\n\n\ndef clipboard_preflight(case=\"render\"):\n    env = {name: required(name) for name in\n           (\"AFT_WORK_DIR\", \"AFT_SESSION\", \"AFT_BROWSER_PROFILES\", \"AFT_TESTS_DIR\",\n            \"AFT_BASE_URL\", \"AGENT_BROWSER_SOCKET_DIR\", \"AFT_BROWSER_SOCKET_RECEIPT\",\n            \"AFT_BROWSER_BIN\")}\n    receipt = Path(env[\"AFT_BROWSER_SOCKET_RECEIPT\"])\n    if receipt != Path(env[\"AFT_WORK_DIR\"]) / \"browser-socket.json\":\n        raise PermissionError(\"foreign browser socket receipt\")\n    subprocess.run([\"node\", str(Path(env[\"AFT_TESTS_DIR\"]) / \"scripts/agent-flows-browser-socket.mjs\"),\n                    \"verify\", str(receipt), env[\"AGENT_BROWSER_SOCKET_DIR\"]],\n                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=5)\n    manifest_file = Path(env[\"AFT_WORK_DIR\"]) / \"manifest.json\"\n    if manifest_file.is_symlink():\n        raise PermissionError(\"foreign clipboard run manifest\")\n    manifest = json.loads(manifest_file.read_text())\n    source_head = subprocess.check_output([\"git\", \"-C\", manifest[\"source_root\"], \"rev-parse\", \"HEAD\"],\n                                          text=True, timeout=5).strip()\n    if source_head != manifest[\"source_head\"]:\n        raise PermissionError(\"clipboard source differs from owned run manifest\")\n    processes = subprocess.check_output([\"ps\", \"-axo\", \"pid=,command=\"], text=True, timeout=5).splitlines()\n    profile = Path(env[\"AFT_BROWSER_PROFILES\"]) / env[\"AFT_SESSION\"]\n    port_file = profile / \"DevToolsActivePort\"\n    if not profile.is_dir() or profile.is_symlink() or port_file.is_symlink():\n        raise PermissionError(\"foreign clipboard profile\")\n    if len(clipboard_primary_pids(profile, processes)) != 1:\n        raise PermissionError(\"ambiguous owned Chrome primary process\")\n    devtools_lines = port_file.read_text().splitlines()\n    wrapper = Path(shutil.which(\"agent-browser\") or \"\")\n    if wrapper != Path(env[\"AFT_WORK_DIR\"]).parent / \"bin/agent-browser\" or \\\n       wrapper.resolve() != Path(env[\"AFT_TESTS_DIR\"]) / \"scripts/agent-flows-browser\":\n        raise PermissionError(\"foreign clipboard browser wrapper\")\n    origin = evaluate(\"location.origin\")\n    route = evaluate(\"location.pathname\")\n    endpoint = browser(\"get\", \"cdp-url\")\n    return clipboard_owned_config(manifest, env, origin, route, endpoint,\n                                  devtools_lines, processes, wrapper, case)\n\n"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "ActualownedRUN/batch/session/evidence/profile/socketreceipt/binary/sourceHEAD/wrapper paths andno-symlinkchecks;fixedsocketverify5s,actualprimaryChromePID uniqueness (profile+debugport,no--type),actualDevToolsActivePort=loopbackbrowserendpoint;currentorigin/route exact owningrenderagent.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "Actualfixture/driver ownership observations mustprove sourceguard outcomes,not alias/urlalone orliteralexpectedprofile/PID. Canonicalcaptureorigincheck alone insufficient."
+            },
+            "bounds": {
+              "socketVerifyMs": 5000,
+              "sourceGitReadMs": 5000,
+              "processReadMs": 5000
+            }
+          },
+          {
+            "id": "visual-clipboard-holder-ack-close-native-bounds",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3431,
+              "end": 3480,
+              "text": "def clipboard_holder_ack(process):\n    with selectors.DefaultSelector() as selector:\n        selector.register(process.stdout, selectors.EVENT_READ)\n        if not selector.select(timeout=10):\n            raise PermissionError(\"clipboard permission holder timed out\")\n        line = process.stdout.readline()\n    if not line:\n        raise PermissionError(\"clipboard permission holder exited before grant\")\n    return json.loads(line)\n\n\ndef close_clipboard_holder(process):\n    if process is None:\n        return None, None\n    if process.poll() is None:\n        try:\n            process.stdin.write(\"close\\n\")\n            process.stdin.flush()\n        except (BrokenPipeError, OSError):\n            pass\n    try:\n        process.stdin.close()\n    except (BrokenPipeError, OSError):\n        pass\n    try:\n        process.wait(timeout=5)\n    except subprocess.TimeoutExpired:\n        try:\n            process.terminate()\n        except ProcessLookupError:\n            pass\n        try:\n            process.wait(timeout=2)\n        except subprocess.TimeoutExpired:\n            try:\n                process.kill()\n            except ProcessLookupError:\n                pass\n            process.wait(timeout=2)\n    reason = None\n    for line in process.stderr.read(512).splitlines()[:1]:\n        try:\n            candidate = json.loads(line).get(\"reason\")\n            if re.fullmatch(r\"[a-z-]+\", candidate or \"\"):\n                reason = candidate\n        except json.JSONDecodeError:\n            pass\n    process.stdout.close()\n    process.stderr.close()\n    return process.returncode, reason"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "Actualholderstdout readiness10s,empty/earlyexitdeny;close command thenstdinclose/processwait5s,terminate/wait2s,kill/wait2s asneeded;boundedstderr512B firstreasonline lowercase;closeallstdio andreturnactualcode/reason.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "Genericdriverdispose cannotcredit originalholderoutcomes/bounds;fixedmanagedpermissionresource ifsupported mustretain safeactualreceipts andnegative denialwithoutarbitraryprocesscapability."
+            },
+            "bounds": {
+              "ackMs": 10000,
+              "normalCloseMs": 5000,
+              "terminateMs": 2000,
+              "killMs": 2000,
+              "stderrMaxBytes": 512
+            }
+          },
+          {
+            "id": "visual-clipboard-grant-receipt-read-finally",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3483,
+              "end": 3519,
+              "text": "def with_owned_clipboard_read(kind, verify):\n    process = None\n    stage = \"preflight\"\n    failure_type = None\n    config = None\n    receipt = None\n    try:\n        config = clipboard_preflight()\n        stage = \"grant\"\n        script = Path(required(\"AFT_TESTS_DIR\")) / \"scripts/coverage-chat-visual-clipboard.mjs\"\n        process = subprocess.Popen([\"node\", str(script), \"hold\"], stdin=subprocess.PIPE,\n                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)\n        process.stdin.write(json.dumps(config) + \"\\n\")\n        process.stdin.flush()\n        receipt = clipboard_holder_ack(process)\n        if not isinstance(receipt, dict) or receipt != {\"status\": \"granted\", \"targetId\": receipt.get(\"targetId\"),\n                       \"context\": \"owned-default\", \"origin\": config[\"origin\"],\n                       \"route\": config[\"route\"]} or not receipt[\"targetId\"]:\n            raise PermissionError(\"foreign clipboard permission receipt\")\n        stage = \"readback\"\n        result = verify()\n        stage = \"verified\"\n        return result\n    except Exception as exc:\n        failure_type = type(exc).__name__\n        raise\n    finally:\n        exit_code, holder_reason = close_clipboard_holder(process)\n        write(f\"clipboard-{kind}-permission.json\", {\"status\": \"closed\" if exit_code == 0 and\n              stage == \"verified\" and failure_type is None else \"blocked\",\n              \"run\": RUN, \"case\": \"render\", \"agent_id\": agent_id(\"render\"), \"kind\": kind,\n              \"stage\": stage, \"failure_type\": failure_type, \"holder_exit\": exit_code,\n              \"holder_reason\": holder_reason, \"owned_origin\": config[\"origin\"] if config else None,\n              \"owned_profile\": config is not None,\n              \"target_id\": receipt.get(\"targetId\") if isinstance(receipt, dict) else None})\n        if process is not None and exit_code != 0:\n            raise PermissionError(\"clipboard permission holder did not close cleanly\")"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "Readactualpreflightconfig,sourceownedholderhold;exactgrantedreceipt keys/defaultcontext/origin/route/nonemptytargetID BEFOREverify;source stagespreflight/grant/readback/verified andfailureType;finallyactualclose receiptstatusclosedONLYverified,noexception,exit0. Nonzeroexit raises,not hidden behindsuccessfulbytes.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "Actualreadbackauthority/receipt/cleanup port+sourceexactfacts;sourceholderdoesNOTcallBrowser.resetPermissions (closesprotocol);canonicalreset behavior mustbe explicitly reviewed,not silentlyequal orwaived."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-clipboard-cdp-route-target-permission-mode",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-clipboard.mjs",
+            "sourceHelperSha256": "d1b4b15935a0413dd5d12fd4b1c33445dc44c60cc430712b6d6d14f2a59d4d45",
+            "sourceLines": {
+              "start": 6,
+              "end": 38,
+              "text": "const fail = code => { throw new Error(code); };\nconst browserUrl = (endpoint, profile) => {\n  const url = new URL(endpoint);\n  if (url.protocol !== 'ws:' || url.hostname !== '127.0.0.1' ||\n      !/^\\/devtools\\/browser\\/[A-Za-z0-9-]+$/.test(url.pathname) ||\n      url.username || url.password || url.search || url.hash) fail('foreign-endpoint');\n  const lines = readFileSync(`${profile}/DevToolsActivePort`, 'utf8').trimEnd().split('\\n');\n  if (lines.length !== 2 || lines[0] !== url.port || lines[1] !== url.pathname)\n    fail('foreign-profile-endpoint');\n  return url;\n};\n\nexport function assertTargets(targetInfos, browserContextIds, exactPage) {\n  if (!Array.isArray(targetInfos) || !Array.isArray(browserContextIds) || browserContextIds.length)\n    fail('ambiguous-browser-context');\n  const pages = targetInfos.filter(target => target.type === 'page');\n  const owned = pages.filter(target => target.url === exactPage);\n  if (owned.length !== 1 || pages.some(target =>\n    ![exactPage, 'about:blank', 'chrome://newtab/'].includes(target.url))) fail('foreign-page');\n  const context = owned[0].browserContextId;\n  if (typeof context !== 'string' || !context ||\n      pages.some(target => target.browserContextId !== context)) fail('ambiguous-browser-context');\n  if (typeof owned[0].targetId !== 'string' || !owned[0].targetId) fail('missing-target');\n  return owned[0].targetId;\n}\n\nexport function permissionParams(origin) {\n  const url = new URL(origin);\n  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' ||\n      !url.port || url.href !== `${origin}/`) fail('foreign-origin');\n  return { permission: { name: 'clipboard-read' }, setting: 'granted',\n           origin, embeddedOrigin: origin };\n}"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "Loopbackws/browserURL no user/pass/query/hash andactualprofileport/path exact;oneexactpage/nootherforeignpage (onlyaboutblank/newtab allowed),noexplicitbrowsercontexts,nonemptydefaultcontext consistentforallpages,targetIDnonempty. permissionParams ONLYhttp127loopbackorigin exact:clipboard-read granted,origin+embeddedOrigin,no browserContextId.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "Canonical584uses Browser.grantPermissions clipboardReadWrite+connectedcontext thenreset;sourceequivalence/ownershipnegative triage required. No enginepermissionchange authorized here."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-clipboard-cdp-holder-lifetime",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-clipboard.mjs",
+            "sourceHelperSha256": "d1b4b15935a0413dd5d12fd4b1c33445dc44c60cc430712b6d6d14f2a59d4d45",
+            "sourceLines": {
+              "start": 48,
+              "end": 97,
+              "text": "async function hold(config, input) {\n  const { endpoint, profile, origin, route } = config;\n  browserUrl(endpoint, profile);\n  permissionParams(origin);\n  if (!/^\\/ws\\/LOCALMODE\\/chat\\/agt_[A-Za-z0-9_-]+$/.test(route)) fail('foreign-route');\n  const exactPage = origin + route;\n  const socket = new WebSocket(endpoint);\n  let nextId = 0;\n  const pending = new Map();\n  socket.onmessage = message => {\n    let response;\n    try { response = JSON.parse(message.data); } catch { return; }\n    const entry = pending.get(response.id);\n    if (!entry) return;\n    pending.delete(response.id);\n    if (response.error) entry.reject(new Error('cdp-command-failed'));\n    else entry.resolve(response.result);\n  };\n  socket.onclose = () => {\n    for (const entry of pending.values()) entry.reject(new Error('cdp-disconnected'));\n    pending.clear();\n  };\n  const call = (method, params = {}) => bounded(new Promise((resolve, reject) => {\n    const id = ++nextId;\n    pending.set(id, { resolve, reject });\n    socket.send(JSON.stringify({ id, method, params }));\n  }), 5000, 'cdp-timeout');\n\n  try {\n    await bounded(new Promise((resolve, reject) => {\n      socket.onopen = resolve;\n      socket.onerror = () => reject(new Error('cdp-connect-failed'));\n    }), 5000, 'cdp-connect-timeout');\n    const { targetInfos } = await call('Target.getTargets');\n    const { browserContextIds } = await call('Target.getBrowserContexts');\n    const targetId = assertTargets(targetInfos, browserContextIds, exactPage);\n    await call('Browser.setPermission', permissionParams(origin));\n    process.stdout.write(`${JSON.stringify({ status: 'granted', targetId,\n      context: 'owned-default', origin, route })}\\n`);\n    const command = await bounded(new Promise(resolve => {\n      input.once('line', resolve);\n      input.once('close', () => resolve(null));\n    }), 20000, 'holder-timeout');\n    input.close();\n    if (command !== 'close') fail('holder-close-required');\n  } finally {\n    if (socket.readyState === WebSocket.CONNECTING) {\n      try { socket.close(); } catch { /* Python bounds and owns this child. */ }\n    } else if (socket.readyState !== WebSocket.CLOSED) {\n      const closed = new Promise(resolve => socket.addEventListener('close', resolve, { once: true }));"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "ActualrouteLOCALMODE/agt beforeconnect;boundedCDPconnect andeachcommand5s,retainedactualtargets/context,source Browser.setPermission thenstdoutgrant;onlystdinclose accepted20s,CDPerrors/disconnection fail. finallysocketclose2s,allpending reject.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "No ad hoc websocket/scripts/holdercopy inYAML. Typed owned browserreceipt/managedhook needs exact sourcefields/bounds andnegative behavior."
+            },
+            "bounds": {
+              "cdpConnectAndCommandMs": 5000,
+              "closeCommandMs": 20000,
+              "socketCloseMs": 2000
+            }
+          },
+          {
+            "id": "visual-clipboard-external-selftest-polarities",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-clipboard.mjs",
+            "sourceHelperSha256": "d1b4b15935a0413dd5d12fd4b1c33445dc44c60cc430712b6d6d14f2a59d4d45",
+            "sourceLines": {
+              "start": 104,
+              "end": 134,
+              "text": "function selfTest() {\n  const origin = 'http://127.0.0.1:1234';\n  const page = `${origin}/ws/LOCALMODE/chat/agt_owned`;\n  const owned = { type: 'page', url: page, targetId: 'target_1', browserContextId: 'default_1' };\n  const tab = { type: 'page', url: 'chrome://newtab/', targetId: 'target_2', browserContextId: 'default_1' };\n  if (assertTargets([owned, tab], [], page) !== 'target_1') fail('owned-target-rejected');\n  const expected = permissionParams(origin);\n  if (expected.origin !== origin || expected.embeddedOrigin !== origin ||\n      expected.permission.name !== 'clipboard-read' || 'browserContextId' in expected)\n    fail('permission-scope-changed');\n  const rejects = (fn, code) => {\n    try { fn(); } catch (error) { if (error.message === code) return; }\n    fail(`negative-accepted-${code}`);\n  };\n  rejects(() => permissionParams('http://foreign.example:1234'), 'foreign-origin');\n  rejects(() => assertTargets([{ ...owned, url: `${origin}/other` }], [], page), 'foreign-page');\n  rejects(() => assertTargets([owned, { ...tab, url: 'http://foreign.example/' }], [], page), 'foreign-page');\n  rejects(() => assertTargets([owned, { ...tab, browserContextId: 'other' }], [], page), 'ambiguous-browser-context');\n  rejects(() => assertTargets([owned], ['default_1'], page), 'ambiguous-browser-context');\n  rejects(() => assertTargets([owned, { ...owned, targetId: 'target_3' }], [], page), 'foreign-page');\n  const profile = mkdtempSync('/private/tmp/aft-visual-clipboard-static.');\n  try {\n    writeFileSync(`${profile}/DevToolsActivePort`, '1235\\n/devtools/browser/owned\\n');\n    browserUrl('ws://127.0.0.1:1235/devtools/browser/owned', profile);\n    rejects(() => browserUrl('ws://foreign.example:1235/devtools/browser/owned', profile), 'foreign-endpoint');\n    rejects(() => browserUrl('ws://127.0.0.1:9999/devtools/browser/owned', profile), 'foreign-profile-endpoint');\n  } finally { rmSync(profile, { recursive: true }); }\n  process.stdout.write('PASS owned CDP target/context/origin negatives\\n');\n}\n\nif (process.argv[2] === 'self-test') selfTest();"
+            },
+            "callerOldStepIds": [],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "clipboard-source-actor-or-exact-oracle-unpreserved",
+              "required": "Preserveexplicitself-test positiveownedtarget+permissionscope andnegativeforeignorigin/page/context/nonemptybrowserContextIDs/duplicatepage/browserendpoint/profileport tests SEPARATELYfrom selectednormalhold. Test-runner/transport doubles only,no fake runtime pass.",
+              "canonicalAttempt": "Existingcanonicalcaptureclipboard/text/focus/click facts may compose partial read,not source-equivalent fullownership/byteprojection/feedback/permissionmode. No authoredscripts/holderinvocation,enginechange orruntime.",
+              "missingObservation": "Sixfrozenrecords nowselftestbucket;otherunextractedassertions/failnegatives remain requirements. No selftest executed or countedpipeline/runtime proof."
+            },
+            "bounds": {}
+          }
+        ],
+        "acceptance": "Sourcebranchclassification only,allnewgroups/predicatesuncovered. External declaration/call records arenot completepredicate denominator;permissions/profile/currenttargets actualevidence unproved."
       }
     },
     {
@@ -54566,17 +55041,17 @@
     "originalSteps": 207,
     "helperInventoryEntries": 1072,
     "classificationCounts": {
-      "selected-invocation-predicate-reachable": 403,
+      "selected-invocation-predicate-reachable": 410,
       "unrelated-to-static-selected-call-closure": 334,
-      "helper-selftest-negative-requirement": 213,
+      "helper-selftest-negative-requirement": 219,
       "excluded-static-selected-invocation-branch": 21,
-      "selected-invocation-predicate-conditionally-reachable": 49,
-      "selected-function-reachable-branch-unresolved": 34,
-      "selected-external-helper-branch-unresolved": 14,
+      "selected-invocation-predicate-conditionally-reachable": 50,
+      "selected-function-reachable-branch-unresolved": 29,
+      "selected-external-helper-branch-unresolved": 5,
       "unrelated-external-helper-case": 4
     },
-    "reachableCandidatePredicates": 500,
-    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit. Visual pacing/projection/arrival deadlines/control exit32 Python and14 external Markdown guards narrowed (26 direct,20 conditional),including actual terminal projection23/36 and nonplain46;9 supplemental source groups preserve all-candidate pressure/first-tie/first-rendered/every-arrival/last-control-exit semantics. Other visual/imported branches still unresolved. Visual41 running/native tool/fullreply/render/reload/reduced/expansion guards narrowed33direct8conditional;10 exact sourceactor/payload/centering/history/window groups uncovered. RemainingvisualPython51/external14+ownershipimports unreconciled; geometryfc unreviewed/unconsumed. Actual final_visual_assert callback reasoning_assert recovers22formerlyunrelated frozen guards;39reasoning/presentation guards narrowed32direct7conditional,6supplemental source groups uncovered. Conservativecandidate count493 replaces471;previousstaticclosure wasincomplete,notfullpredicateproof. Remaining34Python/14external branches plusdynamic/imported/provisioning unresolved. Selectedvisualsuitepreflight/cleanup hook source recovers7formerlyunrelated guards4direct3conditional.11originalsecondcase rostercleanup predicates excludedonlyforfresh selectedtests0 namespace;sourceplanwriteris unselectedtests1,actualabsenceunproven.500conservativecandidates replaces493;fullsuite/dynamic/import/provisioning closure remainsunreconciled.4supplementalhookgroups uncovered(total125).",
+    "reachableCandidatePredicates": 494,
+    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit. Visual pacing/projection/arrival deadlines/control exit32 Python and14 external Markdown guards narrowed (26 direct,20 conditional),including actual terminal projection23/36 and nonplain46;9 supplemental source groups preserve all-candidate pressure/first-tie/first-rendered/every-arrival/last-control-exit semantics. Other visual/imported branches still unresolved. Visual41 running/native tool/fullreply/render/reload/reduced/expansion guards narrowed33direct8conditional;10 exact sourceactor/payload/centering/history/window groups uncovered. RemainingvisualPython51/external14+ownershipimports unreconciled; geometryfc unreviewed/unconsumed. Actual final_visual_assert callback reasoning_assert recovers22formerlyunrelated frozen guards;39reasoning/presentation guards narrowed32direct7conditional,6supplemental source groups uncovered. Conservativecandidate count493 replaces471;previousstaticclosure wasincomplete,notfullpredicateproof. Remaining34Python/14external branches plusdynamic/imported/provisioning unresolved. Selectedvisualsuitepreflight/cleanup hook source recovers7formerlyunrelated guards4direct3conditional.11originalsecondcase rostercleanup predicates excludedonlyforfresh selectedtests0 namespace;sourceplanwriteris unselectedtests1,actualabsenceunproven.500conservativecandidates replaces493;fullsuite/dynamic/import/provisioning closure remainsunreconciled.4supplementalhookgroups uncovered(total125). Visualclipboard5Python+3external selectedrecords narrowed(7direct1failure-dispatchconditional),6externalselftestrecords separatedfromruntime.494conservativecandidates/219selftest/359unrelated-excluded=1072.10sourcegroupsuncovered(total135).29Python/5external branchesplusdynamic/imported/provisioningremainunresolved;extracted declarationsnotlogicalpredicateunits.",
     "reviewedAuthoredUnvalidatedPredicates": 20,
     "partiallyMappedRepeatedPredicates": 3,
     "fullPreservationAcceptance": false,
@@ -54588,7 +55063,8 @@
     "additionalUninventoriedVisualMotionSourceGroups": 19,
     "additionalUninventoriedVisualRenderSourceGroups": 10,
     "additionalUninventoriedVisualReasoningSourceGroups": 6,
-    "additionalUninventoriedVisualSuiteHookSourceGroups": 4
+    "additionalUninventoriedVisualSuiteHookSourceGroups": 4,
+    "additionalUninventoriedVisualClipboardSourceGroups": 10
   },
   "dependencies": {
     "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",

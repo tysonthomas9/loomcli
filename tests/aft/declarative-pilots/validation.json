@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "548d149ca4142d3d71566b7d428b63ff89afad6df17f61e976e28070f7c51f2b"
+        "sha256": "6a44a01e5d5c6f3e9ceaba1f5d47e9c42418e3edaff45cc63a00fbe195695694"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -941,10 +941,10 @@
       "reviewedPredicateMappings": 20,
       "fullPreservationAccepted": 0,
       "helperInventory": 1072,
-      "conservativeReachableCandidates": 500,
-      "helperSelftestOrNegativeRecords": 213,
+      "conservativeReachableCandidates": 494,
+      "helperSelftestOrNegativeRecords": 219,
       "unrelatedBranchesOrCases": 359,
-      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35;Visual boundary57+pacing46+render41+reasoning39+suitehook7. Allnewsourceguardsuncovered,125supplementalsourcegroups;remainingdynamic/imported/34Python14external/provisioning plusfreshplanabsence unproven.500conservativecandidates notfinalpreservationdenominator;originalfullindex unavailable."
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35;Visual boundary57+pacing46+render41+reasoning39+suitehook7+clipboard8.135supplementalsourcegroups,29Python5external/dynamic/imported/provisioning unresolved;494conservativecandidates notfinalpredicate denominator.6externalclipboardselftests trackedseparately(total219);fulloriginalindexmissing."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -2604,5 +2604,81 @@
     "allFiveYamlAndPriorAdmissionBytesUnchanged": true,
     "preservationAccepted": false,
     "runtime": 0
+  },
+  "visualClipboardSelectedBranchReview": {
+    "at": "2026-10-09T13:43:16.317319+00:00",
+    "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+    "externalSha256": "d1b4b15935a0413dd5d12fd4b1c33445dc44c60cc430712b6d6d14f2a59d4d45",
+    "frozenBytesMatch": true,
+    "selected8": {
+      "direct": 7,
+      "conditionalFailureDispatch": 1
+    },
+    "externalSelftestsSeparated": 6,
+    "sourceGroupsUncovered": 10,
+    "canonicalPermissionDifference": {
+      "installedEngine": "58470a6df949158d72aa9500fe515ce3c5721be5",
+      "browserContextFile": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-584-admission-p4v7z1ai/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist/browser-context.js",
+      "sha256": "16cb59b0f37828b668a9159eb72b9fc96dc80b852b68899b320ca62c124033ac",
+      "lines": [
+        146,
+        174
+      ],
+      "original": "Browser.setPermission clipboard-read granted origin+embeddedOrigin,owned-default;closesholderprotocol",
+      "canonical": "Browser.grantPermissions clipboardReadWrite connectedcontext,thenresetPermissions",
+      "status": "Read-onlysourcebackedcompatibility triage sentengine/parent;no confirmedprimitive expansion orengineedit/runtimepermissiongrant."
+    },
+    "allFiveYamlUnchanged": true,
+    "runtime": 0,
+    "preservationAccepted": false
+  },
+  "retainedCapacityReportedBlocker": {
+    "at": "2026-10-09T13:43:16.317319+00:00",
+    "receipt": {
+      "path": "/private/tmp/loom-declarative-aft-276315dd/tests/aft/adapter/.adapter-dev/phase2-consumer/ledger-capacity-dimensions-0c-receipt.json",
+      "sha256": "3f87b1be02f0ad807e24522174e514d125fabbe377dc045c6d454dbeb7d99278",
+      "independentlyRehashedByPilot": true
+    },
+    "engineHead": "0c8f89e317dbc40c7e1365fc8576290e864b0a60",
+    "aggregate": {
+      "bytes": 73236892,
+      "nodes": 1400801,
+      "retainedBudgetBytes": 64000000,
+      "retainedBudgetNodes": 5000000,
+      "byteExcess": 9236892
+    },
+    "counts": {
+      "actualRaf": 20000,
+      "actualDeltas": 5000,
+      "actualCompletions": 100,
+      "actualSourceConnections": 20
+    },
+    "authority": "stream authenticated by canonical getter; DOM actual native CDP value parsed only for unbranded size diagnostics, no issuance authority or observation credit",
+    "cleanup": {
+      "retainedAfterDispose": 0,
+      "pageAfterDispose": {
+        "rafs": 0,
+        "domSamples": 0,
+        "rawFrames": 0
+      }
+    },
+    "coreMotionConsumer": false,
+    "savedReread": "SKIPPED",
+    "derivedIssuance": "SKIPPED",
+    "maintainedRoot": "49d1c50/accepted584 unchanged",
+    "scope": "OwnerVM/CDPsource-shaped deterministic measurement report,notrealbrowser orcanonicalDOMissuance ormotion/pilotproof;pilotdidnotrerun it.",
+    "decision": "Engine requestscoordinator decisionon oneengine-ownedlosslesspooledstorage chargedtosamescope/versionedcharged-vs-expandedreceipts;proposalONLY,nocodec/schema/getter/cap lift implementedby pilot."
+  },
+  "scopedApprovalStatusClarification": {
+    "at": "2026-10-09T13:43:16.317319+00:00",
+    "source": "Parent13:30 message",
+    "approved": [
+      "workertrio a005+979+0c099",
+      "b1",
+      "137",
+      "native9dd",
+      "49dmaintained584"
+    ],
+    "scope": "Parent scopedreviews,not pilotindependenttests. Stalewaitingflags mustnotblockconcretebindings;actualworkerAPIstop/exit remainsseparateopen. Frozenoldreceiptsnotrewritten."
   }
 }
