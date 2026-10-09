@@ -272,6 +272,27 @@ test('CLI launch reserves readiness and completion before worker discovery, clea
  }
 });
 
+test('earlier owned HTTP mutation excludes CLI while a harmless GET permits it',async()=>{
+ for(const method of ['DELETE','GET'] as const){
+  const r=await setupBoundWorker();let entered!:()=>void,release!:()=>void;
+  let request:ReturnType<HostFixtureDriver['requestOwnedHttp']>|undefined;
+  try{
+   const ready=new Promise<void>(resolve=>{entered=resolve;}),blocked=new Promise<void>(resolve=>{release=resolve;});
+   r.onHttp(async actual=>{if(actual===method){entered();await blocked;}});
+   request=r.driver.requestOwnedHttp('api',method,'/api/workspaces/E2E-WS/terminal/tabs/session',null,r.signal);await ready;
+   const runs=r.runs.length;
+   if(method==='DELETE'){
+    await assert.rejects(r.driver.launchOwnedCli(['usage'],{},'',true,r.signal));
+    await assert.rejects(r.driver.launchOwnedCli(['usage'],{},'',false,r.signal));
+    assert.equal(r.runs.length,runs);
+   }else assert.equal((await r.driver.launchOwnedCli(['usage'],{},'',true,r.signal)).completion.complete,true);
+   release();await request;
+   assert.equal((await r.driver.launchOwnedCli(['usage'],{},'',true,r.signal)).completion.complete,true);
+   assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+  }finally{release?.();await request?.catch(()=>{});await r.cleanup();}
+ }
+});
+
 test('Host worker hook denies foreign actor and parent before granting process authority',async()=>{
  const r=await setupBoundWorker();try{
   r.actor.workspace_key='foreign';await assert.rejects(r.driver.refreshOwnedProductProcesses(r.signal));
