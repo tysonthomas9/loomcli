@@ -4,7 +4,7 @@ import { requireFact } from './protocol.js';
 import type { OwnedFixture } from './ownership.js';
 
 export const LoomAuthorizedOperation = z.enum(['loom.cli.role','loom.cli.usage','loom.cli.task',
-  'loom.runtime.stimulate','loom.fixture.seedWorktree','loom.fixture.configure']);
+  'loom.runtime.stimulate','loom.runtime.detachTerminal','loom.fixture.seedWorktree','loom.fixture.configure']);
 export type LoomAuthorizedOperation = z.infer<typeof LoomAuthorizedOperation>;
 const Grant = z.object({ evidenceClass:z.enum(EVIDENCE_CLASSES), effects:z.array(z.enum(CAPABILITY_EFFECTS)).min(1)
   .refine(values=>new Set(values).size===values.length,'Duplicate operation effects') }).strict();
