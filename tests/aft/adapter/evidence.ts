@@ -9,6 +9,9 @@ import type { z } from 'zod';
 export interface EvidenceStore {
   retain(serialized: string): Promise<z.infer<typeof ArtifactRefSchema>>;
   resolve(id: string): Promise<string>;
+  /** Check the authoritative retained receipt and caller identity before any
+   * file verification allocation. Caller-supplied bytes are not a read bound. */
+  resolveBounded(expected: z.infer<typeof ArtifactRefSchema>, maxBytes: number): Promise<string>;
 }
 export const evidenceKey = '@loom/aft-adapter/evidence/v1';
 const key = evidenceKey;
@@ -81,6 +84,21 @@ export async function createEvidenceStore(directory: string): Promise<EvidenceSt
       const receipt = receipts.get(id);
       requireFact(receipt, 'ownership-mismatch', 'Evidence reference is unknown');
       const file = path.join(root, id);
+      await verifyRetainedFile(file, receipt); await verify();
+      return file;
+    },
+    async resolveBounded(expected, maxBytes) {
+      const supplied = ArtifactRefSchema.parse(expected);
+      requireFact(Number.isSafeInteger(maxBytes) && maxBytes > 0,
+        'observation-failed', 'Evidence read bound is invalid');
+      const receipt = receipts.get(supplied.id);
+      requireFact(receipt, 'ownership-mismatch', 'Evidence reference is unknown');
+      requireFact(receipt.bytes > 0 && receipt.bytes <= maxBytes,
+        'incomplete-pages', 'Retained evidence exceeds the read bound');
+      requireFact(Object.entries(receipt).every(([field, value]) => supplied[field as keyof typeof supplied] === value),
+        'identity-mismatch', 'Evidence receipt metadata changed');
+      await verify();
+      const file = path.join(root, receipt.id);
       await verifyRetainedFile(file, receipt); await verify();
       return file;
     },
