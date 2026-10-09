@@ -53,6 +53,7 @@ export interface FixtureProviderOptions {
     rendererTarget?: OwnedFixture['rendererTarget'];
     operationAuthority?: OwnedFixture['operationAuthority'];
     observeWorkers?: OwnedFixture['observeWorkers'];
+    archiveAgent?: OwnedFixture['archiveAgent'];
     ownedWorkspaces?: OwnedFixture['ownedWorkspaces'];
     readWorkspaceLegacyAgent?: OwnedFixture['readWorkspaceLegacyAgent'];
     fixtureRunId?:string;
@@ -226,11 +227,22 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
         const pinnedExecutable = input.profile === 'agents-emulator' ? '/opt/fixture/loom-harness-emu' : input.profile === 'legacy-real-codex-podman' ? '/usr/local/bin/codex' : '/usr/local/bin/opencode';
         const native = containerNative(driver, pinnedExecutable);
         const read: ContainerObservationRead = (request, signal) => driver.nativeRead(request, signal);
-        const managed = ContainerRootIdentity.parse(await read({ operation: 'filesystem-root', root: { kind: 'managed-repo' } }, context.signal));
-        roots.set('managed-repo', { ...managed, remoteObserve: containerFilesystemObserver(read, { kind: 'managed-repo' }, managed) });
-        const temporary=ContainerRootIdentity.parse(await read({operation:'filesystem-root',root:{kind:'fixture-temporary'}},context.signal));
-        roots.set('fixture-temporary',{...temporary,remoteObserve:containerFilesystemObserver(read,{kind:'fixture-temporary'},temporary)});
+        const bindNativeRoots = async (signal:AbortSignal) => {
+          if (!roots.has('managed-repo')) {
+            const managed = ContainerRootIdentity.parse(await read({ operation: 'filesystem-root', root: { kind: 'managed-repo' } }, signal));
+            roots.set('managed-repo', { ...managed, remoteObserve: containerFilesystemObserver(read, { kind: 'managed-repo' }, managed) });
+          }
+          if (!roots.has('fixture-temporary')) {
+            const temporary=ContainerRootIdentity.parse(await read({operation:'filesystem-root',root:{kind:'fixture-temporary'}},signal));
+            roots.set('fixture-temporary',{...temporary,remoteObserve:containerFilesystemObserver(read,{kind:'fixture-temporary'},temporary)});
+          }
+        };
+        // The real LOCALMODE public-HTTP route needs no actor or native
+        // filesystem binding during acquisition. Other routes keep their
+        // existing eager root observations; actual native use remains explicit.
+        if(input.profile!=='agents-real-opencode')await bindNativeRoots(context.signal);
         resolveAgent = async (agentId, signal): Promise<OwnedAgent> => {
+          await bindNativeRoots(signal);
           const row = await native.agent(agentId);
           const common = z.object({ commonDir: Id }).strict().parse(await driver.nativeRead({ operation: 'git-common-dir', agentId }, signal));
           const selector = { kind: 'agent-worktree' as const, agentId };
@@ -262,7 +274,7 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
       const route=driver.executionRouting,operationAuthority=driver.createOperationAuthority(owner);
       const rendererTarget=await bindRenderer(isCompose?compose.loom:host.loom,acquired.lease.id,await driver.rendererRuntimeTarget(context.signal),path.join(runtimeRoot,'evidence'),roots);
       const evidenceStore=await createEvidenceStore(path.join(runtimeRoot,'evidence'));
-      const workspaceBinding=isCompose?{}:{observeWorkers:(signal:AbortSignal)=>checked(()=>driver.observeWorkers(signal)),ownedWorkspaces:await driver.ownedWorkspaceRoster(owner,evidenceStore,context.signal),
+      const workspaceBinding=isCompose?(input.profile==='agents-real-opencode'?{archiveAgent:(request:Parameters<ComposeFixtureDriver['archiveAgent']>[0],signal:AbortSignal)=>checked(()=>driver.archiveAgent(request,signal))}:{}):{observeWorkers:(signal:AbortSignal)=>checked(()=>driver.observeWorkers(signal)),ownedWorkspaces:await driver.ownedWorkspaceRoster(owner,evidenceStore,context.signal),
         readWorkspaceLegacyAgent:(workspaceId:string,name:string,signal:AbortSignal)=>driver.readWorkspaceLegacyAgent(owner,workspaceId,name,signal)};
       return { ...await driver.runtimeIdentity(context.signal),evidenceClass: route.evidenceClass, roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget, operationAuthority,
         evidenceStore,...workspaceBinding,

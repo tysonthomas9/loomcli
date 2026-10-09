@@ -13,6 +13,8 @@ import { prepareRenderer, type PreparedRenderer } from './renderer.js';
 import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
 import type { FixtureAuthorityOwner } from '../authority.js';
 import { IssuedArtifactReader } from './issued-artifacts.js';
+import { ArchiveAgentRequest,ArchiveAgentFacts,assertArchiveAgentTarget } from '../agent-archive.js';
+import { createNativeArchiveHttp,type NativeArchiveHttp } from './native-archive-http.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
@@ -150,6 +152,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   private attempted = false;
   private removed = false;
   private plan?: FixturePlan;
+  private discoveredWorkspace?:Readonly<{id:string;repo:string}>;
   private images = { loom: '', fleet: '' };
   private stackImages: Record<string, string> = {};
   private readonly cloudSecrets: Record<string, string> = {};
@@ -161,7 +164,9 @@ export class ComposeFixtureDriver implements FixtureDriver {
     private readonly files: typeof fs = fs, private readonly uuid: () => string = randomUUID,
     private readonly reserve: () => Promise<PortReservation> = reservePort,
     private readonly http: ComposeRead = fetchRead, private readonly requestHttp: Http = readHttp,
-    private readonly readiness:ComposeReadiness=fetchReadiness,private readonly readinessTime:ReadinessClock=readinessClock) { this.config = structuredClone(config); }
+    private readonly readiness:ComposeReadiness=fetchReadiness,private readonly readinessTime:ReadinessClock=readinessClock,
+    private readonly archiveTimeout:(milliseconds:number)=>AbortSignal=milliseconds=>AbortSignal.timeout(milliseconds),
+    private readonly archiveHttp:NativeArchiveHttp=createNativeArchiveHttp(fetch,archiveTimeout)) { this.config = structuredClone(config); }
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return '/root/.loom/workspaces/LOCALMODE'; }
   get fixtureSecrets() { return Object.values(this.cloudSecrets); }
@@ -203,6 +208,31 @@ export class ComposeFixtureDriver implements FixtureDriver {
       const origin=`http://127.0.0.1:${this.ports[this.cloud?0:1]}`;
       const response=await this.requestHttp(origin,method,relativePath,body,signal);
       await this.verifyContainer(container,signal);return response;
+    });
+  }
+  /** GF1's public cleanup actor: current GET and fixed archive POST only.
+   * Acquisition discovery is not an agent-creation or native-store receipt.
+   * Exact workspace/repo/harness and managed-origin checks are stronger than
+   * the source cleanup's current-name prefix guard. Redirects are denied by
+   * the fixed transports; direct-route parity still requires the paired run. */
+  async archiveAgent(input:ArchiveAgentRequest,signal:AbortSignal):Promise<ArchiveAgentFacts>{
+    signal.throwIfAborted();check(this.profile==='agents-real-opencode','unsupported-capability');
+    const request=ArchiveAgentRequest.parse(input),workspace=this.discoveredWorkspace;
+    check(workspace&&request.agent.fixtureLeaseId===this.leaseId&&request.agent.workspaceId===workspace.id&&
+      request.expectedRepo===workspace.repo,'identity-mismatch');
+    return this.withContainerOperation(async()=>{
+      const container=await this.ownedContainer(signal);
+      const origin=`http://127.0.0.1:${this.ports[1]}`;
+      const bounded=AbortSignal.any([signal,this.archiveTimeout(15000)]);bounded.throwIfAborted();
+      const route=`/api/workspaces/${encodeURIComponent(workspace!.id)}/v1/agents/${encodeURIComponent(request.agent.agentId)}`;
+      const readback=await this.requestHttp(origin,'GET',route,undefined,bounded);
+      bounded.throwIfAborted();check(readback.status>=200&&readback.status<300,'observation-failed');
+      const observed=assertArchiveAgentTarget(request,readback.body);
+      await this.verifyContainer(container,signal);bounded.throwIfAborted();
+      const status=await this.archiveHttp(origin,request.agent,request.idempotencyKey,signal);
+      await this.verifyContainer(container,signal);
+      return ArchiveAgentFacts.parse({agent:request.agent,observed,status,idempotencyKey:request.idempotencyKey,
+        body:{cancel:true},requestTimeoutMs:15000,responseJsonParsed:false});
     });
   }
   private env(): Record<string, string> {
@@ -480,7 +510,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
     const models = catalog.providers?.flatMap(provider => provider.models) ?? [];
     check(models.some(model => model.id === plan.model), 'identity-mismatch');
     if (this.profile === 'agents-real-opencode') check(models.filter(model => !model.id.startsWith('aft/')).length > 1, 'identity-mismatch');
-    return { apiOrigin, filesOrigin, workspaceId: 'LOCALMODE', repo: data!.repos[0]!.path };
+    this.discoveredWorkspace=Object.freeze({id:data!.id,repo:data!.repos[0]!.path});
+    return { apiOrigin, filesOrigin, workspaceId: 'LOCALMODE', repo: this.discoveredWorkspace.repo };
   }
   private async provisionCloud(signal: AbortSignal) {
     const container = this.objects.find(object => object.kind === 'container' && object.service === 'loom-serve')!;

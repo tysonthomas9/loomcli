@@ -6,8 +6,16 @@ import path from 'node:path';
 import { ComposeFixtureDriver, type ProductionConfig, type ProcessRequest } from './production.js';
 import { FixtureLifecycle, FixtureError, type FixturePlan } from './lifecycle.js';
 import { materializeRenderer } from './renderer-fixtures.test.js';
+import { CapabilityRegistry,createCapabilityContext } from '@tysonthomas9/aft/capabilities';
+import { registerLoomAdapter,pinLoomImplementation } from '../composition.js';
+import { productionFixtureOptions } from './providers.js';
+import type { HostConfig,Http } from './host.js';
+import { createNativeArchiveHttp,type NativeArchiveHttp } from './native-archive-http.js';
+import { ArchiveAgentId,ArchiveAgentEffects } from '../agent-archive.js';
+import { createFixtureOperationAuthority } from '../authority.js';
+import { getFixture } from '../ownership.js';
 const hash = (v: string | Uint8Array) => createHash('sha256').update(v).digest('hex');
-async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,useProductionReadiness=false,requestTime?:()=>number) {
+async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,useProductionReadiness=false,requestTime?:()=>number,archivePorts?:{read:Http;write:NativeArchiveHttp;timeout:(ms:number)=>AbortSignal}) {
  const root = await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname), 'test-artifacts-'));
  const source = path.join(root,'source'), build = path.join(root,'build');
  for (const dir of [source,build,path.join(root,'home'),path.join(root,'locks')]) await fs.mkdir(dir);
@@ -37,7 +45,7 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
  const plan:FixturePlan={profile,loomRevision:revision,fleetRevision:revision,engineRevision:revision,adapterRevision:revision,model:profile==='agents-emulator'?'aft/m':'openai/m',maxCases:10,caseCount:1,selectionSha256:'d'.repeat(64),leaseDurationMs:10000};
  let onExec:((request:ProcessRequest)=>Promise<void>)|undefined,onCommand:((request:ProcessRequest)=>Promise<void>)|undefined,onRestart:(()=>Promise<void>)|undefined,onRead:((signal:AbortSignal)=>Promise<void>)|undefined;
  let restartMode='success',restarted=false,readFails=false,clockNow=0;const readinessStatuses:number[]=[],delays:number[]=[];
- const calls:ProcessRequest[]=[]; let project='',up=false,change='',port=5000,serial=0;
+ const calls:ProcessRequest[]=[]; let project='',up=false,change='',port=5000,serial=0,ownedLease='opaque-fixture';
  const services=cloud?['redis','fleet-auth-seed','fleet-db','loom-serve','worker','stub-upstream']:['redis','fleet-db','loom-local','ui-local'];
  const run=async (r:ProcessRequest)=>{
   calls.push(r); await onCommand?.(r); const a=r.args;
@@ -46,7 +54,7 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
   if(r.binary==='bash') return '';
   if(a[0]==='system') return JSON.stringify([{...connection,URI:change==='connection'?'ssh://foreign':connection.URI}]);
   if(a.includes('image')) return JSON.stringify([{Id:image}]);
-  if(a.includes('compose')) { if(a.includes('up')) {up=true;if(change==='fail-up')throw new Error('Bearer private-up-token');} if(a.includes('down')) {if(change==='fail-down')throw new Error('secret=private-down-token');up=false;}
+  if(a.includes('compose')) { if(a.includes('up')) {up=true;const override=JSON.parse(await fs.readFile(path.join(driver.runtimeRoot,'compose.json'),'utf8'));ownedLease=override.services[cloud?'loom-serve':'loom-local'].labels['io.loom.aft.lease'];if(change==='fail-up')throw new Error('Bearer private-up-token');} if(a.includes('down')) {if(change==='fail-down')throw new Error('secret=private-down-token');up=false;}
    if(a.includes('restart')){await onRestart?.();if(restartMode!=='unchanged')restarted=true;if(restartMode==='throw-after')throw new Error('Bearer private-restart-token');}return ''; }
   if(a.includes('logs'))return change==='embedded'?'embedded fleet-db started':'opened cloud fleet-db client';
   if(a.includes('top'))return 'PID COMMAND\n123 loom\nBearer private-top-token\n';
@@ -59,7 +67,7 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
   if(a.includes('ls')) return up?(a.includes('volume')?'volume-owned':'network-owned'):'';
   if(a.includes('inspect')) {
    const id=a.at(-1)!,container=id.startsWith('container-'),service=id.replace('container-','').replace(/-replacement(?:-later)?$/,'');
-   const labels={'com.docker.compose.project':project,'io.loom.aft.lease':change==='foreign'?'foreign':'opaque-fixture','com.docker.compose.service':service};
+   const labels={'com.docker.compose.project':project,'io.loom.aft.lease':change==='foreign'?'foreign':ownedLease,'com.docker.compose.service':service};
    const mappings:Record<string,number>=cloud?{'loom-serve':0,'fleet-db':1,'stub-upstream':2}:{'fleet-db':0,'loom-local':1,'ui-local':2};const index=mappings[service] ?? 0;
    const target=restarted&&service==='loom-local';
    const exited=change==='target-exit'&&service==='loom-local';
@@ -69,12 +77,12 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
  const files={...fs,statfs:async()=>({type:0,blocks:20*1024**3,bavail:20*1024**3,bfree:20*1024**3,bsize:1,files:1000,ffree:1000})} as unknown as typeof fs;
  const http=async (_origin:string,relative:string,signal:AbortSignal)=>{if(restarted&&relative==='/api/config'){await onRead?.(signal);if(readFails)throw Error('private API failure');}
   return relative.endsWith('/repos')?{success:true,repos:[{name:'aft-repo'}]}:relative.endsWith('/LOCALMODE')?{data:{id:'LOCALMODE',path:'/root/.loom/workspaces/LOCALMODE',repos:[{name:'source-repo',path:'/root/.loom/workspaces/LOCALMODE/source-repo'}]}}:relative.endsWith('/models')?{providers:[{models:[{id:plan.model},{id:'openai/alternate'}]}]}:{};};
- const driver=new ComposeFixtureDriver(config,run,files,()=>`id${++serial}`,async()=>({port:port++,async release(){}}),http,async()=>({status:201,body:{}}),
+ const driver=new ComposeFixtureDriver(config,run,files,()=>`id${++serial}`,async()=>({port:port++,async release(){}}),http,archivePorts?.read??(async()=>({status:201,body:{}})),
   useProductionReadiness?undefined:async(origin,signal)=>{await http(origin,'/api/config',signal);return {status:readinessStatuses.shift()??200,complete:true};},
-  {now:()=>clockNow,monotonicNow:requestTime??(()=>clockNow),async nextAttempt(signal){signal.throwIfAborted();delays.push(1000);clockNow+=1000;}});
+  {now:()=>clockNow,monotonicNow:requestTime??(()=>clockNow),async nextAttempt(signal){signal.throwIfAborted();delays.push(1000);clockNow+=1000;}},archivePorts?.timeout,archivePorts?.write);
  const lifecycle=new FixtureLifecycle([plan],()=>driver,()=>1000,()=> 'opaque-fixture');
  const request={runId:'run',profile,loomRevision:revision,fleetRevision:revision,model:plan.model,maxCases:1,selectionSha256:plan.selectionSha256};
- return {root,source,driver,lifecycle,request,calls,onCommand(callback?: (request:ProcessRequest)=>Promise<void>){onCommand=callback;},onExec(callback:(request:ProcessRequest)=>Promise<void>){onExec=callback;},mutate(v:string){change=v;},
+ return {root,source,config,plan,driver,lifecycle,request,calls,onCommand(callback?: (request:ProcessRequest)=>Promise<void>){onCommand=callback;},onExec(callback:(request:ProcessRequest)=>Promise<void>){onExec=callback;},mutate(v:string){change=v;},
   restartMode(value:string){restartMode=value;},restoreOriginalContainer(){restarted=false;restartMode='success';},onRestart(callback:()=>Promise<void>){onRestart=callback;},onRead(callback:(signal:AbortSignal)=>Promise<void>){onRead=callback;},failRead(){readFails=true;},statuses(...values:number[]){readinessStatuses.push(...values);},delays,
   advance(ms:number){clockNow+=ms;},async cleanup(){await fs.rm(root,{recursive:true});}};
 }
@@ -595,4 +603,107 @@ test('pending successor cleanup attestation excludes other container operations 
   assert.equal(r.calls.length,calls);leave();assert.equal((await pending).released,true);
   assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
  }finally{leave?.();await pending?.catch(()=>{});await r.cleanup();}
+});
+
+
+test('GF1 default Compose acquisition discovers LOCALMODE without native actor or filesystem binding',async()=>{
+ const r=await setup('agents-real-opencode','af12345678');try{
+  const root=path.dirname(path.dirname(new URL(import.meta.url).pathname));
+  const pin=await pinLoomImplementation(root,'source');
+  const options=productionFixtureOptions(pin,pin.sha256,[r.plan],r.config,{} as HostConfig);options.driver=()=>r.driver;
+  const registry=new CapabilityRegistry();registerLoomAdapter(registry,{implementation:pin,fixtures:options});
+  const context=createCapabilityContext({file:'gf1-public.test.yaml',line:1},registry,
+   '00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002');
+  const acquired=await registry.invoke({id:'loom.fixture.acquire',version:1,input:{}},
+   {...r.request,runId:context.runId,loomRevision:{...r.request.loomRevision},fleetRevision:{...r.request.fleetRevision}},context);
+  assert.equal(acquired.availability,'observed',JSON.stringify(acquired));
+  const data=acquired.data as {lease:{id:string};apiOrigin:string;filesOrigin:string;workspaceId:string;repo:string;fixtureRunId:string};
+  assert.equal(data.workspaceId,'LOCALMODE');assert.equal(data.apiOrigin,'http://127.0.0.1:5001');
+  assert.equal(data.filesOrigin,'http://127.0.0.1:5002');assert.equal(data.repo,'/root/.loom/workspaces/LOCALMODE/source-repo');
+  assert.equal(data.fixtureRunId,'af12345678');
+  const fixture=await getFixture(context,data.lease.id);assert.equal(fixture.agents.size,0);
+  assert.equal(r.calls.filter(call=>call.args.includes('exec')&&call.args.at(-1)?.includes('filesystem-root')).length,0);
+  assert.equal(r.calls.filter(call=>call.args.includes('exec')&&call.args.at(-1)?.includes('agent')).length,0);
+  assert.equal((await registry.invoke({id:'loom.fixture.release',version:1,input:{}},{leaseId:data.lease.id},context)).availability,'observed');
+ }finally{await r.cleanup();}
+});
+
+
+async function gf1ArchiveRig(){
+ const row={agent_id:'agt_editor-1',workspace_id:'LOCALMODE',name:'cov-files-af12345678-git',
+  repo:'/root/.loom/workspaces/LOCALMODE/source-repo',harness:'opencode'};
+ let current={...row},status=204,getStatus=200,onGet:(()=>Promise<void>)|undefined,onPost:(()=>Promise<void>)|undefined;
+ const reads:string[]=[],writes:string[]=[],deadlines:number[]=[],timers:AbortController[]=[];
+ const timeout=(ms:number)=>{deadlines.push(ms);const timer=new AbortController();timers.push(timer);return timer.signal;};
+ const write=createNativeArchiveHttp(async(url,request)=>{
+  writes.push(String(url));assert.equal(String(url),'http://127.0.0.1:5001/api/workspaces/LOCALMODE/v1/agents/agt_editor-1/archive');
+  assert.equal(request?.body,'{"cancel":true}');assert.equal(request?.method,'POST');
+  assert.equal(new Headers(request?.headers).get('Idempotency-Key'),'cov-files-af12345678-agt_editor-1-cleanup');
+  await onPost?.();const response=new Response(status===204?null:'not-json',{status});
+  response.text=async()=>{throw Error('archive body must remain uninterpreted');};
+  response.json=async()=>{throw Error('archive body must remain uninterpreted');};return response;
+ },timeout);
+ const r=await setup('agents-real-opencode','af12345678',false,undefined,{timeout,write,read:async(origin,method,route,body,signal)=>{
+  signal.throwIfAborted();assert.equal(origin,'http://127.0.0.1:5001');assert.equal(method,'GET');assert.equal(body,undefined);
+  assert.equal(route,'/api/workspaces/LOCALMODE/v1/agents/agt_editor-1');reads.push(route);await onGet?.();
+  return {status:getStatus,body:{...current}};
+ }});
+ try{
+  const root=path.dirname(path.dirname(new URL(import.meta.url).pathname)),pin=await pinLoomImplementation(root,'source');
+  const options=productionFixtureOptions(pin,pin.sha256,[r.plan],r.config,{} as HostConfig);options.driver=()=>r.driver;
+  const registry=new CapabilityRegistry();registerLoomAdapter(registry,{implementation:pin,fixtures:options});
+  const context=createCapabilityContext({file:'gf1-archive.test.yaml',line:1},registry,
+   '00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002');
+  const acquired=await registry.invoke({id:'loom.fixture.acquire',version:1,input:{}},
+   {...r.request,runId:context.runId,loomRevision:{...r.request.loomRevision},fleetRevision:{...r.request.fleetRevision}},context);
+  assert.equal(acquired.availability,'observed',JSON.stringify(acquired));
+  const data=acquired.data as {lease:{id:string}},fixture=await getFixture(context,data.lease.id);
+  const input={agent:{fixtureLeaseId:data.lease.id,workspaceId:'LOCALMODE',agentId:'agt_editor-1'},
+   namePrefixes:['cov-files-af12345678-','cov-files-child-af12345678'],idempotencyKey:'cov-files-af12345678-agt_editor-1-cleanup'};
+  const invoke=(value:unknown=input)=>registry.invoke({id:ArchiveAgentId,version:1,input:{}},value,context);
+  return {...r,row,context,registry,fixture,input,invoke,reads,writes,deadlines,timers,
+   current(value:typeof row){current=value;},status(value:number){status=value;},getStatus(value:number){getStatus=value;},
+   onGet(callback:()=>Promise<void>){onGet=callback;},onPost(callback:()=>Promise<void>){onPost=callback;},
+   async cleanup(){r.mutate('');await registry.invoke({id:'loom.fixture.release',version:1,input:{}},{leaseId:data.lease.id},context);await r.cleanup();}};
+ }catch(error){await r.cleanup();throw error;}
+}
+for(const status of [204,200,409,301,500])test(`GF1 public Compose archive preserves status ${status} and exact source wire without native bind`,async()=>{
+ const r=await gf1ArchiveRig();try{
+  r.status(status);const result=await r.invoke();
+  assert.equal(result.availability,status>=300&&status!==409?'error':'observed',JSON.stringify(result));
+  assert.equal(r.fixture.agents.size,0);assert.equal(r.reads.length,1);assert.equal(r.writes.length,1);
+  assert.deepEqual(r.deadlines,[15000,15000]);
+  assert.equal(r.calls.filter(call=>call.args.includes('exec')&&!call.args.at(-1)?.includes('runtime-identity')).length,0);
+  if(status>=300&&status!==409)assert.equal(result.data,undefined);else{
+   assert.deepEqual(result.data,{agent:r.input.agent,observed:r.row,status,requestTimeoutMs:15000,
+    idempotencyKey:r.input.idempotencyKey,body:{cancel:true},responseJsonParsed:false,conflictIgnored:status===409});
+   assert.equal(result.provenance.artifacts.length,1);
+  }
+ }finally{await r.cleanup();}
+});
+for(const field of ['agent_id','workspace_id','repo','harness','name'] as const)
+ test(`GF1 public Compose archive rejects fresh foreign ${field} before POST`,async()=>{
+  const r=await gf1ArchiveRig();try{r.current({...r.row,[field]:'foreign'});assert.equal((await r.invoke()).availability,'error');
+   assert.equal(r.reads.length,1);assert.equal(r.writes.length,0);
+  }finally{await r.cleanup();}
+ });
+for(const missing of ArchiveAgentEffects)test(`GF1 public Compose archive missing ${missing} has zero verification or HTTP effects`,async()=>{
+ const r=await gf1ArchiveRig();try{
+  r.fixture.operationAuthority=createFixtureOperationAuthority(r.fixture,{[ArchiveAgentId]:{evidenceClass:'real-native',
+   effects:ArchiveAgentEffects.filter(effect=>effect!==missing)}});
+  const before=r.calls.length;assert.equal((await r.invoke()).availability,'unsupported');
+  assert.equal(r.calls.length,before);assert.equal(r.reads.length,0);assert.equal(r.writes.length,0);
+ }finally{await r.cleanup();}
+});
+test('GF1 public Compose archive stale namespace after GET rejects before POST',async()=>{
+ const r=await gf1ArchiveRig();try{r.onGet(async()=>{r.mutate('stale');});assert.equal((await r.invoke()).availability,'error');
+  assert.equal(r.reads.length,1);assert.equal(r.writes.length,0);
+ }finally{await r.cleanup();}
+});
+for(const phase of ['GET','POST'])test(`GF1 public Compose archive enforces independent ${phase} timeout without redispatch`,async()=>{
+ const r=await gf1ArchiveRig();try{
+  if(phase==='GET')r.onGet(async()=>{r.timers[0]!.abort();});else r.onPost(async()=>{r.timers[1]!.abort();});
+  const result=await r.invoke();assert.equal(result.availability,'error');assert.equal(result.data,undefined);
+  assert.equal(r.reads.length,1);assert.equal(r.writes.length,phase==='GET'?0:1);
+ }finally{await r.cleanup();}
 });
