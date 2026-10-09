@@ -42,9 +42,9 @@ export const ServiceRegistration = z.object({
   endpointId: Id,
 }).strict();
 export type ServiceRegistration = z.infer<typeof ServiceRegistration>;
-export interface ProcessIdentity {
-  pid: number; generation: string; executable: string; argv: string[];
-}
+export const ProcessIdentitySchema = z.object({ pid:z.number().int().positive(), generation:Id,
+  executable:z.string().min(1).max(4096), argv:z.array(z.string().max(4096)).max(64) }).strict();
+export type ProcessIdentity = z.infer<typeof ProcessIdentitySchema>;
 export const AgentHistory = z.object({agentId:Id,workspaceId:Id,repo:Id,revision:z.number().int().nonnegative(),
   deletedAt:Id.nullable(),historyPurgedAt:Id.nullable(),savedEventCount:z.number().int().nonnegative()}).strict();
 export type AgentHistory = z.infer<typeof AgentHistory>;
