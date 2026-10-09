@@ -871,7 +871,7 @@
     "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
   },
   "currentPublication": {
-    "at": "2026-10-09T15:04:43.698355+00:00",
+    "at": "2026-10-09T15:32:45.645391+00:00",
     "status": "in-progress reviewable draft; not preservation-complete",
     "taskNoteId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
     "branch": "codex/aft-declarative-pilots",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "3a2e4852b59190b2230c0d5770fddc81bd3c0d2ce807b8d1b02e3dfcdc112e79"
+        "sha256": "ba78809a46ab92e05d29f067ef3b4f0491e64f46f8fceadd6db336a211180663"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -903,7 +903,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-        "sha256": "6e2acb37cf18d077a661c5762cf5223d86304d300c536c18ef6bc8fe7c241247"
+        "sha256": "5afc27013e27111f4c655699b1b701faa1b49fd84f7b5ff5a502d7f534d235c6"
       }
     ],
     "rawPilots": {
@@ -914,18 +914,18 @@
         "count": 699,
         "errors": 0,
         "credit": "individual schema only",
-        "scope": "Historical699 steps before new4geometry+2pathname; no revised699schema-only count claimed. Currentstatic bodytotal664; fullchangedvisual andpriorchild rawadmission recorded separately."
+        "scope": "Historical699schema-onlysteps before later4geometry+2pathname+37callerprefix additions; no revised historicalschema-count credit. Currentstatic bodytotal701, currentchangedvisual fullraw admitted separately."
       },
       "latestFullLoaderAttempt": {
         "engine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
         "wholeEngineHeadApproved": true,
         "adapterSource": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
-        "scope": "Changed visual raw6e2acb37 only in this receipt; prior current childca73 receipt retained separately",
+        "scope": "Changed visual raw5afc2701 with18caller-entry guards+snapshot row; currentchild priorca73 receipt distinct",
         "fullAdmissionPassed": 1,
         "effects": 0,
         "runtimeStarted": 0,
-        "receipt": "visualExactClaimPathAuthoring.admission",
-        "selectionBasis": "NEW60261776 currentfive/perversionactualpin/publicenv; not originalhistoricalrecovery",
+        "receipt": "visualCurrentRoutePrefixAuthoring.admission",
+        "selectionBasis": "NEWd4bb292b current5raw/perversionactualpin/publicenv; no historicalinventory/env recovery",
         "other4CurrentCa73Admission": "Currentchild priorca73admitted; Files/Stop/SSE unchanged historical584 only here"
       },
       "approvedCoherentConsumer": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
@@ -948,14 +948,14 @@
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored. Visualclaim exact capturedpathname concat guard authored and fullraw admitted; not source atomiccallback/runtime proof.",
     "blockedCases": [
       "Current changed child f172 raw admitted on acceptedca73/8dd; original four mobile contexts/real actors/source predicates remain unpreserved,source step27 unresolved.",
-      "Current changedvisual6e2a andchildf172 each admitted separately on acceptedca73/8dd; Files/Stop/SSE retain unchanged historical584/f377 admission only. All five public runtime chains/provisioning/source preservation remain unverified.",
+      "Current changedvisual5afc with18route-prefixes+snapshotrow andchildf172 each admitted separately on acceptedca73/8dd; Files/Stop/SSE unchanged historical584/f377 admission only. All5runtime/provisioning/fullsourcepreservation unverified.",
       "Files repeated identity predicates and exact helper branch denominator uncovered",
       "Stop whole30s chain bound, tool trim/failed normalization, Respond no-request history, recovery correlation and native desc-assistant/first-truthy/full200-prefix uncovered",
       "child synchronous pre-Send/reactivation/native/source predicates require final reviewed ledger and provisioning",
       "visual exact RAF/phase/source/delta/completion/Markdown/2word/300ms/12tick/180000ms preservation and receipt pipeline incomplete",
       "SSE full raw replay/cursor/header/payload/foreign exclusion and native restart provisioning incomplete"
     ],
-    "consumerWorkRemaining": "Author every uncovered source predicate and actor using accepted canonical contracts, actual deterministic public runner chains, original fixed clipboard/archive/provisioning/Compose bindings, full retained-capacity motion consumer, and inventory recovery. Current child raw schema gap closed only; all5 runtime skipped/unrun.",
+    "consumerWorkRemaining": "Continue all uncovered helper predicates/actors and nestedcheck/deadline/capturedfile authority using canonical contracts and actual deterministic public runner chains; full retainedmotion/clipboard/archive/Compose/worker/native provisioning and inventory recovery remain open. 18 visual current-route caller-entry guards+pre-reload Agentrow authored/compile-admitted only, no source acceptance. All5skip/runtime0.",
     "publicationPolicy": "Publish current source independently of journal/provider completion; no executable wrappers, expected-return stubs, original campaign changes or runtime claim."
   },
   "rawLoaderTimeoutDiagnosis": {
@@ -2528,7 +2528,7 @@
         "status": "REJECTED canonical unchanged raw suite",
         "guardMs": 60000,
         "errors": [
-          "invalid suite /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:603:9: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), maxEntries: Required\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:605:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), kind: Invalid literal value, expected \"resources\"\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:607:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"sampling\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:608:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"regions\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:697:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxSamples\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:698:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxNodes\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs"
+          "invalid suite /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:603:9: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), maxEntries: Required\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:605:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), kind: Invalid literal value, expected \"resources\"\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:607:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"sampling\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:608:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"regions\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:697:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxSamples\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:698:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxNodes\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs"
         ],
         "rawUnchangedAfter": true
       },
@@ -4295,5 +4295,667 @@
     "changedRawSuites": 0,
     "effects": 0,
     "runtimeStarted": 0
+  },
+  "visualCurrentRoutePrefixAuthoring": {
+    "at": "2026-10-09T15:29:30.042Z",
+    "sourceBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+    "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+    "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+    "oldRawSha256": "6e2acb37cf18d077a661c5762cf5223d86304d300c536c18ef6bc8fe7c241247",
+    "rawSha256": "5afc27013e27111f4c655699b1b701faa1b49fd84f7b5ff5a502d7f534d235c6",
+    "callerCount": 18,
+    "addedSteps": 37,
+    "mapping": [
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12",
+        "oldIndex": 35,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              35
+            ],
+            "line": 447
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              36
+            ],
+            "line": 452
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16",
+        "oldIndex": 41,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              43
+            ],
+            "line": 477
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              44
+            ],
+            "line": 482
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/18",
+        "oldIndex": 45,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              49
+            ],
+            "line": 531
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              50
+            ],
+            "line": 536
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20",
+        "oldIndex": 50,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              56
+            ],
+            "line": 602
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              57
+            ],
+            "line": 607
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+        "oldIndex": 53,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              61
+            ],
+            "line": 639
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              62
+            ],
+            "line": 644
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+        "oldIndex": 54,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              64
+            ],
+            "line": 657
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              65
+            ],
+            "line": 662
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/24",
+        "oldIndex": 55,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              67
+            ],
+            "line": 675
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              68
+            ],
+            "line": 680
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/25",
+        "oldIndex": 56,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              70
+            ],
+            "line": 693
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              71
+            ],
+            "line": 698
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+        "oldIndex": 59,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              75
+            ],
+            "line": 716
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              76
+            ],
+            "line": 721
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+        "oldIndex": 65,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              83
+            ],
+            "line": 763
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              84
+            ],
+            "line": 768
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/30",
+        "oldIndex": 67,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              87
+            ],
+            "line": 788
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              88
+            ],
+            "line": 793
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+        "oldIndex": 68,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              90
+            ],
+            "line": 806
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              91
+            ],
+            "line": 811
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/32",
+        "oldIndex": 72,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              96
+            ],
+            "line": 867
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              97
+            ],
+            "line": 872
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              98
+            ],
+            "line": 883
+          }
+        ],
+        "wholeOldStepCoverage": "authored-unvalidated"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+        "oldIndex": 80,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              107
+            ],
+            "line": 979
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              108
+            ],
+            "line": 984
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+        "oldIndex": 81,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              110
+            ],
+            "line": 997
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              111
+            ],
+            "line": 1002
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+        "oldIndex": 84,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              115
+            ],
+            "line": 1046
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              116
+            ],
+            "line": 1051
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43",
+        "oldIndex": 95,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              128
+            ],
+            "line": 1118
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              129
+            ],
+            "line": 1123
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      },
+      {
+        "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45",
+        "oldIndex": 97,
+        "newDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              132
+            ],
+            "line": 1138
+          },
+          {
+            "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              133
+            ],
+            "line": 1143
+          }
+        ],
+        "wholeOldStepCoverage": "unresolved"
+      }
+    ],
+    "agentRowSnapshotCaller": 32,
+    "coverage": "authored-unvalidated-subsets",
+    "runtimeExecuted": 0,
+    "fullPreservationAccepted": false,
+    "limits": "One caller-entry guard each. Source old20 shot+motion_capture and reasoning_capture contain additional later current() calls; no check count/order equivalence claimed. Captured leadId replaces persistent source file only at typed binding depth; source file/incarnation ownership unproved. No provider,observer,compound evidence-file write or helper oracle invented.",
+    "receiptPending": false,
+    "evidenceClass": "Canonical fullrawadmission/compiler and source-subset authoring only",
+    "admission": {
+      "purpose": "Accepted ca73 changed visual18current-route/snapshot caller-prefix raw admission only; no source preservation/runtime/capacity claim",
+      "engineHead": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+      "adapterSource": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+      "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/tests/aft/adapter",
+      "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+      "canonicalModuleResolutionVerified": true,
+      "selectionSha256": "d4bb292b61c35f27163bd8eb98ee4e2762d18f00aab297838bae1d5d126ccf81",
+      "envFileSha256": "622feb0b479c7afd89997ccac66d2dbabe7ab7638d04032c66f9f7ce5b98bc28",
+      "envSha256": "da762455946496d9fe851bd7f5e807ea4739f97f8472b41b1c096ed5dabe1cb1",
+      "pinSha256": "034f8a8ed608ca08dc611fc1466fd3b7343872e59794c1790e1b5544428ebda2",
+      "manifestFiles": 2383,
+      "uniqueManifestBytes": 9078843,
+      "providers": 23,
+      "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+      "rawSha256": "5afc27013e27111f4c655699b1b701faa1b49fd84f7b5ff5a502d7f534d235c6",
+      "rawBytes": 39661,
+      "verifyCalls": 146,
+      "verifyReads": 2383,
+      "verifyBytes": 9078843,
+      "verifyMs": 814.1803779999993,
+      "elapsedMs": 886.6163750000001,
+      "effects": 0,
+      "runtimeStarted": 0,
+      "status": "ADMITTED canonical unchanged raw suite",
+      "guardMs": 60000,
+      "loadedSuites": 1,
+      "cases": [
+        {
+          "name": "real repo reply renders markdown tools motion and copy after reload",
+          "skipped": true,
+          "declaredSteps": 136
+        }
+      ],
+      "rawUnchangedAfter": true
+    },
+    "mappingIntegrity": {
+      "purpose": "Mapping integrity/static case facts only",
+      "checkedYamlLocations": 924,
+      "originalStepRecords": 207,
+      "helperPredicateRecords": 1072,
+      "classifications": {
+        "selected-invocation-predicate-reachable": 440,
+        "unrelated-to-static-selected-call-closure": 334,
+        "helper-selftest-negative-requirement": 219,
+        "excluded-static-selected-invocation-branch": 22,
+        "selected-invocation-predicate-conditionally-reachable": 53,
+        "unrelated-external-helper-case": 4
+      },
+      "staticBodySteps": [
+        {
+          "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+          "steps": 229,
+          "skipped": true,
+          "profile": "declarative"
+        },
+        {
+          "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+          "steps": 120,
+          "skipped": true,
+          "profile": "declarative"
+        },
+        {
+          "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+          "steps": 105,
+          "skipped": true,
+          "profile": "declarative"
+        },
+        {
+          "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+          "steps": 136,
+          "skipped": true,
+          "profile": "declarative"
+        },
+        {
+          "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
+          "steps": 111,
+          "skipped": true,
+          "profile": "declarative"
+        }
+      ],
+      "previousVisualBodySteps": 99,
+      "currentVisualBodySteps": 136,
+      "addedSteps": 37,
+      "originalBodyAndNamedScreenshotsUnchangedAfterRemovingAdditions": true,
+      "fullPreservationAccepted": false,
+      "runtimeExecuted": 0
+    },
+    "installedEngineBytesMatched": 116,
+    "artifacts": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/accepted-ca73-public-env.json",
+        "sha256": "622feb0b479c7afd89997ccac66d2dbabe7ab7638d04032c66f9f7ce5b98bc28",
+        "bytes": 442313
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/author.mjs",
+        "sha256": "36ef9b301d607598487114bc1d911ed3af6ea69ac575eede37065ffc1620d2af",
+        "bytes": 7817
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/authoring-receipt.json",
+        "sha256": "44c66ff1eb577e207784036c6d7721c99ce8d519cfdea53a7d6447bfbbe0f637",
+        "bytes": 12982
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/check-map.mjs",
+        "sha256": "1be2bc51bf1d5ca79b4c221272ee4a12aec047e0ce11895293aab14c8ffb7a70",
+        "bytes": 3038
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/construct-public-env.mjs",
+        "sha256": "1e2f78078974e4fc7761738b19e7da00526161aa6313fdb87e79ed930c615f46",
+        "bytes": 1723
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/diagnostic-selection.json",
+        "sha256": "d4bb292b61c35f27163bd8eb98ee4e2762d18f00aab297838bae1d5d126ccf81",
+        "bytes": 1858
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/installed-engine-byte-recheck.json",
+        "sha256": "d9bf8c1cc7b86c0a0ae816e1345e509288c5b5fb6f17457223a484eed47ebda2",
+        "bytes": 15664
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/mapping-integrity-receipt.json",
+        "sha256": "60e652daf87429bd7821fd8b9d13209aa4bb611c827f9a54c22dc893af90b314",
+        "bytes": 1532
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/public-env-basis.json",
+        "sha256": "a7771a90554f232c84f8b7ef78385860fded3a75785cfe12596e016b564a703f",
+        "bytes": 1249
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/raw-compatibility.mjs",
+        "sha256": "b954cd9ac394a9a6173d4d5a4238fbec97f9c7e756d37f0565637d0a5e79e83f",
+        "bytes": 4186
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/visual-current-route-prefixes-20261009/visual-admission-receipt.json",
+        "sha256": "35cb389e5afd402a8dc5759e9d56c818d1fda2a191f8c95413ceafa1be9159c9",
+        "bytes": 1720
+      }
+    ],
+    "originalFullLoaderRetries": 0
   }
 }

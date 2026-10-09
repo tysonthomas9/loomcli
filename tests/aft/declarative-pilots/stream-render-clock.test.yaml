@@ -444,6 +444,22 @@ tests:
         intent: Select and read back the declared real model in the current Chat
       - screenshot: stream-render-clock-s12
         intent: Select and read back the declared real model in the current Chat
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS13
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS13
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s13
         intent: Arm bounded 100ms and rendered-frame observers before the real send
       - fill:
@@ -458,6 +474,22 @@ tests:
         intent: Send the request through Chat
       - screenshot: stream-render-clock-s16
         intent: Wait for the pre-send DOM observer to capture an actual simultaneous running tool, Working row and Stop control
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS17
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS17
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s17
         intent: Read back the observed live state and capture its possibly completed transition; compare the later saved tool by time and file
       - await:
@@ -496,6 +528,22 @@ tests:
         intent: Observe real streamed reply text and its active caret
       - screenshot: stream-render-clock-s18
         intent: Observe real streamed reply text and its active caret
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS19
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS19
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s19
         intent: Capture the named streaming frame while the real turn is active
       - await:
@@ -551,6 +599,22 @@ tests:
         intent: Wait for the saved real turn to finish, flush text and remove caret and working row
       - screenshot: stream-render-clock-s20
         intent: Wait for the saved real turn to finish, flush text and remove caret and working row
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS21
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS21
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s21
         intent: Freeze the first turn's final frame, saved events and caret state at the original checkpoint; motion validation remains pending
       - await:
@@ -572,12 +636,76 @@ tests:
         intent: Wait for completed JSON code highlighting before reading its token spans
       - screenshot: stream-render-clock-s22
         intent: Wait for completed JSON code highlighting before reading its token spans
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS23
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS23
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s23
         intent: Freeze actual saved reasoning EventIDs and raw text, including null, with compact Thinking disclosures and an explicit nonexpandable empty-text explanation; available text expands exactly; original reasoning validation remains pending
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS24
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS24
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s24
         intent: Expand through UI clicks and compare table, highlighted code and all tool bodies with actual saved events
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS25
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS25
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s25
         intent: Capture the expanded real tool input, output and failure
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS26
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS26
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s26
         intent: Require copy and time hidden at rest, visible on reply hover or keyboard focus, below the full reply and onscreen without shifting layout; capture both themes
       - click:
@@ -585,6 +713,22 @@ tests:
         intent: Copy the rendered code through its UI action
       - screenshot: stream-render-clock-s27
         intent: Copy the rendered code through its UI action
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS28
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS28
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - capture:
           source: clipboard
           origin:
@@ -617,6 +761,22 @@ tests:
       - screenshot: stream-render-clock-s29
         intent: Copy the rendered GFM table through its UI action
       - capture:
+          source: url
+          view: pathname
+          as: currentPathS30
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS30
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
+      - capture:
           source: clipboard
           origin:
             ref:
@@ -625,8 +785,40 @@ tests:
         intent: Read back the actual browser clipboard and Copied feedback for the table
       - screenshot: stream-render-clock-s30
         intent: Read back the actual browser clipboard and Copied feedback for the table
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS31
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS31
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s31
         intent: Copy the completed assistant message through its UI action
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS32
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS32
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - capture:
           source: clipboard
           origin:
@@ -672,6 +864,38 @@ tests:
         intent: Compare clipboard bytes with the saved assistant message
       - screenshot: stream-render-clock-s32
         intent: Compare clipboard bytes with the saved assistant message
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS33
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS33
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
+      - api:
+          method: GET
+          path: /
+          as: visualAgentBeforeReload
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+              - ref:
+                  binding: apiOrigin
+              - literal: /api/workspaces/${AFT_WS}/v1/agents/
+              - ref:
+                  binding: leadId
+        intent: Retain the actual Agent row before saved events and reload
       - capability:
           request:
             id: loom.api.savedEvents
@@ -752,8 +976,40 @@ tests:
         intent: Wait for persisted table, code and final answer
       - screenshot: stream-render-clock-s35
         intent: Wait for persisted table, code and final answer
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS36
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS36
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s36
         intent: Freeze actual saved reasoning and collapsed/expanded Thinking DOM after reload without treating absent or null text as a pass
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS37
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS37
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - capability:
           request:
             id: loom.api.savedEvents
@@ -787,6 +1043,22 @@ tests:
         intent: Compare exact saved event IDs and rendered tool/table/code after reload
       - screenshot: stream-render-clock-s37
         intent: Compare exact saved event IDs and rendered tool/table/code after reload
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS38
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS38
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s38
         intent: Check compact Thinking disclosures at 800 and 390px in both themes; expand saved text and close via keyboard, or show the nonexpandable empty-text explanation; keep the original reasoning-text requirement separate
       - context:
@@ -843,10 +1115,42 @@ tests:
         intent: Observe an actual streaming answer under reduced motion
       - screenshot: stream-render-clock-s43
         intent: Observe an actual streaming answer under reduced motion
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS44
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS44
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s44
         intent: Require no fresh-word fade or caret/working animation in the real reduced-motion frame
       - screenshot: stream-render-clock-s45
         intent: Wait for the actual reduced-motion reply to complete
+      - capture:
+          source: url
+          view: pathname
+          as: currentPathS46
+        intent: Require this captured Lead Chat before the source helper
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: currentPathS46
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
+        intent: Require this captured Lead Chat before the source helper
       - screenshot: stream-render-clock-s46
         intent: Compare the second real reply to its saved turn and capture the final reduced-motion frame
       - screenshot: stream-render-clock-s47

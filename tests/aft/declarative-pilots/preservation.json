@@ -27231,7 +27231,7 @@
       ],
       "id": "stream-render-clock",
       "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
-      "sha256": "6e2acb37cf18d077a661c5762cf5223d86304d300c536c18ef6bc8fe7c241247",
+      "sha256": "5afc27013e27111f4c655699b1b701faa1b49fd84f7b5ff5a502d7f534d235c6",
       "skipped": true,
       "oldSteps": [
         {
@@ -27927,16 +27927,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                35
+              ],
+              "line": 447
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                36
+              ],
+              "line": 452
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              35
+              37
             ],
-            "line": 447
+            "line": 463
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  35
+                ],
+                "line": 447
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  36
+                ],
+                "line": 452
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -27970,9 +28029,9 @@
                 "tests",
                 0,
                 "steps",
-                36
+                38
               ],
-              "line": 449
+              "line": 465
             }
           ],
           "checkpoint": {
@@ -27981,9 +28040,9 @@
               "tests",
               0,
               "steps",
-              37
+              39
             ],
-            "line": 453
+            "line": 469
           }
         },
         {
@@ -28014,9 +28073,9 @@
                 "tests",
                 0,
                 "steps",
-                38
+                40
               ],
-              "line": 455
+              "line": 471
             }
           ],
           "checkpoint": {
@@ -28025,9 +28084,9 @@
               "tests",
               0,
               "steps",
-              39
+              41
             ],
-            "line": 457
+            "line": 473
           }
         },
         {
@@ -28066,9 +28125,9 @@
               "tests",
               0,
               "steps",
-              40
+              42
             ],
-            "line": 459
+            "line": 475
           }
         },
         {
@@ -28097,16 +28156,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                43
+              ],
+              "line": 477
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                44
+              ],
+              "line": 482
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              41
+              45
             ],
-            "line": 461
+            "line": 493
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  43
+                ],
+                "line": 477
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  44
+                ],
+                "line": 482
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28145,9 +28263,9 @@
                 "tests",
                 0,
                 "steps",
-                42
+                46
               ],
-              "line": 463
+              "line": 495
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28155,9 +28273,9 @@
                 "tests",
                 0,
                 "steps",
-                43
+                47
               ],
-              "line": 480
+              "line": 512
             }
           ],
           "checkpoint": {
@@ -28166,9 +28284,9 @@
               "tests",
               0,
               "steps",
-              44
+              48
             ],
-            "line": 497
+            "line": 529
           }
         },
         {
@@ -28197,16 +28315,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                49
+              ],
+              "line": 531
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                50
+              ],
+              "line": 536
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              45
+              51
             ],
-            "line": 499
+            "line": 547
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  49
+                ],
+                "line": 531
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  50
+                ],
+                "line": 536
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28245,9 +28422,9 @@
                 "tests",
                 0,
                 "steps",
-                46
+                52
               ],
-              "line": 501
+              "line": 549
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28255,9 +28432,9 @@
                 "tests",
                 0,
                 "steps",
-                47
+                53
               ],
-              "line": 518
+              "line": 566
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28265,9 +28442,9 @@
                 "tests",
                 0,
                 "steps",
-                48
+                54
               ],
-              "line": 535
+              "line": 583
             }
           ],
           "checkpoint": {
@@ -28276,9 +28453,9 @@
               "tests",
               0,
               "steps",
-              49
+              55
             ],
-            "line": 552
+            "line": 600
           }
         },
         {
@@ -28307,16 +28484,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                56
+              ],
+              "line": 602
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                57
+              ],
+              "line": 607
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              50
+              58
             ],
-            "line": 554
+            "line": 618
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  56
+                ],
+                "line": 602
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  57
+                ],
+                "line": 607
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28350,9 +28586,9 @@
                 "tests",
                 0,
                 "steps",
-                51
+                59
               ],
-              "line": 556
+              "line": 620
             }
           ],
           "checkpoint": {
@@ -28361,9 +28597,9 @@
               "tests",
               0,
               "steps",
-              52
+              60
             ],
-            "line": 573
+            "line": 637
           }
         },
         {
@@ -28392,16 +28628,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                61
+              ],
+              "line": 639
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                62
+              ],
+              "line": 644
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              53
+              63
             ],
-            "line": 575
+            "line": 655
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  61
+                ],
+                "line": 639
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  62
+                ],
+                "line": 644
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28430,16 +28725,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                64
+              ],
+              "line": 657
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                65
+              ],
+              "line": 662
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              54
+              66
             ],
-            "line": 577
+            "line": 673
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  64
+                ],
+                "line": 657
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  65
+                ],
+                "line": 662
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28468,16 +28822,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                67
+              ],
+              "line": 675
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                68
+              ],
+              "line": 680
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              55
+              69
             ],
-            "line": 579
+            "line": 691
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  67
+                ],
+                "line": 675
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  68
+                ],
+                "line": 680
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28506,16 +28919,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                70
+              ],
+              "line": 693
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                71
+              ],
+              "line": 698
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              56
+              72
             ],
-            "line": 581
+            "line": 709
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  70
+                ],
+                "line": 693
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  71
+                ],
+                "line": 698
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28548,9 +29020,9 @@
                 "tests",
                 0,
                 "steps",
-                57
+                73
               ],
-              "line": 583
+              "line": 711
             }
           ],
           "checkpoint": {
@@ -28559,9 +29031,9 @@
               "tests",
               0,
               "steps",
-              58
+              74
             ],
-            "line": 586
+            "line": 714
           }
         },
         {
@@ -28597,9 +29069,9 @@
                 "tests",
                 0,
                 "steps",
-                59
+                75
               ],
-              "line": 588
+              "line": 716
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28607,9 +29079,9 @@
                 "tests",
                 0,
                 "steps",
-                60
+                76
               ],
-              "line": 595
+              "line": 721
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28617,9 +29089,29 @@
                 "tests",
                 0,
                 "steps",
-                61
+                77
               ],
-              "line": 602
+              "line": 732
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                78
+              ],
+              "line": 739
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                79
+              ],
+              "line": 746
             }
           ],
           "checkpoint": {
@@ -28628,9 +29120,47 @@
               "tests",
               0,
               "steps",
-              62
+              80
             ],
-            "line": 610
+            "line": 754
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  75
+                ],
+                "line": 716
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  76
+                ],
+                "line": 721
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28665,9 +29195,9 @@
                 "tests",
                 0,
                 "steps",
-                63
+                81
               ],
-              "line": 612
+              "line": 756
             }
           ],
           "checkpoint": {
@@ -28676,9 +29206,9 @@
               "tests",
               0,
               "steps",
-              64
+              82
             ],
-            "line": 617
+            "line": 761
           }
         },
         {
@@ -28714,9 +29244,29 @@
                 "tests",
                 0,
                 "steps",
-                65
+                83
               ],
-              "line": 619
+              "line": 763
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                84
+              ],
+              "line": 768
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                85
+              ],
+              "line": 779
             }
           ],
           "checkpoint": {
@@ -28725,9 +29275,47 @@
               "tests",
               0,
               "steps",
-              66
+              86
             ],
-            "line": 626
+            "line": 786
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  83
+                ],
+                "line": 763
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  84
+                ],
+                "line": 768
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28756,16 +29344,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                87
+              ],
+              "line": 788
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                88
+              ],
+              "line": 793
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              67
+              89
             ],
-            "line": 628
+            "line": 804
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  87
+                ],
+                "line": 788
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  88
+                ],
+                "line": 793
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28801,9 +29448,9 @@
                 "tests",
                 0,
                 "steps",
-                68
+                90
               ],
-              "line": 630
+              "line": 806
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28811,9 +29458,9 @@
                 "tests",
                 0,
                 "steps",
-                69
+                91
               ],
-              "line": 637
+              "line": 811
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28821,9 +29468,29 @@
                 "tests",
                 0,
                 "steps",
-                70
+                92
               ],
-              "line": 658
+              "line": 822
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                93
+              ],
+              "line": 829
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                94
+              ],
+              "line": 850
             }
           ],
           "checkpoint": {
@@ -28832,9 +29499,47 @@
               "tests",
               0,
               "steps",
-              71
+              95
             ],
-            "line": 673
+            "line": 865
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  90
+                ],
+                "line": 806
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  91
+                ],
+                "line": 811
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -28865,9 +29570,39 @@
                 "tests",
                 0,
                 "steps",
-                72
+                96
               ],
-              "line": 675
+              "line": 867
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                97
+              ],
+              "line": 872
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                98
+              ],
+              "line": 883
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                99
+              ],
+              "line": 899
             }
           ],
           "checkpoint": {
@@ -28876,9 +29611,69 @@
               "tests",
               0,
               "steps",
-              73
+              100
             ],
-            "line": 696
+            "line": 920
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  96
+                ],
+                "line": 867
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  97
+                ],
+                "line": 872
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
+          },
+          "partialAuthoredAgentRowSnapshot": {
+            "sourceLines": [
+              146,
+              147,
+              148
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  98
+                ],
+                "line": 883
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "boundMs": 15000,
+            "remaining": "Actual row and saved-event bindings are retained independently; original compound owned-file artifact,full paging/row completeness and snapshot identity remain unverified. status200 is existing authoring policy stronger than original optional HTTP expected_status."
           }
         },
         {
@@ -28909,9 +29704,9 @@
                 "tests",
                 0,
                 "steps",
-                74
+                101
               ],
-              "line": 698
+              "line": 922
             }
           ],
           "checkpoint": {
@@ -28920,9 +29715,9 @@
               "tests",
               0,
               "steps",
-              75
+              102
             ],
-            "line": 700
+            "line": 924
           }
         },
         {
@@ -28960,9 +29755,9 @@
                 "tests",
                 0,
                 "steps",
-                76
+                103
               ],
-              "line": 702
+              "line": 926
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28970,9 +29765,9 @@
                 "tests",
                 0,
                 "steps",
-                77
+                104
               ],
-              "line": 719
+              "line": 943
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -28980,9 +29775,9 @@
                 "tests",
                 0,
                 "steps",
-                78
+                105
               ],
-              "line": 736
+              "line": 960
             }
           ],
           "checkpoint": {
@@ -28991,9 +29786,9 @@
               "tests",
               0,
               "steps",
-              79
+              106
             ],
-            "line": 753
+            "line": 977
           }
         },
         {
@@ -29022,16 +29817,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                107
+              ],
+              "line": 979
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                108
+              ],
+              "line": 984
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              80
+              109
             ],
-            "line": 755
+            "line": 995
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  107
+                ],
+                "line": 979
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  108
+                ],
+                "line": 984
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -29067,9 +29921,9 @@
                 "tests",
                 0,
                 "steps",
-                81
+                110
               ],
-              "line": 757
+              "line": 997
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -29077,9 +29931,29 @@
                 "tests",
                 0,
                 "steps",
-                82
+                111
               ],
-              "line": 778
+              "line": 1002
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                112
+              ],
+              "line": 1013
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                113
+              ],
+              "line": 1034
             }
           ],
           "checkpoint": {
@@ -29088,9 +29962,47 @@
               "tests",
               0,
               "steps",
-              83
+              114
             ],
-            "line": 788
+            "line": 1044
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  110
+                ],
+                "line": 997
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  111
+                ],
+                "line": 1002
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -29119,16 +30031,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                115
+              ],
+              "line": 1046
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                116
+              ],
+              "line": 1051
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              84
+              117
             ],
-            "line": 790
+            "line": 1062
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  115
+                ],
+                "line": 1046
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  116
+                ],
+                "line": 1051
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -29159,9 +30130,9 @@
                 "tests",
                 0,
                 "steps",
-                85
+                118
               ],
-              "line": 792
+              "line": 1064
             }
           ],
           "checkpoint": {
@@ -29170,9 +30141,9 @@
               "tests",
               0,
               "steps",
-              86
+              119
             ],
-            "line": 796
+            "line": 1068
           }
         },
         {
@@ -29210,9 +30181,9 @@
               "tests",
               0,
               "steps",
-              87
+              120
             ],
-            "line": 798
+            "line": 1070
           }
         },
         {
@@ -29246,9 +30217,9 @@
                 "tests",
                 0,
                 "steps",
-                88
+                121
               ],
-              "line": 800
+              "line": 1072
             }
           ],
           "checkpoint": {
@@ -29257,9 +30228,9 @@
               "tests",
               0,
               "steps",
-              89
+              122
             ],
-            "line": 804
+            "line": 1076
           }
         },
         {
@@ -29290,9 +30261,9 @@
                 "tests",
                 0,
                 "steps",
-                90
+                123
               ],
-              "line": 806
+              "line": 1078
             }
           ],
           "checkpoint": {
@@ -29301,9 +30272,9 @@
               "tests",
               0,
               "steps",
-              91
+              124
             ],
-            "line": 808
+            "line": 1080
           }
         },
         {
@@ -29342,9 +30313,9 @@
                 "tests",
                 0,
                 "steps",
-                92
+                125
               ],
-              "line": 810
+              "line": 1082
             },
             {
               "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
@@ -29352,9 +30323,9 @@
                 "tests",
                 0,
                 "steps",
-                93
+                126
               ],
-              "line": 827
+              "line": 1099
             }
           ],
           "checkpoint": {
@@ -29363,9 +30334,9 @@
               "tests",
               0,
               "steps",
-              94
+              127
             ],
-            "line": 844
+            "line": 1116
           }
         },
         {
@@ -29394,16 +30365,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                128
+              ],
+              "line": 1118
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                129
+              ],
+              "line": 1123
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              95
+              130
             ],
-            "line": 846
+            "line": 1134
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  128
+                ],
+                "line": 1118
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  129
+                ],
+                "line": 1123
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -29442,9 +30472,9 @@
               "tests",
               0,
               "steps",
-              96
+              131
             ],
-            "line": 848
+            "line": 1136
           }
         },
         {
@@ -29473,16 +30503,75 @@
             }
           ],
           "deadlineMs": 30000,
-          "destination": [],
+          "destination": [
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                132
+              ],
+              "line": 1138
+            },
+            {
+              "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                133
+              ],
+              "line": 1143
+            }
+          ],
           "checkpoint": {
             "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
             "path": [
               "tests",
               0,
               "steps",
-              97
+              134
             ],
-            "line": 850
+            "line": 1154
+          },
+          "partialAuthoredCurrentRoute": {
+            "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
+            "sourceLines": [
+              111,
+              112,
+              113,
+              114,
+              115,
+              116
+            ],
+            "required": "Exact workspace Chat pathname and same captured Agent ID before this selected source helper",
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  132
+                ],
+                "line": 1138
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  133
+                ],
+                "line": 1143
+              }
+            ],
+            "coverage": "authored-unvalidated",
+            "runtime": 0,
+            "preservationAccepted": false,
+            "remaining": "Original file-backed agent_id re-read/ownership and all later nested current() calls,helper actor/assertions/negative/atomic/deadline evidence remain unverified. This prefix does not make the whole original helper step translated."
           }
         },
         {
@@ -29518,9 +30607,9 @@
               "tests",
               0,
               "steps",
-              98
+              135
             ],
-            "line": 852
+            "line": 1156
           }
         }
       ],
@@ -29691,7 +30780,7 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 115,
                 "sourceFunction": "current",
-                "canonicalAttempt": "Source branch classification only. Strict AgentRef/API paging and captures are available; no actual source predicate YAML preservation/public runner proof supplied here.",
+                "canonicalAttempt": "18 selected caller-entry exact pathname captures + concat equality to previously captured valid leadId now authored using canonical URL/Value operations. This is partial source guard authoring only; repeated nested checks and file-backed ID ownership remain open.",
                 "missingObservation": "Exact source captured-ID/public-name/repo/harness/preset/user/parentnull/current-path or paged fulluniqueevent/seq/order/204 evidence,original15s caller and owned snapshot provenance remain unimplemented; expectedStatus branch retained outside fresh selected case."
               },
               "selectedCallerOldStepIds": [
@@ -29720,7 +30809,495 @@
                 "sourceReviewOnly": true,
                 "preservationAccepted": false,
                 "actualFreshPlanAbsenceProven": null
-              }
+              },
+              "authoredCallerPrefixes": [
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        35
+                      ],
+                      "line": 447
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        36
+                      ],
+                      "line": 452
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        43
+                      ],
+                      "line": 477
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        44
+                      ],
+                      "line": 482
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/18",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        49
+                      ],
+                      "line": 531
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        50
+                      ],
+                      "line": 536
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        56
+                      ],
+                      "line": 602
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        57
+                      ],
+                      "line": 607
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        61
+                      ],
+                      "line": 639
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        62
+                      ],
+                      "line": 644
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        64
+                      ],
+                      "line": 657
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        65
+                      ],
+                      "line": 662
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/24",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        67
+                      ],
+                      "line": 675
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        68
+                      ],
+                      "line": 680
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/25",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        70
+                      ],
+                      "line": 693
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        71
+                      ],
+                      "line": 698
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        75
+                      ],
+                      "line": 716
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        76
+                      ],
+                      "line": 721
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        83
+                      ],
+                      "line": 763
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        84
+                      ],
+                      "line": 768
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/30",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        87
+                      ],
+                      "line": 788
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        88
+                      ],
+                      "line": 793
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        90
+                      ],
+                      "line": 806
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        91
+                      ],
+                      "line": 811
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/32",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        96
+                      ],
+                      "line": 867
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        97
+                      ],
+                      "line": 872
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        107
+                      ],
+                      "line": 979
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        108
+                      ],
+                      "line": 984
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        110
+                      ],
+                      "line": 997
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        111
+                      ],
+                      "line": 1002
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        115
+                      ],
+                      "line": 1046
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        116
+                      ],
+                      "line": 1051
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        128
+                      ],
+                      "line": 1118
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        129
+                      ],
+                      "line": 1123
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        132
+                      ],
+                      "line": 1138
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        133
+                      ],
+                      "line": 1143
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                }
+              ]
             },
             {
               "source": {
@@ -29742,7 +31319,7 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 116,
                 "sourceFunction": "current",
-                "canonicalAttempt": "Source branch classification only. Strict AgentRef/API paging and captures are available; no actual source predicate YAML preservation/public runner proof supplied here.",
+                "canonicalAttempt": "18 selected caller-entry exact pathname captures + concat equality to previously captured valid leadId now authored using canonical URL/Value operations. This is partial source guard authoring only; repeated nested checks and file-backed ID ownership remain open.",
                 "missingObservation": "Exact source captured-ID/public-name/repo/harness/preset/user/parentnull/current-path or paged fulluniqueevent/seq/order/204 evidence,original15s caller and owned snapshot provenance remain unimplemented; expectedStatus branch retained outside fresh selected case."
               },
               "selectedCallerOldStepIds": [
@@ -29771,7 +31348,495 @@
                 "sourceReviewOnly": true,
                 "preservationAccepted": false,
                 "actualFreshPlanAbsenceProven": null
-              }
+              },
+              "authoredCallerPrefixes": [
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        35
+                      ],
+                      "line": 447
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        36
+                      ],
+                      "line": 452
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        43
+                      ],
+                      "line": 477
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        44
+                      ],
+                      "line": 482
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/18",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        49
+                      ],
+                      "line": 531
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        50
+                      ],
+                      "line": 536
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        56
+                      ],
+                      "line": 602
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        57
+                      ],
+                      "line": 607
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        61
+                      ],
+                      "line": 639
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        62
+                      ],
+                      "line": 644
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        64
+                      ],
+                      "line": 657
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        65
+                      ],
+                      "line": 662
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/24",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        67
+                      ],
+                      "line": 675
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        68
+                      ],
+                      "line": 680
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/25",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        70
+                      ],
+                      "line": 693
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        71
+                      ],
+                      "line": 698
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        75
+                      ],
+                      "line": 716
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        76
+                      ],
+                      "line": 721
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        83
+                      ],
+                      "line": 763
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        84
+                      ],
+                      "line": 768
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/30",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        87
+                      ],
+                      "line": 788
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        88
+                      ],
+                      "line": 793
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        90
+                      ],
+                      "line": 806
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        91
+                      ],
+                      "line": 811
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/32",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        96
+                      ],
+                      "line": 867
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        97
+                      ],
+                      "line": 872
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        107
+                      ],
+                      "line": 979
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        108
+                      ],
+                      "line": 984
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        110
+                      ],
+                      "line": 997
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        111
+                      ],
+                      "line": 1002
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        115
+                      ],
+                      "line": 1046
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        116
+                      ],
+                      "line": 1051
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        128
+                      ],
+                      "line": 1118
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        129
+                      ],
+                      "line": 1123
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                },
+                {
+                  "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45",
+                  "destination": [
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        132
+                      ],
+                      "line": 1138
+                    },
+                    {
+                      "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                      "path": [
+                        "tests",
+                        0,
+                        "steps",
+                        133
+                      ],
+                      "line": 1143
+                    }
+                  ],
+                  "coverage": "authored-unvalidated",
+                  "preservationAccepted": false
+                }
+              ]
             },
             {
               "source": {
@@ -50977,6 +53042,519 @@
         "preservationAccepted": false,
         "runtimeExecuted": 0,
         "limits": "Checks entire actual pathname against captured ID; existing Agent row/identity facts remain. Separate earlier path-segments and pathname captures are fail-closed on a changing route but not original atomic callback proof. Other repeated current-path calls, provisioning, screenshots and deadline ownership remain unverified."
+      },
+      "currentRoutePrefixAuthoring": {
+        "at": "2026-10-09T15:29:30.042Z",
+        "sourceBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+        "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+        "oldRawSha256": "6e2acb37cf18d077a661c5762cf5223d86304d300c536c18ef6bc8fe7c241247",
+        "rawSha256": "5afc27013e27111f4c655699b1b701faa1b49fd84f7b5ff5a502d7f534d235c6",
+        "callerCount": 18,
+        "addedSteps": 37,
+        "mapping": [
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/12",
+            "oldIndex": 35,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  35
+                ],
+                "line": 447
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  36
+                ],
+                "line": 452
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/16",
+            "oldIndex": 41,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  43
+                ],
+                "line": 477
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  44
+                ],
+                "line": 482
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/18",
+            "oldIndex": 45,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  49
+                ],
+                "line": 531
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  50
+                ],
+                "line": 536
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/20",
+            "oldIndex": 50,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  56
+                ],
+                "line": 602
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  57
+                ],
+                "line": 607
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+            "oldIndex": 53,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  61
+                ],
+                "line": 639
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  62
+                ],
+                "line": 644
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+            "oldIndex": 54,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  64
+                ],
+                "line": 657
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  65
+                ],
+                "line": 662
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/24",
+            "oldIndex": 55,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  67
+                ],
+                "line": 675
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  68
+                ],
+                "line": 680
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/25",
+            "oldIndex": 56,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  70
+                ],
+                "line": 693
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  71
+                ],
+                "line": 698
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/27",
+            "oldIndex": 59,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  75
+                ],
+                "line": 716
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  76
+                ],
+                "line": 721
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/29",
+            "oldIndex": 65,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  83
+                ],
+                "line": 763
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  84
+                ],
+                "line": 768
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/30",
+            "oldIndex": 67,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  87
+                ],
+                "line": 788
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  88
+                ],
+                "line": 793
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/31",
+            "oldIndex": 68,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  90
+                ],
+                "line": 806
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  91
+                ],
+                "line": 811
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/32",
+            "oldIndex": 72,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  96
+                ],
+                "line": 867
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  97
+                ],
+                "line": 872
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  98
+                ],
+                "line": 883
+              }
+            ],
+            "wholeOldStepCoverage": "authored-unvalidated"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+            "oldIndex": 80,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  107
+                ],
+                "line": 979
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  108
+                ],
+                "line": 984
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+            "oldIndex": 81,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  110
+                ],
+                "line": 997
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  111
+                ],
+                "line": 1002
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+            "oldIndex": 84,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  115
+                ],
+                "line": 1046
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  116
+                ],
+                "line": 1051
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/43",
+            "oldIndex": 95,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  128
+                ],
+                "line": 1118
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  129
+                ],
+                "line": 1123
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/45",
+            "oldIndex": 97,
+            "newDestination": [
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  132
+                ],
+                "line": 1138
+              },
+              {
+                "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  133
+                ],
+                "line": 1143
+              }
+            ],
+            "wholeOldStepCoverage": "unresolved"
+          }
+        ],
+        "agentRowSnapshotCaller": 32,
+        "coverage": "authored-unvalidated-subsets",
+        "runtimeExecuted": 0,
+        "fullPreservationAccepted": false,
+        "limits": "One caller-entry guard each. Source old20 shot+motion_capture and reasoning_capture contain additional later current() calls; no check count/order equivalence claimed. Captured leadId replaces persistent source file only at typed binding depth; source file/incarnation ownership unproved. No provider,observer,compound evidence-file write or helper oracle invented."
       }
     },
     {
