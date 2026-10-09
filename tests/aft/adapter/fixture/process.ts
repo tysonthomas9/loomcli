@@ -7,12 +7,18 @@ export interface HostCommand {
   executable: string; argv: string[]; cwd: string; env: Record<string, string>;
 }
 export interface CliCompletion { exitCode: number | null; stdout: string; stderr: string; complete: boolean }
+export interface ProcessOutputSnapshot {
+  stdout:string;stderr:string;stdoutComplete:boolean;stderrComplete:boolean;closed:boolean;
+}
 export interface OwnedCliProcess extends OwnedProcess { completion(signal: AbortSignal): Promise<CliCompletion> }
 export interface OwnedProcess {
   pid: number; generation: string; executable: string; argv: readonly string[];
   state(): 'running' | 'exited';
   ready(signal: AbortSignal): Promise<void>;
   stop(): Promise<void>;
+  // Private transport bytes; sanitize at the canonical evidence boundary.
+  // A running prefix cannot establish absence of a later product log event.
+  output?():ProcessOutputSnapshot;
 }
 export interface HostProcesses {
   run(command: HostCommand, signal?: AbortSignal): Promise<string>;
@@ -77,25 +83,34 @@ export function createNodeProcesses(spawnChild: typeof spawn = spawn, signalGrou
   start(command, readinessText, registeredGeneration) {
     const child = launch(command.executable, command.argv, { cwd: command.cwd, env: command.env,
       shell: false, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    const generation = registeredGeneration ?? randomUUID(); let running = true;
+    const generation = registeredGeneration ?? randomUUID(); let running = true, outputHealthy=true, outputClosed=false;
     let readyResolve!: () => void; let readyReject!: (error: Error) => void;
     const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
     // Suppress unhandled rejection if a partial acquisition fails before ready().
     void ready.catch(() => undefined);
     let closedResolve!: () => void;
     const closed = new Promise<void>(resolve => { closedResolve = resolve; });
+    const output={stdout:[] as Buffer[],stderr:[] as Buffer[]},sizes={stdout:0,stderr:0};
+    const capture=(stream:'stdout'|'stderr',chunk:Buffer)=>{
+      sizes[stream]+=chunk.length;
+      if(sizes[stream]<=4*1024*1024)output[stream].push(Buffer.from(chunk));
+      data(chunk);
+    };
     let tail = '';
     const data = (chunk: Buffer) => {
-      // Only the readiness boolean survives; raw logs may contain credentials.
+      // Readiness and bounded private evidence are independent; raw bytes are
+      // never placed in public fixture receipts by this transport.
       tail = (tail + chunk.toString('utf8')).slice(-8192);
       if (tail.includes(readinessText)) { tail = ''; readyResolve(); }
     };
-    child.stdout!.on('data', data); child.stderr!.on('data', data);
-    child.on('error', () => { running = false; readyReject(new FixtureError('observation-failed')); closedResolve(); });
-    child.on('close', () => { running = false; readyReject(new FixtureError('observation-failed')); closedResolve(); });
+    child.stdout!.on('data', (chunk:Buffer)=>capture('stdout',chunk)); child.stderr!.on('data', (chunk:Buffer)=>capture('stderr',chunk));
+    child.on('error', () => { running = false;outputHealthy=false; readyReject(new FixtureError('observation-failed')); closedResolve(); });
+    child.on('close', () => { running = false;outputClosed=true; readyReject(new FixtureError('observation-failed')); closedResolve(); });
     return {
       pid: child.pid ?? 0, generation, executable: command.executable, argv: Object.freeze([...command.argv]),
       state: () => running ? 'running' : 'exited',
+      output:()=>({stdout:Buffer.concat(output.stdout).toString('utf8'),stderr:Buffer.concat(output.stderr).toString('utf8'),
+        stdoutComplete:outputHealthy&&sizes.stdout<=4*1024*1024,stderrComplete:outputHealthy&&sizes.stderr<=4*1024*1024,closed:outputClosed}),
       async ready(signal) {
         signal.throwIfAborted();
         let abort!: () => void;

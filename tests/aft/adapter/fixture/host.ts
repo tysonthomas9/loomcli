@@ -65,7 +65,7 @@ export class HostFixtureDriver implements FixtureDriver {
     this.activeOperations.add(id);
     try{return await operation();}finally{this.activeOperations.delete(id);}
   }
-  private requireWorkerRegistrationIdle(){check(!['worker-registration','worker-action','cli-launch'].some(id=>this.activeOperations.has(id)),'identity-mismatch');}
+  private requireWorkerRegistrationIdle(){check(!['worker-registration','worker-action','worker-log','cli-launch'].some(id=>this.activeOperations.has(id)),'identity-mismatch');}
   private requireHandle(id:string,generation:string){
     const handle=this.handles.get(id);check(handle&&handle.generation===generation,'identity-mismatch');return handle!;
   }
@@ -97,6 +97,7 @@ export class HostFixtureDriver implements FixtureDriver {
   get executionRouting() { check(this.plan); return fixtureRouting(this.plan!); }
   createOperationAuthority(owner:FixtureAuthorityOwner) {check(this.plan);return fixtureOperationAuthority(owner,this.plan!);}
   async runtimeIdentity(signal:AbortSignal){
+    check(!this.activeOperations.has('worker-log'),'identity-mismatch');
     return this.withServiceOperation('registered-services',async()=>{
       const parents=await this.registeredParents(signal),serve=this.parentHandles.get('serve');check(serve,'unsupported-capability');
       const parent=parents.find(value=>value.id===serve!.id);check(parent,'identity-mismatch');
@@ -146,7 +147,7 @@ export class HostFixtureDriver implements FixtureDriver {
   async refreshOwnedProductProcesses(signal:AbortSignal):Promise<readonly OwnedWorkerFact[]>{
     signal.throwIfAborted();
     check(this.workspaceFixture&&this.workspaceOwner&&this.workspaceEvidence&&this.workspaceRecords&&this.descendants,'unsupported-capability');
-    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','cli-launch','worker-action'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
+    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','cli-launch','worker-action','worker-log'].some(id=>this.activeOperations.has(id)),'identity-mismatch');
     const daemon=this.handles.get('daemon');check(daemon?.state()==='running','unsupported-capability');
     return this.withServiceOperation('worker-registration',async()=>{
       if(!this.workerRegistrations){
@@ -182,6 +183,21 @@ export class HostFixtureDriver implements FixtureDriver {
     check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','http-mutation'].some(key=>this.activeOperations.has(key)),'identity-mismatch');
     this.requireHandle('serve',expectedServeGeneration);
     return this.withServiceOperation('worker-action',()=>this.workerRegistrations!.stop(id,generation,expectedServeGeneration,signal));
+  }
+  /** Private actual daemon bytes. No log predicate or secret-bearing public
+   * receipt is produced here; canonical consumers must retain redaction facts. */
+  async readOwnedDaemonOutput(expectedDaemonGeneration:string,signal:AbortSignal){
+    signal.throwIfAborted();this.requireWorkerRegistrationIdle();
+    check(!['registered-services','serve','daemon','cleanup-preparation','cleanup-resource','http-mutation'].some(key=>this.activeOperations.has(key)),'identity-mismatch');
+    return this.withServiceOperation('worker-log',async()=>{
+      const handle=this.requireHandle('daemon',expectedDaemonGeneration),parent=this.parentHandles.get('daemon');
+      check(parent&&parent.handle===handle&&handle.output&&this.descendants,'unsupported-capability');
+      const identity=this.descendants!.initial(parent!.id),expected=[{id:parent!.id,pid:identity.pid,generation:identity.generation}];
+      await this.verifyRegisteredParents(expected,signal);
+      const output=handle.output!();
+      await this.verifyRegisteredParents(expected,signal);this.requireCurrentHandle('daemon',handle);
+      return {id:'daemon',generation:expectedDaemonGeneration,...output};
+    });
   }
   async resolveLegacyWorktree(workspaceId:string,agentName:string,signal:AbortSignal,repoName?:string):Promise<{complete:true;workspaceId:string;agentName:string;root:OwnedRoot;branch:string;commonDir:string}>{
     check(this.workspaceOwner&&this.workspaceRecords,'unsupported-capability');
@@ -310,7 +326,7 @@ export class HostFixtureDriver implements FixtureDriver {
       const after=await this.files.lstat(root);check(!after.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino);
     }
   }
-  async prepareObserve(signal:AbortSignal){return this.withServiceOperation('registered-services',()=>this.observeRegisteredServices(signal));}
+  async prepareObserve(signal:AbortSignal){check(!this.activeOperations.has('worker-log'),'identity-mismatch');return this.withServiceOperation('registered-services',()=>this.observeRegisteredServices(signal));}
   async prepareCleanup(signal:AbortSignal){
     this.requireWorkerRegistrationIdle();
     return this.withServiceOperation('cleanup-preparation',async()=>{await this.drainCleanups();await this.prepareObserve(signal);});
