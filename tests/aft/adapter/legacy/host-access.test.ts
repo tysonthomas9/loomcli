@@ -728,6 +728,8 @@ test('every bound action rejects a missing required effect before its host facto
     { id: 'loom.cli.usage', remove: 'start-owned-process', input: { agent: { workspaceId: 'E2E-WS', agentId: 'worker' } } },
     { id: 'loom.cli.task', remove: 'start-owned-process', input: { workspaceId: 'E2E-WS', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null } },
     { id: 'loom.runtime.stimulate', remove: 'stop-owned-process', input: { targetId: 'serve', operation: 'serve-restart', expectedGeneration: 'unused' } },
+    { id: 'loom.runtime.stimulate', remove: 'start-owned-process', input: { targetId: 'serve', operation: 'serve-restart', expectedGeneration: 'unused' } },
+    { id: 'loom.runtime.stimulate', remove: 'start-owned-process', input: { targetId: 'worker', operation: 'worker-stop', expectedGeneration: 'unused' } },
     { id: 'loom.fixture.seedWorktree', remove: 'write-fixture', input: { workspaceId: 'E2E-WS', agentName: 'worker', relativePath: 'proof.txt', content: 'fixture', commitMessage: 'fixture only' } },
     { id: 'loom.fixture.configure', remove: 'write-fixture', input: { setting: 'provider-default', model: 'aft/m', harness: 'opencode' } },
   ] as const;
@@ -738,7 +740,8 @@ test('every bound action rejects a missing required effect before its host facto
       { [row.id]: { evidenceClass: 'deterministic', effects: LegacyOperationEffects[row.id].filter(effect => effect !== row.remove) } });
     const input = row.id === 'loom.cli.usage' ? { agent: { ...row.input.agent, fixtureLeaseId: r.leaseId } } : { ...row.input, leaseId: r.leaseId };
     const result = await r.invoke(row.id, input);
-    assert.equal(result.availability, 'unsupported', row.id); assert.equal(r.factories(), 0, row.id); assert.equal(r.launches.length, 0, row.id);
+    assert.equal(result.availability, 'unsupported', `${row.id} missing ${row.remove}: factories=${r.factories()}, launches=${r.launches.length}`);
+    assert.equal(r.factories(), 0, row.id); assert.equal(r.launches.length, 0, row.id);
   }
 });
 
