@@ -869,5 +869,86 @@
     "provisioning": "task-owned dependency/emitted-source diagnostic only; zero actual source/frontend/browser/container/backend/provider provisioning",
     "installCorrection": "Copied dependency cache initially retained prior engine bytes; byte verification rejected it. Exact task-owned aft package directory was removed, package reinstalled and112/112 verified before this probe. No stale/mixed canonical module credited.",
     "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
+  },
+  "currentPublication": {
+    "at": "2026-10-09T10:41:27.265963+00:00",
+    "status": "in-progress reviewable draft; not preservation-complete",
+    "taskNoteId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
+    "branch": "codex/aft-declarative-pilots",
+    "base": "b675d0803a9e04f0eab06f6b5aa2ef1e1cad8eb0",
+    "files": [
+      {
+        "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+        "sha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1"
+      },
+      {
+        "file": "tests/aft/declarative-pilots/child-repeat.test.yaml",
+        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112"
+      },
+      {
+        "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954"
+      },
+      {
+        "file": "tests/aft/declarative-pilots/predicate-mappings.json",
+        "sha256": "b1d05a56eece40e1b4f558e3ac03b3cd9672f8208901640b4093c43b2d86595d"
+      },
+      {
+        "file": "tests/aft/declarative-pilots/preservation.json",
+        "sha256": "e49dc01e2d23844d8c513fae89e013dc9f83e2cc068f9d94f1c22c81c0e39d3b"
+      },
+      {
+        "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
+        "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea"
+      },
+      {
+        "file": "tests/aft/declarative-pilots/stream-render-clock.test.yaml",
+        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d"
+      }
+    ],
+    "rawPilots": {
+      "count": 5,
+      "skipped": 5,
+      "runtimeExecuted": 0,
+      "individualExpandedStepSchema": {
+        "count": 699,
+        "errors": 0,
+        "credit": "individual schema only"
+      },
+      "latestFullLoaderAttempt": {
+        "engine": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+        "adapter": "477a2c09080739ea5825cfb1c22a916866fc6fc3",
+        "rawPreflightAndSuiteSchemaPassed": 5,
+        "fullAdmissionPassed": 0,
+        "boundedTimeouts": 5,
+        "guardMs": 60000
+      },
+      "approvedCoherentConsumer": "f3776276f88c31c5a89d6787ae824012ebb0be02",
+      "f377PilotChecksObtained": false,
+      "f377Note": "Parent approval recorded; no f377 results invented or attributed to477. No new engine pin here."
+    },
+    "sourceMapping": {
+      "originalSteps": 207,
+      "translatedAuthoredUnvalidated": 135,
+      "uncoveredStepTranslations": 72,
+      "reviewedPredicateMappings": 20,
+      "fullPreservationAccepted": 0,
+      "helperInventory": 1072,
+      "conservativeReachableCandidates": 474,
+      "helperSelftestOrNegativeRecords": 180,
+      "unrelatedBranchesOrCases": 418,
+      "exactReachablePredicateDenominator": "unresolved selected-branch narrowing; no1072-obligation claim"
+    },
+    "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
+    "blockedCases": [
+      "all5 full raw admission has no outcome before guarded timeout",
+      "Files repeated identity predicates and exact helper branch denominator uncovered",
+      "Stop whole30s chain bound, tool trim/failed normalization, Respond no-request history, recovery correlation and native desc-assistant/first-truthy/full200-prefix uncovered",
+      "child synchronous pre-Send/reactivation/native/source predicates require final reviewed ledger and provisioning",
+      "visual exact RAF/phase/source/delta/completion/Markdown/2word/300ms/12tick/180000ms preservation and receipt pipeline incomplete",
+      "SSE full raw replay/cursor/header/payload/foreign exclusion and native restart provisioning incomplete"
+    ],
+    "consumerWorkRemaining": "Diagnose full loader noncompletion; consume corrected coherentf377 only with actual results; author reviewed canonical retained-ledger/receipt interfaces when published; narrow each selected helper branch and map all reachable predicates; preserve original actors/checkpoints/deadlines and cleanup. Runtime and bulk migration stay parent-gated.",
+    "publicationPolicy": "Publish current source independently of journal/provider completion; no executable wrappers, expected-return stubs, original campaign changes or runtime claim."
   }
 }
