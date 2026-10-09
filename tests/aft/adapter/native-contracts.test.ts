@@ -131,3 +131,29 @@ test('Git observations reject foreign identity, changed HEAD, duplicates and fai
     heads = 0; await assert.rejects(observeGit(input, { worktree: root, commonDir: common, branch: 'owned' }, reader));
   }
 });
+
+test('fixed container observation protocol resolves exact owned paths and refuses generic commands', async t => {
+  const { readContainerObservation, ContainerObservationRequest, ContainerRootIdentity } = await import('./container-observations.js');
+  const { AgentRow } = await import('./protocol.js');
+  const root = await directory(t); const repo = path.join(root, 'source'); const worktrees = path.join(root, 'worktrees');
+  const worktree = path.join(worktrees, 'agt_owned'); await mkdir(repo); await mkdir(worktree, { recursive: true });
+  const commonDir = path.join(repo, '.git'); await mkdir(commonDir);
+  await writeFile(path.join(repo, 'marker'), 'exact source bytes'); await writeFile(path.join(worktree, 'answer'), 'actual agent bytes');
+  let corrupt = false;
+  const row = AgentRow.parse({ agent_id: 'agt_owned', workspace_id: 'workspace', repo, worktree_path: worktree, branch: 'owned', harness: 'opencode',
+    harness_session_id: 'ses_owned', harness_session_root: '', parent_agent_id: null, root_agent_id: null, created_by_kind: 'user', created_by_id: null,
+    preset: 'lead', revision: 1, state: 'idle', running_turn_id: null, deleted_at: null, history_purged_at: null });
+  const unused = async (): Promise<never> => { throw new Error('No native service operation is permitted in this test'); };
+  const access = { pinnedExecutable: '/owned/opencode', agent: async () => ({ ...row, repo: corrupt ? '/foreign' : repo }),
+    registration: unused, process: unused, sessions: unused, read: unused };
+  const paths = { workspaceId: 'workspace', repo, worktreeParent: worktrees, commonDir };
+  const stamp = ContainerRootIdentity.parse(await readContainerObservation({ operation: 'filesystem-root', root: { kind: 'managed-repo' } }, access, paths));
+  assert.equal(stamp.path, repo);
+  const result = await readContainerObservation({ operation: 'filesystem-observe', root: { kind: 'agent-worktree', agentId: 'agt_owned' },
+    relativePaths: ['answer'], view: 'bytes', maxBytes: 1000, maxEntries: 10 }, access, paths);
+  assert.ok('data' in result); assert.equal(Buffer.from(result.data.entries[0]!.contentBase64!, 'base64').toString('utf8'), 'actual agent bytes');
+  corrupt = true;
+  await assert.rejects(readContainerObservation({ operation: 'filesystem-root', root: { kind: 'agent-worktree', agentId: 'agt_owned' } }, access, paths));
+  assert.equal(ContainerObservationRequest.safeParse({ operation: 'git-observe', agentId: 'agt_owned', view: 'status', paths: [], maxBytes: 1000, cwd: '/foreign' }).success, false);
+  assert.equal(ContainerObservationRequest.safeParse({ operation: 'exec', command: 'unsafe' }).success, false);
+});

@@ -1,3 +1,4 @@
+import { probeOccurrences, type SyntheticProbe } from './synthetic-probe.js';
 import { z } from 'zod';
 import { EventPage, Id, Json, ObservationError, requireFact, type Event, type ReadTransport } from './protocol.js';
 
@@ -5,18 +6,20 @@ export const SavedEventsInput = z.object({
   agent: z.object({ fixtureLeaseId: Id, workspaceId: Id, agentId: Id }).strict(),
   after: z.number().int().nonnegative(), pageSize: z.number().int().min(1).max(500),
   maxPages: z.number().int().min(1).max(1000), maxRecords: z.number().int().min(1).max(100000),
-  kinds: z.array(Id).max(100),
+  kinds: z.array(Id).max(100), probeHandle: Id.nullable().optional(),
 }).strict();
 export const SavedEventsOutput = z.object({
   snapshotSeq: z.number().int().nonnegative(), after: z.number().int().nonnegative(),
   complete: z.literal(true), events: z.array(z.object({
     agentId: Id, seq: z.number().int().positive(), eventId: Id, kind: Id,
     turnId: z.string().nullable(), payload: Json, createdAt: Id,
+    probe: z.object({ handle: Id, payloadOccurrences: z.number().int().nonnegative() }).strict().nullable(),
   }).strict()),
 }).strict();
 export async function collectSavedEvents(
-  input: z.infer<typeof SavedEventsInput>, read: ReadTransport, signal: AbortSignal,
+  input: z.infer<typeof SavedEventsInput>, read: ReadTransport, signal: AbortSignal, probe?: SyntheticProbe,
 ): Promise<z.infer<typeof SavedEventsOutput>> {
+  requireFact(!input.probeHandle || probe?.handle === input.probeHandle, 'ownership-mismatch', 'Saved-event synthetic probe is not bound');
   const events: Event[] = [];
   let cursor = input.after;
   let boundary: number | undefined;
@@ -50,6 +53,7 @@ export async function collectSavedEvents(
       return { snapshotSeq: boundary, after: input.after, complete: true, events: events.map(event => ({
         agentId: event.agent_id, seq: event.seq, eventId: event.event_id, kind: event.kind,
         turnId: event.turn_id, payload: event.payload, createdAt: event.created_at,
+        probe: probe ? { handle: probe.handle, payloadOccurrences: probeOccurrences(JSON.stringify(event.payload), probe) } : null,
       })) };
     }
     requireFact(page.events.length > 0 && cursor < boundary, 'incomplete-pages', 'Saved event cursor cannot advance');

@@ -1,9 +1,11 @@
+import { probeOccurrences, type SyntheticProbe } from './synthetic-probe.js';
 import { z } from 'zod';
 import { AgentRef, AgentRow, Id, Json, NativeRef, ObservationError, ServiceRegistration, requireFact, sha256, type NativeAccess } from './protocol.js';
 
 export const NativeInput = z.object({ agent: AgentRef, view: z.enum([
   'session', 'inputs', 'completed-models', 'tools', 'usage', 'presence',
 ]), nativeSessionId: Id, nativeRoot: z.string(), expectedGeneration: Id,
+  probeHandle: Id.nullable().optional(),
   maxMessages: z.number().int().min(1).max(200),
 }).strict();
 const Base = { agentId: Id, nativeSessionId: Id, nativeRoot: z.string(), servicePid: z.number().int().positive(),
@@ -21,7 +23,8 @@ export const NativeOutput = z.discriminatedUnion('view', [
     ...RecordIdentity, completedAt: z.union([z.string(), z.number()]), provider: Id, model: Id,
   }).strict()) }).strict(),
   z.object({ ...Base, view: z.literal('tools'), complete: z.boolean(), records: z.array(z.object({
-    ...RecordIdentity, itemId: Id, name: Id, state: Id, input: Json, output: Json,
+    ...RecordIdentity, itemId: Id, messageType: Id, name: Id, state: Id, input: Json, output: Json,
+    probe: z.object({ handle: Id, inputOccurrences: z.number().int().nonnegative(), outputOccurrences: z.number().int().nonnegative() }).strict().nullable(),
   }).strict()) }).strict(),
   z.object({ ...Base, view: z.literal('usage'), complete: z.boolean(), records: z.array(z.object({
     ...RecordIdentity, inputTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative(),
@@ -56,7 +59,8 @@ export async function verifyNativeService(access: NativeAccess, expectedGenerati
   return registration;
 }
 export async function observeNative(input: z.infer<typeof NativeInput>, access: NativeAccess,
-  owned: AgentRow, signal: AbortSignal): Promise<z.infer<typeof NativeOutput>> {
+  owned: AgentRow, signal: AbortSignal, probe?: SyntheticProbe): Promise<z.infer<typeof NativeOutput>> {
+  requireFact(!input.probeHandle || (input.view === 'tools' && probe?.handle === input.probeHandle), 'ownership-mismatch', 'Native synthetic probe is not bound');
   const before = await verifyNativeService(access, input.expectedGeneration, signal);
   const row = AgentRow.parse(await access.agent(input.agent.agentId));
   requireFact(row.agent_id === owned.agent_id && row.workspace_id === owned.workspace_id && row.repo === owned.repo &&
@@ -99,6 +103,8 @@ export async function observeNative(input: z.infer<typeof NativeInput>, access: 
       // The pinned native endpoint does not expose a continuation receipt. A
       // full page is explicitly incomplete; it cannot prove exactness/absence.
       const complete = records.length < input.maxMessages;
+      if (probe) requireFact(records.every(message => message.type !== 'assistant' || Array.isArray(message.content)),
+        'observation-failed', 'Native tool content is missing');
       if (input.view === 'inputs') output = { ...base, view: 'inputs', complete, records: records.filter(message => message.type === 'user').map(message => ({
         id: message.id, sessionId: message.sessionID,
         text: (message.content ?? []).flatMap(part => part && typeof part === 'object' && !Array.isArray(part) && part.type === 'text' && typeof part.text === 'string' ? [part.text] : []).join(''),
@@ -118,15 +124,23 @@ export async function observeNative(input: z.infer<typeof NativeInput>, access: 
       else output = { ...base, view: 'tools', complete, records: records.flatMap(message => (message.content ?? []).flatMap(part => {
         if (!part || typeof part !== 'object' || Array.isArray(part) || part.type !== 'tool') return [];
         const tool = z.object({ id: Id, name: Id, state: z.object({ status: Id, input: Json, content: Json.optional() }).passthrough() }).passthrough().parse(part);
+        if (probe && tool.state.status === 'completed') requireFact(tool.state.content !== undefined,
+          'observation-failed', 'Completed native tool output is missing');
         return [{ id: `${message.id}/tool/${tool.id}`, sessionId: message.sessionID, itemId: message.id, name: tool.name,
-          state: tool.state.status, input: tool.state.input, output: tool.state.content ?? null }];
+          messageType: message.type, state: tool.state.status, input: tool.state.input, output: tool.state.content ?? null,
+          probe: probe ? { handle: probe.handle, inputOccurrences: probeOccurrences(JSON.stringify(tool.state.input || {}), probe),
+            outputOccurrences: probeOccurrences(JSON.stringify(tool.state.content || {}), probe) } : null }];
       })) };
     }
   }
+  if (output.view === 'tools') requireFact(new Set(output.records.map(record => record.id)).size === output.records.length,
+    'identity-mismatch', 'Native tool IDs are duplicated');
   const after = await verifyNativeService(access, input.expectedGeneration, signal);
   requireFact(await sha256(JSON.stringify(before)) === await sha256(JSON.stringify(after)), 'identity-mismatch', 'Native registration changed during observation');
   const afterRow = AgentRow.parse(await access.agent(input.agent.agentId));
-  requireFact(afterRow.revision === row.revision && afterRow.harness_session_id === row.harness_session_id &&
-    afterRow.harness_session_root === row.harness_session_root, 'identity-mismatch', 'Native agent changed during observation');
+  requireFact(afterRow.agent_id === row.agent_id && afterRow.workspace_id === row.workspace_id && afterRow.repo === row.repo &&
+    afterRow.worktree_path === row.worktree_path && afterRow.branch === row.branch && afterRow.parent_agent_id === row.parent_agent_id &&
+    afterRow.root_agent_id === row.root_agent_id && afterRow.created_by_kind === row.created_by_kind && afterRow.created_by_id === row.created_by_id &&
+    afterRow.revision === row.revision && afterRow.harness_session_id === row.harness_session_id && afterRow.harness_session_root === row.harness_session_root, 'identity-mismatch', 'Native agent changed during observation');
   return NativeOutput.parse(output);
 }

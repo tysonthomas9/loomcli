@@ -1,3 +1,4 @@
+import type { SyntheticProbe } from './synthetic-probe.js';
 import { z } from 'zod';
 import { Id, Json, requireFact } from './protocol.js';
 import { SavedEventsInput, SavedEventsOutput, collectSavedEvents } from './events.js';
@@ -10,9 +11,9 @@ export const CorrelationOutput = z.object({ turnId: Id, requestId: Id.nullable()
 }).strict();
 /** A bounded read selector binds exact source IDs. It does not evaluate any
  * scenario outcome, cancellation/tool-success count, or expected text. */
-export async function correlateEvents(input: z.infer<typeof CorrelationInput>, read: ReadTransport, signal: AbortSignal) {
+export async function correlateEvents(input: z.infer<typeof CorrelationInput>, read: ReadTransport, signal: AbortSignal, probe?: SyntheticProbe) {
   requireFact(new Set(input.eventIds).size === input.eventIds.length, 'identity-mismatch', 'Duplicate event correlation IDs');
-  const history = await collectSavedEvents(input, read, signal);
+  const history = await collectSavedEvents(input, read, signal, probe);
   const events = input.eventIds.map(id => {
     const matches = history.events.filter(event => event.eventId === id);
     requireFact(matches.length === 1, 'identity-mismatch', 'Requested saved event is missing or duplicated');
