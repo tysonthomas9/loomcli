@@ -32745,7 +32745,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -32754,14 +32754,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1594,
                 "sourceFunction": "run_markdown_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Always terminal-full callers23/36; additionally motion46 ONLY when saved last message fails exact plain-source fast-path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -32774,7 +32791,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -32783,14 +32800,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1604,
                 "sourceFunction": "run_markdown_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Always terminal-full callers23/36; additionally motion46 ONLY on nonplain source projection.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -32803,7 +32837,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -32812,12 +32846,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1619,
                 "sourceFunction": "source_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -32830,7 +32872,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -32839,12 +32881,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1668,
                 "sourceFunction": "source_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -32857,7 +32907,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -32866,12 +32916,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1695,
                 "sourceFunction": "source_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -32884,7 +32942,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -32893,12 +32951,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1697,
                 "sourceFunction": "source_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -32911,7 +32977,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -32920,12 +32986,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1699,
                 "sourceFunction": "source_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -32938,7 +33012,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -32947,12 +33021,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1702,
                 "sourceFunction": "source_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -33340,7 +33422,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -33349,12 +33431,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1894,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -33367,7 +33457,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -33376,12 +33466,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2011,
                 "sourceFunction": "assert_arrival_deadlines",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -33394,7 +33492,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -33403,12 +33501,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2022,
                 "sourceFunction": "assert_terminal_exit",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -33421,7 +33527,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -33430,12 +33536,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2025,
                 "sourceFunction": "assert_terminal_exit",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -33448,7 +33562,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -33457,12 +33571,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2031,
                 "sourceFunction": "assert_terminal_exit",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -33475,7 +33597,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -33484,12 +33606,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2054,
                 "sourceFunction": "assert_terminal_exit",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37638,7 +37768,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37647,12 +37777,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1650,
                 "sourceFunction": "source_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY nonplain source projection; actual renderer and lock hashes plus installed dependency facts required.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37715,7 +37853,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37724,12 +37862,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1904,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37742,7 +37888,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37751,12 +37897,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1928,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37769,7 +37923,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37778,12 +37932,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1931,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37796,7 +37958,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37805,12 +37967,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1933,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37823,7 +37993,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37832,12 +38002,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1939,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37850,7 +38028,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37859,12 +38037,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1944,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37877,7 +38063,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37886,12 +38072,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1962,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY addedWords>2 non-flush frame; retained pending candidates must be nonempty.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37904,7 +38098,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37913,12 +38107,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1965,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY addedWords>2 non-flush frame; select FIRST max-pressure pending candidate in original arrival order.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37931,7 +38133,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37940,12 +38142,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1967,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY addedWords>2 non-flush frame; future-frame existence targets selected FIRST max-pressure candidate, not all pending candidates.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37958,7 +38168,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37967,12 +38177,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1998,
                 "sourceFunction": "assert_arrival_deadlines",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "For EVERY contentChanged last-item arrival; FIRST mapped frame in ORIGINAL frame order after arrival phase with mono>=arrival mono and min source>=required source.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -37985,7 +38203,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -37994,12 +38212,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2001,
                 "sourceFunction": "assert_arrival_deadlines",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "For EVERY contentChanged last-item arrival; FIRST mapped frame must be within actual arrival mono+300.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -38012,7 +38238,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -38021,12 +38247,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2037,
                 "sourceFunction": "assert_terminal_exit",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -38039,7 +38273,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -38048,12 +38282,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2039,
                 "sourceFunction": "assert_terminal_exit",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -39351,7 +39593,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39360,12 +39602,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1629,
                 "sourceFunction": "source_projection",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY exact plain-source fast-path: no special Markdown characters, every measured raw frame saved-answer prefix and terminal raw DOM equals answer.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -39428,7 +39678,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39437,12 +39687,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1915,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "ONLY FIRST frame with streaming===true and reply-content words>0; checked BEFORE any flush/backlog exception.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -39455,7 +39713,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39464,12 +39722,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1952,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "For EVERY pending content-changing earlier arrival whose requiredMinSourceUtf16 exceeds historical frame-prefix max and projectedWords exceeds previous frame visible words.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -39482,7 +39748,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39491,12 +39757,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1955,
                 "sourceFunction": "assert_frame_pacing",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Accepted584 retained DOM/stream handles and source/math milestones exist, but actual source-equivalent public projection/provider plus authored YAML comparison for this guard is not established. No independently authored schema or expected-result stub used.",
+                "missingObservation": "Authenticate FIRST-turn actual saved last item, raw source/DOM pools and original identities, preserve this exact condition and all original indices/timestamps/thresholds in declared YAML; a maximum-only or sampler-only result cannot discharge every source assertion."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "For EVERY pending candidate; last measured tick mono must cover that candidate actual arrival mono+300.",
+                "acceptance": "Source selected branch only; coverage unresolved, no YAML execution/preservation credit."
+              }
             },
             {
               "source": {
@@ -42263,7 +42537,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42272,14 +42546,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 17,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -42288,7 +42579,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42297,14 +42588,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 46,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -42313,7 +42621,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42322,14 +42630,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 48,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -42338,7 +42663,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42347,14 +42672,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 56,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -42363,7 +42705,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42372,14 +42714,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 80,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -42388,7 +42747,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42397,14 +42756,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 89,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -42413,7 +42789,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42422,14 +42798,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 104,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -42438,7 +42831,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42447,14 +42840,31 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 150,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim.",
+                "conditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "unconditionalCallerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ]
+              }
             },
             {
               "source": {
@@ -42463,7 +42873,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42472,14 +42882,22 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 202,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+                ],
+                "sourceReason": "Terminal-full branch ONLY callers23/36 has declared frames=[]/arrivals=[], denies nonempty motion evidence; motion46 mode absent never enters terminal-full branch.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim."
+              }
             },
             {
               "source": {
@@ -42488,7 +42906,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42497,14 +42915,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 239,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim."
+              }
             },
             {
               "source": {
@@ -42513,7 +42937,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42522,14 +42946,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 242,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim."
+              }
             },
             {
               "source": {
@@ -42538,7 +42968,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42547,14 +42977,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 244,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim."
+              }
             },
             {
               "source": {
@@ -42563,7 +42999,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42572,14 +43008,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 246,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim."
+              }
             },
             {
               "source": {
@@ -42588,7 +43030,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42597,14 +43039,20 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual-markdown.mjs",
                 "sourceLine": 248,
                 "sourceFunction": "",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Adapter owns source-selected renderer projections; exact frozen helper guard equivalence and declared YAML expectations not yet proved by actual public runner.",
+                "missingObservation": "Retain source, CSS, lock and installed dependency hash/version proof plus exact terminal/nonplain mode, work limits and ambiguous prefix denials. Generic pure JSON or authenticated capture alone does not prove renderer-source equivalence."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
-                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop.",
+                "acceptance": "Source validation guard including negative polarity, not an executed-negative/selftest or YAML preservation claim."
+              }
             }
           ]
         },
@@ -44692,6 +45140,702 @@
           }
         ],
         "acceptance": "Source reachability only; all57 coverage unresolved. No additional YAML or preservation/runtime credit; five raw admission receipts unchanged."
+      },
+      "pacingSelectedBranchReview": {
+        "at": "2026-10-09T12:46:11.832157+00:00",
+        "frozenHelperByteMatch": true,
+        "frozenMarkdownHelperByteMatch": true,
+        "scope": "Selected final46 pacing/projection/deadline/terminal; terminal source projection shared23/36. Source branches classified, all coverage unresolved.",
+        "pythonPredicatesReviewed": [
+          {
+            "line": 1594,
+            "endLine": 1594,
+            "function": "run_markdown_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Always terminal-full callers23/36; additionally motion46 ONLY when saved last message fails exact plain-source fast-path."
+          },
+          {
+            "line": 1604,
+            "endLine": 1605,
+            "function": "run_markdown_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Always terminal-full callers23/36; additionally motion46 ONLY on nonplain source projection."
+          },
+          {
+            "line": 1619,
+            "endLine": 1620,
+            "function": "source_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 1668,
+            "endLine": 1693,
+            "function": "source_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 1695,
+            "endLine": 1696,
+            "function": "source_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 1697,
+            "endLine": 1698,
+            "function": "source_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 1699,
+            "endLine": 1701,
+            "function": "source_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 1702,
+            "endLine": 1704,
+            "function": "source_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 1894,
+            "endLine": 1894,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 2011,
+            "endLine": 2012,
+            "function": "assert_arrival_deadlines",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 2022,
+            "endLine": 2024,
+            "function": "assert_terminal_exit",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 2025,
+            "endLine": 2030,
+            "function": "assert_terminal_exit",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 2031,
+            "endLine": 2032,
+            "function": "assert_terminal_exit",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 2054,
+            "endLine": 2055,
+            "function": "assert_terminal_exit",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 1650,
+            "endLine": 1667,
+            "function": "source_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY nonplain source projection; actual renderer and lock hashes plus installed dependency facts required."
+          },
+          {
+            "line": 1904,
+            "endLine": 1910,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 1928,
+            "endLine": 1928,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch."
+          },
+          {
+            "line": 1931,
+            "endLine": 1931,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch."
+          },
+          {
+            "line": 1933,
+            "endLine": 1934,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch."
+          },
+          {
+            "line": 1939,
+            "endLine": 1940,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch."
+          },
+          {
+            "line": 1944,
+            "endLine": 1944,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY addedWords>2 frame NOT admitted by exact saved-completion-flush branch."
+          },
+          {
+            "line": 1962,
+            "endLine": 1962,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY addedWords>2 non-flush frame; retained pending candidates must be nonempty."
+          },
+          {
+            "line": 1965,
+            "endLine": 1966,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY addedWords>2 non-flush frame; select FIRST max-pressure pending candidate in original arrival order."
+          },
+          {
+            "line": 1967,
+            "endLine": 1968,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY addedWords>2 non-flush frame; future-frame existence targets selected FIRST max-pressure candidate, not all pending candidates."
+          },
+          {
+            "line": 1998,
+            "endLine": 1999,
+            "function": "assert_arrival_deadlines",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "For EVERY contentChanged last-item arrival; FIRST mapped frame in ORIGINAL frame order after arrival phase with mono>=arrival mono and min source>=required source."
+          },
+          {
+            "line": 2001,
+            "endLine": 2002,
+            "function": "assert_arrival_deadlines",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "For EVERY contentChanged last-item arrival; FIRST mapped frame must be within actual arrival mono+300."
+          },
+          {
+            "line": 2037,
+            "endLine": 2037,
+            "function": "assert_terminal_exit",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 2039,
+            "endLine": 2040,
+            "function": "assert_terminal_exit",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Selected final-visual-assert46 calls sealed first-turn assert_motion_capture -> source_projection/frame pacing/arrival deadlines/terminal exit; this source guard is unconditional on the successful selected call path."
+          },
+          {
+            "line": 1629,
+            "endLine": 1629,
+            "function": "source_projection",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY exact plain-source fast-path: no special Markdown characters, every measured raw frame saved-answer prefix and terminal raw DOM equals answer."
+          },
+          {
+            "line": 1915,
+            "endLine": 1916,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "ONLY FIRST frame with streaming===true and reply-content words>0; checked BEFORE any flush/backlog exception."
+          },
+          {
+            "line": 1952,
+            "endLine": 1953,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "For EVERY pending content-changing earlier arrival whose requiredMinSourceUtf16 exceeds historical frame-prefix max and projectedWords exceeds previous frame visible words."
+          },
+          {
+            "line": 1955,
+            "endLine": 1956,
+            "function": "assert_frame_pacing",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "For EVERY pending candidate; last measured tick mono must cover that candidate actual arrival mono+300."
+          }
+        ],
+        "markdownPredicatesReviewed": [
+          {
+            "line": 17,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent."
+          },
+          {
+            "line": 46,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent."
+          },
+          {
+            "line": 48,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent."
+          },
+          {
+            "line": 56,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent."
+          },
+          {
+            "line": 80,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent."
+          },
+          {
+            "line": 89,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent."
+          },
+          {
+            "line": 104,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent."
+          },
+          {
+            "line": 150,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "sourceReason": "Terminal-full actual source projection invoked at render-check23 and render-reload-check36; source/path/dependency/mode/input/component guards run there. Motion46 invokes common guards only if nonplain, with mode absent."
+          },
+          {
+            "line": 202,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "conditional": false,
+            "sourceReason": "Terminal-full branch ONLY callers23/36 has declared frames=[]/arrivals=[], denies nonempty motion evidence; motion46 mode absent never enters terminal-full branch."
+          },
+          {
+            "line": 239,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop."
+          },
+          {
+            "line": 242,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop."
+          },
+          {
+            "line": 244,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop."
+          },
+          {
+            "line": 246,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop."
+          },
+          {
+            "line": 248,
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": true,
+            "sourceReason": "Motion46 nonplain mode ONLY: cumulative actual delta-prefix projection, required visible/content source ranges and ambiguity guards; terminal-full23/36 exits before this loop."
+          }
+        ],
+        "direct": 26,
+        "conditional": 20,
+        "additionalSourceGroups": [
+          {
+            "id": "visual-last-item-plain-vs-markdown-selection",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 1612,
+              "end": 1705,
+              "text": "def source_projection(snapshot):\n    \"\"\"Bind raw source offsets and visible words to exact ChatMarkdown rendering.\"\"\"\n    answer = snapshot[\"replies\"][-1][\"payload\"][\"text\"]\n    frames = snapshot[\"probe\"][\"frames\"]\n    arrivals, _ = assert_arrival_receipts(snapshot)\n    item_id = snapshot[\"replies\"][-1][\"payload\"][\"itemId\"]\n    deltas = [a[\"text\"] for a in arrivals if a[\"itemId\"] == item_id]\n    assert answer and js_utf16_length(answer) <= 8000, \\\n        \"motion answer exceeds the bounded projection fixture budget\"\n    texts = [frame[\"text\"] for frame in frames]\n    plain = not re.search(r\"[\\n\\r`*_~|#<>\\[\\]\\\\!]\", answer) and \\\n        all(answer.startswith(text) for text in texts) and \\\n        snapshot[\"probe\"][\"finalText\"] == answer\n    if plain:\n        cumulative, previous, projected = \"\", \"\", []\n        for delta in deltas:\n            cumulative += delta\n            assert answer.startswith(cumulative), \"arrival is not a saved source prefix\"\n            projected.append({\"sourceUtf16\": js_utf16_length(cumulative),\n                              \"visibleChanged\": cumulative != previous,\n                              \"contentChanged\": cumulative != previous,\n                              \"requiredMinSourceUtf16\": js_utf16_length(cumulative),\n                              \"projectedUtf16\": js_utf16_length(cumulative),\n                              \"projectedWords\": len(cumulative.split())})\n            previous = cumulative\n        result = {\"version\": 1, \"terminal\": answer, \"terminalVisible\": answer,\n                  \"terminalContent\": answer,\n                  \"frames\": [{\"minSourceUtf16\": js_utf16_length(text),\n                              \"maxSourceUtf16\": js_utf16_length(text),\n                              \"visible\": text, \"content\": text,\n                              \"visibleWords\": len(text.split()),\n                              \"contentWords\": len(text.split())} for text in texts],\n                  \"arrivals\": projected, \"sourceUtf16\": js_utf16_length(answer),\n                  \"identity\": {\"mode\": \"plain-source-byte-exact\"}}\n    else:\n        result = run_markdown_projection(answer, frames, deltas)\n        frontend = Path(required(\"AFT_TESTS_DIR\")).resolve().parents[1] / \"internal/webui/frontend\"\n        identity = result.get(\"identity\")\n        assert isinstance(identity, dict) and \\\n            identity.get(\"chatMarkdownSha256\") == hashlib.sha256((\n                frontend / \"src/components/AgentChat/ChatMarkdown.tsx\").read_bytes()).hexdigest() and \\\n            identity.get(\"longTextSha256\") == hashlib.sha256((\n                frontend / \"src/components/AgentChat/LongText.tsx\").read_bytes()).hexdigest() and \\\n            identity.get(\"codeHighlightSha256\") == hashlib.sha256((\n                frontend / \"src/components/AgentChat/codeHighlight.ts\").read_bytes()).hexdigest() and \\\n            identity.get(\"messageCopySha256\") == hashlib.sha256((\n                frontend / \"src/components/AgentChat/MessageCopyButton.tsx\").read_bytes()).hexdigest() and \\\n            identity.get(\"cssSha256\") == hashlib.sha256((\n                frontend / \"src/components/AgentChat/ChatMarkdown.module.css\").read_bytes()).hexdigest() and \\\n            identity.get(\"lockSha256\") == hashlib.sha256((\n                frontend / \"package-lock.json\").read_bytes()).hexdigest() and \\\n            isinstance(identity.get(\"dependencies\"), dict) and \\\n            all(identity[\"dependencies\"].get(name) for name in (\n                \"react\", \"react-dom\", \"react-markdown\", \"remark-gfm\",\n                \"rehype-sanitize\", \"esbuild\", \"jsdom\")), \\\n            \"ChatMarkdown source or installed dependency identity changed\"\n    assert result.get(\"version\") == 1 and result.get(\"sourceUtf16\") == js_utf16_length(answer) and \\\n        len(result.get(\"frames\", [])) == len(frames) and \\\n        len(result.get(\"arrivals\", [])) == len(deltas) and \\\n        all(type(frame.get(\"streaming\")) is bool and isinstance(row, dict) and\n            isinstance(row.get(\"minSourceUtf16\"), int) and\n            isinstance(row.get(\"maxSourceUtf16\"), int) and\n            isinstance(row.get(\"visible\"), str) and\n            type(row.get(\"visibleWords\")) is int and\n            isinstance(row.get(\"content\"), str) and\n            type(row.get(\"contentWords\")) is int and\n            0 <= row[\"minSourceUtf16\"] <= row[\"maxSourceUtf16\"] <= js_utf16_length(answer)\n            for frame, row in zip(frames, result[\"frames\"])) and \\\n        all(isinstance(frame.get(\"visibleText\"), str) and isinstance(frame.get(\"contentText\"), str) and\n            frame[\"visibleText\"].split() == row[\"visible\"].split() and\n            frame[\"contentText\"].split() == row[\"content\"].split() and\n            frame.get(\"words\") == row[\"contentWords\"] == len(row[\"content\"].split()) and\n            row[\"visibleWords\"] == len(row[\"visible\"].split())\n            for frame, row in zip(frames, result[\"frames\"])) and \\\n        all(isinstance(row, dict) and type(row.get(\"visibleChanged\")) is bool and\n            type(row.get(\"contentChanged\")) is bool and\n            isinstance(row.get(\"sourceUtf16\"), int) and\n            isinstance(row.get(\"requiredMinSourceUtf16\"), int) and\n            isinstance(row.get(\"projectedWords\"), int) and\n            0 <= row[\"requiredMinSourceUtf16\"] <= row[\"sourceUtf16\"] <= js_utf16_length(answer)\n            for row in result[\"arrivals\"]), \\\n        \"rendered frame has no exact source-backed ChatMarkdown projection\"\n    positions = [row[\"minSourceUtf16\"] for row in result[\"frames\"]]\n    assert positions == sorted(positions), \\\n        \"rendered Markdown source projection moved backward during the live turn\"\n    assert result[\"terminal\"] == snapshot[\"probe\"][\"finalText\"], \\\n        \"final rendered ChatMarkdown text differs from the exact saved answer projection\"\n    assert isinstance(snapshot[\"probe\"].get(\"finalVisibleText\"), str) and \\\n        result[\"terminalVisible\"].split() == snapshot[\"probe\"][\"finalVisibleText\"].split(), \\\n        \"final visible ChatMarkdown words differ from the exact saved source projection\"\n    assert isinstance(snapshot[\"probe\"].get(\"finalContentText\"), str) and \\\n        result[\"terminalContent\"].split() == snapshot[\"probe\"][\"finalContentText\"].split(), \\\n        \"final reply content differs from the exact saved source projection\"\n    return result"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-and-comparison-not-yet-preserved",
+              "required": "Source projection uses ONLY LAST saved message item, with its own item-filtered arrival deltas; aggregate saved answer word criterion earlier is separate. Last answer nonempty and JSUTF16<=8000. Plain fast-path selected ONLY no special Markdown chars/all raw frames answer prefixes/final raw DOM==answer. Nonplain actual renderer projection otherwise. Preserve conditional branches, measured innerText/content split equivalence and nondecreasing mapped min source.",
+              "canonicalAttempt": "Source-backed core pure-math/reader milestones and accepted584 engine ledgers are separate. No complete authenticated public provider plus corresponding authored source assertions validated for this group.",
+              "missingObservation": "Do not concatenate other-item deltas or infer measured visible DOM from expected Markdown; source offsets bound full saved last answer, actual observed delta may be strict prefix."
+            },
+            "bounds": {
+              "maxLastAnswerUtf16": 8000
+            }
+          },
+          {
+            "id": "visual-source-installed-renderer-identity-and-full-mode",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-markdown.mjs",
+            "sourceHelperSha256": "7f9d7b9537e5e7f1b45ba709c15539ef1dda8edd4e9d1157350460843ee146ab",
+            "sourceLines": {
+              "start": 10,
+              "end": 104,
+              "text": "const frontend = resolve(process.argv[2] || \"\");\nif (\n  !frontend ||\n  !resolve(frontend, \"src/components/AgentChat/ChatMarkdown.tsx\").startsWith(\n    frontend + \"/\",\n  )\n)\n  throw Error(\"frontend-source-path\");\nconst sourceFile = resolve(\n  frontend,\n  \"src/components/AgentChat/ChatMarkdown.tsx\",\n);\nconst limitFile = resolve(frontend, \"src/components/AgentChat/LongText.tsx\");\nconst highlightFile = resolve(\n  frontend,\n  \"src/components/AgentChat/codeHighlight.ts\",\n);\nconst copyFile = resolve(\n  frontend,\n  \"src/components/AgentChat/MessageCopyButton.tsx\",\n);\nconst cssFile = resolve(\n  frontend,\n  \"src/components/AgentChat/ChatMarkdown.module.css\",\n);\nconst lockFile = resolve(frontend, \"package-lock.json\");\nconst sha256 = (path) =>\n  createHash(\"sha256\").update(readFileSync(path)).digest(\"hex\");\n// The visible-text traversal is verified against these exact renderer and CSS\n// bytes in Chromium. A change needs new browser parity evidence before credit.\nif (\n  sha256(sourceFile) !==\n    \"cbf6aad87f1f4f4e2160679732a886d2248f6b60b07aee9d7c48c5395600522f\" ||\n  sha256(cssFile) !==\n    \"8fc71740bb4e2e99b526105279f286544e1e27c4fb81b4eb1fc9c051573bda4b\"\n)\n  throw Error(\"unverified-visible-renderer-source\");\nif (!readFileSync(limitFile, \"utf8\").includes(\"{text}</div>\"))\n  throw Error(\"unrecognized-full-text-rendering\");\nconst lock = JSON.parse(readFileSync(lockFile, \"utf8\"));\nconst css = readFileSync(cssFile, \"utf8\");\nif (\n  !/\\.markdown\\[data-streaming=\"true\"\\]\\s+\\.tableActions\\s*\\{\\s*visibility:\\s*hidden;\\s*\\}/.test(\n    css,\n  )\n)\n  throw Error(\"unrecognized-streaming-actions-visibility\");\nconst cssNames = Object.fromEntries(\n  [...css.matchAll(/\\.([A-Za-z][A-Za-z0-9_-]*)/g)].map((match) => [\n    match[1],\n    match[1],\n  ]),\n);\nconst dependencies = {};\nfor (const name of [\n  \"react\",\n  \"react-dom\",\n  \"react-markdown\",\n  \"remark-gfm\",\n  \"rehype-sanitize\",\n  \"esbuild\",\n  \"jsdom\",\n]) {\n  const installed = JSON.parse(\n    readFileSync(\n      resolve(frontend, \"node_modules\", name, \"package.json\"),\n      \"utf8\",\n    ),\n  ).version;\n  if (lock.packages?.[`node_modules/${name}`]?.version !== installed)\n    throw Error(`unmatched-installed-dependency:${name}`);\n  dependencies[name] = installed;\n}\nconst require = createRequire(resolve(frontend, \"package.json\"));\nconst esbuild = require(\"esbuild\");\nconst { JSDOM } = require(\"jsdom\");\nconst input = JSON.parse(readFileSync(0, \"utf8\"));\nconst terminalOnly = input.mode === \"terminal-full\";\nif (input.mode !== undefined && !terminalOnly)\n  throw Error(\"invalid-projection-mode\");\nif (\n  typeof input.answer !== \"string\" ||\n  !input.answer ||\n  input.answer.length > (terminalOnly ? 128000 : 8000) ||\n  !Array.isArray(input.frames) ||\n  input.frames.length > 20000 ||\n  !Array.isArray(input.arrivals) ||\n  input.arrivals.length > 5000 ||\n  !input.frames.every(\n    (frame) =>\n      typeof frame?.text === \"string\" && typeof frame.streaming === \"boolean\",\n  ) ||\n  !input.arrivals.every((text) => typeof text === \"string\")\n)\n  throw Error(\"invalid-projection-input\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-and-comparison-not-yet-preserved",
+              "required": "Exact source/css known hash parity guard, LongText recognizable full-text rendering, streaming CSS actions visibility, ALL installed dependency versions equal lock for react/react-dom/react-markdown/remark-gfm/rehype-sanitize/esbuild/jsdom. Mode terminal-full23/36 permits source<=128000 and requires no motion arrays; motion46 mode absent source<=8000. Frames<=20000/deltas<=5000,actual frame strings/boolean streaming.",
+              "canonicalAttempt": "Source-backed core pure-math/reader milestones and accepted584 engine ledgers are separate. No complete authenticated public provider plus corresponding authored source assertions validated for this group.",
+              "missingObservation": "Authenticated frontend/root/installed identity plus source-defined predicate guards remain required; no actual frontend provisioning authorized here. Pure renderer receipt does not independently prove browser-visible parity."
+            },
+            "bounds": {
+              "motionSourceUtf16": 8000,
+              "terminalSourceUtf16": 128000,
+              "frames": 20000,
+              "arrivals": 5000,
+              "pythonProjectionSubprocessTimeoutMs": 120000
+            }
+          },
+          {
+            "id": "visual-prefix-range-ambiguity-and-terminal-frame",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual-markdown.mjs",
+            "sourceHelperSha256": "7f9d7b9537e5e7f1b45ba709c15539ef1dda8edd4e9d1157350460843ee146ab",
+            "sourceLines": {
+              "start": 200,
+              "end": 288,
+              "text": "if (terminalOnly) {\n  if (input.frames.length || input.arrivals.length)\n    throw Error(\"terminal-mode-has-motion-evidence\");\n  const terminal = project(input.answer, false);\n  process.stdout.write(\n    JSON.stringify({\n      version: 1,\n      mode: \"terminal-full\",\n      sourceUtf16: input.answer.length,\n      terminal: terminal.raw,\n      chatMarkdownSha256: sha256(sourceFile),\n      cssSha256: sha256(cssFile),\n    }) + \"\\n\",\n  );\n  process.exit(0);\n}\n\nconst positions = new Map();\nconst visiblePositions = new Map();\nconst contentPositions = new Map();\nfor (let at = 0; at <= input.answer.length; at++) {\n  const { raw, visible, content } = project(input.answer.slice(0, at), true);\n  const range = positions.get(raw);\n  if (range) range[1] = at;\n  else positions.set(raw, [at, at]);\n  const visibleRange = visiblePositions.get(visible);\n  if (visibleRange) visibleRange[1] = at;\n  else visiblePositions.set(visible, [at, at]);\n  const contentRange = contentPositions.get(content);\n  if (contentRange) contentRange[1] = at;\n  else contentPositions.set(content, [at, at]);\n}\nlet cumulative = \"\";\nlet previous = project(\"\", true).visible;\nlet previousContent = project(\"\", true).content;\nconst arrivals = input.arrivals.map((delta) => {\n  const priorSourceLength = cumulative.length;\n  cumulative += delta;\n  if (!input.answer.startsWith(cumulative))\n    throw Error(\"arrival-is-not-saved-source-prefix\");\n  const { visible, content } = project(cumulative, true);\n  const range = visiblePositions.get(visible);\n  if (!range) throw Error(\"missing-arrival-projection\");\n  if (visible !== previous && range[0] <= priorSourceLength)\n    throw Error(\"ambiguous-visible-arrival-projection\");\n  const contentRange = contentPositions.get(content);\n  if (!contentRange) throw Error(\"missing-content-arrival-projection\");\n  if (content !== previousContent && contentRange[0] <= priorSourceLength)\n    throw Error(\"ambiguous-content-arrival-projection\");\n  const result = {\n    sourceUtf16: cumulative.length,\n    visibleChanged: visible !== previous,\n    contentChanged: content !== previousContent,\n    requiredMinSourceUtf16: contentRange[0],\n    projectedUtf16: visible.length,\n    projectedWords: content.trim().split(/\\s+/).filter(Boolean).length,\n  };\n  previous = visible;\n  previousContent = content;\n  return result;\n});\nconst terminal = project(input.answer, false);\nconst frames = input.frames.map((frame) => {\n  if (!frame.streaming) {\n    if (frame.text !== terminal.raw) return null;\n    return {\n      minSourceUtf16: input.answer.length,\n      maxSourceUtf16: input.answer.length,\n      visibleWords: terminal.visible.trim().split(/\\s+/).filter(Boolean).length,\n      visible: terminal.visible,\n      content: terminal.content,\n      contentWords: terminal.content.trim().split(/\\s+/).filter(Boolean).length,\n    };\n  }\n  const range = positions.get(frame.text);\n  if (!range) return null;\n  const first = project(input.answer.slice(0, range[0]), true);\n  const last = project(input.answer.slice(0, range[1]), true);\n  if (first.visible !== last.visible || first.content !== last.content)\n    return null;\n  return {\n    minSourceUtf16: range[0],\n    maxSourceUtf16: range[1],\n    visibleWords: first.visible.trim().split(/\\s+/).filter(Boolean).length,\n    visible: first.visible,\n    content: first.content,\n    contentWords: first.content.trim().split(/\\s+/).filter(Boolean).length,\n  };\n});"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-and-comparison-not-yet-preserved",
+              "required": "Terminal-only exits before motion prefixes. Motion indexes EVERY UTF16 saved-source cut in raw/visible/content domains, maintains first/last range, rejects changed visible/content prefix whose earliest source cut<=prior arrived source. Cumulative delta must be saved-answer prefix. Streaming frame raw range accepted only if first/last projected visible/content equal; nonstreaming frame requires rawtext==terminal and maps full saved source, allowing unobserved completion suffix.",
+              "canonicalAttempt": "Source-backed core pure-math/reader milestones and accepted584 engine ledgers are separate. No complete authenticated public provider plus corresponding authored source assertions validated for this group.",
+              "missingObservation": "Exact dual raw/visible/content ranges and ambiguity negative guards must remain source-equivalent; literal expected mappings or UTF16 prefix matching alone are insufficient."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-first-live-and-exact-completion-flush",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 1886,
+              "end": 1928,
+              "text": "def assert_frame_pacing(snapshot, projection=None):\n    probe = snapshot[\"probe\"]\n    frames = probe[\"frames\"]\n    arrivals, completions = assert_arrival_receipts(snapshot)\n    ticks = assert_clock_ledger(snapshot)\n    reply = snapshot[\"replies\"][-1]\n    item_id = reply[\"payload\"][\"itemId\"]\n    item_arrivals = [a for a in arrivals if a[\"itemId\"] == item_id]\n    assert item_arrivals, \"visible assistant item has no real delta arrival\"\n    final_completion = next(c for c in completions if c[\"eventId\"] == reply[\"event_id\"])\n    projection = projection or source_projection(snapshot)\n    exceptions = []\n    previous_words = 0\n    first_live_reply_seen = False\n    for index, frame in enumerate(frames):\n        text = frame.get(\"text\")\n        visible_text = frame.get(\"visibleText\")\n        content_text = frame.get(\"contentText\")\n        assert isinstance(text, str) and isinstance(visible_text, str) and isinstance(content_text, str) and \\\n            frame.get(\"chars\") == js_utf16_length(text) and \\\n            frame.get(\"visibleChars\") == js_utf16_length(visible_text) and \\\n            frame.get(\"contentChars\") == js_utf16_length(content_text) and \\\n            frame.get(\"words\") == len(content_text.split()) and frame.get(\"addedWords\") == \\\n            max(0, frame[\"words\"] - previous_words), \\\n            f\"rendered frame bytes, words, or cadence changed at frame {index}\"\n        previous_words = frame[\"words\"]\n        count = frame[\"addedWords\"]\n        if frame.get(\"streaming\") is True and frame[\"words\"] > 0 and not first_live_reply_seen:\n            first_live_reply_seen = True\n            assert count <= 2, \\\n                \"first live reply-content frame exceeded two words without a catch-up exception\"\n        if count <= 2:\n            continue\n        if index == len(frames) - 1 and frame.get(\"streaming\") is False and \\\n           frame.get(\"marker\") and \\\n           text == probe[\"finalText\"] and final_completion[\"phase\"] < frame[\"phase\"] and \\\n           final_completion[\"mono\"] <= frame[\"mono\"] and \\\n           frame[\"mono\"] - final_completion[\"mono\"] <= 300:\n            exceptions.append({\"kind\": \"saved-completion-flush\", \"frame\": index,\n                               \"added_words\": count, \"event_id\": reply[\"event_id\"],\n                               \"completion_lag_ms\": frame[\"at\"] - final_completion[\"at\"]})\n            continue\n        assert index > 0, \"first live frame exceeded two words without a catch-up exception\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-and-comparison-not-yet-preserved",
+              "required": "EVERY changed frame validates raw/visible/content UTF16chars, content whitespace words, added=max(0,current-prior). FIRST streaming positive reply-content frame added<=2 BEFORE exception branches. count<=2 ordinary. count>2 flush ONLY last changed frame,streaming false,marker,exactfinalrawtext,actual last-item completion phase before frame and mono<=frame with mono lag<=300. Completion identity always actual saved item.",
+              "canonicalAttempt": "Source-backed core pure-math/reader milestones and accepted584 engine ledgers are separate. No complete authenticated public provider plus corresponding authored source assertions validated for this group.",
+              "missingObservation": "No first-live exemption or terminal suffix clipping; immutable frame indices/streaming/marker/completion phase/time and before/after content-word operands must remain inspectable."
+            },
+            "bounds": {
+              "wordsPerTick": 2,
+              "completionFlushDeadlineMs": 300
+            }
+          },
+          {
+            "id": "visual-backlog-pressure-and-all-candidate-guards",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 1928,
+              "end": 1975,
+              "text": "        assert index > 0, \"first live frame exceeded two words without a catch-up exception\"\n        earlier = [a for a in item_arrivals if a[\"phase\"] < frame[\"phase\"] and\n                   a[\"mono\"] <= frame[\"mono\"]]\n        assert earlier, \"large frame has no matching real arrival\"\n        raw_source_utf16 = js_utf16_length(\"\".join(a[\"text\"] for a in earlier))\n        assert projection[\"frames\"][index][\"minSourceUtf16\"] <= raw_source_utf16, \\\n            \"large frame lacks exact source-backed arrival projection\"\n        previous_visible = frames[index - 1][\"words\"]\n        previous_source = max(\n            (row[\"minSourceUtf16\"] for row in projection[\"frames\"][:index]), default=0)\n        projected_arrivals = projection[\"arrivals\"][:len(earlier)]\n        assert len(projected_arrivals) == len(earlier), \\\n            \"large frame lacks exact source-backed arrival projection\"\n        recent_ticks = ticks[:frame[\"tickIndex\"] + 1][-12:]\n        intervals = [b[\"mono\"] - a[\"mono\"] for a, b in zip(recent_ticks, recent_ticks[1:])\n                     if b[\"mono\"] > a[\"mono\"]]\n        assert len(intervals) >= 5, \"large frame lacks measured refresh cadence\"\n        min_interval = min(intervals)\n        pending = []\n        for arrival, row in zip(earlier, projected_arrivals):\n            if not row[\"contentChanged\"] or \\\n               row[\"requiredMinSourceUtf16\"] <= previous_source or \\\n               row[\"projectedWords\"] <= previous_visible:\n                continue\n            assert row[\"requiredMinSourceUtf16\"] <= raw_source_utf16, \\\n                \"large frame lacks exact source-backed arrival projection\"\n            deadline = arrival[\"mono\"] + 300\n            assert ticks[-1][\"mono\"] >= deadline, \\\n                \"large frame lacks a complete measured arrival-deadline horizon\"\n            future_ticks = [tick for tick in ticks[frame[\"tickIndex\"] + 1:]\n                            if tick[\"mono\"] <= deadline]\n            required = row[\"projectedWords\"] - previous_visible - 2 * len(future_ticks)\n            pending.append((required, arrival, row[\"projectedWords\"], deadline,\n                            len(future_ticks)))\n        assert pending, \"large frame has no unrevealed arrival backlog\"\n        required_now, pressure, target_words, deadline, future_tick_count = max(\n            pending, key=lambda entry: entry[0])\n        assert required_now > 2 and count <= required_now, \\\n            \"large frame was unnecessary for the measured arrival backlog and 300ms deadline\"\n        assert any(f[\"mono\"] <= deadline and f[\"words\"] >= target_words for f in frames[index:]), \\\n            \"large frame did not actually meet the pending arrival deadline\"\n        exceptions.append({\"kind\": \"measured-backlog-catch-up\", \"frame\": index,\n                           \"added_words\": count, \"arrival_at\": pressure[\"at\"],\n                           \"deadline\": pressure[\"at\"] + 300,\n                           \"deadline_mono\": deadline,\n                           \"backlog_words\": projected_arrivals[-1][\"projectedWords\"] - previous_visible,\n                           \"required_now\": required_now, \"cadence_ms\": min_interval,\n                           \"future_ticks\": future_tick_count})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-and-comparison-not-yet-preserved",
+              "required": "Large non-flush frame requires index>0, actual earlier matching item arrivals with phase<frame and mono<=frame, frame minimum source<=concatenated earlier bytes, complete corresponding arrival mappings. Earlier historical min-source maximum defines pending versus previous frame words; pending candidates may be sparse. For EVERY candidate require source<=arrived prefix and final measured horizon covers arrival+300. Future tick count uses ACTUAL ticks after frame tickIndex and<=deadline, recent cadence last12 ticks inclcurrent/positive intervals>=5. required=projectedWords-previousWords-2*futureTicks; select FIRST max required candidate in ORIGINAL arrival order. required>2,count<=required; existential future frame words>=selected target within deadline.",
+              "canonicalAttempt": "Source-backed core pure-math/reader milestones and accepted584 engine ledgers are separate. No complete authenticated public provider plus corresponding authored source assertions validated for this group.",
+              "missingObservation": "Return reconstructable original-index pools/sparse memberships plus each required-source/horizon proof and first equal-pressure witness; maximum-only summary must not drop per-candidate predicates or round300ms."
+            },
+            "bounds": {
+              "wordsPerFutureTick": 2,
+              "deadlineMs": 300,
+              "cadenceWindowTicks": 12,
+              "minPositiveCadenceIntervals": 5
+            }
+          },
+          {
+            "id": "visual-every-arrival-first-mapped-dom-deadline",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 1979,
+              "end": 2013,
+              "text": "def assert_arrival_deadlines(snapshot, projection=None):\n    \"\"\"Every visible source-backed delta prefix must reach the DOM within 300ms.\"\"\"\n    arrivals, _ = assert_arrival_receipts(snapshot)\n    reply = snapshot[\"replies\"][-1]\n    item_id = reply[\"payload\"][\"itemId\"]\n    frames = snapshot[\"probe\"][\"frames\"]\n    projection = projection or source_projection(snapshot)\n    proofs = []\n    item_arrivals = [a for a in arrivals if a[\"itemId\"] == item_id]\n    for arrival, projected in zip(item_arrivals, projection[\"arrivals\"]):\n        if not projected[\"contentChanged\"]:\n            proofs.append({\"source_id\": arrival[\"sourceId\"], \"item_id\": item_id,\n                           \"arrival_at\": arrival[\"at\"], \"source_utf16\": projected[\"sourceUtf16\"],\n                           \"status\": \"no-new-reply-content\"})\n            continue\n        rendered = next(((frame, mapped) for frame, mapped in zip(frames, projection[\"frames\"])\n                         if frame[\"phase\"] > arrival[\"phase\"] and\n                         frame[\"mono\"] >= arrival[\"mono\"] and\n                         mapped[\"minSourceUtf16\"] >= projected[\"requiredMinSourceUtf16\"]), None)\n        assert rendered is not None, \\\n            \"arrival lacks exact source-backed DOM projection; Markdown pacing is unverified\"\n        deadline = arrival[\"mono\"] + 300\n        assert rendered[0][\"mono\"] <= deadline, \\\n            \"arrival text rendered after its 300ms catch-up deadline\"\n        proofs.append({\"source_id\": arrival[\"sourceId\"], \"item_id\": item_id,\n                       \"arrival_at\": arrival[\"at\"], \"deadline\": arrival[\"at\"] + 300,\n                       \"deadline_mono\": deadline,\n                       \"rendered_at\": rendered[0][\"at\"], \"lag_ms\": rendered[0][\"at\"] - arrival[\"at\"],\n                       \"lag_mono_ms\": rendered[0][\"mono\"] - arrival[\"mono\"],\n                       \"source_utf16\": projected[\"sourceUtf16\"],\n                       \"required_min_source_utf16\": projected[\"requiredMinSourceUtf16\"],\n                       \"rendered_min_source_utf16\": rendered[1][\"minSourceUtf16\"]})\n    assert any(\"rendered_at\" in proof for proof in proofs), \\\n        \"no real visible arrival deadline was measurable\"\n    return proofs"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-and-comparison-not-yet-preserved",
+              "required": "For ALL LAST-item actual arrivals paired with source projection, no-content-change keeps explicit diagnostic only. For EVERY contentChanged arrival choose FIRST frame in original order with later phase,mono>=arrival,minimum mapped source>=requiredMinSourceUtf16; mustexist and mono<=arrival+300. At leastone real rendered proof mandatory. Independently covers each arrival,not only selected max backlog pressure candidate.",
+              "canonicalAttempt": "Source-backed core pure-math/reader milestones and accepted584 engine ledgers are separate. No complete authenticated public provider plus corresponding authored source assertions validated for this group.",
+              "missingObservation": "Missing first matching frame/horizon remains incomplete; preserve original order and equal-mono/phase discrimination,retractions/zero content,earliest proof witness and exact unrounded300ms."
+            },
+            "bounds": {
+              "deadlineMs": 300,
+              "minimumRenderedProofs": 1
+            }
+          },
+          {
+            "id": "visual-last-active-control-exit-dual-clock",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2017,
+              "end": 2058,
+              "text": "    from datetime import datetime\n\n    probe = snapshot[\"probe\"]\n    signals = probe.get(\"signals\")\n    ticks = probe.get(\"ticks\")\n    assert isinstance(signals, list) and isinstance(ticks, list) and \\\n        len(signals) == len(ticks) + 1 and 5 <= len(signals) <= 20001, \\\n        \"missing or unbounded sampled terminal controls\"\n    assert all(isinstance(s, dict) and isinstance(s.get(\"at\"), int) and \\\n               all(type(s.get(key)) is bool for key in (\"caret\", \"working\", \"stop\"))\n               for s in signals) and \\\n        [s[\"at\"] for s in signals[:-1]] == ticks and \\\n        signals[-1][\"at\"] >= ticks[-1], \\\n        \"terminal controls were not sampled on the measured frames\"\n    assert all(not signals[-1][key] for key in (\"caret\", \"working\", \"stop\")), \\\n        \"caret, Working, or Stop remains at the final checkpoint\"\n    exits = {}\n    mono_exits = {}\n    for key in (\"caret\", \"working\", \"stop\"):\n        active = [index for index, signal in enumerate(signals) if signal[key]]\n        assert active, f\"{key} was not sampled during the live turn\"\n        last_active = active[-1]\n        assert last_active + 1 < len(signals) and not signals[last_active + 1][key], \\\n            f\"{key} exit was not sampled\"\n        exits[key] = signals[last_active + 1][\"at\"]\n        mono_exits[key] = signals[last_active + 1][\"mono\"]\n    exit_at = max(exits.values())\n    exit_mono = max(mono_exits.values())\n    _, completions = assert_arrival_receipts(snapshot)\n    turn_id = snapshot[\"turn_completed\"][\"event_id\"]\n    live = next(c for c in completions if c[\"eventId\"] == turn_id)\n    try:\n        saved_at = int(datetime.fromisoformat(\n            snapshot[\"turn_completed\"][\"created_at\"].replace(\"Z\", \"+00:00\")\n        ).timestamp() * 1000)\n    except (KeyError, AttributeError, ValueError) as exc:\n        raise AssertionError(\"saved terminal receipt lacks a timestamp\") from exc\n    assert exit_at - saved_at <= 300 and exit_mono - live[\"mono\"] <= 300, \\\n        \"caret, Working, or Stop exited more than 300ms after saved/live terminal receipt\"\n    return {\"exit_at\": exit_at, \"signal_exits\": exits, \"saved_at\": saved_at,\n            \"live_at\": live[\"at\"], \"lag_from_saved_ms\": exit_at - saved_at,\n            \"lag_from_live_ms\": exit_mono - live[\"mono\"], \"event_id\": turn_id}"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-and-comparison-not-yet-preserved",
+              "required": "Caret/Working/Stop sampled as bool on every tick and one final signal,final allfalse. EACH control must have active sample; exit is sample IMMEDIATELY AFTER LAST active index (not first transient exit),exit=max of three. Match actual turn completion EventID live receipt. Saved wall timestamp source explicitly int(datetime_ms),maxexit-saved<=300; monotonic maxexit-live<=300 separately. Negative lags allowed, no abs/no rounded grace.",
+              "canonicalAttempt": "Source-backed core pure-math/reader milestones and accepted584 engine ledgers are separate. No complete authenticated public provider plus corresponding authored source assertions validated for this group.",
+              "missingObservation": "Retain full signal index pool and last-active/next witness for all3 plus actual saved and live terminal identity/times. Do not infer exit from final DOM or replace saved clock with only live clock."
+            },
+            "bounds": {
+              "maxSignals": 20001,
+              "minSignals": 5,
+              "deadlineMs": 300
+            }
+          },
+          {
+            "id": "visual-terminal-render-source-callers-and-reload",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2886,
+              "end": 2893,
+              "text": "    saved_reply = [e for e in between if e[\"kind\"] == \"item.completed\" and\n                   e[\"payload\"].get(\"itemKind\") == \"message\"][-1]\n    full_source = saved_reply[\"payload\"][\"text\"]\n    full_reply = run_markdown_projection(full_source, [], [], terminal_only=True)\n    disclosures.assert_full_reply(full_source, dom, full_reply)\n    write(\"render-full-reply.json\", {\"saved_event_id\": saved_reply[\"event_id\"],\n        \"source_utf16\": js_utf16_length(full_source), \"crosses_former_limit\": js_utf16_length(full_source) > 8000,\n        \"projection\": full_reply, \"dom\": {\"answer\": dom[\"answer\"], \"showAll\": dom[\"showAll\"]}})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/23",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/36"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-and-comparison-not-yet-preserved",
+              "required": "render_check23 and render_reload_check36 selects LAST saved message actual full_source, projects terminal-full with EXACT empty frames/deltas then source disclosures assert full rendered reply. Reload caller4193-4200 first compares exact saved EventIDprefix AND total count unchanged then repeats full render_check.",
+              "canonicalAttempt": "Source-backed core pure-math/reader milestones and accepted584 engine ledgers are separate. No complete authenticated public provider plus corresponding authored source assertions validated for this group.",
+              "missingObservation": "No synthetic displayed text/fullsource or omission of source-backed visible parity; terminal-only no-motion validation is distinct from first-turn motion projection."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-pacing-negative-cases-remain-distinct",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 1911,
+              "end": 1916,
+              "text": "        previous_words = frame[\"words\"]\n        count = frame[\"addedWords\"]\n        if frame.get(\"streaming\") is True and frame[\"words\"] > 0 and not first_live_reply_seen:\n            first_live_reply_seen = True\n            assert count <= 2, \\\n                \"first live reply-content frame exceeded two words without a catch-up exception\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-selection-and-comparison-not-yet-preserved",
+              "required": "First live positive reply-content frame always two-word maximum even if later catch-up required. Source selftests independently cover invalid frame bytes,omitted mapping,horizon,late300.9,ambiguousMarkdown,partial-prefix/completion,wrongcompletion and retractions; existing inventory selftest/negative class kept separate from selected body obligations.",
+              "canonicalAttempt": "Source-backed core pure-math/reader milestones and accepted584 engine ledgers are separate. No complete authenticated public provider plus corresponding authored source assertions validated for this group.",
+              "missingObservation": "Source branch map does not execute these negatives or prove production implementation equality; deterministic independent facts/reference and actual public-runner negatives still need owner validation."
+            },
+            "bounds": {
+              "firstLiveWords": 2
+            }
+          }
+        ],
+        "acceptance": "No new YAML, preservation credit, runtime or public provider proof. Other visual rendering/reasoning/clipboard/imports remain open."
       }
     },
     {
@@ -50282,17 +51426,17 @@
     "originalSteps": 207,
     "helperInventoryEntries": 1072,
     "classificationCounts": {
-      "selected-invocation-predicate-reachable": 308,
+      "selected-invocation-predicate-reachable": 334,
       "unrelated-to-static-selected-call-closure": 374,
       "helper-selftest-negative-requirement": 213,
       "excluded-static-selected-invocation-branch": 10,
-      "selected-invocation-predicate-conditionally-reachable": 11,
-      "selected-function-reachable-branch-unresolved": 124,
-      "selected-external-helper-branch-unresolved": 28,
+      "selected-invocation-predicate-conditionally-reachable": 31,
+      "selected-function-reachable-branch-unresolved": 92,
+      "selected-external-helper-branch-unresolved": 14,
       "unrelated-external-helper-case": 4
     },
     "reachableCandidatePredicates": 471,
-    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit.",
+    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit. Visual pacing/projection/arrival deadlines/control exit32 Python and14 external Markdown guards narrowed (26 direct,20 conditional),including actual terminal projection23/36 and nonplain46;9 supplemental source groups preserve all-candidate pressure/first-tie/first-rendered/every-arrival/last-control-exit semantics. Other visual/imported branches still unresolved.",
     "reviewedAuthoredUnvalidatedPredicates": 20,
     "partiallyMappedRepeatedPredicates": 3,
     "fullPreservationAcceptance": false,
@@ -50301,7 +51445,7 @@
     "additionalUninventoriedFilesGuards": 6,
     "additionalUninventoriedChildSourceGroups": 56,
     "additionalUninventoriedSseSourceGroups": 10,
-    "additionalUninventoriedVisualMotionSourceGroups": 10
+    "additionalUninventoriedVisualMotionSourceGroups": 19
   },
   "dependencies": {
     "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",

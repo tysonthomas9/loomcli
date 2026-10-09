@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "dd93965adfffe095d01f2605cd2999291ea567bc19dfd8a4a891cde06e403bf4"
+        "sha256": "890243c8fbbf12500f959b754f6778dfc96b2ab7c41b7b2e2b6b5d4adeae69ae"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -940,7 +940,7 @@
       "conservativeReachableCandidates": 471,
       "helperSelftestOrNegativeRecords": 213,
       "unrelatedBranchesOrCases": 388,
-      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35 selected extracted obligations plus Visual first-turn motion boundary57 (all newly reviewed records uncovered); 96 supplemental source groups and remaining visual/imported/provisioning predicates unresolved.1072 is classified inventory, not final pilot preservation denominator; full historical index unavailable."
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35 selected extracted obligations plus Visual first-turn boundary57 and pacing/projection46(20 conditional); all newly reviewed visual records uncovered.105 supplemental source groups and remaining visual/imported/provisioning predicates unresolved.1072 classified inventory is not final preservation denominator; full historical index unavailable."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -2278,5 +2278,20 @@
     "yamlBytesChanged": false,
     "newPreservationCredit": false,
     "remainingVisualAndImports": "Other visual Python branches/source helpers/disclosure/provisioning predicates remain uncovered. Full historical1072 inventory/index still unavailable for independent reconciliation."
+  },
+  "visualPacingSelectedBranchReview": {
+    "at": "2026-10-09T12:46:11.832157+00:00",
+    "sourceHashMatchesGit56bb": true,
+    "pythonSourceSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+    "markdownSourceSha256": "7f9d7b9537e5e7f1b45ba709c15539ef1dda8edd4e9d1157350460843ee146ab",
+    "selectedExtractedRecords": 46,
+    "direct": 26,
+    "conditional": 20,
+    "sourceGroupsUncovered": 9,
+    "allPendingAndAllArrivalGuardsRetained": true,
+    "firstTieAndOriginalIndicesRetained": true,
+    "newYamlOrPreservationCredit": false,
+    "rawAdmissionReceiptsUnchanged": true,
+    "runtimeStarted": 0
   }
 }
