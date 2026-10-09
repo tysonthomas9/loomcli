@@ -170,7 +170,7 @@ tests:
           fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].some(b => b.textContent === 'Approve and create PR' && b.disabled) && !document.querySelector('[data-testid=rebuild]')"
         intent: Approve is disabled, and there is no Rebuild until A has a new revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" rebuild E2E-WS-TREV stale
-        intent: A's next attempt offers B a rebuild on it; Rebuild reopens B, whose next attempt is built on A's new revision
+        intent: A's next attempt offers B a rebuild on it; an agent may not Rebuild; a human's Rebuild reopens B, whose next attempt is built on A's new revision
 
   - name: PR per task, a dependent starts on its blocker's code, waits when approved first, and goes stale on reject
     intent: In trunk mode the same dependency order and stale rules hold

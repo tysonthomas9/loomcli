@@ -241,7 +241,7 @@ stale)
   wait_run "$3"
   verdict "$a" reject > "$work-reject-a.json"
   wait_status "$a" open False
-  reason="built on $a's revision 1, which was rejected: rebuild it once $a has a new revision"
+  reason="built on $a's code, which was rejected: rebuild it once $a has new code"
   wait_field "$b" lineage_state stale
   test "$(revision_field "$b" lineage_reason)" = "$reason"
   test -z "$(revision_field "$b" rebuild_on)"
@@ -263,7 +263,11 @@ rebuild)
   wait_revisions "$a" 2
   wait_status "$a" review True
   wait_field "$b" rebuild_on 2
-  grep -q "rebuild it on revision 2" <<<"$(revision_field "$b" lineage_reason)"
+  test "$(revision_field "$b" lineage_reason)" = "built on $a's code, which was rejected: rebuild it on $a's new code"
+  # Rebuild is a human action: an agent is refused.
+  code="$(curl -sS -o "$work-rebuild-agent.json" -w '%{http_code}' -X POST "$api/issues/$b/rebuild" -H 'Content-Type: application/json' \
+    -d '{"actor":{"kind":"agent","id":"aft-agent"}}')"
+  test "$code" = 409 && grep -q '"review_required"' "$work-rebuild-agent.json"
   curl -fsS -X POST "$api/issues/$b/rebuild" -H 'Content-Type: application/json' \
     -d '{"actor":{"kind":"human","id":"aft-operator"}}' > "$work-rebuild.json"
   json "$work-rebuild.json" 'd=v["data"]; assert d["rebuild_on"]==2 and d["verdict"]=="reject" and d["depends_on"]==sys.argv[2], v' "$a"
