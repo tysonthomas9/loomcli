@@ -37,7 +37,7 @@
     "fixture-baseline": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "known fresh model/GitHub baseline or exact captured private state; requests/count is not full queue snapshot",
-      "status": "missing; unsupported before mutation"
+      "status": "Approved e3 supplies retained host startup baselines. Legacy translation retained as task-owned WIP; mutation binding remains unsupported pending serialized expected-generation HTTP/process repair. Compose baseline and scripted backend capture remain missing."
     },
     "seed-resolution": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
@@ -68,7 +68,7 @@
     "operation-routing": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "Approved fixture executionRouting plus source-supported exact-model/backend-default variant. Direct task inherits model/env; daemon supervisor may override role model. Cursor account/backend default original source has no exact model predicate.",
-      "status": "Consumed exact approved renderer prerequisiteea05a41e and routing1bb88f unchanged. Concrete host validates executionRouting against canonical fixture and requestedbackend/code-owned model env beforetask launch. Shared Cursor backend-default variant and production legacy creation/read hooks still pending; no selected-model observation inferred."
+      "status": "Consumes approved e3 discriminated FixtureModelSelection. Host translates Cursor backend-default without invented model/env proof; exact configured selectors use actual product env/config precedence and private role.Model guard before paid task launch. Source selection checks are deterministic, not observations of a chosen provider model. Actual fixture workspace/read hooks and live runtime acceptance remain required."
     }
   },
   "operations": [
