@@ -12,6 +12,7 @@ import { redactionFacts } from '../redaction.js';
 import { prepareRenderer, type PreparedRenderer } from './renderer.js';
 import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
 import type { FixtureAuthorityOwner } from '../authority.js';
+import { IssuedArtifactReader } from './issued-artifacts.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
@@ -151,6 +152,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   private renderer?: PreparedRenderer;
   private readonly config: ProductionConfig;
   private readonly cleanups: (() => Promise<void>)[] = [];
+  private issuedArtifacts?:IssuedArtifactReader;
   constructor(config: ProductionConfig, private readonly run: ProcessRunner = runProcess,
     private readonly files: typeof fs = fs, private readonly uuid: () => string = randomUUID,
     private readonly reserve: () => Promise<PortReservation> = reservePort,
@@ -317,6 +319,10 @@ export class ComposeFixtureDriver implements FixtureDriver {
     await this.files.chmod(this.root, 0o700);
     await this.files.mkdir(path.join(this.root, 'evidence'), { mode: 0o700 });
     await this.stamp(path.join(this.root, 'evidence'));
+    const rootStamp=this.stamps.get(this.root)!,evidenceStamp=this.stamps.get(path.join(this.root,'evidence'))!;
+    this.issuedArtifacts=new IssuedArtifactReader({path:this.root,device:rootStamp.dev,inode:rootStamp.ino},
+      {path:path.join(this.root,'evidence'),device:evidenceStamp.dev,inode:evidenceStamp.ino},
+      cleanup=>this.enrollCleanup(cleanup),this.files,()=>this.fixtureSecrets);
     // Account and build locks are exclusive and never steal stale locks.
     const names = [ ...(this.profile === 'agents-real-opencode' ? ['aft-live.opencode.lock'] : this.cloud ? ['aft-live.codex.lock'] : []), 'aft-fixture-build.lock' ];
     for (const name of names) {
@@ -672,6 +678,12 @@ export class ComposeFixtureDriver implements FixtureDriver {
     const evidenceStamp = this.stamps.get(path.join(this.root, 'evidence'));
     check(evidenceStamp && !evidence.isSymbolicLink() && evidence.ino === evidenceStamp.ino && evidence.dev === evidenceStamp.dev);
     await this.files.writeFile(id, bytes, { mode: 0o600, flag: 'wx' });
-    return { id, sha256: hash(bytes), bytes: bytes.length, mediaType: 'application/json', redaction: 'sanitized' };
+    const receipt:Artifact={ id, sha256: hash(bytes), bytes: bytes.length, mediaType: 'application/json', redaction: 'sanitized' };
+    check(this.issuedArtifacts);await this.issuedArtifacts!.remember(receipt,bytes);return receipt;
+  }
+  /** Private bridge only. Public Compose callbacks must parse/translate using
+   * the canonical reviewed schema and retain facts in their existing store. */
+  async readIssuedArtifact(receipt:Artifact,signal:AbortSignal):Promise<string>{
+    check(this.issuedArtifacts,'unsupported-capability');return this.issuedArtifacts!.read(receipt,signal);
   }
 }

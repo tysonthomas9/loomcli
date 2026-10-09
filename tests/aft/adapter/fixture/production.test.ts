@@ -88,6 +88,18 @@ for(const profile of ['agents-real-opencode','agents-emulator']) test(`${profile
   assert.equal((await r.lifecycle.observe(a.lease.id,'run')).services.length,4);const released=await r.lifecycle.release(a.lease.id,'run');assert.equal(released.released,true);assert.ok(await fs.readFile(released.receipt.id));
  }finally{await r.cleanup();}
 });
+
+test('Compose private artifact bridge accepts only this lifecycle writer and retains exact bytes after resource teardown',async()=>{
+ const r=await setup('agents-real-opencode');try{
+  const acquired=await r.lifecycle.acquire(r.request,new AbortController().signal);
+  const actual=JSON.parse(await r.driver.readIssuedArtifact(acquired.ownershipArtifact,new AbortController().signal));
+  assert.equal(actual.kind,'acquire');assert.equal(actual.value.leaseId,acquired.lease.id);
+  await assert.rejects(r.driver.readIssuedArtifact({...acquired.ownershipArtifact,bytes:1},new AbortController().signal));
+  const released=await r.lifecycle.release(acquired.lease.id,'run');assert.equal(released.released,true);
+  assert.ok(await fs.readFile(released.receipt.id));
+  await assert.rejects(r.driver.readIssuedArtifact(acquired.ownershipArtifact,new AbortController().signal));
+ }finally{await r.cleanup();}
+});
 test('partial compose startup cleans only labeled resources and retains safe evidence',async()=>{
  const r=await setup();r.mutate('fail-up');try{
   await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal),e=>{assert.ok(e instanceof FixtureError);assert.equal(e.remainingOwnedResources.length,0);return true;});
