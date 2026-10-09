@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "122e7f9d34387a09daedecfd52a015f44e5e604a676869ad0642f446bdc4a91a"
+        "sha256": "7dda4f2033a075316aea9efafc6bce4e4c851a382af6061bd89f045a455a51ac"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -934,10 +934,10 @@
       "reviewedPredicateMappings": 20,
       "fullPreservationAccepted": 0,
       "helperInventory": 1072,
-      "conservativeReachableCandidates": 471,
-      "helperSelftestOrNegativeRecords": 180,
-      "unrelatedBranchesOrCases": 421,
-      "exactReachablePredicateDenominator": "Other helper branches and imported ownership/native guard extensions still unresolved; Stop frozen inventory subset40 individually selected,14 additional native guards uncovered."
+      "conservativeReachableCandidates": 466,
+      "helperSelftestOrNegativeRecords": 213,
+      "unrelatedBranchesOrCases": 393,
+      "exactReachablePredicateDenominator": "Stop40/Files24 frozen inventory obligations individually selected; other pilots and20 source guard extensions/imported ownership closure remain uncovered."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -1567,5 +1567,18 @@
     "globalInventoryCount": 1072,
     "globalConservativeReachableCandidates": 471,
     "fullReachableDenominator": "unresolved"
+  },
+  "filesSelectedBranchReview": {
+    "at": "2026-10-09T11:04:44.303681+00:00",
+    "helperFrozenByteMatch": true,
+    "selectedInventoryObligations": 24,
+    "excludedEmptyBranchAssertions": 5,
+    "helperSelftestNegativeRecords": 33,
+    "additionalSourceGuardsUncovered": 6,
+    "newYamlOrPreservationCredit": false,
+    "globalFrozenInventory": 1072,
+    "globalConservativeReachableCandidates": 466,
+    "globalHelperSelftestNegativeRecords": 213,
+    "fullDenominator": "unresolved other selected branches/ownership import/source extensions"
   }
 }
