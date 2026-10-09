@@ -143,6 +143,14 @@ test('native model and deletion evidence rejects foreign/stale/duplicate proofs 
   assert.equal(models.availability, 'observed');
   assert.equal(schema.parse(models.data).records[0]!.model, 'actual-model');
   assert.notEqual(schema.parse(models.data).records[0]!.model, 'expected-model');
+  agent.native.sessions = async () => [
+    {agent_id:row.agent_id,harness:'opencode',native_root:'',native_id:'ses_owned'},
+    {agent_id:row.agent_id,harness:'opencode',native_root:'',native_id:'ses_old'},
+  ];
+  const all = await harness.invoke('loom.native.observe',{...nativeInput,view:'registrations'});
+  assert.equal(all.availability,'observed');
+  assert.deepEqual(NativeOutput.options[6].parse(all.data).records.map(record=>record.nativeSessionId),['ses_old','ses_owned']);
+
   const stale = await harness.invoke('loom.native.observe', { ...nativeInput, expectedGeneration: 'stale' });
   assert.equal(stale.availability, 'error'); assert.equal(stale.data, undefined);
   messages = { data: [{ id: 'msg_1', sessionID: 'foreign', type: 'assistant', time: {} }] };
@@ -152,6 +160,11 @@ test('native model and deletion evidence rejects foreign/stale/duplicate proofs 
   status = 404; body = { _tag: 'SessionNotFoundError', sessionID: 'ses_owned', message: 'Session not found: ses_owned' };
   const absent = await harness.invoke('loom.native.observe', { ...nativeInput, view: 'presence' });
   assert.equal(absent.availability, 'observed'); assert.equal(NativeOutput.options[1].parse(absent.data).present, false);
+  body = {_tag:'SessionNotFoundError',sessionID:'ses_old',message:'Session not found: ses_old'};
+  const oldAbsent = await harness.invoke('loom.native.observe',{...nativeInput,view:'presence',nativeSessionId:'ses_old'});
+  assert.equal(oldAbsent.availability,'observed'); assert.equal(NativeOutput.options[1].parse(oldAbsent.data).present,false);
+  assert.equal((await harness.invoke('loom.native.observe',{...nativeInput,view:'presence',nativeSessionId:'ses_foreign'})).availability,'error');
+
   body = { _tag: 'NotFoundError' };
   const unknown = await harness.invoke('loom.native.observe', { ...nativeInput, view: 'presence' });
   assert.equal(unknown.availability, 'error'); assert.equal(unknown.data, undefined);

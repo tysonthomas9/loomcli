@@ -4,10 +4,10 @@ import { RedactionFacts, redactionFacts } from './redaction.js';
 import { AgentRef, AgentRow, Id, Json, NativeRef, ObservationError, ServiceRegistration, requireFact, sha256, type NativeAccess } from './protocol.js';
 
 export const NativeInput = z.object({ agent: AgentRef, view: z.enum([
-  'session', 'inputs', 'completed-models', 'tools', 'usage', 'presence',
+  'session', 'inputs', 'completed-models', 'tools', 'usage', 'presence', 'registrations',
 ]), nativeSessionId: Id, nativeRoot: z.string(), expectedGeneration: Id,
-  probeHandle: Id.nullable().optional(),
-  maxMessages: z.number().int().min(1).max(200),
+  probeHandle: Id.nullable().optional(), expectedEndpointId: Id.optional(), expectedServicePid: z.number().int().positive().optional(),
+  maxMessages: z.number().int().min(1).max(200), maxRegistrations: z.number().int().min(1).max(1000).optional(),
 }).strict();
 const Base = { agentId: Id, nativeSessionId: Id, nativeRoot: z.string(), servicePid: z.number().int().positive(),
   serviceGeneration: Id, registeredEndpointId: Id };
@@ -31,6 +31,9 @@ export const NativeOutput = z.discriminatedUnion('view', [
     ...RecordIdentity, inputTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative(),
     cacheReadTokens: z.number().nonnegative(), cacheWriteTokens: z.number().nonnegative(), costUsd: z.number().finite().nonnegative(),
   }).strict()) }).strict(),
+  z.object({ ...Base, view: z.literal('registrations'), currentNativeSessionId: Id, currentNativeRoot: z.string(),
+    complete: z.literal(true), records: z.array(z.object({agentId: Id,harness:z.literal('opencode'),nativeSessionId:Id,nativeRoot:z.string()}).strict()),
+  }).strict(),
 ]);
 const Message = z.object({ id: Id, sessionID: Id, type: Id, time: z.object({
   created: z.union([z.string(), z.number()]).optional(), completed: z.union([z.string(), z.number()]).nullable().optional(),
@@ -63,18 +66,29 @@ export async function observeNative(input: z.infer<typeof NativeInput>, access: 
   owned: AgentRow, signal: AbortSignal, probe?: SyntheticProbe, secrets: readonly string[] = []): Promise<z.infer<typeof NativeOutput>> {
   requireFact(!input.probeHandle || (input.view === 'tools' && probe?.handle === input.probeHandle), 'ownership-mismatch', 'Native synthetic probe is not bound');
   const before = await verifyNativeService(access, input.expectedGeneration, signal);
+  requireFact((input.expectedEndpointId === undefined || before.endpointId===input.expectedEndpointId) &&
+    (input.expectedServicePid === undefined || before.pid===input.expectedServicePid), 'identity-mismatch', 'Native captured endpoint or process changed');
   const row = AgentRow.parse(await access.agent(input.agent.agentId));
   requireFact(row.agent_id === owned.agent_id && row.workspace_id === owned.workspace_id && row.repo === owned.repo &&
     row.worktree_path === owned.worktree_path && row.branch === owned.branch && row.parent_agent_id === owned.parent_agent_id &&
-    row.root_agent_id === owned.root_agent_id && row.harness_session_id === input.nativeSessionId && row.harness_session_root === input.nativeRoot,
+    row.root_agent_id === owned.root_agent_id && row.created_by_kind === owned.created_by_kind && row.created_by_id === owned.created_by_id,
   'identity-mismatch', 'Native registry identity changed');
   const refs = z.array(NativeRef).parse(await access.sessions(row.agent_id));
+  requireFact(refs.length <= (input.maxRegistrations ?? 200), 'incomplete-pages', 'Native registration bound reached');
+  requireFact(new Set(refs.map(ref=>JSON.stringify([ref.harness,ref.native_root,ref.native_id]))).size===refs.length &&
+    refs.every(ref=>ref.agent_id===row.agent_id) && refs.some(ref=>ref.native_id===row.harness_session_id && ref.native_root===row.harness_session_root),
+    'identity-mismatch', 'Native current registration is missing, duplicated or foreign');
   const matching = refs.filter(ref => ref.agent_id === row.agent_id && ref.native_id === input.nativeSessionId && ref.native_root === input.nativeRoot);
   requireFact(matching.length === 1 && refs.every(ref => ref.agent_id === row.agent_id), 'ownership-mismatch', 'Native session registration is missing, duplicated or foreign');
   const base = { agentId: row.agent_id, nativeSessionId: input.nativeSessionId, nativeRoot: input.nativeRoot,
     servicePid: before.pid, serviceGeneration: before.generation, registeredEndpointId: before.endpointId };
-  const response = await access.read(`/api/session/${encodeURIComponent(input.nativeSessionId)}`, signal);
   let output: z.infer<typeof NativeOutput>;
+  if (input.view === 'registrations') {
+    output = {...base,view:'registrations',currentNativeSessionId:row.harness_session_id,currentNativeRoot:row.harness_session_root,complete:true,
+      records:refs.map(ref=>({agentId:ref.agent_id,harness:ref.harness,nativeSessionId:ref.native_id,nativeRoot:ref.native_root}))
+        .sort((a,b)=>a.nativeRoot.localeCompare(b.nativeRoot)||a.nativeSessionId.localeCompare(b.nativeSessionId))};
+  } else {
+  const response = await access.read(`/api/session/${encodeURIComponent(input.nativeSessionId)}`, signal);
   if (response.status === 404 && input.view === 'presence') {
     const missing = z.object({ _tag: z.literal('SessionNotFoundError'), sessionID: z.literal(input.nativeSessionId),
       message: z.literal(`Session not found: ${input.nativeSessionId}`) }).strict().safeParse(response.body);
@@ -134,6 +148,7 @@ export async function observeNative(input: z.infer<typeof NativeInput>, access: 
             outputOccurrences: probeOccurrences(JSON.stringify(tool.state.content || {}), probe) } : null }];
       })) };
     }
+  }
   }
   if (output.view === 'tools') requireFact(new Set(output.records.map(record => record.id)).size === output.records.length,
     'identity-mismatch', 'Native tool IDs are duplicated');
