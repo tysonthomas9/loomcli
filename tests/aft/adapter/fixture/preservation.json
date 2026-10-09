@@ -30584,15 +30584,17 @@
       "commentIntent": "Close live tabs to prove that no billed process is left attached.",
       "executedOracle": {
         "surface": "terminal-tab metadata API",
-        "read": "Reachable initial GET and list-shaped response; capture tabs with exact agent_id and nonempty session_name.",
+        "read": "Initial GET explicitly requires reachability only. A separate enumeration filters a list-shaped response by exact agent_id and nonempty session_name.",
         "actor": "DELETE each captured exact session, retaining each HTTP success/failure; do not accept arbitrary supplied session authority.",
         "after": "Reachable final GET and list-shaped response with same actor filter.",
         "assertions": [
           "zero remaining matching tabs",
           "zero DELETE failures"
         ],
-        "incomplete": "Unreachable API or invalid response never satisfies absence or cardinality."
+        "incomplete": "Initial reachability failure and final enumeration failure are fatal. Intermediate enumeration failure inside for session in $(sessions_for_agent) does not propagate and may exit successfully when the final read has zero matches.",
+        "intermediateFailureGap": "The original shell helper can exit zero after reachable initial GET, malformed intermediate enumeration and valid empty final enumeration; the command substitution in the for loop masks that enumeration error."
       },
+      "typedMigrationSafetyCorrection": "The typed metadata-detach operation must fail closed on every unavailable or malformed read, including intermediate enumeration. This intentionally closes the original shell fail-open gap; it is not claimed as an already enforced original predicate.",
       "excludedInference": "Neither metadata disappearance nor successful DELETE demonstrates a PID, kernel generation, process exit or afterGeneration=null.",
       "productEvidence": "internal/webui/terminal/service_tabs.go:145-165 removes tab metadata, then best-effort Kill logs failures.",
       "callers": [
