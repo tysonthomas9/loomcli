@@ -2,7 +2,7 @@ import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { AgentRow, AgentRef, Id, RelativePath, requireFact, type NativeAccess } from './protocol.js';
-import { observeFilesystem, FilesystemOutput, type FilesystemInput } from './filesystem.js';
+import { observeFilesystem, FilesystemOutput, type NormalizedFilesystemInput } from './filesystem.js';
 import { observeGitLifecycle, GitLifecycleOutput, type GitLifecycleInput } from './git-lifecycle.js';
 import { observeGit, GitOutput, type GitInput, type GitReader } from './git.js';
 
@@ -68,7 +68,7 @@ export async function readContainerObservation(raw: unknown, access: NativeAcces
 export type ContainerObservationRead = (request: z.infer<typeof ContainerObservationRequest>, signal: AbortSignal) => Promise<unknown>;
 export function containerFilesystemObserver(read: ContainerObservationRead, selector: z.infer<typeof RootSelector>, stamp: z.infer<typeof ContainerRootIdentity>) {
   RootSelector.parse(selector); ContainerRootIdentity.parse(stamp);
-  return async (input: z.infer<typeof FilesystemInput>, signal: AbortSignal) => {
+  return async (input: NormalizedFilesystemInput, signal: AbortSignal) => {
     const response = ContainerFilesystemOutput.parse(await read({ operation: 'filesystem-observe', root: selector,
       relativePaths: input.relativePaths, view: input.view, maxBytes: input.maxBytes, maxEntries: input.maxEntries }, signal));
     requireFact(response.root.path === stamp.path && response.root.device === stamp.device && response.root.inode === stamp.inode,

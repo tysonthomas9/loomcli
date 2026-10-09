@@ -1,6 +1,6 @@
 import { getRegisteredResource, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
 import type { z } from 'zod';
-import type { FilesystemInput, FilesystemOutput } from './filesystem.js';
+import type { NormalizedFilesystemInput, FilesystemOutput } from './filesystem.js';
 import type { GitLifecycleInput, GitLifecycleOutput } from './git-lifecycle.js';
 import type { GitInput, GitOutput } from './git.js';
 import { requireOwnedWorkspace, validateOwnedWorkspaceRoster, type OwnedWorkspaceRoster, type WorkspaceAgentFact, type LegacyWorkspaceAgentFact } from './workspaces.js';
@@ -13,7 +13,7 @@ import { AgentRow, AgentRef, requireFact, type NativeAccess, type ReadTransport 
 
 export interface OwnedRoot {
   path: string; device: number; inode: number;
-  remoteObserve?: (input: z.infer<typeof FilesystemInput>, signal: AbortSignal) => Promise<z.infer<typeof FilesystemOutput>>;
+  remoteObserve?: (input: NormalizedFilesystemInput, signal: AbortSignal) => Promise<z.infer<typeof FilesystemOutput>>;
 }
 export interface OwnedAgent {
   row: AgentRow;

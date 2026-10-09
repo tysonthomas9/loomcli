@@ -4,10 +4,21 @@ import path from 'node:path';
 import { z } from 'zod';
 import { Digest, Id, RelativePath, requireFact, sha256 } from './protocol.js';
 
-export const FilesystemInput = z.object({ leaseId: Id, rootId: Id,
-  relativePaths: z.array(RelativePath).min(1).max(1000), view: z.enum(['presence', 'bytes', 'tree-digest']),
+const FilesystemFields = { leaseId: Id, rootId: Id,
+  view: z.enum(['presence', 'bytes', 'tree-digest']),
   maxBytes: z.number().int().min(1).max(16 * 1024 * 1024), maxEntries: z.number().int().min(1).max(10000),
-}).strict();
+};
+export const FilesystemInput = z.union([
+  z.object({ ...FilesystemFields, relativePath: RelativePath }).strict(),
+  z.object({ ...FilesystemFields, relativePaths: z.array(RelativePath).min(1).max(1000) }).strict(),
+]);
+export type NormalizedFilesystemInput = Omit<z.infer<typeof FilesystemInput>, 'relativePath' | 'relativePaths'> & { relativePaths: string[] };
+/** Normalize the admitted public input before choosing a local or remote port. */
+export function normalizeFilesystemInput(input: z.infer<typeof FilesystemInput>): NormalizedFilesystemInput {
+  if ('relativePaths' in input) return input;
+  const { relativePath, ...fields } = input;
+  return { ...fields, relativePaths: [relativePath] };
+}
 export const FilesystemOutput = z.object({ entries: z.array(z.object({
   relativePath: RelativePath, exists: z.boolean(), kind: z.enum(['file', 'directory', 'missing']),
   bytes: z.number().int().nonnegative().nullable(), sha256: Digest.nullable(),
@@ -28,7 +39,7 @@ export async function containedPath(root: string, relative: string): Promise<str
   requireFact(current.startsWith(root + path.sep), 'ownership-mismatch', 'Path is outside owned root');
   return current;
 }
-export async function observeFilesystem(input: z.infer<typeof FilesystemInput>, root: string): Promise<z.infer<typeof FilesystemOutput>> {
+export async function observeFilesystem(input: NormalizedFilesystemInput, root: string): Promise<z.infer<typeof FilesystemOutput>> {
   requireFact(new Set(input.relativePaths).size === input.relativePaths.length, 'identity-mismatch', 'Duplicate filesystem paths');
   const entries: z.infer<typeof FilesystemOutput>['entries'] = [];
   let consumed = 0;
