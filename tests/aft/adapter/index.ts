@@ -2,7 +2,9 @@ import { lstat } from 'node:fs/promises';
 import type { CapabilityProvider, CapabilityRegistry, ImplementationPin } from '@tysonthomas9/aft/capabilities';
 import type { ObservationResult } from '@tysonthomas9/aft/types';
 import { z } from 'zod';
-import { AgentRef, AgentRow, Id, requireFact, redact, type AgentRow as Row } from './protocol.js';
+import { AgentRef, AgentRow, AgentHistory, Id, requireFact, redact, type AgentRow as Row } from './protocol.js';
+import { getFixtureEvidenceStore } from './evidence.js';
+import { enrollOwnedWorkspaceAgent, requireOwnedWorkspace } from './workspaces.js';
 import { defineOperation } from './operation.js';
 import { getSyntheticProbe } from './synthetic-probe.js';
 import { getFixture, getAgent, type OwnedFixture } from './ownership.js';
@@ -12,6 +14,7 @@ import { FilesInput, FilesOutput, observeFiles } from './files.js';
 import { NativeInput, NativeOutput, observeNative } from './native.js';
 import { SavedEventsInput, SavedEventsOutput, collectSavedEvents } from './events.js';
 import { FilesystemInput, FilesystemOutput, observeFilesystem } from './filesystem.js';
+import { GitLifecycleInput, GitLifecycleOutput, observeGitLifecycle } from './git-lifecycle.js';
 import { GitInput, GitOutput, observeGit, type GitReader } from './git.js';
 export * from './operation.js';
 export * from './evidence.js';
@@ -25,6 +28,8 @@ export * from './renderer-target.js';
 export * from './composition.js';
 export * from './redaction.js';
 export * from './authority.js';
+export * from './git-lifecycle.js';
+export * from './workspaces.js';
 export { createLegacyProviders } from './legacy/providers.js';
 export type { LegacyAccessFactory } from './legacy/providers.js';
 
@@ -34,7 +39,7 @@ export const BindAgentOutput = z.object({ fixtureLeaseId: Id, workspaceId: Id, a
   nativeSessionId: Id, nativeRoot: z.string(), harness: z.literal('opencode'),
 }).strict();
 const identity = (fixture: OwnedFixture, row?: Row): Omit<ObservationResult['provenance']['identity'], 'runId'> => ({
-  fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId, ...(row ? {
+  fixtureLeaseId: fixture.leaseId, workspaceId: row?.workspace_id ?? fixture.workspaceId, ...(row ? {
     agentId: row.agent_id, parentAgentId: row.parent_agent_id, rootAgentId: row.root_agent_id,
     repo: row.repo, worktree: row.worktree_path, harness: row.harness,
     nativeSessionId: row.harness_session_id, nativeRoot: row.harness_session_root,
@@ -54,15 +59,19 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     defineOperation({ ...common, id: 'loom.agent.bind', inputSchema: BindAgentInput, outputSchema: BindAgentOutput,
       async run(input, context) {
         const fixture = await getFixture(context, input.leaseId);
-        requireFact(input.workspaceId === fixture.workspaceId && !fixture.agents.has(input.agentId), 'ownership-mismatch', 'Foreign or duplicate agent binding');
-        const agent = await fixture.resolveAgent(input.agentId, context.signal);
+        requireOwnedWorkspace(fixture,input.workspaceId);
+        if(fixture.ownedWorkspaces&&!fixture.ownedWorkspaces.find(value=>value.workspaceId===input.workspaceId)!.agentIds.includes(input.agentId))
+          await enrollOwnedWorkspaceAgent(fixture,input.workspaceId,input.agentId,context.signal,getFixtureEvidenceStore(context,fixture.leaseId));
+        const workspace = requireOwnedWorkspace(fixture,input.workspaceId,input.agentId);
+        requireFact(!fixture.agents.has(input.agentId), 'ownership-mismatch', 'Foreign or duplicate agent binding');
+        const agent = await fixture.resolveAgent(input.agentId, context.signal, input.workspaceId);
         const row = AgentRow.parse(agent.row);
-        requireFact(row.agent_id === input.agentId && row.workspace_id === fixture.workspaceId && row.repo === fixture.repo,
+        requireFact(row.agent_id === input.agentId && row.workspace_id === input.workspaceId && row.repo === workspace.repo && (!workspace.commonDir || agent.commonDir===workspace.commonDir),
           'ownership-mismatch', 'Agent discovery returned a foreign identity');
         fixture.agents.set(input.agentId, { ...agent, row });
-        try { await getAgent(context, { fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId, agentId: input.agentId }); }
+        try { await getAgent(context, { fixtureLeaseId: fixture.leaseId, workspaceId: input.workspaceId, agentId: input.agentId }); }
         catch (error) { fixture.agents.delete(input.agentId); throw error; }
-        return { value: { fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId, agentId: row.agent_id,
+        return { value: { fixtureLeaseId: fixture.leaseId, workspaceId: input.workspaceId, agentId: row.agent_id,
           parentAgentId: row.parent_agent_id, rootAgentId: row.root_agent_id, repo: row.repo, worktree: row.worktree_path, branch: row.branch,
           nativeSessionId: row.harness_session_id, nativeRoot: row.harness_session_root, harness: row.harness },
           identity: identity(fixture, row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
@@ -71,9 +80,9 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     defineOperation({ ...common, id: 'loom.agent.observe', inputSchema: AgentObserveInput, outputSchema: AgentObserveOutput,
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
-        const current = await fixture.resolveAgent(input.agent.agentId, context.signal);
+        const current = await fixture.resolveAgent(input.agent.agentId, context.signal, input.agent.workspaceId);
         const row = AgentRow.parse(current.row);
-        requireFact(row.agent_id === agent.row.agent_id && row.workspace_id === fixture.workspaceId && row.repo === agent.row.repo &&
+        requireFact(row.agent_id === agent.row.agent_id && row.workspace_id === agent.row.workspace_id && row.repo === agent.row.repo &&
           row.worktree_path === agent.row.worktree_path && row.branch === agent.row.branch && row.parent_agent_id === agent.row.parent_agent_id &&
           row.root_agent_id === agent.row.root_agent_id, 'identity-mismatch', 'Agent identity changed');
         return { value: { agentId: row.agent_id, state: row.state, runningTurnId: row.running_turn_id, parentAgentId: row.parent_agent_id,
@@ -146,6 +155,28 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
           requireFact(redact(text, fixture.secrets) === text, 'observation-failed', 'Exact file bytes contain private material');
         }
         return { value, identity: identity(fixture), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
+      },
+    }),
+    defineOperation({ ...common, id:'loom.agent.history',effects:['read-filesystem'],inputSchema:AgentObserveInput,outputSchema:AgentHistory,
+      async run(input,context) {
+        const {fixture,agent}=await getAgent(context,input.agent);
+        requireFact(agent.native?.history,'unsupported-capability','Owned saved-history transport is unavailable');
+        const value=AgentHistory.parse(await agent.native.history(input.agent.agentId));
+        requireFact(value.agentId===agent.row.agent_id&&value.workspaceId===agent.row.workspace_id&&value.repo===agent.row.repo,
+          'identity-mismatch','Saved history belongs to another agent');
+        await fixture.verify(context.signal);
+        return {value,identity:identity(fixture,agent.row),evidenceClass:fixture.evidenceClass,secrets:fixture.secrets};
+      },
+    }),
+    defineOperation({ ...common,id:'loom.git.lifecycle',effects:['read-filesystem'],inputSchema:GitLifecycleInput,outputSchema:GitLifecycleOutput,
+      async run(input,context) {
+        const {fixture,agent}=await getAgent(context,input.agent);
+        const value=agent.gitLifecycle ? GitLifecycleOutput.parse(await agent.gitLifecycle(input,context.signal)) :
+          await observeGitLifecycle(input,{sourceRoot:agent.row.repo,commonDir:agent.commonDir,branch:agent.row.branch,worktree:agent.row.worktree_path},gitReader);
+        requireFact(value.agentId===agent.row.agent_id&&value.sourceRoot===agent.row.repo&&value.commonDir===agent.commonDir&&
+          value.branch===agent.row.branch&&value.worktree===agent.row.worktree_path,'identity-mismatch','Lifecycle Git belongs to another agent');
+        await fixture.verify(context.signal);
+        return {value,identity:identity(fixture,agent.row),evidenceClass:fixture.evidenceClass,secrets:fixture.secrets};
       },
     }),
     defineOperation({ ...common, id: 'loom.git.observe', effects: ['read-filesystem'], inputSchema: GitInput, outputSchema: GitOutput,

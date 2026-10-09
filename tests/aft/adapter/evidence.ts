@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import type { CapabilityContext } from '@tysonthomas9/aft/capabilities';
+import { getRegisteredResource, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { ArtifactRefSchema } from '@tysonthomas9/aft/types';
 import { requireFact, sha256 } from './protocol.js';
 import type { z } from 'zod';
@@ -20,6 +20,14 @@ export function bindEvidenceStore(context: CapabilityContext, leaseId: string): 
   const store = context.resources.get(key) as EvidenceStore | undefined;
   requireFact(store, 'observation-failed', 'No owned evidence store is registered');
   context.resources.set(`${key}:${leaseId}`, store);
+}
+export function getFixtureEvidenceStore(context:CapabilityContext,leaseId:string):EvidenceStore {
+  const resourceKey=`${evidenceKey}:${leaseId}`;
+  let store:EvidenceStore|undefined;
+  if(context.resources.has(resourceKey))store=getRegisteredResource(context,resourceKey,leaseId) as EvidenceStore;
+  else if(context.scope==='case'&&context.suite?.id===context.suiteId&&context.suite.handles.includes(leaseId))
+    store=context.suite.getResource(resourceKey,leaseId) as EvidenceStore|undefined;
+  requireFact(store,'ownership-mismatch','Fixture evidence authority is missing or foreign');return store;
 }
 export async function retainEvidence(context: CapabilityContext, serialized: string, leaseId?: string) {
   let store = context.resources.get(key) as EvidenceStore | undefined;

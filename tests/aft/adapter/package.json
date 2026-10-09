@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "zod": "3.25.76",
-    "@tysonthomas9/aft": "git+https://github.com/tysonthomas9/aft.git#1f2a17de321a6a92f318d2f660ce5ae49968baf6"
+    "@tysonthomas9/aft": "git+https://github.com/tysonthomas9/aft.git#e8eee6bb6d8d5d2c8e65bae36154732a74742212"
   },
   "devDependencies": {
     "@types/node": "24.10.0",

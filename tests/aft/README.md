@@ -58,6 +58,29 @@ observation cannot prove absence. Renderer projection requires source/dependency
 bytes linked to the owned frontend build receipt; matching package versions or
 adapter development packages do not establish runtime renderer identity.
 
+Additional workspaces require an owner-bound, bounded roster with retained actual
+creation receipts, source/common-directory and private store identity. Agents
+created later by the UI enroll through the fixture's fixed private store reader;
+exact workspace, actor, lineage and store generation are checked before binding.
+Old, foreign or listing-only records grant no authority. These receipts remain
+available until consumers finish.
+
+Deletion observations read the surviving source repository and exact captured
+branch/worktree identity. Only a confirmed missing checkout or ref reports absence;
+unreadable or replaced roots are errors. Saved-history observations read the owned
+store coherently and return actual tombstone, purge and event-count facts. Suites
+retain the full pre-action native registration list and compare every prior tuple,
+branch/worktree/event facts and actor/UI predicates themselves.
+
+For later pilot provisioning, build the target frontend from its pinned source and
+installed dependency roots first, then produce the renderer receipt from those
+actual source, dependency and complete output bytes. Seal that receipt into the
+owned build manifest before acquiring a fixture or registering providers. Pass the
+owned runtime/build target to composition, pin the emitted adapter and parser
+closure, and run the suite through the public registry/runner. Receipt equivalence
+alone does not prove which bytes the browser served; that proof belongs to the
+separately authorized runtime/browser stage.
+
 ## Run
 
 ```bash

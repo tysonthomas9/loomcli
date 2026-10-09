@@ -251,3 +251,45 @@ test('container filesystem and Git adapters reject wrong physical and agent iden
   foreign = true; const gitForeign = await harness.invoke('loom.git.observe', gitInput);
   assert.equal(gitForeign.availability, 'error'); assert.equal(gitForeign.data, undefined);
 });
+
+test('registered fixture-created workspaces bind exact agents before discovery and preserve row provenance',async t=>{
+  const {createOwnedWorkspaceRoster}=await import('./workspaces.js');
+  const h=await setup(t);const f=h.fixture;
+  const record=async(workspaceId:string,agentIds:string[])=>{
+    const fields={workspaceId,repo:f.repo,commonDir:'/owned/source/.git',storeId:'owned-store',storeGeneration:'store-generation',agentIds};
+    const creationReceipt=await h.evidenceStore.retain(JSON.stringify({kind:'workspace-created',leaseId:f.leaseId,runId:f.runId,suiteId:f.suiteId,
+      scope:f.scope,caseId:f.caseId,profile:f.profile,...fields}));return {...fields,creationReceipt};
+  };
+  f.ownedWorkspaces=await createOwnedWorkspaceRoster(f,[await record('workspace',['agt_owned']),await record('E2E-WS-AGENT',['nova'])],h.evidenceStore);
+  let discovered=0;
+  f.resolveAgent=async(agentId,_signal,workspaceId)=>{discovered++;assert.equal(agentId,'nova');assert.equal(workspaceId,'E2E-WS-AGENT');
+    return {row:{...f.agents.get('agt_owned')!.row,agent_id:'nova',workspace_id:'E2E-WS-AGENT'},commonDir:'/owned/source/.git'};};
+  for(const input of [{leaseId:'lease',workspaceId:'foreign',agentId:'nova'},{leaseId:'lease',workspaceId:'E2E-WS-AGENT',agentId:'unregistered'}])
+    assert.notEqual((await h.invoke('loom.agent.bind',input)).availability,'observed');
+  assert.equal(discovered,0);
+  const result=await h.invoke('loom.agent.bind',{leaseId:'lease',workspaceId:'E2E-WS-AGENT',agentId:'nova'});
+  assert.equal(result.availability,'observed');assert.equal(result.provenance.identity.workspaceId,'E2E-WS-AGENT');
+  assert.equal(discovered,1);
+  assert.equal((await h.invoke('loom.agent.observe',{agent:{fixtureLeaseId:'lease',workspaceId:'E2E-WS-AGENT',agentId:'nova'}})).availability,'observed');
+});
+
+test('saved-history and lifecycle observations expose actual facts and never treat missing/error as zero or absence',async t=>{
+  const h=await setup(t);const agent=h.fixture.agents.get('agt_owned')!;
+  const request={agent:input.agent};
+  assert.equal((await h.invoke('loom.agent.history',request)).availability,'unsupported');
+  const unused=async():Promise<never>=>{throw new Error('unused owned native port');};
+  let count=3;let wrong=false;let failed=false;
+  agent.native={pinnedExecutable:'/owned/opencode',registration:unused,process:unused,sessions:unused,read:unused,agent:unused,
+    history:async()=>{if(failed)throw new Error('unreadable store');return {agentId:'agt_owned',workspaceId:wrong?'foreign':'workspace',repo:h.fixture.repo,
+      revision:2,deletedAt:'2026-10-09T01:00:00Z',historyPurgedAt:null,savedEventCount:count};}};
+  const result=await h.invoke('loom.agent.history',request);
+  assert.equal(result.availability,'observed');assert.equal(z.object({savedEventCount:z.number()}).parse(result.data).savedEventCount,3);
+  count=0;assert.equal(z.object({savedEventCount:z.number()}).parse((await h.invoke('loom.agent.history',request)).data).savedEventCount,0);
+  wrong=true;assert.equal((await h.invoke('loom.agent.history',request)).availability,'error');wrong=false;
+  failed=true;const unavailable=await h.invoke('loom.agent.history',request);assert.equal(unavailable.availability,'error');assert.equal(unavailable.data,undefined);
+  agent.gitLifecycle=async()=>({agentId:'agt_owned',sourceRoot:h.fixture.repo,commonDir:agent.commonDir,branch:agent.row.branch,
+    branchRef:{ref:'refs/heads/loom/agent/owned',oid:'a'.repeat(40)},worktree:agent.row.worktree_path,worktreePresent:false});
+  const git=await h.invoke('loom.git.lifecycle',{...request,maxBytes:10000});assert.equal(git.availability,'observed');
+  assert.equal(z.object({worktreePresent:z.boolean()}).parse(git.data).worktreePresent,false);
+  agent.gitLifecycle=async()=>{throw new Error('unreadable source');};assert.equal((await h.invoke('loom.git.lifecycle',{...request,maxBytes:10000})).availability,'error');
+});
