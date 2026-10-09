@@ -10,6 +10,21 @@
       ],
       "@tysonthomas9/aft/capabilities": [
         "./node_modules/@tysonthomas9/aft/dist/capabilities.js"
+      ],
+      "unified": [
+        "./node_modules/unified/index.js"
+      ],
+      "remark-parse": [
+        "./node_modules/remark-parse/index.js"
+      ],
+      "remark-gfm": [
+        "./node_modules/remark-gfm/index.js"
+      ],
+      "remark-rehype": [
+        "./node_modules/remark-rehype/index.js"
+      ],
+      "rehype-sanitize": [
+        "./node_modules/rehype-sanitize/index.js"
       ]
     }
   }

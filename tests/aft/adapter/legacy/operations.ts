@@ -3,6 +3,8 @@ import type { EvidenceClass } from '@tysonthomas9/aft/types';
 import { isAbsolute } from 'node:path';
 import { Id, Json, RelativePath, HttpResponse, redact } from '../protocol.js';
 import { FixtureId, FixtureParameters, ScenarioId, scenario } from './catalog.js';
+import { redactionFacts } from '../redaction.js';
+import type { LoomAuthorizedOperation } from '../authority.js';
 
 const Arg = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 export const LegacyEvidenceClasses = ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const satisfies readonly EvidenceClass[];
@@ -78,7 +80,7 @@ export interface ConfigurationSnapshot { complete: true; previous: Json; restore
 // suite values. Mutating drivers must atomically compare the passed generation
 // with the owned process immediately before their side effect.
 export interface LegacyAccess {
-  lease(id: string, signal: AbortSignal): Promise<LegacyLease>;
+  lease(id: string, signal: AbortSignal, operation?: LoomAuthorizedOperation): Promise<LegacyLease>;
   // execute enrolls the process under the lease BEFORE spawn/return, including
   // failed/incomplete responses; registerProcess attests that existing binding.
   execute(leaseId: string, command: CliCommand, signal: AbortSignal): Promise<ProcessResult>;
@@ -98,19 +100,21 @@ export interface LegacyReceipt {
   operation: string; leaseId: string; runId: string; invocationId: string;
   evidence: LegacyLease['evidence']; actor: 'loom-cli' | 'runtime' | 'fixture';
   facts: Json;
+  factsRedaction: ReturnType<typeof redactionFacts>;
 }
-export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: EvidenceClass) {
+export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: EvidenceClass | ((operation: LoomAuthorizedOperation) => EvidenceClass)) {
   const claimed = new Set<string>();
   const configurations = new Map<string, ConfigurationSnapshot>();
   const configurationLocks = new Set<string>();
   const receipt = (op: string, lease: LegacyLease, call: Invocation, actor: LegacyReceipt['actor'], facts: Json): LegacyReceipt =>
     ({ operation: op, leaseId: lease.id, runId: call.runId, invocationId: call.invocationId, evidence: lease.evidence,
-      actor, facts: redact(facts, lease.secrets) });
-  async function owned(id: string, call: Invocation) {
+      actor, facts: redact(facts, lease.secrets), factsRedaction: redactionFacts(facts, lease.secrets) });
+  async function owned(id: string, call: Invocation, operation: LoomAuthorizedOperation) {
     call.signal.throwIfAborted();
-    const lease = await access.lease(id, call.signal);
+    const lease = await access.lease(id, call.signal, operation);
     fact(lease.active && lease.id === id && lease.runId === call.runId, 'ownership-mismatch', 'Fixture lease is inactive or foreign');
-    fact(z.enum(LegacyEvidenceClasses).safeParse(lease.evidence).success && (expectedEvidence === undefined || lease.evidence === expectedEvidence),
+    const expected = typeof expectedEvidence === 'function' ? expectedEvidence(operation) : expectedEvidence;
+    fact(z.enum(LegacyEvidenceClasses).safeParse(lease.evidence).success && (expected === undefined || lease.evidence === expected),
       'source-mismatch', 'Legacy transport evidence differs from canonical fixture');
     fact(isAbsolute(lease.binary) && isAbsolute(lease.cwd), 'ownership-mismatch', 'CLI registration is not absolute');
     return structuredClone(lease);
@@ -156,21 +160,21 @@ export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: 
   }
   return {
     async role(raw: unknown, call: Invocation) {
-      const input = parse(RoleInput, raw); const lease = await owned(input.leaseId, call); workspace(lease, input.workspaceId);
+      const input = parse(RoleInput, raw); const lease = await owned(input.leaseId, call, 'loom.cli.role'); workspace(lease, input.workspaceId);
       if (input.operation === 'show') fact(lease.roles.some(row => row.workspaceId === input.workspaceId && row.name === input.name), 'ownership-mismatch', 'Role is foreign');
       const argv = ['--workspace', input.workspaceId, 'role', input.operation, ...(input.operation === 'show' ? [input.name] : []), '--json'];
       const result = await execute(lease, call, argv); const body = cliBody(result);
       return { exitCode: result.exitCode, body, receipt: receipt('loom.cli.role', lease, call, 'loom-cli', { argv, body }) };
     },
     async usage(raw: unknown, call: Invocation) {
-      const input = parse(UsageInput, raw); const lease = await owned(input.agent.fixtureLeaseId, call);
+      const input = parse(UsageInput, raw); const lease = await owned(input.agent.fixtureLeaseId, call, 'loom.cli.usage');
       const row = agent(lease, input.agent.workspaceId, input.agent.agentId, true);
       const argv = ['usage', '--format', 'json', '--agent', row.name];
       const result = await execute(lease, call, argv, { LOOM_WORKSPACE_ID: input.agent.workspaceId }); const body = cliBody(result);
       return { exitCode: result.exitCode, body, receipt: receipt('loom.cli.usage', lease, call, 'loom-cli', { argv, body }) };
     },
     async task(raw: unknown, call: Invocation) {
-      const input = parse(TaskInput, raw); const lease = await owned(input.leaseId, call); agent(lease, input.workspaceId, input.agentName);
+      const input = parse(TaskInput, raw); const lease = await owned(input.leaseId, call, 'loom.cli.task'); agent(lease, input.workspaceId, input.agentName);
       const env: Record<string, string> = { LOOM_WORKSPACE_ID: input.workspaceId };
       // Erase inherited selection: an earlier invocation must not retarget this task.
       env.LOOM_ASSIGNED_TASK_ID = ''; env.LOOM_SOURCE_REPOS = '';
@@ -192,7 +196,7 @@ export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: 
         receipt: receipt('loom.cli.task', lease, call, 'loom-cli', { argv, backend: input.backend, processId: result.processId, generation: result.generation }) };
     },
     async seedWorktree(raw: unknown, call: Invocation) {
-      const input = parse(SeedInput, raw); const lease = await owned(input.leaseId, call); agent(lease, input.workspaceId, input.agentName);
+      const input = parse(SeedInput, raw); const lease = await owned(input.leaseId, call, 'loom.fixture.seedWorktree'); agent(lease, input.workspaceId, input.agentName);
       fact(lease.evidence === 'deterministic', 'unsupported-capability', 'Worktree seeding is fixture-only');
       await access.validateSeedPath(lease.id, input.workspaceId, input.agentName, input.relativePath, call.signal);
       const argv = ['daemon', 'seed-worktree', '--workspace', input.workspaceId, '--agent', input.agentName,
@@ -205,7 +209,7 @@ export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: 
       return { commit, receipt: receipt('loom.fixture.seedWorktree', lease, call, 'fixture', { commit, actorActivity: false }) };
     },
     async stimulate(raw: unknown, call: Invocation) {
-      const input = parse(RuntimeInput, raw); const lease = await owned(input.leaseId, call);
+      const input = parse(RuntimeInput, raw); const lease = await owned(input.leaseId, call, 'loom.runtime.stimulate');
       const targets = lease.processes.filter(row => row.id === input.targetId);
       fact(targets.length === 1, 'ownership-mismatch', 'Runtime target is foreign or ambiguous'); const target = targets[0]!;
       fact(target.generation === input.expectedGeneration, 'stale-generation', 'Runtime target generation changed');
@@ -238,7 +242,7 @@ export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: 
       return { ...result.data, response: wire, receipt: receipt('loom.runtime.stimulate', lease, call, 'runtime', { ...result.data, response: wire }) };
     },
     async configure(raw: unknown, call: Invocation) {
-      const input = parse(ConfigureInput, raw); const lease = await owned(input.leaseId, call);
+      const input = parse(ConfigureInput, raw); const lease = await owned(input.leaseId, call, 'loom.fixture.configure');
       let target: string; let value: Json; let path: '/__reset' | '/__script' | '/__fixture' | null = null;
       if (input.setting === 'provider-default') {
         target = 'provider-default'; value = { model: input.model, harness: input.harness };
