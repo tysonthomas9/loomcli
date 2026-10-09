@@ -3,6 +3,8 @@ import { constants } from 'node:fs';
 import { containedPath } from './filesystem.js';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import type { OwnedRoot } from './ownership.js';
+import type { OwnedWorkspaceRecord } from './workspaces.js';
 import { AgentRow, AgentHistory, NativeRef, ServiceRegistration, Json, ObservationError, requireFact,
   type NativeAccess, type ProcessIdentity } from './protocol.js';
 
@@ -10,10 +12,19 @@ export interface NativeHostOptions {
   configRoot: string;
   workspaceId: string;
   repo: string;
+  /** Trusted finite topology, never inferred from the first database row. */
+  ownedRepositories?: readonly Pick<NonNullable<OwnedWorkspaceRecord['repositories']>[number], 'repo' | 'commonDir'>[];
+  /** Private descriptor-backed agents.db capture owned by fixture lifecycle. */
+  capturedStore?: { readonly root: Readonly<OwnedRoot>; verify(signal: AbortSignal): Promise<void> };
+  signal?: AbortSignal;
   pinnedExecutable: string;
   // This is an internal host/platform port; suite data cannot supply code.
   processIdentity?: (pid: number) => Promise<ProcessIdentity>;
   fetch?: typeof fetch;
+}
+export interface NativeHostAccess extends NativeAccess {
+  /** Fixed owning-workspace row read for canonical enrollment producers. */
+  rawAgent(agentId: string, signal: AbortSignal): Promise<ReturnType<typeof AgentRow.parse>>;
 }
 async function linuxProcessIdentity(pid: number): Promise<ProcessIdentity> {
   requireFact(process.platform === 'linux', 'unsupported-capability', 'Native process generation requires the owned Linux runtime');
@@ -29,11 +40,17 @@ async function linuxProcessIdentity(pid: number): Promise<ProcessIdentity> {
 }
 /** Direct, read-only native access inside the owned runtime. No ambient HOME,
  * provider directory scan, scenario helper, or browser action is involved. */
-export function createNativeHostAccess(options: NativeHostOptions): NativeAccess {
+export function createNativeHostAccess(options: NativeHostOptions): NativeHostAccess {
   const processIdentity = options.processIdentity ?? linuxProcessIdentity;
   const request = options.fetch ?? fetch;
   const registrationPath = path.join(options.configRoot, 'agents-opencode/state/opencode/service.json');
   const dbPath = path.join(options.configRoot, 'agents.db');
+  const repositories = options.ownedRepositories?.map(repository => ({ ...repository })) ?? [{ repo: options.repo, commonDir: '' }];
+  requireFact(repositories.length > 0 && repositories.length <= 32 && new Set(repositories.map(row => row.repo)).size === repositories.length &&
+    repositories.some(row => row.repo === options.repo), 'ownership-mismatch', 'Native repository topology is missing or ambiguous');
+  const capturedStore = options.capturedStore;
+  requireFact(!capturedStore || capturedStore.root.path === dbPath, 'ownership-mismatch', 'Captured native store has another path');
+  const ownedSignal = options.signal ?? new AbortController().signal;
   let rootIdentity: { ino: number; dev: number } | undefined;
   const verifyRoot = async () => {
     const stat = await lstat(options.configRoot);
@@ -72,35 +89,44 @@ export function createNativeHostAccess(options: NativeHostOptions): NativeAccess
     return ServiceRegistration.parse({ pid: raw.pid, url: raw.url, password: raw.password, generation: proc.generation,
       endpointId: createHash('sha256').update(JSON.stringify({ pid: raw.pid, generation: proc.generation, url: raw.url })).digest('hex') });
   };
-  const query = async (sql: string, args: string[]) => {
+  const query = async (sql: string, args: string[], signal = ownedSignal) => {
+    signal.throwIfAborted();
+    await capturedStore?.verify(signal);
     const before = await verifyFile(dbPath);
+    requireFact(!capturedStore || before.dev === capturedStore.root.device && before.ino === capturedStore.root.inode,
+      'ownership-mismatch', 'Native database differs from captured store');
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
       const rows = db.prepare(sql).all(...args);
       const after = await verifyFile(dbPath);
       requireFact(before.ino === after.ino && before.dev === after.dev, 'identity-mismatch', 'Native database changed');
+      await capturedStore?.verify(signal);
+      signal.throwIfAborted();
       return rows;
     } finally { db.close(); }
+  };
+  const rawAgent = async (agentId: string, signal: AbortSignal) => {
+    const rows = await query('SELECT agent_id, workspace_id, repo, worktree_path, branch, harness, harness_session_id, harness_session_root, parent_agent_id, root_agent_id, created_by_kind, created_by_id, preset, revision, state, running_turn_id, deleted_at, history_purged_at, model, outcome FROM agents WHERE agent_id=? AND workspace_id=?', [agentId, options.workspaceId], signal);
+    requireFact(rows.length === 1, 'identity-mismatch', 'Native agent row is missing or duplicated');
+    const row = AgentRow.parse(rows[0]);
+    requireFact(row.agent_id === agentId && row.workspace_id === options.workspaceId && repositories.some(repository => repository.repo === row.repo),
+      'ownership-mismatch', 'Native agent belongs to another repository or workspace');
+    return row;
   };
   return {
     pinnedExecutable: options.pinnedExecutable,
     registration: privateRegistration,
     process: async () => processIdentity((await privateRegistration()).pid),
-    async agent(agentId) {
-      const rows = await query('SELECT agent_id, workspace_id, repo, worktree_path, branch, harness, harness_session_id, harness_session_root, parent_agent_id, root_agent_id, created_by_kind, created_by_id, preset, revision, state, running_turn_id, deleted_at, history_purged_at, model, outcome FROM agents WHERE agent_id=? AND workspace_id=?', [agentId, options.workspaceId]);
-      requireFact(rows.length === 1, 'identity-mismatch', 'Native agent row is missing or duplicated');
-      const row = AgentRow.parse(rows[0]);
-      requireFact(row.repo === options.repo, 'ownership-mismatch', 'Native agent belongs to another repository');
-      return row;
-    },
+    rawAgent,
+    agent: agentId => rawAgent(agentId, ownedSignal),
     async history(agentId) {
       const rows = await query('SELECT a.agent_id, a.workspace_id, a.repo, a.revision, a.deleted_at, a.history_purged_at, (SELECT COUNT(*) FROM agent_events e WHERE e.agent_id=a.agent_id) AS saved_event_count FROM agents a WHERE a.agent_id=? AND a.workspace_id=?', [agentId,options.workspaceId]);
       requireFact(rows.length===1,'identity-mismatch','Agent saved-history identity is missing or duplicated');
       const raw = rows[0] as Record<string,unknown>;
       const value = AgentHistory.parse({agentId:raw.agent_id,workspaceId:raw.workspace_id,repo:raw.repo,revision:raw.revision,
         deletedAt:raw.deleted_at,historyPurgedAt:raw.history_purged_at,savedEventCount:raw.saved_event_count});
-      requireFact(value.agentId===agentId&&value.workspaceId===options.workspaceId&&value.repo===options.repo,
+      requireFact(value.agentId===agentId&&value.workspaceId===options.workspaceId&&repositories.some(repository=>repository.repo===value.repo),
         'identity-mismatch','Agent saved-history belongs to another owned repository'); return value;
     },
     async sessions(agentId) {

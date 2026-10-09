@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, writeFile, realpath, rm, rename, symlink, unlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, realpath, rm, rename, symlink, unlink, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -87,9 +87,16 @@ test('native host reads owned SQLite and fixed authenticated routes with determi
   db.prepare('INSERT INTO agents VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('agt_owned', 'workspace', '/owned/source', '/owned/tree',
     'loom/agent/owned', 'opencode', 'ses_owned', '', null, null, 'user', null, 'lead', 1, 'idle', null, null, null, 'requested/model', 'completed');
   db.prepare('INSERT INTO agent_native_sessions VALUES (?,?,?,?)').run('agt_owned', 'opencode', '', 'ses_owned');
+  db.exec("INSERT INTO agents SELECT 'agt_beta',workspace_id,'/owned/beta',worktree_path,branch,harness,harness_session_id,harness_session_root,parent_agent_id,root_agent_id,created_by_kind,created_by_id,preset,revision,state,running_turn_id,deleted_at,history_purged_at,model,outcome FROM agents WHERE agent_id='agt_owned';");
   db.exec("INSERT INTO agent_events VALUES ('agt_owned','evt1'),('agt_owned','evt2'),('foreign','evt3');"); db.close();
+  const storeStat=await lstat(path.join(root,'agents.db'));
+  let storeValid=true,verifications=0;
+  const capturedStore={root:{path:path.join(root,'agents.db'),device:storeStat.dev,inode:storeStat.ino},async verify(signal:AbortSignal){
+    signal.throwIfAborted();verifications++;assert.ok(storeValid,'captured store rejected');
+  }};
   const calls: string[] = [];
   const access = createNativeHostAccess({ configRoot: root, workspaceId: 'workspace', repo: '/owned/source', pinnedExecutable: '/owned/opencode',
+    capturedStore,ownedRepositories:[{repo:'/owned/beta',commonDir:'/owned/beta/.git'},{repo:'/owned/source',commonDir:'/owned/source/.git'}],
     processIdentity: async pid => ({ pid, generation: 'generation', executable: '/owned/opencode', argv: ['/owned/opencode', 'serve', '--service'] }),
     fetch: async (target, options) => {
       const url = String(target); calls.push(url);
@@ -101,6 +108,15 @@ test('native host reads owned SQLite and fixed authenticated routes with determi
   assert.equal((await access.agent('agt_owned')).harness_session_root, '');
   assert.equal((await access.agent('agt_owned')).model,'requested/model');
   assert.equal((await access.agent('agt_owned')).outcome,'completed');
+  const beforeVerify=verifications;
+  assert.equal((await access.rawAgent('agt_beta',new AbortController().signal)).repo,'/owned/beta');
+  assert.equal(verifications-beforeVerify,2);
+  const single=createNativeHostAccess({configRoot:root,workspaceId:'workspace',repo:'/owned/source',pinnedExecutable:'/owned/opencode',capturedStore});
+  await assert.rejects(single.rawAgent('agt_beta',new AbortController().signal),/another repository/);
+  storeValid=false;await assert.rejects(access.rawAgent('agt_owned',new AbortController().signal),/captured store rejected/);storeValid=true;
+  await assert.rejects(access.rawAgent('agt_beta',AbortSignal.abort()),/abort/i);
+  assert.throws(()=>createNativeHostAccess({configRoot:root,workspaceId:'workspace',repo:'/owned/source',pinnedExecutable:'/owned/opencode',
+    capturedStore:{...capturedStore,root:{...capturedStore.root,path:path.join(root,'foreign.db')}}}),/another path/);
   assert.equal((await access.history!('agt_owned')).savedEventCount,2);
   await assert.rejects(access.history!('foreign'));
   const update=new DatabaseSync(path.join(root,'agents.db'));
