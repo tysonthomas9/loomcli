@@ -4,7 +4,7 @@ import { LegacyError } from './operations.js';
 /** Configured selection follows product precedence; it is not an observation
  * of the model chosen by a provider. Cursor's frozen actor uses its default. */
 export function checkConfiguredModel(selection: FixtureModelSelection, backend: string,
-  env: Readonly<Record<string, string>>, roleModel: string | undefined, configuredModel?: string): void {
+  env: Readonly<Record<string, string>>, configuredModel?: string): void {
   const reject = (): never => { throw new LegacyError('source-mismatch', 'Configured model selection differs from owned routing'); };
   if (selection.kind === 'backend-default') {
     if (backend !== 'cursor' || env.LOOM_AGENT_MODEL || env.LOOM_OPENCODE_MODEL) reject();
@@ -12,9 +12,9 @@ export function checkConfiguredModel(selection: FixtureModelSelection, backend: 
   }
   switch (selection.selector) {
     case 'agent-env':
-      // supervisor/spawn.go appends Role.Model after the parent environment.
-      if (!['codex', 'claude'].includes(backend) || env.LOOM_AGENT_MODEL?.trim() !== selection.model ||
-        roleModel && roleModel.trim() !== selection.model) reject();
+      // task.go's once/auto/daemon modes consume the inherited environment.
+      // A supervisor override matters only after it is applied to that env.
+      if (!['codex', 'claude'].includes(backend) || env.LOOM_AGENT_MODEL?.trim() !== selection.model) reject();
       break;
     case 'opencode-env':
       // backend_opencode.go prefers this variable over LOOM_AGENT_MODEL.
