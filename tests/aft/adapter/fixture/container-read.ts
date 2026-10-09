@@ -21,6 +21,7 @@ export const ContainerReadRequest = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('configuration-read'), target: z.enum(['opencode', 'emu-scenarios']) }).strict(),
   z.object({ operation: z.literal('configuration-write'), target: z.enum(['opencode', 'emu-scenarios']), bytes: z.string().max(65536).nullable() }).strict(),
   z.object({ operation: z.literal('agent'), agentId: Id }).strict(),
+  z.object({ operation: z.literal('agent-history'), agentId: Id }).strict(),
   z.object({ operation: z.literal('sessions'), agentId: Id }).strict(),
   z.object({ operation: z.literal('registration') }).strict(),
   z.object({ operation: z.literal('process') }).strict(),
@@ -28,6 +29,20 @@ export const ContainerReadRequest = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('git-common-dir'), agentId: Id }).strict(),
 ]);
 export type ContainerRead = z.infer<typeof ContainerReadRequest>;
+// The container marker is checked in the invoked container, never on the host.
+// The owning driver additionally pins the lease label and container generation
+// before and after the fixed protocol request.
+export async function attestContainerTemporaryRoot(namespace:string|undefined,leaseId:string|undefined,
+  files:Pick<typeof import('node:fs/promises'),'lstat'|'realpath'>={lstat,realpath}):Promise<{temporaryRoot:'/tmp';device:number;inode:number}>{
+  requireFact(namespace==='owned-container'&&Id.safeParse(leaseId).success,'ownership-mismatch','Container lease namespace is missing');
+  const marker='/run/.containerenv',before=await files.lstat(marker);
+  requireFact(before.isFile()&&!before.isSymbolicLink()&&await files.realpath(marker)===marker,'ownership-mismatch','Container namespace is not attested');
+  const root=await files.lstat('/tmp');
+  requireFact(root.isDirectory()&&!root.isSymbolicLink()&&await files.realpath('/tmp')==='/tmp','ownership-mismatch','Container temporary root is unsafe');
+  const after=await files.lstat(marker);
+  requireFact(after.isFile()&&!after.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino,'identity-mismatch','Container namespace changed');
+  return {temporaryRoot:'/tmp',device:before.dev,inode:before.ino};
+}
 export async function readContainer(input: unknown) {
   const request = ContainerReadRequest.parse(input);
   const cloud = process.env.AFT_FIXTURE_MODE === 'modecloud';
@@ -77,9 +92,15 @@ export async function readContainer(input: unknown) {
       else await writeFile(filename, request.bytes, { mode: 0o600, flag: exists ? 'w' : 'wx' });
       return { complete: true };
     }
-    case 'git-observe': case 'filesystem-root': case 'filesystem-observe':
-      return readContainerObservation(request, native, paths);
+    case 'git-observe': case 'git-lifecycle': case 'filesystem-root': case 'filesystem-observe': {
+      const attestation=(request.operation==='filesystem-root'||request.operation==='filesystem-observe')&&request.root.kind==='fixture-temporary'?
+        await attestContainerTemporaryRoot(process.env.AFT_FIXTURE_NAMESPACE,process.env.AFT_FIXTURE_LEASE_ID):undefined;
+      const response=await readContainerObservation(request,native,{...paths,...(attestation?{temporaryRoot:attestation.temporaryRoot}:{})});
+      if(attestation){const after=await attestContainerTemporaryRoot(process.env.AFT_FIXTURE_NAMESPACE,process.env.AFT_FIXTURE_LEASE_ID);
+        requireFact(after.device===attestation.device&&after.inode===attestation.inode,'identity-mismatch','Container namespace changed during observation');}return response;
+    }
     case 'agent': return native.agent(request.agentId);
+    case 'agent-history': return native.history!(request.agentId);
     case 'sessions': return native.sessions(request.agentId);
     case 'registration': return native.registration();
     case 'process': return native.process();

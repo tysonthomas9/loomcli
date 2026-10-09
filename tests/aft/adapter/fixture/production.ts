@@ -103,6 +103,21 @@ export class ComposeFixtureDriver implements FixtureDriver {
   private readonly stamps = new Map<string, { dev: number; ino: number }>();
   private readonly locks = new Map<string, string>();
   private objects: ObjectRecord[] = [];
+  private operationActive=false;
+  private async withContainerOperation<T>(operation:()=>Promise<T>):Promise<T>{
+    check(!this.operationActive,'identity-mismatch');this.operationActive=true;
+    try{return await operation();}finally{this.operationActive=false;}
+  }
+  private async ownedContainer(signal:AbortSignal,expectedGeneration?:string){
+    signal.throwIfAborted();await this.inspect({id:this.project,kind:'compose',generation:this.leaseId});signal.throwIfAborted();
+    const containers=this.objects.filter(object=>object.kind==='container'&&object.service===(this.cloud?'loom-serve':'loom-local'));
+    check(containers.length===1&&containers[0]!.state==='running');const container=containers[0]!;
+    check(expectedGeneration===undefined||container.generation===expectedGeneration,'identity-mismatch');return {...container};
+  }
+  private async verifyContainer(container:ObjectRecord,signal:AbortSignal){
+    const current=await this.ownedContainer(signal,container.generation);
+    check(current.id===container.id&&current.pid===container.pid,'identity-mismatch');
+  }
   private attempted = false;
   private removed = false;
   private plan?: FixturePlan;
@@ -137,17 +152,22 @@ export class ComposeFixtureDriver implements FixtureDriver {
     check(bytes === null || Buffer.byteLength(bytes) <= 65536);
     await this.nativeRead({ operation: 'configuration-write', target, bytes }, signal);
   }
-  async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relativePath: string, body: unknown, signal: AbortSignal) {
-    signal.throwIfAborted(); check(this.ports.length === 3);
-    await this.inspect({ id: this.project, kind: 'compose', generation: this.leaseId });
-    check(this.objects.some(object => object.kind === 'container' && object.service === (this.cloud ? 'loom-serve' : 'loom-local') && object.state === 'running'));
-    check(target !== 'fake-github', 'unsupported-capability');
-    if (target === 'fake-model') {
-      check(!this.cloud, 'unsupported-capability');
-      return this.nativeRead({ operation: 'fixture-http', method, relativePath, body: Json.parse(body) }, signal) as Promise<{ status: number; body: unknown }>;
+  async requestOwnedHttp(target: 'api' | 'fake-model' | 'fake-github', method: Parameters<Http>[1], relativePath: string, body: unknown, signal: AbortSignal,expectedGeneration?:string) {
+    signal.throwIfAborted();check(this.ports.length===3);check(target!=='fake-github','unsupported-capability');
+    if(target==='fake-model'){
+      // Container identity alone cannot attest the separately restartable model
+      // process. Until its product registration port is bound, retained model
+      // generations must fail before any HTTP mutation.
+      check(!this.cloud&&expectedGeneration===undefined,'unsupported-capability');
+      return this.nativeRead({operation:'fixture-http',method,relativePath,body:Json.parse(body)},signal) as Promise<{status:number;body:unknown}>;
     }
     check(relativePath.startsWith('/api/'));
-    return this.requestHttp(`http://127.0.0.1:${this.ports[this.cloud ? 0 : 1]}`, method, relativePath, body, signal);
+    return this.withContainerOperation(async()=>{
+      const container=await this.ownedContainer(signal,expectedGeneration);
+      const origin=`http://127.0.0.1:${this.ports[this.cloud?0:1]}`;
+      const response=await this.requestHttp(origin,method,relativePath,body,signal);
+      await this.verifyContainer(container,signal);return response;
+    });
   }
   private env(): Record<string, string> {
     const c = this.config;
@@ -280,10 +300,10 @@ export class ComposeFixtureDriver implements FixtureDriver {
     const override = this.cloud ? this.cloudOverride(labels) : { services: Object.fromEntries(SERVICES.map(service => [service, {
       labels,
       ...(service === 'fleet-db' ? { build: { context: this.config.fleet.source.root }, environment: { FLEET_RATE_LIMIT_ENABLED: 'false' } } : {}),
-      ...(service === 'loom-local' ? { volumes: [`${this.config.adapter.build.root}:/opt/aft:ro`] } : {}),
+      ...(service === 'loom-local' ? { environment: {AFT_FIXTURE_NAMESPACE:'owned-container',AFT_FIXTURE_LEASE_ID:this.leaseId}, volumes: [`${this.config.adapter.build.root}:/opt/aft:ro`] } : {}),
       ...(service === 'ui-local' ? { volumes: [`${this.renderer!.buildRoot}:/srv:ro`] } : {}),
       ...(service === 'loom-local' && this.profile === 'agents-emulator' ? {
-        environment: { LOOM_OPENCODE_BIN: '/opt/fixture/loom-harness-emu', LOOM_HARNESS_EMU: '1',
+        environment: {AFT_FIXTURE_NAMESPACE:'owned-container',AFT_FIXTURE_LEASE_ID:this.leaseId, LOOM_OPENCODE_BIN: '/opt/fixture/loom-harness-emu', LOOM_HARNESS_EMU: '1',
           LOOM_HARNESS_EMU_MODEL: 'http://127.0.0.1:4010/v1', LOOM_HARNESS_EMU_SCENARIOS: '/root/.loom/agents-opencode/emu-scenarios.json' },
         volumes: [`${this.config.adapter.build.root}:/opt/aft:ro`, `${this.config.emulatorBinary!.path}:/opt/fixture/loom-harness-emu:ro`],
       } : {}),
@@ -300,7 +320,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
       ...(this.stackImages[service] ? { image: this.stackImages[service] } : {}),
       ...(service === 'fleet-db' ? { environment: { FLEET_AUTH_DEV_MODE: 'true', FLEET_AUTHZ_ENABLED: 'false' } } : {}),
       ...(service === 'loom-serve' ? { environment: { CODEX_HOME: '/home/node/.codex-rw', LOOM_STACK_CODEX_RW_DIR: '/home/node/.codex-rw',
-        FLUE_REPO: '/opt/flue', AFT_FIXTURE_MODE: 'modecloud', LOOM_DRIVER_TASK_RUNNER_CMD_JSON: null, LOOM_FLUE_AGENT_MODEL: this.plan!.model,
+        FLUE_REPO: '/opt/flue', AFT_FIXTURE_NAMESPACE:'owned-container', AFT_FIXTURE_LEASE_ID:this.leaseId, AFT_FIXTURE_MODE: 'modecloud', LOOM_DRIVER_TASK_RUNNER_CMD_JSON: null, LOOM_FLUE_AGENT_MODEL: this.plan!.model,
         LOOM_FRONTEND_DIR: '/opt/webui', LOOM_FRONTEND_URL: `http://localhost:${this.ports[0]}` },
         volumes: [`${this.config.modecloud!.codexAuthRoot}:/home/node/.codex:ro`, `${this.config.modecloud!.frontendDist}:/opt/webui:ro`,
           `${this.config.adapter.build.root}:/opt/aft:ro`] } : {}),
@@ -415,12 +435,12 @@ export class ComposeFixtureDriver implements FixtureDriver {
     return this.http(origin, relative, signal);
   }
   async nativeRead(request: ContainerRead, signal: AbortSignal): Promise<unknown> {
-    await this.inspect({ id: this.project, kind: 'compose', generation: this.leaseId });
-    signal.throwIfAborted();
-    const container = this.objects.filter(object => object.kind === 'container' && object.service === (this.cloud ? 'loom-serve' : 'loom-local'));
-    check(container.length === 1 && container[0]!.state === 'running');
-    return JSON.parse(await this.command('podman', ['--connection', this.config.connection, 'exec', container[0]!.id,
-      'node', '/opt/aft/fixture/container-read.js', JSON.stringify(request)], signal));
+    return this.withContainerOperation(async()=>{
+      const container=await this.ownedContainer(signal);
+      const response=JSON.parse(await this.command('podman',['--connection',this.config.connection,'exec',container.id,
+        'node','/opt/aft/fixture/container-read.js',JSON.stringify(request)],signal));
+      await this.verifyContainer(container,signal);return response;
+    });
   }
   async inspect(resource: Resource): Promise<Inventory> {
     if (resource.kind === 'ports') return { complete: true, owned: resource.generation === this.leaseId && this.ports.length > 0, services: [] };
@@ -443,8 +463,11 @@ export class ComposeFixtureDriver implements FixtureDriver {
     await this.inspect(resource);
     while (this.cleanups.length) { await this.cleanups[this.cleanups.length - 1]!(); this.cleanups.pop(); }
     if (resource.kind === 'compose') {
-      await this.command('podman', [...this.composeArgs(), 'down', '-v', '--remove-orphans']);
-      check((await this.inventory()).length === 0);
+      await this.withContainerOperation(async()=>{
+        await this.inspect(resource);
+        await this.command('podman', [...this.composeArgs(), 'down', '-v', '--remove-orphans']);
+        check((await this.inventory()).length === 0);
+      });
       if (this.profile === 'agents-real-opencode') await this.command('bash', ['test/local-mode/real-opencode-copy.sh', 'remove', this.env().LOCAL_MODE_OPENCODE_COPY!]);
       this.removed = true; this.objects = []; return;
     }
