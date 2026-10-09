@@ -42,6 +42,19 @@ export const ServiceRegistration = z.object({
   endpointId: Id,
 }).strict();
 export type ServiceRegistration = z.infer<typeof ServiceRegistration>;
+/** Private endpoint identity may cross the fixed session wire; credentials may not. */
+export const NativeRegistrationIdentity = ServiceRegistration.omit({ password: true });
+export type NativeRegistrationIdentity = z.infer<typeof NativeRegistrationIdentity>;
+export function nativeRegistrationIdentity(raw: unknown): NativeRegistrationIdentity {
+  const registration = ServiceRegistration.parse(raw);
+  let url: URL;
+  try { url = new URL(registration.url); } catch { throw new ObservationError('identity-mismatch', 'Native endpoint is invalid'); }
+  requireFact(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname) && url.port && Number(url.port) <= 65535 &&
+    !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash,
+  'ownership-mismatch', 'Native endpoint is outside the owned service');
+  return NativeRegistrationIdentity.parse({ url: registration.url, pid: registration.pid,
+    generation: registration.generation, endpointId: registration.endpointId });
+}
 export const ProcessIdentitySchema = z.object({ pid:z.number().int().positive(), generation:Id,
   executable:z.string().min(1).max(4096), argv:z.array(z.string().max(4096)).max(64) }).strict();
 export type ProcessIdentity = z.infer<typeof ProcessIdentitySchema>;

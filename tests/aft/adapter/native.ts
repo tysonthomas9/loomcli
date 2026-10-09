@@ -1,7 +1,7 @@
 import { probeOccurrences, type SyntheticProbe } from './synthetic-probe.js';
 import { z } from 'zod';
 import { RedactionFacts, redactionFacts } from './redaction.js';
-import { AgentRef, AgentRow, Id, Json, NativeRef, ObservationError, ServiceRegistration, requireFact, sha256, type NativeAccess } from './protocol.js';
+import { AgentRef, AgentRow, Id, Json, NativeRef, ServiceRegistration, nativeRegistrationIdentity, requireFact, sha256, type NativeAccess } from './protocol.js';
 
 export const NativeInput = z.object({ agent: AgentRef, view: z.enum([
   'session', 'inputs', 'completed-models', 'tools', 'usage', 'presence', 'registrations',
@@ -51,11 +51,7 @@ const Message = z.object({ id: Id, sessionID: Id, type: Id, time: z.object({
 
 export async function verifyNativeService(access: NativeAccess, expectedGeneration: string, signal: AbortSignal) {
   const registration = ServiceRegistration.parse(await access.registration());
-  let url: URL;
-  try { url = new URL(registration.url); } catch { throw new ObservationError('identity-mismatch', 'Invalid native registration'); }
-  requireFact(url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname) &&
-    url.port && Number(url.port) <= 65535 && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash,
-  'ownership-mismatch', 'Native endpoint is outside the owned service');
+  nativeRegistrationIdentity(registration);
   const process = await access.process();
   requireFact(process.pid === registration.pid && process.generation === registration.generation &&
     registration.generation === expectedGeneration && process.executable === access.pinnedExecutable &&
