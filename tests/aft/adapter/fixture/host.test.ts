@@ -59,7 +59,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
   const starts: { id: string; command: HostCommand; readiness: string }[] = []; const runs: HostCommand[] = []; const stopped: string[] = [];
   let failService = ''; let failStop = ''; let spawnFails = false; let port = 4100; let count = 0; let failHttp = false;
   const handles = new Map<string, OwnedProcess>();
-  let cliOutput='',headOutput:string|undefined;const commonDirectories=new Map<string,string>();
+  let cliOutput='',headOutput:string|undefined;let onCliAwait:((phase:'ready'|'completion')=>Promise<void>)|undefined;const commonDirectories=new Map<string,string>();
   let onRun:((command:HostCommand)=>Promise<void>)|undefined;
   const processes: HostProcesses = {
     async run(command) {
@@ -77,8 +77,8 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
       if(spawnFails) throw new LaunchNotStarted();
       runs.push(command); let alive = true;
       const handle = { pid: ++count + 100, generation, executable: command.executable, argv: command.argv,
-        state: () => alive ? 'running' as const : 'exited' as const, async ready() {}, async stop() { alive = false; stopped.push('cli'); },
-        async completion() { alive = false; return { exitCode: 0, stdout: stdin || cliOutput || '{"owned":true}', stderr: '', complete: true }; } };
+        state: () => alive ? 'running' as const : 'exited' as const, async ready() {await onCliAwait?.('ready');}, async stop() { alive = false; stopped.push('cli'); },
+        async completion() {await onCliAwait?.('completion'); alive = false; return { exitCode: 0, stdout: stdin || cliOutput || '{"owned":true}', stderr: '', complete: true }; } };
       handles.set('cli', handle); return handle;
     },
     start(command, readiness, generation) {
@@ -135,6 +135,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     overrideResponse(callback:(relative:string)=>unknown){responseOverride=callback;},
     cliOutput(value:unknown){cliOutput=JSON.stringify(value);},commonDir(repo:string,value:string){commonDirectories.set(repo,value);},head(value:string){headOutput=value;},
     onRun(callback:(command:HostCommand)=>Promise<void>){onRun=callback;},
+    onCliAwait(callback:(phase:'ready'|'completion')=>Promise<void>){onCliAwait=callback;},
     failSpawn() { spawnFails = true; }, failService(value: string) { failService = value; }, failStop(value: string) { failStop = value; }, failHttp() { failHttp = true; },
     async cleanup() { await fs.rm(root, { recursive: true }); } };
 }
@@ -241,10 +242,34 @@ test('Host worker discovery serializes mutation, parent stop and cleanup across 
   await assert.rejects(r.driver.requestOwnedHttp('api','DELETE','/api/workspaces/E2E-WS',null,r.signal));
   await assert.rejects(r.driver.stopOwnedProcess('daemon',r.daemon.generation,r.signal));
   await assert.rejects(r.driver.prepareCleanup(r.signal));
+  const runs=r.runs.length;await assert.rejects(r.driver.launchOwnedCli(['usage'],{},'',true,r.signal));assert.equal(r.runs.length,runs);
   assert.equal(r.requests.length,requests);assert.equal(r.registeredStops.length,stops);assert.equal(r.daemon.state(),'running');
   release();assert.equal((await refresh).length,1);
   assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
  }finally{release?.();await r.cleanup();}
+});
+
+test('CLI launch reserves readiness and completion before worker discovery, cleanup or mutations',async()=>{
+ for(const phase of ['ready','completion'] as const){
+  const r=await setupBoundWorker();let entered!:()=>void,release!:()=>void;
+  let cli:ReturnType<HostFixtureDriver['launchOwnedCli']>|undefined;
+  try{
+   const ready=new Promise<void>(resolve=>{entered=resolve;}),blocked=new Promise<void>(resolve=>{release=resolve;});
+   r.onCliAwait(async actual=>{if(actual===phase){entered();await blocked;}});
+   cli=r.driver.launchOwnedCli(['usage'],{},'',true,r.signal);await ready;
+   const requests=r.requests.length,stops=r.registeredStops.length,runs=r.runs.length;
+   await assert.rejects(r.driver.refreshOwnedProductProcesses(r.signal));assert.equal(r.captures.includes(1700),false);
+   await assert.rejects(r.driver.prepareCleanup(r.signal));
+   await assert.rejects(r.driver.stopOwnedProcess('daemon',r.daemon.generation,r.signal));
+   await assert.rejects(r.driver.restartOwnedProcess('daemon',r.daemon.generation,r.signal));
+   await assert.rejects(r.driver.requestOwnedHttp('api','DELETE','/api/workspaces/E2E-WS',null,r.signal));
+   await assert.rejects(r.driver.launchOwnedCli(['usage'],{},'',true,r.signal));
+   assert.equal(r.requests.length,requests);assert.equal(r.registeredStops.length,stops);assert.equal(r.runs.length,runs);
+   assert.equal(r.daemon.state(),'running');release();assert.equal((await cli).completion.complete,true);
+   assert.equal((await r.driver.refreshOwnedProductProcesses(r.signal)).length,1);
+   assert.equal((await r.lifecycle.release(r.acquired.lease.id,r.request.runId)).released,true);
+  }finally{release?.();await cli?.catch(()=>{});await r.cleanup();}
+ }
 });
 
 test('Host worker hook denies foreign actor and parent before granting process authority',async()=>{
