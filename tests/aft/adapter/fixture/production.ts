@@ -54,6 +54,24 @@ export interface ProductionConfig {
   fixtureRunId?:string;
 }
 export type ComposeRead = (origin: string, relative: string, signal: AbortSignal) => Promise<unknown>;
+// Fixed internal readiness port: no caller path, predicate or executable.
+export type ComposeReadiness = (origin:string,signal:AbortSignal)=>Promise<{status:number;complete:true}>;
+export interface ReadinessClock { now():number; nextAttempt(signal:AbortSignal):Promise<void>; }
+const readinessClock:ReadinessClock={now:()=>performance.now(),nextAttempt:signal=>new Promise<void>((resolve,reject)=>{
+  signal.throwIfAborted();
+  const abort=()=>{clearTimeout(timer);reject(new FixtureError('observation-failed'));};
+  const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},1000);
+  signal.addEventListener('abort',abort,{once:true});
+})};
+const fetchReadiness:ComposeReadiness=async(origin,signal)=>{
+  const response=await fetch(new URL('/api/config',origin),{signal,redirect:'manual'});
+  // curl -fsS consumes the body, but does not require JSON or follow redirects.
+  const reader=response.body?.getReader();let bytes=0;
+  try{if(reader)for(;;){const chunk=await reader.read();if(chunk.done)break;bytes+=chunk.value.byteLength;
+    check(bytes<=4*1024*1024,'observation-failed');}}
+  finally{if(reader){await reader.cancel();reader.releaseLock();}}
+  signal.throwIfAborted();return {status:response.status,complete:true};
+};
 const fetchRead: ComposeRead = async (origin, relative, signal) => {
   check(relative.startsWith('/api/') && !relative.startsWith('//') && !relative.includes('\\'));
   const response = await fetch(new URL(relative, origin), { signal, redirect: 'error' });
@@ -92,7 +110,7 @@ export async function verifyManifest(manifest: FileManifest, expected: string): 
   }
   check(hash(entries.map(entry => `${entry.sha256}  ${entry.relativePath}\n`).join('')) === expected, 'source-mismatch');
 }
-interface ObjectRecord { id: string; kind: 'container' | 'volume' | 'network'; generation: string; service: string; pid: number; state: string; startedAt?:string; healthy?: boolean; workVolume?: string }
+interface ObjectRecord { id: string; kind: 'container' | 'volume' | 'network'; generation: string; service: string; pid: number; state: string; startedAt?:string; healthy?: boolean; workVolume?: string; namespaceSha256?:string;networkIds?:readonly string[] }
 const SERVICES = ['redis', 'fleet-db', 'loom-local', 'ui-local'];
 const CLOUD_SERVICES = ['redis', 'fleet-auth-seed', 'fleet-db', 'loom-serve', 'worker', 'stub-upstream'];
 
@@ -121,7 +139,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   }
   private async verifyContainer(container:ObjectRecord,signal:AbortSignal){
     const current=await this.ownedContainer(signal,container.generation);
-    check(current.id===container.id&&current.pid===container.pid,'identity-mismatch');
+    check(current.id===container.id&&current.pid===container.pid&&current.namespaceSha256===container.namespaceSha256,'identity-mismatch');
   }
   private attempted = false;
   private removed = false;
@@ -135,7 +153,8 @@ export class ComposeFixtureDriver implements FixtureDriver {
   constructor(config: ProductionConfig, private readonly run: ProcessRunner = runProcess,
     private readonly files: typeof fs = fs, private readonly uuid: () => string = randomUUID,
     private readonly reserve: () => Promise<PortReservation> = reservePort,
-    private readonly http: ComposeRead = fetchRead, private readonly requestHttp: Http = readHttp) { this.config = structuredClone(config); }
+    private readonly http: ComposeRead = fetchRead, private readonly requestHttp: Http = readHttp,
+    private readonly readiness:ComposeReadiness=fetchReadiness,private readonly readinessTime:ReadinessClock=readinessClock) { this.config = structuredClone(config); }
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return '/root/.loom/workspaces/LOCALMODE'; }
   get fixtureSecrets() { return Object.values(this.cloudSecrets); }
@@ -368,6 +387,21 @@ export class ComposeFixtureDriver implements FixtureDriver {
         }
         if (kind === 'container' && service === 'fleet-db') check(value.Image === this.images.fleet, 'source-mismatch');
         if (kind === 'container' && service === 'loom-local') check(value.Image === this.images.loom, 'source-mismatch');
+        let namespaceSha256:string|undefined,networkIds:string[]|undefined;
+        if(kind==='container'&&service==='loom-local'){
+          const adapter=value.Mounts?.filter((mount:{Destination:string})=>mount.Destination==='/opt/aft');
+          check(adapter?.length===1&&adapter[0].RW===false&&adapter[0].Source===this.config.adapter.build.root,'source-mismatch');
+          const mounts=value.Mounts.map((mount:{Destination:string;Type:string;Source?:string;Name?:string;RW:boolean})=>{
+            check(typeof mount.Destination==='string'&&typeof mount.Type==='string'&&typeof mount.RW==='boolean');
+            return {destination:mount.Destination,type:mount.Type,source:mount.Source??null,name:mount.Name??null,writable:mount.RW};
+          }).sort((a:{destination:string},b:{destination:string})=>a.destination.localeCompare(b.destination));
+          check(new Set(mounts.map((mount:{destination:string})=>mount.destination)).size===mounts.length);
+          const networks=value.NetworkSettings?.Networks;
+          check(networks&&typeof networks==='object'&&!Array.isArray(networks));
+          networkIds=Object.values(networks).map(network=>{const id=(network as {NetworkID?:unknown}).NetworkID;check(typeof id==='string'&&id.length>0);return id as string;}).sort();
+          check(networkIds.length>0&&networkIds.length<=16&&new Set(networkIds).size===networkIds.length);
+          namespaceSha256=hash(JSON.stringify({mounts,networkIds}));
+        }
         if (kind === 'container' && this.cloud && this.stackImages[service]) check(value.Image === this.stackImages[service], 'source-mismatch');
         let workVolume: string | undefined;
         if(kind==='container'&&service==='ui-local'){
@@ -386,10 +420,11 @@ export class ComposeFixtureDriver implements FixtureDriver {
         records.push({ id: kind === 'volume' ? value.Name : value.Id ?? value.ID, kind, service,
           generation: kind === 'container' ? `${value.Id}:${value.State?.StartedAt}` : `${value.Name ?? value.Id ?? value.ID}:${value.CreatedAt ?? value.Created}`,
           pid: kind === 'container' ? value.State?.Pid ?? 0 : 0, state: kind === 'container' ? value.State?.Status ?? 'unknown' : 'allocated',
-          ...(kind === 'container' ? {startedAt:value.State?.StartedAt, healthy: value.State?.Health?.Status === 'healthy' } : {}), ...(workVolume ? { workVolume } : {}) });
+          ...(kind === 'container' ? {startedAt:value.State?.StartedAt, healthy: value.State?.Health?.Status === 'healthy' } : {}), ...(workVolume ? { workVolume } : {}),...(namespaceSha256?{namespaceSha256,networkIds}:{}) });
       }
     }
     check(new Set(records.map(record => `${record.kind}:${record.id}`)).size === records.length);
+    for(const container of records.filter(record=>record.networkIds))check(container.networkIds!.every(id=>records.some(record=>record.kind==='network'&&record.id===id)),'ownership-mismatch');
     if (this.cloud) for (const record of records.filter(record => record.workVolume)) check(records.some(volume => volume.kind === 'volume' && volume.id === record.workVolume));
     return records;
   }
@@ -458,9 +493,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
     });
   }
   /** Fixed selected SSE actor. This restarts serve and colocated OpenCode;
-   * it is unrelated to the native registered-service SIGTERM actor.
-   * A new container ID is currently denied even if it has matching labels:
-   * this is a stronger ownership restriction than the original helper. */
+   * it is unrelated to the native registered-service SIGTERM actor. */
   async restartOwnedServe(expectedContainerId:string,expectedGeneration:string,signal:AbortSignal){
     signal.throwIfAborted();check(this.profile==='agents-real-opencode','unsupported-capability');
     return this.withContainerOperation(async()=>{
@@ -471,26 +504,40 @@ export class ComposeFixtureDriver implements FixtureDriver {
       check(before.id===expectedContainerId&&Number.isInteger(before.pid)&&before.pid>0&&typeof before.startedAt==='string'&&before.startedAt.length>0,'identity-mismatch');
       const attempt=JSON.stringify([before.id,before.generation]);check(!this.restartAttempts.has(attempt),'identity-mismatch');
       const retained=this.objects.map(object=>({...object}));
+      const requireRuntime=async(container:ObjectRecord,abort:AbortSignal)=>{
+        const actual=JSON.parse(await this.command('podman',['--connection',this.config.connection,'exec',container.id,
+          'node','/opt/aft/fixture/container-read.js',JSON.stringify({operation:'runtime-identity'})],abort));
+        check(actual?.runId===this.provisionedRunId&&actual?.leaseId===this.leaseId,'identity-mismatch');
+      };
+      await requireRuntime(before,signal);await this.verifyContainer(before,signal);
       const beforeTop=await this.command('podman',['--connection',this.config.connection,'top',before.id,'pid','comm'],signal);
       const intent=await this.artifact('observe',{operation:'compose-restart-intent',leaseId:this.leaseId,project:this.project,
         scope:'loom-local-plus-OpenCode',before:{containerId:before.id,initPid:before.pid,startedAt:before.startedAt,generation:before.generation},
-        additionalRestrictions:{containerReplacement:'same-container-id-only',readiness:'healthy-container-and-successful-api-config',dispatchTimeoutMs:60000},
+        additionalRestrictions:{dispatchTimeoutMs:60000,maximumReadinessBodyBytes:4*1024*1024},
         processListing:{value:redact(beforeTop,this.fixtureSecrets),redaction:redactionFacts(beforeTop,this.fixtureSecrets)}});
       const adopt=async(abort:AbortSignal,expectedTarget?:ObjectRecord)=>{
-        abort.throwIfAborted();const records=await this.inventory(abort);abort.throwIfAborted();check(records.length===retained.length);
-        for(const record of records){
-          const previous=retained.find(value=>value.id===record.id&&value.kind===record.kind);
-          check(previous&&previous.service===record.service,'identity-mismatch');
-          if(record.id!==before.id)check(record.generation===previous!.generation&&record.pid===previous!.pid,'identity-mismatch');
-          else {check(record.kind==='container'&&record.service==='loom-local'&&typeof record.startedAt==='string'&&record.startedAt.length>0,'identity-mismatch');
-            if(expectedTarget)check(record.generation===expectedTarget.generation&&record.pid===expectedTarget.pid,'identity-mismatch');}
-        }
-        // Exact retained container identity, labels, image, ports and namespace
-        // are still checked by inventory. No new container or project adoption.
-        this.objects=records;return records.find(value=>value.id===before.id)!;
+        const validate=(records:ObjectRecord[],expected?:ObjectRecord)=>{
+          check(records.length===retained.length,'identity-mismatch');
+          const targets=records.filter(record=>record.kind==='container'&&record.service==='loom-local');check(targets.length===1,'identity-mismatch');
+          const target=targets[0]!;check(typeof target.startedAt==='string'&&target.startedAt.length>0&&
+            target.namespaceSha256===before.namespaceSha256&&before.namespaceSha256,'identity-mismatch');
+          if(expected)check(target.id===expected.id&&target.generation===expected.generation&&target.pid===expected.pid,'identity-mismatch');
+          const neighbors=retained.filter(record=>record.kind!=='container'||record.id!==before.id);
+          check(neighbors.every(previous=>records.some(record=>record.kind===previous.kind&&record.id===previous.id&&
+            record.service===previous.service&&record.generation===previous.generation&&record.pid===previous.pid)),'identity-mismatch');
+          return target;
+        };
+        abort.throwIfAborted();const first=await this.inventory(abort);abort.throwIfAborted();const target=validate(first,expectedTarget);
+        await requireRuntime(target,abort);
+        const records=await this.inventory(abort);abort.throwIfAborted();validate(records,target);
+        // Only this fixed dispatch can enroll one successor. Its actual image,
+        // lease/run marker, persistent mounts and all neighboring resources are
+        // revalidated before and after the read; a later change is never adopted.
+        this.objects=records;return records.find(record=>record.kind==='container'&&record.id===target.id)!;
       };
       await this.verifyContainer(before,signal);signal.throwIfAborted();this.restartAttempts.add(attempt);
       let after:ObjectRecord|undefined;
+      const readinessAttempts:{status?:number;complete:boolean;elapsedMs:number}[]=[];
       try{
         // A separate fixed dispatch guard is a safety bound, not part of the
         // frozen helper's post-restart readiness window.
@@ -498,25 +545,38 @@ export class ComposeFixtureDriver implements FixtureDriver {
         await this.command('podman',[...this.composeArgs(),'restart','loom-local'],dispatch);
         dispatch.throwIfAborted();
         const bounded=AbortSignal.any([signal,AbortSignal.timeout(180000)]);
+        const readinessStart=this.readinessTime.now();check(Number.isFinite(readinessStart),'observation-failed');
         after=await adopt(bounded);
         check(after.state==='running'&&Number.isInteger(after.pid)&&after.pid>0&&after.pid!==before.pid&&after.startedAt!==before.startedAt,'identity-mismatch');
-        // The frozen container healthcheck includes the readiness marker and
-        // /api/config. Await its explicit signal; never poll or sleep here.
-        await this.command('podman',['--connection',this.config.connection,'wait','--condition=healthy','--condition=unhealthy','--condition=exited',after.id],bounded);
-        await this.verifyContainer(after,bounded);
-        check(this.objects.find(value=>value.id===after!.id)?.healthy,'observation-failed');
-        const request=AbortSignal.any([bounded,AbortSignal.timeout(3000)]);
-        request.throwIfAborted();
-        await this.http(`http://127.0.0.1:${this.ports[1]}`,'/api/config',request);
-        request.throwIfAborted();
-        await this.verifyContainer(after,bounded);
+        let readyStatus:number|undefined,elapsedMs=0;
+        for(let attempt=0;attempt<181;attempt++){
+          bounded.throwIfAborted();elapsedMs=this.readinessTime.now()-readinessStart;
+          check(Number.isFinite(elapsedMs)&&elapsedMs>=0&&elapsedMs<180000,'observation-failed');
+          await adopt(bounded,after);
+          const request=AbortSignal.any([bounded,AbortSignal.timeout(3000)]);let response:{status:number;complete:true}|undefined;
+          try{request.throwIfAborted();response=await this.readiness(`http://127.0.0.1:${this.ports[1]}`,request);request.throwIfAborted();
+            check(response.complete===true&&Number.isInteger(response.status)&&response.status>=100&&response.status<=599,'observation-failed');}
+          catch{response=undefined;}
+          bounded.throwIfAborted();elapsedMs=this.readinessTime.now()-readinessStart;
+          check(Number.isFinite(elapsedMs)&&elapsedMs>=0&&elapsedMs<180000,'observation-failed');
+          await adopt(bounded,after);
+          readinessAttempts.push({...(response?{status:response.status}:{}),complete:!!response,elapsedMs});
+          if(response&&response.status>=200&&response.status<400){readyStatus=response.status;break;}
+          await this.readinessTime.nextAttempt(bounded);
+        }
+        check(readyStatus!==undefined,'observation-failed');
         const afterTop=await this.command('podman',['--connection',this.config.connection,'top',after.id,'pid','comm'],bounded);
         await this.verifyContainer(after,bounded);
+        await verifyManifest(this.config.loom.source,this.plan!.loomRevision.sourceManifestSha256);
+        await verifyManifest(this.config.loom.build,this.plan!.loomRevision.buildManifestSha256);
+        bounded.throwIfAborted();
         const fact={scope:'loom-local-plus-OpenCode' as const,
           before:{containerId:before.id,initPid:before.pid,startedAt:before.startedAt,generation:before.generation},
           after:{containerId:after.id,initPid:after.pid,startedAt:after.startedAt!,generation:after.generation},
-          readiness:{path:'/api/config' as const,complete:true as const}};
+          readiness:{path:'/api/config' as const,status:readyStatus!,complete:true as const,attempts:readinessAttempts.length,elapsedMs,
+            windowMs:180000 as const,requestTimeoutMs:3000 as const}};
         const receipt=await this.artifact('observe',{operation:'compose-restarted',intent,fact,
+          successor:{namespaceSha256:after.namespaceSha256,predecessorContainerId:before.id,containerIdChanged:after.id!==before.id},readinessAttempts,
           processListing:{value:redact(afterTop,this.fixtureSecrets),redaction:redactionFacts(afterTop,this.fixtureSecrets)}});return {...fact,receipt};
       }catch{
         // Failed or cancelled dispatch may still have restarted this exact
@@ -524,7 +584,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
         // never retry the mutation or replace the resource roster wholesale.
         let cleanupIdentityRetained=false;
         try{after=await adopt(AbortSignal.timeout(15000),after);cleanupIdentityRetained=true;}catch{/* retain prior known authority */}
-        const receipt=await this.artifact('failure',{operation:'compose-restart-uncertain',intent,cleanupIdentityRetained,
+        const receipt=await this.artifact('failure',{operation:'compose-restart-uncertain',intent,cleanupIdentityRetained,readinessAttempts,
           ...(after?{after:{containerId:after.id,initPid:after.pid,startedAt:after.startedAt,generation:after.generation}}:{})});
         throw new FixtureError('observation-failed',receipt);
       }
@@ -536,7 +596,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
       check(resource.id === this.project && resource.generation === this.leaseId);
       const records = await this.inventory();
       if (this.objects.length) check(records.every(record => this.objects.some(owned => owned.kind === record.kind && owned.id === record.id && owned.generation === record.generation&&
-        (owned.pid===record.pid||record.kind==='container'&&record.state==='exited'&&record.pid===0))) &&
+        owned.namespaceSha256===record.namespaceSha256&&(owned.pid===record.pid||record.kind==='container'&&record.state==='exited'&&record.pid===0))) &&
         this.objects.every(owned => records.some(record => record.id === owned.id && record.kind === owned.kind)));
       if (this.objects.length) this.objects = records;
       return { complete: true, owned: true, services: records.filter(record => record.kind === 'container').map(record => ({
