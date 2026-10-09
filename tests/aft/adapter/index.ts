@@ -5,13 +5,18 @@ import { z } from 'zod';
 import { AgentRef, AgentRow, Id, requireFact, type AgentRow as Row } from './protocol.js';
 import { defineOperation } from './operation.js';
 import { getFixture, getAgent, type OwnedFixture } from './ownership.js';
+import { CorrelationInput, CorrelationOutput, correlateEvents } from './correlation.js';
+import { FailureInput, FailureOutput, observeNativeFailure } from './native-failure.js';
+import { FilesInput, FilesOutput, observeFiles } from './files.js';
 import { NativeInput, NativeOutput, observeNative } from './native.js';
 import { SavedEventsInput, SavedEventsOutput, collectSavedEvents } from './events.js';
 import { FilesystemInput, FilesystemOutput, observeFilesystem } from './filesystem.js';
 import { GitInput, GitOutput, observeGit, type GitReader } from './git.js';
 export * from './operation.js';
+export * from './evidence.js';
 export * from './ownership.js';
 export * from './protocol.js';
+export * from './native-host.js';
 
 export const BindAgentInput = z.object({ leaseId: Id, workspaceId: Id, agentId: Id }).strict();
 export const BindAgentOutput = z.object({ fixtureLeaseId: Id, workspaceId: Id, agentId: Id,
@@ -73,12 +78,36 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),
+    defineOperation({ ...common, id: 'loom.api.correlate', inputSchema: CorrelationInput, outputSchema: CorrelationOutput,
+      async run(input, context) {
+        const { fixture, agent } = await getAgent(context, input.agent);
+        const value = await correlateEvents(input, fixture.readApi, context.signal);
+        return { value, identity: { ...identity(fixture, agent.row), turnId: input.turnId,
+          ...(input.requestId ? { requestId: input.requestId } : {}), ...(input.itemId ? { itemId: input.itemId } : {}) },
+          evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
+      },
+    }),
+    defineOperation({ ...common, id: 'loom.files.observe', inputSchema: FilesInput, outputSchema: FilesOutput,
+      async run(input, context) {
+        const { fixture, agent } = await getAgent(context, input.agent);
+        const value = await observeFiles(input, fixture.repo, fixture.readFiles, context.signal);
+        return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
+      },
+    }),
     defineOperation({ ...common, id: 'loom.native.observe', effects: ['read-native'], inputSchema: NativeInput, outputSchema: NativeOutput,
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
         requireFact(agent.native, 'unsupported-capability', 'Native observation is not available for this fixture');
         const value = await observeNative(input, agent.native, agent.row, context.signal);
         requireFact(!('complete' in value) || value.complete, 'incomplete-pages', 'Native message history is incomplete');
+        return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
+      },
+    }),
+    defineOperation({ ...common, id: 'loom.native.failure', effects: ['read-native'], inputSchema: FailureInput, outputSchema: FailureOutput,
+      async run(input, context) {
+        const { fixture, agent } = await getAgent(context, input.agent);
+        requireFact(agent.native, 'unsupported-capability', 'Native access is unavailable');
+        const value = await observeNativeFailure(input, agent.native, agent.row, context.signal);
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),

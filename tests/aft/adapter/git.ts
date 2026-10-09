@@ -65,6 +65,8 @@ export async function observeGit(input: z.infer<typeof GitInput>, owned: { workt
     pushRefspecs: (await read(['config', '--get-all', 'remote.origin.push'], true)).trim().split('\n').filter(Boolean),
   } : null;
   if (origin && !origin.push.length) origin.push = [...origin.fetch];
+  requireFact(new Set(status.map(entry => entry.path)).size === status.length && new Set(refs.map(entry => entry.ref)).size === refs.length,
+    'identity-mismatch', 'Duplicate Git observation identity');
   const after = await attest();
   requireFact(JSON.stringify(before) === JSON.stringify(after), 'identity-mismatch', 'Git identity changed during read');
   return GitOutput.parse({ ...before, status, refs, diff, origin });
